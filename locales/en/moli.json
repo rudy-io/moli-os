@@ -113,6 +113,8 @@
   "moli.reglages.confidentialite": "You’ll be asked for your code. The key is encrypted inside Moli and never shown again: to change it, replace it.",
   "moli.reglages.voix": "Voice",
   "moli.reglages.ton_aria": "Tone of voice",
+  "moli.reglages.debit": "Pace",
+  "moli.reglages.debit_aria": "Voice pace",
   "moli.reglages.ton_enjoue": "Cheerful",
   "moli.reglages.ton_pose": "Calm",
   "moli.reglages.ton_doux": "Soft",

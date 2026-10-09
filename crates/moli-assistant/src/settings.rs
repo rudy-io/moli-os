@@ -31,11 +31,36 @@ pub(crate) const STYLES: [(&str, &str, &str); 3] = [
     ),
 ];
 
+/// Paces a person can pick: id, catalogue key of its label, OpenAI's `speed`.
+pub(crate) const PACES: [(&str, &str, f64); 3] = [
+    ("normal", "assistant.voice.pace.normal", 1.0),
+    ("rapide", "assistant.voice.pace.rapide", 1.2),
+    ("tres_rapide", "assistant.voice.pace.tres_rapide", 1.4),
+];
+
 /// The voice a person chose in the dashboard.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct VoicePrefs {
     pub voice: String,
     pub style: String,
+    /// A pace from `PACES`; none = `speech_speed` of `moli.toml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<String>,
+}
+
+fn pace_speed(id: &str) -> Option<f64> {
+    PACES
+        .iter()
+        .find(|(i, ..)| *i == id)
+        .map(|(.., speed)| *speed)
+}
+
+/// Which pace `speed` is; `perso` for a speed of `moli.toml`'s own.
+fn pace_id(speed: f64) -> &'static str {
+    PACES
+        .iter()
+        .find(|(.., s)| (s - speed).abs() < 0.001)
+        .map_or("perso", |(i, ..)| *i)
 }
 
 /// The instructions of tone `id`, in the house's language.
@@ -71,7 +96,9 @@ pub(crate) fn plausible_key(key: &str) -> bool {
 }
 
 fn read_prefs(path: &Path) -> Option<VoicePrefs> {
-    let prefs: VoicePrefs = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let mut prefs: VoicePrefs = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    // A pace this build does not know: the configured one.
+    prefs.pace = prefs.pace.filter(|p| pace_speed(p).is_some());
     (CLOUD_VOICES.contains(&prefs.voice.as_str()) && style_text(&prefs.style).is_some())
         .then_some(prefs)
 }
@@ -101,6 +128,18 @@ impl Assistant {
         }
     }
 
+    /// How fast the cloud voice speaks, as chosen now.
+    pub(crate) fn speed(&self) -> f64 {
+        self.0
+            .prefs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|p| p.pace.as_deref())
+            .and_then(pace_speed)
+            .unwrap_or(self.0.config.speech_speed)
+    }
+
     /// What the settings card shows (never the key).
     pub fn settings(&self) -> Json {
         let c = &self.0.config;
@@ -125,16 +164,19 @@ impl Assistant {
             "local_voice": crate::voice::host_port(&c.local_speech).is_some(),
             "voice": voice,
             "style": style,
+            "pace": pace_id(self.speed()),
             "voices": CLOUD_VOICES,
             "styles": STYLES.iter().map(|(id, label, _)| json!({ "id": id, "label": moli_i18n::tr(label) })).collect::<Vec<_>>(),
+            "paces": PACES.iter().map(|(id, label, _)| json!({ "id": id, "label": moli_i18n::tr(label) })).collect::<Vec<_>>(),
         })
     }
 
-    /// Changes the voice and/or the tone, kept for the next start.
+    /// Changes the voice, the tone and/or the pace, kept for the next start.
     pub async fn set_voice_prefs(
         &self,
         voice: Option<&str>,
         style: Option<&str>,
+        pace: Option<&str>,
     ) -> Result<Json, AssistantError> {
         if voice.is_some_and(|v| !CLOUD_VOICES.contains(&v)) {
             return Err(AssistantError::Invalid("unknown voice".into()));
@@ -142,17 +184,24 @@ impl Assistant {
         if style.is_some_and(|s| style_text(s).is_none()) {
             return Err(AssistantError::Invalid("unknown tone".into()));
         }
+        if pace.is_some_and(|p| pace_speed(p).is_none()) {
+            return Err(AssistantError::Invalid("unknown pace".into()));
+        }
         let (current_voice, _) = self.voice_and_style();
-        let current_style = self
+        let (current_style, current_pace) = self
             .0
             .prefs
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .map_or_else(|| STYLES[0].0.to_owned(), |p| p.style.clone());
+            .map_or_else(
+                || (STYLES[0].0.to_owned(), None),
+                |p| (p.style.clone(), p.pace.clone()),
+            );
         let prefs = VoicePrefs {
             voice: voice.map_or(current_voice, str::to_owned),
             style: style.map_or(current_style, str::to_owned),
+            pace: pace.map(str::to_owned).or(current_pace),
         };
         let path = self
             .0
@@ -169,7 +218,7 @@ impl Assistant {
                 .and(tokio::fs::rename(&tmp, &path).await)
                 .map_err(|e| AssistantError::Upstream(format!("cannot save the voice: {e}")))?;
         }
-        tracing::info!(voice = %prefs.voice, style = %prefs.style, "voice chosen from the dashboard");
+        tracing::info!(voice = %prefs.voice, style = %prefs.style, pace = ?prefs.pace, "voice chosen from the dashboard");
         *self.0.prefs.write().unwrap_or_else(PoisonError::into_inner) = Some(prefs);
         Ok(self.settings())
     }
@@ -226,9 +275,15 @@ mod tests {
             read_prefs(&path),
             Some(VoicePrefs {
                 voice: "nova".into(),
-                style: "doux".into()
+                style: "doux".into(),
+                pace: None,
             })
         );
+        // An unknown pace is dropped, the rest kept.
+        std::fs::write(&path, r#"{"voice":"nova","style":"doux","pace":"fusee"}"#).unwrap();
+        assert_eq!(read_prefs(&path).unwrap().pace, None);
+        std::fs::write(&path, r#"{"voice":"nova","style":"doux","pace":"normal"}"#).unwrap();
+        assert_eq!(read_prefs(&path).unwrap().pace.as_deref(), Some("normal"));
         std::fs::write(&path, r#"{"voice":"robot","style":"doux"}"#).unwrap();
         assert_eq!(read_prefs(&path), None);
         assert_eq!(read_prefs(&dir.join("absent.json")), None);
@@ -267,6 +322,40 @@ mod tests {
         for (_, label, text) in STYLES {
             assert!(en[label].is_ascii() && en[text].is_ascii(), "{label}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_pace_is_chosen_and_kept() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config = serde_json::from_value(json!({})).unwrap();
+        let moli = Assistant::new(hub, None, None, None, config).unwrap();
+        // Nothing chosen: moli.toml's speed, 1.2 by default, is « rapide ».
+        assert_eq!(moli.settings()["pace"], "rapide");
+        assert_eq!(moli.settings()["paces"].as_array().unwrap().len(), 3);
+        let s = moli
+            .set_voice_prefs(None, None, Some("normal"))
+            .await
+            .unwrap();
+        assert_eq!(s["pace"], "normal");
+        assert!((moli.speed() - 1.0).abs() < f64::EPSILON);
+        // Another voice keeps the pace.
+        let s = moli
+            .set_voice_prefs(Some("sage"), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            (s["voice"].as_str(), s["pace"].as_str()),
+            (Some("sage"), Some("normal"))
+        );
+        assert!(matches!(
+            moli.set_voice_prefs(None, None, Some("fusée")).await,
+            Err(AssistantError::Invalid(_))
+        ));
+        // A file from before the pace still loads.
+        let old: VoicePrefs =
+            serde_json::from_str(r#"{"voice":"coral","style":"enjoue"}"#).unwrap();
+        assert_eq!(old.pace, None);
+        assert_eq!(pace_id(1.33), "perso");
     }
 
     #[tokio::test]

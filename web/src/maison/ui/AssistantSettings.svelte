@@ -167,6 +167,16 @@
             </div>
           {/each}
         </div>
+        {#if s.paces}
+          <div class="head">
+            <b>{t('moli.reglages.debit')}</b>
+            <div class="tones" role="radiogroup" aria-label={t('moli.reglages.debit_aria')}>
+              {#each s.paces as pace (pace.id)}
+                <button role="radio" aria-checked={s.pace === pace.id} class:on={s.pace === pace.id} onclick={() => choose({ pace: pace.id })}>{pace.label}</button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <small class="muted">{t('moli.reglages.aide_voix')}</small>
       </div>
     {/if}

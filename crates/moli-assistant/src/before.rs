@@ -12,16 +12,12 @@ use crate::CARD_KINDS;
 use crate::import::HaAutomation;
 
 /// Words changed on purpose after the move (9 Oct. 2026: a spoken
-/// conversation answers in one short sentence and nothing more, cards and
-/// words leave in one round trip, the cheerful voice speaks faster).
-const REWORDED: [(&str, &str); 5] = [
+/// conversation answers in one short sentence and nothing more, without
+/// cards; the cheerful voice speaks faster).
+const REWORDED: [(&str, &str); 4] = [
     (
         "Exemple : « 940 W en ce moment, surtout des appareils non mesurés à part. Dehors, 23 °C et un ciel couvert. »",
         "Réponds à ce qu'on te demande, rien de plus : pas de météo ni de conso en prime. Exemple, à « on consomme combien ? » : « 940 W en ce moment, surtout des appareils non mesurés à part. »",
-    ),
-    (
-        ") ; elles complètent ta réponse et permettent d'agir.",
-        "), en écrivant ta réponse dans le même message : la réponse et les cartes partent ensemble. Elles complètent ta réponse et permettent d'agir.",
     ),
     (
         "valider sur la carte.\n\n             \n\n             Garde-fous",
@@ -29,7 +25,7 @@ const REWORDED: [(&str, &str); 5] = [
     ),
     (
         "Cette réponse sera dite à voix haute : une ou deux phrases courtes, sans liste,",
-        "Cette réponse sera dite à voix haute, dans une conversation : une seule phrase courte, une quinzaine de mots, qui répond à la question et à rien d'autre, sans te répéter. Sans liste,",
+        "Cette réponse sera dite à voix haute, dans une conversation : une seule phrase courte, une quinzaine de mots, qui répond à la question et à rien d'autre, sans te répéter ni poser de question en retour. Pas de carte à l'écran : n'appelle pas `show`. Sans liste,",
     ),
     ("débit vif,", "débit rapide, sans traîner,"),
 ];

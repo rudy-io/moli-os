@@ -113,6 +113,8 @@
   "moli.reglages.confidentialite": "Ton code est demandé. La clé est chiffrée dans Moli et ne réapparaît nulle part : pour la changer, on la remplace.",
   "moli.reglages.voix": "Sa voix",
   "moli.reglages.ton_aria": "Ton de la voix",
+  "moli.reglages.debit": "Débit",
+  "moli.reglages.debit_aria": "Débit de la voix",
   "moli.reglages.ton_enjoue": "Enjoué",
   "moli.reglages.ton_pose": "Posé",
   "moli.reglages.ton_doux": "Doux",

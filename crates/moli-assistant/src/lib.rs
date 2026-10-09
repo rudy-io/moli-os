@@ -454,7 +454,7 @@ impl Assistant {
                     model: &c.speech_model,
                     voice: voice.unwrap_or(&chosen),
                     style: &style,
-                    speed: c.speech_speed,
+                    speed: self.speed(),
                 }),
                 _ => None,
             },
@@ -500,12 +500,20 @@ impl Assistant {
             messages.push(json!({ "role": m.role, "content": content }));
         }
 
+        // Spoken, nobody waits for cards: no `show`, one round trip less
+        // (the screen still gets the cards the question calls for).
+        let mut offered = tools();
+        if turn.spoken
+            && let Some(list) = offered.as_array_mut()
+        {
+            list.retain(|t| t["function"]["name"] != "show");
+        }
         let mut run = Run::default();
         for step in 0..MAX_STEPS {
             let mut body = json!({
                 "model": self.0.config.model,
                 "messages": messages,
-                "tools": tools(),
+                "tools": offered,
             });
             // Reasoning models (gpt-5…, o…) take neither a temperature nor
             // `max_tokens`; they think briefly here: answers are short.
@@ -1896,7 +1904,12 @@ mod tests {
             "Je n’ai pas su répondre, tu peux reformuler ?"
         );
         assert_eq!(moli_i18n::tr!("assistant.reply.done"), "Voilà.");
-        assert_eq!(word_list("assistant.filter.offers"), before::OFFERS);
+        // Three questions back added on 9 Oct. 2026 (heard in conversation).
+        let offers: Vec<&str> = ["que veux-tu", "que souhaites-tu", "qu'est-ce que tu veux"]
+            .into_iter()
+            .chain(before::OFFERS)
+            .collect();
+        assert_eq!(word_list("assistant.filter.offers"), offers);
         assert_eq!(word_list("assistant.filter.pointers"), before::POINTERS);
         assert_eq!(word_list("assistant.guess.energy"), before::GUESS_ENERGY);
         assert_eq!(word_list("assistant.guess.weather"), before::GUESS_WEATHER);

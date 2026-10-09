@@ -107,9 +107,11 @@ pub(crate) struct Prefs {
     voice: Option<String>,
     #[serde(default)]
     style: Option<String>,
+    #[serde(default)]
+    pace: Option<String>,
 }
 
-/// The voice and the tone: a taste, not a power, so no code asked.
+/// The voice, the tone and the pace: a taste, not a power, so no code asked.
 pub(crate) async fn set_settings(
     Extension(Moli(moli)): Extension<Moli>,
     axum::Json(prefs): axum::Json<Prefs>,
@@ -118,7 +120,11 @@ pub(crate) async fn set_settings(
         return not_configured();
     };
     match moli
-        .set_voice_prefs(prefs.voice.as_deref(), prefs.style.as_deref())
+        .set_voice_prefs(
+            prefs.voice.as_deref(),
+            prefs.style.as_deref(),
+            prefs.pace.as_deref(),
+        )
         .await
     {
         Ok(settings) => axum::Json(settings).into_response(),

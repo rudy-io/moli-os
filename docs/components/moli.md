@@ -141,8 +141,12 @@ masqué raccroche.
 - `POST /api/assistant` avec `spoken: true` : consigne orale ajoutée au prompt (une phrase
   d'une quinzaine de mots, rien que la réponse, pas de symbole, nombres comme on les dit,
   « il faut valider à l'écran » si un ordre attend).
-- Un tour s'arrête dès que le modèle écrit sa réponse **avec** son appel à `show` (les cartes
-  ne renvoient rien d'utile) : un aller-retour de moins, environ une seconde de gagnée.
+- En conversation, `show` n'est pas proposé au modèle : un aller-retour de moins (environ une
+  seconde). L'écran reçoit les cartes que la question appelle (`guess_cards`) et celles des
+  appareils commandés. Hors conversation, un tour s'arrête aussi dès que le modèle écrit sa
+  réponse avec son appel à `show` (les cartes ne renvoient rien d'utile).
+- Le journal `assistant turn` donne les outils appelés dans l'ordre (`tools=get_device,show`) :
+  c'est là qu'on voit où un tour lent a passé son temps.
 - `GET /api/assistant` : `listen`, `speak`, `voices: { cloud, local }`.
 
 | Panne | Comportement |
@@ -158,8 +162,9 @@ masqué raccroche.
   par `GET /v1/models` (refusée = 400 avec la raison), puis rangée chiffrée dans le coffre
   (`assistant/api_key`), jamais renvoyée. Tuto pas à pas dans la carte (compte, crédit,
   limite de dépense, création de la clé). Prise en compte immédiatement.
-- **Voix et ton** : `GET|PUT /api/assistant/settings` `{voice?, style?}` (sans code : un goût,
-  pas un pouvoir). Tons : `enjoue` (défaut), `pose`, `doux`. Gardés dans
+- **Voix, ton et débit** : `GET|PUT /api/assistant/settings` `{voice?, style?, pace?}` (sans code :
+  un goût, pas un pouvoir). Tons : `enjoue` (défaut), `pose`, `doux`. Débits : `normal` (1),
+  `rapide` (1,2, le défaut de `speech_speed`), `tres_rapide` (1,4). Gardés dans
   `data/assistant.json` ; sans ce fichier, `speech_voice`/`speech_style` de `moli.toml`.
   ▶ à côté de chaque voix pour l'écouter.
 - **Moli toujours présent** : sans `[assistant]` dans `moli.toml`, il démarre avec ses
