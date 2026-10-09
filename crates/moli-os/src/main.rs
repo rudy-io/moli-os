@@ -317,6 +317,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         assistant,
         automations: Some(automations),
         access: config.server.access.clone(),
+        demo: config.server.demo,
         phones: gates.phones,
         machines: gates.machines,
     };
@@ -759,6 +760,7 @@ const KINDS: &[&str] = &[
     "ipp",
     "host",
     "profile",
+    "demo",
 ];
 
 /// Every enabled driver, running. The phones driver and the API share its
@@ -906,6 +908,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )?),
         "helpers" => Arc::new(moli_helpers::Helpers::new(
+            config.options.clone().try_into().with_context(context)?,
+        )?),
+        "demo" => Arc::new(moli_demo::Demo::new(
             config.options.clone().try_into().with_context(context)?,
         )?),
         "profile" => Arc::new(moli_profile::ProfileDriver::new(

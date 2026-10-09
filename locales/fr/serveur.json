@@ -118,5 +118,6 @@
   "serveur.energie.point.month_cost": "Coût du mois (kWh)",
   "serveur.energie.point.projection_kwh": "Conso du mois au rythme actuel",
   "serveur.energie.point.bill_projection": "Facture du mois au rythme actuel (abonnement compris)",
-  "serveur.energie.point.over_budget": "Facture estimée au-dessus du budget"
+  "serveur.energie.point.over_budget": "Facture estimée au-dessus du budget",
+  "serveur.demo.reserve": "pas dans la démo : ce changement resterait pour les visiteurs suivants"
 }

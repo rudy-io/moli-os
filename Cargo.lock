@@ -1170,6 +1170,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jiff",
+ "moli-core",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "moli-energy"
 version = "0.1.0"
 dependencies = [
@@ -1385,6 +1400,7 @@ dependencies = [
  "moli-automation",
  "moli-bambu",
  "moli-core",
+ "moli-demo",
  "moli-energy",
  "moli-esphome",
  "moli-frigate",

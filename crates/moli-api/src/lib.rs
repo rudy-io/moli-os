@@ -76,6 +76,9 @@ pub struct Options {
     /// The Cloudflare Access application in front of the tunnel, whose
     /// signed assertions name the person (`[server.access]`).
     pub access: Option<AccessConfig>,
+    /// A demo house (no real devices): anyone is let in, as a visitor
+    /// (`[server] demo = true`).
+    pub demo: bool,
     /// The household's phones (the Moli app), when a `phones` driver runs.
     pub phones: Option<moli_phones::Gateway>,
     /// The house's computers' Moli agents, when a host driver runs.
@@ -152,7 +155,7 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
 
 /// Who is who: the human sessions (the code, its owners) and the Cloudflare
 /// Access check.
-fn people(hub: &Hub, options: &Options) -> (Arc<session::Sessions>, Option<Arc<access::Verifier>>) {
+fn people(hub: &Hub, options: &Options) -> (Arc<session::Sessions>, caller::Gate) {
     let owners = options
         .access
         .as_ref()
@@ -160,12 +163,16 @@ fn people(hub: &Hub, options: &Options) -> (Arc<session::Sessions>, Option<Arc<a
         .unwrap_or_default();
     let humans = session::Sessions::new(hub.clone(), options.ui_pin.clone(), owners);
     let access = options.access.as_ref().map(access::Verifier::new);
-    (Arc::new(humans), access.map(Arc::new))
+    let gate = caller::Gate {
+        access: access.map(Arc::new),
+        demo: options.demo,
+    };
+    (Arc::new(humans), gate)
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
-    let (humans, access) = people(&hub, options);
+    let (humans, gate) = people(&hub, options);
     Router::new()
         .route("/api/health", get(rest::health))
         .merge(device_routes())
@@ -259,7 +266,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
             Arc::new(limit::Limits::default()),
             limit::check,
         ))
-        .layer(middleware::from_fn_with_state(access, caller::identify))
+        .layer(middleware::from_fn_with_state(gate, caller::identify))
         .layer(middleware::from_fn_with_state(allowed, guard::check))
         .layer(compression())
         .with_state(hub)

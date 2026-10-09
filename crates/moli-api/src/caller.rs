@@ -4,7 +4,11 @@
 //!   machine only, the CLI);
 //! - through Cloudflare (the tunnel) with a valid Access assertion: the
 //!   person Access let in, by e-mail;
-//! - anything else (Internet without proof, public address): a stranger.
+//! - anything else (Internet without proof, public address): a stranger;
+//! - except on a demo house (`[server] demo = true`, a house without real
+//!   devices): there, a stranger is a visitor, let in like the household,
+//!   but nothing that would change the house for the next visitors (its
+//!   code, names, plan, assistant key) is open to anyone.
 //!
 //! Human sessions (PIN) and failure counters are bound to [`Caller::key`]:
 //! the address on the home network, the e-mail through Access (a phone's
@@ -15,7 +19,7 @@ use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -34,6 +38,31 @@ pub(crate) enum Via {
     /// The Moli app on a phone, reporting with its own token: it reaches
     /// one route only (its reports), where the token is checked.
     Phone,
+    /// Someone trying a demo house: anyone, anywhere.
+    Visitor,
+}
+
+/// What [`identify`] needs: the Access verifier, and whether this house is
+/// a demo.
+#[derive(Clone)]
+pub(crate) struct Gate {
+    pub(crate) access: Option<Arc<Verifier>>,
+    pub(crate) demo: bool,
+}
+
+/// What nobody may change in a demo house: it would change the house for
+/// every visitor after them (its code, the names, the plan, the assistant's
+/// key). A demo comes back as it was at its next start anyway.
+fn demo_locked(method: &Method, path: &str) -> bool {
+    let writes = method != Method::GET && method != Method::HEAD;
+    writes
+        && (path.starts_with("/api/session/pin")
+            || path.starts_with("/api/session/setup")
+            || path.starts_with("/api/labels/")
+            || path.starts_with("/api/plan")
+            || path.starts_with("/api/assistant/key")
+            || path.starts_with("/api/assistant/settings")
+            || path.starts_with("/api/home"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +75,10 @@ pub(crate) struct Caller {
 impl Caller {
     /// The household: home network, this machine, or a person Access let in.
     pub(crate) fn is_household(&self) -> bool {
-        matches!(self.via, Via::Lan | Via::Loopback | Via::Access { .. })
+        matches!(
+            self.via,
+            Via::Lan | Via::Loopback | Via::Access { .. } | Via::Visitor
+        )
     }
 
     /// This very machine, not through the tunnel (which also ends here).
@@ -58,6 +90,7 @@ impl Caller {
     pub(crate) fn describe(&self) -> String {
         match &self.via {
             Via::Access { email } => format!("tableau de bord ({email})"),
+            Via::Visitor => "tableau de bord (visiteur de la démo)".to_owned(),
             _ => format!("tableau de bord ({})", self.key),
         }
     }
@@ -69,6 +102,7 @@ impl Caller {
             Via::Access { .. } => "access",
             Via::Outside => "outside",
             Via::Phone => "phone",
+            Via::Visitor => "visitor",
         }
     }
 }
@@ -165,7 +199,7 @@ fn phone_report(path: &str) -> Option<&str> {
 
 /// Middleware: identifies the caller and leaves it in the request.
 pub(crate) async fn identify(
-    State(access): State<Option<Arc<Verifier>>>,
+    State(gate): State<Gate>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -175,7 +209,7 @@ pub(crate) async fn identify(
         .map_or(IpAddr::from([0, 0, 0, 0]), |c| c.0.ip());
     let headers = request.headers();
     let from_tunnel = through_cloudflare(headers) && peer.to_canonical().is_loopback();
-    let email = match (&access, from_tunnel) {
+    let email = match (&gate.access, from_tunnel) {
         (Some(verifier), true) => match header(headers, "cf-access-jwt-assertion") {
             Some(token) => verifier.identity(token).await,
             None => None,
@@ -195,6 +229,19 @@ pub(crate) async fn identify(
             key: format!("phone:{id}"),
             via: Via::Phone,
         };
+    }
+    // A demo house lets anyone in, as a visitor, but keeps itself as it is.
+    if gate.demo {
+        if demo_locked(request.method(), request.uri().path()) {
+            return (
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({ "error": moli_i18n::tr!("serveur.demo.reserve") })),
+            )
+                .into_response();
+        }
+        if caller.via == Via::Outside {
+            caller.via = Via::Visitor;
+        }
     }
     // Strangers get nothing: not a reading, not a PIN attempt. Moli is the
     // home network's, and Cloudflare Access's for the people it lets in.
