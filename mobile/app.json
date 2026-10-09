@@ -18,7 +18,8 @@
       },
       "infoPlist": {
         "CFBundleLocalizations": [
-          "fr"
+          "fr",
+          "en"
         ],
         "CFBundleDevelopmentRegion": "fr",
         "ITSAppUsesNonExemptEncryption": false,
@@ -27,7 +28,12 @@
           "location",
           "fetch",
           "remote-notification"
-        ]
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Moli parle à ta maison sur le Wi-Fi de la maison, à l'adresse que tu lui donnes."
       }
     },
     "android": {
@@ -53,6 +59,14 @@
     },
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#161512",
@@ -77,7 +91,12 @@
           "color": "#E8B931"
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-localization"
+    ],
+    "locales": {
+      "fr": "./locales/fr.json",
+      "en": "./locales/en.json"
+    }
   }
 }

@@ -1,13 +1,18 @@
-// The app's identity (store ids, Expo account) and the house it opens are the
-// publisher's, not the project's: they come from `house.json` next to this
-// file (never committed; model: house.example.json), else from MOLI_URL.
+// The app is one for every house: the person types their house's address on
+// the first screen (src/house.ts). The store identity (ids, Expo account)
+// is the publisher's, not the project's: it comes from `house.json` next to
+// this file (never committed; model: house.example.json).
+//
+// A build made for a single house may also preset its address (house.json
+// `url`, or MOLI_URL): the first screen is then skipped. Never in a build
+// meant for the stores: everyone would get that house's address.
 const fs = require("fs");
 const path = require("path");
 
 module.exports = ({ config }) => {
   const file = path.join(__dirname, "house.json");
   const house = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
-  const url = house.url ?? process.env.MOLI_URL ?? "https://maison.example.org";
+  const url = house.url ?? process.env.MOLI_URL ?? null;
   return {
     ...config,
     ...(house.owner && { owner: house.owner }),
@@ -20,9 +25,10 @@ module.exports = ({ config }) => {
     extra: {
       ...config.extra,
       moliUrl: url,
-      // Hosts the dashboard may move to without leaving the app (suffixes:
-      // a redirect must not throw the user out), e.g. a sign-in page.
-      allowedSuffixes: house.allowedSuffixes ?? [new URL(url).hostname],
+      // More domains the dashboard may move to without leaving the app, on
+      // top of the house's own and Cloudflare Access's sign-in (e.g. another
+      // sign-in page in front of the house).
+      allowedSuffixes: house.allowedSuffixes ?? [],
       ...(house.easProjectId && { eas: { projectId: house.easProjectId } }),
     },
   };

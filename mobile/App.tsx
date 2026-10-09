@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   BackHandler,
   Linking,
@@ -16,14 +17,17 @@ import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import * as Battery from "expo-battery";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import { BASE, pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground } from "./src/moli";
+import { pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground, unpair } from "./src/moli";
+import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from "./src/house";
+import { t } from "./src/texts";
+import { Welcome } from "./src/Welcome";
 
-// The shell: Moli's own dashboard, at the house's address (app.config.js).
-// Behind Cloudflare Access, the sign-in page is Cloudflare's: it is listed in
-// house.json so that it stays in the app too. Domains, never exact hosts (a
-// redirect must not throw the user out), but whole labels only: "example.org"
-// lets in example.org and its subdomains, never evilexample.org.
-const ALLOWED_SUFFIXES = (Constants.expoConfig?.extra?.allowedSuffixes as string[] | undefined) ?? [new URL(BASE).hostname];
+// The shell: Moli's own dashboard, at the house's address, chosen on the
+// first screen (src/house.ts) unless this build is made for one house.
+// Behind Cloudflare Access, the sign-in page is Cloudflare's: it stays in the
+// app too. Domains, never exact hosts (a redirect must not throw the user
+// out), but whole labels only: "example.org" lets in example.org and its
+// subdomains, never evilexample.org.
 const inDomain = (host: string, domain: string) => {
   const d = domain.replace(/^\./, "");
   return host === d || host.endsWith("." + d);
@@ -74,7 +78,48 @@ async function pushToken(): Promise<string | null> {
   }
 }
 
+// Which house, then its dashboard. `undefined`: still reading the keychain.
 export default function App() {
+  const [base, setBase] = useState<string | null | undefined>(undefined);
+  const [last, setLast] = useState<string | null>(null);
+
+  useEffect(() => {
+    currentHouse().then(setBase, () => setBase(PRESET));
+  }, []);
+
+  const choose = useCallback(async (next: string) => {
+    // A pairing made with another house is that house's: let it go. One from
+    // before the app could change house (no `base`) follows the first house
+    // chosen; if it is not its house, Moli refuses the token (401) and the
+    // phone pairs again.
+    const p = await pairing();
+    if (p?.base && p.base !== next) await unpair();
+    await saveHouse(next);
+    setBase(next);
+  }, []);
+
+  const leave = useCallback(async () => {
+    setLast(base ?? null);
+    await unpair();
+    await forgetHouse();
+    // Even a build made for one house lets its owner type another.
+    setBase(null);
+  }, [base]);
+
+  return (
+    <SafeAreaProvider>
+      {base === undefined ? (
+        <View style={styles.center} />
+      ) : base === null ? (
+        <Welcome initial={last} onDone={choose} />
+      ) : (
+        <House key={base} base={base} onLeave={leave} />
+      )}
+    </SafeAreaProvider>
+  );
+}
+
+function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   const webRef = useRef<WebView>(null);
   const [failed, setFailed] = useState(false);
   const [askLocation, setAskLocation] = useState(false);
@@ -156,19 +201,28 @@ export default function App() {
     };
   }, []);
 
+  const allowed = useMemo(() => allowedSuffixes(base), [base]);
+
+  const askLeave = useCallback(() => {
+    Alert.alert(t.leaveTitle, t.leaveText, [
+      { text: t.cancel, style: "cancel" },
+      { text: t.leave, style: "destructive", onPress: onLeave },
+    ]);
+  }, [onLeave]);
+
   // Everything outside the house's hosts (and its sign-in page) opens in the browser.
   const onShouldStart = useCallback((req: { url: string }) => {
     try {
       const url = new URL(req.url);
       if (url.protocol === "about:" || url.protocol === "blob:" || url.protocol === "data:") return true;
-      const internal = ALLOWED_SUFFIXES.some((d) => inDomain(url.hostname, d));
+      const internal = allowed.some((d) => inDomain(url.hostname, d));
       if ((url.protocol === "https:" || url.protocol === "http:") && internal) return true;
     } catch {
       return false;
     }
     Linking.openURL(req.url).catch(() => {});
     return false;
-  }, []);
+  }, [allowed]);
 
   // Once the dashboard itself shows (signed in), pair this phone if needed.
   const onLoadEnd = useCallback(async (e: { nativeEvent: { url: string } }) => {
@@ -178,12 +232,12 @@ export default function App() {
     } catch {
       return;
     }
-    if (url.hostname !== new URL(BASE).hostname || url.pathname.startsWith("/cdn-cgi/")) return;
+    if (url.hostname !== new URL(base).hostname || url.pathname.startsWith("/cdn-cgi/")) return;
     if (pairingAsked.current || (await pairing())) return;
     pairingAsked.current = true;
     const token = await pushToken();
     webRef.current?.injectJavaScript(pairingScript(pairingRequest(token)));
-  }, []);
+  }, [base]);
 
   const onMessage = useCallback(async (e: WebViewMessageEvent) => {
     let msg: { type?: string; status?: number; body?: { id?: string; token?: string; home?: unknown; error?: string } };
@@ -203,16 +257,21 @@ export default function App() {
       setTop({ bg, dark: !light });
       return;
     }
+    // The dashboard may offer to change house (window.MoliNative.changeHouse).
+    if (msg.type === "change-house") {
+      askLeave();
+      return;
+    }
     if (msg.type !== "paired") return;
     if (msg.status === 200 && msg.body?.id && msg.body.token) {
-      await savePairing({ id: msg.body.id, token: msg.body.token, home: (msg.body.home as never) ?? null });
+      await savePairing({ id: msg.body.id, token: msg.body.token, home: (msg.body.home as never) ?? null, base });
       await report("appairage");
       setAskLocation(true);
     } else {
       // Not signed in yet, or refused: try again on the next page.
       pairingAsked.current = false;
     }
-  }, []);
+  }, [base, askLeave]);
 
   const startLocation = useCallback(async () => {
     setAskLocation(false);
@@ -224,13 +283,13 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
       <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top"]}>
         <StatusBar style={top.dark ? "light" : "dark"} />
         {failed ? (
           <View style={styles.center}>
-            <Text style={styles.title}>Moli est injoignable</Text>
-            <Text style={styles.sub}>Vérifie ta connexion, puis réessaie.</Text>
+            <Text style={styles.title}>{t.unreachableTitle}</Text>
+            <Text style={styles.sub}>{t.unreachableSub}</Text>
+            <Text style={styles.address}>{base.replace(/^https?:\/\//, "")}</Text>
             <Pressable
               style={styles.button}
               onPress={() => {
@@ -238,16 +297,19 @@ export default function App() {
                 webRef.current?.reload();
               }}
             >
-              <Text style={styles.buttonText}>Réessayer</Text>
+              <Text style={styles.buttonText}>{t.retry}</Text>
+            </Pressable>
+            <Pressable style={styles.other} onPress={askLeave}>
+              <Text style={styles.otherText}>{t.changeHouse}</Text>
             </Pressable>
           </View>
         ) : (
           <WebView
             ref={webRef}
-            source={{ uri: BASE }}
+            source={{ uri: base }}
             style={styles.web}
             applicationNameForUserAgent="MoliNative"
-            injectedJavaScriptBeforeContentLoaded={`window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true }; true;`}
+            injectedJavaScriptBeforeContentLoaded={`window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); } }; true;`}
             injectedJavaScript={THEME_WATCH}
             allowsBackForwardNavigationGestures
             allowsInlineMediaPlayback
@@ -278,24 +340,19 @@ export default function App() {
         )}
         {askLocation && (
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Moli et ta position</Text>
-            <Text style={styles.sheetText}>
-              Pour savoir quand tu arrives à la maison ou que tu en pars, même appli fermée, Moli a
-              besoin de ta position. Elle n'est envoyée qu'à ton Moli, chez toi. Choisis « Toujours »
-              à la deuxième question.
-            </Text>
+            <Text style={styles.sheetTitle}>{t.locationTitle}</Text>
+            <Text style={styles.sheetText}>{t.locationText}</Text>
             <View style={styles.row}>
               <Pressable style={styles.later} onPress={() => setAskLocation(false)}>
-                <Text style={styles.laterText}>Plus tard</Text>
+                <Text style={styles.laterText}>{t.later}</Text>
               </Pressable>
               <Pressable style={styles.go} onPress={startLocation}>
-                <Text style={styles.goText}>Continuer</Text>
+                <Text style={styles.goText}>{t.continue}</Text>
               </Pressable>
             </View>
           </View>
         )}
       </SafeAreaView>
-    </SafeAreaProvider>
   );
 }
 
@@ -307,6 +364,9 @@ const styles = StyleSheet.create({
   sub: { color: "#b9b2a4", fontSize: 14, marginTop: 8, textAlign: "center" },
   button: { marginTop: 20, borderColor: GOLD, borderWidth: 1, borderRadius: 999, paddingHorizontal: 24, paddingVertical: 10 },
   buttonText: { color: GOLD, fontSize: 15, fontWeight: "500" },
+  address: { color: "#8a8376", fontSize: 13, marginTop: 14 },
+  other: { marginTop: 14, paddingVertical: 8, paddingHorizontal: 16 },
+  otherText: { color: "#b9b2a4", fontSize: 14, fontWeight: "600" },
   sheet: {
     position: "absolute",
     left: 12,
