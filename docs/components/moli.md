@@ -135,6 +135,11 @@ masqué raccroche.
   (Piper `local_speech`), en-tête `x-moli-voice:
   cloud|local`. Le texte passe par `speakable()` (« 22.9 °C » → « 22,9 degrés », W, kWh, €,
   %, « 21h05 »). Budget à part de la conversation : 150 phrases / 10 min, 3 à la fois.
+  Avec `accept: audio/pcm` (ce que fait le tableau de bord), la voix OpenAI arrive **pendant**
+  qu'elle est faite : PCM 16 bits, `audio/pcm;rate=24000`, relayé morceau par morceau (coupé après
+  10 s sans rien ou 4 Mo), joué au fil de l'eau par `player.playSpeech` : le premier mot environ
+  une seconde plus tôt. La compression des réponses ne touche jamais `audio/*` (elle retiendrait
+  le son). Piper reste entier (WAV).
 - `POST /api/assistant/listen` : WAV 16 kHz mono (ce que le tableau de bord envoie) ou tout
   format audio accepté par OpenAI → `{ text, engine }`. Cloud d'abord, **Whisper local**
   (`local_listen`) si le cloud échoue ou est coupé (WAV seulement).

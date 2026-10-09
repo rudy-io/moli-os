@@ -8,7 +8,7 @@ use axum::Extension;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use moli_assistant::{Assistant, AssistantError, Turn};
+use moli_assistant::{Assistant, AssistantError, Speech, Turn};
 use serde_json::json;
 
 use crate::caller::Caller;
@@ -69,26 +69,52 @@ pub(crate) struct Say {
 }
 
 /// One sentence of an answer, spoken (MP3 from the cloud, WAV from Piper).
+/// With `accept: audio/pcm`, the cloud voice comes as it is made (16-bit PCM,
+/// rate in the content type): the voice starts before the sentence is whole.
 pub(crate) async fn speak(
     Extension(Moli(moli)): Extension<Moli>,
+    headers: HeaderMap,
     axum::Json(say): axum::Json<Say>,
 ) -> Response {
     let Some(moli) = moli else {
         return not_configured();
     };
-    match moli.speak(&say.text, say.voice.as_deref()).await {
-        Ok(spoken) => (
+    let streamed = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.contains("audio/pcm"));
+    let speech = if streamed {
+        moli.speak_streamed(&say.text, say.voice.as_deref()).await
+    } else {
+        moli.speak(&say.text, say.voice.as_deref())
+            .await
+            .map(Speech::Whole)
+    };
+    let voice = header::HeaderName::from_static("x-moli-voice");
+    match speech {
+        Ok(Speech::Whole(spoken)) => (
             [
                 (header::CONTENT_TYPE, spoken.mime),
                 (header::CACHE_CONTROL, "no-store"),
-                (
-                    header::HeaderName::from_static("x-moli-voice"),
-                    spoken.engine,
-                ),
+                (voice, spoken.engine),
             ],
             spoken.audio,
         )
             .into_response(),
+        Ok(Speech::Stream(stream)) => {
+            let chunks = futures::stream::unfold(stream.chunks, |mut chunks| async move {
+                chunks.recv().await.map(|chunk| (chunk, chunks))
+            });
+            (
+                [
+                    (header::CONTENT_TYPE, stream.mime),
+                    (header::CACHE_CONTROL, "no-store"),
+                    (voice, stream.engine),
+                ],
+                axum::body::Body::from_stream(chunks),
+            )
+                .into_response()
+        }
         Err(e) => failure(&e),
     }
 }

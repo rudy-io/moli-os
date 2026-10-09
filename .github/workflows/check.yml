@@ -37,7 +37,7 @@ jobs:
       - run: npm run build
         working-directory: web
       - run: node scripts/i18n-check.mjs
-      - run: node --test src/maison/lib/voice/speech.test.js
+      - run: node --test src/maison/lib/voice/*.test.js
         working-directory: web
       - run: node scripts/solar-sim.check.mjs
         working-directory: web

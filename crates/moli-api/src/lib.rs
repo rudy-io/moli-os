@@ -40,6 +40,7 @@ use moli_history::History;
 use moli_runtime::Hub;
 use tokio_util::sync::CancellationToken;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 
 pub use access::AccessConfig;
 pub use plan::image_name_ok as plan_image_name_ok;
@@ -260,6 +261,13 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         ))
         .layer(middleware::from_fn_with_state(access, caller::identify))
         .layer(middleware::from_fn_with_state(allowed, guard::check))
-        .layer(CompressionLayer::new())
+        .layer(compression())
         .with_state(hub)
+}
+
+/// Answers compressed, never audio: it hardly shrinks, and a voice streamed
+/// while it is made would wait for the compressor's buffer.
+fn compression() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new()
+        .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("audio/")))
 }

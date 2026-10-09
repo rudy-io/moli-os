@@ -145,10 +145,11 @@ async function say(text) {
   for (let i = 0; i < parts.length; i++) {
     if (talk.state !== 'speaking') return;
     talk.saying = parts[i];
-    const bytes = await audio[i];
+    const res = await audio[i];
     if (talk.state !== 'speaking') return;
-    if (!bytes) return browserSays(parts.slice(i).join(' '));
-    if (!(await player.play(bytes).catch(() => false)) && talk.state === 'speaking') return browserSays(parts.slice(i).join(' '));
+    if (!res) return browserSays(parts.slice(i).join(' '));
+    // The cloud voice plays while it is made (the first words a second sooner).
+    if (!(await player.playSpeech(res).catch(() => false)) && talk.state === 'speaking') return browserSays(parts.slice(i).join(' '));
   }
 }
 

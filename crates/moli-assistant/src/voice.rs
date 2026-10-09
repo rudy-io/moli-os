@@ -4,7 +4,9 @@
 
 use std::time::Duration;
 
+use http_body_util::BodyExt as _;
 use moli_net::wyoming;
+use tokio::sync::mpsc;
 
 use crate::AssistantError;
 use crate::llm::Endpoint;
@@ -20,6 +22,29 @@ pub struct Spoken {
     /// `cloud` or `local`.
     pub engine: &'static str,
 }
+
+/// A voice as it is made: 16-bit PCM (`mime` says the rate), chunk by chunk.
+#[derive(Debug)]
+pub struct SpeechStream {
+    pub mime: &'static str,
+    /// `cloud`.
+    pub engine: &'static str,
+    /// Ends with the sentence; an `Err` cuts it (the provider stalled).
+    pub chunks: mpsc::Receiver<Result<moli_net::Body, std::io::Error>>,
+}
+
+/// What a sentence becomes: audio whole, or a voice streamed while it is made.
+#[derive(Debug)]
+pub enum Speech {
+    Whole(Spoken),
+    Stream(SpeechStream),
+}
+
+pub(crate) const PCM_MIME: &str = "audio/pcm;rate=24000";
+/// A stream that says nothing for this long is cut.
+const STREAM_IDLE: Duration = Duration::from_secs(10);
+/// 300 characters are under half a minute: 24 000 samples of 2 bytes a second.
+const STREAM_MAX: usize = 4 * 1024 * 1024;
 
 /// What was heard, and by whom (`cloud` or `local`).
 #[derive(Debug)]
@@ -87,6 +112,85 @@ impl Voices<'_> {
             AssistantError::Upstream,
         ))
     }
+}
+
+impl Voices<'_> {
+    /// The cloud voice as it is made; the house's (Piper, whole) when the
+    /// cloud fails before saying anything.
+    pub(crate) async fn say_streamed(&self, text: &str) -> Result<Speech, AssistantError> {
+        if let Some(c) = &self.cloud {
+            match c
+                .endpoint
+                .speech_stream(c.key, c.model, c.voice, c.style, c.speed, text)
+                .await
+            {
+                Ok(audio) => {
+                    return Ok(Speech::Stream(SpeechStream {
+                        mime: PCM_MIME,
+                        engine: "cloud",
+                        chunks: relay(audio, text.chars().count()),
+                    }));
+                }
+                Err(e) => tracing::warn!(error = %e, "cloud voice failed, trying the local one"),
+            }
+        }
+        let local = Voices {
+            cloud: None,
+            local: self.local,
+            local_voice: self.local_voice,
+        };
+        local.say(text).await.map(Speech::Whole)
+    }
+}
+
+/// Hands the provider's audio over as it comes, within bounds (silence,
+/// size); stops when nobody listens any more.
+fn relay(
+    mut audio: moli_net::Incoming,
+    chars: usize,
+) -> mpsc::Receiver<Result<moli_net::Body, std::io::Error>> {
+    let (tx, rx) = mpsc::channel(32);
+    tokio::spawn(async move {
+        let mut bytes = 0usize;
+        loop {
+            let chunk = match tokio::time::timeout(STREAM_IDLE, audio.frame()).await {
+                Ok(None) => break,
+                Ok(Some(Ok(frame))) => match frame.into_data() {
+                    Ok(data) => data,
+                    Err(_) => continue,
+                },
+                Ok(Some(Err(e))) => {
+                    let _ = tx.send(Err(std::io::Error::other(e))).await;
+                    break;
+                }
+                Err(_) => {
+                    let _ = tx
+                        .send(Err(std::io::Error::other("the voice stalled")))
+                        .await;
+                    break;
+                }
+            };
+            bytes += chunk.len();
+            if bytes > STREAM_MAX {
+                let _ = tx
+                    .send(Err(std::io::Error::other("the voice is too long")))
+                    .await;
+                break;
+            }
+            if tx.send(Ok(chunk)).await.is_err() {
+                // The listener left (interrupted): the provider's stream goes.
+                break;
+            }
+        }
+        tracing::info!(
+            engine = "cloud",
+            chars,
+            bytes,
+            streamed = true,
+            "voice spoken"
+        );
+    });
+    rx
 }
 
 /// `host:port`, or nothing for an empty or malformed setting.
@@ -320,6 +424,59 @@ mod tests {
         let spoken = voices.say("Bonsoir").await.unwrap();
         assert_eq!((spoken.mime, spoken.engine), ("audio/wav", "local"));
         assert_eq!(&spoken.audio[..4], b"RIFF");
+    }
+
+    #[tokio::test]
+    async fn the_cloud_voice_streams_as_it_is_made() {
+        let (url, task) = crate::llm::tests::fake_http(200, b"\x01\x00\x02\x00\x03\x00").await;
+        let endpoint = Endpoint::parse(&url).unwrap();
+        let voices = Voices {
+            cloud: Some(Cloud {
+                endpoint: &endpoint,
+                key: None,
+                model: "m",
+                voice: "v",
+                style: "",
+                speed: 1.2,
+            }),
+            local: None,
+            local_voice: None,
+        };
+        let Speech::Stream(mut stream) = voices.say_streamed("Bonsoir").await.unwrap() else {
+            panic!("a stream");
+        };
+        assert_eq!((stream.mime, stream.engine), (PCM_MIME, "cloud"));
+        let mut heard = Vec::new();
+        while let Some(chunk) = stream.chunks.recv().await {
+            heard.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(heard, b"\x01\x00\x02\x00\x03\x00");
+        let request = task.await.unwrap();
+        assert!(request.contains("\"response_format\":\"pcm\""), "{request}");
+        assert!(request.contains("\"speed\":1.2"), "{request}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_stream_lets_piper_speak() {
+        let (url, _t) = crate::llm::tests::fake_http(500, br#"{"error":{"message":"down"}}"#).await;
+        let endpoint = Endpoint::parse(&url).unwrap();
+        let port = fake_piper().await;
+        let voices = Voices {
+            cloud: Some(Cloud {
+                endpoint: &endpoint,
+                key: None,
+                model: "m",
+                voice: "v",
+                style: "",
+                speed: 1.0,
+            }),
+            local: Some(("127.0.0.1", port)),
+            local_voice: None,
+        };
+        let Speech::Whole(spoken) = voices.say_streamed("Bonsoir").await.unwrap() else {
+            panic!("Piper, whole");
+        };
+        assert_eq!((spoken.mime, spoken.engine), ("audio/wav", "local"));
     }
 
     #[tokio::test]

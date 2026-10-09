@@ -2,6 +2,7 @@
 
 let ctx = null;
 let analyser = null;
+/** What plays now: its sources (one, or the pieces of a stream) and who waits for its end. */
 let current = null;
 
 /** Call synchronously inside the tap that starts a conversation: the
@@ -29,25 +30,108 @@ export async function play(bytes) {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(analyser);
-    current = { source, resolve };
+    current = { sources: new Set([source]), resolve };
     source.onended = () => {
-      if (current?.source === source) current = null;
+      if (current?.sources.has(source)) current = null;
       resolve(true);
     };
     source.start();
   });
 }
 
+/** A sentence as the server sends it: streamed PCM is played as it comes,
+ *  anything else whole. Resolves `true` when finished, `false` if stopped. */
+export async function playSpeech(res) {
+  const type = res.headers.get('content-type') ?? '';
+  if (type.startsWith('audio/pcm') && res.body) return playStream(res.body.getReader(), rateOf(type));
+  return play(await res.arrayBuffer());
+}
+
+/** `audio/pcm;rate=24000` → 24000. */
+export function rateOf(type) {
+  const rate = Number(/rate=(\d+)/.exec(type)?.[1]);
+  return rate > 0 ? rate : 24000;
+}
+
+/** 16-bit little-endian PCM bytes → samples in -1..1; an odd last byte waits for the next chunk. */
+export function samples(bytes, carry) {
+  const all = carry?.length ? concat(carry, bytes) : bytes;
+  const even = all.length - (all.length % 2);
+  const view = new DataView(all.buffer, all.byteOffset, even);
+  const out = new Float32Array(even / 2);
+  for (let i = 0; i < out.length; i++) out[i] = view.getInt16(i * 2, true) / 32768;
+  return { out, carry: all.slice(even) };
+}
+
+function concat(a, b) {
+  const all = new Uint8Array(a.length + b.length);
+  all.set(a);
+  all.set(b, a.length);
+  return all;
+}
+
+// A little head start, so the first pieces play back to back.
+const LEAD = 0.06;
+
+async function playStream(reader, rate) {
+  if (!ctx) unlock();
+  stop();
+  let resolve;
+  const done = new Promise((r) => (resolve = r));
+  const me = { sources: new Set(), resolve, reader };
+  current = me;
+  let at = 0;
+  let carry = null;
+  let last = null;
+  try {
+    for (;;) {
+      const { done: ended, value } = await reader.read();
+      if (current !== me) return false;
+      if (ended) break;
+      const piece = samples(value, carry);
+      carry = piece.carry;
+      if (!piece.out.length) continue;
+      const buffer = ctx.createBuffer(1, piece.out.length, rate);
+      buffer.getChannelData(0).set(piece.out);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(analyser);
+      at = Math.max(at, ctx.currentTime + LEAD);
+      source.start(at);
+      at += buffer.duration;
+      me.sources.add(source);
+      source.onended = () => me.sources.delete(source);
+      last = source;
+    }
+  } catch {
+    // Cut short (network, server): what came is played.
+    if (current !== me) return false;
+  }
+  if (!last || ctx.currentTime >= at) {
+    if (current === me) current = null;
+    return true;
+  }
+  last.onended = () => {
+    me.sources.delete(last);
+    if (current === me) current = null;
+    resolve(true);
+  };
+  return done;
+}
+
 export function stop() {
   const c = current;
   current = null;
   if (!c) return;
-  c.source.onended = null;
-  try {
-    c.source.stop();
-  } catch {
-    /* already stopped */
+  for (const source of c.sources) {
+    source.onended = null;
+    try {
+      source.stop();
+    } catch {
+      /* already stopped */
+    }
   }
+  c.reader?.cancel().catch(() => {});
   c.resolve(false);
 }
 

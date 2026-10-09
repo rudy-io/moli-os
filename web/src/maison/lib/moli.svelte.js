@@ -6,7 +6,7 @@ import { i18n, locale, t } from '../../lib/i18n.svelte.js';
 import { home, note, value, isOn } from './home.svelte.js';
 import { openMic, RATE } from './voice/capture.js';
 import { toWav } from './voice/pcm.js';
-import { play, unlock } from './voice/player.js';
+import { playSpeech, unlock } from './voice/player.js';
 import { sentences, fetchSpeech } from './voice/speech.js';
 
 export const moli = $state({
@@ -154,7 +154,7 @@ export async function transcribe(wav) {
 export async function speak(text) {
   if (!text) return;
   try {
-    for (const s of sentences(text)) if (!(await play(await fetchSpeech(s)))) return;
+    for (const s of sentences(text)) if (!(await playSpeech(await fetchSpeech(s)))) return;
   } catch {
     speakBrowser(text);
   }

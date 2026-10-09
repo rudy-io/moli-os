@@ -3,7 +3,7 @@
   import { home, note } from '../lib/home.svelte.js';
   import { moli } from '../lib/moli.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
-  import { play, stop, unlock } from '../lib/voice/player.js';
+  import { playSpeech, stop, unlock } from '../lib/voice/player.js';
   import { fetchSpeech } from '../lib/voice/speech.js';
   import Icon from './Icon.svelte';
 
@@ -80,7 +80,7 @@
     stop();
     playing = voice;
     try {
-      await play(await fetchSpeech(t('moli.reglages.echantillon'), undefined, voice));
+      await playSpeech(await fetchSpeech(t('moli.reglages.echantillon'), undefined, voice));
     } catch {
       note(t('moli.reglages.voix_muette'), 'error');
     } finally {

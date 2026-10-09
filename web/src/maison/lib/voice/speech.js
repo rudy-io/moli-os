@@ -27,14 +27,16 @@ const APPROVAL = { fr: /valid/i, en: /approv|confirm|valid/i };
 /** Does `reply` already ask for an approval? */
 export const mentionsApproval = (reply, language = 'fr') => (APPROVAL[language] ?? APPROVAL.fr).test(reply);
 
-/** One sentence as audio (MP3 or WAV) from the server; `voice` to try another. */
+/** One sentence as the server says it (`player.playSpeech` plays it): the
+ *  cloud voice streamed while it is made (PCM), else MP3 or WAV whole;
+ *  `voice` to try another. */
 export async function fetchSpeech(text, signal, voice) {
   const res = await fetch('/api/assistant/speak', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'audio/pcm, audio/mpeg;q=0.9, audio/wav;q=0.8' },
     body: JSON.stringify(voice ? { text, voice } : { text }),
     signal,
   });
   if (!res.ok) throw new Error(`speak ${res.status}`);
-  return res.arrayBuffer();
+  return res;
 }

@@ -5,13 +5,15 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use http::{Method, Request};
-use http_body_util::Full;
+use http_body_util::{BodyExt as _, Full};
 use moli_net::Body as Bytes;
 use serde_json::Value as Json;
 
 const CHAT_LIMIT: Duration = Duration::from_secs(45);
 const LISTEN_LIMIT: Duration = Duration::from_secs(30);
 const SPEAK_LIMIT: Duration = Duration::from_secs(20);
+/// A streamed voice: its first bytes come within this, or the house's voice speaks.
+const SPEAK_HEAD: Duration = Duration::from_secs(10);
 const CHECK_LIMIT: Duration = Duration::from_secs(10);
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
@@ -60,6 +62,35 @@ impl Endpoint {
         !self.tls
     }
 
+    fn request(
+        &self,
+        key: Option<&str>,
+        tail: &str,
+        content_type: &str,
+        accept: &str,
+        body: Vec<u8>,
+    ) -> anyhow::Result<Request<Full<Bytes>>> {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}{tail}", self.base))
+            .header("content-type", content_type)
+            .header("accept", accept);
+        if let Some(key) = key {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        Ok(builder.body(Full::new(Bytes::from(body)))?)
+    }
+
+    /// The provider's own words, never the request (it holds the key).
+    fn refused(&self, status: http::StatusCode, answer: &[u8]) -> anyhow::Error {
+        let json: Json = serde_json::from_slice(answer).unwrap_or(Json::Null);
+        let message = json["error"]["message"].as_str().map_or_else(
+            || String::from_utf8_lossy(&answer[..answer.len().min(200)]).into_owned(),
+            str::to_owned,
+        );
+        anyhow::anyhow!("{}: HTTP {} {message}", self.host, status.as_u16())
+    }
+
     /// The raw answer of a POST; the provider's own error words otherwise.
     async fn send(
         &self,
@@ -70,25 +101,11 @@ impl Endpoint {
         body: Vec<u8>,
         limit: Duration,
     ) -> anyhow::Result<Bytes> {
-        let mut builder = Request::builder()
-            .method(Method::POST)
-            .uri(format!("{}{tail}", self.base))
-            .header("content-type", content_type)
-            .header("accept", accept);
-        if let Some(key) = key {
-            builder = builder.header("authorization", format!("Bearer {key}"));
-        }
-        let request = builder.body(Full::new(Bytes::from(body)))?;
+        let request = self.request(key, tail, content_type, accept, body)?;
         let (status, answer) =
             moli_net::web(&self.host, self.port, self.tls, request, limit, MAX_ANSWER).await?;
         if !status.is_success() {
-            // The provider's own words, never the request (it holds the key).
-            let json: Json = serde_json::from_slice(&answer).unwrap_or(Json::Null);
-            let message = json["error"]["message"].as_str().map_or_else(
-                || String::from_utf8_lossy(&answer[..answer.len().min(200)]).into_owned(),
-                str::to_owned,
-            );
-            bail!("{}: HTTP {} {message}", self.host, status.as_u16());
+            return Err(self.refused(status, &answer));
         }
         Ok(answer)
     }
@@ -123,30 +140,50 @@ impl Endpoint {
         speed: f64,
         text: &str,
     ) -> anyhow::Result<Vec<u8>> {
-        let mut body = serde_json::json!({
-            "model": model,
-            "voice": voice,
-            "input": text,
-            "response_format": "mp3",
-        });
-        if !style.is_empty() {
-            body["instructions"] = serde_json::json!(style);
-        }
-        if (speed - 1.0).abs() > f64::EPSILON {
-            body["speed"] = serde_json::json!(speed);
-        }
+        let body = speech_body(model, voice, style, speed, text, "mp3");
         let audio = self
             .send(
                 key,
                 "/audio/speech",
                 "application/json",
                 "audio/mpeg",
-                body.to_string().into_bytes(),
+                body,
                 SPEAK_LIMIT,
             )
             .await?;
         anyhow::ensure!(!audio.is_empty(), "{}: empty audio", self.host);
         Ok(audio.to_vec())
+    }
+
+    /// The same as it is made: raw 16-bit PCM, 24 kHz mono, handed over
+    /// chunk by chunk, so the voice starts before the sentence is whole.
+    /// Bounded here up to the answer's head; the caller bounds the rest.
+    pub(crate) async fn speech_stream(
+        &self,
+        key: Option<&str>,
+        model: &str,
+        voice: &str,
+        style: &str,
+        speed: f64,
+        text: &str,
+    ) -> anyhow::Result<moli_net::Incoming> {
+        let body = speech_body(model, voice, style, speed, text, "pcm");
+        let request = self.request(key, "/audio/speech", "application/json", "audio/pcm", body)?;
+        let (status, audio) =
+            moli_net::web_stream(&self.host, self.port, self.tls, request, SPEAK_HEAD).await?;
+        if !status.is_success() {
+            let answer = tokio::time::timeout(
+                SPEAK_HEAD,
+                http_body_util::Limited::new(audio, 64 * 1024).collect(),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .map(http_body_util::Collected::to_bytes)
+            .unwrap_or_default();
+            return Err(self.refused(status, &answer));
+        }
+        Ok(audio)
     }
 
     /// Whether the provider accepts `key` (`GET /models`): `false` for a
@@ -238,6 +275,30 @@ impl Endpoint {
             .trim()
             .to_owned())
     }
+}
+
+/// The body of a speech request; `format` as the provider names it.
+fn speech_body(
+    model: &str,
+    voice: &str,
+    style: &str,
+    speed: f64,
+    text: &str,
+    format: &str,
+) -> Vec<u8> {
+    let mut body = serde_json::json!({
+        "model": model,
+        "voice": voice,
+        "input": text,
+        "response_format": format,
+    });
+    if !style.is_empty() {
+        body["instructions"] = serde_json::json!(style);
+    }
+    if (speed - 1.0).abs() > f64::EPSILON {
+        body["speed"] = serde_json::json!(speed);
+    }
+    body.to_string().into_bytes()
 }
 
 #[cfg(test)]

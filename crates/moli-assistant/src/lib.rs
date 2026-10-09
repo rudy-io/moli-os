@@ -22,7 +22,7 @@ mod voice;
 
 pub use auto::Draft;
 pub use import::HaAutomation;
-pub use voice::{Heard, Spoken};
+pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
 #[cfg(test)]
 mod before;
@@ -424,6 +424,28 @@ impl Assistant {
     /// One sentence of an answer, spoken (at most 300 characters), in the
     /// configured cloud voice or `voice` (one of OpenAI's, to try them).
     pub async fn speak(&self, text: &str, voice: Option<&str>) -> Result<Spoken, AssistantError> {
+        match self.voice_for(text, voice, false).await? {
+            Speech::Whole(spoken) => Ok(spoken),
+            Speech::Stream(_) => Err(AssistantError::Upstream("a streamed voice".into())),
+        }
+    }
+
+    /// The same, streamed while the cloud voice makes it (a second sooner
+    /// in a conversation); whole from the house's voice when the cloud fails.
+    pub async fn speak_streamed(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+    ) -> Result<Speech, AssistantError> {
+        self.voice_for(text, voice, true).await
+    }
+
+    async fn voice_for(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        streamed: bool,
+    ) -> Result<Speech, AssistantError> {
         let text = text.trim();
         if text.is_empty() || text.chars().count() > MAX_SPOKEN_CHARS {
             return Err(AssistantError::Invalid(format!(
@@ -461,15 +483,23 @@ impl Assistant {
             local: voice::host_port(&c.local_speech),
             local_voice: Some(c.local_voice.as_str()).filter(|v| !v.is_empty()),
         };
-        let spoken = voices.say(&voice::speakable(text)).await?;
-        // What a conversation costs: characters in, seconds of audio out.
-        tracing::info!(
-            engine = spoken.engine,
-            chars = text.chars().count(),
-            bytes = spoken.audio.len(),
-            "voice spoken"
-        );
-        Ok(spoken)
+        let said = voice::speakable(text);
+        let speech = if streamed {
+            voices.say_streamed(&said).await?
+        } else {
+            Speech::Whole(voices.say(&said).await?)
+        };
+        // What a conversation costs: characters in, seconds of audio out (a
+        // stream says it at its end).
+        if let Speech::Whole(spoken) = &speech {
+            tracing::info!(
+                engine = spoken.engine,
+                chars = text.chars().count(),
+                bytes = spoken.audio.len(),
+                "voice spoken"
+            );
+        }
+        Ok(speech)
     }
 
     /// One turn of the conversation: the model reads the house, may act and
