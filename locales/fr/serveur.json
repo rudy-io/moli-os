@@ -119,5 +119,21 @@
   "serveur.energie.point.projection_kwh": "Conso du mois au rythme actuel",
   "serveur.energie.point.bill_projection": "Facture du mois au rythme actuel (abonnement compris)",
   "serveur.energie.point.over_budget": "Facture estimée au-dessus du budget",
-  "serveur.demo.reserve": "pas dans la démo : ce changement resterait pour les visiteurs suivants"
+  "serveur.demo.reserve": "pas dans la démo : ce changement resterait pour les visiteurs suivants",
+
+  "serveur.personnes.mot_de_passe_court": "un mot de passe de {min} caractères au moins",
+  "serveur.personnes.trop": "trop de personnes dans la maison",
+  "serveur.personnes.zones_trop": "trop de zones",
+  "serveur.personnes.zone_invalide": "zone « {zone} » : nom, position (latitude, longitude) et rayon de 20 m à 50 km",
+  "serveur.personnes.email_pris": "l'e-mail {email} est déjà celui de quelqu'un d'autre",
+  "serveur.personnes.champ": "valeur refusée : {champ}",
+  "serveur.personnes.inconnue": "personne inconnue",
+  "serveur.personnes.dernier_proprietaire": "la maison garde au moins un propriétaire",
+  "serveur.personnes.pas_ecrit": "les personnes n'ont pas pu être enregistrées (disque ou coffre de secrets)",
+  "serveur.personnes.proprietaire_seul": "seul un propriétaire de la maison gère les personnes et les zones",
+  "serveur.personnes.soi_seulement": "chacun change seulement son propre mot de passe",
+  "serveur.personnes.invitation_incorrecte": "code d'invitation inconnu ou expiré",
+  "serveur.personnes.identifiants_incorrects": "identifiant ou mot de passe incorrect",
+  "serveur.personnes.invite_limite": "un invité peut seulement commander dans ses pièces",
+  "serveur.personnes.invite_piece": "cet appareil n'est pas dans les pièces de cet invité"
 }

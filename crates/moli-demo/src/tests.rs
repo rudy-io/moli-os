@@ -43,11 +43,9 @@ mod tempdir {
     pub struct Dir(pub std::path::PathBuf);
     impl Dir {
         pub fn new() -> Self {
-            let p = std::env::temp_dir().join(format!(
-                "moli-demo-{}-{}",
-                std::process::id(),
-                moli_core::now_ms()
-            ));
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let p = std::env::temp_dir().join(format!("moli-demo-{}-{n}", std::process::id()));
             std::fs::create_dir_all(&p).unwrap();
             Self(p)
         }

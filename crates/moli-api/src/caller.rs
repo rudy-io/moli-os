@@ -24,6 +24,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::access::Verifier;
+use crate::people::{People, PersonRef};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -40,6 +41,8 @@ pub(crate) enum Via {
     Phone,
     /// Someone trying a demo house: anyone, anywhere.
     Visitor,
+    /// From the Internet, a person signed in with their password.
+    Person,
 }
 
 /// What [`identify`] needs: the Access verifier, and whether this house is
@@ -48,6 +51,31 @@ pub(crate) enum Via {
 pub(crate) struct Gate {
     pub(crate) access: Option<Arc<Verifier>>,
     pub(crate) demo: bool,
+    pub(crate) people: Arc<People>,
+}
+
+/// What a guest may do besides reading: command (in its rooms, checked by
+/// the routes), sign in or out, its own password, its own phone. Nothing
+/// that changes the house's setup.
+fn guest_allowed(method: &Method, path: &str) -> bool {
+    if path.starts_with("/mcp") || path.starts_with("/api/journal") || path.ends_with("/snapshot") {
+        return false;
+    }
+    method == Method::GET
+        || matches!(
+            path,
+            "/api/command" | "/api/ambiance" | "/api/session" | "/api/mobile/register"
+        )
+        || (path.starts_with("/api/people/") && path.ends_with("/password"))
+}
+
+/// What a stranger may reach: the dashboard's files (its sign-in page) and
+/// signing in. Nothing that reads or changes the house.
+fn public(method: &Method, path: &str) -> bool {
+    let api = path.starts_with("/api/") || path == "/api" || path.starts_with("/mcp");
+    (!api && (method == Method::GET || method == Method::HEAD))
+        || path == "/api/session"
+        || (path == "/api/invitation" && method == Method::POST)
 }
 
 /// What nobody may change in a demo house: it would change the house for
@@ -70,6 +98,8 @@ pub(crate) struct Caller {
     pub(crate) via: Via,
     /// What sessions and failure counters are bound to.
     pub(crate) key: String,
+    /// The person, when Moli knows who it is (Access e-mail, password).
+    pub(crate) person: Option<PersonRef>,
 }
 
 impl Caller {
@@ -77,7 +107,7 @@ impl Caller {
     pub(crate) fn is_household(&self) -> bool {
         matches!(
             self.via,
-            Via::Lan | Via::Loopback | Via::Access { .. } | Via::Visitor
+            Via::Lan | Via::Loopback | Via::Access { .. } | Via::Visitor | Via::Person
         )
     }
 
@@ -88,6 +118,9 @@ impl Caller {
 
     /// For the journal: who clicked.
     pub(crate) fn describe(&self) -> String {
+        if let Some(p) = &self.person {
+            return format!("tableau de bord ({})", p.name);
+        }
         match &self.via {
             Via::Access { email } => format!("tableau de bord ({email})"),
             Via::Visitor => "tableau de bord (visiteur de la démo)".to_owned(),
@@ -103,6 +136,7 @@ impl Caller {
             Via::Outside => "outside",
             Via::Phone => "phone",
             Via::Visitor => "visitor",
+            Via::Person => "person",
         }
     }
 }
@@ -159,6 +193,7 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
             (true, Some(email)) => Caller {
                 key: format!("access:{email}"),
                 via: Via::Access { email },
+                person: None,
             },
             (true, None) => Caller {
                 key: format!(
@@ -168,10 +203,12 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
                         .map_or_else(|| "?".to_owned(), |ip| ip.to_string())
                 ),
                 via: Via::Outside,
+                person: None,
             },
             (false, _) => Caller {
                 key: mapped.to_string(),
                 via: Via::Outside,
+                person: None,
             },
         };
     }
@@ -187,6 +224,7 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
     Caller {
         via,
         key: mapped.to_string(),
+        person: None,
     }
 }
 
@@ -228,7 +266,36 @@ pub(crate) async fn identify(
         caller = Caller {
             key: format!("phone:{id}"),
             via: Via::Phone,
+            person: None,
         };
+    }
+    // Who it is, when Moli knows: the person Access vouched for, else the
+    // person signed in on this browser (from anywhere: a phone moves).
+    if let Via::Access { email } = &caller.via {
+        caller.person = gate.people.by_email(email);
+    }
+    if caller.person.is_none()
+        && let Some(person) = gate.people.signed_in(request.headers())
+    {
+        if caller.via == Via::Outside {
+            caller.via = Via::Person;
+            caller.key = format!("person:{}", person.id);
+        }
+        caller.person = Some(person);
+    }
+    if caller
+        .person
+        .as_ref()
+        .is_some_and(crate::people::PersonRef::is_guest)
+        && !guest_allowed(request.method(), request.uri().path())
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(
+                serde_json::json!({ "error": moli_i18n::tr!("serveur.personnes.invite_limite") }),
+            ),
+        )
+            .into_response();
     }
     // A demo house lets anyone in, as a visitor, but keeps itself as it is.
     if gate.demo {
@@ -245,7 +312,7 @@ pub(crate) async fn identify(
     }
     // Strangers get nothing: not a reading, not a PIN attempt. Moli is the
     // home network's, and Cloudflare Access's for the people it lets in.
-    if caller.via == Via::Outside {
+    if caller.via == Via::Outside && !public(request.method(), request.uri().path()) {
         tracing::warn!(client = caller.key, path = %request.uri().path(), "stranger refused");
         return (
             StatusCode::FORBIDDEN,
