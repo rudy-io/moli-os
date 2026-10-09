@@ -39,6 +39,7 @@
   "pilotes.bambu.imprimante_3d": "Imprimante 3D",
   "pilotes.bambu.injoignable": "l'imprimante est injoignable",
   "pilotes.bambu.code_manquant": "code d'accès manquant : printf %s \"$CODE\" | moli-os secrets set {instance} {key}",
+  "pilotes.bambu.code_refuse": "l'imprimante refuse le code d'accès : lis celui qu'affichent ses réglages réseau, puis printf %s \"$CODE\" | moli-os secrets set {instance} {key}",
   "pilotes.bambu.certificat_change": "le certificat de l'imprimante a changé : si c'est normal, `moli-os secrets forget {instance} {key}` puis redémarrer",
   "pilotes.bambu.ordre_inconnu": "{order} n'est pas un ordre d'impression",
   "pilotes.bambu.lecture_seule": "{point} ne s'écrit pas",

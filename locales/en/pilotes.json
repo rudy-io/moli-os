@@ -39,6 +39,7 @@
   "pilotes.bambu.imprimante_3d": "3D printer",
   "pilotes.bambu.injoignable": "the printer is unreachable",
   "pilotes.bambu.code_manquant": "access code missing: printf %s \"$CODE\" | moli-os secrets set {instance} {key}",
+  "pilotes.bambu.code_refuse": "the printer refuses the access code: read the one its network settings show, then printf %s \"$CODE\" | moli-os secrets set {instance} {key}",
   "pilotes.bambu.certificat_change": "the printer’s certificate changed: if that’s expected, `moli-os secrets forget {instance} {key}` and restart",
   "pilotes.bambu.ordre_inconnu": "{order} isn’t a print command",
   "pilotes.bambu.lecture_seule": "{point} is read-only",

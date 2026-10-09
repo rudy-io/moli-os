@@ -333,6 +333,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let printer = printer_name(config);
     let mut refresh = tokio::time::interval(PUSHALL_EVERY);
     let mut connected = false;
+    let mut last_error: Option<String> = None;
     let mut paused_until: Option<tokio::time::Instant> = None;
     loop {
         tokio::select! {
@@ -354,6 +355,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             event = events.poll(), if paused_until.is_none() => match event {
                 Ok(Event::Incoming(Packet::ConnAck(_))) => {
                     connected = true;
+                    last_error = None;
                     if let Err(e) = client.try_subscribe(&report_topic, QoS::AtMostOnce) {
                         tracing::warn!(instance = %ctx.instance(), error = %e, "printer subscription not sent");
                     }
@@ -380,13 +382,36 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         ctx.cancelled().await;
                         return Ok(());
                     }
-                    // Printer off: rumqttc reconnects on the next poll.
-                    tracing::debug!(instance = %ctx.instance(), error = %text, "printer unreachable");
+                    // A refused access code is not « switched off »: the
+                    // person reads the code on the printer and gives it again.
+                    if refused_code(&text) {
+                        ctx.wait_for(moli_i18n::tr!(
+                            "pilotes.bambu.code_refuse",
+                            instance = ctx.instance(),
+                            key = ACCESS_CODE
+                        ));
+                        ctx.cancelled().await;
+                        return Ok(());
+                    }
+                    // Printer off: rumqttc reconnects on the next poll. Each
+                    // new reason is said once (a printer switched off says
+                    // the same thing every 30 s).
+                    if last_error.as_deref() == Some(text.as_str()) {
+                        tracing::debug!(instance = %ctx.instance(), error = %text, "printer unreachable");
+                    } else {
+                        tracing::warn!(instance = %ctx.instance(), error = %text, "printer unreachable");
+                        last_error = Some(text);
+                    }
                     paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(30));
                 }
             },
         }
     }
+}
+
+/// The printer said no to the access code (MQTT `CONNACK` 4 or 5).
+fn refused_code(error: &str) -> bool {
+    error.contains("BadUserNamePassword") || error.contains("NotAuthorized")
 }
 
 /// One report: merged into what is known, then read into the printer's
@@ -464,6 +489,21 @@ fn reply(client: &AsyncClient, topic: &str, command: CommandRequest) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_access_code_is_told_apart() {
+        for (error, refused) in [
+            (
+                "Connection refused, return code: `BadUserNamePassword`",
+                true,
+            ),
+            ("Connection refused, return code: `NotAuthorized`", true),
+            ("I/O: Connection refused (os error 111)", false),
+            ("Timeout", false),
+        ] {
+            assert_eq!(refused_code(error), refused, "{error}");
+        }
+    }
 
     #[test]
     fn a_merged_report_reads_as_points() {
