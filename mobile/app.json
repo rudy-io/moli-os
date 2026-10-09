@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.example.moli",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "entitlements": {
         "com.apple.developer.networking.wifi-info": true
       },
