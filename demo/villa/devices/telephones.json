@@ -1,0 +1,291 @@
+{
+ "imitates": "phones",
+ "devices": [
+  {
+   "id": "telephones:iphone-claire",
+   "instance": "telephones",
+   "native_name": "iPhone de Claire",
+   "manufacturer": "Apple",
+   "model": "iPhone 15 Pro Max",
+   "points": [
+    {
+     "key": "home",
+     "label": "À la maison",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "battery",
+     "label": "Batterie",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "charging",
+     "label": "En charge",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "wifi",
+     "label": "Wi-Fi",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "latitude",
+     "label": "Latitude",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "longitude",
+     "label": "Longitude",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "accuracy",
+     "label": "Précision",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    },
+    {
+     "key": "distance",
+     "label": "Distance de la maison",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    },
+    {
+     "key": "app",
+     "label": "Version de l'appli",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "push",
+     "label": "Notifier",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "home": true,
+    "battery": 78,
+    "charging": false,
+    "wifi": "Villa",
+    "latitude": 43.5,
+    "longitude": 7.0,
+    "accuracy": 8,
+    "distance": 3,
+    "app": "1.0.0 (7)"
+   }
+  },
+  {
+   "id": "telephones:pixel-thomas",
+   "instance": "telephones",
+   "native_name": "Téléphone de Thomas",
+   "manufacturer": "Apple",
+   "model": "iPhone 15 Pro Max",
+   "points": [
+    {
+     "key": "home",
+     "label": "À la maison",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "battery",
+     "label": "Batterie",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "charging",
+     "label": "En charge",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "wifi",
+     "label": "Wi-Fi",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "latitude",
+     "label": "Latitude",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "longitude",
+     "label": "Longitude",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "accuracy",
+     "label": "Précision",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    },
+    {
+     "key": "distance",
+     "label": "Distance de la maison",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    },
+    {
+     "key": "app",
+     "label": "Version de l'appli",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "push",
+     "label": "Notifier",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "home": false,
+    "battery": 41,
+    "charging": false,
+    "wifi": null,
+    "latitude": 43.55,
+    "longitude": 7.02,
+    "accuracy": 12,
+    "distance": 6200,
+    "app": "1.0.0 (7)"
+   }
+  }
+ ]
+}

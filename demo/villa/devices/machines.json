@@ -1,0 +1,498 @@
+{
+ "imitates": "host",
+ "devices": [
+  {
+   "id": "machines:serveur",
+   "instance": "machines",
+   "native_name": "Serveur de la villa",
+   "model": "Serveur de la maison",
+   "points": [
+    {
+     "key": "cpu",
+     "label": "Processeur",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "load",
+     "label": "Charge (1 min)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "ram",
+     "label": "Mémoire",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "ram_used",
+     "label": "Mémoire utilisée",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "ram_total",
+     "label": "Mémoire totale",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "swap",
+     "label": "Mémoire d'échange",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cpu_temperature",
+     "label": "Température du processeur",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "other"
+    },
+    {
+     "key": "disk_temperature",
+     "label": "Température du disque",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "other"
+    },
+    {
+     "key": "net_down",
+     "label": "Réseau (réception)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    },
+    {
+     "key": "net_up",
+     "label": "Réseau (émission)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    },
+    {
+     "key": "uptime",
+     "label": "Allumé depuis",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "cores",
+     "label": "Cœurs",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "cores": 4,
+    "cpu": 6.0,
+    "cpu_temperature": 48.0,
+    "disk_temperature": 38.0,
+    "load": 0.35,
+    "net_down": 1.2,
+    "net_up": 0.4,
+    "ram": 34.0,
+    "ram_total": 16.0,
+    "ram_used": 5.4,
+    "swap": 0.0,
+    "uptime": 2592000
+   }
+  },
+  {
+   "id": "machines:ordinateur",
+   "instance": "machines",
+   "native_name": "Ordinateur du bureau",
+   "model": "Ordinateur",
+   "points": [
+    {
+     "key": "power",
+     "label": "Allumé",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "agent",
+     "label": "Agent Moli connecté",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cpu",
+     "label": "Processeur",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cpu_temperature",
+     "label": "Température du processeur",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "other"
+    },
+    {
+     "key": "ram",
+     "label": "Mémoire",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "ram_used",
+     "label": "Mémoire utilisée",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "ram_total",
+     "label": "Mémoire totale",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "gpu_load",
+     "label": "Carte graphique",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "gpu_temperature",
+     "label": "Température de la carte graphique",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "other"
+    },
+    {
+     "key": "gpu_memory",
+     "label": "Mémoire graphique utilisée",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "gpu_memory_total",
+     "label": "Mémoire graphique",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Go",
+     "semantic": "other"
+    },
+    {
+     "key": "gpu_power",
+     "label": "Consommation de la carte graphique",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "other"
+    },
+    {
+     "key": "disk",
+     "label": "Disque système",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "net_down",
+     "label": "Réseau (réception)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    },
+    {
+     "key": "net_up",
+     "label": "Réseau (émission)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    },
+    {
+     "key": "uptime",
+     "label": "Allumé depuis",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "claude_app",
+     "label": "Claude ouvert (pour le téléphone)",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "codex_app",
+     "label": "Codex ouvert (pour le téléphone)",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "restart",
+     "label": "Redémarrer",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "sleep",
+     "label": "Mettre en veille",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "agent": true,
+    "claude_app": false,
+    "codex_app": false,
+    "cpu": 12.0,
+    "cpu_temperature": 52.0,
+    "disk": 41.0,
+    "gpu_load": 3.0,
+    "gpu_memory": 1.2,
+    "gpu_memory_total": 16.0,
+    "gpu_power": 22.0,
+    "gpu_temperature": 38.0,
+    "net_down": 2.0,
+    "net_up": 0.6,
+    "power": true,
+    "ram": 38.0,
+    "ram_total": 32.0,
+    "ram_used": 12.2,
+    "uptime": 14400
+   }
+  }
+ ]
+}

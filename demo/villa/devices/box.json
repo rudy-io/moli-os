@@ -1,0 +1,100 @@
+{
+ "imitates": "igd",
+ "devices": [
+  {
+   "id": "box:maison",
+   "instance": "box",
+   "native_name": "Box internet",
+   "model": "Box internet",
+   "points": [
+    {
+     "key": "connected",
+     "label": "Internet",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "external_ip",
+     "label": "Adresse publique",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "uptime",
+     "label": "Connectée depuis",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "line",
+     "label": "Lien physique",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "line_down",
+     "label": "Débit de ligne (réception)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    },
+    {
+     "key": "line_up",
+     "label": "Débit de ligne (émission)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Mbit/s",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "connected": true,
+    "external_ip": "203.0.113.42",
+    "uptime": 864000,
+    "line": true,
+    "line_down": 2000.0,
+    "line_up": 900.0
+   }
+  }
+ ]
+}

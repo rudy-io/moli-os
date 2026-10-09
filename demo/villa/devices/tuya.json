@@ -1,0 +1,3849 @@
+{
+ "imitates": "tuya",
+ "devices": [
+  {
+   "id": "tuya:relais-suspensions",
+   "instance": "tuya",
+   "native_name": "Relais des suspensions",
+   "manufacturer": "Tuya",
+   "model": "eMylo-WiFi Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salle à manger",
+   "state": {
+    "switch_1": true
+   }
+  },
+  {
+   "id": "tuya:spots-salon",
+   "instance": "tuya",
+   "native_name": "Spots du salon",
+   "manufacturer": "Tuya",
+   "model": "Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "0",
+       "1",
+       "2"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_type",
+     "label": "Switch type",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "flip",
+       "sync",
+       "button"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:air-salon",
+   "instance": "tuya",
+   "native_name": "Air du salon",
+   "manufacturer": "Tuya",
+   "model": "Smart air box",
+   "points": [
+    {
+     "key": "co2_value",
+     "label": "CO₂",
+     "kind": {
+      "type": "numeric",
+      "min": 350.0,
+      "max": 2000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "temp_current",
+     "label": "Température",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 85.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity_value",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "voc_value",
+     "label": "COV",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 99.99,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "ch2o_value",
+     "label": "Formaldéhyde",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 10.0,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mg/m3",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "co2_value": 612,
+    "temp_current": 22.4,
+    "humidity_value": 48,
+    "voc_value": 0.2,
+    "ch2o_value": 0.01
+   }
+  },
+  {
+   "id": "tuya:baie-vitree",
+   "instance": "tuya",
+   "native_name": "Baie vitrée",
+   "manufacturer": "Tuya",
+   "model": "Door sensor alarm",
+   "points": [
+    {
+     "key": "doorcontact_state",
+     "label": "Porte ouverte",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "doorcontact_state": false,
+    "battery_percentage": 92
+   }
+  },
+  {
+   "id": "tuya:volet-salon",
+   "instance": "tuya",
+   "native_name": "Volets du salon",
+   "manufacturer": "Tuya",
+   "model": "Curtain switch",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "stop",
+       "close"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control",
+     "label": "Ouverture",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cur_calibration",
+     "label": "Cur calibration",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "start",
+       "end"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control_back_mode",
+     "label": "Control back mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "forward",
+       "back"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "percent_control": 100,
+    "control": "stop"
+   }
+  },
+  {
+   "id": "tuya:prise-home-cinema",
+   "instance": "tuya",
+   "native_name": "Prise du home cinéma",
+   "manufacturer": "Tuya",
+   "model": "EU Standard Dual Socket",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "switch_2",
+     "label": "Marche 2",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "countdown_2",
+     "label": "Minuterie 2",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 30.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 8000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Cinéma",
+   "state": {
+    "switch_1": true,
+    "switch_2": true,
+    "cur_power": 96.0,
+    "cur_voltage": 231.4,
+    "cur_current": 0.42
+   }
+  },
+  {
+   "id": "tuya:spots-cuisine",
+   "instance": "tuya",
+   "native_name": "Spots de la cuisine",
+   "manufacturer": "Tuya",
+   "model": "Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "0",
+       "1",
+       "2"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_type",
+     "label": "Switch type",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "flip",
+       "sync",
+       "button"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Cuisine",
+   "state": {
+    "switch_1": true
+   }
+  },
+  {
+   "id": "tuya:lave-vaisselle",
+   "instance": "tuya",
+   "native_name": "Lave-vaisselle",
+   "manufacturer": "Tuya",
+   "model": "Smart Plug",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 80.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 20000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "voltage_coe",
+     "label": "Voltage coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electric_coe",
+     "label": "Electric coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power_coe",
+     "label": "Power coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electricity_coe",
+     "label": "Electricity coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "overcharge_switch",
+     "label": "Overcharge switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Cuisine",
+   "state": {
+    "switch_1": true,
+    "cur_power": 1850.0,
+    "cur_voltage": 230.8,
+    "cur_current": 8.0,
+    "add_ele": 3.2
+   }
+  },
+  {
+   "id": "tuya:couloir",
+   "instance": "tuya",
+   "native_name": "Couloir",
+   "manufacturer": "Tuya",
+   "model": "eMylo-WiFi Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Entrée",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:porte-entree",
+   "instance": "tuya",
+   "native_name": "Porte d'entrée",
+   "manufacturer": "Tuya",
+   "model": "Door sensor alarm",
+   "points": [
+    {
+     "key": "doorcontact_state",
+     "label": "Porte ouverte",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Entrée",
+   "state": {
+    "doorcontact_state": false,
+    "battery_percentage": 88
+   }
+  },
+  {
+   "id": "tuya:plafonnier-bureau",
+   "instance": "tuya",
+   "native_name": "Plafonnier du bureau",
+   "manufacturer": "Tuya",
+   "model": "Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "0",
+       "1",
+       "2"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_type",
+     "label": "Switch type",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "flip",
+       "sync",
+       "button"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:prise-ordinateur",
+   "instance": "tuya",
+   "native_name": "Prise de l'ordinateur",
+   "manufacturer": "Tuya",
+   "model": "Smart Plug",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 80.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 20000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "voltage_coe",
+     "label": "Voltage coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electric_coe",
+     "label": "Electric coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power_coe",
+     "label": "Power coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electricity_coe",
+     "label": "Electricity coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "overcharge_switch",
+     "label": "Overcharge switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "switch_1": true,
+    "cur_power": 145.0,
+    "cur_voltage": 231.0,
+    "cur_current": 0.63,
+    "add_ele": 1.1
+   }
+  },
+  {
+   "id": "tuya:multiprise-bureau",
+   "instance": "tuya",
+   "native_name": "Multiprise du bureau",
+   "manufacturer": "Tuya",
+   "model": "Offgridtec Smart 3-Way Power Strip",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "switch_2",
+     "label": "Marche 2",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "switch_3",
+     "label": "Marche 3",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "countdown_2",
+     "label": "Minuterie 2",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "countdown_3",
+     "label": "Minuterie 3",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 30.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 8000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "switch_1": true,
+    "switch_2": true,
+    "switch_3": false,
+    "cur_power": 38.0,
+    "cur_voltage": 231.0
+   }
+  },
+  {
+   "id": "tuya:air-bureau",
+   "instance": "tuya",
+   "native_name": "Air du bureau",
+   "manufacturer": "Tuya",
+   "model": "Smart air box",
+   "points": [
+    {
+     "key": "co2_value",
+     "label": "CO₂",
+     "kind": {
+      "type": "numeric",
+      "min": 350.0,
+      "max": 2000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "temp_current",
+     "label": "Température",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 85.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity_value",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "voc_value",
+     "label": "COV",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 99.99,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "ch2o_value",
+     "label": "Formaldéhyde",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 10.0,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mg/m3",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "co2_value": 845,
+    "temp_current": 23.1,
+    "humidity_value": 45,
+    "voc_value": 0.3,
+    "ch2o_value": 0.01
+   }
+  },
+  {
+   "id": "tuya:lave-linge",
+   "instance": "tuya",
+   "native_name": "Lave-linge",
+   "manufacturer": "Tuya",
+   "model": "Smart Plug",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 80.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 20000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "voltage_coe",
+     "label": "Voltage coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electric_coe",
+     "label": "Electric coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power_coe",
+     "label": "Power coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electricity_coe",
+     "label": "Electricity coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "overcharge_switch",
+     "label": "Overcharge switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Buanderie",
+   "state": {
+    "switch_1": true,
+    "cur_power": 0.0,
+    "cur_voltage": 231.2,
+    "add_ele": 0.9
+   }
+  },
+  {
+   "id": "tuya:fuite-ballon",
+   "instance": "tuya",
+   "native_name": "Fuite du ballon d'eau chaude",
+   "manufacturer": "Tuya",
+   "model": "Water leak sensor",
+   "points": [
+    {
+     "key": "watersensor_state",
+     "label": "Fuite d'eau",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "alarm",
+       "normal"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Buanderie",
+   "state": {
+    "watersensor_state": "normal",
+    "battery_percentage": 84
+   }
+  },
+  {
+   "id": "tuya:borne-voiture",
+   "instance": "tuya",
+   "native_name": "Borne de la voiture",
+   "manufacturer": "Tuya",
+   "model": "Smart Plug",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 80.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 20000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "voltage_coe",
+     "label": "Voltage coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electric_coe",
+     "label": "Electric coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power_coe",
+     "label": "Power coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electricity_coe",
+     "label": "Electricity coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "overcharge_switch",
+     "label": "Overcharge switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "switch_1": true,
+    "cur_power": 3650.0,
+    "cur_voltage": 229.8,
+    "add_ele": 14.6
+   }
+  },
+  {
+   "id": "tuya:prise-atelier",
+   "instance": "tuya",
+   "native_name": "Prise de l'atelier",
+   "manufacturer": "Tuya",
+   "model": "Smart Plug",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "add_ele",
+     "label": "Énergie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 50.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "cur_current",
+     "label": "Courant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 80.0,
+      "step": 0.001
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "cur_power",
+     "label": "Puissance",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 20000.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "cur_voltage",
+     "label": "Tension",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 500.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "voltage_coe",
+     "label": "Voltage coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electric_coe",
+     "label": "Electric coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power_coe",
+     "label": "Power coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "electricity_coe",
+     "label": "Electricity coe",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "overcharge_switch",
+     "label": "Overcharge switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Atelier",
+   "state": {
+    "switch_1": true,
+    "cur_power": 210.0,
+    "cur_voltage": 230.9,
+    "cur_current": 0.91,
+    "add_ele": 6.4
+   }
+  },
+  {
+   "id": "tuya:ventilateur-suite",
+   "instance": "tuya",
+   "native_name": "Ventilateur de la suite",
+   "manufacturer": "Tuya",
+   "model": "ceiling fan/Light v2",
+   "points": [
+    {
+     "key": "switch_led",
+     "label": "Switch led",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "white",
+       "colour",
+       "scene",
+       "music"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "temp_value",
+     "label": "Temp value",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "scene_data",
+     "label": "Scene data",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "fan_switch",
+     "label": "Fan switch",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "fan_speed",
+     "label": "Fan speed",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 6.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "fan_direction",
+     "label": "Fan direction",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "forward",
+       "reverse"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "countdown_left_fan",
+     "label": "Countdown left fan",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 540.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "fan_beep",
+     "label": "Fan beep",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "switch_led": false,
+    "fan_switch": false,
+    "fan_speed": 2
+   }
+  },
+  {
+   "id": "tuya:volet-suite",
+   "instance": "tuya",
+   "native_name": "Volet de la suite",
+   "manufacturer": "Tuya",
+   "model": "Curtain switch",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "stop",
+       "close"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control",
+     "label": "Ouverture",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cur_calibration",
+     "label": "Cur calibration",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "start",
+       "end"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control_back_mode",
+     "label": "Control back mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "forward",
+       "back"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "percent_control": 100,
+    "control": "stop"
+   }
+  },
+  {
+   "id": "tuya:air-suite",
+   "instance": "tuya",
+   "native_name": "Air de la suite",
+   "manufacturer": "Tuya",
+   "model": "Smart air box",
+   "points": [
+    {
+     "key": "co2_value",
+     "label": "CO₂",
+     "kind": {
+      "type": "numeric",
+      "min": 350.0,
+      "max": 2000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "temp_current",
+     "label": "Température",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 85.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity_value",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "voc_value",
+     "label": "COV",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 99.99,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "ch2o_value",
+     "label": "Formaldéhyde",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 10.0,
+      "step": 0.01
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mg/m3",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "co2_value": 520,
+    "temp_current": 21.6,
+    "humidity_value": 52,
+    "voc_value": 0.1,
+    "ch2o_value": 0.0
+   }
+  },
+  {
+   "id": "tuya:volet-lea",
+   "instance": "tuya",
+   "native_name": "Volet de Léa",
+   "manufacturer": "Tuya",
+   "model": "Curtain switch",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "stop",
+       "close"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control",
+     "label": "Ouverture",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cur_calibration",
+     "label": "Cur calibration",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "start",
+       "end"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control_back_mode",
+     "label": "Control back mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "forward",
+       "back"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Léa",
+   "state": {
+    "percent_control": 100,
+    "control": "stop"
+   }
+  },
+  {
+   "id": "tuya:volet-hugo",
+   "instance": "tuya",
+   "native_name": "Volet de Hugo",
+   "manufacturer": "Tuya",
+   "model": "Curtain switch",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "stop",
+       "close"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control",
+     "label": "Ouverture",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "cur_calibration",
+     "label": "Cur calibration",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "start",
+       "end"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control_back_mode",
+     "label": "Control back mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "forward",
+       "back"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Hugo",
+   "state": {
+    "percent_control": 100,
+    "control": "stop"
+   }
+  },
+  {
+   "id": "tuya:pergola",
+   "instance": "tuya",
+   "native_name": "Éclairage de la pergola",
+   "manufacturer": "Tuya",
+   "model": "eMylo-WiFi Smart Switch",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Terrasse",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:pompe-piscine",
+   "instance": "tuya",
+   "native_name": "Pompe de la piscine",
+   "manufacturer": "Tuya",
+   "model": "Wi-Fi BLE Socket",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Piscine",
+   "state": {
+    "switch_1": true
+   }
+  },
+  {
+   "id": "tuya:eclairage-piscine",
+   "instance": "tuya",
+   "native_name": "Éclairage de la piscine",
+   "manufacturer": "Tuya",
+   "model": "Wi-Fi BLE Socket",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Piscine",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:sonde-chlore",
+   "instance": "tuya",
+   "native_name": "Sonde de la piscine",
+   "manufacturer": "Tuya",
+   "model": "Smart Solar Free Chlorine",
+   "points": [
+    {
+     "key": "tds_in",
+     "label": "Minéraux (TDS)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 10000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "ppm",
+     "semantic": "other"
+    },
+    {
+     "key": "temp_current",
+     "label": "Température",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.1
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Piscine",
+   "state": {
+    "tds_in": 1450,
+    "temp_current": 24.6,
+    "battery_percentage": 78
+   }
+  },
+  {
+   "id": "tuya:allee",
+   "instance": "tuya",
+   "native_name": "Éclairage de l'allée",
+   "manufacturer": "Tuya",
+   "model": "Wi-Fi BLE Socket",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Allée",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:fond-jardin",
+   "instance": "tuya",
+   "native_name": "Lumières du fond du jardin",
+   "manufacturer": "Tuya",
+   "model": "Wi-Fi BLE Socket",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "relay_status",
+     "label": "État au retour du courant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "power_off",
+       "power_on",
+       "last"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light_mode",
+     "label": "Voyant",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "relay",
+       "pos",
+       "none"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "child_lock",
+     "label": "Sécurité enfant",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cycle_time",
+     "label": "Cycle time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "random_time",
+     "label": "Random time",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "switch_inching",
+     "label": "Switch inching",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Jardin",
+   "state": {
+    "switch_1": false
+   }
+  },
+  {
+   "id": "tuya:arrosage-pelouse",
+   "instance": "tuya",
+   "native_name": "Arrosage de la pelouse",
+   "manufacturer": "Tuya",
+   "model": "Smart  Water Timer",
+   "points": [
+    {
+     "key": "switch_1",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "switch_2",
+     "label": "Marche 2",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "countdown_1",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1440.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "countdown_2",
+     "label": "Minuterie 2",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1440.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "use_time_1",
+     "label": "Use time 1",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "use_time_2",
+     "label": "Use time 2",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Jardin",
+   "state": {
+    "switch_1": false,
+    "switch_2": false,
+    "battery_percentage": 82
+   }
+  },
+  {
+   "id": "tuya:arrosage-potager",
+   "instance": "tuya",
+   "native_name": "Arrosage du potager",
+   "manufacturer": "Tuya",
+   "model": "Smart Water Timer",
+   "points": [
+    {
+     "key": "switch",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "battery_percentage",
+     "label": "Pile",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "time_use",
+     "label": "Time use",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 2592000.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "weather_delay",
+     "label": "Weather delay",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "cancel",
+       "24h",
+       "48h",
+       "72h"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "countdown",
+     "label": "Minuterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "work_state",
+     "label": "Work state",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "manual",
+       "idle"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "use_time_one",
+     "label": "Use time one",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 86400.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Jardin",
+   "state": {
+    "switch": false,
+    "battery_percentage": 64,
+    "work_state": "auto",
+    "weather_delay": "cancel"
+   }
+  }
+ ]
+}

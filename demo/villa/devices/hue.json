@@ -1,0 +1,3058 @@
+{
+ "imitates": "hue",
+ "devices": [
+  {
+   "id": "hue:suspension-1",
+   "instance": "hue",
+   "native_name": "Suspension 1",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LCA006",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.2,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salle à manger",
+   "state": {
+    "on": true,
+    "brightness": 70,
+    "color_temp": 400,
+    "color": "#ffc27a"
+   }
+  },
+  {
+   "id": "hue:suspension-2",
+   "instance": "hue",
+   "native_name": "Suspension 2",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LCA006",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.2,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salle à manger",
+   "state": {
+    "on": true,
+    "brightness": 70,
+    "color_temp": 400,
+    "color": "#ffc27a"
+   }
+  },
+  {
+   "id": "hue:suspension-3",
+   "instance": "hue",
+   "native_name": "Suspension 3",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LCA006",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.2,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salle à manger",
+   "state": {
+    "on": true,
+    "brightness": 70,
+    "color_temp": 400,
+    "color": "#ffc27a"
+   }
+  },
+  {
+   "id": "hue:lampadaire-salon",
+   "instance": "hue",
+   "native_name": "Lampadaire",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "on": true,
+    "brightness": 55,
+    "color_temp": 420,
+    "color": "#ffb36b"
+   }
+  },
+  {
+   "id": "hue:lampe-canape",
+   "instance": "hue",
+   "native_name": "Lampe du canapé",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "on": true,
+    "brightness": 40,
+    "color": "#ff9a5c"
+   }
+  },
+  {
+   "id": "hue:ruban-bibliotheque",
+   "instance": "hue",
+   "native_name": "Ruban de la bibliothèque",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "on": false,
+    "brightness": 50,
+    "color": "#7a5cff"
+   }
+  },
+  {
+   "id": "hue:prise-sapin",
+   "instance": "hue",
+   "native_name": "Prise de la lampe de lecture",
+   "manufacturer": "OSRAM",
+   "model": "Plug 01",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "on": false
+   }
+  },
+  {
+   "id": "hue:ruban-meuble-tv",
+   "instance": "hue",
+   "native_name": "Ruban du meuble télé",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Cinéma",
+   "state": {
+    "on": false,
+    "brightness": 30,
+    "color": "#3b6cff"
+   }
+  },
+  {
+   "id": "hue:ilot",
+   "instance": "hue",
+   "native_name": "Îlot central",
+   "manufacturer": "_TZ3210_mja6r5ix",
+   "model": "TS0505B",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Cuisine",
+   "state": {
+    "on": true,
+    "brightness": 90,
+    "color_temp": 300
+   }
+  },
+  {
+   "id": "hue:plafonnier-entree",
+   "instance": "hue",
+   "native_name": "Plafonnier de l'entrée",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LTW001",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 454.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    }
+   ],
+   "native_room": "Entrée",
+   "state": {
+    "on": false,
+    "brightness": 70,
+    "color_temp": 370
+   }
+  },
+  {
+   "id": "hue:interrupteur-entree",
+   "instance": "hue",
+   "native_name": "Interrupteur de l'entrée",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "RWL022",
+   "points": [
+    {
+     "key": "button1",
+     "label": "Bouton 1",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button2",
+     "label": "Bouton 2",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button3",
+     "label": "Bouton 3",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button4",
+     "label": "Bouton 4",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "battery",
+     "label": "Batterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Entrée",
+   "state": {
+    "battery": 76
+   }
+  },
+  {
+   "id": "hue:lampe-bureau",
+   "instance": "hue",
+   "native_name": "Lampe du bureau",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "on": true,
+    "brightness": 100,
+    "color_temp": 250
+   }
+  },
+  {
+   "id": "hue:lampe-suite-amis",
+   "instance": "hue",
+   "native_name": "Lampe de la suite d'amis",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LTW001",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 454.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    }
+   ],
+   "native_room": "Suite d'amis",
+   "state": {
+    "on": false,
+    "brightness": 50,
+    "color_temp": 420
+   }
+  },
+  {
+   "id": "hue:lampe-wc",
+   "instance": "hue",
+   "native_name": "Lampe des toilettes",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LTW001",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 454.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    }
+   ],
+   "native_room": "WC",
+   "state": {
+    "on": false,
+    "brightness": 60,
+    "color_temp": 370
+   }
+  },
+  {
+   "id": "hue:vmc",
+   "instance": "hue",
+   "native_name": "VMC",
+   "manufacturer": "_TZ3000_prits6g4",
+   "model": "TS0001",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    }
+   ],
+   "native_room": "Buanderie",
+   "state": {
+    "on": true
+   }
+  },
+  {
+   "id": "hue:eclairage-garage",
+   "instance": "hue",
+   "native_name": "Éclairage du garage",
+   "manufacturer": "_TZ3000_prits6g4",
+   "model": "TS0001",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "on": false
+   }
+  },
+  {
+   "id": "hue:suite-plafonnier",
+   "instance": "hue",
+   "native_name": "Plafonnier de la suite",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LWA017",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 5.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "on": false,
+    "brightness": 60
+   }
+  },
+  {
+   "id": "hue:chevet-claire",
+   "instance": "hue",
+   "native_name": "Chevet de Claire",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "on": false,
+    "brightness": 35,
+    "color_temp": 450
+   }
+  },
+  {
+   "id": "hue:chevet-thomas",
+   "instance": "hue",
+   "native_name": "Chevet de Thomas",
+   "manufacturer": "eWeLink",
+   "model": "CK-BL702-AL-01(7009_Z102LG03-1)",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 142.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "on": false,
+    "brightness": 35,
+    "color_temp": 450
+   }
+  },
+  {
+   "id": "hue:interrupteur-suite",
+   "instance": "hue",
+   "native_name": "Interrupteur de la suite",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "RWL022",
+   "points": [
+    {
+     "key": "button1",
+     "label": "Bouton 1",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button2",
+     "label": "Bouton 2",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button3",
+     "label": "Bouton 3",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "button4",
+     "label": "Bouton 4",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "initial_press",
+       "repeat",
+       "short_release",
+       "long_release",
+       "long_press"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "battery",
+     "label": "Batterie",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "battery": 91
+   }
+  },
+  {
+   "id": "hue:spot-miroir-gauche",
+   "instance": "hue",
+   "native_name": "Miroir gauche",
+   "manufacturer": "_TZ3210_mja6r5ix",
+   "model": "TS0505B",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salle de bain parentale",
+   "state": {
+    "on": false,
+    "brightness": 90,
+    "color_temp": 300
+   }
+  },
+  {
+   "id": "hue:spot-miroir-droit",
+   "instance": "hue",
+   "native_name": "Miroir droit",
+   "manufacturer": "_TZ3210_mja6r5ix",
+   "model": "TS0505B",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salle de bain parentale",
+   "state": {
+    "on": false,
+    "brightness": 90,
+    "color_temp": 300
+   }
+  },
+  {
+   "id": "hue:lampe-lea",
+   "instance": "hue",
+   "native_name": "Lampe de Léa",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LWA017",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 5.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Léa",
+   "state": {
+    "on": false,
+    "brightness": 40
+   }
+  },
+  {
+   "id": "hue:veilleuse-lea",
+   "instance": "hue",
+   "native_name": "Veilleuse de Léa",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "915005821901",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.07,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Léa",
+   "state": {
+    "on": false,
+    "brightness": 15,
+    "color": "#ff7fbf"
+   }
+  },
+  {
+   "id": "hue:lampe-hugo",
+   "instance": "hue",
+   "native_name": "Lampe de Hugo",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "LWA017",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 5.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Hugo",
+   "state": {
+    "on": false,
+    "brightness": 40
+   }
+  },
+  {
+   "id": "hue:veilleuse-hugo",
+   "instance": "hue",
+   "native_name": "Veilleuse de Hugo",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "915005821901",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.07,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Hugo",
+   "state": {
+    "on": false,
+    "brightness": 15,
+    "color": "#5ac8ff"
+   }
+  },
+  {
+   "id": "hue:spots-sdb",
+   "instance": "hue",
+   "native_name": "Spots de la salle de bain",
+   "manufacturer": "_TZ3210_mja6r5ix",
+   "model": "TS0505B",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    }
+   ],
+   "native_room": "Salle de bain",
+   "state": {
+    "on": false,
+    "brightness": 80,
+    "color_temp": 330
+   }
+  },
+  {
+   "id": "hue:lanterne-terrasse",
+   "instance": "hue",
+   "native_name": "Lanterne de la terrasse",
+   "manufacturer": "Signify Netherlands B.V.",
+   "model": "915005821901",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.07,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    },
+    {
+     "key": "color_temp",
+     "label": "Température de couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 153.0,
+      "max": 500.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "mired",
+     "semantic": "color_temp"
+    },
+    {
+     "key": "color",
+     "label": "Couleur",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.x",
+     "label": "Couleur x",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "color.y",
+     "label": "Couleur y",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "color"
+    },
+    {
+     "key": "effect",
+     "label": "Effet",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "no_effect",
+       "candle",
+       "fire",
+       "prism",
+       "sparkle",
+       "opal",
+       "glisten",
+       "underwater",
+       "cosmos",
+       "sunbeam",
+       "enchant"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Terrasse",
+   "state": {
+    "on": false,
+    "brightness": 60,
+    "color": "#ffb36b"
+   }
+  },
+  {
+   "id": "hue:piece-salle-a-manger",
+   "instance": "hue",
+   "native_name": "Salle à manger",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Salle à manger",
+   "members": [
+    "hue:suspension-1",
+    "hue:suspension-2",
+    "hue:suspension-3"
+   ],
+   "state": {
+    "on": true,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-salon",
+   "instance": "hue",
+   "native_name": "Salon",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Salon",
+   "members": [
+    "hue:lampadaire-salon",
+    "hue:lampe-canape",
+    "hue:ruban-bibliotheque"
+   ],
+   "state": {
+    "on": true,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-cinema",
+   "instance": "hue",
+   "native_name": "Cinéma",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Cinéma",
+   "members": [
+    "hue:ruban-meuble-tv"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-cuisine",
+   "instance": "hue",
+   "native_name": "Cuisine",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Cuisine",
+   "members": [
+    "hue:ilot"
+   ],
+   "state": {
+    "on": true,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-entree",
+   "instance": "hue",
+   "native_name": "Entrée",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Entrée",
+   "members": [
+    "hue:plafonnier-entree"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-bureau",
+   "instance": "hue",
+   "native_name": "Bureau",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Bureau",
+   "members": [
+    "hue:lampe-bureau"
+   ],
+   "state": {
+    "on": true,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-suite-d-amis",
+   "instance": "hue",
+   "native_name": "Suite d'amis",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Suite d'amis",
+   "members": [
+    "hue:lampe-suite-amis"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-wc",
+   "instance": "hue",
+   "native_name": "WC",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "WC",
+   "members": [
+    "hue:lampe-wc"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-suite-parentale",
+   "instance": "hue",
+   "native_name": "Suite parentale",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "members": [
+    "hue:suite-plafonnier",
+    "hue:chevet-claire",
+    "hue:chevet-thomas"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-salle-de-bain-parentale",
+   "instance": "hue",
+   "native_name": "Salle de bain parentale",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Salle de bain parentale",
+   "members": [
+    "hue:spot-miroir-gauche",
+    "hue:spot-miroir-droit"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-chambre-de-lea",
+   "instance": "hue",
+   "native_name": "Chambre de Léa",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Chambre de Léa",
+   "members": [
+    "hue:lampe-lea",
+    "hue:veilleuse-lea"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-chambre-de-hugo",
+   "instance": "hue",
+   "native_name": "Chambre de Hugo",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Chambre de Hugo",
+   "members": [
+    "hue:lampe-hugo",
+    "hue:veilleuse-hugo"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-salle-de-bain",
+   "instance": "hue",
+   "native_name": "Salle de bain",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Salle de bain",
+   "members": [
+    "hue:spots-sdb"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  },
+  {
+   "id": "hue:piece-terrasse",
+   "instance": "hue",
+   "native_name": "Terrasse",
+   "manufacturer": "Signify",
+   "model": "room",
+   "points": [
+    {
+     "key": "on",
+     "label": "État",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "brightness",
+     "label": "Luminosité",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "brightness"
+    }
+   ],
+   "native_room": "Terrasse",
+   "members": [
+    "hue:lanterne-terrasse"
+   ],
+   "state": {
+    "on": false,
+    "brightness": 70
+   }
+  }
+ ]
+}

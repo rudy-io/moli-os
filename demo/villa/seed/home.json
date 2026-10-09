@@ -1,0 +1,276 @@
+{
+ "title": "Villa",
+ "rooms": [
+  {
+   "name": "Salon",
+   "icon": "sofa",
+   "aliases": []
+  },
+  {
+   "name": "Salle à manger",
+   "icon": "table-chair",
+   "aliases": []
+  },
+  {
+   "name": "Cuisine",
+   "icon": "silverware-fork-knife",
+   "aliases": []
+  },
+  {
+   "name": "Cinéma",
+   "icon": "television-classic",
+   "aliases": []
+  },
+  {
+   "name": "Entrée",
+   "icon": "door",
+   "aliases": []
+  },
+  {
+   "name": "Bureau",
+   "icon": "desk-lamp",
+   "aliases": []
+  },
+  {
+   "name": "Suite d'amis",
+   "icon": "bed-outline",
+   "aliases": []
+  },
+  {
+   "name": "WC",
+   "icon": "toilet",
+   "aliases": []
+  },
+  {
+   "name": "Buanderie",
+   "icon": "washing-machine",
+   "aliases": []
+  },
+  {
+   "name": "Garage",
+   "icon": "garage",
+   "aliases": []
+  },
+  {
+   "name": "Atelier",
+   "icon": "printer-3d",
+   "aliases": []
+  },
+  {
+   "name": "Suite parentale",
+   "icon": "bed-king-outline",
+   "aliases": []
+  },
+  {
+   "name": "Salle de bain parentale",
+   "icon": "shower-head",
+   "aliases": []
+  },
+  {
+   "name": "Chambre de Léa",
+   "icon": "bed-outline",
+   "aliases": []
+  },
+  {
+   "name": "Chambre de Hugo",
+   "icon": "bed-outline",
+   "aliases": []
+  },
+  {
+   "name": "Salle de bain",
+   "icon": "shower-head",
+   "aliases": []
+  },
+  {
+   "name": "Palier",
+   "icon": "stairs",
+   "aliases": []
+  },
+  {
+   "name": "Terrasse",
+   "icon": "umbrella-beach-outline",
+   "aliases": []
+  },
+  {
+   "name": "Piscine",
+   "icon": "pool",
+   "aliases": []
+  },
+  {
+   "name": "Pool house",
+   "icon": "home-outline",
+   "aliases": []
+  },
+  {
+   "name": "Jardin",
+   "icon": "flower-outline",
+   "aliases": []
+  },
+  {
+   "name": "Allée",
+   "icon": "gate",
+   "aliases": []
+  }
+ ],
+ "favorites": {
+  "lights": [
+   {
+    "id": "lumieres:suspensions",
+    "name": "Salle à manger",
+    "icon": "table-chair"
+   },
+   {
+    "id": "hue:piece-salon",
+    "name": "Salon",
+    "icon": "sofa-outline"
+   },
+   {
+    "id": "tuya:spots-cuisine",
+    "name": "Cuisine",
+    "icon": "silverware-fork-knife",
+    "also": [
+     "hue:ilot"
+    ]
+   },
+   {
+    "id": "hue:plafonnier-entree",
+    "name": "Entrée",
+    "icon": "door",
+    "also": [
+     "tuya:couloir"
+    ]
+   },
+   {
+    "id": "hue:lampe-bureau",
+    "name": "Bureau",
+    "icon": "desk-lamp"
+   },
+   {
+    "id": "hue:piece-suite-parentale",
+    "name": "Suite parentale",
+    "icon": "bed-king-outline"
+   },
+   {
+    "id": "hue:piece-chambre-de-lea",
+    "name": "Léa",
+    "icon": "bed-outline"
+   },
+   {
+    "id": "hue:piece-chambre-de-hugo",
+    "name": "Hugo",
+    "icon": "bed-outline"
+   },
+   {
+    "id": "tuya:pergola",
+    "name": "Pergola",
+    "icon": "umbrella-beach-outline",
+    "also": [
+     "hue:lanterne-terrasse"
+    ]
+   }
+  ],
+  "climate": [
+   {
+    "id": "daikin:salon",
+    "name": "Salon"
+   },
+   {
+    "id": "daikin:suite",
+    "name": "Suite"
+   },
+   {
+    "id": "daikin:bureau",
+    "name": "Bureau"
+   },
+   {
+    "id": "daikin:suite-amis",
+    "name": "Amis"
+   }
+  ],
+  "cameras": [
+   {
+    "id": "reolink:sonnette",
+    "name": "Sonnette",
+    "refresh": 10
+   },
+   {
+    "id": "frigate:piscine",
+    "name": "Piscine",
+    "refresh": 10
+   },
+   {
+    "id": "frigate:jardin",
+    "name": "Jardin",
+    "refresh": 10
+   },
+   {
+    "id": "reolink:garage",
+    "name": "Garage",
+    "refresh": 60,
+    "battery": true
+   }
+  ]
+ },
+ "salon": {
+  "lamps": [
+   "hue:lampadaire-salon",
+   "hue:lampe-canape",
+   "hue:ruban-bibliotheque"
+  ],
+  "room_light": "hue:piece-salon",
+  "speaker": "sonos:salon",
+  "tv": "tele:cinema"
+ },
+ "doors": [
+  {
+   "id": "tuya:porte-entree",
+   "name": "Entrée"
+  },
+  {
+   "id": "tuya:baie-vitree",
+   "name": "Baie vitrée"
+  },
+  {
+   "id": "z2m:porte-garage",
+   "name": "Garage"
+  },
+  {
+   "id": "z2m:portail",
+   "name": "Portail"
+  },
+  {
+   "id": "z2m:fenetre-bureau",
+   "name": "Bureau"
+  }
+ ],
+ "outdoor": {
+  "air": "air:ville",
+  "weather": "meteo:ville",
+  "pool": "piscine:bassin",
+  "pool_pump": "tuya:pompe-piscine",
+  "garden_lights": [
+   {
+    "id": "tuya:allee",
+    "name": "Allée"
+   },
+   {
+    "id": "tuya:fond-jardin",
+    "name": "Fond du jardin"
+   },
+   {
+    "id": "tuya:eclairage-piscine",
+    "name": "Piscine"
+   }
+  ]
+ },
+ "safety": [
+  "z2m:fumee-salon",
+  "z2m:fumee-etage",
+  "z2m:fuite-lave-linge",
+  "tuya:fuite-ballon"
+ ],
+ "hidden": [
+  "hue:interrupteur-entree",
+  "hue:interrupteur-suite"
+ ]
+}

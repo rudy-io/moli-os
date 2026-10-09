@@ -1,0 +1,222 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "meteo:ville",
+   "instance": "meteo",
+   "native_name": "Météo",
+   "manufacturer": "Open-Meteo",
+   "model": "Prévisions",
+   "points": [
+    {
+     "key": "temperature",
+     "label": "Température",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "feels_like",
+     "label": "Ressentie",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "precipitation",
+     "label": "Précipitations",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mm",
+     "semantic": "other"
+    },
+    {
+     "key": "cloud_cover",
+     "label": "Nébulosité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "wind_speed",
+     "label": "Vent",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "km/h",
+     "semantic": "other"
+    },
+    {
+     "key": "wind_gusts",
+     "label": "Rafales",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "km/h",
+     "semantic": "other"
+    },
+    {
+     "key": "weather_code",
+     "label": "Code météo (WMO)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "daylight",
+     "label": "Jour",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "today_max",
+     "label": "Max du jour",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "today_min",
+     "label": "Min du jour",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "today_rain",
+     "label": "Pluie du jour",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mm",
+     "semantic": "other"
+    },
+    {
+     "key": "today_rain_chance",
+     "label": "Risque de pluie",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "sunrise",
+     "label": "Lever du soleil",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "sunset",
+     "label": "Coucher du soleil",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "cloud_cover": 0.0,
+    "daylight": true,
+    "feels_like": 11.6,
+    "humidity": 37.0,
+    "precipitation": 0.0,
+    "sunrise": "2026-10-09T07:54",
+    "sunset": "2026-10-09T19:16",
+    "temperature": 18.5,
+    "today_max": 19.7,
+    "today_min": 13.6,
+    "today_rain": 0.0,
+    "today_rain_chance": 0.0,
+    "weather_code": 0.0,
+    "wind_gusts": 63.0,
+    "wind_speed": 33.0
+   }
+  }
+ ]
+}

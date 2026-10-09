@@ -1,0 +1,290 @@
+# La villa de démonstration : une maison complète, sans aucun appareil réel.
+# Chaque appareil copie la forme d'un vrai (mêmes points, même tableau de bord)
+# et vit tout seul (crate moli-demo). Ouverte à tout visiteur ([server] demo).
+#
+#   docker compose -f demo/villa/compose.yaml up      → http://localhost:8790
+#   cargo run -p moli-os -- --config demo/villa/moli.toml serve   (depuis le dépôt)
+
+[server]
+listen = "0.0.0.0:8790"
+data_dir = "demo/villa/data"
+worker_threads = 2
+# The names the demo is reached by, besides localhost (set at deployment).
+allowed_hosts = []
+history_days = 7
+demo = true
+
+[guard]
+protected_rooms = ["Chambre de Léa", "Chambre de Hugo", "Sécurité"]
+
+[guard.quiet_hours]
+from = "22:00"
+to = "07:30"
+timezone = "Europe/Paris"
+rooms = ["Chambre de Léa", "Chambre de Hugo"]
+
+[[driver]]
+id = "air"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/air.json"
+
+[[driver]]
+id = "bambu"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/bambu.json"
+
+[[driver]]
+id = "box"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/box.json"
+
+[[driver]]
+id = "canon"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/canon.json"
+
+[[driver]]
+id = "circuits"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/circuits.json"
+
+[[driver]]
+id = "daikin"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/daikin.json"
+
+[[driver]]
+id = "frigate"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/frigate.json"
+
+[[driver]]
+id = "hue"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/hue.json"
+
+[[driver]]
+id = "machines"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/machines.json"
+
+[[driver]]
+id = "meteo"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/meteo.json"
+
+[[driver]]
+id = "piscine"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/piscine.json"
+
+[[driver]]
+id = "presence"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/presence.json"
+
+[[driver]]
+id = "reolink"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/reolink.json"
+
+[[driver]]
+id = "snapmaker"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/snapmaker.json"
+
+[[driver]]
+id = "sonos"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/sonos.json"
+
+[[driver]]
+id = "tele"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/tele.json"
+
+[[driver]]
+id = "telegram"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/telegram.json"
+
+[[driver]]
+id = "telephones"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/telephones.json"
+
+[[driver]]
+id = "tuya"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/tuya.json"
+
+[[driver]]
+id = "z2m"
+kind = "demo"
+[driver.options]
+fixture = "demo/villa/devices/z2m.json"
+
+[[driver]]
+id = "maison"
+kind = "helpers"
+[[driver.options.helper]]
+id = "mode_maison"
+name = "Mode Maison"
+kind = "select"
+options = ["Normal", "Absent", "Nuit", "Vacances"]
+initial = "Normal"
+[[driver.options.helper]]
+id = "alarme_active"
+name = "Alarme"
+kind = "switch"
+initial = false
+room = "Sécurité"
+[[driver.options.helper]]
+id = "budget_elec_mensuel"
+name = "Budget électricité mensuel"
+kind = "number"
+min = 50.0
+max = 800.0
+step = 10.0
+initial = 320.0
+[[driver.options.helper]]
+id = "arrosage_auto"
+name = "Arrosage automatique"
+kind = "switch"
+initial = true
+
+[[fixture]]
+id = "suspensions"
+name = "Suspensions"
+room = "Salle à manger"
+bulbs = ["hue:suspension-1", "hue:suspension-2", "hue:suspension-3"]
+power = "tuya:relais-suspensions/switch_1"
+
+[energy]
+timezone = "Europe/Paris"
+currency = "€"
+monthly_fee = 24.0
+budget = "maison:budget_elec_mensuel/value"
+
+[energy.tariff]
+period = "z2m:linky/active_register_tier_delivered"
+prices = { "HP" = 0.2068, "HC" = 0.1615 }
+
+[energy.live]
+power = "z2m:linky/apparent_power"
+max = 12000
+warn = 4000
+
+[[energy.meter]]
+id = "linky-hc"
+name = "Linky heures creuses"
+point = "z2m:linky/current_tier1_summ_delivered"
+role = "grid"
+price = 0.1615
+reset = "never"
+period = "HC"
+
+[[energy.meter]]
+id = "linky-hp"
+name = "Linky heures pleines"
+point = "z2m:linky/current_tier2_summ_delivered"
+role = "grid"
+price = 0.2068
+reset = "never"
+period = "HP"
+
+[[energy.meter]]
+id = "general"
+name = "Général"
+point = "circuits:tableau/energy_month_1"
+power = "circuits:tableau/power_1"
+role = "total"
+
+[[energy.meter]]
+id = "clims-piscine"
+name = "Clims et piscine"
+point = "circuits:tableau/energy_month_2"
+power = "circuits:tableau/power_2"
+role = "circuit"
+feeds = ["daikin:salon", "daikin:suite", "daikin:bureau", "daikin:suite-amis", "tuya:pompe-piscine"]
+
+[[energy.meter]]
+id = "cuisine"
+name = "Cuisine"
+point = "circuits:tableau/energy_month_3"
+power = "circuits:tableau/power_3"
+role = "circuit"
+
+[[energy.meter]]
+id = "chauffe-eau"
+name = "Chauffe-eau"
+point = "circuits:tableau/energy_month_4"
+power = "circuits:tableau/power_4"
+role = "circuit"
+
+[[energy.meter]]
+id = "prises"
+name = "Prises"
+point = "circuits:tableau/energy_month_5"
+power = "circuits:tableau/power_5"
+role = "circuit"
+
+[[energy.meter]]
+id = "voiture"
+name = "Voiture électrique"
+point = "circuits:tableau/energy_month_6"
+power = "circuits:tableau/power_6"
+role = "circuit"
+
+[[energy.meter]]
+id = "home-cinema"
+name = "Home cinéma"
+point = "tuya:prise-home-cinema/cur_power"
+role = "appliance"
+integrate = true
+
+[[energy.meter]]
+id = "lave-vaisselle"
+name = "Lave-vaisselle"
+point = "tuya:lave-vaisselle/cur_power"
+role = "appliance"
+integrate = true
+
+[[energy.meter]]
+id = "atelier"
+name = "Atelier (impression 3D)"
+point = "tuya:prise-atelier/cur_power"
+role = "appliance"
+integrate = true
+
+[[energy.meter]]
+id = "cave-a-vin"
+name = "Cave à vin"
+point = "z2m:cave-a-vin/energy"
+role = "appliance"
+
+[[energy.meter]]
+id = "lampe-suspensions"
+name = "Suspensions"
+point = "lumieres:suspensions/on"
+role = "appliance"
+estimate = true

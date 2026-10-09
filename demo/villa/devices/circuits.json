@@ -1,0 +1,515 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "circuits:tableau",
+   "instance": "circuits",
+   "native_name": "Tableau électrique",
+   "manufacturer": "Meross",
+   "model": "EM06",
+   "points": [
+    {
+     "key": "power_1",
+     "label": "Puissance 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_1",
+     "label": "Courant 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_1",
+     "label": "Tension 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_1",
+     "label": "Facteur de puissance 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_1",
+     "label": "Énergie du jour 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_1",
+     "label": "Énergie du mois 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_2",
+     "label": "Puissance 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_2",
+     "label": "Courant 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_2",
+     "label": "Tension 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_2",
+     "label": "Facteur de puissance 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_2",
+     "label": "Énergie du jour 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_2",
+     "label": "Énergie du mois 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_3",
+     "label": "Puissance 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_3",
+     "label": "Courant 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_3",
+     "label": "Tension 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_3",
+     "label": "Facteur de puissance 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_3",
+     "label": "Énergie du jour 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_3",
+     "label": "Énergie du mois 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_4",
+     "label": "Puissance 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_4",
+     "label": "Courant 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_4",
+     "label": "Tension 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_4",
+     "label": "Facteur de puissance 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_4",
+     "label": "Énergie du jour 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_4",
+     "label": "Énergie du mois 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_5",
+     "label": "Puissance 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_5",
+     "label": "Courant 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_5",
+     "label": "Tension 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_5",
+     "label": "Facteur de puissance 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_5",
+     "label": "Énergie du jour 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_5",
+     "label": "Énergie du mois 5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_6",
+     "label": "Puissance 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current_6",
+     "label": "Courant 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage_6",
+     "label": "Tension 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "power_factor_6",
+     "label": "Facteur de puissance 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "energy_today_6",
+     "label": "Énergie du jour 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    },
+    {
+     "key": "energy_month_6",
+     "label": "Énergie du mois 6",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "Wh",
+     "semantic": "energy"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "power_1": 1850.0,
+    "current_1": 8.04,
+    "voltage_1": 231.0,
+    "power_factor_1": 0.92,
+    "energy_today_1": 9800.0,
+    "energy_month_1": 412000.0,
+    "power_2": 920.0,
+    "current_2": 4.0,
+    "voltage_2": 231.0,
+    "power_factor_2": 0.9,
+    "energy_today_2": 5200.0,
+    "energy_month_2": 128000.0,
+    "power_3": 210.0,
+    "current_3": 0.91,
+    "voltage_3": 231.0,
+    "power_factor_3": 0.85,
+    "energy_today_3": 1400.0,
+    "energy_month_3": 38000.0,
+    "power_4": 0.0,
+    "current_4": 0.0,
+    "voltage_4": 231.0,
+    "power_factor_4": 0.0,
+    "energy_today_4": 2600.0,
+    "energy_month_4": 76000.0,
+    "power_5": 310.0,
+    "current_5": 1.35,
+    "voltage_5": 231.0,
+    "power_factor_5": 0.8,
+    "energy_today_5": 2100.0,
+    "energy_month_5": 61000.0,
+    "power_6": 3650.0,
+    "current_6": 15.9,
+    "voltage_6": 229.8,
+    "power_factor_6": 0.99,
+    "energy_today_6": 7300.0,
+    "energy_month_6": 109000.0
+   }
+  }
+ ]
+}

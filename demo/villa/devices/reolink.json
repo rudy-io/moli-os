@@ -1,0 +1,150 @@
+{
+ "imitates": "reolink",
+ "devices": [
+  {
+   "id": "reolink:sonnette",
+   "instance": "reolink",
+   "native_name": "Sonnette",
+   "manufacturer": "Reolink",
+   "model": "Reolink Home Hub",
+   "points": [
+    {
+     "key": "motion",
+     "label": "Mouvement",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "person",
+     "label": "Personne",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "vehicle",
+     "label": "Véhicule",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "animal",
+     "label": "Animal",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "package",
+     "label": "Colis",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "doorbell",
+     "label": "Sonnette",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "camera": true,
+   "native_room": "Allée",
+   "state": {
+    "motion": false,
+    "person": false,
+    "vehicle": false,
+    "animal": false,
+    "package": false,
+    "doorbell": false
+   },
+   "snapshot": "cameras/sonnette.jpg"
+  },
+  {
+   "id": "reolink:garage",
+   "instance": "reolink",
+   "native_name": "Caméra du garage",
+   "manufacturer": "Reolink",
+   "model": "Reolink Home Hub",
+   "points": [
+    {
+     "key": "person",
+     "label": "Personne",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "vehicle",
+     "label": "Véhicule",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "animal",
+     "label": "Animal",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "camera": true,
+   "native_room": "Garage",
+   "state": {
+    "person": false,
+    "vehicle": false,
+    "animal": false
+   },
+   "snapshot": "cameras/garage.jpg"
+  }
+ ]
+}

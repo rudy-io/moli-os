@@ -1,0 +1,516 @@
+{
+ "imitates": "moonraker",
+ "devices": [
+  {
+   "id": "snapmaker:u1",
+   "instance": "snapmaker",
+   "native_name": "Snapmaker U1",
+   "manufacturer": "Snapmaker",
+   "model": "Snapmaker U1",
+   "points": [
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "standby",
+       "printing",
+       "paused",
+       "complete",
+       "cancelled",
+       "error"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "printing",
+     "label": "En impression",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "progress",
+     "label": "Progression",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "remaining",
+     "label": "Temps restant",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "job",
+     "label": "Impression",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "layer",
+     "label": "Couche",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "total_layers",
+     "label": "Couches",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "print_duration",
+     "label": "Durée d'impression",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "filament_used",
+     "label": "Filament utilisé",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    },
+    {
+     "key": "nozzle_temperature",
+     "label": "Buse",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "nozzle_target",
+     "label": "Buse (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "active_tool",
+     "label": "Tête active",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 4.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool1_temperature",
+     "label": "Tête 1",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "tool1_target",
+     "label": "Tête 1 (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "tool1_filament",
+     "label": "Filament 1",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool1_color",
+     "label": "Couleur 1",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool2_temperature",
+     "label": "Tête 2",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "tool2_target",
+     "label": "Tête 2 (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "tool2_filament",
+     "label": "Filament 2",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool2_color",
+     "label": "Couleur 2",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool3_temperature",
+     "label": "Tête 3",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "tool3_target",
+     "label": "Tête 3 (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "tool3_filament",
+     "label": "Filament 3",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool3_color",
+     "label": "Couleur 3",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool4_temperature",
+     "label": "Tête 4",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "tool4_target",
+     "label": "Tête 4 (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "tool4_filament",
+     "label": "Filament 4",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tool4_color",
+     "label": "Couleur 4",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "bed_temperature",
+     "label": "Plateau",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "bed_target",
+     "label": "Plateau (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "chamber_temperature",
+     "label": "Enceinte",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "message",
+     "label": "Message",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light",
+     "label": "Lumière",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "pause",
+       "resume",
+       "cancel"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "jobs_total",
+     "label": "Impressions (total)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "print_hours_total",
+     "label": "Heures d'impression (total)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "h",
+     "semantic": "other"
+    },
+    {
+     "key": "filament_total",
+     "label": "Filament (total)",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "m",
+     "semantic": "other"
+    }
+   ],
+   "camera": true,
+   "native_room": "Atelier",
+   "state": {
+    "state": "complete",
+    "printing": false,
+    "progress": 100.0,
+    "remaining": 0.0,
+    "job": "Support de casque",
+    "layer": 612.0,
+    "total_layers": 612.0,
+    "print_duration": 254.0,
+    "filament_used": 18.2,
+    "light": false
+   }
+  }
+ ]
+}

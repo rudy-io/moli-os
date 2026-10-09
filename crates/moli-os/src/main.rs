@@ -95,6 +95,13 @@ enum EnergyCommand {
     /// before Moli's own recording are taken; safe to run twice, and while
     /// moli-os runs.
     Import,
+    /// A demo house only (`[server] demo = true`): file a made-up past for
+    /// its meters (a family villa's habits), up to now. Run it before the
+    /// first start.
+    Demo {
+        #[arg(long, default_value_t = 400)]
+        days: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -175,6 +182,7 @@ fn main() -> anyhow::Result<()> {
             devices_file,
         }) => tuya_import(&config, &instance, devices_file),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
+        Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => {
             for driver in &config.drivers {
                 build_driver(driver, &config.server.data_dir)?;
@@ -465,6 +473,29 @@ fn energy_import(config: &Config) -> anyhow::Result<()> {
     println!(
         "{} hours imported, {} priced, {} skipped (known or recorded live), {} invalid",
         report.inserted, report.repriced, report.skipped, report.invalid
+    );
+    Ok(())
+}
+
+fn energy_demo(config: &Config, days: u32) -> anyhow::Result<()> {
+    if !config.server.demo {
+        bail!("a made-up past is for a demo house only ([server] demo = true)");
+    }
+    let energy = config
+        .energy
+        .as_ref()
+        .context("no [energy] section in the configuration")?;
+    let tz = jiff::tz::TimeZone::get(&energy.timezone)?;
+    let meters: Vec<String> = energy.meters.iter().map(|m| m.id.clone()).collect();
+    let rows: Vec<moli_energy::ImportRow> =
+        moli_demo::history::history(&meters, &tz, jiff::Timestamp::now(), days)
+            .into_iter()
+            .map(|(meter, hour, kwh)| moli_energy::ImportRow { meter, hour, kwh })
+            .collect();
+    let report = moli_energy::import(&config.server.data_dir.join("energy.db"), energy, &rows)?;
+    println!(
+        "{} hours imported, {} skipped (known or recorded live)",
+        report.inserted, report.skipped
     );
     Ok(())
 }

@@ -1,0 +1,240 @@
+{
+ "imitates": "philips",
+ "devices": [
+  {
+   "id": "tele:cinema",
+   "instance": "tele",
+   "native_name": "Télé du cinéma",
+   "manufacturer": "Philips",
+   "model": "Android TV",
+   "points": [
+    {
+     "key": "power",
+     "label": "Allumée",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "volume",
+     "label": "Volume",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 60.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "mute",
+     "label": "Sourdine",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "app",
+     "label": "Application",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "ambilight",
+     "label": "Ambilight",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "key",
+     "label": "Touche",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "CursorUp",
+       "CursorDown",
+       "CursorLeft",
+       "CursorRight",
+       "Confirm",
+       "Back",
+       "Home",
+       "Options",
+       "Info",
+       "PlayPause",
+       "Play",
+       "Pause",
+       "Stop",
+       "Next",
+       "Previous",
+       "FastForward",
+       "Rewind",
+       "VolumeUp",
+       "VolumeDown",
+       "Mute",
+       "ChannelStepUp",
+       "ChannelStepDown",
+       "Source",
+       "WatchTV"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_app",
+     "label": "Appli en lecture",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_state",
+     "label": "Lecture",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "playing",
+       "paused",
+       "buffering",
+       "idle"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_title",
+     "label": "Titre",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_subtitle",
+     "label": "Série, artiste",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_image",
+     "label": "Image",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "media_duration",
+     "label": "Durée",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "media_position",
+     "label": "Position",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "media_control",
+     "label": "Lecture (commande)",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "play",
+       "pause",
+       "stop"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Cinéma",
+   "state": {
+    "power": true,
+    "volume": 18,
+    "mute": false,
+    "ambilight": true,
+    "app": "com.netflix.ninja",
+    "media_app": "Netflix",
+    "media_state": "playing",
+    "media_title": "Chef's Table",
+    "media_subtitle": "Saison 3",
+    "media_duration": 3120,
+    "media_position": 1240
+   }
+  }
+ ]
+}

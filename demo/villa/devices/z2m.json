@@ -1,0 +1,1331 @@
+{
+ "imitates": "z2m",
+ "devices": [
+  {
+   "id": "z2m:presence-salon",
+   "instance": "z2m",
+   "native_name": "Présence du salon",
+   "manufacturer": "Tuya",
+   "model": "ZG-204ZL",
+   "points": [
+    {
+     "key": "occupancy",
+     "label": "Occupancy",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "illuminance",
+     "label": "Illuminance",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lx",
+     "semantic": "illuminance"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "sensitivity",
+     "label": "Sensitivity",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "keep_time",
+     "label": "Keep time",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "10",
+       "30",
+       "60",
+       "120"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "illuminance_interval",
+     "label": "Illuminance interval",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 720.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "occupancy": true,
+    "illuminance": 240,
+    "battery": 87,
+    "linkquality": 150
+   }
+  },
+  {
+   "id": "z2m:fumee-salon",
+   "instance": "z2m",
+   "native_name": "Détecteur de fumée",
+   "manufacturer": "HEIMAN",
+   "model": "HS1SA",
+   "points": [
+    {
+     "key": "smoke",
+     "label": "Smoke",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "smoke"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "test",
+     "label": "Test",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "smoke": false,
+    "battery_low": false,
+    "battery": 95,
+    "linkquality": 120
+   }
+  },
+  {
+   "id": "z2m:fenetre-bureau",
+   "instance": "z2m",
+   "native_name": "Fenêtre du bureau",
+   "manufacturer": "SONOFF",
+   "model": "SNZB-04",
+   "points": [
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mV",
+     "semantic": "voltage"
+    },
+    {
+     "key": "contact",
+     "label": "Contact",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "contact"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "contact": true,
+    "battery": 81,
+    "battery_low": false,
+    "voltage": 2900,
+    "linkquality": 110
+   }
+  },
+  {
+   "id": "z2m:fuite-lave-linge",
+   "instance": "z2m",
+   "native_name": "Fuite sous le lave-linge",
+   "manufacturer": "HOBEIAN",
+   "model": "ZG-222ZA",
+   "points": [
+    {
+     "key": "water_leak",
+     "label": "Water leak",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "water_leak"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Buanderie",
+   "state": {
+    "water_leak": false,
+    "battery": 90,
+    "battery_low": false,
+    "linkquality": 98
+   }
+  },
+  {
+   "id": "z2m:cave-a-vin",
+   "instance": "z2m",
+   "native_name": "Cave à vin",
+   "manufacturer": "Tuya",
+   "model": "TS011F_plug_3",
+   "points": [
+    {
+     "key": "state",
+     "label": "State",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "power_outage_memory",
+     "label": "Power outage memory",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "on",
+       "off",
+       "restore"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "indicator_mode",
+     "label": "Indicator mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "off",
+       "off/on",
+       "on/off",
+       "on"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power",
+     "label": "Power",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current",
+     "label": "Current",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "energy",
+     "label": "Energy",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "child_lock",
+     "label": "Child lock",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Buanderie",
+   "state": {
+    "state": true,
+    "power": 62.0,
+    "voltage": 231,
+    "current": 0.27,
+    "energy": 312.4
+   }
+  },
+  {
+   "id": "z2m:porte-garage",
+   "instance": "z2m",
+   "native_name": "Porte du garage",
+   "manufacturer": "SONOFF",
+   "model": "SNZB-04",
+   "points": [
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mV",
+     "semantic": "voltage"
+    },
+    {
+     "key": "contact",
+     "label": "Contact",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "contact"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "contact": true,
+    "battery": 77,
+    "battery_low": false,
+    "voltage": 2850,
+    "linkquality": 90
+   }
+  },
+  {
+   "id": "z2m:mouvement-garage",
+   "instance": "z2m",
+   "native_name": "Mouvement du garage",
+   "manufacturer": "Tuya",
+   "model": "ZG-204ZL",
+   "points": [
+    {
+     "key": "occupancy",
+     "label": "Occupancy",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "illuminance",
+     "label": "Illuminance",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lx",
+     "semantic": "illuminance"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "sensitivity",
+     "label": "Sensitivity",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "keep_time",
+     "label": "Keep time",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "10",
+       "30",
+       "60",
+       "120"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "illuminance_interval",
+     "label": "Illuminance interval",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 720.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "occupancy": false,
+    "illuminance": 12,
+    "battery": 64,
+    "linkquality": 80
+   }
+  },
+  {
+   "id": "z2m:linky",
+   "instance": "z2m",
+   "native_name": "Compteur Linky",
+   "manufacturer": "LiXee",
+   "model": "ZLinky_TIC",
+   "points": [
+    {
+     "key": "active_register_tier_delivered",
+     "label": "PTEC",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "current_tier1_summ_delivered",
+     "label": "HCHC",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "current_tier2_summ_delivered",
+     "label": "HCHP",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "meter_serial_number",
+     "label": "ADCO",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "available_power",
+     "label": "ISOUSC",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "apparent_power",
+     "label": "PAPP",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "VA",
+     "semantic": "apparent_power"
+    },
+    {
+     "key": "current_tarif",
+     "label": "OPTARIF",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "MOTDETAT",
+     "label": "MOTDETAT",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "schedule_h_p_h_c",
+     "label": "HHPHC",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "rms_current",
+     "label": "IINST",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "rms_current_max",
+     "label": "IMAX",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "warn_d_p_s",
+     "label": "ADPS",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "active_register_tier_delivered": "HP..",
+    "current_tier1_summ_delivered": 18432100,
+    "current_tier2_summ_delivered": 27154300,
+    "meter_serial_number": "000000000000",
+    "available_power": 60,
+    "apparent_power": 2150,
+    "current_tarif": "HC..",
+    "rms_current": 9,
+    "rms_current_max": 90,
+    "linkquality": 160
+   }
+  },
+  {
+   "id": "z2m:mouvement-etage",
+   "instance": "z2m",
+   "native_name": "Mouvement du palier",
+   "manufacturer": "Tuya",
+   "model": "ZG-204ZL",
+   "points": [
+    {
+     "key": "occupancy",
+     "label": "Occupancy",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "illuminance",
+     "label": "Illuminance",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lx",
+     "semantic": "illuminance"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "sensitivity",
+     "label": "Sensitivity",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "low",
+       "medium",
+       "high"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "keep_time",
+     "label": "Keep time",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "10",
+       "30",
+       "60",
+       "120"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "illuminance_interval",
+     "label": "Illuminance interval",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 720.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Palier",
+   "state": {
+    "occupancy": false,
+    "illuminance": 80,
+    "battery": 72,
+    "linkquality": 105
+   }
+  },
+  {
+   "id": "z2m:fumee-etage",
+   "instance": "z2m",
+   "native_name": "Détecteur de fumée du palier",
+   "manufacturer": "HEIMAN",
+   "model": "HS1SA",
+   "points": [
+    {
+     "key": "smoke",
+     "label": "Smoke",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "smoke"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "test",
+     "label": "Test",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Palier",
+   "state": {
+    "smoke": false,
+    "battery_low": false,
+    "battery": 88,
+    "linkquality": 101
+   }
+  },
+  {
+   "id": "z2m:prise-pool-house",
+   "instance": "z2m",
+   "native_name": "Prise du pool house",
+   "manufacturer": "Tuya",
+   "model": "TS011F_plug_3",
+   "points": [
+    {
+     "key": "state",
+     "label": "State",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "power_outage_memory",
+     "label": "Power outage memory",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "on",
+       "off",
+       "restore"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "indicator_mode",
+     "label": "Indicator mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "off",
+       "off/on",
+       "on/off",
+       "on"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "power",
+     "label": "Power",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current",
+     "label": "Current",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "energy",
+     "label": "Energy",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "child_lock",
+     "label": "Child lock",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Pool house",
+   "state": {
+    "state": true,
+    "power": 24.0,
+    "voltage": 231,
+    "current": 0.1,
+    "energy": 88.2
+   }
+  },
+  {
+   "id": "z2m:portail",
+   "instance": "z2m",
+   "native_name": "Portail",
+   "manufacturer": "SONOFF",
+   "model": "SNZB-04",
+   "points": [
+    {
+     "key": "battery",
+     "label": "Battery",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mV",
+     "semantic": "voltage"
+    },
+    {
+     "key": "contact",
+     "label": "Contact",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "contact"
+    },
+    {
+     "key": "battery_low",
+     "label": "Battery low",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "battery_low"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Allée",
+   "state": {
+    "contact": true,
+    "battery": 69,
+    "battery_low": false,
+    "voltage": 2800,
+    "linkquality": 70
+   }
+  }
+ ]
+}

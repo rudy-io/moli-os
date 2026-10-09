@@ -1,0 +1,343 @@
+{
+ "imitates": "frigate",
+ "devices": [
+  {
+   "id": "frigate:jardin",
+   "instance": "frigate",
+   "native_name": "Jardin",
+   "manufacturer": "Frigate",
+   "model": "Caméra",
+   "points": [
+    {
+     "key": "motion",
+     "label": "Mouvement",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "status",
+     "label": "Détection active",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "person",
+     "label": "Personnes",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "car",
+     "label": "Voitures",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "dog",
+     "label": "Chiens",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cat",
+     "label": "Chats",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "bird",
+     "label": "Oiseaux",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "all",
+     "label": "Objets",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "detection",
+     "label": "Détection",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "recording",
+     "label": "Enregistrement",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "snapshots",
+     "label": "Instantanés",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "camera": true,
+   "native_room": "Jardin",
+   "state": {
+    "motion": false,
+    "status": "ON",
+    "person": 0,
+    "car": 0,
+    "dog": 0,
+    "cat": 0,
+    "bird": 0,
+    "all": 0,
+    "detection": true,
+    "recording": true,
+    "snapshots": true
+   },
+   "snapshot": "cameras/jardin.jpg"
+  },
+  {
+   "id": "frigate:piscine",
+   "instance": "frigate",
+   "native_name": "Piscine",
+   "manufacturer": "Frigate",
+   "model": "Caméra",
+   "points": [
+    {
+     "key": "motion",
+     "label": "Mouvement",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    },
+    {
+     "key": "status",
+     "label": "Détection active",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "person",
+     "label": "Personnes",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "car",
+     "label": "Voitures",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "dog",
+     "label": "Chiens",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cat",
+     "label": "Chats",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "bird",
+     "label": "Oiseaux",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "all",
+     "label": "Objets",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "detection",
+     "label": "Détection",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "recording",
+     "label": "Enregistrement",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "snapshots",
+     "label": "Instantanés",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "camera": true,
+   "native_room": "Piscine",
+   "state": {
+    "motion": false,
+    "status": "ON",
+    "person": 0,
+    "car": 0,
+    "dog": 0,
+    "cat": 0,
+    "bird": 0,
+    "all": 0,
+    "detection": true,
+    "recording": true,
+    "snapshots": true
+   },
+   "snapshot": "cameras/piscine.jpg"
+  }
+ ]
+}

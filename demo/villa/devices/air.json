@@ -1,0 +1,99 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "air:ville",
+   "instance": "air",
+   "native_name": "Qualité de l'air",
+   "manufacturer": "Open-Meteo",
+   "model": "CAMS",
+   "points": [
+    {
+     "key": "aqi",
+     "label": "Indice européen (AQI)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "pm2_5",
+     "label": "Particules fines PM2,5",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "µg/m³",
+     "semantic": "other"
+    },
+    {
+     "key": "pm10",
+     "label": "Particules PM10",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "µg/m³",
+     "semantic": "other"
+    },
+    {
+     "key": "no2",
+     "label": "Dioxyde d'azote",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "µg/m³",
+     "semantic": "other"
+    },
+    {
+     "key": "ozone",
+     "label": "Ozone",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "µg/m³",
+     "semantic": "other"
+    },
+    {
+     "key": "uv_index",
+     "label": "Indice UV",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "UV",
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "aqi": 31.0,
+    "no2": 0.8,
+    "ozone": 82.0,
+    "pm10": 4.3,
+    "pm2_5": 2.2,
+    "uv_index": 4.1
+   }
+  }
+ ]
+}

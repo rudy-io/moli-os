@@ -21,6 +21,7 @@
 //!
 //! Nothing here reaches the network: a demo can be opened to anyone.
 
+pub mod history;
 mod sim;
 
 use std::collections::BTreeMap;

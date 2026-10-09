@@ -1,0 +1,111 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "piscine:bassin",
+   "instance": "piscine",
+   "native_name": "Piscine",
+   "manufacturer": "iopool",
+   "model": "EcO",
+   "points": [
+    {
+     "key": "temperature",
+     "label": "Eau",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "ph",
+     "label": "pH",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "orp",
+     "label": "Désinfection (ORP)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "mV",
+     "semantic": "voltage"
+    },
+    {
+     "key": "measured_at",
+     "label": "Mesuré le",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "action_required",
+     "label": "Action requise",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "filtration",
+     "label": "Filtration conseillée",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "h",
+     "semantic": "other"
+    },
+    {
+     "key": "mode",
+     "label": "Mode",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Piscine",
+   "state": {
+    "temperature": 25.4,
+    "ph": 7.2,
+    "orp": 720.0,
+    "measured_at": "",
+    "action_required": false,
+    "filtration": 8.0,
+    "mode": "STANDARD"
+   }
+  }
+ ]
+}
