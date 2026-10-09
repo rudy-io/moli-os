@@ -17,6 +17,7 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "pdfjs-dist": "^6.4.299"
   }
 }

@@ -7,6 +7,7 @@
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
   import Setup from './ui/Setup.svelte';
+  import Login from './ui/Login.svelte';
   import Accueil from './pages/Accueil.svelte';
   import Salon from './pages/Salon.svelte';
   import Pieces from './pages/Pieces.svelte';
@@ -42,6 +43,7 @@
     { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
     { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
+    { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
@@ -145,6 +147,9 @@
       <Pieces />
     {:else if page === 'plan'}
       <Plan />
+    {:else if page === 'carte'}
+      <!-- The map (Leaflet): loaded only when visited. -->
+      {#await import('./pages/Carte.svelte') then { default: Carte }}<Carte />{/await}
     {:else if page === 'cameras'}
       <Cameras />
     {:else if page === 'energie' && route.startsWith('energie/solaire')}
@@ -189,6 +194,11 @@
 
   {#if home.held}
     <PinSheet />
+  {/if}
+
+  {#if hub.session?.login_required}
+    <!-- From the Internet, not signed in: nothing of the house, only this. -->
+    <Login />
   {/if}
 
   {#if hub.session?.setup && !home.setupLater}
