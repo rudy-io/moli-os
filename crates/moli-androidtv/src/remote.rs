@@ -50,14 +50,47 @@ pub enum Order {
     Key(u32),
 }
 
-/// What the remote launches for `target`: a link as it is, an Android
-/// package through its store link (`com.netflix.ninja`).
+/// Apps people name rather than spell (« mets YouTube »), as letters and
+/// digits only, lowercase: their Android TV package. Brands, the same in
+/// every language.
+const NAMED_APPS: [(&str, &str); 9] = [
+    ("netflix", "com.netflix.ninja"),
+    ("youtube", "com.google.android.youtube.tv"),
+    ("disney", "com.disney.disneyplus"),
+    ("disneyplus", "com.disney.disneyplus"),
+    ("primevideo", "com.amazon.amazonvideo.livingroom"),
+    ("amazonprimevideo", "com.amazon.amazonvideo.livingroom"),
+    ("prime", "com.amazon.amazonvideo.livingroom"),
+    ("jellyfin", "org.jellyfin.androidtv"),
+    ("moonlight", "com.limelight"),
+];
+
+/// The package of an app named the way people say it (« Disney+ », « Prime
+/// Video »), when it is a known one.
+#[must_use]
+pub fn package_of(name: &str) -> Option<&'static str> {
+    let key: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    NAMED_APPS
+        .iter()
+        .find(|(n, _)| *n == key)
+        .map(|(_, package)| *package)
+}
+
+/// What the remote launches for `target`: a link as it is, a known app's name
+/// or an Android package through its store link (`com.netflix.ninja`).
 #[must_use]
 pub fn app_link(target: &str) -> String {
     if target.contains("://") {
         target.to_owned()
     } else {
-        format!("market://launch?id={target}")
+        format!(
+            "market://launch?id={}",
+            package_of(target).unwrap_or(target)
+        )
     }
 }
 
@@ -283,6 +316,19 @@ mod tests {
         );
         let video = "https://www.youtube.com/watch?v=NLs3LqVgpT4";
         assert_eq!(app_link(video), video);
+        // Named the way people say it.
+        assert_eq!(
+            app_link("YouTube"),
+            "market://launch?id=com.google.android.youtube.tv"
+        );
+        assert_eq!(app_link("netflix"), "market://launch?id=com.netflix.ninja");
+        assert_eq!(package_of("Disney+"), Some("com.disney.disneyplus"));
+        assert_eq!(
+            package_of("Prime Video"),
+            Some("com.amazon.amazonvideo.livingroom")
+        );
+        assert_eq!(package_of("com.netflix.ninja"), None);
+        assert_eq!(package_of("Une appli inconnue"), None);
         let launch = encode(&Order::Launch(app_link("com.netflix.ninja")));
         let m = parse(&launch).unwrap();
         assert_eq!(

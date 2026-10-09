@@ -14,8 +14,12 @@ use crate::import::HaAutomation;
 /// Words changed on purpose after the move (9 Oct. 2026: a spoken
 /// conversation answers in one short sentence and nothing more, without
 /// cards; the cheerful voice speaks faster; a question about a state is
-/// never an order).
-const REWORDED: [(&str, &str); 5] = [
+/// never an order; an app opens on the TV by its name).
+const REWORDED: [(&str, &str); 6] = [
+    (
+        "Pour la télé, appuie sur une touche avec `key`.",
+        "Pour la télé, appuie sur une touche avec `key` ; pour ouvrir une appli, `set` sur son `app` avec le nom de l'appli (« YouTube », « Netflix », « Disney+ »), même télé éteinte.",
+    ),
     (
         "appelle `set` tout de suite, sur une valeur marquée ✎ dans l'inventaire.",
         "appelle `set` tout de suite, sur une valeur marquée ✎ dans l'inventaire. Une question sur un état (« la lumière est allumée ? », « le portail est fermé ? ») n'est jamais un ordre : réponds, ne touche à rien.",
