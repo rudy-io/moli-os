@@ -135,5 +135,17 @@
   "serveur.personnes.invitation_incorrecte": "unknown or expired invitation code",
   "serveur.personnes.identifiants_incorrects": "wrong name or password",
   "serveur.personnes.invite_limite": "a guest may only command in their rooms",
-  "serveur.personnes.invite_piece": "this device is not in this guest's rooms"
+  "serveur.personnes.invite_piece": "this device is not in this guest's rooms",
+  "serveur.personnes.zone_maison": "Home",
+  "serveur.personnes.ailleurs": "Away",
+  "serveur.personnes.modele": "Person",
+  "serveur.personnes.foyer": "The household",
+  "serveur.personnes.modele_foyer": "Home presence",
+  "serveur.personnes.point_zone": "Zone",
+  "serveur.personnes.point_precision": "Accuracy",
+  "serveur.personnes.point_batterie": "Phone battery",
+  "serveur.personnes.point_depuis": "In this zone since",
+  "serveur.personnes.point_nombre": "People at home",
+  "serveur.personnes.point_quelquun": "Someone at home",
+  "serveur.personnes.point_tous_partis": "Everyone has left"
 }

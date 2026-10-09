@@ -25,6 +25,9 @@ mod machines;
 mod mcp;
 mod people;
 mod people_api;
+mod whereabouts;
+
+pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 mod phones;
 mod plan;
 mod rest;
@@ -52,6 +55,37 @@ const BODY: usize = 256 * 1024;
 /// Recorded speech, a Home Assistant export.
 const BIG_BODY: usize = 4 * 1024 * 1024;
 pub use session::UiPin;
+
+/// The household's people (`data/people.json`, their sessions), shared by
+/// the surfaces and the driver that says where each one is.
+#[derive(Clone, Debug)]
+pub struct Household(Arc<people::People>);
+
+impl Household {
+    /// `owners`: the Access e-mails of `[server.access]` (owners at once).
+    #[must_use]
+    pub fn open(hub: &Hub, data_dir: Option<&std::path::Path>, owners: &[String]) -> Self {
+        Self(Arc::new(people::People::open(
+            hub.clone(),
+            data_dir,
+            owners,
+        )))
+    }
+
+    /// The driver of `personnes:*` (where each person is, from their phones).
+    #[must_use]
+    pub fn whereabouts(
+        &self,
+        hub: &Hub,
+        phones: Option<moli_phones::Gateway>,
+    ) -> Arc<dyn moli_runtime::Driver> {
+        Arc::new(whereabouts::Whereabouts {
+            people: self.0.clone(),
+            hub: hub.clone(),
+            phones,
+        })
+    }
+}
 
 /// Surface settings.
 #[derive(Clone, Debug, Default)]
@@ -81,6 +115,8 @@ pub struct Options {
     /// A demo house (no real devices): anyone is let in, as a visitor
     /// (`[server] demo = true`).
     pub demo: bool,
+    /// The household's people; none: opened from `home_path`'s folder.
+    pub household: Option<Household>,
     /// The household's phones (the Moli app), when a `phones` driver runs.
     pub phones: Option<moli_phones::Gateway>,
     /// The house's computers' Moli agents, when a host driver runs.
@@ -135,7 +171,11 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .route("/api/plan/images/{name}", get(plan::image))
         .route("/api/mobile/register", post(phones::register))
         .route("/api/phones/{id}/report", post(phones::report))
-        .route("/api/phones/{id}", axum::routing::delete(phones::remove))
+        .route("/api/phones", get(phones::list))
+        .route(
+            "/api/phones/{id}",
+            axum::routing::delete(phones::remove).put(phones::assign),
+        )
         .route(
             "/api/integrations/tuya-cloud",
             get(integrations::tuya_cloud).put(integrations::set_tuya_cloud),
@@ -180,11 +220,16 @@ fn people(
         .unwrap_or_default();
     let humans = session::Sessions::new(hub.clone(), options.ui_pin.clone(), owners);
     let access = options.access.as_ref().map(access::Verifier::new);
-    let data_dir = options
-        .home_path
-        .as_deref()
-        .and_then(std::path::Path::parent);
-    let persons = Arc::new(people::People::open(hub.clone(), data_dir, owners));
+    let persons = options.household.as_ref().map_or_else(
+        || {
+            let data_dir = options
+                .home_path
+                .as_deref()
+                .and_then(std::path::Path::parent);
+            Arc::new(people::People::open(hub.clone(), data_dir, owners))
+        },
+        |h| h.0.clone(),
+    );
     let gate = caller::Gate {
         access: access.map(Arc::new),
         demo: options.demo,

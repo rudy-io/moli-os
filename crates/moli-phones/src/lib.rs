@@ -68,6 +68,20 @@ pub struct Phone {
     pub created_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub push_token: Option<String>,
+    /// The person it belongs to (`personnes:<id>`): who paired it, signed in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+}
+
+/// A phone as the household sees it (no token).
+#[derive(Clone, Debug, Serialize)]
+pub struct PhoneInfo {
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+    pub model: String,
+    pub person: Option<String>,
+    pub created_ms: u64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -225,7 +239,9 @@ pub struct HomeView {
 }
 
 impl Gateway {
-    fn home(&self) -> Option<HomeView> {
+    /// The home: configured, or learned from a phone on the home Wi-Fi.
+    #[must_use]
+    pub fn home(&self) -> Option<HomeView> {
         self.config
             .home
             .or_else(|| self.registry.home())
@@ -243,6 +259,7 @@ impl Gateway {
         platform: &str,
         model: &str,
         push_token: Option<&str>,
+        person: Option<&str>,
     ) -> anyhow::Result<Paired> {
         let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
         ensure!(
@@ -276,6 +293,7 @@ impl Gateway {
             token_sha256: sha256(&token),
             created_ms: moli_core::now_ms(),
             push_token: push_token.map(str::to_owned),
+            person: person.map(str::to_owned),
         };
         {
             let mut file = self.registry.lock();
@@ -292,6 +310,38 @@ impl Gateway {
             token,
             home: self.home(),
         })
+    }
+
+    /// The household's phones.
+    #[must_use]
+    pub fn list(&self) -> Vec<PhoneInfo> {
+        self.registry
+            .lock()
+            .phones
+            .iter()
+            .map(|p| PhoneInfo {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                platform: p.platform.clone(),
+                model: p.model.clone(),
+                person: p.person.clone(),
+                created_ms: p.created_ms,
+            })
+            .collect()
+    }
+
+    /// Gives a phone to a person (or to nobody).
+    pub fn assign(&self, id: &str, person: Option<&str>) -> anyhow::Result<bool> {
+        let mut file = self.registry.lock();
+        let Some(phone) = file.phones.iter_mut().find(|p| p.id == id) else {
+            return Ok(false);
+        };
+        phone.person = person.map(str::to_owned);
+        let phone = phone.clone();
+        self.registry.save(&file)?;
+        drop(file);
+        let _ = self.tx.try_send(Event::Registered(phone));
+        Ok(true)
     }
 
     /// A phone forgotten (lost, sold): its token stops working at once.
@@ -435,6 +485,7 @@ fn numeric() -> Kind {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn device(ctx: &DriverCtx, phone: &Phone) -> Device {
     Device {
         id: ctx.device_id(&phone.id),
@@ -460,6 +511,13 @@ fn device(ctx: &DriverCtx, phone: &Phone) -> Device {
         native_room: None,
         members: Vec::new(),
         points: vec![
+            spec(
+                "person",
+                &moli_i18n::tr!("pilotes.phones.personne"),
+                Kind::Text,
+                None,
+                Semantic::Other,
+            ),
             spec(
                 "home",
                 &moli_i18n::tr!("pilotes.phones.a_la_maison"),
@@ -538,9 +596,20 @@ fn device(ctx: &DriverCtx, phone: &Phone) -> Device {
     }
 }
 
+/// A phone's device, and whose it is.
+fn publish(ctx: &DriverCtx, phone: &Phone) {
+    let id = ctx.device_id(&phone.id);
+    ctx.upsert_device(device(ctx, phone));
+    let person = phone
+        .person
+        .as_deref()
+        .map_or(Value::Null, |p| Value::Text(p.into()));
+    ctx.set_state(&id, "person", person);
+}
+
 async fn run(this: &Phones, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     for phone in this.gateway.registry.phones() {
-        ctx.upsert_device(device(ctx, &phone));
+        publish(ctx, &phone);
     }
     ctx.ready();
     let mut events = this.events.lock().await;
@@ -554,7 +623,7 @@ async fn run(this: &Phones, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 None => return Ok(()),
             },
             event = events.recv() => match event {
-                Some(Event::Registered(phone)) => ctx.upsert_device(device(ctx, &phone)),
+                Some(Event::Registered(phone)) => publish(ctx, &phone),
                 Some(Event::Report(id, report)) => apply(this, ctx, &id, &report),
                 Some(Event::Removed(id)) => ctx.set_availability(&ctx.device_id(&id), false),
                 // The API is gone first when Moli stops: wait for the end.
@@ -670,7 +739,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let (g, _phones) = gateway(&dir, config());
         let paired = g
-            .register("iPhone  de Sam", "ios", "iPhone 15", None)
+            .register("iPhone  de Sam", "ios", "iPhone 15", None, None)
             .unwrap();
         assert_eq!(paired.token.len(), 64);
         assert!(g.verify(&paired.id, &paired.token));
@@ -682,7 +751,7 @@ mod tests {
             "a removed phone's token is dead"
         );
         let paired = g
-            .register("iPhone  de Sam", "ios", "iPhone 15", None)
+            .register("iPhone  de Sam", "ios", "iPhone 15", None, None)
             .unwrap();
         let kept = std::fs::read_to_string(dir.join("phones.json")).unwrap();
         assert!(
@@ -690,8 +759,8 @@ mod tests {
             "only the token's hash is kept"
         );
         assert!(kept.contains("iPhone de Sam"));
-        assert!(g.register("", "ios", "", None).is_err());
-        assert!(g.register("x", "symbian", "", None).is_err());
+        assert!(g.register("", "ios", "", None, None).is_err());
+        assert!(g.register("x", "symbian", "", None, None).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 
