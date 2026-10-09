@@ -17,6 +17,7 @@ mod auto;
 mod house;
 mod import;
 mod llm;
+mod satellite;
 mod settings;
 mod voice;
 
@@ -195,6 +196,8 @@ struct Inner {
     /// SHA-256 of the HA automations translated since start: not paid for
     /// twice, even after their draft was renamed.
     imported: Mutex<std::collections::HashSet<String>>,
+    /// Voices prepared for a satellite: id → (until when, text).
+    prepared: Mutex<std::collections::HashMap<String, (Instant, String)>>,
 }
 
 /// One turn, as the dashboard sends it: the conversation so far, the last
@@ -313,6 +316,7 @@ impl Assistant {
             automations: std::sync::RwLock::new(None),
             importing: std::sync::atomic::AtomicBool::new(false),
             imported: Mutex::default(),
+            prepared: Mutex::default(),
         })))
     }
 
@@ -424,7 +428,7 @@ impl Assistant {
     /// One sentence of an answer, spoken (at most 300 characters), in the
     /// configured cloud voice or `voice` (one of OpenAI's, to try them).
     pub async fn speak(&self, text: &str, voice: Option<&str>) -> Result<Spoken, AssistantError> {
-        match self.voice_for(text, voice, false).await? {
+        match self.voice_for(text, voice, None).await? {
             Speech::Whole(spoken) => Ok(spoken),
             Speech::Stream(_) => Err(AssistantError::Upstream("a streamed voice".into())),
         }
@@ -437,14 +441,14 @@ impl Assistant {
         text: &str,
         voice: Option<&str>,
     ) -> Result<Speech, AssistantError> {
-        self.voice_for(text, voice, true).await
+        self.voice_for(text, voice, Some(voice::Stream::Pcm)).await
     }
 
     async fn voice_for(
         &self,
         text: &str,
         voice: Option<&str>,
-        streamed: bool,
+        stream: Option<voice::Stream>,
     ) -> Result<Speech, AssistantError> {
         let text = text.trim();
         if text.is_empty() || text.chars().count() > MAX_SPOKEN_CHARS {
@@ -484,10 +488,9 @@ impl Assistant {
             local_voice: Some(c.local_voice.as_str()).filter(|v| !v.is_empty()),
         };
         let said = voice::speakable(text);
-        let speech = if streamed {
-            voices.say_streamed(&said).await?
-        } else {
-            Speech::Whole(voices.say(&said).await?)
+        let speech = match stream {
+            Some(stream) => voices.say_streamed(&said, stream).await?,
+            None => Speech::Whole(voices.say(&said).await?),
         };
         // What a conversation costs: characters in, seconds of audio out (a
         // stream says it at its end).

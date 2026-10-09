@@ -93,6 +93,7 @@
   "assistant.voice.pace.normal": "Normal",
   "assistant.voice.pace.rapide": "Rapide",
   "assistant.voice.pace.tres_rapide": "Très rapide",
+  "assistant.voice.goodbye": "merci|merci beaucoup|merci moli|merci beaucoup moli|c'est tout|c'est tout merci|merci c'est tout|stop|au revoir|au revoir moli|ça ira|ça ira merci|bonne nuit|bonne nuit moli|à plus|à plus tard|terminé|c'est bon merci",
   "assistant.say.decimal": ",",
   "assistant.say.unit.celsius": "degrés",
   "assistant.say.unit.kwh": "kilowattheures",

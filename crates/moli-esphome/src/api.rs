@@ -20,6 +20,31 @@ pub const MEDIA_PLAYER_STATE: u16 = 64;
 pub const MEDIA_PLAYER_COMMAND: u16 = 65;
 pub const LIST_EVENT: u16 = 107;
 pub const EVENT: u16 = 108;
+pub const SUBSCRIBE_VOICE_ASSISTANT: u16 = 89;
+pub const VOICE_REQUEST: u16 = 90;
+pub const VOICE_RESPONSE: u16 = 91;
+pub const VOICE_EVENT: u16 = 92;
+pub const VOICE_AUDIO: u16 = 106;
+pub const VOICE_ANNOUNCE_FINISHED: u16 = 120;
+pub const VOICE_CONFIGURATION_REQUEST: u16 = 121;
+pub const VOICE_CONFIGURATION_RESPONSE: u16 = 122;
+pub const VOICE_SET_CONFIGURATION: u16 = 123;
+
+/// The voice pipeline's events, as the device reacts to them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoiceEvent {
+    Error = 0,
+    RunStart = 1,
+    RunEnd = 2,
+    SttStart = 3,
+    SttEnd = 4,
+    IntentStart = 5,
+    IntentEnd = 6,
+    TtsStart = 7,
+    TtsEnd = 8,
+    SttVadStart = 11,
+    SttVadEnd = 12,
+}
 
 /// The API version Moli speaks (the device warns below 1.14).
 const API_MAJOR: u64 = 1;
@@ -129,9 +154,146 @@ pub fn event(payload: &[u8]) -> Option<(u32, String)> {
     Some((m.fixed32(1)?, m.str(2).unwrap_or_default().to_owned()))
 }
 
+/// `SubscribeVoiceAssistantRequest`: Moli is the device's voice assistant.
+#[must_use]
+pub fn subscribe_voice() -> Vec<u8> {
+    Writer::new().bool(1, true).finish()
+}
+
+/// The device starts (a wake word, its button, a continued conversation) or stops.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VoiceRequest {
+    pub start: bool,
+    pub conversation_id: String,
+    pub flags: u64,
+    pub wake_word: String,
+}
+
+#[must_use]
+pub fn voice_request(payload: &[u8]) -> Option<VoiceRequest> {
+    let m = parse(payload)?;
+    Some(VoiceRequest {
+        start: m.bool(1),
+        conversation_id: m.str(2).unwrap_or_default().to_owned(),
+        flags: m.uint(3).unwrap_or(0),
+        wake_word: m.str(5).unwrap_or_default().to_owned(),
+    })
+}
+
+/// `VoiceAssistantResponse`: port 0 = the audio comes through the API; or an error.
+#[must_use]
+pub fn voice_response(error: bool) -> Vec<u8> {
+    if error {
+        Writer::new().bool(2, true).finish()
+    } else {
+        Writer::new().uint(1, 0).finish()
+    }
+}
+
+/// `VoiceAssistantEventResponse` with its data (always strings).
+#[must_use]
+pub fn voice_event(event: VoiceEvent, data: &[(&str, &str)]) -> Vec<u8> {
+    let mut w = Writer::new().uint(1, event as u64);
+    for (name, value) in data {
+        w = w.msg(2, Writer::new().str(1, name).str(2, value));
+    }
+    w.finish()
+}
+
+/// The microphone's audio (16 kHz, 16-bit, mono, little-endian).
+#[must_use]
+pub fn voice_audio(payload: &[u8]) -> Option<Vec<u8>> {
+    parse(payload)?.bytes(1).map(<[u8]>::to_vec)
+}
+
+/// The wake words the device has, the active ones, and how many may be.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WakeWords {
+    pub available: Vec<(String, String)>,
+    pub active: Vec<String>,
+    pub max_active: u64,
+}
+
+#[must_use]
+pub fn wake_words(payload: &[u8]) -> Option<WakeWords> {
+    let m = parse(payload)?;
+    Some(WakeWords {
+        available: m
+            .all_msgs(1)
+            .map(|w| {
+                (
+                    w.str(1).unwrap_or_default().to_owned(),
+                    w.str(2).unwrap_or_default().to_owned(),
+                )
+            })
+            .collect(),
+        active: m
+            .all_bytes(2)
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .collect(),
+        max_active: m.uint(3).unwrap_or(0),
+    })
+}
+
+/// `VoiceAssistantSetConfiguration`: these wake words, and only these, active.
+#[must_use]
+pub fn set_wake_words(ids: &[&str]) -> Vec<u8> {
+    ids.iter()
+        .fold(Writer::new(), |w, id| w.str(1, id))
+        .finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_messages() {
+        let request = Writer::new()
+            .bool(1, true)
+            .str(2, "conv-1")
+            .uint(3, 1)
+            .str(5, "Okay Nabu")
+            .finish();
+        assert_eq!(
+            voice_request(&request),
+            Some(VoiceRequest {
+                start: true,
+                conversation_id: "conv-1".into(),
+                flags: 1,
+                wake_word: "Okay Nabu".into()
+            })
+        );
+        let ok = voice_response(false);
+        let ok = parse(&ok).unwrap();
+        assert_eq!((ok.uint(1), ok.bool(2)), (Some(0), false));
+        let event = voice_event(
+            VoiceEvent::IntentEnd,
+            &[("conversation_id", "c"), ("continue_conversation", "1")],
+        );
+        let event = parse(&event).unwrap();
+        assert_eq!(event.uint(1), Some(6));
+        let data: Vec<_> = event
+            .all_msgs(2)
+            .map(|d| (d.str(1).unwrap().to_owned(), d.str(2).unwrap().to_owned()))
+            .collect();
+        assert_eq!(data[1], ("continue_conversation".into(), "1".into()));
+        let audio = Writer::new().bytes(1, &[1, 2, 3, 4]).finish();
+        assert_eq!(voice_audio(&audio), Some(vec![1, 2, 3, 4]));
+        let config = Writer::new()
+            .msg(1, Writer::new().str(1, "okay_nabu").str(2, "Okay Nabu"))
+            .msg(1, Writer::new().str(1, "hey_jarvis").str(2, "Hey Jarvis"))
+            .str(2, "okay_nabu")
+            .uint(3, 2)
+            .finish();
+        let words = wake_words(&config).unwrap();
+        assert_eq!(words.available.len(), 2);
+        assert_eq!(words.active, ["okay_nabu"]);
+        assert_eq!(words.max_active, 2);
+        let set = set_wake_words(&["hey_moli", "dis_moli"]);
+        let set = parse(&set).unwrap();
+        assert_eq!(set.all_bytes(1).count(), 2);
+    }
 
     #[test]
     fn hello_announces_moli_and_api_1_14() {

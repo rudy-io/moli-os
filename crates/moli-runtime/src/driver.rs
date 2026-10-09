@@ -163,6 +163,12 @@ impl DriverCtx {
         MediaPublisher(self.hub.clone())
     }
 
+    /// The home's assistant, for a voice satellite (once the binary set it).
+    #[must_use]
+    pub fn voice_brain(&self) -> Option<std::sync::Arc<dyn crate::voice::VoiceBrain>> {
+        self.hub.voice_brain()
+    }
+
     /// Declares that `device` (one of ours) can produce images on demand.
     pub fn provide_snapshots(
         &self,

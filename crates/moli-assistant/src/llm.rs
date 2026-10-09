@@ -155,9 +155,11 @@ impl Endpoint {
         Ok(audio.to_vec())
     }
 
-    /// The same as it is made: raw 16-bit PCM, 24 kHz mono, handed over
-    /// chunk by chunk, so the voice starts before the sentence is whole.
-    /// Bounded here up to the answer's head; the caller bounds the rest.
+    /// The same as it is made, in `format` (`pcm`: raw 16-bit, 24 kHz mono;
+    /// `mp3`), handed over chunk by chunk, so the voice starts before the
+    /// sentence is whole. Bounded here up to the answer's head; the caller
+    /// bounds the rest.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn speech_stream(
         &self,
         key: Option<&str>,
@@ -165,10 +167,16 @@ impl Endpoint {
         voice: &str,
         style: &str,
         speed: f64,
+        format: &str,
         text: &str,
     ) -> anyhow::Result<moli_net::Incoming> {
-        let body = speech_body(model, voice, style, speed, text, "pcm");
-        let request = self.request(key, "/audio/speech", "application/json", "audio/pcm", body)?;
+        let body = speech_body(model, voice, style, speed, text, format);
+        let accept = if format == "mp3" {
+            "audio/mpeg"
+        } else {
+            "audio/pcm"
+        };
+        let request = self.request(key, "/audio/speech", "application/json", accept, body)?;
         let (status, audio) =
             moli_net::web_stream(&self.host, self.port, self.tls, request, SPEAK_HEAD).await?;
         if !status.is_success() {

@@ -374,6 +374,8 @@ async fn start_brains(
     if let Some(moli) = &assistant {
         moli.set_automations(automations.clone());
         automations.set_writer(Arc::new(moli.clone()));
+        // The voice satellites (already running) find Moli from now on.
+        hub.set_voice_brain(Arc::new(moli.clone()));
     }
     Ok((assistant, automations, task))
 }

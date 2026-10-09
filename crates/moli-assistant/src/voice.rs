@@ -41,6 +41,30 @@ pub enum Speech {
 }
 
 pub(crate) const PCM_MIME: &str = "audio/pcm;rate=24000";
+
+/// How a streamed voice is encoded: raw PCM for the dashboard (played piece
+/// by piece), MP3 for a satellite's player (it decodes a stream).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stream {
+    Pcm,
+    Mp3,
+}
+
+impl Stream {
+    fn format(self) -> &'static str {
+        match self {
+            Self::Pcm => "pcm",
+            Self::Mp3 => "mp3",
+        }
+    }
+
+    fn mime(self) -> &'static str {
+        match self {
+            Self::Pcm => PCM_MIME,
+            Self::Mp3 => "audio/mpeg",
+        }
+    }
+}
 /// A stream that says nothing for this long is cut.
 const STREAM_IDLE: Duration = Duration::from_secs(10);
 /// 300 characters are under half a minute: 24 000 samples of 2 bytes a second.
@@ -117,16 +141,28 @@ impl Voices<'_> {
 impl Voices<'_> {
     /// The cloud voice as it is made; the house's (Piper, whole) when the
     /// cloud fails before saying anything.
-    pub(crate) async fn say_streamed(&self, text: &str) -> Result<Speech, AssistantError> {
+    pub(crate) async fn say_streamed(
+        &self,
+        text: &str,
+        stream: Stream,
+    ) -> Result<Speech, AssistantError> {
         if let Some(c) = &self.cloud {
             match c
                 .endpoint
-                .speech_stream(c.key, c.model, c.voice, c.style, c.speed, text)
+                .speech_stream(
+                    c.key,
+                    c.model,
+                    c.voice,
+                    c.style,
+                    c.speed,
+                    stream.format(),
+                    text,
+                )
                 .await
             {
                 Ok(audio) => {
                     return Ok(Speech::Stream(SpeechStream {
-                        mime: PCM_MIME,
+                        mime: stream.mime(),
                         engine: "cloud",
                         chunks: relay(audio, text.chars().count()),
                     }));
@@ -442,7 +478,8 @@ mod tests {
             local: None,
             local_voice: None,
         };
-        let Speech::Stream(mut stream) = voices.say_streamed("Bonsoir").await.unwrap() else {
+        let Speech::Stream(mut stream) = voices.say_streamed("Bonsoir", Stream::Pcm).await.unwrap()
+        else {
             panic!("a stream");
         };
         assert_eq!((stream.mime, stream.engine), (PCM_MIME, "cloud"));
@@ -473,7 +510,8 @@ mod tests {
             local: Some(("127.0.0.1", port)),
             local_voice: None,
         };
-        let Speech::Whole(spoken) = voices.say_streamed("Bonsoir").await.unwrap() else {
+        let Speech::Whole(spoken) = voices.say_streamed("Bonsoir", Stream::Pcm).await.unwrap()
+        else {
             panic!("Piper, whole");
         };
         assert_eq!((spoken.mime, spoken.engine), ("audio/wav", "local"));

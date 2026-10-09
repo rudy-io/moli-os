@@ -18,6 +18,7 @@ mod secrets;
 mod state_cache;
 mod stats;
 pub mod supervisor;
+pub mod voice;
 
 pub use driver::{BoxFuture, CommandRequest, Driver, DriverCtx, MediaPublisher};
 pub use hub::{

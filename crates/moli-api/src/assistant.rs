@@ -90,6 +90,22 @@ pub(crate) async fn speak(
             .await
             .map(Speech::Whole)
     };
+    speech_response(speech)
+}
+
+/// A voice prepared for a satellite (`<id>.mp3`, 60 s): its player fetches
+/// it and plays it while the cloud voice makes it. The id is the only key.
+pub(crate) async fn satellite_voice(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    speech_response(moli.satellite_voice(&name).await)
+}
+
+fn speech_response(speech: Result<Speech, AssistantError>) -> Response {
     let voice = header::HeaderName::from_static("x-moli-voice");
     match speech {
         Ok(Speech::Whole(spoken)) => (

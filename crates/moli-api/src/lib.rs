@@ -198,6 +198,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
             post(assistant::listen).layer(DefaultBodyLimit::max(BIG_BODY)),
         )
         .route("/api/assistant/speak", post(assistant::speak))
+        .route("/api/voice/{name}", get(assistant::satellite_voice))
         .route(
             "/api/assistant/settings",
             get(assistant::settings).put(assistant::set_settings),

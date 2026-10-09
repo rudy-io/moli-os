@@ -11,6 +11,9 @@
 mod api;
 mod frame;
 mod noise;
+mod satellite;
+mod sound;
+mod vad;
 
 use std::time::Duration;
 
@@ -55,6 +58,10 @@ pub struct Config {
     /// Seconds a conversation stays open after each answer.
     #[serde(default = "default_window")]
     pub window_s: u64,
+    /// The wake words to keep active (their ids in the device's firmware,
+    /// e.g. `hey_moli`); empty: as the device has them.
+    #[serde(default)]
+    pub wake_words: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -328,39 +335,35 @@ async fn session(
         "esphome device connected"
     );
     tx.send(api::SUBSCRIBE_STATES, &[]).await?;
+    // Moli is the device's voice assistant (the first to subscribe keeps it).
+    tx.send(api::SUBSCRIBE_VOICE_ASSISTANT, &api::subscribe_voice())
+        .await?;
+    if !config.wake_words.is_empty() {
+        let ids: Vec<&str> = config.wake_words.iter().map(String::as_str).collect();
+        tx.send(api::VOICE_SET_CONFIGURATION, &api::set_wake_words(&ids))
+            .await?;
+    }
+    tx.send(api::VOICE_CONFIGURATION_REQUEST, &[]).await?;
+    let (mut voice, mut thoughts) = satellite::Voice::new(
+        Duration::from_secs(config.window_s),
+        config.media_base.clone(),
+    );
 
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut heard = Instant::now();
     loop {
+        let deadline = voice.deadline();
         tokio::select! {
             message = inbox.recv() => {
                 let (kind, payload) = message.context("the connection closed")??;
                 heard = Instant::now();
-                match kind {
-                    api::PING_REQUEST => tx.send(api::PING_RESPONSE, &[]).await?,
-                    api::DISCONNECT_REQUEST => {
-                        let _ = tx.send(api::DISCONNECT_RESPONSE, &[]).await;
-                        bail!("the device closed the connection");
-                    }
-                    api::MEDIA_PLAYER_STATE => {
-                        if let Some(state) = api::media_state(&payload)
-                            .filter(|s| Some(s.key) == entities.media_player)
-                        {
-                            ctx.set_state(&id, "volume", Value::Float(f64::from((state.volume * 100.0).round())));
-                            ctx.set_state(&id, "muted", Value::Bool(state.muted));
-                        }
-                    }
-                    api::EVENT => {
-                        if let Some((key, event)) = api::event(&payload)
-                            .filter(|(key, _)| Some(*key) == entities.button)
-                        {
-                            tracing::debug!(instance = %ctx.instance(), key, event, "button");
-                        }
-                    }
-                    _ => {}
-                }
+                on_message(ctx, &id, &mut tx, &entities, &mut voice, kind, &payload).await?;
             }
+            Some((generation, thought)) = thoughts.recv() => {
+                voice.on_thought(ctx, &id, &mut tx, generation, thought).await?;
+            }
+            () = until(deadline) => voice.on_deadline(ctx, &id, &mut tx).await?,
             _ = ping.tick() => {
                 if heard.elapsed() > SILENCE_LIMIT {
                     bail!("the device went silent");
@@ -376,6 +379,76 @@ async fn session(
                 command.reply(result);
             }
         }
+    }
+}
+
+/// One message from the device, once connected.
+async fn on_message(
+    ctx: &DriverCtx,
+    id: &DeviceId,
+    tx: &mut Outbox,
+    entities: &Entities,
+    voice: &mut satellite::Voice,
+    kind: u16,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    match kind {
+        api::PING_REQUEST => tx.send(api::PING_RESPONSE, &[]).await?,
+        api::DISCONNECT_REQUEST => {
+            let _ = tx.send(api::DISCONNECT_RESPONSE, &[]).await;
+            bail!("the device closed the connection");
+        }
+        api::VOICE_AUDIO => {
+            if let Some(pcm) = api::voice_audio(payload) {
+                voice.on_audio(ctx, id, tx, &pcm).await?;
+            }
+        }
+        api::VOICE_REQUEST => {
+            if let Some(request) = api::voice_request(payload) {
+                voice.on_request(ctx, id, tx, &request).await?;
+            }
+        }
+        api::VOICE_ANNOUNCE_FINISHED => voice.on_played(ctx, id),
+        api::VOICE_CONFIGURATION_RESPONSE => {
+            if let Some(words) = api::wake_words(payload) {
+                tracing::info!(
+                    instance = %ctx.instance(),
+                    available = ?words.available.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+                    active = ?words.active,
+                    max_active = words.max_active,
+                    "wake words"
+                );
+            }
+        }
+        api::MEDIA_PLAYER_STATE => {
+            if let Some(state) =
+                api::media_state(payload).filter(|s| Some(s.key) == entities.media_player)
+            {
+                ctx.set_state(
+                    id,
+                    "volume",
+                    Value::Float(f64::from((state.volume * 100.0).round())),
+                );
+                ctx.set_state(id, "muted", Value::Bool(state.muted));
+            }
+        }
+        api::EVENT => {
+            if let Some((_, event)) =
+                api::event(payload).filter(|(key, _)| Some(*key) == entities.button)
+            {
+                voice.on_button(ctx, id, tx, &event).await?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Until `at`; forever without one (a `select!` branch that never fires).
+async fn until(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }
 

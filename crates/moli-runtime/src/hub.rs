@@ -232,6 +232,8 @@ struct Inner {
     images: Mutex<HashMap<DeviceId, LastImage>>,
     /// Short-lived media a device fetches back (an announcement's sound).
     published: Mutex<HashMap<String, (Instant, crate::media::Image)>>,
+    /// The assistant voice satellites talk to (set after the drivers start).
+    voice: std::sync::OnceLock<Arc<dyn crate::voice::VoiceBrain>>,
     opts: HubOptions,
     started: Instant,
 }
@@ -342,9 +344,23 @@ impl Hub {
             state_dirty: AtomicBool::new(false),
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
+            voice: std::sync::OnceLock::new(),
             opts,
             started: Instant::now(),
         })))
+    }
+
+    /// The assistant voice satellites talk to, once it exists (set once).
+    pub fn set_voice_brain(&self, brain: Arc<dyn crate::voice::VoiceBrain>) {
+        if self.0.voice.set(brain).is_err() {
+            tracing::warn!("a voice brain was already set");
+        }
+    }
+
+    /// The assistant, if the binary has handed it over yet.
+    #[must_use]
+    pub fn voice_brain(&self) -> Option<Arc<dyn crate::voice::VoiceBrain>> {
+        self.0.voice.get().cloned()
     }
 
     // ---- reading -----------------------------------------------------------
