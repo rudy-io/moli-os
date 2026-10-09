@@ -60,6 +60,8 @@ téléphones passent sans Access, avec leur propre jeton.
 | [api.md](components/api.md) | REST, SSE, MCP, CLI, sécurité des routes |
 | [dashboard.md](components/dashboard.md) | interface Maison et Atelier (Svelte 5), carte vivante |
 | [exploitation.md](components/exploitation.md) | image Docker, clé maître, sauvegarde, mise à jour, développement |
+| [installation.md](components/installation.md) | premier démarrage, code de la maison, clé maître, premiers appareils, accès hors de chez soi |
+| [traduction.md](components/traduction.md) | catalogues `locales/`, clés, pluriels, ajouter une langue, contrôle |
 
 ## Les règles à ne jamais oublier
 
