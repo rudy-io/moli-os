@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use moli_core::{DeviceId, Kind, Value};
+use moli_core::{DeviceId, Kind, PointId, Value};
 use moli_runtime::DeviceView;
 use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization as _;
@@ -205,6 +205,27 @@ pub(crate) fn inventory(
     out
 }
 
+/// A point as the model wrote it. It sometimes names the integration rather
+/// than the device (`tele/app` for `tele:192.168.1.x/app`): the one device
+/// of that instance with that value, when there is exactly one.
+pub(crate) fn resolve_point(written: &str, devices: &[DeviceView]) -> PointId {
+    let point = PointId::from(written.trim());
+    let Some((device, key)) = point.split() else {
+        return point;
+    };
+    if devices.iter().any(|v| v.device.id == device) {
+        return point;
+    }
+    let mut matching = devices.iter().filter(|v| {
+        v.device.instance.as_str() == device.as_str()
+            && v.device.points.iter().any(|p| &*p.key == key)
+    });
+    match (matching.next(), matching.next()) {
+        (Some(only), None) => PointId::from(format!("{}/{key}", only.device.id.as_str())),
+        _ => point,
+    }
+}
+
 const MAX_POINTS: usize = 8;
 const MAX_CHOICES: usize = 30;
 
@@ -322,6 +343,45 @@ mod tests {
             camera: false,
             printer: false,
         }
+    }
+
+    fn with_point(mut view: DeviceView, key: &str) -> DeviceView {
+        let device = std::sync::Arc::make_mut(&mut view.device);
+        device.points.push(moli_core::PointSpec {
+            key: key.into(),
+            label: key.into(),
+            kind: Kind::Text,
+            access: moli_core::Access {
+                read: true,
+                write: true,
+            },
+            unit: None,
+            semantic: moli_core::Semantic::Other,
+        });
+        view
+    }
+
+    #[test]
+    fn a_point_named_by_its_instance_finds_its_one_device() {
+        let devices = [
+            with_point(view("tele:192.168.1.x", "TV", &[]), "app"),
+            with_point(view("hue:1", "LCA006", &[]), "on"),
+            with_point(view("hue:2", "LCA006", &[]), "on"),
+        ];
+        assert_eq!(
+            resolve_point("tele/app", &devices).as_str(),
+            "tele:192.168.1.x/app"
+        );
+        // Already right, or ambiguous, or unknown: as written.
+        assert_eq!(
+            resolve_point("tele:192.168.1.x/app", &devices).as_str(),
+            "tele:192.168.1.x/app"
+        );
+        assert_eq!(resolve_point("hue/on", &devices).as_str(), "hue/on");
+        assert_eq!(
+            resolve_point("tele/volume", &devices).as_str(),
+            "tele/volume"
+        );
     }
 
     #[test]

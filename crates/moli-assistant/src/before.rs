@@ -18,7 +18,7 @@ use crate::import::HaAutomation;
 const REWORDED: [(&str, &str); 6] = [
     (
         "Pour la télé, appuie sur une touche avec `key`.",
-        "Pour la télé, appuie sur une touche avec `key` ; pour ouvrir une appli, `set` sur son `app` avec le nom de l'appli (« YouTube », « Netflix », « Disney+ »), même télé éteinte.",
+        "Pour la télé, appuie sur une touche avec `key` ; pour ouvrir une appli, `set` sur `<id de la télé>/app` avec le nom de l'appli (« YouTube », « Netflix », « Disney+ »), même télé éteinte.",
     ),
     (
         "appelle `set` tout de suite, sur une valeur marquée ✎ dans l'inventaire.",

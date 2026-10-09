@@ -751,7 +751,7 @@ impl Assistant {
         let (Some(point), Some(value)) = (args["point"].as_str(), args.get("value")) else {
             return json!({ "error": "point and value are required" });
         };
-        let point = PointId::from(point);
+        let point = house::resolve_point(point, &self.0.hub.snapshot().devices);
         let device = point
             .split()
             .and_then(|(d, _)| self.0.hub.device(&d))
