@@ -130,6 +130,10 @@ pub struct Server {
     /// assistant, its dashboard. The one chosen at the installation wins.
     #[serde(default = "default_language")]
     pub language: String,
+    /// A demo house, with demo devices only (`kind = "demo"`): anyone who
+    /// reaches it is let in. Refused with any real driver.
+    #[serde(default)]
+    pub demo: bool,
 }
 
 fn default_language() -> String {
@@ -150,6 +154,7 @@ impl Default for Server {
             history_days: default_history_days(),
             access: None,
             language: default_language(),
+            demo: false,
         }
     }
 }
@@ -238,6 +243,19 @@ impl Config {
                 "[server] language = {:?}: Moli speaks {}",
                 self.server.language,
                 moli_i18n::languages().join(", ")
+            );
+        }
+        // A demo is opened to anyone: nothing real may sit behind it.
+        if self.server.demo
+            && let Some(real) = self
+                .drivers
+                .iter()
+                .find(|d| !["demo", "helpers"].contains(&d.kind.as_str()))
+        {
+            bail!(
+                "[server] demo = true opens the house to anyone: driver {:?} (kind {:?}) is real, only demo and helpers drivers are allowed",
+                real.id,
+                real.kind
             );
         }
         let mut seen = std::collections::HashSet::new();

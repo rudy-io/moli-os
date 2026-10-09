@@ -118,5 +118,6 @@
   "serveur.energie.point.month_cost": "Cost this month (kWh)",
   "serveur.energie.point.projection_kwh": "Usage this month at the current pace",
   "serveur.energie.point.bill_projection": "Bill this month at the current pace (plan fee included)",
-  "serveur.energie.point.over_budget": "Estimated bill over budget"
+  "serveur.energie.point.over_budget": "Estimated bill over budget",
+  "serveur.demo.reserve": "not in the demo: this change would stay for the next visitors"
 }

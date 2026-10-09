@@ -1,0 +1,23 @@
+[integration]
+id = "demo"
+name = "Maison de démonstration (appareils simulés)"
+brands = []
+models = []
+# Nothing on the network: the devices come from a file and live in memory.
+transport = "native"
+driver = "demo"
+crate = "moli-demo"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["fixture"]
+
+[origin]
+reused = "aucune intégration HA : rejoue des appareils réels anonymisés, tels que les vrais pilotes les publient"
+author = "agent"
