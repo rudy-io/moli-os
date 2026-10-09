@@ -250,7 +250,7 @@ mod tests {
         {
             assert_eq!(*id, old_id);
             assert_eq!(moli_i18n::tr(label), old_label);
-            assert_eq!(moli_i18n::tr(text), old_text);
+            assert_eq!(moli_i18n::tr(text), crate::before::reworded(old_text));
         }
     }
 

@@ -34,6 +34,7 @@ pub(crate) struct Cloud<'a> {
     pub model: &'a str,
     pub voice: &'a str,
     pub style: &'a str,
+    pub speed: f64,
 }
 
 /// The voices available for one sentence, in order of preference.
@@ -49,7 +50,7 @@ impl Voices<'_> {
         if let Some(c) = &self.cloud {
             match c
                 .endpoint
-                .speech(c.key, c.model, c.voice, c.style, text)
+                .speech(c.key, c.model, c.voice, c.style, c.speed, text)
                 .await
             {
                 Ok(audio) => {
@@ -289,6 +290,7 @@ mod tests {
                 model: "m",
                 voice: "v",
                 style: "",
+                speed: 1.0,
             }),
             local: Some(("127.0.0.1", 1)),
             local_voice: None,
@@ -310,6 +312,7 @@ mod tests {
                 model: "m",
                 voice: "v",
                 style: "",
+                speed: 1.0,
             }),
             local: Some(("127.0.0.1", port)),
             local_voice: Some("fr_FR-siwis-medium"),

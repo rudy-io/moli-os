@@ -112,13 +112,15 @@ impl Endpoint {
     }
 
     /// Text to speech (`/audio/speech`): MP3 bytes. `style` steers the
-    /// voice (models that take instructions); empty = none.
+    /// voice (models that take instructions); empty = none. `speed` 1 = the
+    /// model's own pace.
     pub(crate) async fn speech(
         &self,
         key: Option<&str>,
         model: &str,
         voice: &str,
         style: &str,
+        speed: f64,
         text: &str,
     ) -> anyhow::Result<Vec<u8>> {
         let mut body = serde_json::json!({
@@ -129,6 +131,9 @@ impl Endpoint {
         });
         if !style.is_empty() {
             body["instructions"] = serde_json::json!(style);
+        }
+        if (speed - 1.0).abs() > f64::EPSILON {
+            body["speed"] = serde_json::json!(speed);
         }
         let audio = self
             .send(
@@ -288,7 +293,14 @@ pub(crate) mod tests {
         let (url, task) = fake_http(200, b"ID3fake-mp3").await;
         let audio = Endpoint::parse(&url)
             .unwrap()
-            .speech(None, "gpt-4o-mini-tts", "sage", "Voix posée.", "Bonsoir")
+            .speech(
+                None,
+                "gpt-4o-mini-tts",
+                "sage",
+                "Voix posée.",
+                1.2,
+                "Bonsoir",
+            )
             .await
             .unwrap();
         assert_eq!(audio, b"ID3fake-mp3");
@@ -297,6 +309,15 @@ pub(crate) mod tests {
         assert!(request.contains("\"input\":\"Bonsoir\""));
         assert!(request.contains("\"instructions\":\"Voix posée.\""));
         assert!(request.contains("\"response_format\":\"mp3\""));
+        assert!(request.contains("\"speed\":1.2"), "{request}");
+        // The model's own pace is not asked for.
+        let (url, task) = fake_http(200, b"ID3fake-mp3").await;
+        Endpoint::parse(&url)
+            .unwrap()
+            .speech(None, "m", "v", "", 1.0, "Bonsoir")
+            .await
+            .unwrap();
+        assert!(!task.await.unwrap().contains("speed"));
     }
 
     #[tokio::test]
@@ -348,7 +369,7 @@ pub(crate) mod tests {
         let (url, _task) = fake_http(500, br#"{"error":{"message":"boom"}}"#).await;
         let err = Endpoint::parse(&url)
             .unwrap()
-            .speech(None, "m", "v", "", "x")
+            .speech(None, "m", "v", "", 1.0, "x")
             .await
             .unwrap_err()
             .to_string();

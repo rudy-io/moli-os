@@ -27,7 +27,7 @@ const APPROVAL = { fr: /valid/i, en: /approv|confirm|valid/i };
 /** Does `reply` already ask for an approval? */
 export const mentionsApproval = (reply, language = 'fr') => (APPROVAL[language] ?? APPROVAL.fr).test(reply);
 
-/** One sentence as audio (MP3 or WAV) from the server; oice to try another. */
+/** One sentence as audio (MP3 or WAV) from the server; `voice` to try another. */
 export async function fetchSpeech(text, signal, voice) {
   const res = await fetch('/api/assistant/speak', {
     method: 'POST',

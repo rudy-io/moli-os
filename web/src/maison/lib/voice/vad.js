@@ -1,7 +1,8 @@
 // Is someone speaking? Energy against an adaptive noise floor, per 20 ms frame.
 
 export class Vad {
-  constructor({ factor = 3, minLevel = 0.012, startMs = 150, endMs = 900, frameMs = 20 } = {}) {
+  // endMs: 700 ms of silence ends a sentence (a pause inside one is shorter).
+  constructor({ factor = 3, minLevel = 0.012, startMs = 150, endMs = 700, frameMs = 20 } = {}) {
     Object.assign(this, { factor, minLevel, frameMs });
     this.startFrames = Math.ceil(startMs / frameMs);
     this.strictFrames = Math.ceil(300 / frameMs);

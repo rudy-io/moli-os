@@ -131,15 +131,18 @@ masqué raccroche.
 ### Serveur
 
 - `POST /api/assistant/speak` `{ "text": "…", "voice"?: "coral" }` (1 à 300 caractères ; `voice` = une voix OpenAI pour essayer, sinon `speech_voice`) → `audio/mpeg` (voix
-  OpenAI `speech_model`) ou `audio/wav` (Piper `local_speech`), en-tête `x-moli-voice:
+  OpenAI `speech_model`, au débit `speech_speed`, 1,2 par défaut, de 0,25 à 4) ou `audio/wav`
+  (Piper `local_speech`), en-tête `x-moli-voice:
   cloud|local`. Le texte passe par `speakable()` (« 22.9 °C » → « 22,9 degrés », W, kWh, €,
   %, « 21h05 »). Budget à part de la conversation : 150 phrases / 10 min, 3 à la fois.
 - `POST /api/assistant/listen` : WAV 16 kHz mono (ce que le tableau de bord envoie) ou tout
   format audio accepté par OpenAI → `{ text, engine }`. Cloud d'abord, **Whisper local**
   (`local_listen`) si le cloud échoue ou est coupé (WAV seulement).
-- `POST /api/assistant` avec `spoken: true` : consigne orale ajoutée au prompt (phrases
-  courtes, pas de symbole, nombres comme on les dit, « il faut valider à l'écran » si un
-  ordre attend).
+- `POST /api/assistant` avec `spoken: true` : consigne orale ajoutée au prompt (une phrase
+  d'une quinzaine de mots, rien que la réponse, pas de symbole, nombres comme on les dit,
+  « il faut valider à l'écran » si un ordre attend).
+- Un tour s'arrête dès que le modèle écrit sa réponse **avec** son appel à `show` (les cartes
+  ne renvoient rien d'utile) : un aller-retour de moins, environ une seconde de gagnée.
 - `GET /api/assistant` : `listen`, `speak`, `voices: { cloud, local }`.
 
 | Panne | Comportement |
@@ -165,7 +168,7 @@ masqué raccroche.
 ### Navigateur (`web/src/maison/lib/voice/`)
 
 `capture.js` (micro → AudioWorklet → trames de 20 ms à 16 kHz), `vad.js` (énergie contre un
-plancher de bruit appris : début après 150 ms au-dessus de 3× le plancher, fin après 900 ms
+plancher de bruit appris : début après 150 ms au-dessus de 3× le plancher, fin après 700 ms
 de silence ; pendant que Moli parle, seuil ×2 et 300 ms, plancher figé pour ne pas apprendre
 l'écho), `pcm.js` (rééchantillonnage, WAV), `speech.js` (phrases : la 1re part seule pour que
 la voix démarre vite ; phrases de fin), `player.js` (un seul `AudioContext` débloqué au

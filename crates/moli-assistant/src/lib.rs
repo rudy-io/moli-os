@@ -64,6 +64,9 @@ pub struct Config {
     /// How the cloud voice should sound (models that take instructions).
     #[serde(default = "default_speech_style")]
     pub speech_style: String,
+    /// How fast the cloud voice speaks, 0.25 to 4 (1 = the model's own pace).
+    #[serde(default = "default_speech_speed")]
+    pub speech_speed: f64,
     /// Piper (Wyoming) `host:port`, when the cloud fails; empty = none.
     #[serde(default = "default_local_speech")]
     pub local_speech: String,
@@ -88,6 +91,7 @@ impl Default for Config {
             speech_model: default_speech_model(),
             speech_voice: default_speech_voice(),
             speech_style: default_speech_style(),
+            speech_speed: default_speech_speed(),
             local_speech: default_local_speech(),
             local_voice: default_local_voice(),
             local_listen: default_local_listen(),
@@ -117,7 +121,12 @@ fn default_speech_voice() -> String {
 }
 
 fn default_speech_style() -> String {
-    "Ton enjoué et souriant, plein d'énergie, comme un ami content de rendre service. Intonation vivante, débit vif, français naturel de France.".into()
+    "Ton enjoué et souriant, plein d'énergie, comme un ami content de rendre service. Intonation vivante, débit rapide, sans traîner, français naturel de France.".into()
+}
+
+/// A conversation, not a reading: a little brisker than the model's pace.
+fn default_speech_speed() -> f64 {
+    1.2
 }
 
 fn default_local_speech() -> String {
@@ -283,6 +292,10 @@ impl Assistant {
     ) -> anyhow::Result<Self> {
         let endpoint = Endpoint::parse(&config.base_url)?;
         let tz = jiff::tz::TimeZone::get(&config.timezone)?;
+        anyhow::ensure!(
+            (0.25..=4.0).contains(&config.speech_speed),
+            "speech_speed must be between 0.25 and 4"
+        );
         Ok(Self(Arc::new(Inner {
             hub,
             energy,
@@ -441,6 +454,7 @@ impl Assistant {
                     model: &c.speech_model,
                     voice: voice.unwrap_or(&chosen),
                     style: &style,
+                    speed: c.speech_speed,
                 }),
                 _ => None,
             },
@@ -518,6 +532,12 @@ impl Assistant {
             let message = &answer["choices"][0]["message"];
             let calls = message["tool_calls"].as_array().filter(|c| !c.is_empty());
             if let Some(calls) = calls {
+                // Cards and words in the same answer: the screen gives nothing
+                // back worth another round trip, the turn ends here (a second
+                // sooner, which a spoken conversation hears).
+                let said = message["content"].as_str().unwrap_or_default().trim();
+                let only_cards = calls.iter().all(|c| c["function"]["name"] == "show");
+                let done = (only_cards && !said.is_empty()).then(|| said.to_owned());
                 messages.push(json!({
                     "role": "assistant",
                     "content": message["content"],
@@ -535,6 +555,9 @@ impl Assistant {
                         "tool_call_id": call["id"],
                         "content": result.to_string(),
                     }));
+                }
+                if let Some(said) = done {
+                    return Ok(self.finish(&said, run, &layout, &question));
                 }
                 continue;
             }
@@ -1496,8 +1519,41 @@ mod tests {
     fn old_configs_still_load() {
         let c: Config = toml::from_str("model = \"gpt-4.1-mini\"").unwrap();
         assert_eq!(c.speech_model, "gpt-4o-mini-tts");
+        assert!((c.speech_speed - 1.2).abs() < f64::EPSILON);
         assert_eq!(c.local_speech, "127.0.0.1:10200");
         assert_eq!(c.local_listen, "127.0.0.1:10300");
+    }
+
+    #[test]
+    fn a_voice_pace_out_of_range_is_refused() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config: Config = toml::from_str("speech_speed = 9.0").unwrap();
+        let err = Assistant::new(hub, None, None, None, config).unwrap_err();
+        assert!(err.to_string().contains("speech_speed"), "{err}");
+    }
+
+    /// The fake provider answers once: a second round trip would fail the turn.
+    #[tokio::test]
+    async fn cards_and_words_together_end_the_turn() {
+        let answer = br#"{"choices":[{"message":{"role":"assistant",
+            "content":"Il fait vingt-trois degres dehors.",
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"show",
+            "arguments":"{\"cards\":[{\"kind\":\"weather\"}]}"}}]}}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5}}"#;
+        let (url, _task) = crate::llm::tests::fake_http(200, answer).await;
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        let moli = Assistant::new(hub, None, None, None, config).unwrap();
+        let turn: Turn = serde_json::from_value(json!({
+            "spoken": true,
+            "messages": [{ "role": "user", "content": "Quel temps fait-il ?" }],
+        }))
+        .unwrap();
+        let reply = moli.turn(turn).await.unwrap();
+        assert_eq!(reply.usage.steps, 1);
+        assert_eq!(reply.reply, "Il fait vingt-trois degres dehors.");
+        assert_eq!(reply.cards.len(), 1);
+        assert_eq!(reply.cards[0]["kind"], "weather");
     }
 
     #[test]
@@ -1776,7 +1832,7 @@ mod tests {
                 inventory,
             }
             .render();
-            assert_eq!(now, before);
+            assert_eq!(now, before::reworded(&before));
         }
         assert_eq!(
             quiet_text("22:00", "07:00", true),
@@ -1806,7 +1862,7 @@ mod tests {
     fn the_french_spoken_style_is_what_it_always_was() {
         assert_eq!(
             with_voice("Tu es Moli.".into(), true),
-            format!("Tu es Moli.{}", before::SPOKEN_STYLE)
+            format!("Tu es Moli.{}", before::reworded(before::SPOKEN_STYLE))
         );
     }
 
