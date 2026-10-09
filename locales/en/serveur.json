@@ -119,5 +119,21 @@
   "serveur.energie.point.projection_kwh": "Usage this month at the current pace",
   "serveur.energie.point.bill_projection": "Bill this month at the current pace (plan fee included)",
   "serveur.energie.point.over_budget": "Estimated bill over budget",
-  "serveur.demo.reserve": "not in the demo: this change would stay for the next visitors"
+  "serveur.demo.reserve": "not in the demo: this change would stay for the next visitors",
+
+  "serveur.personnes.mot_de_passe_court": "a password of {min} characters at least",
+  "serveur.personnes.trop": "too many people in the house",
+  "serveur.personnes.zones_trop": "too many zones",
+  "serveur.personnes.zone_invalide": "zone “{zone}”: name, position (latitude, longitude) and a radius from 20 m to 50 km",
+  "serveur.personnes.email_pris": "the e-mail {email} already belongs to someone else",
+  "serveur.personnes.champ": "value refused: {champ}",
+  "serveur.personnes.inconnue": "unknown person",
+  "serveur.personnes.dernier_proprietaire": "the house keeps at least one owner",
+  "serveur.personnes.pas_ecrit": "the people could not be saved (disk or secret store)",
+  "serveur.personnes.proprietaire_seul": "only an owner of the house manages people and zones",
+  "serveur.personnes.soi_seulement": "everyone changes their own password only",
+  "serveur.personnes.invitation_incorrecte": "unknown or expired invitation code",
+  "serveur.personnes.identifiants_incorrects": "wrong name or password",
+  "serveur.personnes.invite_limite": "a guest may only command in their rooms",
+  "serveur.personnes.invite_piece": "this device is not in this guest's rooms"
 }

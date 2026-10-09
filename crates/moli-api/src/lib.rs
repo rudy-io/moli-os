@@ -23,6 +23,8 @@ mod integrations;
 mod limit;
 mod machines;
 mod mcp;
+mod people;
+mod people_api;
 mod phones;
 mod plan;
 mod rest;
@@ -139,6 +141,18 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
             get(integrations::tuya_cloud).put(integrations::set_tuya_cloud),
         )
         .route("/api/session/pin", put(rest::set_pin))
+        .route(
+            "/api/people",
+            get(people_api::list).post(people_api::create),
+        )
+        .route(
+            "/api/people/{id}",
+            put(people_api::update).delete(people_api::remove),
+        )
+        .route("/api/people/{id}/invite", post(people_api::invite))
+        .route("/api/people/{id}/password", put(people_api::password))
+        .route("/api/zones", put(people_api::zones))
+        .route("/api/invitation", post(people_api::redeem))
         .route("/api/session/setup", post(rest::setup))
         .route("/api/machines/{id}", get(machines::view))
         .route("/api/machines/{id}/report", post(machines::report))
@@ -155,7 +169,10 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
 
 /// Who is who: the human sessions (the code, its owners) and the Cloudflare
 /// Access check.
-fn people(hub: &Hub, options: &Options) -> (Arc<session::Sessions>, caller::Gate) {
+fn people(
+    hub: &Hub,
+    options: &Options,
+) -> (Arc<session::Sessions>, caller::Gate, Arc<people::People>) {
     let owners = options
         .access
         .as_ref()
@@ -163,16 +180,22 @@ fn people(hub: &Hub, options: &Options) -> (Arc<session::Sessions>, caller::Gate
         .unwrap_or_default();
     let humans = session::Sessions::new(hub.clone(), options.ui_pin.clone(), owners);
     let access = options.access.as_ref().map(access::Verifier::new);
+    let data_dir = options
+        .home_path
+        .as_deref()
+        .and_then(std::path::Path::parent);
+    let persons = Arc::new(people::People::open(hub.clone(), data_dir, owners));
     let gate = caller::Gate {
         access: access.map(Arc::new),
         demo: options.demo,
+        people: persons.clone(),
     };
-    (Arc::new(humans), gate)
+    (Arc::new(humans), gate, persons)
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
-    let (humans, gate) = people(&hub, options);
+    let (humans, gate, persons) = people(&hub, options);
     Router::new()
         .route("/api/health", get(rest::health))
         .merge(device_routes())
@@ -262,6 +285,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
         .layer(Extension(humans))
+        .layer(Extension(persons))
         .layer(DefaultBodyLimit::max(BODY))
         .layer(middleware::from_fn_with_state(
             Arc::new(limit::Limits::default()),

@@ -545,7 +545,8 @@ impl Hub {
     /// Every room an order on this device reaches: its own (user label and
     /// source system's room) and, for a group, those of each member. All
     /// count for protection.
-    fn rooms_of(&self, device: &DeviceId) -> Vec<String> {
+    #[must_use]
+    pub fn rooms_of(&self, device: &DeviceId) -> Vec<String> {
         let model = self.read();
         let own = |id: &DeviceId| {
             let label = model.labels.get(id).and_then(|l| l.room.clone());

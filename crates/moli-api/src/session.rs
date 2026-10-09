@@ -412,7 +412,11 @@ impl Sessions {
 
     /// One attempt at a code from `key`, behind the per-client and global
     /// lockouts: `matches` is only asked when nobody is locked out.
-    fn attempt(&self, key: &str, matches: impl FnOnce() -> bool) -> Result<(), LoginError> {
+    pub(crate) fn attempt(
+        &self,
+        key: &str,
+        matches: impl FnOnce() -> bool,
+    ) -> Result<(), LoginError> {
         if lock(&self.global)
             .2
             .is_some_and(|until| Instant::now() < until)

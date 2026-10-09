@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::caller::{Caller, Via};
+use crate::people::People;
 use crate::session::{ClaimError, LoginError, Sessions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -68,6 +69,22 @@ pub(crate) fn origin(hub: &Hub, headers: &HeaderMap, humans: &Sessions, caller: 
     }
 }
 
+/// A guest commands in its rooms only.
+#[allow(clippy::result_large_err)]
+fn guest_may(hub: &Hub, caller: &Caller, device: &DeviceId) -> Result<(), Response> {
+    let Some(person) = caller.person.as_ref().filter(|p| p.is_guest()) else {
+        return Ok(());
+    };
+    let rooms = hub.rooms_of(device);
+    if !rooms.is_empty() && rooms.iter().all(|r| person.rooms.contains(r)) {
+        return Ok(());
+    }
+    Err(error(
+        StatusCode::FORBIDDEN,
+        &moli_i18n::tr!("serveur.personnes.invite_piece"),
+    ))
+}
+
 pub(crate) async fn command(
     State(hub): State<Hub>,
     Extension(humans): Humans,
@@ -75,6 +92,11 @@ pub(crate) async fn command(
     headers: HeaderMap,
     Json(body): Json<CommandBody>,
 ) -> Response {
+    if let Some((device, _)) = body.point.split()
+        && let Err(no) = guest_may(&hub, &caller, &device)
+    {
+        return no;
+    }
     let origin = origin(&hub, &headers, &humans, &caller);
     let actor = match origin {
         Origin::Ui => body.actor.or_else(|| Some(caller.describe())),
@@ -147,6 +169,11 @@ pub(crate) async fn ambiance(
             return error(StatusCode::BAD_REQUEST, "one of ambiance, color or white");
         }
     };
+    for light in &body.lights {
+        if let Err(no) = guest_may(&hub, &caller, light) {
+            return no;
+        }
+    }
     let origin = origin(&hub, &headers, &humans, &caller);
     let actor = match origin {
         Origin::Ui => body.actor.or_else(|| Some(caller.describe())),
@@ -235,6 +262,7 @@ pub(crate) async fn set_label(
 pub(crate) async fn session(
     State(hub): State<Hub>,
     Extension(humans): Humans,
+    Extension(persons): Extension<Arc<People>>,
     caller: Caller,
     headers: HeaderMap,
 ) -> Response {
@@ -242,7 +270,12 @@ pub(crate) async fn session(
         Via::Access { email } => Some(email.as_str()),
         _ => None,
     };
+    let owner = crate::people_api::is_owner(&caller, &humans, &persons, &headers);
     Json(json!({
+        // The person Moli recognised (Access e-mail, password), if any.
+        "person": caller.person,
+        // From the Internet without signing in: only the sign-in page.
+        "login_required": caller.via == Via::Outside,
         "human": humans.is_human(&headers, &caller.key),
         "pin_configured": humans.pin_configured(),
         "locked": humans.locked(&caller.key),
@@ -251,7 +284,7 @@ pub(crate) async fn session(
         "via": caller.via_name(),
         "who": who,
         // May choose the code without the current one (`PUT /api/session/pin`).
-        "owner": who.is_some_and(|email| humans.is_owner(email)),
+        "owner": owner,
         // A new house: the installation code (logs) chooses the first code.
         "setup": humans.setup_pending(),
         // The shortest code this house accepts.
@@ -261,8 +294,7 @@ pub(crate) async fn session(
         "languages": moli_i18n::languages(),
         // May change the code: an owner, or anyone with the current code in
         // a house without owners.
-        "can_change": who.is_some_and(|email| humans.is_owner(email))
-            || (!humans.has_owners() && humans.pin_configured()),
+        "can_change": owner || (!humans.has_owners() && humans.pin_configured()),
     }))
     .into_response()
 }
@@ -282,14 +314,14 @@ pub(crate) struct PinBody {
 /// the code itself).
 pub(crate) async fn set_pin(
     Extension(humans): Humans,
+    Extension(persons): Extension<Arc<People>>,
     caller: Caller,
+    headers: HeaderMap,
     Json(body): Json<PinBody>,
 ) -> Response {
-    let owner = match &caller.via {
-        Via::Access { email } => humans.is_owner(email),
-        _ => false,
-    };
-    if !owner && humans.has_owners() {
+    let owner = crate::people_api::is_owner(&caller, &humans, &persons, &headers);
+    let has_owners = humans.has_owners() || persons.has_owner();
+    if !owner && has_owners {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.code.proprietaire_seul"),
@@ -405,17 +437,43 @@ pub(crate) async fn setup(
     }
 }
 
+/// The house's code (`{pin}`, from the household), or a person's password
+/// (`{login, password}`, from anywhere).
 #[derive(Deserialize)]
-pub(crate) struct LoginBody {
-    pin: String,
+#[serde(untagged)]
+pub(crate) enum LoginBody {
+    Person { login: String, password: String },
+    Pin { pin: String },
 }
 
 pub(crate) async fn login(
     Extension(humans): Humans,
+    Extension(persons): Extension<Arc<People>>,
     caller: Caller,
     Json(body): Json<LoginBody>,
 ) -> Response {
-    match humans.login(&body.pin, &caller.key).await {
+    let pin = match body {
+        LoginBody::Person { login, password } => {
+            return match persons.login(&humans, &login, &password, &caller.key).await {
+                Ok((token, person)) => (
+                    [(SET_COOKIE, People::cookie(&token))],
+                    Json(json!({ "person": person })),
+                )
+                    .into_response(),
+                Err(e) => {
+                    crate::people_api::login_error(e, "serveur.personnes.identifiants_incorrects")
+                }
+            };
+        }
+        LoginBody::Pin { pin } => pin,
+    };
+    if !caller.is_household() {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.acces.refuse"),
+        );
+    }
+    match humans.login(&pin, &caller.key).await {
         Ok(token) => (
             [(SET_COOKIE, Sessions::cookie(&token))],
             Json(json!({ "human": true })),
@@ -436,11 +494,19 @@ pub(crate) async fn login(
     }
 }
 
-pub(crate) async fn logout(Extension(humans): Humans, headers: HeaderMap) -> Response {
+pub(crate) async fn logout(
+    Extension(humans): Humans,
+    Extension(persons): Extension<Arc<People>>,
+    headers: HeaderMap,
+) -> Response {
     humans.logout(&headers).await;
+    persons.logout(&headers).await;
     (
-        [(SET_COOKIE, Sessions::clear_cookie())],
-        Json(json!({ "human": false })),
+        axum::response::AppendHeaders([
+            (SET_COOKIE, Sessions::clear_cookie()),
+            (SET_COOKIE, People::clear_cookie()),
+        ]),
+        Json(json!({ "human": false, "person": null })),
     )
         .into_response()
 }
@@ -598,6 +664,16 @@ pub(crate) async fn snapshot(
 ) -> Response {
     use moli_runtime::media::SnapshotError;
     let id = DeviceId::from(id);
+    if caller
+        .person
+        .as_ref()
+        .is_some_and(crate::people::PersonRef::is_guest)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.personnes.invite_limite"),
+        );
+    }
     if let Some(room) = hub.protected_room(&id)
         && !humans.is_human(&headers, &caller.key)
     {

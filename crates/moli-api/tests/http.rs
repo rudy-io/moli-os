@@ -409,3 +409,182 @@ async fn only_a_person_gives_the_assistant_a_key() {
     let (status, _) = request(&addr, "GET", "/api/assistant/settings", None).await;
     assert_eq!(status, 503);
 }
+
+/// The response's `Set-Cookie` value for `name`, and the body.
+async fn request_cookie(
+    addr: &str,
+    method: &str,
+    path: &str,
+    body: &Json,
+    extra: &str,
+    name: &str,
+) -> (u16, Option<String>, String) {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let body = body.to_string();
+    let head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+         Content-Type: application/json\r\n{extra}Content-Length: {}\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.write_all(body.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.unwrap();
+    let raw = String::from_utf8_lossy(&raw).to_string();
+    let status = raw[9..12].parse().unwrap();
+    let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
+    let cookie = headers.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        (k.eq_ignore_ascii_case("set-cookie") && v.trim().starts_with(&format!("{name}=")))
+            .then(|| v.trim().split(';').next().unwrap_or_default().to_owned())
+    });
+    (status, cookie, body.to_owned())
+}
+
+/// Élodie, from the Internet: nothing until she is invited, then the house.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn an_invited_person_reaches_the_house_from_the_internet() {
+    let dir = std::env::temp_dir().join(format!("moli-http-people-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let hub = Hub::new(HubOptions {
+        secrets: Some((
+            dir.join("secrets.enc"),
+            moli_runtime::MasterKey::generate().unwrap(),
+        )),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(Lamp),
+        CancellationToken::new(),
+    );
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    // From the Internet (a relayed request is never the home network).
+    let outside = "X-Forwarded-For: 203.0.113.9\r\n";
+
+    let (status, _) = request_with(&addr, "GET", "/api/devices", None, outside).await;
+    assert_eq!(status, 403, "a stranger reads nothing");
+    let (status, page) = request_with(&addr, "GET", "/api/session", None, outside).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&page).unwrap()["login_required"],
+        true
+    );
+    let (status, _) = request_with(
+        &addr,
+        "POST",
+        "/api/session",
+        Some(&json!({ "pin": "482915" })),
+        outside,
+    )
+    .await;
+    assert_eq!(status, 403, "the house's code only from the house");
+
+    // At home, the owner (proved by the code: nobody yet) invites Élodie.
+    let (status, pin, _) = request_cookie(
+        &addr,
+        "POST",
+        "/api/session",
+        &json!({ "pin": "482915" }),
+        "",
+        "moli_session",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let pin = format!("Cookie: {}\r\n", pin.unwrap());
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "Élodie", "role": "member" })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/people/elodie/invite", None, &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let code = serde_json::from_str::<Json>(&body).unwrap()["code"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(dir.join("people.json").exists());
+    assert!(
+        !std::fs::read_to_string(dir.join("people.json"))
+            .unwrap()
+            .contains(&code)
+    );
+
+    // Élodie, from the Internet, with the code.
+    let (status, cookie, body) = request_cookie(
+        &addr,
+        "POST",
+        "/api/invitation",
+        &json!({ "code": code, "password": "le jardin fleuri" }),
+        outside,
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let me = format!("{outside}Cookie: {}\r\n", cookie.unwrap());
+    let (status, _) = request_with(&addr, "GET", "/api/devices", None, &me).await;
+    assert_eq!(status, 200, "signed in: the house");
+    let (_, session) = request_with(&addr, "GET", "/api/session", None, &me).await;
+    let session: Json = serde_json::from_str(&session).unwrap();
+    assert_eq!(session["person"]["id"], "elodie");
+    assert_eq!(session["owner"], false);
+    let (status, _) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "X", "role": "owner" })),
+        &me,
+    )
+    .await;
+    assert_eq!(status, 403, "a member manages nobody");
+    let (status, _) = request_with(
+        &addr,
+        "POST",
+        "/api/command",
+        Some(&json!({ "point": "fake:lamp/state", "value": true })),
+        &format!("{me}x-moli-origin: ui\r\n"),
+    )
+    .await;
+    assert_eq!(status, 200, "and commands it");
+    let journal = hub.journal(10);
+    assert!(
+        journal
+            .iter()
+            .any(|e| e.actor.as_deref() == Some("tableau de bord (Élodie)")),
+        "{journal:?}"
+    );
+    // Her password works the next time; a wrong one does not.
+    let (status, _, _) = request_cookie(
+        &addr,
+        "POST",
+        "/api/session",
+        &json!({ "login": "elodie", "password": "le jardin fleuri" }),
+        outside,
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _, _) = request_cookie(
+        &addr,
+        "POST",
+        "/api/session",
+        &json!({ "login": "elodie", "password": "le jardin fané" }),
+        outside,
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 401);
+    let _ = std::fs::remove_dir_all(&dir);
+}
