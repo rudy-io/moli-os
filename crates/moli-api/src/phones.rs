@@ -143,7 +143,9 @@ pub(crate) struct Owner {
     person: Option<String>,
 }
 
-/// Gives a phone to a person (an owner of the house).
+/// Gives a phone to a person (an owner of the house). Under `/api/mobile/`:
+/// a house behind Cloudflare Access lets `/api/phones` through unsigned
+/// (the phones' reports), so an owner's order must not live there.
 pub(crate) async fn assign(
     Extension(PhonesGate(gate)): Extension<PhonesGate>,
     Extension(humans): Extension<std::sync::Arc<crate::session::Sessions>>,

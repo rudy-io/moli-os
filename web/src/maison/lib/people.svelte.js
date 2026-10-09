@@ -25,7 +25,7 @@ async function call(method, path, body) {
 
 export async function loadPeople() {
   try {
-    const [book, phones] = await Promise.all([call('GET', '/api/people'), call('GET', '/api/phones').catch(() => ({ phones: [] }))]);
+    const [book, phones] = await Promise.all([call('GET', '/api/people'), call('GET', '/api/mobile/phones').catch(() => ({ phones: [] }))]);
     people.me = book.me;
     people.owner = book.owner;
     people.list = book.people;
@@ -62,7 +62,7 @@ export async function saveZones(zones) {
 }
 
 export async function assignPhone(phone, person) {
-  await call('PUT', `/api/phones/${encodeURIComponent(phone)}`, { person: person || null });
+  await call('PUT', `/api/mobile/phones/${encodeURIComponent(phone)}`, { person: person || null });
   await loadPeople();
 }
 

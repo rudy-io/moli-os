@@ -171,11 +171,11 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .route("/api/plan/images/{name}", get(plan::image))
         .route("/api/mobile/register", post(phones::register))
         .route("/api/phones/{id}/report", post(phones::report))
-        .route("/api/phones", get(phones::list))
-        .route(
-            "/api/phones/{id}",
-            axum::routing::delete(phones::remove).put(phones::assign),
-        )
+        // Under /api/mobile: behind Cloudflare Access like the dashboard
+        // (/api/phones is the phones' own way in, Access lets it through).
+        .route("/api/mobile/phones", get(phones::list))
+        .route("/api/mobile/phones/{id}", put(phones::assign))
+        .route("/api/phones/{id}", axum::routing::delete(phones::remove))
         .route(
             "/api/integrations/tuya-cloud",
             get(integrations::tuya_cloud).put(integrations::set_tuya_cloud),

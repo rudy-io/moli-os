@@ -95,6 +95,7 @@ fn demo_locked(method: &Method, path: &str) -> bool {
             || path.starts_with("/api/zones")
             || path.starts_with("/api/invitation")
             || path.starts_with("/api/phones/")
+            || path.starts_with("/api/mobile/phones")
             || path.starts_with("/api/mobile/register"))
 }
 
