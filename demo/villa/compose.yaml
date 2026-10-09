@@ -1,0 +1,22 @@
+# La villa de démonstration, sans aucun appareil : toute la maison est simulée.
+#   docker compose -f demo/villa/compose.yaml up --build     → http://localhost:8790
+# Chaque démarrage repart de demo/villa/seed (rien de ce que font les visiteurs ne reste).
+# Code de la démo (valider un automatisme…) : 123456.
+services:
+  moli-demo:
+    build:
+      context: ../..
+    image: moli-os:latest
+    container_name: moli-demo
+    restart: unless-stopped
+    environment:
+      MOLI_CONFIG: /villa/moli.toml
+      MOLI_UI_PIN: "123456"
+    volumes:
+      - ./:/villa:ro
+    # Ce que la démo écrit vit en mémoire : un redémarrage efface tout.
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=0700
+    ports:
+      - "8790:8790"
+    mem_limit: 128m

@@ -250,7 +250,56 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// The file that says a data directory is a demo's: only such a directory
+/// (or an empty one) is ever emptied.
+const DEMO_MARKER: &str = ".moli-demo";
+
+/// A demo house starts as its seed says, every time (`[server] demo_seed`):
+/// what visitors changed is gone, the energy past reaches today.
+fn demo_fresh(config: &Config) -> anyhow::Result<()> {
+    let (true, Some(seed)) = (config.server.demo, &config.server.demo_seed) else {
+        return Ok(());
+    };
+    let data = &config.server.data_dir;
+    std::fs::create_dir_all(data).with_context(|| format!("cannot create {}", data.display()))?;
+    let empty = std::fs::read_dir(data)?.next().is_none();
+    if !empty && !data.join(DEMO_MARKER).exists() {
+        bail!(
+            "{} holds data that is not a demo's (no {DEMO_MARKER}): it is never emptied",
+            data.display()
+        );
+    }
+    for entry in std::fs::read_dir(data)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    std::fs::write(
+        data.join(DEMO_MARKER),
+        "a demo house: emptied at every start
+",
+    )?;
+    for entry in
+        std::fs::read_dir(seed).with_context(|| format!("cannot read {}", seed.display()))?
+    {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            std::fs::copy(entry.path(), data.join(entry.file_name()))?;
+        }
+    }
+    if config.energy.is_some() {
+        energy_demo(config, 400)?;
+    }
+    tracing::info!(seed = %seed.display(), "demo house reset");
+    Ok(())
+}
+
 async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
+    // Before anything opens the data directory.
+    demo_fresh(&config)?;
     // The house's language: the one chosen at the installation, else the
     // configuration's.
     let language = moli_api::settings::language(&config.server.data_dir)
