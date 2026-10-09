@@ -1,0 +1,24 @@
+[package]
+name = "moli-esphome"
+description = "Moli OS driver for ESPHome devices over their native API (Noise-encrypted), starting with voice satellites such as the Home Assistant Voice Preview Edition."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "io-util"] }
+
+[lints]
+workspace = true

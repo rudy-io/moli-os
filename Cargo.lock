@@ -1189,6 +1189,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-esphome"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-frigate"
 version = "0.1.0"
 dependencies = [
@@ -1371,6 +1386,7 @@ dependencies = [
  "moli-bambu",
  "moli-core",
  "moli-energy",
+ "moli-esphome",
  "moli-frigate",
  "moli-helpers",
  "moli-history",

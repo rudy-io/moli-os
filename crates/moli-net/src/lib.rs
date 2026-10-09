@@ -6,6 +6,7 @@
 //! answering on that address is refused.
 
 mod legacy;
+pub mod proto;
 pub mod upnp;
 pub mod wol;
 pub mod ws;

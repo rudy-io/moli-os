@@ -9,5 +9,7 @@
 //! Each runs one connection until it fails; the driver reconnects.
 
 pub mod cast;
-pub mod proto;
 pub mod remote;
+
+/// The protobuf codec, shared with the other protocols.
+pub use moli_net::proto;

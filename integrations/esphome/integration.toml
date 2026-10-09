@@ -1,0 +1,26 @@
+[integration]
+id = "esphome"
+name = "Appareil ESPHome (satellite vocal)"
+# Any ESPHome device with the native API and an encryption key; first used
+# with the Home Assistant Voice Preview Edition.
+brands = ["Nabu Casa", "ESPHome"]
+models = ["Home Assistant Voice PE"]
+transport = "tcp"
+driver = "esphome"
+crate = "moli-esphome"
+
+[discovery]
+# ESPHome devices announce `_esphomelib._tcp` over mDNS; the instance gives
+# the address for now.
+mdns = ["_esphomelib._tcp"]
+ssdp = []
+ports = [6053]
+
+[needs]
+secrets = ["api_key"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"
