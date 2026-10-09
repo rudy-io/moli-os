@@ -48,6 +48,9 @@ const THEME_WATCH = `
   true;`;
 const GOLD = "#E8B931";
 const EVERY = 10 * 60 * 1000;
+// Back from the background, the page has this long to answer, or it is reloaded.
+const PAGE_ALIVE = 3000;
+const PING = `window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'alive' })); true;`;
 
 // A notification that arrives while the app is open shows anyway.
 Notifications.setNotificationHandler({
@@ -79,6 +82,31 @@ export default function App() {
   const [top, setTop] = useState<{ bg: string; dark: boolean }>({ bg: BG, dark: true });
   const canGoBack = useRef(false);
   const pairingAsked = useRef(false);
+  const alive = useRef(true);
+
+  // A sleeping app may lose its page: iOS kills the web view's process when
+  // memory runs short (onContentProcessDidTerminate reloads it), and the view
+  // then stays empty, a black screen. Back from the background, the page
+  // must answer a ping, or it is reloaded.
+  useEffect(() => {
+    let away = false;
+    let check: ReturnType<typeof setTimeout> | undefined;
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "background") away = true;
+      if (s !== "active" || !away) return;
+      away = false;
+      alive.current = false;
+      webRef.current?.injectJavaScript(PING);
+      clearTimeout(check);
+      check = setTimeout(() => {
+        if (!alive.current) webRef.current?.reload();
+      }, PAGE_ALIVE);
+    });
+    return () => {
+      clearTimeout(check);
+      sub.remove();
+    };
+  }, []);
 
   // Android back button → the dashboard's history.
   useEffect(() => {
@@ -164,6 +192,10 @@ export default function App() {
     } catch {
       return;
     }
+    if (msg.type === "alive") {
+      alive.current = true;
+      return;
+    }
     if (msg.type === "theme" && typeof (msg as { bg?: unknown }).bg === "string") {
       const bg = (msg as { bg: string }).bg;
       const rgb = bg.match(/\d+(\.\d+)?/g)?.slice(0, 3).map(Number) ?? [22, 21, 18];
@@ -229,6 +261,7 @@ export default function App() {
             onShouldStartLoadWithRequest={onShouldStart}
             onLoadEnd={onLoadEnd}
             onMessage={onMessage}
+            onContentProcessDidTerminate={() => webRef.current?.reload()}
             onError={() => setFailed(true)}
             onHttpError={(e) => {
               if (e.nativeEvent.statusCode >= 500) setFailed(true);

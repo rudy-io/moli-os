@@ -221,8 +221,11 @@ export async function startBackground(): Promise<"always" | "foreground" | "deni
       },
     });
   }
+  // The home's edge once: registering it again at each opening made iOS
+  // report an « arrivée » every time the app opened at home.
   const p = await pairing();
-  if (p?.home) await watchHome(p.home);
+  const watching = await Location.hasStartedGeofencingAsync(REGION_TASK).catch(() => false);
+  if (p?.home && !watching) await watchHome(p.home);
   return "always";
 }
 
