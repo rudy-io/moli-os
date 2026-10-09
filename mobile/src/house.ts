@@ -10,18 +10,22 @@ import * as SecureStore from "expo-secure-store";
 
 const HOUSE = "moli.house";
 
-/** The address baked into this build, if any (a house's own build). */
-export const PRESET = (Constants.expoConfig?.extra?.moliUrl as string | null | undefined) ?? null;
+/** The address baked into this build, if any (a house's own build). Anything
+ * but an address is ignored (build 7 got {} and crashed at launch). */
+const RAW_PRESET: unknown = Constants.expoConfig?.extra?.moliUrl;
+export const PRESET = typeof RAW_PRESET === "string" ? normalize(RAW_PRESET) : null;
 
 /** Extra domains the dashboard may move to (house.json `allowedSuffixes`). */
-const EXTRA_SUFFIXES = (Constants.expoConfig?.extra?.allowedSuffixes as string[] | undefined) ?? [];
+const RAW_SUFFIXES: unknown = Constants.expoConfig?.extra?.allowedSuffixes;
+const EXTRA_SUFFIXES = Array.isArray(RAW_SUFFIXES) ? RAW_SUFFIXES.filter((s): s is string => typeof s === "string") : [];
 
 /** Cloudflare Access's sign-in pages: a house behind Access sends there first. */
 const ACCESS = "cloudflareaccess.com";
 
 export async function savedHouse(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(HOUSE);
+    const saved = await SecureStore.getItemAsync(HOUSE);
+    return saved ? normalize(saved) : null;
   } catch {
     return null;
   }

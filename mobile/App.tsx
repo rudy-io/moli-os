@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -113,10 +113,38 @@ export default function App() {
       ) : base === null ? (
         <Welcome initial={last} onDone={choose} />
       ) : (
-        <House key={base} base={base} onLeave={leave} />
+        <Guard key={base} onLeave={leave}>
+          <House base={base} onLeave={leave} />
+        </Guard>
       )}
     </SafeAreaProvider>
   );
+}
+
+/** A screen that breaks never closes the app: it offers to retry or to
+ * choose another house (a bad address must not lock anyone out). */
+class Guard extends Component<{ children: ReactNode; onLeave: () => void }, { broken: boolean }> {
+  state = { broken: false };
+
+  static getDerivedStateFromError() {
+    return { broken: true };
+  }
+
+  render() {
+    if (!this.state.broken) return this.props.children;
+    return (
+      <SafeAreaView style={[styles.root, styles.center]}>
+        <Text style={styles.title}>{t.brokenTitle}</Text>
+        <Text style={styles.sub}>{t.brokenSub}</Text>
+        <Pressable style={styles.button} onPress={() => this.setState({ broken: false })}>
+          <Text style={styles.buttonText}>{t.retry}</Text>
+        </Pressable>
+        <Pressable style={styles.other} onPress={this.props.onLeave}>
+          <Text style={styles.otherText}>{t.changeHouse}</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
 }
 
 function House({ base, onLeave }: { base: string; onLeave: () => void }) {

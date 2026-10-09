@@ -24,7 +24,9 @@ module.exports = ({ config }) => {
     android: { ...config.android, ...(house.bundleId && { package: house.bundleId }) },
     extra: {
       ...config.extra,
-      moliUrl: url,
+      // Only when there is one: a null here reached the build as {} (build 7
+      // crashed at launch, taking it for an address).
+      ...(url && { moliUrl: url }),
       // More domains the dashboard may move to without leaving the app, on
       // top of the house's own and Cloudflare Access's sign-in (e.g. another
       // sign-in page in front of the house).
