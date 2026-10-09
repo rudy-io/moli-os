@@ -17,7 +17,14 @@
   let placing = $state(false);
   let draft = $state(null); // { id?, name, latitude, longitude, radius }
   let error = $state('');
-  let centered = false;
+  let touched = false;
+  let points = [];
+
+  /** Everyone and every zone in view (until someone moves the map). */
+  function frame() {
+    if (!map || !points.length || box.clientWidth < 50) return;
+    map.fitBounds(L.latLngBounds(points).pad(0.3), { maxZoom: 15 });
+  }
 
   onMount(() => {
     map = L.map(box, { zoomControl: true, attributionControl: true }).setView([46.6, 2.4], 5);
@@ -31,8 +38,20 @@
       placing = false;
       draft = { name: '', latitude: e.latlng.lat, longitude: e.latlng.lng, radius: 200 };
     });
+    // The page settles after the map is made: it must know its real size,
+    // or it frames too wide and leaves grey tiles.
+    const resized = new ResizeObserver(() => {
+      map.invalidateSize();
+      if (!touched) frame();
+    });
+    resized.observe(box);
+    // Once someone moves the map, it stays where they put it.
+    for (const e of ['mousedown', 'wheel', 'touchstart']) box.addEventListener(e, () => (touched = true), { passive: true });
     loadPeople();
-    return () => map.remove();
+    return () => {
+      resized.disconnect();
+      map.remove();
+    };
   });
 
   // Who is where, live.
@@ -64,17 +83,17 @@
     for (const { person, at } of marks) {
       const icon = L.divIcon({
         className: 'person-pin',
-        html: `<span style="background:${colorOf(person)}">${person.name.slice(0, 1).toUpperCase()}</span>`,
+        html: `<span style="background:${escape(colorOf(person))}">${escape(person.name.slice(0, 1).toUpperCase())}</span>`,
         iconSize: [36, 36],
         iconAnchor: [18, 18],
       });
-      L.marker([at.latitude, at.longitude], { icon }).bindTooltip(person.name).addTo(layer);
+      // A name is text, never HTML.
+      const name = document.createElement('span');
+      name.textContent = person.name;
+      L.marker([at.latitude, at.longitude], { icon }).bindTooltip(name).addTo(layer);
     }
-    if (!centered && (marks.length || zones.length)) {
-      centered = true;
-      const points = [...marks.map(({ at }) => [at.latitude, at.longitude]), ...zones.map((z) => [z.latitude, z.longitude])];
-      map.fitBounds(L.latLngBounds(points).pad(0.4), { maxZoom: 15 });
-    }
+    points = [...marks.map(({ at }) => [at.latitude, at.longitude]), ...zones.map((z) => [z.latitude, z.longitude])];
+    if (!touched) frame();
   });
 
   const escape = (text) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
