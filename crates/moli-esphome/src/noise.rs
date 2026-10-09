@@ -29,6 +29,35 @@ pub fn psk_from_base64(text: &str) -> anyhow::Result<[u8; 32]> {
         .map_err(|b: Vec<u8>| anyhow::anyhow!("the API key is {} bytes, not 32", b.len()))
 }
 
+/// A new random key, in the base64 form ESPHome takes (and gives back).
+pub fn new_key_base64() -> anyhow::Result<String> {
+    use ring::rand::SecureRandom as _;
+    let mut key = [0u8; 32];
+    SystemRandom::new()
+        .fill(&mut key)
+        .map_err(|_| anyhow::anyhow!("no random key"))?;
+    Ok(base64_encode(&key))
+}
+
+/// Standard base64 with padding.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let word = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ALPHABET[((word >> (18 - 6 * i)) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// Standard base64 with padding (the key's only form).
 fn base64(text: &str) -> Option<Vec<u8>> {
     fn value(c: u8) -> Option<u32> {
@@ -333,6 +362,13 @@ mod tests {
         assert!(psk_from_base64("A!==").is_err());
         assert_eq!(base64("TW9saQ=="), Some(b"Moli".to_vec()));
         assert_eq!(base64("TW9saSE="), Some(b"Moli!".to_vec()));
+        for bytes in [&b"Moli"[..], b"Moli!", b"Moli!!", b""] {
+            assert_eq!(base64(&base64_encode(bytes)), Some(bytes.to_vec()));
+        }
+        assert_eq!(base64_encode(b"Moli"), "TW9saQ==");
+        let key = new_key_base64().unwrap();
+        assert_eq!(psk_from_base64(&key).unwrap().len(), 32);
+        assert_ne!(key, new_key_base64().unwrap());
     }
 
     #[test]

@@ -27,6 +27,8 @@ use tokio::time::Instant;
 
 /// The marker of a handshake the device refused for its key.
 pub(crate) const WRONG_KEY: &str = "the device refused the API key";
+/// The marker of a device speaking the API in clear: it has no key.
+pub(crate) const IN_CLEAR: &str = "the device speaks the API in clear (it has no key)";
 const API_KEY: &str = "api_key";
 const PING_EVERY: Duration = Duration::from_secs(20);
 /// Nothing at all from the device for this long (it pings after 60 s of
@@ -62,6 +64,10 @@ pub struct Config {
     /// e.g. `hey_moli`); empty: as the device has them.
     #[serde(default)]
     pub wake_words: Vec<String>,
+    /// The device's MAC address: a device without a key is given one only
+    /// if it is this one (an address may have gone to another device).
+    #[serde(default)]
+    pub mac: Option<String>,
 }
 
 #[derive(Debug)]
@@ -165,20 +171,21 @@ fn device(
     }
 }
 
+/// Waits for a person: says why, then idles until Moli stops.
+async fn wait_for_person(ctx: &DriverCtx, why: String) {
+    ctx.wait_for(why);
+    ctx.cancelled().await;
+}
+
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-    let Some(key) = ctx.secret(API_KEY) else {
-        ctx.wait_for(moli_i18n::tr!(
-            "pilotes.esphome.cle_manquante",
-            instance = ctx.instance(),
-            key = API_KEY
-        ));
-        ctx.cancelled().await;
-        return Ok(());
-    };
-    let Ok(psk) = noise::psk_from_base64(&key) else {
-        ctx.wait_for(moli_i18n::tr!("pilotes.esphome.cle_invalide"));
-        ctx.cancelled().await;
-        return Ok(());
+    // No key yet is fine: a device in clear is given one (see `provision`).
+    let mut psk = match ctx.secret(API_KEY).map(|k| noise::psk_from_base64(&k)) {
+        None => None,
+        Some(Ok(psk)) => Some(psk),
+        Some(Err(_)) => {
+            wait_for_person(ctx, moli_i18n::tr!("pilotes.esphome.cle_invalide")).await;
+            return Ok(());
+        }
     };
     ctx.ready();
     let mut pause = RETRY_MIN;
@@ -186,7 +193,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut known: Option<DeviceId> = None;
     loop {
         let started = Instant::now();
-        let outcome = session(config, ctx, &psk, &mut known).await;
+        let outcome = match &psk {
+            Some(psk) => session(config, ctx, psk, &mut known).await,
+            None => Err(anyhow::anyhow!(IN_CLEAR)),
+        };
         let error = match outcome {
             Ok(()) => return Ok(()), // shutting down
             Err(e) => format!("{e:#}"),
@@ -195,14 +205,32 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             ctx.set_availability(id, false);
         }
         if error.contains(WRONG_KEY) {
-            ctx.wait_for(moli_i18n::tr!(
+            let why = moli_i18n::tr!(
                 "pilotes.esphome.cle_refusee",
                 instance = ctx.instance(),
                 key = API_KEY
-            ));
-            ctx.cancelled().await;
+            );
+            wait_for_person(ctx, why).await;
             return Ok(());
         }
+        let error = if error.contains(IN_CLEAR) {
+            match provision(config, ctx, psk.is_some()).await {
+                Ok(new) => {
+                    psk = Some(new);
+                    pause = RETRY_MIN;
+                    // The device switches to encryption: a moment, then again.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                Err(Provision::Person(why)) => {
+                    wait_for_person(ctx, why).await;
+                    return Ok(());
+                }
+                Err(Provision::Retry(e)) => format!("{e:#}"),
+            }
+        } else {
+            error
+        };
         // Each new reason once; a device switched off says the same every time.
         if last_error.as_deref() == Some(error.as_str()) {
             tracing::debug!(instance = %ctx.instance(), error, "esphome device unreachable");
@@ -221,6 +249,112 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             () = ctx.cancelled() => return Ok(()),
         }
     }
+}
+
+/// Why a key could not be given: a person must act, or it may work later.
+enum Provision {
+    Person(String),
+    Retry(anyhow::Error),
+}
+
+impl From<anyhow::Error> for Provision {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Retry(e)
+    }
+}
+
+impl From<std::io::Error> for Provision {
+    fn from(e: std::io::Error) -> Self {
+        Self::Retry(e.into())
+    }
+}
+
+/// `AC:BC:…` or `acbc…` → `acbc…`.
+fn mac_hex(mac: &str) -> String {
+    mac.chars()
+        .filter(char::is_ascii_hexdigit)
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// The next message in clear of type `kind`, the device's pings answered.
+async fn expect_plain(tcp: &mut TcpStream, kind: u16) -> anyhow::Result<Vec<u8>> {
+    loop {
+        let (got, payload) = tokio::time::timeout(frame::HANDSHAKE_LIMIT, frame::read_plain(tcp))
+            .await
+            .context("the device stopped answering")??;
+        match got {
+            k if k == kind => return Ok(payload),
+            api::PING_REQUEST => frame::send_plain(tcp, api::PING_RESPONSE, &[]).await?,
+            api::DISCONNECT_REQUEST => bail!("the device closed the connection"),
+            _ => {}
+        }
+    }
+}
+
+/// The device speaks in clear: it has no key (Home Assistant clears it when
+/// it lets a device go; a new one never had one). Moli gives it its own, after
+/// checking it is the expected device, and files it in the vault first: never
+/// a key the device holds and Moli lost.
+async fn provision(config: &Config, ctx: &DriverCtx, had_key: bool) -> Result<[u8; 32], Provision> {
+    let mut tcp = connect(config).await?;
+    frame::send_plain(&mut tcp, api::HELLO_REQUEST, &api::hello()).await?;
+    if let Err(e) = expect_plain(&mut tcp, api::HELLO_RESPONSE).await {
+        // It holds a key after all, one Moli does not know.
+        if !had_key && format!("{e:#}").contains("asks for encryption") {
+            return Err(Provision::Person(moli_i18n::tr!(
+                "pilotes.esphome.cle_manquante",
+                instance = ctx.instance(),
+                key = API_KEY
+            )));
+        }
+        return Err(e.into());
+    }
+    frame::send_plain(&mut tcp, api::DEVICE_INFO_REQUEST, &[]).await?;
+    let info = api::device_info(&expect_plain(&mut tcp, api::DEVICE_INFO_RESPONSE).await?)
+        .context("unreadable device info")?;
+    if !info.encryption_supported {
+        return Err(Provision::Person(moli_i18n::tr!(
+            "pilotes.esphome.sans_chiffrement"
+        )));
+    }
+    let mac = mac_hex(&info.mac);
+    if let Some(expected) = config.mac.as_deref().map(mac_hex).filter(|e| *e != mac) {
+        return Err(Provision::Person(moli_i18n::tr!(
+            "pilotes.esphome.autre_appareil",
+            host = config.host,
+            mac = mac,
+            expected = expected
+        )));
+    }
+    let key = noise::new_key_base64()?;
+    ctx.store_secret(API_KEY, &key).await?;
+    frame::send_plain(&mut tcp, api::NOISE_SET_KEY_REQUEST, &api::set_key(&key)).await?;
+    let saved = expect_plain(&mut tcp, api::NOISE_SET_KEY_RESPONSE).await?;
+    if !moli_net::proto::parse(&saved).is_some_and(|m| m.bool(1)) {
+        return Err(Provision::Retry(anyhow::anyhow!(
+            "the device did not save the key"
+        )));
+    }
+    tracing::warn!(
+        instance = %ctx.instance(),
+        device = %info.friendly_name,
+        mac,
+        "the device had no API key: Moli gave it its own"
+    );
+    Ok(noise::psk_from_base64(&key)?)
+}
+
+async fn connect(config: &Config) -> anyhow::Result<TcpStream> {
+    let tcp = tokio::time::timeout(
+        frame::HANDSHAKE_LIMIT,
+        TcpStream::connect((config.host.as_str(), config.port)),
+    )
+    .await
+    .context("no answer")?
+    .with_context(|| format!("cannot reach {}:{}", config.host, config.port))?;
+    tcp.set_nodelay(true)?;
+    Ok(tcp)
 }
 
 /// Messages from the device, or why they stopped.
@@ -255,14 +389,7 @@ struct Opened {
 
 /// Connects, does the handshake, says hello, reads the device and its entities.
 async fn open(config: &Config, psk: &[u8; 32]) -> anyhow::Result<Opened> {
-    let mut tcp = tokio::time::timeout(
-        frame::HANDSHAKE_LIMIT,
-        TcpStream::connect((config.host.as_str(), config.port)),
-    )
-    .await
-    .context("no answer")?
-    .with_context(|| format!("cannot reach {}:{}", config.host, config.port))?;
-    tcp.set_nodelay(true)?;
+    let mut tcp = connect(config).await?;
     let (hello, send, receive) =
         tokio::time::timeout(frame::HANDSHAKE_LIMIT, frame::handshake(&mut tcp, psk))
             .await

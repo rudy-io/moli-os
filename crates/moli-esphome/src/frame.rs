@@ -30,7 +30,7 @@ async fn read_frame<R: AsyncRead + Unpin>(read: &mut R, max: usize) -> anyhow::R
     read.read_exact(&mut head).await?;
     match head[0] {
         INDICATOR => {}
-        0x00 => bail!("the device speaks the API in clear: set an encryption key on it"),
+        0x00 => bail!(crate::IN_CLEAR),
         other => bail!("bad frame indicator {other:#04x}"),
     }
     let len = usize::from(u16::from_be_bytes([head[1], head[2]]));
@@ -162,10 +162,67 @@ impl<R: AsyncRead + Unpin> Receiver<R> {
     }
 }
 
+/// A message in clear (`0x00`, varint length, varint type, payload): only to
+/// give a device that lost its key a new one.
+pub async fn send_plain<W: AsyncWrite + Unpin>(
+    write: &mut W,
+    kind: u16,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    let mut out = vec![0x00];
+    moli_net::proto::varint(payload.len() as u64, &mut out);
+    moli_net::proto::varint(u64::from(kind), &mut out);
+    out.extend_from_slice(payload);
+    write.write_all(&out).await?;
+    write.flush().await?;
+    Ok(())
+}
+
+async fn read_varint<R: AsyncRead + Unpin>(read: &mut R) -> anyhow::Result<u64> {
+    let mut value = 0u64;
+    for shift in [0, 7, 14, 21] {
+        let byte = read.read_u8().await?;
+        value |= u64::from(byte & 0x7F) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    bail!("varint too long from the device")
+}
+
+/// The next message in clear.
+pub async fn read_plain<R: AsyncRead + Unpin>(read: &mut R) -> anyhow::Result<(u16, Vec<u8>)> {
+    match read.read_u8().await? {
+        0x00 => {}
+        INDICATOR => bail!("the device asks for encryption"),
+        other => bail!("bad frame indicator {other:#04x}"),
+    }
+    let len = usize::try_from(read_varint(read).await?)?;
+    if len > MAX_DATA {
+        bail!("frame of {len} bytes from the device");
+    }
+    let kind = u16::try_from(read_varint(read).await?).context("message type")?;
+    let mut payload = vec![0; len];
+    read.read_exact(&mut payload).await?;
+    Ok((kind, payload))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::noise::respond;
+
+    #[tokio::test]
+    async fn messages_in_clear_round_trip() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        send_plain(&mut a, 124, b"key").await.unwrap();
+        send_plain(&mut a, 1, &[]).await.unwrap();
+        let big = vec![7u8; 300];
+        send_plain(&mut a, 10, &big).await.unwrap();
+        assert_eq!(read_plain(&mut b).await.unwrap(), (124, b"key".to_vec()));
+        assert_eq!(read_plain(&mut b).await.unwrap(), (1, Vec::new()));
+        assert_eq!(read_plain(&mut b).await.unwrap(), (10, big));
+    }
 
     /// A device's side of the handshake over an in-memory pipe.
     async fn device(

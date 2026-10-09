@@ -48,6 +48,8 @@
   "pilotes.esphome.cle_manquante": "clé API manquante : printf %s \"$CLE\" | moli-os secrets set {instance} {key}",
   "pilotes.esphome.cle_invalide": "la clé API n'est pas une clé ESPHome (32 octets en base64)",
   "pilotes.esphome.cle_refusee": "l'appareil refuse la clé API : reprends celle de sa configuration ESPHome, puis printf %s \"$CLE\" | moli-os secrets set {instance} {key}",
+  "pilotes.esphome.sans_chiffrement": "l'appareil ne sait pas garder de clé de chiffrement : installe-lui un firmware avec « api: encryption: »",
+  "pilotes.esphome.autre_appareil": "un autre appareil répond à {host} ({mac}, attendu {expected}) : vérifie l'adresse avant que Moli lui donne une clé",
   "pilotes.esphome.sans_lecteur": "cet appareil n'a pas de lecteur",
   "pilotes.esphome.lecture_seule": "{point} ne se règle pas",
   "pilotes.bambu.certificat_change": "le certificat de l'imprimante a changé : si c'est normal, `moli-os secrets forget {instance} {key}` puis redémarrer",

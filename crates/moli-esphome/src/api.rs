@@ -29,6 +29,8 @@ pub const VOICE_ANNOUNCE_FINISHED: u16 = 120;
 pub const VOICE_CONFIGURATION_REQUEST: u16 = 121;
 pub const VOICE_CONFIGURATION_RESPONSE: u16 = 122;
 pub const VOICE_SET_CONFIGURATION: u16 = 123;
+pub const NOISE_SET_KEY_REQUEST: u16 = 124;
+pub const NOISE_SET_KEY_RESPONSE: u16 = 125;
 
 /// The voice pipeline's events, as the device reacts to them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +73,8 @@ pub struct DeviceInfo {
     pub project: String,
     pub project_version: String,
     pub voice_flags: u32,
+    /// It can take an encryption key from a client (pi: encryption: without a key).
+    pub encryption_supported: bool,
 }
 
 #[must_use]
@@ -87,7 +91,14 @@ pub fn device_info(payload: &[u8]) -> Option<DeviceInfo> {
         manufacturer: text(12),
         friendly_name: text(13),
         voice_flags: u32::try_from(m.uint(17).unwrap_or(0)).unwrap_or(0),
+        encryption_supported: m.bool(19),
     })
+}
+
+/// NoiseEncryptionSetKeyRequest: the key in base64 (the device decodes it).
+#[must_use]
+pub fn set_key(key_base64: &str) -> Vec<u8> {
+    Writer::new().str(1, key_base64).finish()
 }
 
 /// An entity of interest: its key (the handle of every later message) and name.

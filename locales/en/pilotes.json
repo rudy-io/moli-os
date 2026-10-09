@@ -48,6 +48,8 @@
   "pilotes.esphome.cle_manquante": "API key missing: printf %s \"$KEY\" | moli-os secrets set {instance} {key}",
   "pilotes.esphome.cle_invalide": "the API key is not an ESPHome key (32 bytes in base64)",
   "pilotes.esphome.cle_refusee": "the device refuses the API key: take the one from its ESPHome configuration, then printf %s \"$KEY\" | moli-os secrets set {instance} {key}",
+  "pilotes.esphome.sans_chiffrement": "the device cannot keep an encryption key: install a firmware with \"api: encryption:\"",
+  "pilotes.esphome.autre_appareil": "another device answers at {host} ({mac}, expected {expected}): check the address before Moli gives it a key",
   "pilotes.esphome.sans_lecteur": "this device has no media player",
   "pilotes.esphome.lecture_seule": "{point} cannot be set",
   "pilotes.bambu.certificat_change": "the printer’s certificate changed: if that’s expected, `moli-os secrets forget {instance} {key}` and restart",
