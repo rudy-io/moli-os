@@ -27,6 +27,7 @@ const EVERY: Duration = Duration::from_secs(15);
 pub(crate) struct Whereabouts {
     pub(crate) people: Arc<People>,
     pub(crate) hub: Hub,
+    /// The pairing side (where the home was learned).
     pub(crate) phones: Option<moli_phones::Gateway>,
 }
 
@@ -112,17 +113,19 @@ impl Whereabouts {
         (zones, home)
     }
 
-    /// Each phone's word, by the person it belongs to.
+    /// Each phone's word, by the person it belongs to: the devices of the
+    /// phones driver (its own `person` point says whose each is).
     fn phones(&self) -> BTreeMap<String, Vec<Phone>> {
-        let Some(gateway) = &self.phones else {
-            return BTreeMap::new();
-        };
         let mut by_person: BTreeMap<String, Vec<Phone>> = BTreeMap::new();
-        let ids: HashSet<String> = gateway.list().into_iter().map(|p| p.id).collect();
-        for view in self.hub.snapshot().devices {
-            let id = view.device.id.as_str();
-            let native = id.split_once(':').map_or(id, |(_, n)| n);
-            if !ids.contains(native) {
+        let snapshot = self.hub.snapshot();
+        let instances: HashSet<String> = snapshot
+            .drivers
+            .iter()
+            .filter(|d| d.kind == "phones")
+            .map(|d| d.instance.as_str().to_owned())
+            .collect();
+        for view in snapshot.devices {
+            if !instances.contains(view.device.instance.as_str()) {
                 continue;
             }
             let Some(person) = view.state.get("person").and_then(|s| match &s.value {

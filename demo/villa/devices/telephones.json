@@ -9,6 +9,18 @@
    "model": "iPhone 15 Pro Max",
    "points": [
     {
+     "key": "person",
+     "label": "Personne",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
      "key": "home",
      "label": "À la maison",
      "kind": {
@@ -133,12 +145,13 @@
     }
    ],
    "state": {
+    "person": "claire",
     "home": true,
     "battery": 78,
     "charging": false,
     "wifi": "Villa",
-    "latitude": 43.5,
-    "longitude": 7.0,
+    "latitude": 43.6281,
+    "longitude": 7.0423,
     "accuracy": 8,
     "distance": 3,
     "app": "1.0.0 (7)"
@@ -152,6 +165,18 @@
    "model": "iPhone 15 Pro Max",
    "points": [
     {
+     "key": "person",
+     "label": "Personne",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
      "key": "home",
      "label": "À la maison",
      "kind": {
@@ -276,14 +301,15 @@
     }
    ],
    "state": {
+    "person": "thomas",
     "home": false,
     "battery": 41,
     "charging": false,
     "wifi": null,
-    "latitude": 43.55,
-    "longitude": 7.02,
+    "latitude": 43.6172,
+    "longitude": 7.0668,
     "accuracy": 12,
-    "distance": 6200,
+    "distance": 2300,
     "app": "1.0.0 (7)"
    }
   }

@@ -90,7 +90,12 @@ fn demo_locked(method: &Method, path: &str) -> bool {
             || path.starts_with("/api/plan")
             || path.starts_with("/api/assistant/key")
             || path.starts_with("/api/assistant/settings")
-            || path.starts_with("/api/home"))
+            || path.starts_with("/api/home")
+            || path.starts_with("/api/people")
+            || path.starts_with("/api/zones")
+            || path.starts_with("/api/invitation")
+            || path.starts_with("/api/phones/")
+            || path.starts_with("/api/mobile/register"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

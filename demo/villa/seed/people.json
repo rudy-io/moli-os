@@ -1,0 +1,69 @@
+{
+  "people": [
+    {
+      "id": "claire",
+      "name": "Claire",
+      "role": "owner",
+      "color": "#3DBE8B",
+      "created": 0
+    },
+    {
+      "id": "thomas",
+      "name": "Thomas",
+      "role": "member",
+      "color": "#4F8DF7",
+      "created": 0
+    },
+    {
+      "id": "lea",
+      "name": "Léa",
+      "role": "guest",
+      "color": "#E5677B",
+      "rooms": [
+        "Chambre de Léa"
+      ],
+      "created": 0
+    },
+    {
+      "id": "hugo",
+      "name": "Hugo",
+      "role": "guest",
+      "color": "#F08A3E",
+      "rooms": [
+        "Chambre de Hugo"
+      ],
+      "created": 0
+    }
+  ],
+  "zones": [
+    {
+      "id": "maison",
+      "name": "Maison",
+      "latitude": 43.6281,
+      "longitude": 7.0423,
+      "radius": 150,
+      "icon": "home"
+    },
+    {
+      "id": "bureau-thomas",
+      "name": "Bureau de Thomas",
+      "latitude": 43.6172,
+      "longitude": 7.0668,
+      "radius": 400
+    },
+    {
+      "id": "ecole",
+      "name": "École",
+      "latitude": 43.6412,
+      "longitude": 7.0089,
+      "radius": 250
+    },
+    {
+      "id": "plage",
+      "name": "Plage",
+      "latitude": 43.5665,
+      "longitude": 7.0745,
+      "radius": 300
+    }
+  ]
+}
