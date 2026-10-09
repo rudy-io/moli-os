@@ -15,7 +15,7 @@ use crate::import::HaAutomation;
 /// conversation answers in one short sentence and nothing more, without
 /// cards; the cheerful voice speaks faster; a question about a state is
 /// never an order; an app opens on the TV by its name).
-const REWORDED: [(&str, &str); 6] = [
+const REWORDED: [(&str, &str); 7] = [
     (
         "Pour la télé, appuie sur une touche avec `key`.",
         "Pour la télé, appuie sur une touche avec `key` ; pour ouvrir une appli, `set` sur `<id de la télé>/app` avec le nom de l'appli (« YouTube », « Netflix », « Disney+ »), même télé éteinte.",
@@ -37,6 +37,10 @@ const REWORDED: [(&str, &str); 6] = [
         "Cette réponse sera dite à voix haute, dans une conversation : une seule phrase courte, une quinzaine de mots, qui répond à la question et à rien d'autre, sans te répéter ni poser de question en retour. Pas de carte à l'écran : n'appelle pas `show`. Sans liste,",
     ),
     ("débit vif,", "débit rapide, sans traîner,"),
+    (
+        "n'annonce jamais une protection, un refus ou un succès sans le résultat de `set`.",
+        "n'annonce jamais une protection ni un refus sans le résultat de `set`. Écris ta courte confirmation (« C'est allumé. ») dans le même message que les `set` : elle n'est dite que si la maison a tout fait ; sinon tu reçois le résultat et tu réponds.",
+    ),
 ];
 
 /// `old` as a French house hears it now: the old words with the changes above.

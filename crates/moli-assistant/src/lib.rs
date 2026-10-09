@@ -573,34 +573,10 @@ impl Assistant {
             let message = &answer["choices"][0]["message"];
             let calls = message["tool_calls"].as_array().filter(|c| !c.is_empty());
             if let Some(calls) = calls {
-                // Cards and words in the same answer: the screen gives nothing
-                // back worth another round trip, the turn ends here (a second
-                // sooner, which a spoken conversation hears).
-                let said = message["content"].as_str().unwrap_or_default().trim();
-                let only_cards = calls.iter().all(|c| c["function"]["name"] == "show");
-                let done = (only_cards && !said.is_empty()).then(|| said.to_owned());
-                messages.push(json!({
-                    "role": "assistant",
-                    "content": message["content"],
-                    "tool_calls": calls,
-                }));
-                for call in calls {
-                    let name = call["function"]["name"].as_str().unwrap_or_default();
-                    if run.tools.len() < 16 {
-                        run.tools.push(name.chars().take(32).collect());
-                    }
-                    let args: Json = call["function"]["arguments"]
-                        .as_str()
-                        .and_then(|a| serde_json::from_str(a).ok())
-                        .unwrap_or_else(|| json!({}));
-                    let result = self.tool(name, &args, &layout, &mut run).await;
-                    messages.push(json!({
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": result.to_string(),
-                    }));
-                }
-                if let Some(said) = done {
+                if let Some(said) = self
+                    .act(message, calls, &layout, &mut run, &mut messages)
+                    .await
+                {
                     return Ok(self.finish(&said, run, &layout, &question));
                 }
                 continue;
@@ -613,6 +589,50 @@ impl Assistant {
             return Ok(self.finish(&text, run, &layout, &question));
         }
         Ok(self.finish("", run, &layout, &question))
+    }
+
+    /// Runs an answer's tool calls, their results added to `messages`. Cards,
+    /// orders and words in the same answer: the screen gives nothing back
+    /// worth another round trip, nor an order the house carried out, and the
+    /// words end the turn (a second or two sooner, which a spoken
+    /// conversation hears). An order held or failed goes back to the model,
+    /// which must say so.
+    async fn act(
+        &self,
+        message: &Json,
+        calls: &[Json],
+        layout: &Layout,
+        run: &mut Run,
+        messages: &mut Vec<Json>,
+    ) -> Option<String> {
+        let said = message["content"].as_str().unwrap_or_default().trim();
+        let quick = calls
+            .iter()
+            .all(|c| matches!(c["function"]["name"].as_str(), Some("show" | "set")));
+        let mut carried_out = quick && !said.is_empty();
+        messages.push(json!({
+            "role": "assistant",
+            "content": message["content"],
+            "tool_calls": calls,
+        }));
+        for call in calls {
+            let name = call["function"]["name"].as_str().unwrap_or_default();
+            if run.tools.len() < 16 {
+                run.tools.push(name.chars().take(32).collect());
+            }
+            let args: Json = call["function"]["arguments"]
+                .as_str()
+                .and_then(|a| serde_json::from_str(a).ok())
+                .unwrap_or_else(|| json!({}));
+            let result = self.tool(name, &args, layout, run).await;
+            carried_out &= name != "set" || result["status"] == "done";
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": result.to_string(),
+            }));
+        }
+        carried_out.then(|| said.to_owned())
     }
 
     fn finish(&self, text: &str, mut run: Run, layout: &Layout, question: &str) -> Reply {
@@ -1601,6 +1621,113 @@ mod tests {
         assert_eq!(reply.reply, "Il fait vingt-trois degres dehors.");
         assert_eq!(reply.cards.len(), 1);
         assert_eq!(reply.cards[0]["kind"], "weather");
+    }
+
+    /// A lamp that does what it is told.
+    struct Lamp;
+
+    impl moli_runtime::Driver for Lamp {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+
+        fn run<'a>(
+            &'a self,
+            ctx: &'a mut moli_runtime::DriverCtx,
+        ) -> moli_runtime::BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                let id = ctx.device_id("lamp");
+                ctx.upsert_device(moli_core::Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: "lamp".into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: None,
+                    members: Vec::new(),
+                    points: vec![moli_core::PointSpec {
+                        key: "on".into(),
+                        label: "On".into(),
+                        kind: moli_core::Kind::Binary,
+                        access: moli_core::Access {
+                            read: true,
+                            write: true,
+                        },
+                        unit: None,
+                        semantic: moli_core::Semantic::OnOff,
+                    }],
+                });
+                ctx.set_state(&id, "on", Value::Bool(false));
+                ctx.ready();
+                while let Some(cmd) = ctx.next_command().await {
+                    ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                    cmd.reply(Ok(()));
+                }
+                Ok(())
+            })
+        }
+    }
+
+    /// Moli over a hub with the lamp running, its provider answering `answer` once.
+    async fn moli_with_lamp(answer: &'static [u8]) -> Assistant {
+        let (url, _task) = crate::llm::tests::fake_http(200, answer).await;
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        moli_runtime::spawn_driver(
+            &hub,
+            InstanceId::from("fake"),
+            Arc::new(Lamp),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        for _ in 0..200 {
+            if hub.stats().drivers_running == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        Assistant::new(hub, None, None, None, config).unwrap()
+    }
+
+    fn spoken(question: &str) -> Turn {
+        serde_json::from_value(json!({
+            "spoken": true,
+            "messages": [{ "role": "user", "content": question }],
+        }))
+        .unwrap()
+    }
+
+    /// The provider answers once: a second round trip would fail the turn.
+    #[tokio::test]
+    async fn an_order_carried_out_ends_the_turn_with_its_words() {
+        let moli = moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant",
+            "content":"C'est allume.",
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true}"}}]}}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        )
+        .await;
+        let reply = moli.turn(spoken("Allume la lampe")).await.unwrap();
+        assert_eq!(reply.usage.steps, 1);
+        assert_eq!(reply.reply, "C'est allume.");
+        assert_eq!(reply.actions.len(), 1);
+        assert_eq!(reply.actions[0].status, "done");
+    }
+
+    /// An order that failed is not announced as done: the model hears the
+    /// result, a second round trip (which the one-answer provider fails).
+    #[tokio::test]
+    async fn an_order_that_failed_goes_back_to_the_model() {
+        let moli = moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant",
+            "content":"C'est allume.",
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:nothing/on\",\"value\":true}"}}]}}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        )
+        .await;
+        assert!(moli.turn(spoken("Allume le rien")).await.is_err());
     }
 
     #[test]

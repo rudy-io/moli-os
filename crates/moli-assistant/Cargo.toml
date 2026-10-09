@@ -29,6 +29,7 @@ unicode-normalization.workspace = true
 [dev-dependencies]
 toml.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tokio-util.workspace = true
 
 [lints]
 workspace = true
