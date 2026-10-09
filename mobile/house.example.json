@@ -1,6 +1,4 @@
 {
-  "url": "https://maison.example.org",
-  "allowedSuffixes": ["maison.example.org", "cloudflareaccess.com", ".cloudflareaccess.com"],
   "bundleId": "com.example.moli",
   "owner": "votre-compte-expo",
   "appleTeamId": "ABCDE12345",

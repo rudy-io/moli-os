@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "NSMicrophoneUsageDescription": "Moli t'écoute quand tu lui parles (bouton micro ou « Parler avec Moli »).",
+    "NSLocationWhenInUseUsageDescription": "Moli utilise ta position pour savoir si tu es à la maison, et adapter la maison (lumières, alarme, chauffage). Elle n'est envoyée qu'à ton Moli, chez toi.",
+    "NSLocationAlwaysAndWhenInUseUsageDescription": "Pour savoir quand tu arrives à la maison ou que tu en pars, même appli fermée, Moli a besoin de ta position en arrière-plan. Elle n'est envoyée qu'à ton Moli, chez toi.",
+    "NSLocalNetworkUsageDescription": "Moli parle à ta maison sur le Wi-Fi de la maison, à l'adresse que tu lui donnes."
+  }
+}

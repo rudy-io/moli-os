@@ -15,19 +15,20 @@ import * as SecureStore from "expo-secure-store";
 import * as TaskManager from "expo-task-manager";
 import NetInfo from "@react-native-community/netinfo";
 import { Platform } from "react-native";
+import { currentHouse } from "./house";
+import { t } from "./texts";
 
 // iOS gives the Wi-Fi's name only when asked (and with the location granted
 // plus the Wi-Fi information entitlement, see app.json).
 NetInfo.configure({ shouldFetchWiFiSSID: true });
 
-// The house's address: app.config.js (house.json or MOLI_URL).
-export const BASE = (Constants.expoConfig?.extra?.moliUrl as string | undefined) ?? "https://maison.example.org";
 const PAIRING = "moli.pairing";
 export const LOCATION_TASK = "moli-location";
 export const REGION_TASK = "moli-home-region";
 
 export type Home = { latitude: number; longitude: number; radius: number };
-export type Pairing = { id: string; token: string; home?: Home | null };
+/** `base`: the house it was made with (missing in pairings from before the app could change house). */
+export type Pairing = { id: string; token: string; home?: Home | null; base?: string };
 
 export async function pairing(): Promise<Pairing | null> {
   try {
@@ -44,10 +45,24 @@ export async function savePairing(p: Pairing): Promise<void> {
   });
 }
 
+/**
+ * Leaving a house: its token, its home zone and the location watching go.
+ * The next house pairs the phone again once its dashboard is signed in.
+ */
+export async function unpair(): Promise<void> {
+  await SecureStore.deleteItemAsync(PAIRING).catch(() => {});
+  if (await Location.hasStartedGeofencingAsync(REGION_TASK).catch(() => false)) {
+    await Location.stopGeofencingAsync(REGION_TASK).catch(() => {});
+  }
+  if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false)) {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK).catch(() => {});
+  }
+}
+
 /** What the phone tells Moli when it pairs. */
 export function pairingRequest(pushToken: string | null) {
   return {
-    name: Device.deviceName ?? Device.modelName ?? "Téléphone",
+    name: Device.deviceName ?? Device.modelName ?? t.phone,
     platform: Platform.OS === "ios" ? "ios" : "android",
     model: (Device.modelName ?? "").slice(0, 60),
     ...(pushToken ? { push_token: pushToken } : {}),
@@ -149,7 +164,9 @@ export async function report(
   try {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 15_000);
-    const res = await fetch(`${BASE}/api/phones/${p.id}/report`, {
+    const base = p.base ?? (await currentHouse());
+    if (!base) return;
+    const res = await fetch(`${base}/api/phones/${p.id}/report`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${p.token}` },
       body: JSON.stringify(body),
