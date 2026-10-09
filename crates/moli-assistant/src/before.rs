@@ -13,8 +13,13 @@ use crate::import::HaAutomation;
 
 /// Words changed on purpose after the move (9 Oct. 2026: a spoken
 /// conversation answers in one short sentence and nothing more, without
-/// cards; the cheerful voice speaks faster).
-const REWORDED: [(&str, &str); 4] = [
+/// cards; the cheerful voice speaks faster; a question about a state is
+/// never an order).
+const REWORDED: [(&str, &str); 5] = [
+    (
+        "appelle `set` tout de suite, sur une valeur marquée ✎ dans l'inventaire.",
+        "appelle `set` tout de suite, sur une valeur marquée ✎ dans l'inventaire. Une question sur un état (« la lumière est allumée ? », « le portail est fermé ? ») n'est jamais un ordre : réponds, ne touche à rien.",
+    ),
     (
         "Exemple : « 940 W en ce moment, surtout des appareils non mesurés à part. Dehors, 23 °C et un ciel couvert. »",
         "Réponds à ce qu'on te demande, rien de plus : pas de météo ni de conso en prime. Exemple, à « on consomme combien ? » : « 940 W en ce moment, surtout des appareils non mesurés à part. »",
