@@ -396,12 +396,15 @@ impl People {
         lock(&self.book).clone()
     }
 
-    /// Whether someone may manage the people (else the house's code does).
+    /// Whether an owner can sign in (a password set, or an e-mail Access
+    /// vouches for): until then, the house's code manages the people (else
+    /// the first owner, created but not yet invited, could never be).
     pub(crate) fn has_owner(&self) -> bool {
-        lock(&self.book)
-            .people
-            .iter()
-            .any(|p| p.role == Role::Owner && active(p))
+        lock(&self.book).people.iter().any(|p| {
+            p.role == Role::Owner
+                && active(p)
+                && (!p.emails.is_empty() || self.hub.core_secret(&password_key(&p.id)).is_some())
+        })
     }
 
     fn reference(p: &Person) -> PersonRef {

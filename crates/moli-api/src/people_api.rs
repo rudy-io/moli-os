@@ -85,6 +85,7 @@ fn owners_only() -> Response {
 pub(crate) async fn list(
     Extension(humans): Extension<Arc<Sessions>>,
     Extension(persons): Persons,
+    Extension(crate::phones::PhonesGate(phones)): Extension<crate::phones::PhonesGate>,
     caller: Caller,
     headers: axum::http::HeaderMap,
 ) -> Response {
@@ -112,11 +113,25 @@ pub(crate) async fn list(
             v
         })
         .collect();
+    // The home the phones learned, as a zone, until an owner draws one.
+    let mut zones = book.zones;
+    if !zones.iter().any(|z| z.id == "maison")
+        && let Some(home) = phones.as_ref().and_then(moli_phones::Gateway::home)
+    {
+        zones.push(Zone {
+            id: "maison".into(),
+            name: moli_i18n::tr!("serveur.personnes.zone_maison"),
+            latitude: home.latitude,
+            longitude: home.longitude,
+            radius: home.radius,
+            icon: Some("home".into()),
+        });
+    }
     Json(json!({
         "me": caller.person,
         "owner": owner,
         "people": people,
-        "zones": book.zones,
+        "zones": zones,
     }))
     .into_response()
 }
