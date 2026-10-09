@@ -134,6 +134,11 @@ pub struct Server {
     /// reaches it is let in. Refused with any real driver.
     #[serde(default)]
     pub demo: bool,
+    /// A demo house's starting point (home, plan, automations…): at every
+    /// start, its data directory is emptied and filled from here, and a
+    /// made-up energy past is filed. Only with `demo = true`.
+    #[serde(default)]
+    pub demo_seed: Option<PathBuf>,
 }
 
 fn default_language() -> String {
@@ -155,6 +160,7 @@ impl Default for Server {
             access: None,
             language: default_language(),
             demo: false,
+            demo_seed: None,
         }
     }
 }
@@ -231,10 +237,31 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read {}", path.display()))?;
-        let config: Self =
+        let mut config: Self =
             toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+        config.beside(path.parent().unwrap_or(Path::new(".")));
         config.check()?;
         Ok(config)
+    }
+
+    /// A demo's files (its devices, its seed) are found next to its
+    /// configuration, wherever Moli is started from.
+    fn beside(&mut self, dir: &Path) {
+        let near = |p: &Path| {
+            if p.is_relative() {
+                dir.join(p)
+            } else {
+                p.to_path_buf()
+            }
+        };
+        if let Some(seed) = &self.server.demo_seed {
+            self.server.demo_seed = Some(near(seed));
+        }
+        for driver in self.drivers.iter_mut().filter(|d| d.kind == "demo") {
+            if let Some(toml::Value::String(f)) = driver.options.get_mut("fixture") {
+                *f = near(Path::new(f.as_str())).to_string_lossy().into_owned();
+            }
+        }
     }
 
     fn check(&self) -> anyhow::Result<()> {
@@ -244,6 +271,9 @@ impl Config {
                 self.server.language,
                 moli_i18n::languages().join(", ")
             );
+        }
+        if self.server.demo_seed.is_some() && !self.server.demo {
+            bail!("[server] demo_seed is for a demo house only (demo = true)");
         }
         // A demo is opened to anyone: nothing real may sit behind it.
         if self.server.demo

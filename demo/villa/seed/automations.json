@@ -1,0 +1,1293 @@
+{
+  "automations": [
+    {
+      "approved": "62a40c9bd6df33d2f8c8e4ec20315e01f519ef37c249ea125df0c3c5058760c0",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "yes",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            },
+            {
+              "from": "n3",
+              "port": "out",
+              "to": "n4"
+            }
+          ],
+          "nodes": [
+            {
+              "days": [],
+              "event": "rise",
+              "id": "t",
+              "offset_min": -30,
+              "type": "at_sun",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "all": true,
+              "id": "n1",
+              "rules": [
+                {
+                  "kind": "state",
+                  "op": "eq",
+                  "point": "maison:arrosage_auto/on",
+                  "value": true
+                }
+              ],
+              "type": "if",
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "tuya:arrosage-potager/switch",
+              "type": "set",
+              "value": true,
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "seconds": 900,
+              "type": "wait",
+              "x": 900.0,
+              "y": 0.0
+            },
+            {
+              "id": "n4",
+              "point": "tuya:arrosage-potager/switch",
+              "type": "set",
+              "value": false,
+              "x": 1200.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924731,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "yes",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          },
+          {
+            "from": "n3",
+            "port": "out",
+            "to": "n4"
+          }
+        ],
+        "nodes": [
+          {
+            "days": [],
+            "event": "rise",
+            "id": "t",
+            "offset_min": -30,
+            "type": "at_sun",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "all": true,
+            "id": "n1",
+            "rules": [
+              {
+                "kind": "state",
+                "op": "eq",
+                "point": "maison:arrosage_auto/on",
+                "value": true
+              }
+            ],
+            "type": "if",
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "tuya:arrosage-potager/switch",
+            "type": "set",
+            "value": true,
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "seconds": 900,
+            "type": "wait",
+            "x": 900.0,
+            "y": 0.0
+          },
+          {
+            "id": "n4",
+            "point": "tuya:arrosage-potager/switch",
+            "type": "set",
+            "value": false,
+            "x": 1200.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "arrosage-du-potager",
+      "mode": "single",
+      "name": "Arrosage du potager",
+      "updated": 1791546924736
+    },
+    {
+      "approved": "ceb34fcf90a6feda02cdf9b58797b660a45f4b8ba2aafde0e5d400ce4ac6ecfb",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "out",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            }
+          ],
+          "nodes": [
+            {
+              "at": "23:00",
+              "days": [],
+              "id": "t",
+              "type": "at_time",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "id": "n1",
+              "point": "tuya:pompe-piscine/switch_1",
+              "type": "set",
+              "value": true,
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "seconds": 21600,
+              "type": "wait",
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "point": "tuya:pompe-piscine/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 900.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924741,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "out",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          }
+        ],
+        "nodes": [
+          {
+            "at": "23:00",
+            "days": [],
+            "id": "t",
+            "type": "at_time",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "n1",
+            "point": "tuya:pompe-piscine/switch_1",
+            "type": "set",
+            "value": true,
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "seconds": 21600,
+            "type": "wait",
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "point": "tuya:pompe-piscine/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 900.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "filtration-de-la-piscine-en-heures-creus",
+      "mode": "single",
+      "name": "Filtration de la piscine en heures creuses",
+      "updated": 1791546924747
+    },
+    {
+      "approved": "8a0d7dc25097b96eaf49737e5b1ba8456bd874dc23df73e62e00774eebdc9418",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "out",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            }
+          ],
+          "nodes": [
+            {
+              "days": [],
+              "event": "set",
+              "id": "t",
+              "offset_min": 10,
+              "type": "at_sun",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "id": "n1",
+              "point": "tuya:allee/switch_1",
+              "type": "set",
+              "value": true,
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "tuya:fond-jardin/switch_1",
+              "type": "set",
+              "value": true,
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "point": "tuya:pergola/switch_1",
+              "type": "set",
+              "value": true,
+              "x": 900.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924751,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "out",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          }
+        ],
+        "nodes": [
+          {
+            "days": [],
+            "event": "set",
+            "id": "t",
+            "offset_min": 10,
+            "type": "at_sun",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "n1",
+            "point": "tuya:allee/switch_1",
+            "type": "set",
+            "value": true,
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "tuya:fond-jardin/switch_1",
+            "type": "set",
+            "value": true,
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "point": "tuya:pergola/switch_1",
+            "type": "set",
+            "value": true,
+            "x": 900.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "lumieres-du-jardin-au-coucher-du-soleil",
+      "mode": "single",
+      "name": "Lumières du jardin au coucher du soleil",
+      "updated": 1791546924756
+    },
+    {
+      "approved": "7dbef5222602b41fe0be14c4c45c25f42f0280fdc7916dcf3bcad1ded8552c5c",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "out",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            },
+            {
+              "from": "n3",
+              "port": "out",
+              "to": "n4"
+            }
+          ],
+          "nodes": [
+            {
+              "at": "00:30",
+              "days": [],
+              "id": "t",
+              "type": "at_time",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "id": "n1",
+              "point": "tuya:allee/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "tuya:fond-jardin/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "point": "tuya:pergola/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 900.0,
+              "y": 0.0
+            },
+            {
+              "id": "n4",
+              "point": "tuya:eclairage-piscine/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 1200.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924760,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "out",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          },
+          {
+            "from": "n3",
+            "port": "out",
+            "to": "n4"
+          }
+        ],
+        "nodes": [
+          {
+            "at": "00:30",
+            "days": [],
+            "id": "t",
+            "type": "at_time",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "n1",
+            "point": "tuya:allee/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "tuya:fond-jardin/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "point": "tuya:pergola/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 900.0,
+            "y": 0.0
+          },
+          {
+            "id": "n4",
+            "point": "tuya:eclairage-piscine/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 1200.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "tout-dehors-s-eteint-a-minuit-et-demi",
+      "mode": "single",
+      "name": "Tout dehors s'éteint à minuit et demi",
+      "updated": 1791546924765
+    },
+    {
+      "approved": "556b626e01f7f68700957f570a4d8ddbd16437eaa02dc8bd8aab2cd794ce7430",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "yes",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            },
+            {
+              "from": "n3",
+              "port": "out",
+              "to": "n4"
+            }
+          ],
+          "nodes": [
+            {
+              "for_s": 0,
+              "id": "t",
+              "point": "z2m:portail/contact",
+              "to": false,
+              "type": "when_state",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "all": true,
+              "id": "n1",
+              "rules": [
+                {
+                  "is": "night",
+                  "kind": "sun"
+                }
+              ],
+              "type": "if",
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "hue:plafonnier-entree/on",
+              "type": "set",
+              "value": true,
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "seconds": 300,
+              "type": "wait",
+              "x": 900.0,
+              "y": 0.0
+            },
+            {
+              "id": "n4",
+              "point": "hue:plafonnier-entree/on",
+              "type": "set",
+              "value": false,
+              "x": 1200.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "restart"
+      },
+      "author": "human",
+      "created": 1791546924770,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "yes",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          },
+          {
+            "from": "n3",
+            "port": "out",
+            "to": "n4"
+          }
+        ],
+        "nodes": [
+          {
+            "for_s": 0,
+            "id": "t",
+            "point": "z2m:portail/contact",
+            "to": false,
+            "type": "when_state",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "all": true,
+            "id": "n1",
+            "rules": [
+              {
+                "is": "night",
+                "kind": "sun"
+              }
+            ],
+            "type": "if",
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "hue:plafonnier-entree/on",
+            "type": "set",
+            "value": true,
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "seconds": 300,
+            "type": "wait",
+            "x": 900.0,
+            "y": 0.0
+          },
+          {
+            "id": "n4",
+            "point": "hue:plafonnier-entree/on",
+            "type": "set",
+            "value": false,
+            "x": 1200.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "portail-ouvert-la-nuit-lumiere-de-l-entr",
+      "mode": "restart",
+      "name": "Portail ouvert la nuit : lumière de l'entrée",
+      "updated": 1791546924775
+    },
+    {
+      "approved": "e0f9beb9caa8ca7e66530ad859ab110319689b4ffa8929d073f113de2c7a087f",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            }
+          ],
+          "nodes": [
+            {
+              "for_s": 0,
+              "id": "t",
+              "point": "z2m:fuite-lave-linge/water_leak",
+              "to": true,
+              "type": "when_state",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "channels": [
+                "maison",
+                "telegram",
+                "voix"
+              ],
+              "id": "n1",
+              "message": "De l'eau sous le lave-linge, à la buanderie.",
+              "title": "Fuite d'eau",
+              "type": "notify",
+              "x": 300.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924780,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          }
+        ],
+        "nodes": [
+          {
+            "for_s": 0,
+            "id": "t",
+            "point": "z2m:fuite-lave-linge/water_leak",
+            "to": true,
+            "type": "when_state",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "channels": [
+              "maison",
+              "telegram",
+              "voix"
+            ],
+            "id": "n1",
+            "message": "De l'eau sous le lave-linge, à la buanderie.",
+            "title": "Fuite d'eau",
+            "type": "notify",
+            "x": 300.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "fuite-sous-le-lave-linge",
+      "mode": "single",
+      "name": "Fuite sous le lave-linge",
+      "updated": 1791546924786
+    },
+    {
+      "approved": "bcc8097032c94dea7765426a25d8dff3a4324a2ec3e9cd7651157df724ffee2f",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            }
+          ],
+          "nodes": [
+            {
+              "for_s": 0,
+              "id": "t",
+              "point": "reolink:sonnette/doorbell",
+              "to": true,
+              "type": "when_state",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "channels": [
+                "maison",
+                "voix",
+                "telephone"
+              ],
+              "id": "n1",
+              "message": "On sonne à la porte.",
+              "type": "notify",
+              "x": 300.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924792,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          }
+        ],
+        "nodes": [
+          {
+            "for_s": 0,
+            "id": "t",
+            "point": "reolink:sonnette/doorbell",
+            "to": true,
+            "type": "when_state",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "channels": [
+              "maison",
+              "voix",
+              "telephone"
+            ],
+            "id": "n1",
+            "message": "On sonne à la porte.",
+            "type": "notify",
+            "x": 300.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "on-sonne-a-la-porte",
+      "mode": "single",
+      "name": "On sonne à la porte",
+      "updated": 1791546924797
+    },
+    {
+      "approved": "0ddf0c893a59765d2bc5aef66609e4e0d0ca5d31e67610926bb6cb0b9630558b",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "out",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            },
+            {
+              "from": "n3",
+              "port": "out",
+              "to": "n4"
+            },
+            {
+              "from": "n4",
+              "port": "out",
+              "to": "n5"
+            },
+            {
+              "from": "n5",
+              "port": "out",
+              "to": "n6"
+            },
+            {
+              "from": "n6",
+              "port": "out",
+              "to": "n7"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "t",
+              "type": "manual",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "id": "n1",
+              "point": "maison:mode_maison/state",
+              "type": "set",
+              "value": "Nuit",
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "hue:piece-salon/on",
+              "type": "set",
+              "value": false,
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "point": "lumieres:suspensions/on",
+              "type": "set",
+              "value": false,
+              "x": 900.0,
+              "y": 0.0
+            },
+            {
+              "id": "n4",
+              "point": "tuya:spots-cuisine/switch_1",
+              "type": "set",
+              "value": false,
+              "x": 1200.0,
+              "y": 0.0
+            },
+            {
+              "id": "n5",
+              "point": "tuya:volet-salon/control",
+              "type": "set",
+              "value": "close",
+              "x": 1500.0,
+              "y": 0.0
+            },
+            {
+              "id": "n6",
+              "point": "daikin:salon/on",
+              "type": "set",
+              "value": false,
+              "x": 1800.0,
+              "y": 0.0
+            },
+            {
+              "id": "n7",
+              "point": "maison:alarme_active/on",
+              "type": "set",
+              "value": true,
+              "x": 2100.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "single"
+      },
+      "author": "human",
+      "created": 1791546924801,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "out",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          },
+          {
+            "from": "n3",
+            "port": "out",
+            "to": "n4"
+          },
+          {
+            "from": "n4",
+            "port": "out",
+            "to": "n5"
+          },
+          {
+            "from": "n5",
+            "port": "out",
+            "to": "n6"
+          },
+          {
+            "from": "n6",
+            "port": "out",
+            "to": "n7"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "t",
+            "type": "manual",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "n1",
+            "point": "maison:mode_maison/state",
+            "type": "set",
+            "value": "Nuit",
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "hue:piece-salon/on",
+            "type": "set",
+            "value": false,
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "point": "lumieres:suspensions/on",
+            "type": "set",
+            "value": false,
+            "x": 900.0,
+            "y": 0.0
+          },
+          {
+            "id": "n4",
+            "point": "tuya:spots-cuisine/switch_1",
+            "type": "set",
+            "value": false,
+            "x": 1200.0,
+            "y": 0.0
+          },
+          {
+            "id": "n5",
+            "point": "tuya:volet-salon/control",
+            "type": "set",
+            "value": "close",
+            "x": 1500.0,
+            "y": 0.0
+          },
+          {
+            "id": "n6",
+            "point": "daikin:salon/on",
+            "type": "set",
+            "value": false,
+            "x": 1800.0,
+            "y": 0.0
+          },
+          {
+            "id": "n7",
+            "point": "maison:alarme_active/on",
+            "type": "set",
+            "value": true,
+            "x": 2100.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "bonne-nuit",
+      "mode": "single",
+      "name": "Bonne nuit",
+      "updated": 1791546924808
+    },
+    {
+      "approved": "a9d28d2eb062277affb45726b2264fd670da94f93f440d5cc30c0169e8a4f629",
+      "approved_version": {
+        "graph": {
+          "edges": [
+            {
+              "from": "t",
+              "port": "out",
+              "to": "n1"
+            },
+            {
+              "from": "n1",
+              "port": "yes",
+              "to": "n2"
+            },
+            {
+              "from": "n2",
+              "port": "out",
+              "to": "n3"
+            },
+            {
+              "from": "n3",
+              "port": "out",
+              "to": "n4"
+            },
+            {
+              "from": "n4",
+              "port": "out",
+              "to": "n5"
+            },
+            {
+              "from": "n5",
+              "port": "out",
+              "to": "n6"
+            }
+          ],
+          "nodes": [
+            {
+              "for_s": 600,
+              "id": "t",
+              "point": "presence:claire/home",
+              "to": false,
+              "type": "when_state",
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "all": true,
+              "id": "n1",
+              "rules": [
+                {
+                  "kind": "state",
+                  "op": "eq",
+                  "point": "presence:thomas/home",
+                  "value": false
+                }
+              ],
+              "type": "if",
+              "x": 300.0,
+              "y": 0.0
+            },
+            {
+              "id": "n2",
+              "point": "maison:mode_maison/state",
+              "type": "set",
+              "value": "Absent",
+              "x": 600.0,
+              "y": 0.0
+            },
+            {
+              "id": "n3",
+              "point": "hue:piece-salon/on",
+              "type": "set",
+              "value": false,
+              "x": 900.0,
+              "y": 0.0
+            },
+            {
+              "id": "n4",
+              "point": "daikin:salon/on",
+              "type": "set",
+              "value": false,
+              "x": 1200.0,
+              "y": 0.0
+            },
+            {
+              "id": "n5",
+              "point": "maison:alarme_active/on",
+              "type": "set",
+              "value": true,
+              "x": 1500.0,
+              "y": 0.0
+            },
+            {
+              "channels": [
+                "telephone"
+              ],
+              "id": "n6",
+              "message": "Plus personne à la villa : alarme allumée, clim coupée.",
+              "type": "notify",
+              "x": 1800.0,
+              "y": 0.0
+            }
+          ]
+        },
+        "mode": "restart"
+      },
+      "author": "human",
+      "created": 1791546924814,
+      "enabled": true,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          },
+          {
+            "from": "n1",
+            "port": "yes",
+            "to": "n2"
+          },
+          {
+            "from": "n2",
+            "port": "out",
+            "to": "n3"
+          },
+          {
+            "from": "n3",
+            "port": "out",
+            "to": "n4"
+          },
+          {
+            "from": "n4",
+            "port": "out",
+            "to": "n5"
+          },
+          {
+            "from": "n5",
+            "port": "out",
+            "to": "n6"
+          }
+        ],
+        "nodes": [
+          {
+            "for_s": 600,
+            "id": "t",
+            "point": "presence:claire/home",
+            "to": false,
+            "type": "when_state",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "all": true,
+            "id": "n1",
+            "rules": [
+              {
+                "kind": "state",
+                "op": "eq",
+                "point": "presence:thomas/home",
+                "value": false
+              }
+            ],
+            "type": "if",
+            "x": 300.0,
+            "y": 0.0
+          },
+          {
+            "id": "n2",
+            "point": "maison:mode_maison/state",
+            "type": "set",
+            "value": "Absent",
+            "x": 600.0,
+            "y": 0.0
+          },
+          {
+            "id": "n3",
+            "point": "hue:piece-salon/on",
+            "type": "set",
+            "value": false,
+            "x": 900.0,
+            "y": 0.0
+          },
+          {
+            "id": "n4",
+            "point": "daikin:salon/on",
+            "type": "set",
+            "value": false,
+            "x": 1200.0,
+            "y": 0.0
+          },
+          {
+            "id": "n5",
+            "point": "maison:alarme_active/on",
+            "type": "set",
+            "value": true,
+            "x": 1500.0,
+            "y": 0.0
+          },
+          {
+            "channels": [
+              "telephone"
+            ],
+            "id": "n6",
+            "message": "Plus personne à la villa : alarme allumée, clim coupée.",
+            "type": "notify",
+            "x": 1800.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "toute-la-famille-est-partie",
+      "mode": "restart",
+      "name": "Toute la famille est partie",
+      "updated": 1791546924820
+    }
+  ]
+}

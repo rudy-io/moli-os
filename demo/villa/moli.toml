@@ -3,15 +3,16 @@
 # et vit tout seul (crate moli-demo). Ouverte à tout visiteur ([server] demo).
 #
 #   docker compose -f demo/villa/compose.yaml up      → http://localhost:8790
-#   cargo run -p moli-os -- --config demo/villa/moli.toml serve   (depuis le dépôt)
+#   cd demo/villa && MOLI_UI_PIN=123456 cargo run -p moli-os -- --config moli.toml serve
 
 [server]
 listen = "0.0.0.0:8790"
-data_dir = "demo/villa/data"
+data_dir = "data"
 worker_threads = 2
 # The names the demo is reached by, besides localhost (set at deployment).
 allowed_hosts = []
 history_days = 7
+demo_seed = "seed"
 demo = true
 
 [guard]
@@ -27,121 +28,121 @@ rooms = ["Chambre de Léa", "Chambre de Hugo"]
 id = "air"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/air.json"
+fixture = "devices/air.json"
 
 [[driver]]
 id = "bambu"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/bambu.json"
+fixture = "devices/bambu.json"
 
 [[driver]]
 id = "box"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/box.json"
+fixture = "devices/box.json"
 
 [[driver]]
 id = "canon"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/canon.json"
+fixture = "devices/canon.json"
 
 [[driver]]
 id = "circuits"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/circuits.json"
+fixture = "devices/circuits.json"
 
 [[driver]]
 id = "daikin"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/daikin.json"
+fixture = "devices/daikin.json"
 
 [[driver]]
 id = "frigate"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/frigate.json"
+fixture = "devices/frigate.json"
 
 [[driver]]
 id = "hue"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/hue.json"
+fixture = "devices/hue.json"
 
 [[driver]]
 id = "machines"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/machines.json"
+fixture = "devices/machines.json"
 
 [[driver]]
 id = "meteo"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/meteo.json"
+fixture = "devices/meteo.json"
 
 [[driver]]
 id = "piscine"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/piscine.json"
+fixture = "devices/piscine.json"
 
 [[driver]]
 id = "presence"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/presence.json"
+fixture = "devices/presence.json"
 
 [[driver]]
 id = "reolink"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/reolink.json"
+fixture = "devices/reolink.json"
 
 [[driver]]
 id = "snapmaker"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/snapmaker.json"
+fixture = "devices/snapmaker.json"
 
 [[driver]]
 id = "sonos"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/sonos.json"
+fixture = "devices/sonos.json"
 
 [[driver]]
 id = "tele"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/tele.json"
+fixture = "devices/tele.json"
 
 [[driver]]
 id = "telegram"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/telegram.json"
+fixture = "devices/telegram.json"
 
 [[driver]]
 id = "telephones"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/telephones.json"
+fixture = "devices/telephones.json"
 
 [[driver]]
 id = "tuya"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/tuya.json"
+fixture = "devices/tuya.json"
 
 [[driver]]
 id = "z2m"
 kind = "demo"
 [driver.options]
-fixture = "demo/villa/devices/z2m.json"
+fixture = "devices/z2m.json"
 
 [[driver]]
 id = "maison"
