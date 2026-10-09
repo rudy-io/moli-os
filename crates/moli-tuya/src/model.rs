@@ -202,9 +202,23 @@ fn semantic(code: &str, unit: Option<&Unit>) -> Semantic {
 
 /// Tuya's standard codes in words; others: `cur_power` → « Cur power ».
 fn label(code: &str) -> String {
+    // The outlets of a strip and their timers: `switch_3` → « Marche 3 ».
+    for (prefix, key) in [
+        ("switch_", "pilotes.tuya.marche_n"),
+        ("countdown_", "pilotes.tuya.minuterie_n"),
+    ] {
+        if let Some(n) = code
+            .strip_prefix(prefix)
+            .filter(|n| n.parse::<u8>().is_ok_and(|n| n >= 2))
+        {
+            return moli_i18n::tr!(key, n = n);
+        }
+    }
     let known = match code {
         "switch" | "switch_1" => "pilotes.tuya.marche",
-        "switch_2" => "pilotes.tuya.marche_2",
+        "relay_status" => "pilotes.tuya.retour_courant",
+        "light_mode" => "pilotes.tuya.voyant",
+        "child_lock" => "pilotes.tuya.securite_enfant",
         "cur_power" => "pilotes.tuya.puissance",
         "cur_voltage" => "pilotes.tuya.tension",
         "cur_current" => "pilotes.tuya.courant",
@@ -273,6 +287,20 @@ impl TuyaDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_strips_outlets_are_numbered_in_words() {
+        assert_eq!(label("switch_1"), "Marche");
+        assert_eq!(label("switch_2"), "Marche 2");
+        assert_eq!(label("switch_3"), "Marche 3");
+        assert_eq!(label("countdown_1"), "Minuterie");
+        assert_eq!(label("countdown_3"), "Minuterie 3");
+        assert_eq!(label("relay_status"), "État au retour du courant");
+        assert_eq!(label("child_lock"), "Sécurité enfant");
+        // Not a number: as the code says.
+        assert_eq!(label("switch_led"), "Switch led");
+        assert_eq!(label("switch_inching"), "Switch inching");
+    }
 
     fn plug() -> TuyaDevice {
         serde_json::from_value(serde_json::json!({
