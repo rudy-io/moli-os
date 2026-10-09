@@ -31,8 +31,9 @@ const RETRY_LAUNCH: Duration = Duration::from_secs(4);
 /// A refusal this soon after the remote came up is the TV still starting.
 const STARTING: Duration = Duration::from_secs(90);
 /// No refusal this long after a link: the app opened (the TV refuses within
-/// a second; it does not always say which app came up).
-const SETTLE: Duration = Duration::from_secs(2);
+/// a fraction of a second; it does not always say which app came up, an app
+/// woken from the screensaver can take seconds to show).
+const SETTLE: Duration = Duration::from_secs(1);
 /// The hub's patience ends at the order's deadline: answered a little before.
 const BEFORE_DEADLINE: Duration = Duration::from_millis(300);
 
