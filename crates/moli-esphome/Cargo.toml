@@ -13,6 +13,7 @@ moli-core.workspace = true
 moli-net.workspace = true
 moli-runtime.workspace = true
 ring.workspace = true
+earshot.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -47,6 +47,24 @@ struct Run {
     ended: bool,
 }
 
+impl Run {
+    /// What the microphone gave, and how the listening ended: the levels to
+    /// tune the detection by.
+    fn log(&self, ctx: &DriverCtx, ended_by: &str) {
+        let heard = self.vad.heard();
+        tracing::info!(
+            instance = %ctx.instance(),
+            ended_by,
+            length_ms = self.length.as_millis(),
+            speech_at_ms = heard.speech_at.map(|d| d.as_millis()),
+            best = heard.best,
+            voice_db = heard.voice_db(),
+            quiet_db = heard.quiet_db(),
+            "satellite listened"
+        );
+    }
+}
+
 /// The voice of one satellite.
 #[derive(Debug)]
 pub(crate) struct Voice {
@@ -164,9 +182,8 @@ impl Voice {
             return Ok(());
         };
         run.pcm.extend_from_slice(pcm);
-        let (rms, length) = vad::level(pcm, RATE);
-        run.length += length;
-        let edge = run.vad.push(rms, length);
+        run.length += vad::length(pcm);
+        let edge = run.vad.push(pcm);
         if edge == Some(Edge::Start) {
             run.speech_by = None;
             Self::event(tx, VoiceEvent::SttVadStart, &[]).await?;
@@ -175,6 +192,7 @@ impl Voice {
         if edge != Some(Edge::End) && !too_long {
             return Ok(());
         }
+        run.log(ctx, if too_long { "cut" } else { "silence" });
         run.ended = true;
         run.speech_by = None;
         let wav = sound::wav(&std::mem::take(&mut run.pcm), RATE);
@@ -306,12 +324,12 @@ impl Voice {
         tx: &mut Outbox,
     ) -> Sent {
         let now = Instant::now();
-        if self
+        if let Some(run) = self
             .run
             .as_ref()
-            .and_then(|r| r.speech_by)
-            .is_some_and(|by| now >= by)
+            .filter(|r| r.speech_by.is_some_and(|by| now >= by))
         {
+            run.log(ctx, "no voice");
             return self.end(ctx, id, tx, true).await;
         }
         if self.continuing.is_some_and(|by| now >= by) {
