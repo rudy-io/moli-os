@@ -372,41 +372,46 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 Err(e) => {
                     connected = false;
                     online(ctx, &id, &filament, false);
-                    let text = format!("{e:#}");
-                    if text.contains(moli_net::PIN_MISMATCH) {
-                        ctx.wait_for(moli_i18n::tr!(
-                            "pilotes.bambu.certificat_change",
-                            instance = ctx.instance(),
-                            key = CERT
-                        ));
+                    if stopped_by(ctx, &format!("{e:#}"), &mut last_error) {
                         ctx.cancelled().await;
                         return Ok(());
                     }
-                    // A refused access code is not « switched off »: the
-                    // person reads the code on the printer and gives it again.
-                    if refused_code(&text) {
-                        ctx.wait_for(moli_i18n::tr!(
-                            "pilotes.bambu.code_refuse",
-                            instance = ctx.instance(),
-                            key = ACCESS_CODE
-                        ));
-                        ctx.cancelled().await;
-                        return Ok(());
-                    }
-                    // Printer off: rumqttc reconnects on the next poll. Each
-                    // new reason is said once (a printer switched off says
-                    // the same thing every 30 s).
-                    if last_error.as_deref() == Some(text.as_str()) {
-                        tracing::debug!(instance = %ctx.instance(), error = %text, "printer unreachable");
-                    } else {
-                        tracing::warn!(instance = %ctx.instance(), error = %text, "printer unreachable");
-                        last_error = Some(text);
-                    }
+                    // Printer off: rumqttc reconnects on the next poll.
                     paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(30));
                 }
             },
         }
     }
+}
+
+/// Why the connection dropped. A changed certificate or a refused access
+/// code waits for a person (`true`: the driver stops trying); anything else
+/// (the printer switched off) is said once per new reason, not every 30 s.
+fn stopped_by(ctx: &DriverCtx, error: &str, last_error: &mut Option<String>) -> bool {
+    let instance = ctx.instance();
+    if error.contains(moli_net::PIN_MISMATCH) {
+        ctx.wait_for(moli_i18n::tr!(
+            "pilotes.bambu.certificat_change",
+            instance = instance,
+            key = CERT
+        ));
+        return true;
+    }
+    if refused_code(error) {
+        ctx.wait_for(moli_i18n::tr!(
+            "pilotes.bambu.code_refuse",
+            instance = instance,
+            key = ACCESS_CODE
+        ));
+        return true;
+    }
+    if last_error.as_deref() == Some(error) {
+        tracing::debug!(%instance, error, "printer unreachable");
+    } else {
+        tracing::warn!(%instance, error, "printer unreachable");
+        *last_error = Some(error.to_owned());
+    }
+    false
 }
 
 /// The printer said no to the access code (MQTT `CONNACK` 4 or 5).
