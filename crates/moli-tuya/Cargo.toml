@@ -1,0 +1,32 @@
+[package]
+name = "moli-tuya"
+description = "Moli OS driver for Tuya Wi-Fi devices, 100 % local (protocols 3.3, 3.4, 3.5)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+aes.workspace = true
+anyhow.workspace = true
+crc32fast.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+md-5.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+socket2 = "0.6"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

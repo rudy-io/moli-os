@@ -1,0 +1,34 @@
+[package]
+name = "moli-assistant"
+description = "Moli OS: the home's own assistant, a conversation that acts through the hub (under its guard) and decides what the screen shows."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+moli-ambiance.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+moli-history.workspace = true
+moli-energy.workspace = true
+moli-net.workspace = true
+moli-automation.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+jiff.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

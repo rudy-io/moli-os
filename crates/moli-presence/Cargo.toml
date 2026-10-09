@@ -1,0 +1,18 @@
+[package]
+name = "moli-presence"
+description = "Moli OS presence: who is home, from their phones on the home Wi-Fi (local, no app, no cloud)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

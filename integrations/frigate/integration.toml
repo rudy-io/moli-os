@@ -1,0 +1,25 @@
+[integration]
+id = "frigate"
+name = "Frigate (enregistreur vidéo)"
+brands = ["Frigate"]
+models = []
+transport = "mqtt"
+driver = "frigate"
+crate = "moli-frigate"
+
+[discovery]
+# Cameras appear when Frigate publishes their `motion` or `detect` state.
+mdns = []
+ssdp = []
+# The MQTT broker; Frigate's internal HTTP API (camera images).
+ports = [1883, 5000]
+
+[needs]
+# No MQTT credentials option (unlike z2m).
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = ""
+author = "agent"

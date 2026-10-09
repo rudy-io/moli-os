@@ -1,0 +1,13 @@
+# Exceptions de scripts/i18n-check.mjs : « chemin  expression » (la ligne de code entière).
+# Chaque langue nommée dans sa propre langue, quelle que soit celle du tableau de bord.
+web/src/maison/ui/Setup.svelte  const NAMES = \{ fr: 'Français'
+# Identifiants que le serveur pose et que l'interface compare (jamais affichés, jamais traduits).
+web/src/maison/pages/Infra.svelte  'Serveur de la maison'
+web/src/maison/pages/Systeme.svelte  'Aide'
+# La pièce de l'alarme dans le plan de la maison de référence (à remplacer par un rôle : voir la spec).
+web/src/maison/ui/SecurityPanel.svelte  roomOf\(d\) === 'Sécurité'
+# Les mots que l'imprimante emploie, dans chaque langue de la maison (reconnaissance, pas affichage).
+web/src/maison/ui/PaperPrinterCard.svelte  STUCK = /papier
+web/src/maison/ui/PaperPrinterCard.svelte  /envoi\|en attente
+web/src/maison/ui/PaperPrinterCard.svelte  /(couleur|noire|jaune)
+web/src/maison/lib/paper.js  /pleine\|full/

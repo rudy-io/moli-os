@@ -1,0 +1,29 @@
+[integration]
+id = "hue"
+name = "Philips Hue (pont, API CLIP v2)"
+brands = ["Philips Hue"]
+models = []
+transport = "https"
+driver = "hue"
+crate = "moli-hue"
+
+[discovery]
+# No discovery: the instance gives the bridge's address.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+# app_key, client_key and cert_sha256 are written by the driver itself at
+# pairing (a human presses the bridge's button): nothing to provide.
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-hue/src/model.rs).
+[[fixture]]
+file = "fixtures/resources.json"

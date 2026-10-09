@@ -1,0 +1,202 @@
+/* Moli · Maison — the family dashboard.
+   Porcelain by day, a soft night after sunset. Warm amber means « on »,
+   cool blue means climate, coral asks for attention. Big touch targets,
+   few words, no jargon. Everything lives under .maison: the Atelier keeps
+   its own look. */
+
+.maison {
+  --bg: #edf0f5;
+  --surface: #ffffff;
+  --surface-2: #f5f7fa;
+  --surface-3: #e9edf3;
+  --ink: #171c28;
+  --ink-2: #4a5265;
+  --ink-3: #6b7386; /* 4.6:1 on white (WCAG AA for small text) */
+  --line: #e1e5ec;
+  --warm: #f0a53a;
+  --warm-ink: #8a4b06;
+  --warm-soft: #fff2dc;
+  --warm-glow: rgb(240 165 58 / 38%);
+  --sun: #e8b931;
+  --cool: #4b74f2;
+  --cool-soft: #e8eefe;
+  --good: #2c9a88;
+  --good-soft: #e1f3ef;
+  --alert: #df5a40;
+  --alert-soft: #fde8e3;
+  --shadow: 0 1px 2px rgb(23 32 56 / 5%), 0 10px 30px -12px rgb(23 32 56 / 16%);
+  --shadow-lift: 0 1px 2px rgb(23 32 56 / 6%), 0 16px 40px -14px rgb(23 32 56 / 24%);
+  --r-xl: 32px;
+  --r-lg: 26px;
+  --r-md: 20px;
+  --r-sm: 14px;
+  --font: 'Figtree Variable', 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  color-scheme: light;
+
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.maison[data-theme='night'] {
+  --bg: #0d1016;
+  --surface: #161a22;
+  --surface-2: #1b2029;
+  --surface-3: #232935;
+  --ink: #eceff5;
+  --ink-2: #b3bac8;
+  --ink-3: #788195;
+  --line: #252b37;
+  --warm: #f5ae4c;
+  --warm-ink: #ffd49a;
+  --warm-soft: #33270f;
+  --warm-glow: rgb(245 174 76 / 30%);
+  --cool: #7e9dff;
+  --cool-soft: #1a2238;
+  --good: #4fc0ad;
+  --good-soft: #142b28;
+  --alert: #ff7b62;
+  --alert-soft: #3a1c16;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 30px -14px rgb(0 0 0 / 60%);
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 35%), 0 18px 40px -14px rgb(0 0 0 / 70%);
+  color-scheme: dark;
+}
+
+.maison *,
+.maison *::before,
+.maison *::after {
+  box-sizing: border-box;
+}
+
+.maison button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.maison button:disabled {
+  cursor: default;
+}
+
+.maison :focus-visible {
+  outline: 3px solid var(--cool);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.maison h1,
+.maison h2,
+.maison h3,
+.maison p {
+  margin: 0;
+}
+
+.maison .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A surface: the one card style everything shares. */
+.maison .card {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  position: relative;
+}
+
+.maison .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.maison .card-head h2 {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.maison .card-head .more {
+  border: 0;
+  background: var(--surface-2);
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  transition: background 0.2s var(--ease);
+}
+
+.maison .card-head .more:hover {
+  background: var(--surface-3);
+}
+
+.maison .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.maison .chip.warm {
+  background: var(--warm-soft);
+  color: var(--warm-ink);
+}
+
+.maison .chip.cool {
+  background: var(--cool-soft);
+  color: var(--cool);
+}
+
+.maison .chip.alert {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
+.maison .chip.good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.maison .muted {
+  color: var(--ink-3);
+}
+
+.maison .page-title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.maison .page-sub {
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maison *,
+  .maison *::before,
+  .maison *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

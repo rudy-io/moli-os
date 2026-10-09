@@ -1,0 +1,23 @@
+[integration]
+id = "phones"
+name = "Téléphones de la famille (appli Moli)"
+brands = ["Apple", "Android"]
+models = []
+# The app reports to Moli over HTTPS (the tunnel); nothing to discover.
+transport = "https"
+driver = "phones"
+crate = "moli-phones"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["home_wifi"]
+
+[origin]
+reused = "même rôle que l'intégration mobile_app de HA (capteurs du téléphone, présence)"
+author = "agent"

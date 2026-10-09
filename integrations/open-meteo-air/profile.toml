@@ -1,0 +1,62 @@
+# Air quality and UV, from Open-Meteo (CAMS models; free, no key).
+# Set `vars = { lat = "…", lon = "…" }` in the driver options.
+
+[profile]
+id = "open-meteo-air"
+name = "Qualité de l'air"
+manufacturer = "Open-Meteo"
+model = "CAMS"
+https = true
+host = "air-quality-api.open-meteo.com"
+
+[[request]]
+id = "a"
+path = "/v1/air-quality?latitude={lat}&longitude={lon}&current=european_aqi,pm10,pm2_5,nitrogen_dioxide,ozone,uv_index&timezone=auto"
+format = "json"
+every = "30m"
+
+[[point]]
+key = "aqi"
+label = "Indice européen (AQI)"
+from = "a.current.european_aqi"
+kind = "numeric"
+
+[[point]]
+key = "pm2_5"
+label = "Particules fines PM2,5"
+from = "a.current.pm2_5"
+kind = "numeric"
+unit = "µg/m³"
+round = 1
+
+[[point]]
+key = "pm10"
+label = "Particules PM10"
+from = "a.current.pm10"
+kind = "numeric"
+unit = "µg/m³"
+round = 1
+
+[[point]]
+key = "no2"
+label = "Dioxyde d'azote"
+from = "a.current.nitrogen_dioxide"
+kind = "numeric"
+unit = "µg/m³"
+round = 1
+
+[[point]]
+key = "ozone"
+label = "Ozone"
+from = "a.current.ozone"
+kind = "numeric"
+unit = "µg/m³"
+round = 1
+
+[[point]]
+key = "uv_index"
+label = "Indice UV"
+from = "a.current.uv_index"
+kind = "numeric"
+unit = "UV"
+round = 1

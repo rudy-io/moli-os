@@ -1,0 +1,34 @@
+[integration]
+id = "daikin-brp069"
+name = "Daikin (adaptateur Wi-Fi BRP069)"
+brands = ["Daikin"]
+models = ["BRP069"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the unit's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code ni donnée repris : protocole documenté par pydaikin (intégration HA « daikin ») ; réponse de test capturée sur un vrai BRP069"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/basic_info.kv"
+request = "basic"
+
+[[fixture]]
+file = "fixtures/sensor_info.kv"
+request = "sensor"
+
+[[fixture]]
+file = "fixtures/control_info.kv"
+request = "control"

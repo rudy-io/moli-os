@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+dist/
+*.ipa
+*.apk
+*.aab
+# The publisher's identity and the house's address (model: house.example.json).
+house.json

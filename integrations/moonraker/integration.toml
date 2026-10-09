@@ -1,0 +1,27 @@
+[integration]
+id = "moonraker"
+name = "Imprimante 3D (Klipper / Moonraker)"
+# Any printer running Klipper with the Moonraker API.
+brands = []
+models = []
+transport = "http"
+driver = "profile"
+
+[discovery]
+mdns = []
+ssdp = []
+# Moonraker's usual port: the profile has no default, the instance sets `port`.
+ports = [7125]
+
+[needs]
+secrets = []
+vars = []
+options = ["host", "port"]
+
+[origin]
+reused = ""
+author = "agent"
+
+[[fixture]]
+file = "fixtures/objects_query.json"
+request = "q"

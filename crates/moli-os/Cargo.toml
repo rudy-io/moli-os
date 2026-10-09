@@ -1,0 +1,52 @@
+[package]
+name = "moli-os"
+description = "Moli OS: an agent-native, ultra-light home automation platform."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-core.workspace = true
+moli-i18n.workspace = true
+moli-runtime.workspace = true
+moli-z2m.workspace = true
+moli-api.workspace = true
+moli-hue.workspace = true
+moli-host.workspace = true
+moli-history.workspace = true
+moli-profile.workspace = true
+moli-energy.workspace = true
+moli-tuya.workspace = true
+moli-reolink.workspace = true
+moli-sonos.workspace = true
+moli-bambu.workspace = true
+moli-moonraker.workspace = true
+moli-frigate.workspace = true
+moli-philips.workspace = true
+moli-tapo.workspace = true
+moli-igd.workspace = true
+moli-ipp.workspace = true
+moli-helpers.workspace = true
+moli-lights.workspace = true
+moli-presence.workspace = true
+moli-telegram.workspace = true
+moli-phones.workspace = true
+moli-assistant.workspace = true
+moli-automation.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+moli-net.workspace = true
+http.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

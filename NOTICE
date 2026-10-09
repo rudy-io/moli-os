@@ -1,0 +1,8 @@
+Moli OS
+Copyright 2026 Rudy Molinillo
+
+This product includes data derived from Powercalc
+(https://github.com/bramstroker/homeassistant-powercalc):
+the light power profiles in crates/moli-energy/src/estimate.rs.
+Copyright (c) 2021 Bram Gerritsen. Licensed under the MIT License;
+see licenses/powercalc-MIT.txt.

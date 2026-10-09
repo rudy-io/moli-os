@@ -1,0 +1,39 @@
+# EDF Tempo day colour, today and tomorrow (RTE data through the free
+# api-couleur-tempo.fr service, no key). 1 = bleu, 2 = blanc, 3 = rouge,
+# 0 = not yet known (tomorrow's colour is published around 11:00).
+
+[profile]
+id = "tempo"
+name = "Couleur Tempo"
+manufacturer = "RTE"
+model = "Tempo"
+https = true
+host = "www.api-couleur-tempo.fr"
+
+[[request]]
+id = "today"
+path = "/api/jourTempo/today"
+format = "json"
+every = "1h"
+
+[[request]]
+id = "tomorrow"
+path = "/api/jourTempo/tomorrow"
+format = "json"
+every = "30m"
+
+[[point]]
+key = "today"
+label = "Aujourd'hui"
+from = "today.codeJour"
+kind = "enum"
+values = ["inconnu", "bleu", "blanc", "rouge"]
+map = { "0" = "inconnu", "1" = "bleu", "2" = "blanc", "3" = "rouge" }
+
+[[point]]
+key = "tomorrow"
+label = "Demain"
+from = "tomorrow.codeJour"
+kind = "enum"
+values = ["inconnu", "bleu", "blanc", "rouge"]
+map = { "0" = "inconnu", "1" = "bleu", "2" = "blanc", "3" = "rouge" }

@@ -1,0 +1,23 @@
+[package]
+name = "moli-lights"
+description = "Moli OS light fixtures: several bulbs and the relay that feeds them, seen and commanded as one light."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

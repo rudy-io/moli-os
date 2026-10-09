@@ -1,0 +1,13 @@
+[package]
+name = "moli-i18n"
+description = "Moli OS words in the house's language: one catalogue per language and area (locales/)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

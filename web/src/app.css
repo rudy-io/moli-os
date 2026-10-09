@@ -1,0 +1,84 @@
+/* Moli OS — charte « Le Relevé » : os, encre, jaune solaire, cuivre, traits 2px. */
+:root {
+  --bone: #f2f0ea;
+  --paper: #fbfaf6;
+  --ink: #161512;
+  --ink-2: #4a4740;
+  --ink-3: #8a857a;
+  --line: #d9d5c9;
+  --sun: #e8b931;
+  --sun-soft: #f6e3a6;
+  --copper: #b5653a;
+  --alarm: #c2410c;
+  --ok: #3f7d4e;
+  --bg: var(--bone);
+  --card: var(--paper);
+  --radius: 4px;
+  --stroke: 2px;
+  --font: 'Archivo', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12110f;
+    --card: #1b1a17;
+    --ink: #efece4;
+    --ink-2: #b9b4a8;
+    --ink-3: #7d786d;
+    --line: #2e2c27;
+    --sun-soft: #3a3016;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 0.82em;
+}
+
+@keyframes flash {
+  from {
+    background: var(--sun-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

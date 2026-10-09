@@ -1,0 +1,29 @@
+[integration]
+id = "reolink"
+name = "Caméras Reolink (Home Hub)"
+brands = ["Reolink"]
+models = ["Home Hub"]
+transport = "https"
+driver = "reolink"
+crate = "moli-reolink"
+
+[discovery]
+# No discovery: the instance gives the station's address.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+# `cert` (the pinned fingerprint) is written by the driver itself.
+secrets = ["username", "password"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"
+
+# The station's public X.509 v1 certificate, replayed by
+# crates/moli-net/src/legacy.rs (handshake signatures checked by hand).
+[[fixture]]
+file = "fixtures/home-hub-cert.b64"

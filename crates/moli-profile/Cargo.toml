@@ -1,0 +1,34 @@
+[package]
+name = "moli-profile"
+description = "Moli OS declarative device profiles: an HTTP device described in TOML, no code per brand."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+moli-net.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+md-5.workspace = true
+ring.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio-util.workspace = true
+
+[lints]
+workspace = true

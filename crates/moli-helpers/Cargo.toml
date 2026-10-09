@@ -1,0 +1,22 @@
+[package]
+name = "moli-helpers"
+description = "Moli OS helpers: virtual devices (house mode, switches, numbers) that automations and people set."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tokio-util.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,8 @@
+{
+  "url": "https://maison.example.org",
+  "allowedSuffixes": ["maison.example.org", "cloudflareaccess.com", ".cloudflareaccess.com"],
+  "bundleId": "com.example.moli",
+  "owner": "votre-compte-expo",
+  "appleTeamId": "ABCDE12345",
+  "easProjectId": "00000000-0000-4000-8000-000000000000"
+}

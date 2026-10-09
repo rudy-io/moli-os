@@ -1,0 +1,137 @@
+# Daikin air conditioners with the BRP069 Wi-Fi adapter (local HTTP API,
+# no authentication). Protocol knowledge from the community (pydaikin, used
+# by Home Assistant's `daikin` integration); no code copied.
+# Writes: set_control_info takes every parameter at once, so each write
+# echoes the control answer (read again just before) and changes one value.
+
+[profile]
+id = "daikin-brp069"
+name = "Daikin (adaptateur Wi-Fi BRP069)"
+manufacturer = "Daikin"
+model = "BRP069"
+# Stable identity: the adapter's MAC address.
+identity = "basic.mac"
+# Name given in the Daikin app (URL-encoded in the answer).
+name_from = "basic.name"
+
+[[request]]
+id = "basic"
+path = "/common/basic_info"
+format = "kv"
+every = "1h"
+
+[[request]]
+id = "sensor"
+path = "/aircon/get_sensor_info"
+format = "kv"
+every = "60s"
+
+[[request]]
+id = "control"
+path = "/aircon/get_control_info"
+format = "kv"
+every = "30s"
+
+[[point]]
+key = "on"
+label = "Marche"
+from = "control.pow"
+kind = "binary"
+semantic = "on_off"
+map = { "1" = true, "0" = false }
+
+[[point]]
+key = "mode"
+label = "Mode"
+from = "control.mode"
+kind = "enum"
+values = ["auto", "déshumidification", "froid", "chaud", "ventilation"]
+map = { "0" = "auto", "1" = "auto", "7" = "auto", "2" = "déshumidification", "3" = "froid", "4" = "chaud", "6" = "ventilation" }
+
+[[point]]
+key = "target_temperature"
+label = "Consigne"
+from = "control.stemp"
+kind = "numeric"
+unit = "°C"
+semantic = "config"
+# Orders outside the dashboard's dial are refused; reads are not bounded.
+min = 16.0
+max = 30.0
+step = 0.5
+
+[[point]]
+key = "temperature"
+label = "Température intérieure"
+from = "sensor.htemp"
+kind = "numeric"
+unit = "°C"
+semantic = "temperature"
+
+[[point]]
+key = "outdoor_temperature"
+label = "Température extérieure"
+from = "sensor.otemp"
+kind = "numeric"
+unit = "°C"
+semantic = "temperature"
+
+[[point]]
+key = "humidity"
+label = "Humidité"
+from = "sensor.hhum"
+kind = "numeric"
+unit = "%"
+semantic = "humidity"
+
+[[point]]
+key = "fan"
+label = "Ventilation"
+from = "control.f_rate"
+kind = "enum"
+values = ["auto", "silence", "1", "2", "3", "4", "5"]
+map = { "A" = "auto", "B" = "silence", "3" = "1", "4" = "2", "5" = "3", "6" = "4", "7" = "5" }
+
+[[point]]
+key = "error"
+label = "Code erreur"
+from = "control.err"
+kind = "numeric"
+semantic = "other"
+
+# ---- writes ----
+# The adapter answers 200 even when it refuses (« ret=PARAM NG »): `expect`.
+# Every write reads `control` again right after: the dashboard shows what the
+# unit did, not what was asked.
+
+[[write]]
+point = "on"
+path = "/aircon/set_control_info?pow={value}&mode={control.mode}&stemp={control.stemp}&shum={control.shum}&f_rate={control.f_rate}&f_dir={control.f_dir}"
+map = { true = "1", false = "0" }
+expect = "ret=OK"
+refresh = "control"
+
+# Each mode remembers its set point (dt<mode>), humidity (dh<mode>) and fan
+# speed (dfr<mode>): a mode change brings them back, as pydaikin does. Modes
+# without one (fan-only has no dt6) keep the current value.
+[[write]]
+point = "mode"
+path = "/aircon/set_control_info?pow={control.pow}&mode={value}&stemp={control.dt{value}|control.stemp}&shum={control.dh{value}|control.shum}&f_rate={control.dfr{value}|control.f_rate}&f_dir={control.f_dir}"
+map = { auto = "0", "déshumidification" = "2", froid = "3", chaud = "4", ventilation = "6" }
+expect = "ret=OK"
+refresh = "control"
+
+[[write]]
+point = "target_temperature"
+path = "/aircon/set_control_info?pow={control.pow}&mode={control.mode}&stemp={value}&shum={control.shum}&f_rate={control.f_rate}&f_dir={control.f_dir}"
+# The adapter reports « 25.0 »: send it the same way.
+decimals = 1
+expect = "ret=OK"
+refresh = "control"
+
+[[write]]
+point = "fan"
+path = "/aircon/set_control_info?pow={control.pow}&mode={control.mode}&stemp={control.stemp}&shum={control.shum}&f_rate={value}&f_dir={control.f_dir}"
+map = { auto = "A", silence = "B", "1" = "3", "2" = "4", "3" = "5", "4" = "6", "5" = "7" }
+expect = "ret=OK"
+refresh = "control"

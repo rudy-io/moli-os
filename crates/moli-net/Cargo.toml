@@ -1,0 +1,25 @@
+[package]
+name = "moli-net"
+description = "Moli OS: HTTPS to LAN appliances with certificate pinning (trust on first use)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ring.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+socket2 = "0.6"
+tokio = { workspace = true, features = ["io-util"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+webpki-roots.workspace = true
+
+[lints]
+workspace = true

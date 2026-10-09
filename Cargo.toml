@@ -1,0 +1,99 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/rudy-io/moli-os"
+rust-version = "1.88"
+
+[workspace.dependencies]
+moli-core = { path = "crates/moli-core" }
+moli-runtime = { path = "crates/moli-runtime" }
+moli-z2m = { path = "crates/moli-z2m" }
+moli-api = { path = "crates/moli-api" }
+moli-hue = { path = "crates/moli-hue" }
+moli-host = { path = "crates/moli-host" }
+moli-history = { path = "crates/moli-history" }
+moli-profile = { path = "crates/moli-profile" }
+moli-energy = { path = "crates/moli-energy" }
+moli-tuya = { path = "crates/moli-tuya" }
+moli-net = { path = "crates/moli-net" }
+moli-reolink = { path = "crates/moli-reolink" }
+moli-sonos = { path = "crates/moli-sonos" }
+moli-bambu = { path = "crates/moli-bambu" }
+moli-frigate = { path = "crates/moli-frigate" }
+moli-philips = { path = "crates/moli-philips" }
+moli-tapo = { path = "crates/moli-tapo" }
+moli-igd = { path = "crates/moli-igd" }
+moli-ipp = { path = "crates/moli-ipp" }
+moli-assistant = { path = "crates/moli-assistant" }
+moli-automation = { path = "crates/moli-automation" }
+moli-helpers = { path = "crates/moli-helpers" }
+moli-lights = { path = "crates/moli-lights" }
+moli-presence = { path = "crates/moli-presence" }
+moli-telegram = { path = "crates/moli-telegram" }
+moli-i18n = { path = "crates/moli-i18n" }
+moli-phones = { path = "crates/moli-phones" }
+moli-ambiance = { path = "crates/moli-ambiance" }
+moli-moonraker = { path = "crates/moli-moonraker" }
+moli-androidtv = { path = "crates/moli-androidtv" }
+
+aes = "0.8"
+anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "macros"] }
+crc32fast = "1"
+clap = { version = "4", features = ["derive", "env"] }
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+md-5 = "0.11"
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+ring = "0.17"
+rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }
+unicode-normalization = "0.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+mime_guess = { version = "2", default-features = false }
+rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+rumqttc = { version = "0.25", default-features = false }
+rust-embed = "8"
+schemars = "1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net", "fs"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
+toml = "1"
+tower-http = { version = "0.7", features = ["compression-gzip", "compression-br", "trace"] }
+tracing = "0.1"
+webpki-roots = "1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+# `assert!(x.is_empty())` reads better than an assert_eq! against a typed empty array.
+assert_is_empty = "allow"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+# Symbols stay (a backtrace from a frozen process is worth ~1 MB); debug info goes.
+strip = "debuginfo"
+# panic = "unwind" volontaire : le superviseur capture les panics des pilotes.

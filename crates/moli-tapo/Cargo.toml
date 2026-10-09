@@ -1,0 +1,25 @@
+[package]
+name = "moli-tapo"
+description = "Moli OS driver for TP-Link Tapo bulbs and plugs (local KLAP protocol)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+aes.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

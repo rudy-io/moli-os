@@ -1,0 +1,9 @@
+{
+  "header": { "method": "GETACK" },
+  "payload": {
+    "electricity": [
+      { "channel": 1, "current": 3486, "voltage": 233158, "power": 560202, "today": 8207, "mConsume": 55281, "factor": 0.69 },
+      { "channel": 2, "current": 150, "voltage": 233032, "power": 893, "today": 8, "mConsume": 7829, "factor": 0.03 }
+    ]
+  }
+}

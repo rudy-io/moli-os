@@ -1,0 +1,22 @@
+[integration]
+id = "open-meteo-air"
+name = "Qualité de l'air"
+brands = ["Open-Meteo"]
+models = ["CAMS"]
+transport = "https"
+driver = "profile"
+
+[discovery]
+# A public web API (air-quality-api.open-meteo.com): nothing on the LAN.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = ["lat", "lon"]
+options = []
+
+[origin]
+reused = "API publique Open-Meteo Air Quality (modèles CAMS, gratuite, sans clé)"
+author = "agent"

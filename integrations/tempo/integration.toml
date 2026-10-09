@@ -1,0 +1,22 @@
+[integration]
+id = "tempo"
+name = "Couleur Tempo"
+brands = ["RTE"]
+models = ["Tempo"]
+transport = "https"
+driver = "profile"
+
+[discovery]
+# A public web API (www.api-couleur-tempo.fr): nothing on the LAN.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = "service gratuit api-couleur-tempo.fr (données RTE), sans clé"
+author = "agent"

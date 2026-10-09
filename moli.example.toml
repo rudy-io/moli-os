@@ -1,0 +1,91 @@
+# Moli OS configuration. No secret here, ever: credentials are referenced by
+# the name of the environment variable holding them (e.g. password_env).
+
+[server]
+listen = "0.0.0.0:8790"
+# "/data" in the image (the volume); "data" for a run from the repository.
+data_dir = "/data"
+worker_threads = 2
+# Names/IPs this instance is reached by, besides localhost (DNS-rebinding guard).
+allowed_hosts = ["192.168.0.10", "moli.local"]
+
+# Reached from the Internet through a Cloudflare tunnel behind Cloudflare
+# Access: Moli checks Access's signed assertion itself and recognizes the
+# person by e-mail. Without this section, nobody coming through Cloudflare
+# is recognized (a stranger, never the household).
+# [server.access]
+# team = "myteam"        # https://myteam.cloudflareaccess.com
+# aud = "<application audience tag>"
+
+# Guard: where and when agents (MCP), scripts (API) and the CLI must ask a
+# human (approval from the dashboard). The household in the dashboard is always
+# obeyed, without a code (dashboard = "trusted", the default: the home network
+# and people Access let in); the PIN is for approving automations and releasing
+# what an agent asked for. dashboard = "pin": commands need a PIN session too.
+# [guard]
+# dashboard = "trusted"
+# protected_rooms = ["Chambre", "Chambre des enfants"]
+#
+# [guard.quiet_hours]
+# from = "21:00"
+# to = "07:30"
+# timezone = "Europe/Paris"
+# rooms = []            # empty = the whole home
+
+# Energy: cumulative counters (Wh or kWh) become kWh and cost per hour,
+# kept forever in data/energy.db. Roles: grid (billed: the reference),
+# total (whole home, fine), circuit (part of the total).
+# [energy]
+# timezone = "Europe/Paris"
+# [energy.tariff]
+# period = "z2m:linky/active_register_tier_delivered"
+# prices = { "HP" = 0.17, "HC" = 0.14 }
+# [[energy.meter]]
+# id = "linky-hc"        # storage key: never rename
+# name = "Heures creuses"
+# point = "z2m:linky/current_tier1_summ_delivered"
+# role = "grid"
+# price = 0.14
+# reset = "never"        # an index; default "auto" handles daily counters
+
+# Light fixtures: bulbs and the relay that feeds them as one light
+# (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb
+# answers, and comes back on its own when the light is switched on.
+# [[fixture]]
+# id = "suspensions"     # never rename
+# name = "Suspensions"
+# room = "Salon"
+# bulbs = ["hue:…", "hue:…"]
+# power = "tuya:…/switch_1"
+
+# Zigbee, through an existing Zigbee2MQTT bridge.
+[[driver]]
+id = "z2m"
+kind = "z2m"
+
+[driver.options]
+host = "127.0.0.1"
+port = 1883
+base_topic = "zigbee2mqtt"
+# username = "moli-os"
+# password_env = "MOLI_Z2M_PASSWORD"
+
+# Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
+# keep the pairing key encrypted; press the link button when asked.
+# [[driver]]
+# id = "hue"
+# kind = "hue"
+#
+# [driver.options]
+# host = "192.168.0.x"
+
+# Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
+# [assistant]
+# model = "gpt-4.1-mini"
+# transcribe_model = "gpt-4o-mini-transcribe"   # écoute cloud ; "" = Whisper local seulement
+# speech_model = "gpt-4o-mini-tts"              # voix cloud ; "" = Piper local seulement
+# speech_voice = "coral"            # une voix OpenAI ; essai : POST /api/assistant/speak {"text","voice"}
+# speech_style = "Ton enjoué et souriant, plein d'énergie, comme un ami content de rendre service. Intonation vivante, débit vif, français naturel de France."
+# local_speech = "127.0.0.1:10200"              # Piper (Wyoming), repli de la voix ; "" = aucun
+# local_voice = "fr_FR-siwis-medium"
+# local_listen = "127.0.0.1:10300"              # Whisper (Wyoming), repli de l'écoute ; "" = aucun

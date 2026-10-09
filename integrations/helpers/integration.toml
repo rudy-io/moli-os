@@ -1,0 +1,24 @@
+[integration]
+id = "helpers"
+name = "Aides de la maison (mode, alarme, budget…)"
+brands = []
+models = []
+# Nothing on the network: Moli keeps the values itself.
+transport = "native"
+driver = "helpers"
+crate = "moli-helpers"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+# Each helper is declared in [[driver.options.helper]].
+options = []
+
+[origin]
+reused = "même rôle que les input_select, input_boolean, input_number et input_text de HA"
+author = "agent"

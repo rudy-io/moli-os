@@ -1,0 +1,22 @@
+[integration]
+id = "open-meteo"
+name = "Météo"
+brands = ["Open-Meteo"]
+models = []
+transport = "https"
+driver = "profile"
+
+[discovery]
+# A public web API (api.open-meteo.com): nothing to find on the LAN.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = ["lat", "lon"]
+options = []
+
+[origin]
+reused = "API publique Open-Meteo (gratuite, sans clé)"
+author = "agent"

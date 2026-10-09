@@ -1,0 +1,34 @@
+[integration]
+id = "z2m"
+name = "Zigbee (via Zigbee2MQTT)"
+# Any Zigbee device Zigbee2MQTT describes: no list per brand.
+brands = []
+models = []
+transport = "mqtt"
+driver = "z2m"
+crate = "moli-z2m"
+
+[discovery]
+# Devices come from the retained `bridge/devices` message, not from the network.
+mdns = []
+ssdp = []
+# The MQTT broker.
+ports = [1883]
+
+[needs]
+# A broker password, if any, comes from the environment variable named by
+# `password_env`: never from the store, never in moli.toml.
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = "protocole MQTT de Zigbee2MQTT (bridge/devices et ses exposes)"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-z2m/src/catalog.rs).
+[[fixture]]
+file = "fixtures/bridge_devices.json"
+
+[[fixture]]
+file = "fixtures/state.json"

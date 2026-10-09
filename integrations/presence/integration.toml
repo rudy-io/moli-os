@@ -1,0 +1,25 @@
+[integration]
+id = "presence"
+name = "Présence (téléphones sur le Wi-Fi de la maison)"
+brands = []
+models = []
+# A UDP knock on each address of the home network, then the kernel's
+# neighbour table: no port of the phone is used.
+transport = "native"
+driver = "presence"
+crate = "moli-presence"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+# The home network and, per person, their phones' Wi-Fi addresses.
+options = ["network"]
+
+[origin]
+reused = "même principe que les trackers ping et nmap de HA"
+author = "agent"

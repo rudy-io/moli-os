@@ -1,0 +1,27 @@
+[package]
+name = "moli-automation"
+description = "Moli OS automations: graphs of triggers, conditions and actions (« the n8n of the house »), run by a deterministic engine once a human approved them."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

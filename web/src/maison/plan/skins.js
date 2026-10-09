@@ -1,0 +1,201 @@
+// Skins of a drawn floor: the same house, rendered differently. A skin is
+// only colours and line styles; the geometry never changes. The server
+// knows their ids (plan.rs SKINS): keep both lists in step. `palette`: the
+// fixtures' materials in 3D (without one, the skin's own item tones);
+// `roof`: the tiles' colour.
+
+import { t } from '../../lib/i18n.svelte.js';
+
+const rooms = (base, over = {}) => ({
+  living: base,
+  kitchen: base,
+  bedroom: base,
+  bath: base,
+  wc: base,
+  office: base,
+  hall: base,
+  veranda: base,
+  storage: base,
+  void: base,
+  roof: base,
+  garden: base,
+  deck: base,
+  pool: base,
+  terrace: base,
+  driveway: base,
+  garage: base,
+  other: base,
+  ...over,
+});
+
+export const SKINS = {
+  plan: {
+    wall3d: '#f3f0ea',
+    get name() {
+      return t('maison.skin.plan');
+    },
+    bg: '#efece6',
+    grid: null,
+    wall: '#3b3936',
+    window: '#7fb6d9',
+    door: '#b9b2a6',
+    label: '#4a463f',
+    sub: '#8c867b',
+    roomLine: 'none',
+    item: '#e2ddd3',
+    itemLine: '#a59d90',
+    glow: '#ffc457',
+    glowStrength: 0.55,
+    roof: '#b4573f',
+    palette: {
+      wood: '#c49a6c', fabric: '#d8cfc2', soft: '#fbfaf7', stone: '#8d9196', metal: '#c9cdd1',
+      dark: '#3d4148', line: '#9a948a', green: '#6f9a55', terracotta: '#b9694c', water: '#7fc4e6',
+      glass: '#bfe3f2', pad: '#b9cf3a',
+    },
+    rooms: rooms('#faf8f3', {
+      kitchen: '#f8f3e8',
+      bath: '#ecf3f6',
+      wc: '#ecf3f6',
+      hall: '#f4f1eb',
+      veranda: '#eff3ea',
+      storage: '#e9e5dd',
+      void: '#dedad2',
+      roof: '#dcd8d0',
+      garden: '#d9e6c8',
+      deck: '#e6e1d6',
+      pool: '#8fc6e2',
+      terrace: '#e7d9c0',
+      driveway: '#d6d1c9',
+      garage: '#d6d1c9',
+    }),
+  },
+  blueprint: {
+    wall3d: '#2d5b93',
+    get name() {
+      return t('maison.skin.blueprint');
+    },
+    bg: '#123b6d',
+    grid: 'rgba(255,255,255,0.07)',
+    wall: '#eaf3ff',
+    window: '#7fd6ff',
+    door: '#a9c6ee',
+    label: '#e3eeff',
+    sub: '#9dbbe4',
+    roomLine: 'rgba(234,243,255,0.35)',
+    item: 'rgba(234,243,255,0.06)',
+    itemLine: '#9dbbe4',
+    glow: '#ffe07a',
+    glowStrength: 0.5,
+    roof: '#2d5b93',
+    rooms: rooms('rgba(255,255,255,0.025)', {
+      garden: 'rgba(140,220,170,0.08)',
+      pool: 'rgba(110,200,255,0.25)',
+      void: 'rgba(0,0,0,0.12)',
+    }),
+  },
+  nuit: {
+    wall3d: '#2b303b',
+    get name() {
+      return t('maison.skin.nuit');
+    },
+    bg: '#0b0d12',
+    grid: null,
+    wall: '#3a4150',
+    window: '#4f6c8f',
+    door: '#3a4150',
+    label: '#a7b0c2',
+    sub: '#6c7487',
+    roomLine: 'none',
+    item: '#1b2029',
+    itemLine: '#2d3442',
+    glow: '#ffb547',
+    glowStrength: 0.9,
+    roof: '#3b2d2a',
+    palette: {
+      wood: '#3a3129', fabric: '#2c313b', soft: '#3b404b', stone: '#262a31', metal: '#3f4552',
+      dark: '#15181d', line: '#1d2026', green: '#1f3323', terracotta: '#3a2a24', water: '#1d4a66',
+      glass: '#2a4058', pad: '#2c3a20',
+    },
+    rooms: rooms('#151920', {
+      garden: '#111a12',
+      pool: '#10324a',
+      terrace: '#1a1712',
+      void: '#0e1015',
+      roof: '#12151b',
+    }),
+  },
+  aquarelle: {
+    wall3d: '#fbf5ec',
+    get name() {
+      return t('maison.skin.aquarelle');
+    },
+    bg: '#fbf6ee',
+    grid: null,
+    wall: '#5b4b43',
+    window: '#7cc3e0',
+    door: '#c9b8aa',
+    label: '#5b4b43',
+    sub: '#9a8679',
+    roomLine: 'none',
+    item: 'rgba(255,255,255,0.55)',
+    itemLine: '#b9a597',
+    glow: '#ffb347',
+    glowStrength: 0.6,
+    roof: '#d98c74',
+    palette: {
+      wood: '#e2bf98', fabric: '#f3d9c4', soft: '#fffaf3', stone: '#cbbfb3', metal: '#ddd5cc',
+      dark: '#8a7a70', line: '#b9a597', green: '#9fcf8a', terracotta: '#e3a184', water: '#8fd2f0',
+      glass: '#cdeef8', pad: '#d6e48c',
+    },
+    rooms: rooms('#f6efe6', {
+      living: '#fde3cc',
+      kitchen: '#fff0b8',
+      bedroom: '#e6dcf7',
+      bath: '#cfeef6',
+      wc: '#cfeef6',
+      office: '#d8f0da',
+      hall: '#f6e5df',
+      veranda: '#e2f1d5',
+      storage: '#ece3da',
+      void: '#e8e1d9',
+      roof: '#e3dcd3',
+      garden: '#cfe7b5',
+      deck: '#efe3cf',
+      pool: '#8fd2f0',
+      terrace: '#f3d7b2',
+      driveway: '#e2dbd2',
+      garage: '#e2dbd2',
+    }),
+  },
+};
+
+export const SKIN_IDS = Object.keys(SKINS);
+
+/** Fixtures one can add to a drawn floor (the server's ITEM_KINDS). */
+// Its back (headboard, backrest, screen) is the top edge; « tourner » turns it.
+export const ITEMS = {
+  bed: { get name() { return t('maison.meuble.bed'); }, w: 160, h: 200 },
+  bunk: { get name() { return t('maison.meuble.bunk'); }, w: 100, h: 200 },
+  sofa: { get name() { return t('maison.meuble.sofa'); }, w: 220, h: 95 },
+  armchair: { get name() { return t('maison.meuble.armchair'); }, w: 85, h: 85 },
+  chair: { get name() { return t('maison.meuble.chair'); }, w: 45, h: 50 },
+  table: { get name() { return t('maison.meuble.table'); }, w: 160, h: 90 },
+  desk: { get name() { return t('maison.meuble.desk'); }, w: 140, h: 70 },
+  wardrobe: { get name() { return t('maison.meuble.wardrobe'); }, w: 120, h: 60 },
+  tv: { get name() { return t('maison.meuble.tv'); }, w: 140, h: 40 },
+  plant: { get name() { return t('maison.meuble.plant'); }, w: 50, h: 50 },
+  counter: { get name() { return t('maison.meuble.counter'); }, w: 240, h: 62 },
+  fridge: { get name() { return t('maison.meuble.fridge'); }, w: 65, h: 65 },
+  washer: { get name() { return t('maison.meuble.washer'); }, w: 60, h: 60 },
+  bathtub: { get name() { return t('maison.meuble.bathtub'); }, w: 170, h: 75 },
+  shower: { get name() { return t('maison.meuble.shower'); }, w: 90, h: 90 },
+  sink: { get name() { return t('maison.meuble.sink'); }, w: 60, h: 45 },
+  toilet: { get name() { return t('maison.meuble.toilet'); }, w: 40, h: 65 },
+  car: { get name() { return t('maison.meuble.car'); }, w: 180, h: 420 },
+  lounger: { get name() { return t('maison.meuble.lounger'); }, w: 65, h: 190 },
+  trampoline: { get name() { return t('maison.meuble.trampoline'); }, w: 300, h: 300 },
+  bin: { get name() { return t('maison.meuble.bin'); }, w: 60, h: 70 },
+  stairs: { get name() { return t('maison.meuble.stairs'); }, w: 100, h: 280 },
+  stairs_u: { get name() { return t('maison.meuble.stairs_u'); }, w: 200, h: 190 },
+  other: { get name() { return t('maison.meuble.other'); }, w: 80, h: 80 },
+};

@@ -1,0 +1,55 @@
+# The same checks as scripts/check.sh and the dashboard's build, on every
+# pull request and every push to main.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      # fmt, clippy pedantic -D warnings, tests, integration catalogue, leak check
+      # (generic patterns: a private denylist never leaves its house).
+      - run: mkdir -p web/dist && sh scripts/check.sh
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: node scripts/i18n-check.mjs
+      - run: node --test src/maison/lib/voice/speech.test.js
+        working-directory: web
+      - run: node scripts/solar-sim.check.mjs
+        working-directory: web
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # The release image builds (x86-64 here; ARM builds the same way on an ARM machine).
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: moli-os:check

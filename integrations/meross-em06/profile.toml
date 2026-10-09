@@ -1,0 +1,333 @@
+# Meross EM06 / EM06P: 6-channel energy monitor, local signed API
+# (no cloud at run time). The device key comes from the Meross account the
+# monitor was set up with; store it once:
+#   moli-os secrets set <instance> key        (value on standard input)
+# Protocol knowledge from the community (meross_lan, merossiot); no code
+# copied. Units on the wire: mA, mV, mW, Wh. Read-only.
+
+[profile]
+id = "meross-em06"
+name = "Compteur d'énergie Meross EM06"
+manufacturer = "Meross"
+model = "EM06"
+secret = "key"
+identity = "all.payload.all.system.hardware.uuid"
+name_from = "all.payload.all.system.hardware.type"
+
+[[request]]
+id = "all"
+path = "/config"
+format = "json"
+every = "1h"
+transport = "meross"
+namespace = "Appliance.System.All"
+payload = "{}"
+
+[[request]]
+id = "e"
+path = "/config"
+format = "json"
+every = "15s"
+transport = "meross"
+namespace = "Appliance.Control.ElectricityX"
+payload = '{"electricity": [{"channel": 1}, {"channel": 2}, {"channel": 3}, {"channel": 4}, {"channel": 5}, {"channel": 6}]}'
+
+# ---- channel 1 ----
+[[point]]
+key = "power_1"
+label = "Puissance 1"
+from = "e.payload.electricity.[channel=1].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_1"
+label = "Courant 1"
+from = "e.payload.electricity.[channel=1].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_1"
+label = "Tension 1"
+from = "e.payload.electricity.[channel=1].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_1"
+label = "Facteur de puissance 1"
+from = "e.payload.electricity.[channel=1].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_1"
+label = "Énergie du jour 1"
+from = "e.payload.electricity.[channel=1].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_1"
+label = "Énergie du mois 1"
+from = "e.payload.electricity.[channel=1].mConsume"
+kind = "numeric"
+unit = "Wh"
+
+# ---- channel 2 ----
+[[point]]
+key = "power_2"
+label = "Puissance 2"
+from = "e.payload.electricity.[channel=2].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_2"
+label = "Courant 2"
+from = "e.payload.electricity.[channel=2].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_2"
+label = "Tension 2"
+from = "e.payload.electricity.[channel=2].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_2"
+label = "Facteur de puissance 2"
+from = "e.payload.electricity.[channel=2].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_2"
+label = "Énergie du jour 2"
+from = "e.payload.electricity.[channel=2].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_2"
+label = "Énergie du mois 2"
+from = "e.payload.electricity.[channel=2].mConsume"
+kind = "numeric"
+unit = "Wh"
+
+# ---- channel 3 ----
+[[point]]
+key = "power_3"
+label = "Puissance 3"
+from = "e.payload.electricity.[channel=3].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_3"
+label = "Courant 3"
+from = "e.payload.electricity.[channel=3].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_3"
+label = "Tension 3"
+from = "e.payload.electricity.[channel=3].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_3"
+label = "Facteur de puissance 3"
+from = "e.payload.electricity.[channel=3].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_3"
+label = "Énergie du jour 3"
+from = "e.payload.electricity.[channel=3].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_3"
+label = "Énergie du mois 3"
+from = "e.payload.electricity.[channel=3].mConsume"
+kind = "numeric"
+unit = "Wh"
+
+# ---- channel 4 ----
+[[point]]
+key = "power_4"
+label = "Puissance 4"
+from = "e.payload.electricity.[channel=4].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_4"
+label = "Courant 4"
+from = "e.payload.electricity.[channel=4].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_4"
+label = "Tension 4"
+from = "e.payload.electricity.[channel=4].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_4"
+label = "Facteur de puissance 4"
+from = "e.payload.electricity.[channel=4].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_4"
+label = "Énergie du jour 4"
+from = "e.payload.electricity.[channel=4].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_4"
+label = "Énergie du mois 4"
+from = "e.payload.electricity.[channel=4].mConsume"
+kind = "numeric"
+unit = "Wh"
+
+# ---- channel 5 ----
+[[point]]
+key = "power_5"
+label = "Puissance 5"
+from = "e.payload.electricity.[channel=5].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_5"
+label = "Courant 5"
+from = "e.payload.electricity.[channel=5].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_5"
+label = "Tension 5"
+from = "e.payload.electricity.[channel=5].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_5"
+label = "Facteur de puissance 5"
+from = "e.payload.electricity.[channel=5].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_5"
+label = "Énergie du jour 5"
+from = "e.payload.electricity.[channel=5].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_5"
+label = "Énergie du mois 5"
+from = "e.payload.electricity.[channel=5].mConsume"
+kind = "numeric"
+unit = "Wh"
+
+# ---- channel 6 ----
+[[point]]
+key = "power_6"
+label = "Puissance 6"
+from = "e.payload.electricity.[channel=6].power"
+kind = "numeric"
+unit = "W"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "current_6"
+label = "Courant 6"
+from = "e.payload.electricity.[channel=6].current"
+kind = "numeric"
+unit = "A"
+scale = 0.001
+round = 3
+
+[[point]]
+key = "voltage_6"
+label = "Tension 6"
+from = "e.payload.electricity.[channel=6].voltage"
+kind = "numeric"
+unit = "V"
+scale = 0.001
+round = 1
+
+[[point]]
+key = "power_factor_6"
+label = "Facteur de puissance 6"
+from = "e.payload.electricity.[channel=6].factor"
+kind = "numeric"
+semantic = "other"
+round = 2
+
+[[point]]
+key = "energy_today_6"
+label = "Énergie du jour 6"
+from = "e.payload.electricity.[channel=6].today"
+kind = "numeric"
+unit = "Wh"
+
+[[point]]
+key = "energy_month_6"
+label = "Énergie du mois 6"
+from = "e.payload.electricity.[channel=6].mConsume"
+kind = "numeric"
+unit = "Wh"

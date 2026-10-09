@@ -1,0 +1,83 @@
+{
+  "expo": {
+    "name": "Moli",
+    "slug": "moli",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "moli",
+    "primaryColor": "#E8B931",
+    "backgroundColor": "#161512",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.moli",
+      "buildNumber": "5",
+      "entitlements": {
+        "com.apple.developer.networking.wifi-info": true
+      },
+      "infoPlist": {
+        "CFBundleLocalizations": [
+          "fr"
+        ],
+        "CFBundleDevelopmentRegion": "fr",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Moli t'écoute quand tu lui parles (bouton micro ou « Parler avec Moli »).",
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.example.moli",
+      "versionCode": 1,
+      "backgroundColor": "#161512",
+      "adaptiveIcon": {
+        "backgroundColor": "#161512",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#161512",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 140
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Moli utilise ta position pour savoir si tu es à la maison, et adapter la maison (lumières, alarme, chauffage). Elle n'est envoyée qu'à ton Moli, chez toi.",
+          "locationAlwaysAndWhenInUsePermission": "Pour savoir quand tu arrives à la maison ou que tu en pars, même appli fermée, Moli a besoin de ta position en arrière-plan. Elle n'est envoyée qu'à ton Moli, chez toi.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#E8B931"
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}

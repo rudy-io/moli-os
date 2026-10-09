@@ -1,0 +1,26 @@
+[integration]
+id = "klipper"
+name = "Imprimante 3D Klipper (Moonraker), pilote complet"
+# Any printer running Klipper with the Moonraker API; seen on a Snapmaker U1.
+brands = ["Snapmaker", "Voron", "Prusa", "Creality"]
+models = ["U1"]
+transport = "http"
+driver = "moonraker"
+crate = "moli-moonraker"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [7125]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"
+
+[[fixture]]
+file = "fixtures/u1.json"

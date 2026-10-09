@@ -1,0 +1,24 @@
+[integration]
+id = "host"
+name = "La machine de Moli (processeur, mémoire, températures, réseau)"
+# Any Linux machine Moli runs on: a mini PC, a Raspberry Pi.
+brands = []
+models = []
+transport = "native"
+driver = "host"
+crate = "moli-host"
+
+[discovery]
+# Nothing to find: the machine Moli runs on.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = "Documentation du noyau Linux (proc(5), sysfs hwmon) : aucun code repris"
+author = "agent"

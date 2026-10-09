@@ -1,0 +1,26 @@
+[integration]
+id = "meross-em06"
+name = "Compteur d'énergie Meross EM06"
+brands = ["Meross"]
+models = ["EM06", "EM06P"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the monitor's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = ["key"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "meross_lan et merossiot (communauté) : protocole et signature, aucun code copié"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/electricity.json"
+request = "e"

@@ -1,0 +1,22 @@
+[integration]
+id = "iopool"
+name = "Piscine (iopool)"
+brands = ["iopool"]
+models = ["EcO"]
+transport = "https"
+driver = "profile"
+
+[discovery]
+# The vendor's cloud API (api.iopool.com): the probe is not reached on the LAN.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["api_key"]
+vars = []
+options = []
+
+[origin]
+reused = "API cloud iopool avec la clé personnelle de l'appli"
+author = "agent"

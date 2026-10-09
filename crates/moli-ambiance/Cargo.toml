@@ -1,0 +1,20 @@
+[package]
+name = "moli-ambiance"
+description = "Moli OS ambiances: a whole room's lights set to a look (fire, sunset, party…) or a single colour in one gesture."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+futures.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

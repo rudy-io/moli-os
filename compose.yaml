@@ -1,0 +1,18 @@
+# Moli OS : une maison, un conteneur.
+#   mkdir -p data && sudo chown 1000:1000 data
+#   docker compose up -d --build
+#   docker compose logs moli-os        # le code d'installation, au premier démarrage
+# Puis http://<adresse de cette machine>:8790. Guide : docs/components/installation.md
+services:
+  moli-os:
+    build: .
+    image: moli-os:latest
+    container_name: moli-os
+    restart: unless-stopped
+    # Le réseau de la maison tel quel : découverte des appareils (mDNS, SSDP,
+    # diffusions), réveil à distance des ordinateurs.
+    network_mode: host
+    volumes:
+      # Configuration, coffre chiffré, historique : tout ce que Moli sait.
+      - ./data:/data
+    mem_limit: 128m

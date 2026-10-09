@@ -1,0 +1,29 @@
+[integration]
+id = "ipp"
+name = "Imprimante réseau (IPP Everywhere, AirPrint)"
+# Any printer that speaks IPP Everywhere / AirPrint (most since 2013).
+brands = ["Canon", "Epson", "HP", "Brother"]
+# The one printer seen so far (in the reference home).
+models = ["MG3600 series"]
+transport = "http"
+driver = "ipp"
+crate = "moli-ipp"
+
+[discovery]
+# They announce themselves as `_ipp._tcp`; the instance gives the address.
+mdns = ["_ipp._tcp"]
+ssdp = []
+ports = [631]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "RFC 8010 / 8011 (IPP 2.0) et PWG 5100.14 (IPP Everywhere) : protocole seulement, aucun code copié"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-ipp/src/proto.rs): a Canon MG3600's real answer.
+[[fixture]]
+file = "fixtures/mg3600-attributes.ipp"

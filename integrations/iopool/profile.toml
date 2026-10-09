@@ -1,0 +1,68 @@
+# iopool pool probe (EcO): water temperature, pH, ORP, filtration advice.
+# Cloud API with a personal key (iopool app → Settings → API key), kept in
+# the encrypted store: `moli-os secrets set <instance> api_key` (pipe).
+
+[profile]
+id = "iopool"
+name = "Piscine (iopool)"
+manufacturer = "iopool"
+model = "EcO"
+https = true
+host = "api.iopool.com"
+secret = "api_key"
+identity = "pools.0.id"
+name_from = "pools.0.title"
+
+[[request]]
+id = "pools"
+path = "/v1/pools"
+format = "json"
+every = "15m"
+headers = { "x-api-key" = "{secret}" }
+
+[[point]]
+key = "temperature"
+label = "Eau"
+from = "pools.0.latestMeasure.temperature"
+kind = "numeric"
+unit = "°C"
+round = 1
+
+[[point]]
+key = "ph"
+label = "pH"
+from = "pools.0.latestMeasure.ph"
+kind = "numeric"
+round = 2
+
+[[point]]
+key = "orp"
+label = "Désinfection (ORP)"
+from = "pools.0.latestMeasure.orp"
+kind = "numeric"
+unit = "mV"
+
+[[point]]
+key = "measured_at"
+label = "Mesuré le"
+from = "pools.0.latestMeasure.measuredAt"
+kind = "text"
+
+[[point]]
+key = "action_required"
+label = "Action requise"
+from = "pools.0.hasAnActionRequired"
+kind = "binary"
+
+[[point]]
+key = "filtration"
+label = "Filtration conseillée"
+from = "pools.0.advice.filtrationDuration"
+kind = "numeric"
+unit = "h"
+
+[[point]]
+key = "mode"
+label = "Mode"
+from = "pools.0.mode"
+kind = "text"

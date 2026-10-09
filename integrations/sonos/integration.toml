@@ -1,0 +1,26 @@
+[integration]
+id = "sonos"
+name = "Enceintes Sonos"
+brands = ["Sonos"]
+# The one player seen so far (in the reference home).
+models = ["Beam"]
+transport = "upnp"
+driver = "sonos"
+crate = "moli-sonos"
+
+[discovery]
+# No SSDP search: the instance gives the player's address.
+mdns = []
+ssdp = []
+# UPnP/SOAP over HTTP; 1443: the local WebSocket API (TLS) for announcements.
+ports = [1400, 1443]
+
+[needs]
+# `ws_cert` (announcements) is written by the driver itself.
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "annonces : même effet que le script HA announce_sonos (clip audio de l'API locale)"
+author = "agent"

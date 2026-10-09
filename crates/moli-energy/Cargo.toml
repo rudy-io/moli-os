@@ -1,0 +1,27 @@
+[package]
+name = "moli-energy"
+description = "Moli OS energy: hourly consumption and cost from cumulative meters, kept forever."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

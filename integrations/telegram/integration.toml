@@ -1,0 +1,25 @@
+[integration]
+id = "telegram"
+name = "Telegram (messages à la maison)"
+brands = ["Telegram"]
+models = []
+# Internet, the Bot API over HTTPS: no relay (no n8n).
+transport = "https"
+driver = "telegram"
+crate = "moli-telegram"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# The bot token: kept in a secrets manager, handed over in a read-only tmpfs
+# file (`token_file`, default /run/secrets/telegram.token), never in moli.toml.
+secrets = []
+vars = []
+options = ["chats"]
+
+[origin]
+reused = "remplace une notification de HA relayée par n8n par l'API des bots, en direct"
+author = "agent"

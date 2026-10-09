@@ -1,0 +1,25 @@
+[integration]
+id = "tuya"
+name = "Tuya Wi-Fi en local"
+brands = ["Tuya"]
+models = []
+transport = "tcp"
+driver = "tuya"
+crate = "moli-tuya"
+
+[discovery]
+mdns = []
+ssdp = []
+# TCP 6668 to each device. Addresses and versions come from the devices' UDP
+# broadcasts, listened on 6666, 6667 (up to 3.3) and 7000 (3.4+).
+ports = [6668, 6666, 6667, 7000]
+
+[needs]
+# One local key per device, filed by `moli-os tuya import`.
+secrets = ["key-<device_id>"]
+vars = []
+options = []
+
+[origin]
+reused = "aucun code repris : trames vérifiées octet par octet contre la sortie d'implémentations existantes (localtuya, tinytuya), test d'interopérabilité ; import des clés par le compte Tuya déjà lié à HA"
+author = "agent"

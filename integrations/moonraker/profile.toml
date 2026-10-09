@@ -1,0 +1,88 @@
+# 3D printers running Klipper + Moonraker (Snapmaker U1, Voron, Prusa with
+# Klipper…). Local JSON API, no authentication on a trusted LAN.
+# Read-only for now.
+
+[profile]
+id = "moonraker"
+name = "Imprimante 3D (Klipper / Moonraker)"
+manufacturer = "Klipper"
+model = "Moonraker"
+identity = "info.result.hostname"
+name_from = "info.result.hostname"
+
+[[request]]
+id = "info"
+path = "/printer/info"
+format = "json"
+every = "1h"
+
+[[request]]
+id = "q"
+path = "/printer/objects/query?print_stats&heater_bed&extruder&display_status"
+format = "json"
+every = "15s"
+
+[[point]]
+key = "state"
+label = "État"
+from = "q.result.status.print_stats.state"
+kind = "enum"
+values = ["standby", "printing", "paused", "complete", "cancelled", "error"]
+
+[[point]]
+key = "progress"
+label = "Progression"
+from = "q.result.status.display_status.progress"
+kind = "numeric"
+unit = "%"
+scale = 100.0
+round = 1
+
+[[point]]
+key = "file"
+label = "Fichier"
+from = "q.result.status.print_stats.filename"
+kind = "text"
+
+[[point]]
+key = "print_duration"
+label = "Durée d'impression"
+from = "q.result.status.print_stats.print_duration"
+kind = "numeric"
+unit = "min"
+scale = 0.016666666666666666
+round = 0
+
+[[point]]
+key = "nozzle_temperature"
+label = "Buse"
+from = "q.result.status.extruder.temperature"
+kind = "numeric"
+unit = "°C"
+semantic = "temperature"
+round = 1
+
+[[point]]
+key = "nozzle_target"
+label = "Buse (consigne)"
+from = "q.result.status.extruder.target"
+kind = "numeric"
+unit = "°C"
+semantic = "config"
+
+[[point]]
+key = "bed_temperature"
+label = "Plateau"
+from = "q.result.status.heater_bed.temperature"
+kind = "numeric"
+unit = "°C"
+semantic = "temperature"
+round = 1
+
+[[point]]
+key = "bed_target"
+label = "Plateau (consigne)"
+from = "q.result.status.heater_bed.target"
+kind = "numeric"
+unit = "°C"
+semantic = "config"

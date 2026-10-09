@@ -1,0 +1,42 @@
+[package]
+name = "moli-api"
+description = "Moli OS surfaces: REST, server-sent events, MCP and the embedded dashboard."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-ambiance.workspace = true
+moli-core.workspace = true
+moli-i18n.workspace = true
+moli-runtime.workspace = true
+moli-history.workspace = true
+moli-host.workspace = true
+moli-phones.workspace = true
+moli-energy.workspace = true
+moli-assistant.workspace = true
+moli-automation.workspace = true
+moli-net.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+futures.workspace = true
+http.workspace = true
+mime_guess.workspace = true
+ring.workspace = true
+rmcp.workspace = true
+rust-embed.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+moli-history.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

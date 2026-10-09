@@ -1,0 +1,16 @@
+{
+  "installation.titre": "Bienvenue chez toi",
+  "installation.intro": "Cette maison n’a pas encore de code. On le choisit maintenant : il servira à valider ce qui engage la maison (un automatisme, une pièce protégée…).",
+  "installation.langue": "Langue de la maison",
+  "installation.code_installation": "Code d’installation",
+  "installation.code_aide": "Écrit dans les journaux de Moli au démarrage (commande ci-dessous). Il vaut une heure ; redémarrer Moli en donne un nouveau.",
+  "installation.code_maison": "Code de la maison",
+  "installation.chiffres": "{min} à 8 chiffres",
+  "installation.encore": "Encore une fois",
+  "installation.differents": "Les deux codes de la maison diffèrent.",
+  "installation.terminer": "Terminer l’installation",
+  "installation.un_instant": "Un instant…",
+  "installation.plus_tard": "Plus tard",
+  "installation.injoignable": "Moli ne répond pas : réessaie dans un instant.",
+  "installation.erreur": "erreur {status}"
+}

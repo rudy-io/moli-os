@@ -1,0 +1,22 @@
+[package]
+name = "moli-moonraker"
+description = "Moli OS Moonraker: 3D printers running Klipper (Snapmaker U1, Voron…): the print, every tool head, the thumbnail; pause, resume, cancel, light."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+http.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

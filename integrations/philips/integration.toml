@@ -1,0 +1,30 @@
+[integration]
+id = "philips"
+name = "Télé Philips (Android, JointSpace)"
+brands = ["Philips"]
+models = []
+transport = "https"
+driver = "philips"
+crate = "moli-philips"
+
+[discovery]
+# No discovery: the instance gives the TV's address. Turning on also sends a
+# Wake-on-LAN packet (UDP broadcast, port 9) to the `mac` option.
+mdns = []
+ssdp = []
+# 1926 JointSpace ; 6466 Android TV Remote (open apps, app on screen) ;
+# 8009 Google Cast (what plays).
+ports = [1926, 6466, 8009]
+
+[needs]
+# JointSpace pairing credentials; `cert`, `atv_pin`, `cast_pin` are written
+# by the driver itself. Optional: `atv_cert` / `atv_key` (PEM), an Android TV
+# Remote pairing (Home Assistant's `.storage/androidtv_remote_*.pem`), to
+# open apps and know the one on screen.
+secrets = ["username", "password"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"

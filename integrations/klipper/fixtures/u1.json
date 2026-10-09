@@ -1,0 +1,243 @@
+{
+ "objects": [
+  "gcode",
+  "webhooks",
+  "exception_manager",
+  "configfile",
+  "mcu",
+  "mcu e0",
+  "mcu e1",
+  "mcu e2",
+  "mcu e3",
+  "gcode_move",
+  "print_stats",
+  "virtual_sdcard",
+  "pause_resume",
+  "display_status",
+  "exclude_object",
+  "print_task_config",
+  "mqtt",
+  "timelapse",
+  "filament_detect",
+  "resonance_tester",
+  "heaters",
+  "stepper_enable",
+  "tmc2240 stepper_x",
+  "tmc2240 stepper_y",
+  "tmc2209 stepper_z",
+  "heater_bed",
+  "temperature_sensor cavity",
+  "fan_generic cavity_fan",
+  "led cavity_led",
+  "purifier",
+  "bed_mesh",
+  "homing_precise_corexy",
+  "heater_fan power_fan",
+  "adc_current_sensor I_AD",
+  "power_loss_check",
+  "auto_screws_tilt_adjust",
+  "tmc2209 extruder",
+  "fan",
+  "heater_fan e0_nozzle_fan",
+  "output_pin e0_heat_sw",
+  "filament_motion_sensor e0_filament",
+  "filament_entangle_detect e0_filament",
+  "extruder_offset_calibration",
+  "probe",
+  "power_loss_check e0",
+  "tmc2209 extruder1",
+  "fan_generic e1_fan",
+  "heater_fan e1_nozzle_fan",
+  "output_pin e1_heat_sw",
+  "filament_motion_sensor e1_filament",
+  "filament_entangle_detect e1_filament",
+  "power_loss_check e1",
+  "tmc2209 extruder2",
+  "fan_generic e2_fan",
+  "heater_fan e2_nozzle_fan",
+  "output_pin e2_heat_sw",
+  "filament_motion_sensor e2_filament",
+  "filament_entangle_detect e2_filament",
+  "power_loss_check e2",
+  "tmc2209 extruder3",
+  "fan_generic e3_fan",
+  "heater_fan e3_nozzle_fan",
+  "output_pin e3_heat_sw",
+  "filament_motion_sensor e3_filament",
+  "filament_entangle_detect e3_filament",
+  "power_loss_check e3",
+  "filament_feed left",
+  "filament_feed right",
+  "idle_timeout",
+  "filament_parameters",
+  "defect_detection",
+  "motion_report",
+  "query_endstops",
+  "system_stats",
+  "manual_probe",
+  "machine_state_manager",
+  "toolhead",
+  "extruder",
+  "extruder1",
+  "extruder2",
+  "extruder3"
+ ],
+ "query": {
+  "result": {
+   "eventtime": 5686694.106735793,
+   "status": {
+    "webhooks": {
+     "state": "ready",
+     "state_message": "Printer is ready"
+    },
+    "print_stats": {
+     "filename": "Calibration_cube_PLA_8h16m.gcode",
+     "total_duration": 27932.115175901912,
+     "print_duration": 27720.401616635034,
+     "filament_used": 29118.14608001412,
+     "state": "complete",
+     "exception": {},
+     "message": "",
+     "info": {
+      "total_layer": 1002,
+      "current_layer": 1002
+     }
+    },
+    "display_status": {
+     "progress": 1.0,
+     "message": null
+    },
+    "virtual_sdcard": {
+     "file_path": null,
+     "progress": 1.0,
+     "is_active": false,
+     "file_position": 30565845,
+     "file_size": 30565845,
+     "pl_env_valid": false
+    },
+    "heater_bed": {
+     "temperature": 28.0,
+     "target": 0.0,
+     "power": 0.0
+    },
+    "extruder": {
+     "temperature": 30.0,
+     "target": 0.0,
+     "state": "PARKED",
+     "extruder_index": 0
+    },
+    "extruder1": {
+     "temperature": 30.0,
+     "target": 0.0,
+     "state": "PARKED",
+     "extruder_index": 1
+    },
+    "extruder2": {
+     "temperature": 30.0,
+     "target": 0.0,
+     "state": "PARKED",
+     "extruder_index": 2
+    },
+    "extruder3": {
+     "temperature": 30.0,
+     "target": 0.0,
+     "state": "PARKED",
+     "extruder_index": 3
+    },
+    "toolhead": {
+     "extruder": "extruder3"
+    },
+    "temperature_sensor cavity": {
+     "temperature": 30.0,
+     "measured_min_temp": 26.0,
+     "measured_max_temp": 50.0
+    },
+    "led cavity_led": {
+     "color_data": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "print_task_config": {
+     "filament_vendor": [
+      "Generic",
+      "Generic",
+      "Snapmaker",
+      "Generic"
+     ],
+     "filament_type": [
+      "PLA",
+      "PLA",
+      "PLA",
+      "PLA"
+     ],
+     "filament_sub_type": [
+      "",
+      "",
+      "Basic",
+      ""
+     ],
+     "filament_color_rgba": [
+      "6C5BB1FF",
+      "8BD5EEFF",
+      "FFFFFFFF",
+      "000000FF"
+     ],
+     "filament_exist": [
+      true,
+      true,
+      true,
+      true
+     ]
+    }
+   }
+  }
+ },
+ "metadata": {
+  "result": {
+   "filename": "Calibration_cube_PLA_8h16m.gcode",
+   "estimated_time": 29732,
+   "filament_weight_total": 85.33,
+   "filament_total": 29150.95,
+   "object_height": 123.4,
+   "layer_height": 0.16,
+   "thumbnails": [
+    {
+     "width": 96,
+     "height": 96,
+     "size": 4868,
+     "relative_path": ".thumbs/Calibration_cube_PLA_8h16m-96x96.png"
+    },
+    {
+     "width": 48,
+     "height": 48,
+     "size": 1444,
+     "relative_path": ".thumbs/Calibration_cube_PLA_8h16m-48x48.png"
+    },
+    {
+     "width": 300,
+     "height": 300,
+     "size": 22213,
+     "relative_path": ".thumbs/Calibration_cube_PLA_8h16m-300x300.png"
+    }
+   ]
+  }
+ },
+ "totals": {
+  "result": {
+   "job_totals": {
+    "total_jobs": 83.0,
+    "total_time": 1161647.3785303663,
+    "total_print_time": 880450.9944024069,
+    "total_filament_used": 1787182.5643818309,
+    "longest_job": 154977.66615402396,
+    "longest_print": 102115.61257564928
+   },
+   "auxiliary_totals": []
+  }
+ }
+}

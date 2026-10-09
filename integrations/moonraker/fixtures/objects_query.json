@@ -1,0 +1,10 @@
+{
+  "result": {
+    "status": {
+      "print_stats": { "state": "complete", "filename": "a.gcode", "print_duration": 27720.4 },
+      "display_status": { "progress": 0.4567 },
+      "extruder": { "temperature": 29.04, "target": 0.0 },
+      "heater_bed": { "temperature": 27.0, "target": 0.0 }
+    }
+  }
+}

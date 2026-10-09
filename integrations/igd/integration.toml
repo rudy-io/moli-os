@@ -1,0 +1,26 @@
+[integration]
+id = "igd"
+name = "Box internet (UPnP IGD)"
+# Any UPnP Internet Gateway Device (Livebox, Freebox…).
+brands = []
+models = []
+transport = "upnp"
+driver = "igd"
+crate = "moli-igd"
+
+[discovery]
+mdns = []
+# Generic search (the Livebox ignores device-type searches): the first root
+# device with a WAN service is the box. The `location` option skips it.
+ssdp = ["upnp:rootdevice"]
+# The description URL gives its own port.
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = ""
+author = "agent"

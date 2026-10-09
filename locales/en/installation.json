@@ -1,0 +1,16 @@
+{
+  "installation.titre": "Welcome home",
+  "installation.intro": "This house doesn’t have a code yet. Let’s choose one now: you’ll use it to approve anything that matters (an automation, a protected room…).",
+  "installation.langue": "House language",
+  "installation.code_installation": "Setup code",
+  "installation.code_aide": "Written in Moli’s logs when it starts (command below). It’s valid for one hour; restarting Moli gives you a new one.",
+  "installation.code_maison": "House code",
+  "installation.chiffres": "{min} to 8 digits",
+  "installation.encore": "Once more",
+  "installation.differents": "The two codes don’t match.",
+  "installation.terminer": "Finish setup",
+  "installation.un_instant": "One moment…",
+  "installation.plus_tard": "Later",
+  "installation.injoignable": "Moli isn’t answering: try again in a moment.",
+  "installation.erreur": "error {status}"
+}

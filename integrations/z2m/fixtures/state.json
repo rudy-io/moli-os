@@ -1,0 +1,78 @@
+{
+ "0x00124b0000000001": {
+  "current_tarif": "HC..",
+  "update": {
+   "state": "available",
+   "installed_version": 16,
+   "latest_version": 17
+  },
+  "apparent_power": 1070,
+  "current_tier3_summ_delivered": 0,
+  "rms_current": 4,
+  "tomorrow_color": "",
+  "start_notice_e_j_p": 0,
+  "current_summ_delivered": 294967,
+  "current_tier1_summ_delivered": 13266,
+  "current_tier2_summ_delivered": 19535,
+  "current_tier4_summ_delivered": 0,
+  "current_tier5_summ_delivered": 0,
+  "current_tier6_summ_delivered": 0,
+  "warn_d_p_s": 0,
+  "schedule_h_p_h_c": 0,
+  "mot_d_etat": "000000",
+  "rms_current_max": 90,
+  "active_register_tier_delivered": "HP..",
+  "meter_serial_number": "000000000000",
+  "available_power": 45,
+  "linkquality": 220
+ },
+ "0x00124b0000000008": {
+  "battery": 50,
+  "occupancy": false,
+  "illuminance": 1466,
+  "linkquality": 168,
+  "illuminance_interval": 60,
+  "keep_time": "10",
+  "sensitivity": "high"
+ },
+ "0x00124b0000000006": {
+  "battery": 100,
+  "voltage": 3000,
+  "contact": false,
+  "battery_low": false
+ },
+ "0x00124b0000000009": {
+  "state": "ON",
+  "child_lock": "UNLOCK",
+  "indicator_mode": "on",
+  "energy": 90.66,
+  "power": 1538,
+  "current": 6.58,
+  "voltage": 230
+ },
+ "0x00124b0000000003": {
+  "state": "ON",
+  "power": 0,
+  "current": 0,
+  "voltage": 231,
+  "energy": 0
+ },
+ "0x00124b0000000007": {
+  "battery": 97,
+  "water_leak": false,
+  "tamper": false,
+  "battery_low": false
+ },
+ "0x00124b0000000004": {
+  "battery": 100,
+  "smoke": false,
+  "tamper": false,
+  "battery_low": false,
+  "supervision_reports": false,
+  "restore_reports": true,
+  "trouble": false,
+  "ac_status": false,
+  "test": false,
+  "battery_defect": false
+ }
+}

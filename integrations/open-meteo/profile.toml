@@ -1,0 +1,127 @@
+# Weather now and today, from Open-Meteo (free, no key, ECMWF/Météo-France
+# models). Set `vars = { lat = "…", lon = "…" }` in the driver options.
+# Also gives sunrise/sunset and day/night: what HA's `sun` provides.
+
+[profile]
+id = "open-meteo"
+name = "Météo"
+manufacturer = "Open-Meteo"
+model = "Prévisions"
+https = true
+host = "api.open-meteo.com"
+
+[[request]]
+id = "w"
+path = "/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=1"
+format = "json"
+every = "15m"
+
+[[point]]
+key = "temperature"
+label = "Température"
+from = "w.current.temperature_2m"
+kind = "numeric"
+unit = "°C"
+round = 1
+
+[[point]]
+key = "feels_like"
+label = "Ressentie"
+from = "w.current.apparent_temperature"
+kind = "numeric"
+unit = "°C"
+round = 1
+
+[[point]]
+key = "humidity"
+label = "Humidité"
+from = "w.current.relative_humidity_2m"
+kind = "numeric"
+unit = "%"
+
+[[point]]
+key = "precipitation"
+label = "Précipitations"
+from = "w.current.precipitation"
+kind = "numeric"
+unit = "mm"
+round = 1
+
+[[point]]
+key = "cloud_cover"
+label = "Nébulosité"
+from = "w.current.cloud_cover"
+kind = "numeric"
+unit = "%"
+
+[[point]]
+key = "wind_speed"
+label = "Vent"
+from = "w.current.wind_speed_10m"
+kind = "numeric"
+unit = "km/h"
+round = 0
+
+[[point]]
+key = "wind_gusts"
+label = "Rafales"
+from = "w.current.wind_gusts_10m"
+kind = "numeric"
+unit = "km/h"
+round = 0
+
+[[point]]
+key = "weather_code"
+label = "Code météo (WMO)"
+from = "w.current.weather_code"
+kind = "numeric"
+
+[[point]]
+key = "daylight"
+label = "Jour"
+from = "w.current.is_day"
+kind = "binary"
+map = { "1" = true, "0" = false }
+
+[[point]]
+key = "today_max"
+label = "Max du jour"
+from = "w.daily.temperature_2m_max.0"
+kind = "numeric"
+unit = "°C"
+round = 1
+
+[[point]]
+key = "today_min"
+label = "Min du jour"
+from = "w.daily.temperature_2m_min.0"
+kind = "numeric"
+unit = "°C"
+round = 1
+
+[[point]]
+key = "today_rain"
+label = "Pluie du jour"
+from = "w.daily.precipitation_sum.0"
+kind = "numeric"
+unit = "mm"
+round = 1
+
+[[point]]
+key = "today_rain_chance"
+label = "Risque de pluie"
+from = "w.daily.precipitation_probability_max.0"
+kind = "numeric"
+unit = "%"
+
+[[point]]
+key = "sunrise"
+label = "Lever du soleil"
+from = "w.daily.sunrise.0"
+kind = "text"
+
+[[point]]
+key = "sunset"
+label = "Coucher du soleil"
+from = "w.daily.sunset.0"
+kind = "text"

@@ -1,0 +1,24 @@
+[integration]
+id = "tapo"
+name = "TP-Link Tapo (ampoules, prises)"
+brands = ["TP-Link"]
+# The one device seen so far (in the reference home).
+models = ["L530"]
+transport = "http"
+driver = "tapo"
+crate = "moli-tapo"
+
+[discovery]
+# No discovery: the instance gives the device's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = ["auth_hash"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code repris : session KLAP vérifiée octet par octet contre la sortie de python-kasa (test d'interopérabilité) ; auth_hash gardé comme HA le garde"
+author = "agent"

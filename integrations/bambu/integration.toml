@@ -1,0 +1,25 @@
+[integration]
+id = "bambu"
+name = "Imprimante 3D Bambu Lab"
+brands = ["Bambu Lab"]
+models = ["A1", "P1", "X1"]
+transport = "mqtt"
+driver = "bambu"
+crate = "moli-bambu"
+
+[discovery]
+# No discovery: the instance gives the printer's address and serial.
+mdns = []
+ssdp = []
+# MQTT over TLS.
+ports = [8883]
+
+[needs]
+# `cert` (the pinned fingerprint) is written by the driver itself.
+secrets = ["access_code"]
+vars = []
+options = ["host", "serial"]
+
+[origin]
+reused = ""
+author = "agent"
