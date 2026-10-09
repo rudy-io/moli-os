@@ -545,6 +545,9 @@ impl Assistant {
                 }));
                 for call in calls {
                     let name = call["function"]["name"].as_str().unwrap_or_default();
+                    if run.tools.len() < 16 {
+                        run.tools.push(name.chars().take(32).collect());
+                    }
                     let args: Json = call["function"]["arguments"]
                         .as_str()
                         .and_then(|a| serde_json::from_str(a).ok())
@@ -600,6 +603,7 @@ impl Assistant {
             completion_tokens = run.usage.completion_tokens,
             actions = run.actions.len(),
             cards = run.cards.len(),
+            tools = run.tools.join(","),
             "assistant turn"
         );
         Reply {
@@ -889,6 +893,8 @@ struct Run {
     cards: Vec<Json>,
     actions: Vec<Action>,
     usage: Usage,
+    /// The tools called, in order, for the log: where a slow turn went.
+    tools: Vec<String>,
 }
 
 /// The same answer said twice in a row (seen once from a small model)
