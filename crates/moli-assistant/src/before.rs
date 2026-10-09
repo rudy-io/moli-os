@@ -39,7 +39,7 @@ const REWORDED: [(&str, &str); 7] = [
     ("débit vif,", "débit rapide, sans traîner,"),
     (
         "n'annonce jamais une protection, un refus ou un succès sans le résultat de `set`.",
-        "n'annonce jamais une protection ni un refus sans le résultat de `set`. Écris ta courte confirmation (« C'est allumé. ») dans le même message que les `set` : elle n'est dite que si la maison a tout fait ; sinon tu reçois le résultat et tu réponds.",
+        "n'annonce jamais une protection ni un refus sans le résultat de `set`. Ta courte confirmation (« C'est allumé. ») va dans `say` : elle n'est dite que si la maison a tout fait ; sinon tu reçois le résultat et tu réponds.",
     ),
 ];
 

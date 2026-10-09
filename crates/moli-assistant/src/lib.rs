@@ -595,8 +595,9 @@ impl Assistant {
     /// orders and words in the same answer: the screen gives nothing back
     /// worth another round trip, nor an order the house carried out, and the
     /// words end the turn (a second or two sooner, which a spoken
-    /// conversation hears). An order held or failed goes back to the model,
-    /// which must say so.
+    /// conversation hears). The words are the answer's text or, since models
+    /// leave it empty beside a call, each order's `say`. An order held or
+    /// failed goes back to the model, which must say so.
     async fn act(
         &self,
         message: &Json,
@@ -605,11 +606,15 @@ impl Assistant {
         run: &mut Run,
         messages: &mut Vec<Json>,
     ) -> Option<String> {
-        let said = message["content"].as_str().unwrap_or_default().trim();
-        let quick = calls
+        let mut said = message["content"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let mut carried_out = calls
             .iter()
             .all(|c| matches!(c["function"]["name"].as_str(), Some("show" | "set")));
-        let mut carried_out = quick && !said.is_empty();
+        let mut says: Vec<String> = Vec::new();
         messages.push(json!({
             "role": "assistant",
             "content": message["content"],
@@ -625,14 +630,25 @@ impl Assistant {
                 .and_then(|a| serde_json::from_str(a).ok())
                 .unwrap_or_else(|| json!({}));
             let result = self.tool(name, &args, layout, run).await;
-            carried_out &= name != "set" || result["status"] == "done";
+            if name == "set" {
+                carried_out &= result["status"] == "done";
+                if let Some(say) = args["say"].as_str().map(str::trim)
+                    && !say.is_empty()
+                    && !says.iter().any(|s| s == say)
+                {
+                    says.push(say.to_owned());
+                }
+            }
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "content": result.to_string(),
             }));
         }
-        carried_out.then(|| said.to_owned())
+        if said.is_empty() {
+            said = says.join(" ");
+        }
+        (carried_out && !said.is_empty()).then_some(said)
     }
 
     fn finish(&self, text: &str, mut run: Run, layout: &Layout, question: &str) -> Reply {
@@ -1225,9 +1241,10 @@ fn tools() -> Json {
                     "type": "object",
                     "properties": {
                         "point": { "type": "string", "description": moli_i18n::tr!("assistant.tools.set.point") },
-                        "value": { "anyOf": [{ "type": "boolean" }, { "type": "number" }, { "type": "string" }] }
+                        "value": { "anyOf": [{ "type": "boolean" }, { "type": "number" }, { "type": "string" }] },
+                        "say": { "type": "string", "description": moli_i18n::tr!("assistant.tools.set.say") }
                     },
-                    "required": ["point", "value"]
+                    "required": ["point", "value", "say"]
                 }
             }
         },
@@ -1702,9 +1719,9 @@ mod tests {
     async fn an_order_carried_out_ends_the_turn_with_its_words() {
         let moli = moli_with_lamp(
             br#"{"choices":[{"message":{"role":"assistant",
-            "content":"C'est allume.",
+            "content":null,
             "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
-            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true}"}}]}}],
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true,\"say\":\"C'est allume.\"}"}}]}}],
             "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
         )
         .await;
@@ -1721,13 +1738,33 @@ mod tests {
     async fn an_order_that_failed_goes_back_to_the_model() {
         let moli = moli_with_lamp(
             br#"{"choices":[{"message":{"role":"assistant",
-            "content":"C'est allume.",
+            "content":null,
             "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
-            "arguments":"{\"point\":\"fake:nothing/on\",\"value\":true}"}}]}}],
+            "arguments":"{\"point\":\"fake:nothing/on\",\"value\":true,\"say\":\"C'est allume.\"}"}}]}}],
             "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
         )
         .await;
         assert!(moli.turn(spoken("Allume le rien")).await.is_err());
+    }
+
+    /// Two orders, the same words in each: said once.
+    #[tokio::test]
+    async fn the_words_of_several_orders_are_said_once() {
+        let moli = moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant",
+            "content":null,
+            "tool_calls":[
+            {"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true,\"say\":\"C'est allume.\"}"}},
+            {"id":"c2","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":false,\"say\":\"C'est allume.\"}"}}]}}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        )
+        .await;
+        let reply = moli.turn(spoken("Allume la lampe")).await.unwrap();
+        assert_eq!(reply.usage.steps, 1);
+        assert_eq!(reply.reply, "C'est allume.");
+        assert_eq!(reply.actions.len(), 2);
     }
 
     #[test]
@@ -2053,7 +2090,19 @@ mod tests {
 
     #[test]
     fn the_french_tools_are_what_they_always_were() {
-        assert_eq!(tools(), before::tools());
+        // One deliberate change: `set` carries the words said once it is done.
+        let mut then = before::tools();
+        let set = then
+            .as_array_mut()
+            .and_then(|t| t.iter_mut().find(|t| t["function"]["name"] == "set"))
+            .map(|t| &mut t["function"]["parameters"])
+            .unwrap();
+        set["properties"]["say"] = json!({
+            "type": "string",
+            "description": "Ta réponse, dite si la maison exécute tous les ordres : courte (« C'est allumé. »), avec la réponse à une éventuelle question. Sinon tu reçois le résultat et tu réponds."
+        });
+        set["required"] = json!(["point", "value", "say"]);
+        assert_eq!(tools(), then);
         assert_eq!(ambiance_tool(), before::ambiance_tool());
     }
 
