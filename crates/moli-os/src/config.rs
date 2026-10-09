@@ -304,6 +304,7 @@ impl Config {
                 "automations",
                 moli_energy::points::INSTANCE,
                 moli_lights::INSTANCE,
+                moli_api::PEOPLE_INSTANCE,
             ]
             .contains(&driver.id.as_str())
             {

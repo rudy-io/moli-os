@@ -344,6 +344,8 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
+    let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
+    tasks.push(whereabouts);
 
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
@@ -375,6 +377,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         automations: Some(automations),
         access: config.server.access.clone(),
         demo: config.server.demo,
+        household: Some(household),
         phones: gates.phones,
         machines: gates.machines,
     };
@@ -874,6 +877,30 @@ fn spawn_house_drivers(
         ));
     }
     tasks
+}
+
+/// The household's people (`data/people.json`), and the driver that says
+/// where each one is (`personnes:*`).
+fn spawn_household(
+    config: &Config,
+    hub: &Hub,
+    phones: Option<moli_phones::Gateway>,
+    cancel: &CancellationToken,
+) -> (moli_api::Household, tokio::task::JoinHandle<()>) {
+    let owners = config
+        .server
+        .access
+        .as_ref()
+        .map(|a| a.owners.clone())
+        .unwrap_or_default();
+    let household = moli_api::Household::open(hub, Some(&config.server.data_dir), &owners);
+    let task = spawn_driver(
+        hub,
+        InstanceId::from(moli_api::PEOPLE_INSTANCE),
+        household.whereabouts(hub, phones),
+        cancel.clone(),
+    );
+    (household, task)
 }
 
 /// What some drivers share with the API: the phones' pairing and reports,

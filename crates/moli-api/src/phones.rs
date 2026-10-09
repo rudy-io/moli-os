@@ -50,7 +50,15 @@ pub(crate) async fn register(
             &moli_i18n::tr!("serveur.telephone.foyer_seulement"),
         );
     }
-    match gate.register(&p.name, &p.platform, &p.model, p.push_token.as_deref()) {
+    // Paired from a person's session: the phone is theirs.
+    let person = caller.person.as_ref().map(|p| p.id.as_str());
+    match gate.register(
+        &p.name,
+        &p.platform,
+        &p.model,
+        p.push_token.as_deref(),
+        person,
+    ) {
         Ok(paired) => axum::Json(paired).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &format!("{e:#}")),
     }
@@ -112,5 +120,65 @@ pub(crate) async fn report(
     match gate.report(&id, r) {
         Ok(home) => axum::Json(json!({ "home": home })).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &format!("{e:#}")),
+    }
+}
+
+/// The household's phones, and whose each is.
+pub(crate) async fn list(
+    Extension(PhonesGate(gate)): Extension<PhonesGate>,
+    caller: Caller,
+) -> Response {
+    if !caller.is_household() {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.acces.refuse"),
+        );
+    }
+    axum::Json(json!({ "phones": gate.map(|g| g.list()).unwrap_or_default() })).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Owner {
+    person: Option<String>,
+}
+
+/// Gives a phone to a person (an owner of the house).
+pub(crate) async fn assign(
+    Extension(PhonesGate(gate)): Extension<PhonesGate>,
+    Extension(humans): Extension<std::sync::Arc<crate::session::Sessions>>,
+    Extension(persons): Extension<std::sync::Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<Owner>,
+) -> Response {
+    let Some(gate) = gate else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &moli_i18n::tr!("serveur.pilote.absent", pilote = "phones"),
+        );
+    };
+    if !crate::people_api::is_owner(&caller, &humans, &persons, &headers) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.personnes.proprietaire_seul"),
+        );
+    }
+    if let Some(p) = &body.person
+        && persons.get(p).is_none()
+    {
+        return error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.personnes.inconnue"),
+        );
+    }
+    match gate.assign(&id, body.person.as_deref()) {
+        Ok(true) => axum::Json(json!({ "phone": id, "person": body.person })).into_response(),
+        Ok(false) => error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.telephone.inconnu"),
+        ),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e:#}")),
     }
 }

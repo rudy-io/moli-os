@@ -135,5 +135,17 @@
   "serveur.personnes.invitation_incorrecte": "code d'invitation inconnu ou expiré",
   "serveur.personnes.identifiants_incorrects": "identifiant ou mot de passe incorrect",
   "serveur.personnes.invite_limite": "un invité peut seulement commander dans ses pièces",
-  "serveur.personnes.invite_piece": "cet appareil n'est pas dans les pièces de cet invité"
+  "serveur.personnes.invite_piece": "cet appareil n'est pas dans les pièces de cet invité",
+  "serveur.personnes.zone_maison": "Maison",
+  "serveur.personnes.ailleurs": "Ailleurs",
+  "serveur.personnes.modele": "Personne",
+  "serveur.personnes.foyer": "Le foyer",
+  "serveur.personnes.modele_foyer": "Présence de la maison",
+  "serveur.personnes.point_zone": "Zone",
+  "serveur.personnes.point_precision": "Précision",
+  "serveur.personnes.point_batterie": "Batterie du téléphone",
+  "serveur.personnes.point_depuis": "Dans cette zone depuis",
+  "serveur.personnes.point_nombre": "Personnes à la maison",
+  "serveur.personnes.point_quelquun": "Quelqu'un à la maison",
+  "serveur.personnes.point_tous_partis": "Tout le monde est parti"
 }
