@@ -1,0 +1,146 @@
+{
+ "imitates": "ipp",
+ "devices": [
+  {
+   "id": "canon:bureau",
+   "instance": "canon",
+   "native_name": "Imprimante du bureau",
+   "manufacturer": "Canon",
+   "model": "MG3600 series",
+   "points": [
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "idle",
+       "processing",
+       "stopped"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "status",
+     "label": "Message",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "ink_low",
+     "label": "Encre basse",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "jobs",
+     "label": "Impressions en attente",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "job",
+     "label": "Dernière impression",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "identify",
+     "label": "Faire clignoter",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "cancel",
+     "label": "Annuler l'impression",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "ink_1",
+     "label": "Encre couleur",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "ink_2",
+     "label": "Encre noire",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    }
+   ],
+   "printer": true,
+   "native_room": "Bureau",
+   "state": {
+    "state": "idle",
+    "status": "Prête",
+    "ink_low": false,
+    "jobs": 0,
+    "job": "Facture électricité.pdf",
+    "ink_1": 64,
+    "ink_2": 48
+   }
+  }
+ ]
+}

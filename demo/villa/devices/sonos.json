@@ -1,0 +1,397 @@
+{
+ "imitates": "sonos",
+ "devices": [
+  {
+   "id": "sonos:salon",
+   "instance": "sonos",
+   "native_name": "Sonos du salon",
+   "manufacturer": "Sonos",
+   "model": "Sonos Beam",
+   "points": [
+    {
+     "key": "playing",
+     "label": "Lecture",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "volume",
+     "label": "Volume",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "mute",
+     "label": "Sourdine",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "title",
+     "label": "Titre",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "artist",
+     "label": "Artiste",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet",
+     "label": "Annonces coupées",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet_until",
+     "label": "Annonces coupées jusqu'à (ms)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "announce",
+     "label": "Annonce",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "playing": true,
+    "state": "playing",
+    "volume": 22,
+    "mute": false,
+    "title": "Midnight City",
+    "artist": "M83",
+    "quiet": false,
+    "quiet_until": 0
+   }
+  },
+  {
+   "id": "sonos:terrasse",
+   "instance": "sonos",
+   "native_name": "Sonos de la terrasse",
+   "manufacturer": "Sonos",
+   "model": "Sonos Beam",
+   "points": [
+    {
+     "key": "playing",
+     "label": "Lecture",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "volume",
+     "label": "Volume",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "mute",
+     "label": "Sourdine",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "title",
+     "label": "Titre",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "artist",
+     "label": "Artiste",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet",
+     "label": "Annonces coupées",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet_until",
+     "label": "Annonces coupées jusqu'à (ms)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "announce",
+     "label": "Annonce",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Terrasse",
+   "state": {
+    "playing": false,
+    "state": "stopped",
+    "volume": 30,
+    "mute": false,
+    "quiet": false,
+    "quiet_until": 0
+   }
+  },
+  {
+   "id": "sonos:cuisine",
+   "instance": "sonos",
+   "native_name": "Sonos de la cuisine",
+   "manufacturer": "Sonos",
+   "model": "Sonos Beam",
+   "points": [
+    {
+     "key": "playing",
+     "label": "Lecture",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "volume",
+     "label": "Volume",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "mute",
+     "label": "Sourdine",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "title",
+     "label": "Titre",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "artist",
+     "label": "Artiste",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet",
+     "label": "Annonces coupées",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "quiet_until",
+     "label": "Annonces coupées jusqu'à (ms)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "announce",
+     "label": "Annonce",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Cuisine",
+   "state": {
+    "playing": false,
+    "state": "stopped",
+    "volume": 18,
+    "mute": false,
+    "quiet": false,
+    "quiet_until": 0
+   }
+  }
+ ]
+}

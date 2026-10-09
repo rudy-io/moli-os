@@ -1,0 +1,557 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "daikin:salon",
+   "instance": "daikin",
+   "native_name": "Clim du salon",
+   "manufacturer": "Daikin",
+   "model": "BRP069",
+   "points": [
+    {
+     "key": "on",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "mode",
+     "label": "Mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "déshumidification",
+       "froid",
+       "chaud",
+       "ventilation"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "target_temperature",
+     "label": "Consigne",
+     "kind": {
+      "type": "numeric",
+      "min": 16.0,
+      "max": 30.0,
+      "step": 0.5
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "temperature",
+     "label": "Température intérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "outdoor_temperature",
+     "label": "Température extérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "fan",
+     "label": "Ventilation",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "silence",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "error",
+     "label": "Code erreur",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "on": true,
+    "mode": "froid",
+    "target_temperature": 23.0,
+    "temperature": 24.6,
+    "outdoor_temperature": 27.0,
+    "fan": "auto",
+    "humidity": 48
+   }
+  },
+  {
+   "id": "daikin:suite",
+   "instance": "daikin",
+   "native_name": "Clim de la suite",
+   "manufacturer": "Daikin",
+   "model": "BRP069",
+   "points": [
+    {
+     "key": "on",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "mode",
+     "label": "Mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "déshumidification",
+       "froid",
+       "chaud",
+       "ventilation"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "target_temperature",
+     "label": "Consigne",
+     "kind": {
+      "type": "numeric",
+      "min": 16.0,
+      "max": 30.0,
+      "step": 0.5
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "temperature",
+     "label": "Température intérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "outdoor_temperature",
+     "label": "Température extérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "fan",
+     "label": "Ventilation",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "silence",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "error",
+     "label": "Code erreur",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite parentale",
+   "state": {
+    "on": false,
+    "mode": "auto",
+    "target_temperature": 21.0,
+    "temperature": 22.0,
+    "outdoor_temperature": 27.0,
+    "fan": "auto",
+    "humidity": 50
+   }
+  },
+  {
+   "id": "daikin:bureau",
+   "instance": "daikin",
+   "native_name": "Clim du bureau",
+   "manufacturer": "Daikin",
+   "model": "BRP069",
+   "points": [
+    {
+     "key": "on",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "mode",
+     "label": "Mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "déshumidification",
+       "froid",
+       "chaud",
+       "ventilation"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "target_temperature",
+     "label": "Consigne",
+     "kind": {
+      "type": "numeric",
+      "min": 16.0,
+      "max": 30.0,
+      "step": 0.5
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "temperature",
+     "label": "Température intérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "outdoor_temperature",
+     "label": "Température extérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "fan",
+     "label": "Ventilation",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "silence",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "error",
+     "label": "Code erreur",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Bureau",
+   "state": {
+    "on": false,
+    "mode": "froid",
+    "target_temperature": 22.0,
+    "temperature": 23.4,
+    "outdoor_temperature": 27.0,
+    "fan": "auto",
+    "humidity": 46
+   }
+  },
+  {
+   "id": "daikin:suite-amis",
+   "instance": "daikin",
+   "native_name": "Clim de la suite d'amis",
+   "manufacturer": "Daikin",
+   "model": "BRP069",
+   "points": [
+    {
+     "key": "on",
+     "label": "Marche",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "mode",
+     "label": "Mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "déshumidification",
+       "froid",
+       "chaud",
+       "ventilation"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "target_temperature",
+     "label": "Consigne",
+     "kind": {
+      "type": "numeric",
+      "min": 16.0,
+      "max": 30.0,
+      "step": 0.5
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "°C",
+     "semantic": "config"
+    },
+    {
+     "key": "temperature",
+     "label": "Température intérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "outdoor_temperature",
+     "label": "Température extérieure",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "humidity",
+     "label": "Humidité",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "humidity"
+    },
+    {
+     "key": "fan",
+     "label": "Ventilation",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "auto",
+       "silence",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "error",
+     "label": "Code erreur",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Suite d'amis",
+   "state": {
+    "on": false,
+    "mode": "auto",
+    "target_temperature": 21.0,
+    "temperature": 22.3,
+    "outdoor_temperature": 27.0,
+    "fan": "auto",
+    "humidity": 49
+   }
+  }
+ ]
+}

@@ -1,0 +1,27 @@
+{
+ "imitates": "telegram",
+ "devices": [
+  {
+   "id": "telegram:bot",
+   "instance": "telegram",
+   "native_name": "Telegram",
+   "manufacturer": "Telegram",
+   "model": "Bot de la maison",
+   "points": [
+    {
+     "key": "notify",
+     "label": "Envoyer un message",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {}
+  }
+ ]
+}

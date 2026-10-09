@@ -1,0 +1,222 @@
+{
+ "imitates": "bambu",
+ "devices": [
+  {
+   "id": "bambu:a1",
+   "instance": "bambu",
+   "native_name": "Bambu A1",
+   "manufacturer": "Bambu Lab",
+   "points": [
+    {
+     "key": "state",
+     "label": "État",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "progress",
+     "label": "Progression",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "remaining",
+     "label": "Temps restant",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "nozzle_temperature",
+     "label": "Buse",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "nozzle_target",
+     "label": "Buse (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "bed_temperature",
+     "label": "Plateau",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "bed_target",
+     "label": "Plateau (consigne)",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "job",
+     "label": "Impression",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "layer",
+     "label": "Couche",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "total_layers",
+     "label": "Couches",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "error",
+     "label": "Erreur",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "wifi_signal",
+     "label": "Wi-Fi",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "dBm",
+     "semantic": "other"
+    },
+    {
+     "key": "printing",
+     "label": "En impression",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "light",
+     "label": "Lumière",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "pause",
+       "resume",
+       "stop"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "control"
+    }
+   ],
+   "native_room": "Atelier",
+   "state": {
+    "state": "printing",
+    "printing": true,
+    "progress": 37.0,
+    "remaining": 76.0,
+    "job": "Vase spirale",
+    "layer": 148.0,
+    "total_layers": 400.0,
+    "nozzle_temperature": 220.0,
+    "nozzle_target": 220.0,
+    "bed_temperature": 65.0,
+    "bed_target": 65.0,
+    "error": 0,
+    "wifi_signal": -52.0,
+    "light": true
+   }
+  }
+ ]
+}

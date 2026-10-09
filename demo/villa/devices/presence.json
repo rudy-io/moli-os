@@ -1,0 +1,53 @@
+{
+ "imitates": "presence",
+ "devices": [
+  {
+   "id": "presence:claire",
+   "instance": "presence",
+   "native_name": "Claire",
+   "manufacturer": "Moli",
+   "model": "Présence",
+   "points": [
+    {
+     "key": "home",
+     "label": "À la maison",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    }
+   ],
+   "state": {
+    "home": true
+   }
+  },
+  {
+   "id": "presence:thomas",
+   "instance": "presence",
+   "native_name": "Thomas",
+   "manufacturer": "Moli",
+   "model": "Présence",
+   "points": [
+    {
+     "key": "home",
+     "label": "À la maison",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "occupancy"
+    }
+   ],
+   "state": {
+    "home": false
+   }
+  }
+ ]
+}

@@ -30,6 +30,7 @@ moli-igd.workspace = true
 moli-ipp.workspace = true
 moli-helpers.workspace = true
 moli-demo.workspace = true
+jiff.workspace = true
 moli-lights.workspace = true
 moli-presence.workspace = true
 moli-telegram.workspace = true

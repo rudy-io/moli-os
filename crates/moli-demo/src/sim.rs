@@ -159,15 +159,12 @@ impl Live {
 
     /// The switch that says whether the device runs, if it has one.
     fn running(&self) -> Option<bool> {
-        for key in ["on", "power", "state", "playing", "printing"] {
-            if let Some(spec) = self.specs.iter().find(|s| &*s.key == key)
-                && matches!(spec.kind, Kind::Binary)
-                && let Some(on) = self.flag(key)
-            {
-                return Some(on);
-            }
-        }
-        None
+        let spec = self.specs.iter().find(|s| is_switch(s)).or_else(|| {
+            self.specs
+                .iter()
+                .find(|s| matches!(s.kind, Kind::Binary) && &*s.key == "printing")
+        })?;
+        self.flag(&spec.key)
     }
 
     /// The power the device draws now, in W (its power points summed).
@@ -182,6 +179,14 @@ impl Live {
     fn has(&self, key: &str) -> bool {
         self.specs.iter().any(|s| &*s.key == key)
     }
+}
+
+/// The point that switches a device on and off (`on`, `switch_1`…).
+fn is_switch(spec: &PointSpec) -> bool {
+    matches!(spec.kind, Kind::Binary)
+        && spec.access.write
+        && (matches!(&*spec.key, "on" | "power" | "state" | "playing")
+            || spec.key.starts_with("switch"))
 }
 
 fn readable_number(spec: &PointSpec) -> bool {
@@ -228,6 +233,10 @@ fn behaviour(spec: &PointSpec, start: Option<&Value>, has_switch: bool) -> Behav
         (Semantic::Power, _) => Behaviour::Power {
             base: if v > 1.0 { v } else { 8.0 },
             switched: has_switch,
+        },
+        (Semantic::ApparentPower, _) => Behaviour::Power {
+            base: if v > 1.0 { v } else { 300.0 },
+            switched: false,
         },
         (Semantic::Energy, Some(Unit::KiloWattHour)) => Behaviour::Meter { factor: 0.001 },
         (Semantic::Energy, _) => Behaviour::Meter { factor: 1.0 },
@@ -312,11 +321,7 @@ impl World {
         let mut devices = Vec::with_capacity(played.len());
         let mut index = HashMap::new();
         for (p, id) in played.iter().zip(ids) {
-            let has_switch = p.device.points.iter().any(|s| {
-                matches!(s.kind, Kind::Binary)
-                    && s.access.write
-                    && matches!(&*s.key, "on" | "power" | "state" | "playing")
-            });
+            let has_switch = p.device.points.iter().any(is_switch);
             let points = p
                 .device
                 .points
@@ -398,17 +403,15 @@ impl World {
         if spec.access.read {
             Self::set(ctx, live, key, value.clone());
         }
-        let on_key = ["on", "power", "state"]
-            .into_iter()
-            .find(|k| live.specs.iter().any(|s| &*s.key == *k && s.access.write));
+        let on_key = live
+            .specs
+            .iter()
+            .find(|s| is_switch(s) && &*s.key != "playing")
+            .map(|s| s.key.to_string());
         match (key, value) {
             ("brightness" | "color" | "color_temp", v) if v.as_f64().is_none_or(|b| b > 0.0) => {
                 if let Some(k) = on_key {
-                    let on = match live.specs.iter().find(|s| &*s.key == k).map(|s| &s.kind) {
-                        Some(Kind::Enum { .. }) => Value::Text("ON".into()),
-                        _ => Value::Bool(true),
-                    };
-                    Self::set(ctx, live, k, on);
+                    Self::set(ctx, live, &k, Value::Bool(true));
                 }
             }
             ("playing", Value::Bool(b)) if live.has("state") => {
@@ -471,8 +474,39 @@ impl World {
     /// One step of `dt` seconds for the whole house.
     pub(crate) fn step(&mut self, ctx: &DriverCtx, dt: f64) {
         let clock = Clock::now(&self.tz);
+        let today = jiff::Timestamp::now()
+            .to_zoned(self.tz.clone())
+            .date()
+            .to_string();
         for i in 0..self.devices.len() {
             self.step_device(ctx, i, dt, clock);
+            Self::today(ctx, &mut self.devices[i], &today);
+        }
+    }
+
+    /// Dated texts (sunrise, a measure's time) stay of the day: a demo
+    /// file written months ago must not look stale.
+    fn today(ctx: &DriverCtx, live: &mut Live, today: &str) {
+        let dated: Vec<(String, Value)> = live
+            .values
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::Text(t)
+                    if t.len() >= 16
+                        && t.as_bytes()[4] == b'-'
+                        && t.as_bytes()[10] == b'T'
+                        && t.get(..10) != Some(today) =>
+                {
+                    Some((
+                        k.clone(),
+                        Value::Text(format!("{today}{}", &t[10..]).into()),
+                    ))
+                }
+                _ => None,
+            })
+            .collect();
+        for (k, v) in dated {
+            Self::set(ctx, live, &k, v);
         }
     }
 
