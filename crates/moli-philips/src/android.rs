@@ -3,6 +3,7 @@
 //! `atv_cert` / `atv_key`, PEM), what plays (Google Cast, nothing to pair).
 //! Both certificates are pinned on first contact, like the TV's own.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use anyhow::{Context as _, bail};
 use moli_androidtv::{cast, remote};
 use moli_core::{DeviceId, Value};
 use moli_net::PinnedTls;
-use moli_runtime::DriverCtx;
+use moli_runtime::{CommandRequest, DriverCtx};
 use tokio::sync::{Notify, mpsc};
 use tokio::time::Instant;
 
@@ -29,6 +30,19 @@ const HOLD: Duration = Duration::from_secs(60);
 const RETRY_LAUNCH: Duration = Duration::from_secs(4);
 /// A refusal this soon after the remote came up is the TV still starting.
 const STARTING: Duration = Duration::from_secs(90);
+/// No refusal this long after a link: the app opened (the TV refuses within
+/// a second; it does not always say which app came up).
+const SETTLE: Duration = Duration::from_secs(2);
+/// The hub's patience ends at the order's deadline: answered a little before.
+const BEFORE_DEADLINE: Duration = Duration::from_millis(300);
+
+/// One app link to the TV.
+fn send_link(side: Option<&Side<remote::Order>>, link: &str) -> anyhow::Result<()> {
+    let side = side.with_context(|| moli_i18n::tr!("pilotes.philips.pas_de_telecommande"))?;
+    side.orders
+        .try_send(remote::Order::Launch(link.to_owned()))
+        .map_err(|_| anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas")))
+}
 
 /// News from either side.
 pub(crate) enum Up {
@@ -56,13 +70,56 @@ struct Pending {
     retry: bool,
 }
 
+/// The app being opened: the link sent last, the ones left if the TV refuses
+/// it, and the order waiting for the TV's word.
+struct Sent {
+    target: String,
+    link: String,
+    at: Instant,
+    rest: VecDeque<String>,
+    /// Whether it is already the second try (a TV that was starting).
+    retry: bool,
+    /// Answered once the TV takes the app or refuses every link: a refusal
+    /// reaches whoever asked (the family, Moli) instead of a silent « ok ».
+    waiting: Option<Waiting>,
+}
+
+/// Who waits for an app's outcome, and until when (the hub's patience).
+pub(crate) struct Waiting {
+    pub(crate) answer: Box<dyn FnOnce(Result<(), String>) + Send>,
+    pub(crate) deadline: std::time::Instant,
+}
+
+impl Waiting {
+    /// An order of the hub's.
+    pub(crate) fn order(order: CommandRequest) -> Self {
+        let deadline = order.deadline;
+        Self {
+            answer: Box::new(move |result| order.reply(result)),
+            deadline,
+        }
+    }
+
+    fn reply(self, result: Result<(), String>) {
+        (self.answer)(result);
+    }
+}
+
+impl Sent {
+    fn answer(&mut self, result: Result<(), String>) {
+        if let Some(waiting) = self.waiting.take() {
+            waiting.reply(result);
+        }
+    }
+}
+
 pub(crate) struct Android {
     remote: Option<Side<remote::Order>>,
     cast: Option<Side<cast::Order>>,
     playing: Option<cast::Playing>,
     pending: Option<Pending>,
-    /// The last app sent: what, when, whether it was the retry.
-    sent: Option<(String, Instant, bool)>,
+    /// The last app sent.
+    sent: Option<Sent>,
     /// When the remote last came up.
     ready_at: Option<Instant>,
     /// The TV answered JointSpace at the last poll; when the connections were
@@ -145,22 +202,31 @@ impl Android {
         self.remote.is_some()
     }
 
-    /// Opens an app (Android package) or a link. The remote not ready yet
-    /// (the TV waking up, the remote reconnecting): kept, and sent as soon
-    /// as it is, for [`HOLD`].
-    pub(crate) fn launch(&mut self, target: &str) -> anyhow::Result<()> {
-        let side = self
-            .remote
-            .as_ref()
-            .with_context(|| moli_i18n::tr!("pilotes.philips.appairage"))?;
+    /// Opens an app (its name, its Android package) or a link. The remote up:
+    /// sent now, and `waiting` is answered when the TV takes it or has
+    /// refused every way to open it. The remote not ready yet (the TV waking
+    /// up, the remote reconnecting): kept, sent as soon as it is, for
+    /// [`HOLD`], and answered now (the TV may take a while).
+    pub(crate) fn launch(&mut self, target: &str, waiting: Waiting) {
+        let Some(side) = self.remote.as_ref() else {
+            return waiting.reply(Err(moli_i18n::tr!("pilotes.philips.appairage")));
+        };
         let target = target.trim().to_owned();
         if target.is_empty() {
-            bail!(moli_i18n::tr!("pilotes.philips.quelle_appli"));
+            return waiting.reply(Err(moli_i18n::tr!("pilotes.philips.quelle_appli")));
         }
         if side.up {
             // The last word wins: an app still waiting must not come after.
             self.pending = None;
-            return self.send(target, false);
+            match self.send(target, false) {
+                Ok(()) => {
+                    if let Some(sent) = &mut self.sent {
+                        sent.waiting = Some(waiting);
+                    }
+                }
+                Err(e) => waiting.reply(Err(format!("{e:#}"))),
+            }
+            return;
         }
         side.nudge.notify_one();
         let now = Instant::now();
@@ -170,21 +236,46 @@ impl Android {
             until: now + HOLD,
             retry: false,
         });
-        Ok(())
+        waiting.reply(Ok(()));
     }
 
     fn send(&mut self, target: String, retry: bool) -> anyhow::Result<()> {
-        let side = self
-            .remote
-            .as_ref()
-            .with_context(|| moli_i18n::tr!("pilotes.philips.pas_de_telecommande"))?;
-        side.orders
-            .try_send(remote::Order::Launch(remote::app_link(&target)))
-            .map_err(|_| {
-                anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas"))
-            })?;
-        self.sent = Some((target, Instant::now(), retry));
+        let mut rest: VecDeque<String> = remote::app_links(&target).into();
+        let link = rest.pop_front().context("no way to open it")?;
+        send_link(self.remote.as_ref(), &link)?;
+        // An app asked for before this one: its order is not kept waiting.
+        if let Some(mut before) = self.sent.take() {
+            before.answer(Ok(()));
+        }
+        self.sent = Some(Sent {
+            target,
+            link,
+            at: Instant::now(),
+            rest,
+            retry,
+            waiting: None,
+        });
         Ok(())
+    }
+
+    /// When an order waiting for the TV's word is answered anyway: no
+    /// refusal for [`SETTLE`], and never past the hub's patience.
+    pub(crate) fn due(&self) -> Option<Instant> {
+        let sent = self.sent.as_ref()?;
+        let waiting = sent.waiting.as_ref()?;
+        let deadline = Instant::from_std(waiting.deadline)
+            .checked_sub(BEFORE_DEADLINE)
+            .unwrap_or_else(Instant::now);
+        Some((sent.at + SETTLE).min(deadline))
+    }
+
+    /// The TV did not refuse in time: the app opened.
+    pub(crate) fn settle(&mut self) {
+        if self.due().is_some_and(|due| Instant::now() >= due)
+            && let Some(sent) = &mut self.sent
+        {
+            sent.answer(Ok(()));
+        }
     }
 
     /// At each poll of the TV: back on the network, the connections that are
@@ -228,31 +319,58 @@ impl Android {
         }
     }
 
-    /// The TV refused an order: an app just sent to a TV still starting is
-    /// tried once more a little later.
+    /// The TV refused an order. The app link just sent: the next way to open
+    /// the same app goes at once (a Google TV may refuse the store link and
+    /// take the web one). Every way refused: a TV still starting gets the app
+    /// once more a little later; otherwise whoever asked is told.
     fn refused(&mut self, what: &str) {
-        let starting = self.ready_at.is_some_and(|at| at.elapsed() < STARTING);
         // Only the very app link sent (not a key, not the configuration).
-        let again = match &self.sent {
-            Some((target, at, false))
-                if starting
-                    && at.elapsed() < Duration::from_secs(3)
-                    && what.contains(remote::app_link(target).as_str()) =>
-            {
-                Some(target.clone())
-            }
-            _ => None,
+        let Some(sent) = self
+            .sent
+            .as_mut()
+            .filter(|s| what.contains(s.link.as_str()))
+        else {
+            tracing::warn!(refused = %what, "android tv remote: the TV refused an order");
+            return;
         };
-        tracing::warn!(refused = %what, retry = again.is_some(), "android tv remote: the TV refused an order");
-        if let Some(target) = again {
+        while let Some(next) = sent.rest.pop_front() {
+            if send_link(self.remote.as_ref(), &next).is_ok() {
+                tracing::info!(refused = %what, next = %next, "android tv remote: link refused, trying the next one");
+                sent.link = next;
+                sent.at = Instant::now();
+                return;
+            }
+        }
+        let starting = self.ready_at.is_some_and(|at| at.elapsed() < STARTING);
+        let again = starting && !sent.retry && sent.at.elapsed() < Duration::from_secs(3);
+        tracing::warn!(refused = %what, retry = again, "android tv remote: the TV refused an order");
+        let Some(mut sent) = self.sent.take() else {
+            return;
+        };
+        if again {
+            sent.answer(Ok(()));
             let now = Instant::now();
-            self.sent = None;
             self.pending = Some(Pending {
-                target,
+                target: sent.target,
                 not_before: now + RETRY_LAUNCH,
                 until: now + HOLD,
                 retry: true,
             });
+        } else {
+            let app = sent.target.clone();
+            sent.answer(Err(moli_i18n::tr!(
+                "pilotes.philips.appli_refusee",
+                app = app
+            )));
+        }
+    }
+
+    /// The app on screen is the one being opened: its order is answered now.
+    fn opened(&mut self, app: &str) {
+        if let Some(sent) = &mut self.sent
+            && (sent.target == app || remote::package_of(&sent.target) == Some(app))
+        {
+            sent.answer(Ok(()));
         }
     }
 
@@ -294,7 +412,10 @@ impl Android {
                     }
                     remote::Event::Lost => side.up = false,
                     remote::Event::Refused(what) => self.refused(&what),
-                    remote::Event::App(app) => ctx.set_state(id, "app", Value::Text(app.into())),
+                    remote::Event::App(app) => {
+                        self.opened(&app);
+                        ctx.set_state(id, "app", Value::Text(app.into()));
+                    }
                     remote::Event::Power(false) => ctx.set_state(id, "app", Value::Null),
                     // JointSpace says these already.
                     remote::Event::Power(true) | remote::Event::Volume { .. } => {}
@@ -457,5 +578,109 @@ fn next_pause(pause: Duration, started: Instant) -> Duration {
         RETRY_MIN
     } else {
         (pause * 2).min(RETRY_MAX)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use remote::Order;
+    use tokio::sync::oneshot;
+
+    /// A remote that is up, its orders readable by the test.
+    fn paired(orders: mpsc::Sender<Order>) -> Android {
+        Android {
+            remote: Some(Side {
+                orders,
+                tls: PinnedTls::new(None).unwrap(),
+                up: true,
+                pinned: true,
+                nudge: Arc::new(Notify::new()),
+            }),
+            cast: None,
+            playing: None,
+            pending: None,
+            sent: None,
+            ready_at: None,
+            tv_was_online: true,
+            nudged: None,
+        }
+    }
+
+    fn waiting() -> (Waiting, oneshot::Receiver<Result<(), String>>) {
+        let (tx, rx) = oneshot::channel();
+        let waiting = Waiting {
+            answer: Box::new(move |result| {
+                let _ = tx.send(result);
+            }),
+            deadline: std::time::Instant::now() + Duration::from_secs(5),
+        };
+        (waiting, rx)
+    }
+
+    fn link(order: Option<Order>) -> String {
+        match order {
+            Some(Order::Launch(link)) => link,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_link_tries_the_next_and_a_refusal_of_all_is_said() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        let (answer, mut outcome) = waiting();
+        android.launch("YouTube", answer);
+        assert_eq!(link(orders.recv().await), "https://www.youtube.com");
+        android.refused("app link https://www.youtube.com");
+        let store = link(orders.recv().await);
+        assert_eq!(store, "market://launch?id=com.google.android.youtube.tv");
+        assert!(outcome.try_recv().is_err(), "still waiting for the TV");
+        android.refused(&format!("app link {store}"));
+        assert_eq!(
+            outcome.await.unwrap(),
+            Err("la télé a refusé d'ouvrir YouTube".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_app_on_screen_answers_at_once() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        let (answer, outcome) = waiting();
+        android.launch("netflix", answer);
+        assert_eq!(link(orders.recv().await), "https://www.netflix.com/title");
+        android.opened("com.netflix.ninja");
+        assert_eq!(outcome.await.unwrap(), Ok(()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_refusal_means_it_opened() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        let (answer, mut outcome) = waiting();
+        android.launch("com.limelight", answer);
+        assert_eq!(
+            link(orders.recv().await),
+            "market://launch?id=com.limelight"
+        );
+        android.settle();
+        assert!(outcome.try_recv().is_err(), "too soon");
+        tokio::time::advance(SETTLE).await;
+        android.settle();
+        assert_eq!(outcome.await.unwrap(), Ok(()));
+        assert!(android.due().is_none());
+    }
+
+    #[tokio::test]
+    async fn another_order_refused_is_not_this_app() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        let (answer, mut outcome) = waiting();
+        android.launch("YouTube", answer);
+        let _ = orders.recv().await;
+        android.refused("key 3");
+        assert!(orders.try_recv().is_err(), "no next link for a key");
+        assert!(outcome.try_recv().is_err());
     }
 }

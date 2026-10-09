@@ -513,13 +513,63 @@ async fn wake(mac: &str, host: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One order. « Switch on » with the TV unreachable wakes it; an app asked
+/// for with the TV asleep wakes it too (kept until the remote is there), and
+/// an app is answered when the TV takes it or refuses it.
+async fn order(
+    command: CommandRequest,
+    tv: &Tv,
+    android: &mut android::Android,
+    waking: &mut Waking,
+    online: Option<bool>,
+    config: &Config,
+    ctx: &DriverCtx,
+) {
+    if matches!(
+        (&*command.key, &command.value),
+        ("power", Value::Bool(true))
+    ) && online != Some(true)
+    {
+        command.reply(waking.ask(config, ctx).await);
+        return;
+    }
+    // Only a real app with a paired remote: never the TV on for nothing.
+    let real_app = matches!(&command.value, Value::Text(t) if !t.trim().is_empty());
+    if &*command.key == "app"
+        && real_app
+        && android.can_launch()
+        && online != Some(true)
+        && !waking.active()
+        && let Err(e) = waking.ask(config, ctx).await
+    {
+        command.reply(Err(e));
+        return;
+    }
+    if let ("app", Value::Text(target)) = (&*command.key, &command.value) {
+        let target = target.to_string();
+        android.launch(&target, android::Waiting::order(command));
+        return;
+    }
+    let result = apply(tv, android, &command)
+        .await
+        .map_err(|e| format!("{e:#}"));
+    command.reply(result);
+}
+
+/// Until `at`; forever without one (a `select!` branch that never fires).
+async fn until(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
 async fn apply(
     tv: &Tv,
     android: &mut android::Android,
     command: &CommandRequest,
 ) -> anyhow::Result<()> {
     match (&*command.key, &command.value) {
-        ("app", Value::Text(target)) => android.launch(target)?,
         ("media_control", Value::Text(word)) => android.control(word)?,
         ("power", Value::Bool(true)) => {
             // Awake enough to answer (network standby): its API switches
@@ -668,24 +718,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
-                if matches!((&*command.key, &command.value), ("power", Value::Bool(true))) && online != Some(true) {
-                    command.reply(waking.ask(config, ctx).await);
-                    continue;
-                }
-                // An app asked for with the TV asleep: wake it, the app is
-                // kept until the remote is there (`Android::launch`). Only a
-                // real app with a paired remote: never the TV on for nothing.
-                let real_app = matches!(&command.value, Value::Text(t) if !t.trim().is_empty());
-                if &*command.key == "app" && real_app && android.can_launch() && online != Some(true) && !waking.active()
-                    && let Err(e) = waking.ask(config, ctx).await
-                {
-                    command.reply(Err(e));
-                    continue;
-                }
-                let result = apply(&tv, &mut android, &command).await.map_err(|e| format!("{e:#}"));
-                command.reply(result);
+                order(command, &tv, &mut android, &mut waking, online, config, ctx).await;
             }
             Some(up) = ups.recv() => android.on(up, ctx, &id).await,
+            () = until(android.due()) => android.settle(),
             _ = tick.tick() => {
                 waking.tick(config, ctx).await;
                 let polled = poll(&tv).await;

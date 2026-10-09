@@ -282,6 +282,7 @@
   "pilotes.philips.certificat_change": "le certificat de la télé a changé : si c'est normal, `moli-os secrets forget {instance} {key}`",
   "pilotes.philips.appairage": "ouvrir une appli demande l'appairage Android TV (secrets atv_cert et atv_key)",
   "pilotes.philips.quelle_appli": "quelle appli ?",
+  "pilotes.philips.appli_refusee": "la télé a refusé d'ouvrir {app}",
   "pilotes.philips.pas_de_telecommande": "pas de télécommande Android TV",
   "pilotes.philips.telecommande_ne_suit_pas": "la télécommande Android TV ne suit pas",
   "pilotes.philips.play_pause_stop": "{word} : play, pause ou stop",

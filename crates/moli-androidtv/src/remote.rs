@@ -50,48 +50,85 @@ pub enum Order {
     Key(u32),
 }
 
-/// Apps people name rather than spell (« mets YouTube »), as letters and
-/// digits only, lowercase: their Android TV package. Brands, the same in
-/// every language.
-const NAMED_APPS: [(&str, &str); 9] = [
-    ("netflix", "com.netflix.ninja"),
-    ("youtube", "com.google.android.youtube.tv"),
-    ("disney", "com.disney.disneyplus"),
-    ("disneyplus", "com.disney.disneyplus"),
-    ("primevideo", "com.amazon.amazonvideo.livingroom"),
-    ("amazonprimevideo", "com.amazon.amazonvideo.livingroom"),
-    ("prime", "com.amazon.amazonvideo.livingroom"),
-    ("jellyfin", "org.jellyfin.androidtv"),
-    ("moonlight", "com.limelight"),
+/// An app people name rather than spell (« mets YouTube »).
+struct KnownApp {
+    /// As letters and digits only, lowercase. Brands: the same in every language.
+    names: &'static [&'static str],
+    package: &'static str,
+    /// The link Google TVs open it by: some refuse the store link
+    /// (`market://launch?id=…`). YouTube's and Netflix's were tried on a real
+    /// TV; Disney+'s and Prime Video's are Home Assistant's documented ones.
+    web: Option<&'static str>,
+}
+
+const KNOWN_APPS: [KnownApp; 6] = [
+    KnownApp {
+        names: &["netflix"],
+        package: "com.netflix.ninja",
+        web: Some("https://www.netflix.com/title"),
+    },
+    KnownApp {
+        names: &["youtube"],
+        package: "com.google.android.youtube.tv",
+        web: Some("https://www.youtube.com"),
+    },
+    KnownApp {
+        names: &["disney", "disneyplus"],
+        package: "com.disney.disneyplus",
+        web: Some("https://www.disneyplus.com"),
+    },
+    KnownApp {
+        names: &["primevideo", "amazonprimevideo", "prime"],
+        package: "com.amazon.amazonvideo.livingroom",
+        web: Some("https://app.primevideo.com"),
+    },
+    KnownApp {
+        names: &["jellyfin"],
+        package: "org.jellyfin.androidtv",
+        web: None,
+    },
+    KnownApp {
+        names: &["moonlight"],
+        package: "com.limelight",
+        web: None,
+    },
 ];
+
+/// A known app, named the way people say it (« Disney+ ») or by its package.
+fn known(target: &str) -> Option<&'static KnownApp> {
+    let key: String = target
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    KNOWN_APPS
+        .iter()
+        .find(|a| a.package == target.trim() || a.names.contains(&key.as_str()))
+}
 
 /// The package of an app named the way people say it (« Disney+ », « Prime
 /// Video »), when it is a known one.
 #[must_use]
 pub fn package_of(name: &str) -> Option<&'static str> {
-    let key: String = name
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect();
-    NAMED_APPS
-        .iter()
-        .find(|(n, _)| *n == key)
-        .map(|(_, package)| *package)
+    known(name).map(|a| a.package)
 }
 
-/// What the remote launches for `target`: a link as it is, a known app's name
-/// or an Android package through its store link (`com.netflix.ninja`).
+/// The links that open `target`, in the order to try: a link as it is; a
+/// known app (named, or by package) by its web link, then its store link;
+/// any other package by its store link (`market://launch?id=…`).
 #[must_use]
-pub fn app_link(target: &str) -> String {
+pub fn app_links(target: &str) -> Vec<String> {
+    let target = target.trim();
     if target.contains("://") {
-        target.to_owned()
-    } else {
-        format!(
-            "market://launch?id={}",
-            package_of(target).unwrap_or(target)
-        )
+        return vec![target.to_owned()];
     }
+    let app = known(target);
+    let package = app.map_or(target, |a| a.package);
+    app.and_then(|a| a.web)
+        .map(str::to_owned)
+        .into_iter()
+        .chain([format!("market://launch?id={package}")])
+        .collect()
 }
 
 /// One connection, until it fails or `orders` closes (`Ok`).
@@ -309,27 +346,39 @@ mod tests {
     }
 
     #[test]
-    fn apps_launch_through_their_store_link() {
+    fn apps_open_by_their_web_link_then_their_store_link() {
+        // A Google TV may refuse the store link: the web link comes first.
         assert_eq!(
-            app_link("com.limelight"),
-            "market://launch?id=com.limelight"
+            app_links("YouTube"),
+            [
+                "https://www.youtube.com",
+                "market://launch?id=com.google.android.youtube.tv"
+            ]
+        );
+        assert_eq!(
+            app_links("com.netflix.ninja"),
+            [
+                "https://www.netflix.com/title",
+                "market://launch?id=com.netflix.ninja"
+            ]
+        );
+        // Without a web link, an unknown package: the store link only.
+        assert_eq!(app_links("Moonlight"), ["market://launch?id=com.limelight"]);
+        assert_eq!(
+            app_links("org.example.tv"),
+            ["market://launch?id=org.example.tv"]
         );
         let video = "https://www.youtube.com/watch?v=NLs3LqVgpT4";
-        assert_eq!(app_link(video), video);
-        // Named the way people say it.
-        assert_eq!(
-            app_link("YouTube"),
-            "market://launch?id=com.google.android.youtube.tv"
-        );
-        assert_eq!(app_link("netflix"), "market://launch?id=com.netflix.ninja");
+        assert_eq!(app_links(video), [video]);
         assert_eq!(package_of("Disney+"), Some("com.disney.disneyplus"));
         assert_eq!(
             package_of("Prime Video"),
             Some("com.amazon.amazonvideo.livingroom")
         );
-        assert_eq!(package_of("com.netflix.ninja"), None);
         assert_eq!(package_of("Une appli inconnue"), None);
-        let launch = encode(&Order::Launch(app_link("com.netflix.ninja")));
+        let launch = encode(&Order::Launch(
+            "market://launch?id=com.netflix.ninja".into(),
+        ));
         let m = parse(&launch).unwrap();
         assert_eq!(
             m.msg(90).unwrap().str(1),

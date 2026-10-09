@@ -282,6 +282,7 @@
   "pilotes.philips.certificat_change": "the TV’s certificate changed: if that’s expected, `moli-os secrets forget {instance} {key}`",
   "pilotes.philips.appairage": "opening an app requires Android TV pairing (secrets atv_cert and atv_key)",
   "pilotes.philips.quelle_appli": "which app?",
+  "pilotes.philips.appli_refusee": "the TV refused to open {app}",
   "pilotes.philips.pas_de_telecommande": "no Android TV remote",
   "pilotes.philips.telecommande_ne_suit_pas": "the Android TV remote isn’t responding",
   "pilotes.philips.play_pause_stop": "{word}: play, pause or stop",
