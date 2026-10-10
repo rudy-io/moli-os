@@ -84,10 +84,11 @@ impl Assistant {
 impl VoiceBrain for Assistant {
     fn hear(&self, wav: Vec<u8>) -> BoxFuture<'_, Result<String, String>> {
         Box::pin(async move {
-            self.listen(&wav, "audio/wav")
-                .await
-                .map(|heard| heard.text)
-                .map_err(|e| e.to_string())
+            let audio = self.record(&wav);
+            let heard = self.listen(&wav, "audio/wav").await;
+            // Its recording goes with the turn that follows.
+            self.note_heard(voice::seconds_of(&wav, "audio/wav"), audio);
+            heard.map(|heard| heard.text).map_err(|e| e.to_string())
         })
     }
 
@@ -127,8 +128,8 @@ impl VoiceBrain for Assistant {
         goodbye(text, &word_list("assistant.voice.goodbye"))
     }
 
-    fn heard_nothing(&self) {
-        self.heard_nothing_on("satellite");
+    fn heard_nothing(&self, wav: Option<Vec<u8>>) {
+        self.heard_nothing_on("satellite", wav.as_deref());
     }
 }
 

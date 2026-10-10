@@ -62,6 +62,13 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
     if failed > 0 {
         lines.push(moli_i18n::tr!("assistant.recap.failed", n = failed));
     }
+    let cost: f64 = exchanges.iter().map(|e| e.cost.total).sum();
+    if cost > 0.0 {
+        lines.push(moli_i18n::tr!(
+            "assistant.recap.cost",
+            dollars = money(cost)
+        ));
+    }
     let answered: Vec<u64> = turns
         .iter()
         .filter(|e| e.kind == Kind::Turn)
@@ -106,6 +113,20 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
     Some(lines.join("\n"))
 }
 
+/// Dollars to the cent, below a cent to the tenth of a cent.
+pub(crate) fn money(dollars: f64) -> String {
+    let text = if dollars < 0.01 {
+        format!("{dollars:.3}")
+    } else {
+        format!("{dollars:.2}")
+    };
+    if moli_i18n::language().starts_with("fr") {
+        text.replace('.', ",")
+    } else {
+        text
+    }
+}
+
 /// `1.36` → `1,4` in French, `1.4` otherwise.
 fn decimal(value: f64) -> String {
     let text = format!("{value:.1}");
@@ -142,6 +163,8 @@ mod tests {
             tools: Vec::new(),
             orders: Vec::new(),
             ms: 1_000,
+            audio: None,
+            cost: crate::exchanges::Cost::new(0.001, 0.0, 0.0, 0.0),
         }
     }
 

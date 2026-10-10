@@ -19,13 +19,15 @@ mod house;
 mod import;
 mod llm;
 mod outside;
+mod pricing;
 mod recap;
+mod recordings;
 mod satellite;
 mod settings;
 mod voice;
 
 pub use auto::Draft;
-pub use exchanges::{Exchange, Kind as ExchangeKind, Order};
+pub use exchanges::{Cost, Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
@@ -225,7 +227,22 @@ struct Inner {
     prepared: Mutex<std::collections::HashMap<String, (Instant, String)>>,
     /// What was asked and answered, for the history and the recap.
     exchanges: exchanges::Exchanges,
+    /// What the satellites heard, while someone tests the microphone.
+    recordings: recordings::Recordings,
+    /// The last thing heard, for the turn that follows (its cost, its audio).
+    last_heard: Mutex<Option<LastHeard>>,
 }
+
+/// What a transcription leaves for the turn that follows it.
+#[derive(Debug)]
+struct LastHeard {
+    at: Instant,
+    seconds: f64,
+    audio: Option<String>,
+}
+
+/// A transcription older than this belongs to no turn.
+const HEARD_FRESH: Duration = Duration::from_secs(60);
 
 /// One turn, as the dashboard sends it: the conversation so far, the last
 /// message being the user's.
@@ -269,11 +286,16 @@ pub struct Reply {
     /// The tools called, for the history.
     #[serde(skip)]
     pub tools: Vec<String>,
+    /// What the web searches cost (dollars), for the history.
+    #[serde(skip)]
+    pub search_cost: f64,
 }
 
 #[derive(Debug, Default, Serialize)]
 pub struct Usage {
     pub prompt_tokens: u64,
+    /// Of the prompt tokens, those the provider read from its cache (cheaper).
+    pub cached_tokens: u64,
     pub completion_tokens: u64,
     pub steps: usize,
 }
@@ -351,6 +373,8 @@ impl Assistant {
             imported: Mutex::default(),
             prepared: Mutex::default(),
             exchanges: exchanges::Exchanges::default(),
+            recordings: recordings::Recordings::default(),
+            last_heard: Mutex::new(None),
         })))
     }
 
@@ -429,6 +453,7 @@ impl Assistant {
                 {
                     Ok(text) => {
                         tracing::info!(engine = "cloud", bytes = audio.len(), "voice heard");
+                        self.note_heard(voice::seconds_of(audio, mime), None);
                         return Ok(Heard {
                             text,
                             engine: "cloud",
@@ -553,8 +578,13 @@ impl Assistant {
         let spoken = turn.spoken;
         let result = self.converse(turn).await;
         if let Some(question) = question {
+            let heard = self.take_heard();
+            let c = &self.0.config;
             let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let (kind, reply, tools, orders) = match &result {
+            let hear = heard
+                .as_ref()
+                .map_or(0.0, |h| pricing::hear(&c.transcribe_model, h.seconds));
+            let (kind, reply, tools, orders, cost) = match &result {
                 Ok(r) => (
                     exchanges::Kind::Turn,
                     r.reply.clone(),
@@ -566,12 +596,28 @@ impl Assistant {
                             status: a.status.to_owned(),
                         })
                         .collect(),
+                    exchanges::Cost::new(
+                        pricing::think(
+                            &c.model,
+                            r.usage.prompt_tokens,
+                            r.usage.cached_tokens,
+                            r.usage.completion_tokens,
+                        ),
+                        hear,
+                        if spoken {
+                            pricing::speak(&c.speech_model, r.reply.chars().count())
+                        } else {
+                            0.0
+                        },
+                        r.search_cost,
+                    ),
                 ),
                 Err(e) => (
                     exchanges::Kind::Failed,
                     e.to_string(),
                     Vec::new(),
                     Vec::new(),
+                    exchanges::Cost::new(0.0, hear, 0.0, 0.0),
                 ),
             };
             self.0.exchanges.add(Exchange {
@@ -584,9 +630,74 @@ impl Assistant {
                 tools,
                 orders,
                 ms,
+                audio: heard.and_then(|h| h.audio),
+                cost,
             });
         }
         result
+    }
+
+    /// A transcription's length (and, from a satellite, its recording),
+    /// for the turn that follows.
+    pub(crate) fn note_heard(&self, seconds: f64, audio: Option<String>) {
+        *self
+            .0
+            .last_heard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(LastHeard {
+            at: Instant::now(),
+            seconds,
+            audio,
+        });
+    }
+
+    /// What was heard just before, if it was just before.
+    fn take_heard(&self) -> Option<LastHeard> {
+        self.0
+            .last_heard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .filter(|h| h.at.elapsed() < HEARD_FRESH)
+    }
+
+    /// Keeps what a satellite heard, while recording is on; its name.
+    pub(crate) fn record(&self, wav: &[u8]) -> Option<String> {
+        self.0
+            .recordings
+            .save(wav, jiff::Timestamp::now().as_millisecond())
+    }
+
+    /// Where the satellites' recordings go (the data directory).
+    pub fn open_recordings(&self, dir: PathBuf) {
+        self.0
+            .recordings
+            .open(dir, jiff::Timestamp::now().as_millisecond());
+    }
+
+    /// Until when the satellites' recordings are kept (none: not recording).
+    #[must_use]
+    pub fn recording_until(&self) -> Option<i64> {
+        self.0
+            .recordings
+            .until(jiff::Timestamp::now().as_millisecond())
+    }
+
+    /// Recording on for `days` (a week at most), or off with 0.
+    pub fn set_recording(&self, days: u32) -> Result<Option<i64>, AssistantError> {
+        let until = self
+            .0
+            .recordings
+            .switch(days, jiff::Timestamp::now().as_millisecond())
+            .map_err(|e| AssistantError::Upstream(format!("cannot save the switch: {e}")))?;
+        tracing::info!(?until, "satellite recordings switched from the dashboard");
+        Ok(until)
+    }
+
+    /// The file of recording `name`, if it is one.
+    #[must_use]
+    pub fn recording(&self, name: &str) -> Option<PathBuf> {
+        self.0.recordings.path(name)
     }
 
     /// Where the history is kept (the data directory), read back at start.
@@ -607,7 +718,15 @@ impl Assistant {
 
     /// A satellite woke and heard nothing it understood: counted in the
     /// history (false activations show up there).
-    pub(crate) fn heard_nothing_on(&self, surface: &str) {
+    pub(crate) fn heard_nothing_on(&self, surface: &str, wav: Option<&[u8]>) {
+        let heard = self.take_heard();
+        let hear = heard.as_ref().map_or(0.0, |h| {
+            pricing::hear(&self.0.config.transcribe_model, h.seconds)
+        });
+        let audio = match wav {
+            Some(wav) => self.record(wav),
+            None => heard.and_then(|h| h.audio),
+        };
         self.0.exchanges.add(Exchange {
             at: jiff::Timestamp::now().as_millisecond(),
             kind: exchanges::Kind::Silence,
@@ -618,6 +737,8 @@ impl Assistant {
             tools: Vec::new(),
             orders: Vec::new(),
             ms: 0,
+            audio,
+            cost: exchanges::Cost::new(0.0, hear, 0.0, 0.0),
         });
     }
 
@@ -765,6 +886,9 @@ impl Assistant {
             run.usage.prompt_tokens += answer["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
             run.usage.completion_tokens +=
                 answer["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+            run.usage.cached_tokens += answer["usage"]["prompt_tokens_details"]["cached_tokens"]
+                .as_u64()
+                .unwrap_or(0);
             let message = &answer["choices"][0]["message"];
             let calls = message["tool_calls"].as_array().filter(|c| !c.is_empty());
             if let Some(calls) = calls {
@@ -891,6 +1015,7 @@ impl Assistant {
             usage: run.usage,
             end: run.end,
             tools: run.tools,
+            search_cost: run.search_cost,
         }
     }
 
@@ -925,7 +1050,7 @@ impl Assistant {
     }
 
     /// `web_search`: a question about the world, answered from the web.
-    async fn web_search(&self, args: &Json) -> Json {
+    async fn web_search(&self, args: &Json, run: &mut Run) -> Json {
         let Some(query) = args["query"]
             .as_str()
             .map(str::trim)
@@ -947,8 +1072,20 @@ impl Assistant {
         )
         .await
         {
-            Ok(found) => found,
+            Ok((found, usage)) => {
+                run.search_cost += pricing::SEARCH
+                    + pricing::think(
+                        &c.search_model,
+                        usage["input_tokens"].as_u64().unwrap_or(0),
+                        usage["input_tokens_details"]["cached_tokens"]
+                            .as_u64()
+                            .unwrap_or(0),
+                        usage["output_tokens"].as_u64().unwrap_or(0),
+                    );
+                found
+            }
             Err(e) => {
+                run.search_cost += pricing::SEARCH;
                 tracing::warn!(error = %e, "web search failed");
                 json!({ "error": "the web search failed" })
             }
@@ -1017,7 +1154,7 @@ impl Assistant {
             "energy" => self.energy(args).await,
             "history" => self.history(args).await,
             "forecast" => self.forecast(args).await,
-            "web_search" => self.web_search(args).await,
+            "web_search" => self.web_search(args, run).await,
             "automation" => self.automation_tool(args, run).await,
             other => json!({ "error": format!("unknown tool {other}") }),
         }
@@ -1243,6 +1380,8 @@ struct Run {
     tools: Vec<String>,
     /// `end_conversation` was called.
     end: bool,
+    /// What the web searches cost (dollars).
+    search_cost: f64,
 }
 
 /// The same answer said twice in a row (seen once from a small model)

@@ -33,7 +33,7 @@ pub struct Order {
     pub status: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Exchange {
     /// Milliseconds since the epoch.
     pub at: i64,
@@ -49,6 +49,38 @@ pub struct Exchange {
     pub orders: Vec<Order>,
     /// How long Moli took, from the question to the answer.
     pub ms: u64,
+    /// What the satellite heard, while recording is on (`recordings/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<String>,
+    /// What it cost, estimated (dollars of the provider's credit).
+    #[serde(default)]
+    pub cost: Cost,
+}
+
+/// An exchange's estimated cost, in dollars, by what was paid for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Cost {
+    /// The model's thinking (tokens).
+    pub think: f64,
+    /// Speech to text.
+    pub hear: f64,
+    /// The answer's voice.
+    pub speak: f64,
+    /// Web searches.
+    pub search: f64,
+    pub total: f64,
+}
+
+impl Cost {
+    pub(crate) fn new(think: f64, hear: f64, speak: f64, search: f64) -> Self {
+        Self {
+            think,
+            hear,
+            speak,
+            search,
+            total: think + hear + speak + search,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -141,6 +173,8 @@ mod tests {
                 status: "done".into(),
             }],
             ms: 1_200,
+            audio: None,
+            cost: Cost::default(),
         }
     }
 

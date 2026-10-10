@@ -145,5 +145,13 @@
   "moli.echanges.plus": "Show more",
   "moli.echanges.recap": "Send the recap on Telegram",
   "moli.echanges.recap_ok": "Recap sent on Telegram.",
-  "moli.echanges.recap_rien": "Nothing to send, or no Telegram set up."
+  "moli.echanges.recap_rien": "Nothing to send, or no Telegram set up.",
+  "moli.echanges.cout": "{dollars} $ of OpenAI credit (estimated)",
+  "moli.echanges.cout_detail": "Estimated cost: thinking, transcription, voice and web searches",
+  "moli.echanges.ecouter": "Hear what the satellite heard",
+  "moli.echanges.enregistrer": "Record what the satellite hears (7 days)",
+  "moli.echanges.enregistrer_aide": "To test the microphone: each sentence can be heard here, then is deleted after 7 days.",
+  "moli.echanges.enregistre_jusqu": "The satellite is recorded until {date} (each recording is deleted after 7 days).",
+  "moli.echanges.arreter": "Stop recording",
+  "moli.echanges.estimation": "Costs are estimated from OpenAI's public prices; the exact bill is on platform.openai.com."
 }

@@ -12,16 +12,57 @@
   let shown = $state(20);
   let sending = $state(false);
   let sent = $state('');
+  // Recording what the satellite hears (to test the microphone): until when.
+  let recordingUntil = $state(null);
+  let playing = $state(null);
+  let player = null;
 
   async function load() {
     try {
       const res = await fetch(`/api/assistant/exchanges?hours=${hours}`);
-      if (res.ok) all = (await res.json()).exchanges;
+      if (res.ok) {
+        const body = await res.json();
+        all = body.exchanges;
+        recordingUntil = body.recording_until ?? null;
+      }
     } catch {
       /* the card stays as it was */
     }
   }
-  onMount(load);
+  onMount(() => {
+    load();
+    return () => player?.pause();
+  });
+
+  async function record(days) {
+    const res = await fetch('/api/assistant/recording', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
+      body: JSON.stringify({ days }),
+    });
+    if (res.status === 403) {
+      home.held = { label: t('moli.echanges.enregistrer'), reason: 'ton code', custom: () => record(days) };
+      return;
+    }
+    if (res.ok) recordingUntil = (await res.json()).recording_until ?? null;
+  }
+
+  function play(audio) {
+    player?.pause();
+    if (playing === audio) {
+      playing = null;
+      return;
+    }
+    player = new Audio(`/api/assistant/recordings/${encodeURIComponent(audio)}`);
+    playing = audio;
+    player.onended = () => (playing = null);
+    player.play().catch(() => (playing = null));
+  }
+
+  const money = (dollars) => {
+    const digits = dollars < 0.01 ? 3 : 2;
+    return dollars.toLocaleString(i18n.language, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  };
 
   function period(h) {
     hours = h;
@@ -33,6 +74,7 @@
   const silences = $derived((all ?? []).length - turns.length);
   const orders = $derived(turns.reduce((n, e) => n + (e.orders?.length ?? 0), 0));
   const searches = $derived(turns.filter((e) => e.tools?.includes('web_search')).length);
+  const cost = $derived((all ?? []).reduce((s, e) => s + (e.cost?.total ?? 0), 0));
   const speed = $derived.by(() => {
     const ok = turns.filter((e) => e.kind === 'turn');
     if (!ok.length) return null;
@@ -66,6 +108,14 @@
   }
 </script>
 
+{#snippet listen(e)}
+  {#if e.audio}
+    <button class="hear" onclick={() => play(e.audio)} aria-label={t('moli.echanges.ecouter')} title={t('moli.echanges.ecouter')}>
+      <Icon name={playing === e.audio ? 'stop' : 'play'} size={14} />
+    </button>
+  {/if}
+{/snippet}
+
 {#if all}
   <section class="card">
     <div class="row">
@@ -73,7 +123,7 @@
       <div class="text">
         <b>{t('moli.echanges.titre')}</b>
         <span class="muted">
-          {t('moli.echanges.resume', { turns: turns.length, orders, searches })}{#if silences}{' · '}{t('moli.echanges.silences', { n: silences })}{/if}{#if speed}{' · '}{t('moli.echanges.vitesse', { s: speed })}{/if}
+          {t('moli.echanges.resume', { turns: turns.length, orders, searches })}{#if silences}{' · '}{t('moli.echanges.silences', { n: silences })}{/if}{#if speed}{' · '}{t('moli.echanges.vitesse', { s: speed })}{/if}{#if cost > 0}{' · '}{t('moli.echanges.cout', { dollars: money(cost) })}{/if}
         </span>
       </div>
       <div class="tones" role="radiogroup" aria-label={t('moli.echanges.periode')}>
@@ -92,6 +142,7 @@
             <span class="where">{e.surface === 'satellite' ? t('moli.echanges.boitier') : t('moli.echanges.appli')}</span>
             {#if e.kind === 'silence'}
               <span class="what muted">{t('moli.echanges.silence')}</span>
+              <span class="side">{@render listen(e)}</span>
             {:else}
               <span class="what">
                 <span class="q">{e.question}</span>
@@ -105,7 +156,11 @@
                   </span>
                 {/if}
               </span>
-              <span class="ms muted">{(e.ms / 1000).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} s</span>
+              <span class="side">
+                {@render listen(e)}
+                <span class="ms muted">{(e.ms / 1000).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} s</span>
+                {#if e.cost?.total}<span class="ms muted" title={t('moli.echanges.cout_detail')}>{money(e.cost.total)} $</span>{/if}
+              </span>
             {/if}
           </li>
         {/each}
@@ -119,6 +174,17 @@
       <button class="btn" disabled={sending} onclick={sendRecap}>{t('moli.echanges.recap')}</button>
       {#if sent}<small class="muted">{sent}</small>{/if}
     </div>
+
+    <div class="row foot">
+      {#if recordingUntil}
+        <span class="muted">{t('moli.echanges.enregistre_jusqu', { date: new Date(recordingUntil).toLocaleDateString(i18n.language, { weekday: 'long', day: 'numeric', month: 'long' }) })}</span>
+        <button class="btn" onclick={() => record(0)}>{t('moli.echanges.arreter')}</button>
+      {:else}
+        <button class="btn" onclick={() => record(7)}>{t('moli.echanges.enregistrer')}</button>
+        <small class="muted">{t('moli.echanges.enregistrer_aide')}</small>
+      {/if}
+    </div>
+    <small class="muted">{t('moli.echanges.estimation')}</small>
   </section>
 {/if}
 
@@ -196,6 +262,31 @@
     background: transparent;
   }
 
+  .side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .hear {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 0;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .hear:focus-visible,
+  .btn:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
   .when,
   .ms {
     font-variant-numeric: tabular-nums;
@@ -269,6 +360,11 @@
     .where,
     .ms {
       display: none;
+    }
+
+    .side {
+      grid-column: 2;
+      justify-content: flex-start;
     }
   }
 </style>

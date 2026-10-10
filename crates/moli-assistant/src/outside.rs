@@ -101,19 +101,20 @@ fn sky(code: Option<u64>) -> String {
     moli_i18n::tr(key)
 }
 
-/// A question answered from the web, in a few sentences.
+/// A question answered from the web, in a few sentences, and what the
+/// search model used (`input_tokens`, `output_tokens`…, for the cost).
 pub(crate) async fn search(
     endpoint: &Endpoint,
     key: Option<&str>,
     model: &str,
     timezone: &str,
     query: &str,
-) -> anyhow::Result<Json> {
+) -> anyhow::Result<(Json, Json)> {
     let body = request(model, timezone, query);
     let answer = endpoint.respond(key, &body).await?;
     let text = output_text(&answer);
     anyhow::ensure!(!text.is_empty(), "the search gave no answer");
-    Ok(json!({ "answer": text }))
+    Ok((json!({ "answer": text }), answer["usage"].clone()))
 }
 
 fn request(model: &str, timezone: &str, query: &str) -> Json {

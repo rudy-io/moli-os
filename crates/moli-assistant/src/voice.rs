@@ -236,6 +236,17 @@ pub(crate) fn host_port(s: &str) -> Option<(&str, u16)> {
 }
 
 /// The 16-bit mono PCM of a WAV file, and its rate.
+/// How long a recording lasts: exactly for a WAV, about for a compressed
+/// one (some 4 kB a second).
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn seconds_of(audio: &[u8], mime: &str) -> f64 {
+    match pcm_of(audio) {
+        Some((rate, pcm)) if rate > 0 => pcm.len() as f64 / 2.0 / f64::from(rate),
+        _ if mime.contains("wav") => 0.0,
+        _ => audio.len() as f64 / 4_000.0,
+    }
+}
+
 pub(crate) fn pcm_of(wav: &[u8]) -> Option<(u32, &[u8])> {
     if wav.len() < 12 || &wav[..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return None;

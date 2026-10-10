@@ -13,6 +13,7 @@
   "assistant.recap.silences": "{n} satellite wake-ups with no sentence understood (possible false activations)",
   "assistant.recap.failed": "{n} failed exchanges",
   "assistant.recap.speed": "Answered in {s} s on average",
+  "assistant.recap.cost": "Estimated cost: {dollars} $ of OpenAI credit",
   "assistant.recap.line": "{time} {place} · \"{question}\" → {reply}",
   "assistant.recap.boitier": "satellite",
   "assistant.recap.appli": "app",

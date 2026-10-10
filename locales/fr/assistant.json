@@ -13,6 +13,7 @@
   "assistant.recap.silences": "{n} réveils du boîtier sans phrase comprise (fausses activations possibles)",
   "assistant.recap.failed": "{n} échanges ratés",
   "assistant.recap.speed": "Réponse en {s} s en moyenne",
+  "assistant.recap.cost": "Coût estimé : {dollars} $ de crédit OpenAI",
   "assistant.recap.line": "{time} {place} · « {question} » → {reply}",
   "assistant.recap.boitier": "boîtier",
   "assistant.recap.appli": "appli",

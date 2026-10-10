@@ -259,6 +259,11 @@ fn assistant_routes() -> Router<Hub> {
         .route("/api/assistant/speak", post(assistant::speak))
         .route("/api/assistant/exchanges", get(assistant::exchanges))
         .route("/api/assistant/recap", post(assistant::recap))
+        .route("/api/assistant/recording", put(assistant::set_recording))
+        .route(
+            "/api/assistant/recordings/{name}",
+            get(assistant::recording),
+        )
         .route("/api/voice/{name}", get(assistant::satellite_voice))
         .route(
             "/api/assistant/settings",

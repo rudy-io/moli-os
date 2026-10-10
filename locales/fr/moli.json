@@ -145,5 +145,13 @@
   "moli.echanges.plus": "Voir plus",
   "moli.echanges.recap": "Envoyer le récap sur Telegram",
   "moli.echanges.recap_ok": "Récap envoyé sur Telegram.",
-  "moli.echanges.recap_rien": "Rien à envoyer, ou pas de Telegram configuré."
+  "moli.echanges.recap_rien": "Rien à envoyer, ou pas de Telegram configuré.",
+  "moli.echanges.cout": "{dollars} $ de crédit OpenAI (estimé)",
+  "moli.echanges.cout_detail": "Coût estimé : réflexion, transcription, voix et recherches web",
+  "moli.echanges.ecouter": "Écouter ce qu'a entendu le boîtier",
+  "moli.echanges.enregistrer": "Enregistrer ce qu'entend le boîtier (7 jours)",
+  "moli.echanges.enregistrer_aide": "Pour tester le micro : chaque phrase reste écoutable ici, puis s'efface au bout de 7 jours.",
+  "moli.echanges.enregistre_jusqu": "Le boîtier est enregistré jusqu'au {date} (chaque enregistrement s'efface au bout de 7 jours).",
+  "moli.echanges.arreter": "Arrêter l'enregistrement",
+  "moli.echanges.estimation": "Les coûts sont estimés d'après les tarifs publics d'OpenAI ; la facture exacte est sur platform.openai.com."
 }

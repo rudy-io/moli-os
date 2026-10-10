@@ -270,7 +270,7 @@ impl Voice {
                 if text.is_empty()
                     && let Some(brain) = &brain
                 {
-                    brain.heard_nothing();
+                    brain.heard_nothing(None);
                 }
                 if text.is_empty() || brain.is_some_and(|b| b.is_goodbye(&text)) {
                     return self.end(ctx, id, tx, false).await;
@@ -352,7 +352,7 @@ impl Voice {
         {
             run.log(ctx, "no voice");
             if let Some(brain) = ctx.voice_brain() {
-                brain.heard_nothing();
+                brain.heard_nothing(Some(sound::wav(&run.pcm, RATE)));
             }
             return self.end(ctx, id, tx, true).await;
         }

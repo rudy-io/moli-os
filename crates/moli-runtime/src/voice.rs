@@ -45,6 +45,7 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     fn is_goodbye(&self, text: &str) -> bool;
 
     /// The satellite woke and heard nothing it understood (a wake word said
-    /// for nothing, or a false activation): for the history.
-    fn heard_nothing(&self) {}
+    /// for nothing, or a false activation): for the history, with what it
+    /// heard when no transcription was asked (`wav`).
+    fn heard_nothing(&self, _wav: Option<Vec<u8>>) {}
 }

@@ -152,10 +152,52 @@ pub(crate) async fn exchanges(
     axum::extract::Query(since): axum::extract::Query<Since>,
 ) -> Response {
     match moli {
-        Some(moli) => {
-            axum::Json(json!({ "exchanges": moli.exchanges(since.hours.min(720)) })).into_response()
-        }
+        Some(moli) => axum::Json(json!({
+            "exchanges": moli.exchanges(since.hours.min(720)),
+            "recording_until": moli.recording_until(),
+        }))
+        .into_response(),
         None => not_configured(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Recording {
+    days: u32,
+}
+
+/// The satellites' recordings on for some days (a week at most), or off.
+pub(crate) async fn set_recording(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::Json(recording): axum::Json<Recording>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    match moli.set_recording(recording.days) {
+        Ok(until) => axum::Json(json!({ "recording_until": until })).into_response(),
+        Err(e) => failure(&e),
+    }
+}
+
+/// What a satellite heard (a WAV kept while recording is on).
+pub(crate) async fn recording(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Response {
+    let Some(path) = moli.and_then(|m| m.recording(&name)) else {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    };
+    match tokio::fs::read(&path).await {
+        Ok(wav) => (
+            [
+                (header::CONTENT_TYPE, "audio/wav"),
+                (header::CACHE_CONTROL, "private, max-age=604800"),
+            ],
+            wav,
+        )
+            .into_response(),
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
 }
 

@@ -486,6 +486,7 @@ fn start_assistant(
     .context("[assistant]")?;
     moli.load_voice_prefs(config.server.data_dir.join("assistant.json"));
     moli.open_exchanges(config.server.data_dir.join("assistant-exchanges.jsonl"));
+    moli.open_recordings(config.server.data_dir.join("recordings"));
     Ok(Some(moli))
 }
 
