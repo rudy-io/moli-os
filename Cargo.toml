@@ -42,6 +42,7 @@ moli-moonraker = { path = "crates/moli-moonraker" }
 moli-androidtv = { path = "crates/moli-androidtv" }
 moli-esphome = { path = "crates/moli-esphome" }
 moli-demo = { path = "crates/moli-demo" }
+moli-weather = { path = "crates/moli-weather" }
 
 aes = "0.8"
 anyhow = "1"

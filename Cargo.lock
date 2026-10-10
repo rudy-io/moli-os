@@ -1095,6 +1095,7 @@ dependencies = [
  "moli-net",
  "moli-phones",
  "moli-runtime",
+ "moli-weather",
  "ring",
  "rmcp",
  "rust-embed",
@@ -1433,6 +1434,7 @@ dependencies = [
  "moli-tapo",
  "moli-telegram",
  "moli-tuya",
+ "moli-weather",
  "moli-z2m",
  "rusqlite",
  "serde",
@@ -1622,6 +1624,21 @@ dependencies = [
  "serde_json",
  "socket2",
  "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-weather"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "http",
+ "http-body-util",
+ "jiff",
+ "moli-net",
+ "serde_json",
  "tokio",
  "tracing",
 ]

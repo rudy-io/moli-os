@@ -380,6 +380,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         household: Some(household),
         phones: gates.phones,
         machines: gates.machines,
+        weather: weather(&config),
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(
@@ -408,6 +409,25 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .await
         .context("final state cache write")?;
     Ok(())
+}
+
+/// The sky over the house (the dashboard's forecast and satellite images):
+/// where the assistant places it, else the automations (for the sun).
+fn weather(config: &Config) -> Option<moli_weather::Weather> {
+    let assistant = config.assistant.as_ref();
+    let latitude = assistant
+        .and_then(|a| a.latitude)
+        .or(config.automations.latitude);
+    let longitude = assistant
+        .and_then(|a| a.longitude)
+        .or(config.automations.longitude);
+    // The demo house sits nowhere: no sky from the outside world.
+    if config.server.demo {
+        return None;
+    }
+    latitude
+        .zip(longitude)
+        .map(|(lat, lon)| moli_weather::Weather::new(lat, lon))
 }
 
 /// The automations engine, and Moli (who drafts them and writes their

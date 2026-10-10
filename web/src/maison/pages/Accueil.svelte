@@ -1,8 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, greeting, num, relative, longDate, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
-  import { weatherOf } from '../lib/icons.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import LightTile from '../ui/LightTile.svelte';
@@ -11,14 +10,10 @@
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import Routines from '../ui/Routines.svelte';
+  import SkyHero from '../ui/SkyHero.svelte';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
-  const w = $derived(out.weather);
-  const day = $derived(value(w, 'daylight') !== false);
-  const sky = $derived(weatherOf(value(w, 'weather_code'), day));
-  const date = $derived(longDate(home.now));
-  const hhmm = (iso) => (iso ? String(iso).slice(11, 16) : '—');
 
   const lights = $derived(cfg.favorites?.lights ?? []);
   const litCount = $derived(lights.filter((l) => [l.id, ...(l.also ?? [])].some((i) => isOn(i))).length);
@@ -153,30 +148,7 @@
 </script>
 
 <div class="accueil">
-  <section class="hero">
-    <div class="hello">
-      <p class="date">{date}</p>
-      <h1>{greeting(home.now)}</h1>
-      <p class="time num">{clock(home.now)}</p>
-    </div>
-    {#if w}
-      <a class="sky" href="#/dehors" aria-label={t('maison.accueil.meteo', { label: sky.label })}>
-        <span class="sky-icon"><Icon path={sky.icon} size={64} /></span>
-        <div>
-          <strong class="num">{num(value(w, 'temperature'), 0)}°</strong>
-          <span class="sky-label">{sky.label}</span>
-          <span class="sky-line muted num">
-            ↑ {num(value(w, 'today_max'), 0)}° ↓ {num(value(w, 'today_min'), 0)}°
-            {#if value(w, 'today_rain_chance') >= 30} · {t('maison.accueil.pluie', { pct: num(value(w, 'today_rain_chance')) })}{/if}
-          </span>
-          <span class="sky-line muted">
-            <Icon name={day ? 'sunset' : 'sunrise'} size={15} />
-            {day ? t('maison.accueil.coucher', { time: hhmm(value(w, 'sunset')) }) : t('maison.accueil.lever', { time: hhmm(value(w, 'sunrise')) })}
-          </span>
-        </div>
-      </a>
-    {/if}
-  </section>
+  <SkyHero />
 
   {#if modes.length}
     <div class="modes" role="radiogroup" aria-label={t('maison.accueil.mode_maison')}>
@@ -281,75 +253,6 @@
   .accueil {
     display: grid;
     gap: 22px;
-  }
-
-  .hero {
-    display: flex;
-    justify-content: space-between;
-    align-items: end;
-    gap: 24px;
-    flex-wrap: wrap;
-    padding: 6px 4px 0;
-  }
-
-  .date {
-    color: var(--ink-3);
-    font-weight: 600;
-  }
-
-  h1 {
-    font-size: 40px;
-    font-weight: 750;
-    letter-spacing: -0.03em;
-    line-height: 1.1;
-  }
-
-  .time {
-    font-size: 22px;
-    font-weight: 400;
-    color: var(--ink-2);
-  }
-
-  .sky {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    color: inherit;
-    text-decoration: none;
-    padding: 10px 22px 10px 14px;
-    border-radius: var(--r-lg);
-    transition: background 0.2s var(--ease);
-  }
-
-  .sky:hover {
-    background: var(--surface);
-  }
-
-  .sky-icon {
-    color: var(--sun);
-  }
-
-  .sky div {
-    display: grid;
-  }
-
-  .sky strong {
-    font-size: 48px;
-    font-weight: 300;
-    letter-spacing: -0.03em;
-    line-height: 1;
-  }
-
-  .sky-label {
-    font-weight: 650;
-  }
-
-  .sky-line {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    font-size: 13px;
-    font-weight: 550;
   }
 
   .modes {
@@ -624,10 +527,6 @@
   }
 
   @media (max-width: 760px) {
-    h1 {
-      font-size: 32px;
-    }
-
     .grid > * {
       grid-column: span 12 !important;
     }

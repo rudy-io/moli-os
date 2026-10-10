@@ -2,6 +2,7 @@
 //!
 //! - `/api/*`    REST (snapshot, commands, labels, journal, approvals, health)
 //! - `/api/energy` consumption and cost (headline figures, series)
+//! - `/api/weather` the forecast and the clouds seen from space
 //! - `/api/assistant` Moli, the conversation that acts and picks what to show
 //! - `/api/automations` automations (graphs), their runs and Moli's drafts
 //! - `/api/events` server-sent events: a snapshot, then every change
@@ -35,6 +36,7 @@ mod session;
 pub mod settings;
 mod sse;
 mod system;
+mod weather;
 
 use std::sync::Arc;
 
@@ -121,6 +123,9 @@ pub struct Options {
     pub phones: Option<moli_phones::Gateway>,
     /// The house's computers' Moli agents, when a host driver runs.
     pub machines: Option<moli_host::agents::Agents>,
+    /// The sky over the house (forecast, satellite), when its position is
+    /// known.
+    pub weather: Option<moli_weather::Weather>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -152,7 +157,7 @@ fn device_routes() -> Router<Hub> {
         )
 }
 
-/// The house's plan, its phones, its machines.
+/// The house's plan, its phones, its machines, the sky over it.
 fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hub> {
     // The host script writes it next to `home.json`.
     let infra = options
@@ -161,6 +166,7 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .and_then(std::path::Path::parent)
         .map(|dir| dir.join("infra.json"));
     Router::new()
+        .merge(weather::routes(options.weather.clone()))
         .route("/api/infra", get(rest::infra))
         .layer(Extension(rest::InfraFile(infra)))
         .route("/api/plan", get(plan::get).put(plan::put))

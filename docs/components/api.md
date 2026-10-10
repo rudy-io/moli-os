@@ -299,6 +299,9 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/history` | libre | `?point=` (obligatoire), `hours` (défaut 24, borné 1 min → 366 j), `points` (défaut 300, borné 10 → 2 000) | `Series` (§ 2.3) | `404` history is disabled ; `400` requête ; `500` |
 | GET | `/api/energy` | libre | aucune | `Summary` : puissance instantanée, aujourd'hui, hier, mois, projection, mois dernier, par compteur | `404` no [energy] meters configured ; `500` |
 | GET | `/api/energy/series` | libre | `?step=hour\|day\|month` (obligatoire), `count` (défaut 24 / 30 / 12 ; borné 1 → 8 784 / 3 660 / 600) | `Report` `{step, from, to, currency, timezone, meters, buckets:[{start, meters:{<id>:{kwh, cost?}}}]}` | `400` pas invalide ; `404` ; `500` |
+| GET | `/api/weather/forecast` | libre | aucune | Prévisions Open-Meteo (gardées 15 min) : `{timezone, utc_offset_seconds, hourly:{time, temperature_2m, weather_code, precipitation_probability, precipitation, cloud_cover, wind_speed_10m, is_day}, daily:{time, weather_code, temperature_2m_max/min, precipitation_sum, precipitation_probability_max, wind_speed_10m_max, sunrise, sunset}}` : 25 heures, 7 jours | `404` maison sans position ; `502` |
+| GET | `/api/weather/satellite` | libre | aucune | Images Meteosat (EUMETSAT GeoColour) des deux dernières heures, cherchées au plus toutes les 5 min, seulement quand on regarde : `{frames:[heure ISO…], every_min, house:[x, y] (0..1), width_km, size:[w, h], source}`. Le centre demandé au fournisseur est arrondi au quart de degré | `404` ; `502` |
+| GET | `/api/weather/satellite/{heure}.jpg` | libre | aucune | Une de ces images (JPEG 960 × 720), servie seulement si elle est déjà en mémoire : la demander ne fait jamais rien chercher | `404` |
 
 **Assistant (Moli)**
 

@@ -18,6 +18,7 @@ moli-energy.workspace = true
 moli-assistant.workspace = true
 moli-automation.workspace = true
 moli-net.workspace = true
+moli-weather.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 futures.workspace = true
