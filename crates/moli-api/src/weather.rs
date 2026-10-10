@@ -1,21 +1,15 @@
 //! The sky over the house, for the dashboard (crate `moli-weather`).
 //!
 //! - `GET /api/weather/forecast`: the next 24 hours and the next 7 days.
-//! - `GET /api/weather/satellite[?zoom=wide]`: the Meteosat images at hand
-//!   (their times) and where the house is on them; close around the house
-//!   by default, the whole region with `zoom=wide`.
-//! - `GET /api/weather/satellite/{time}[?zoom=wide]`: one of those images
-//!   (JPEG), only ever served from what is at hand: asking never makes Moli
-//!   fetch.
+//! - `GET /api/weather/map`: the weather map around the house: the area,
+//!   the next day's wind, clouds and rain on a grid, and the land under it.
 
-use axum::extract::{Path, Query};
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use moli_runtime::Hub;
-use moli_weather::{Weather, Zoom};
-use serde::Deserialize;
+use moli_weather::Weather;
 use serde_json::json;
 
 #[derive(Clone)]
@@ -24,25 +18,8 @@ pub(crate) struct Sky(pub(crate) Option<Weather>);
 pub(crate) fn routes(weather: Option<Weather>) -> Router<Hub> {
     Router::new()
         .route("/api/weather/forecast", get(forecast))
-        .route("/api/weather/satellite", get(satellite))
-        .route("/api/weather/satellite/{time}", get(frame))
+        .route("/api/weather/map", get(map))
         .layer(Extension(Sky(weather)))
-}
-
-#[derive(Deserialize)]
-pub(crate) struct Framing {
-    #[serde(default)]
-    zoom: Option<String>,
-}
-
-impl Framing {
-    fn zoom(&self) -> Zoom {
-        if self.zoom.as_deref() == Some("wide") {
-            Zoom::Wide
-        } else {
-            Zoom::Near
-        }
-    }
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
@@ -66,38 +43,12 @@ pub(crate) async fn forecast(Extension(Sky(weather)): Extension<Sky>) -> Respons
     }
 }
 
-pub(crate) async fn satellite(
-    Extension(Sky(weather)): Extension<Sky>,
-    Query(framing): Query<Framing>,
-) -> Response {
+pub(crate) async fn map(Extension(Sky(weather)): Extension<Sky>) -> Response {
     let Some(weather) = weather else {
         return unplaced();
     };
-    match weather.sky(framing.zoom()).await {
-        Ok(s) => axum::Json(s).into_response(),
+    match weather.map().await {
+        Ok(m) => axum::Json(m).into_response(),
         Err(e) => error(StatusCode::BAD_GATEWAY, &format!("{e:#}")),
-    }
-}
-
-pub(crate) async fn frame(
-    Extension(Sky(weather)): Extension<Sky>,
-    Path(time): Path<String>,
-    Query(framing): Query<Framing>,
-) -> Response {
-    let Some(weather) = weather else {
-        return unplaced();
-    };
-    let time = time.strip_suffix(".jpg").unwrap_or(&time);
-    match weather.frame(framing.zoom(), time).await {
-        // An image never changes: kept by the browser as long as it likes.
-        Some(jpeg) => (
-            [
-                (header::CONTENT_TYPE, "image/jpeg"),
-                (header::CACHE_CONTROL, "private, max-age=86400, immutable"),
-            ],
-            jpeg,
-        )
-            .into_response(),
-        None => error(StatusCode::NOT_FOUND, "no such image"),
     }
 }

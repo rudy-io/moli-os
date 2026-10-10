@@ -1,85 +1,49 @@
-//! The sky over the house, for the dashboard:
+//! The sky over the house, for the dashboard (Open-Meteo, free and keyless,
+//! the service the weather driver already reads):
 //!
-//! - the forecast: the next hours and the days to come (Open-Meteo, free and
-//!   keyless, the service the weather driver already reads);
-//! - the clouds seen from space: the last two hours of Meteosat images
-//!   (EUMETSAT's « GeoColour », one every ten minutes, true colours by day,
-//!   clouds over the lights of the towns by night), cropped around the house.
+//! - the forecast: the next hours and the days to come;
+//! - the weather map: a grid of points around the house, hour by hour for
+//!   the next day (wind, clouds, rain), and the land under it (elevations),
+//!   from which the dashboard draws its own map: relief, clouds, rain and
+//!   the wind flowing.
 //!
-//! Nothing is fetched until someone looks, then both are kept a while: a
-//! wall of tablets costs the services one request each, the house no more
-//! than a megabyte of images. The images are asked around a point rounded
-//! to a quarter of a degree, never the house's own.
+//! Nothing is fetched until someone looks, then it is kept a while: a wall
+//! of tablets costs the service one request. The land never changes: asked
+//! once, kept on disk. The map is asked around a point rounded to a tenth
+//! of a degree.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures::{StreamExt, TryStreamExt};
 use http::{Method, Request};
 use http_body_util::Full;
 use moli_net::Body as Bytes;
 use serde_json::{Value as Json, json};
 use tokio::sync::Mutex;
 
-const FORECAST_HOST: &str = "api.open-meteo.com";
+const HOST: &str = "api.open-meteo.com";
 /// Open-Meteo refreshes its models every hour or so.
 const FORECAST_KEEP: Duration = Duration::from_secs(15 * 60);
-const FORECAST_LIMIT: Duration = Duration::from_secs(10);
+const MAP_KEEP: Duration = Duration::from_secs(60 * 60);
+const LIMIT: Duration = Duration::from_secs(15);
 const MAX_FORECAST: usize = 256 * 1024;
+const MAX_MAP: usize = 2 * 1024 * 1024;
+const MAX_ELEVATION: usize = 64 * 1024;
 
-const SKY_HOST: &str = "view.eumetsat.int";
-const SKY_LAYER: &str = "mtg_fd:rgb_geocolour";
-/// The layer's own capabilities: a few kilobytes, the latest image's time.
-const SKY_CAPABILITIES: &str =
-    "/geoserver/mtg_fd/rgb_geocolour/ows?service=WMS&request=GetCapabilities&version=1.3.0";
-/// Two hours of images, one every ten minutes.
-pub const FRAMES: usize = 12;
-const FRAME_STEP_MIN: i64 = 10;
-/// A new image every ten minutes: looked for at most every five.
-const SKY_CHECK: Duration = Duration::from_secs(5 * 60);
-/// After a failure, tried again a minute later (the old images stay).
-const SKY_RETRY: Duration = Duration::from_secs(60);
-const SKY_LIMIT: Duration = Duration::from_secs(20);
-const MAX_CAPABILITIES: usize = 64 * 1024;
-const MAX_FRAME: usize = 1024 * 1024;
-/// Web Mercator's sphere.
-const EARTH_M: f64 = 6_378_137.0;
-
-/// How far the images look: close around the house (the home page's
-/// picture, about as close as Meteosat's kilometre allows), or the whole
-/// region (the storms seen coming from far).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Zoom {
-    Near,
-    Wide,
-}
-
-impl Zoom {
-    /// Width on the ground (the height is three quarters of it).
-    #[must_use]
-    pub const fn width_km(self) -> f64 {
-        match self {
-            Self::Near => 260.0,
-            Self::Wide => 840.0,
-        }
-    }
-
-    /// The image's pixels (4:3): about one per kilometre for the close one,
-    /// the browser smooths it.
-    #[must_use]
-    pub const fn size(self) -> [u32; 2] {
-        match self {
-            Self::Near => [480, 360],
-            Self::Wide => [960, 720],
-        }
-    }
-
-    const fn index(self) -> usize {
-        match self {
-            Self::Near => 0,
-            Self::Wide => 1,
-        }
-    }
-}
+/// The map: 400 × 300 km around the house.
+pub const MAP_WIDTH_KM: f64 = 400.0;
+pub const MAP_HEIGHT_KM: f64 = 300.0;
+/// The weather's grid (one request; ~35 km between points, about the
+/// models' own mesh): the dashboard smooths between them.
+pub const WEATHER_GRID: [usize; 2] = [12, 9];
+/// The land's grid (~6 km between points), asked a hundred at a time.
+pub const LAND_GRID: [usize; 2] = [64, 48];
+const ELEVATIONS_PER_CALL: usize = 100;
+/// The next day, hour by hour.
+const MAP_HOURS: u32 = 24;
+const KM_PER_DEGREE: f64 = 111.32;
 
 #[derive(Clone, Debug)]
 pub struct Weather(Arc<Inner>);
@@ -88,138 +52,195 @@ pub struct Weather(Arc<Inner>);
 struct Inner {
     latitude: f64,
     longitude: f64,
+    /// Where the land is kept (`weather-land.json`), when there is a disk.
+    data_dir: Option<PathBuf>,
     forecast: Mutex<Option<(Instant, Json)>>,
-    /// One per [`Zoom`].
-    sky: [Mutex<Sky>; 2],
+    map: Mutex<Option<(Instant, Json)>>,
+    land: Mutex<Option<Arc<Vec<f32>>>>,
 }
 
-#[derive(Debug, Default)]
-struct Sky {
-    next_check: Option<Instant>,
-    /// Oldest first: (`2026-10-10T13:40:00Z`, JPEG).
-    frames: Vec<(String, Bytes)>,
-}
-
-/// Where the region's images are taken, in Web Mercator metres, and where
-/// the house sits on them (0..1 from the left, from the top).
+/// The map's area (degrees) and where the house sits on it (0..1 from the
+/// left, from the top).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Region {
-    pub bbox: [f64; 4],
+pub struct Area {
+    pub south: f64,
+    pub west: f64,
+    pub north: f64,
+    pub east: f64,
     pub house: [f64; 2],
 }
 
-impl Region {
+impl Area {
     #[must_use]
-    pub fn around(latitude: f64, longitude: f64, zoom: Zoom) -> Self {
-        // The images are asked around a rounded point (a tenth of a degree,
-        // ~10 km): the provider never learns where the house is.
+    pub fn around(latitude: f64, longitude: f64) -> Self {
+        // Asked around a rounded point (~10 km): the service never learns
+        // where the house is.
         let c_lat = (latitude * 10.0).round() / 10.0;
         let c_lon = (longitude * 10.0).round() / 10.0;
-        // Mercator stretches distances by 1/cos(latitude).
-        let stretch = 1.0 / c_lat.to_radians().cos();
-        let half_w = zoom.width_km() * 500.0 * stretch;
-        let half_h = half_w * 0.75;
-        let (cx, cy) = mercator(c_lat, c_lon);
-        let bbox = [cx - half_w, cy - half_h, cx + half_w, cy + half_h];
-        let (hx, hy) = mercator(latitude, longitude);
+        let half_lat = MAP_HEIGHT_KM / 2.0 / KM_PER_DEGREE;
+        let half_lon = MAP_WIDTH_KM / 2.0 / (KM_PER_DEGREE * c_lat.to_radians().cos());
+        let (south, north) = (c_lat - half_lat, c_lat + half_lat);
+        let (west, east) = (c_lon - half_lon, c_lon + half_lon);
         let house = [
-            (hx - bbox[0]) / (bbox[2] - bbox[0]),
-            (bbox[3] - hy) / (bbox[3] - bbox[1]),
+            (longitude - west) / (east - west),
+            (north - latitude) / (north - south),
         ];
-        Self { bbox, house }
+        Self {
+            south,
+            west,
+            north,
+            east,
+            house,
+        }
     }
-}
 
-fn mercator(latitude: f64, longitude: f64) -> (f64, f64) {
-    let x = EARTH_M * longitude.to_radians();
-    let y = EARTH_M
-        * (std::f64::consts::FRAC_PI_4 + latitude.to_radians() / 2.0)
-            .tan()
-            .ln();
-    (x, y)
+    /// A grid's points, row by row from the north-west corner.
+    #[must_use]
+    pub fn points(&self, [nx, ny]: [usize; 2]) -> Vec<(f64, f64)> {
+        let step = |from: f64, to: f64, n: usize, i: usize| {
+            #[allow(clippy::cast_precision_loss)] // a few dozen
+            let f = i as f64 / (n - 1) as f64;
+            from + (to - from) * f
+        };
+        (0..ny)
+            .flat_map(|j| {
+                (0..nx).map(move |i| {
+                    (
+                        step(self.north, self.south, ny, j),
+                        step(self.west, self.east, nx, i),
+                    )
+                })
+            })
+            .collect()
+    }
 }
 
 impl Weather {
     #[must_use]
-    pub fn new(latitude: f64, longitude: f64) -> Self {
+    pub fn new(latitude: f64, longitude: f64, data_dir: Option<PathBuf>) -> Self {
         Self(Arc::new(Inner {
             latitude,
             longitude,
+            data_dir,
             forecast: Mutex::new(None),
-            sky: [Mutex::new(Sky::default()), Mutex::new(Sky::default())],
+            map: Mutex::new(None),
+            land: Mutex::new(None),
         }))
     }
 
     /// The next 24 hours (hour by hour) and the next 7 days, as Open-Meteo's
     /// columns (`hourly`, `daily`), times in the house's time zone.
     pub async fn forecast(&self) -> anyhow::Result<Json> {
-        let mut kept = self.0.forecast.lock().await;
-        if let Some((at, json)) = kept.as_ref()
-            && at.elapsed() < FORECAST_KEEP
-        {
-            return Ok(json.clone());
-        }
-        match fetch_forecast(self.0.latitude, self.0.longitude).await {
-            Ok(json) => {
-                *kept = Some((Instant::now(), json.clone()));
-                Ok(json)
-            }
-            // Out of date is better than nothing (kept, tried again later).
-            Err(e) => match kept.as_ref() {
-                Some((_, json)) => {
-                    tracing::warn!("forecast: {e:#}");
-                    Ok(json.clone())
-                }
-                None => Err(e),
-            },
-        }
+        let (lat, lon) = (self.0.latitude, self.0.longitude);
+        kept(&self.0.forecast, FORECAST_KEEP, fetch_forecast(lat, lon)).await
     }
 
-    /// The images at hand (their times, oldest first) and where the house
-    /// is on them; new ones are looked for when it is time.
-    pub async fn sky(&self, zoom: Zoom) -> anyhow::Result<Json> {
-        let region = Region::around(self.0.latitude, self.0.longitude, zoom);
-        let mut sky = self.0.sky[zoom.index()].lock().await;
-        if sky.next_check.is_none_or(|at| Instant::now() >= at) {
-            match refresh(&mut sky, &region, zoom).await {
-                Ok(()) => sky.next_check = Some(Instant::now() + SKY_CHECK),
-                Err(e) => {
-                    tracing::warn!("satellite: {e:#}");
-                    sky.next_check = Some(Instant::now() + SKY_RETRY);
-                    if sky.frames.is_empty() {
-                        return Err(e);
-                    }
-                }
-            }
-        }
+    /// The weather map: the area, the next day's wind, clouds and rain on
+    /// the weather's grid, and the land (null until it could be asked).
+    pub async fn map(&self) -> anyhow::Result<Json> {
+        let area = Area::around(self.0.latitude, self.0.longitude);
+        let weather = kept(&self.0.map, MAP_KEEP, fetch_map(area)).await?;
+        let land = self.land(&area).await;
         Ok(json!({
-            "frames": sky.frames.iter().map(|(t, _)| t).collect::<Vec<_>>(),
-            "every_min": FRAME_STEP_MIN,
-            "house": region.house,
-            "width_km": zoom.width_km(),
-            "size": zoom.size(),
-            "source": "EUMETSAT · Meteosat",
+            "area": {
+                "south": area.south, "west": area.west,
+                "north": area.north, "east": area.east,
+            },
+            "house": area.house,
+            "km": [MAP_WIDTH_KM, MAP_HEIGHT_KM],
+            "weather": weather,
+            "land": land.map(|elevation| json!({
+                "grid": LAND_GRID,
+                "elevation": *elevation,
+            })),
         }))
     }
 
-    /// One image already at hand (never fetched for the asking).
-    pub async fn frame(&self, zoom: Zoom, time: &str) -> Option<Bytes> {
-        let sky = self.0.sky[zoom.index()].lock().await;
-        sky.frames
-            .iter()
-            .find(|(t, _)| t == time)
-            .map(|(_, jpeg)| jpeg.clone())
+    /// The land under the map: in memory, else on disk, else asked (and
+    /// written down). `None` when it cannot be had now (tried again later).
+    async fn land(&self, area: &Area) -> Option<Arc<Vec<f32>>> {
+        let mut land = self.0.land.lock().await;
+        if let Some(l) = land.as_ref() {
+            return Some(l.clone());
+        }
+        let key = land_key(area);
+        let file = self
+            .0
+            .data_dir
+            .as_ref()
+            .map(|d| d.join("weather-land.json"));
+        if let Some(file) = &file
+            && let Ok(text) = tokio::fs::read_to_string(file).await
+            && let Ok(saved) = serde_json::from_str::<Json>(&text)
+            && saved["key"] == key
+            && let Some(elevation) = elevations(&saved["elevation"])
+        {
+            let l = Arc::new(elevation);
+            *land = Some(l.clone());
+            return Some(l);
+        }
+        match fetch_land(area).await {
+            Ok(elevation) => {
+                if let Some(file) = &file {
+                    let saved = json!({ "key": key, "elevation": elevation });
+                    let tmp = file.with_extension("json.tmp");
+                    let written = async {
+                        tokio::fs::write(&tmp, saved.to_string()).await?;
+                        tokio::fs::rename(&tmp, file).await
+                    };
+                    if let Err(e) = written.await {
+                        tracing::warn!("weather land not saved: {e}");
+                    }
+                }
+                let l = Arc::new(elevation);
+                *land = Some(l.clone());
+                Some(l)
+            }
+            Err(e) => {
+                tracing::warn!("weather land: {e:#}");
+                None
+            }
+        }
     }
 }
 
-async fn get(host: &str, path: &str, limit: Duration, max: usize) -> anyhow::Result<Bytes> {
+/// A value kept `keep` long; out of date is better than nothing when the
+/// service fails (kept, tried again on the next look).
+async fn kept(
+    slot: &Mutex<Option<(Instant, Json)>>,
+    keep: Duration,
+    fetch: impl Future<Output = anyhow::Result<Json>>,
+) -> anyhow::Result<Json> {
+    let mut slot = slot.lock().await;
+    if let Some((at, json)) = slot.as_ref()
+        && at.elapsed() < keep
+    {
+        return Ok(json.clone());
+    }
+    match fetch.await {
+        Ok(json) => {
+            *slot = Some((Instant::now(), json.clone()));
+            Ok(json)
+        }
+        Err(e) => match slot.as_ref() {
+            Some((_, json)) => {
+                tracing::warn!("weather: {e:#}");
+                Ok(json.clone())
+            }
+            None => Err(e),
+        },
+    }
+}
+
+async fn get(path: &str, max: usize) -> anyhow::Result<Json> {
     let request = Request::builder()
         .method(Method::GET)
         .uri(path)
+        .header("accept", "application/json")
         .body(Full::new(Bytes::new()))?;
-    let (status, body) = moli_net::web(host, 443, true, request, limit, max).await?;
-    anyhow::ensure!(status.is_success(), "{host}: HTTP {}", status.as_u16());
-    Ok(body)
+    let (status, body) = moli_net::web(HOST, 443, true, request, LIMIT, max).await?;
+    anyhow::ensure!(status.is_success(), "{HOST}: HTTP {}", status.as_u16());
+    Ok(serde_json::from_slice(&body)?)
 }
 
 async fn fetch_forecast(latitude: f64, longitude: f64) -> anyhow::Result<Json> {
@@ -231,8 +252,7 @@ async fn fetch_forecast(latitude: f64, longitude: f64) -> anyhow::Result<Json> {
          precipitation_probability_max,wind_speed_10m_max,sunrise,sunset\
          &forecast_hours=25&forecast_days=7&timezone=auto"
     );
-    let body = get(FORECAST_HOST, &path, FORECAST_LIMIT, MAX_FORECAST).await?;
-    let w: Json = serde_json::from_slice(&body)?;
+    let w = get(&path, MAX_FORECAST).await?;
     anyhow::ensure!(w["hourly"]["time"].is_array(), "open-meteo: no hours");
     Ok(json!({
         "timezone": w["timezone"],
@@ -242,70 +262,122 @@ async fn fetch_forecast(latitude: f64, longitude: f64) -> anyhow::Result<Json> {
     }))
 }
 
-/// The latest image's time, from the layer's capabilities.
-fn latest(capabilities: &str) -> Option<jiff::Timestamp> {
-    let dimension = capabilities.find("<Dimension name=\"time\"")?;
-    let rest = &capabilities[dimension..];
-    let start = rest.find("default=\"")? + "default=\"".len();
-    let end = rest[start..].find('"')?;
-    rest[start..start + end].parse().ok()
+fn coordinates(points: &[(f64, f64)]) -> (String, String) {
+    let lats: Vec<String> = points.iter().map(|(la, _)| format!("{la:.3}")).collect();
+    let lons: Vec<String> = points.iter().map(|(_, lo)| format!("{lo:.3}")).collect();
+    (lats.join(","), lons.join(","))
 }
 
-/// The images wanted: the last [`FRAMES`], ten minutes apart, oldest first.
-fn wanted(latest: jiff::Timestamp) -> Vec<String> {
-    (0..FRAMES)
-        .rev()
-        .filter_map(|i| {
-            let back = jiff::SignedDuration::from_mins(FRAME_STEP_MIN * i64::try_from(i).ok()?);
-            latest.checked_sub(back).ok()
-        })
-        .map(|t| t.strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
-        .collect()
+/// One decimal is plenty for a picture (and halves the answer).
+fn round1(v: f64) -> f64 {
+    (v * 10.0).round() / 10.0
 }
 
-async fn refresh(sky: &mut Sky, region: &Region, zoom: Zoom) -> anyhow::Result<()> {
-    let caps = get(SKY_HOST, SKY_CAPABILITIES, SKY_LIMIT, MAX_CAPABILITIES).await?;
-    let latest = latest(&String::from_utf8_lossy(&caps))
-        .ok_or_else(|| anyhow::anyhow!("{SKY_HOST}: no image time"))?;
-    let wanted = wanted(latest);
-    if sky.frames.last().map(|(t, _)| t) == wanted.last() {
-        return Ok(());
-    }
-    let mut kept: Vec<(String, Bytes)> = std::mem::take(&mut sky.frames)
-        .into_iter()
-        .filter(|(t, _)| wanted.contains(t))
-        .collect();
-    let missing: Vec<&String> = wanted
-        .iter()
-        .filter(|t| !kept.iter().any(|(k, _)| k == *t))
-        .collect();
-    let fetched =
-        futures::future::join_all(missing.iter().map(|t| fetch_frame(region, zoom, t))).await;
-    for (time, image) in missing.into_iter().zip(fetched) {
-        match image {
-            Ok(jpeg) => kept.push((time.clone(), jpeg)),
-            // A missing image is a gap in the loop, not a failure.
-            Err(e) => tracing::debug!("satellite {time}: {e:#}"),
+/// The next day on the weather's grid: `hours` (local), then per variable
+/// one flat array, `[hour × points + point]`; the wind as east (`u`) and
+/// north (`v`) speeds in km/h.
+async fn fetch_map(area: Area) -> anyhow::Result<Json> {
+    let points = area.points(WEATHER_GRID);
+    let (lats, lons) = coordinates(&points);
+    let path = format!(
+        "/v1/forecast?latitude={lats}&longitude={lons}\
+         &hourly=wind_speed_10m,wind_direction_10m,cloud_cover,precipitation\
+         &forecast_hours={MAP_HOURS}&timezone=auto"
+    );
+    let answer = get(&path, MAX_MAP).await?;
+    let places = answer.as_array().map(Vec::as_slice).unwrap_or_default();
+    anyhow::ensure!(
+        places.len() == points.len(),
+        "open-meteo: {} places",
+        places.len()
+    );
+    let hours: Vec<Json> = places[0]["hourly"]["time"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let n = points.len();
+    let (mut u, mut v, mut cloud, mut rain) = (
+        vec![0.0; hours.len() * n],
+        vec![0.0; hours.len() * n],
+        vec![0.0; hours.len() * n],
+        vec![0.0; hours.len() * n],
+    );
+    for (p, place) in places.iter().enumerate() {
+        let h = &place["hourly"];
+        let at = |key: &str, i: usize| h[key][i].as_f64().unwrap_or(0.0);
+        for i in 0..hours.len() {
+            let speed = at("wind_speed_10m", i);
+            // The direction the wind comes from: it blows the other way.
+            let from = at("wind_direction_10m", i).to_radians();
+            u[i * n + p] = round1(-speed * from.sin());
+            v[i * n + p] = round1(-speed * from.cos());
+            cloud[i * n + p] = at("cloud_cover", i).round();
+            rain[i * n + p] = round1(at("precipitation", i));
         }
     }
-    kept.sort_by(|a, b| a.0.cmp(&b.0));
-    sky.frames = kept;
-    anyhow::ensure!(!sky.frames.is_empty(), "{SKY_HOST}: no image");
-    Ok(())
+    Ok(json!({
+        "grid": WEATHER_GRID,
+        "hours": hours,
+        "utc_offset_seconds": places[0]["utc_offset_seconds"],
+        "u": u, "v": v, "cloud": cloud, "rain": rain,
+    }))
 }
 
-async fn fetch_frame(region: &Region, zoom: Zoom, time: &str) -> anyhow::Result<Bytes> {
-    let [x0, y0, x1, y1] = region.bbox;
-    let [width, height] = zoom.size();
-    let path = format!(
-        "/geoserver/ows?service=WMS&version=1.3.0&request=GetMap&layers={SKY_LAYER}&styles=\
-         &crs=EPSG:3857&bbox={x0:.0},{y0:.0},{x1:.0},{y1:.0}\
-         &width={width}&height={height}&format=image/jpeg&time={time}"
-    );
-    let jpeg = get(SKY_HOST, &path, SKY_LIMIT, MAX_FRAME).await?;
-    // A WMS error comes back as XML, sometimes with a 200.
-    anyhow::ensure!(jpeg.starts_with(&[0xFF, 0xD8]), "not an image");
-    Ok(jpeg)
+fn land_key(area: &Area) -> String {
+    format!(
+        "{:.3},{:.3},{MAP_WIDTH_KM},{MAP_HEIGHT_KM},{}x{}",
+        area.north, area.west, LAND_GRID[0], LAND_GRID[1]
+    )
+}
+
+fn elevations(json: &Json) -> Option<Vec<f32>> {
+    #[allow(clippy::cast_possible_truncation)] // metres
+    let v: Vec<f32> = json
+        .as_array()?
+        .iter()
+        .map(|e| e.as_f64().map(|m| m as f32))
+        .collect::<Option<_>>()?;
+    (v.len() == LAND_GRID[0] * LAND_GRID[1]).then_some(v)
+}
+
+/// The land's elevations (metres, 0 at sea), a hundred points a request,
+/// a few at a time.
+async fn fetch_land(area: &Area) -> anyhow::Result<Vec<f32>> {
+    let chunks: Vec<Vec<(f64, f64)>> = area
+        .points(LAND_GRID)
+        .chunks(ELEVATIONS_PER_CALL)
+        .map(<[_]>::to_vec)
+        .collect();
+    let parts: Vec<Vec<f32>> = futures::stream::iter(chunks)
+        .map(fetch_elevations)
+        .buffered(4)
+        .try_collect()
+        .await?;
+    Ok(parts.concat())
+}
+
+async fn fetch_elevations(chunk: Vec<(f64, f64)>) -> anyhow::Result<Vec<f32>> {
+    let (lats, lons) = coordinates(&chunk);
+    let answer = get(
+        &format!("/v1/elevation?latitude={lats}&longitude={lons}"),
+        MAX_ELEVATION,
+    )
+    .await?;
+    let part = elevation_list(&answer["elevation"]);
+    anyhow::ensure!(part.len() == chunk.len(), "open-meteo: elevations");
+    Ok(part)
+}
+
+fn elevation_list(json: &Json) -> Vec<f32> {
+    json.as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| {
+            #[allow(clippy::cast_possible_truncation)] // metres
+            let m = e.as_f64().unwrap_or(0.0) as f32;
+            m
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -313,38 +385,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_house_sits_near_the_middle_of_its_region() {
-        for zoom in [Zoom::Near, Zoom::Wide] {
-            let r = Region::around(48.86, 2.33, zoom);
-            // The centre is rounded (48.9 ; 2.3): the house is a little off it.
-            assert!((r.house[0] - 0.5).abs() < 0.05, "{:?}", r.house);
-            assert!((r.house[1] - 0.5).abs() < 0.05, "{:?}", r.house);
-            assert!(r.house[0] > 0.5, "east of the centre");
-            assert!(r.house[1] > 0.5, "south of the centre");
-            // So wide on the ground, stretched by Mercator.
-            let width = r.bbox[2] - r.bbox[0];
-            let expected = zoom.width_km() * 1000.0 / 48.9_f64.to_radians().cos();
-            assert!((width - expected).abs() < 1.0);
-            assert!(((r.bbox[3] - r.bbox[1]) / width - 0.75).abs() < 1e-9);
-        }
+    fn the_house_sits_near_the_middle_of_its_map() {
+        let a = Area::around(48.86, 2.33);
+        // The centre is rounded (48.9 ; 2.3): the house is a little off it.
+        assert!((a.house[0] - 0.5).abs() < 0.05, "{:?}", a.house);
+        assert!((a.house[1] - 0.5).abs() < 0.05, "{:?}", a.house);
+        assert!(a.house[0] > 0.5, "east of the centre");
+        assert!(a.house[1] > 0.5, "south of the centre");
+        // 300 km tall, 400 km wide on the ground.
+        assert!(((a.north - a.south) * KM_PER_DEGREE - MAP_HEIGHT_KM).abs() < 1e-6);
+        let wide = (a.east - a.west) * KM_PER_DEGREE * 48.9_f64.to_radians().cos();
+        assert!((wide - MAP_WIDTH_KM).abs() < 1e-6);
     }
 
     #[test]
-    fn the_latest_image_is_read_from_the_capabilities() {
-        let caps = r#"<Layer><Name>rgb_geocolour</Name>
-            <Dimension name="time" default="2026-10-10T13:40:00Z" units="ISO8601" nearestValue="1">
-            2024-09-23T00:00:00.000Z/2026-10-10T13:40:00.000Z/PT10M</Dimension></Layer>"#;
-        let t = latest(caps).unwrap();
-        let w = wanted(t);
-        assert_eq!(w.len(), FRAMES);
-        assert_eq!(w.last().unwrap(), "2026-10-10T13:40:00Z");
-        assert_eq!(w[0], "2026-10-10T11:50:00Z");
-        assert_eq!(latest("<WMS_Capabilities/>"), None);
+    fn the_grid_runs_from_the_north_west_row_by_row() {
+        let a = Area::around(48.86, 2.33);
+        let p = a.points([3, 2]);
+        assert_eq!(p.len(), 6);
+        assert_eq!(p[0], (a.north, a.west));
+        assert_eq!(p[2], (a.north, a.east));
+        assert_eq!(p[5], (a.south, a.east));
     }
 
     #[test]
-    fn the_hours_roll_over_midnight() {
-        let w = wanted("2026-10-11T00:30:00Z".parse().unwrap());
-        assert_eq!(w[0], "2026-10-10T22:40:00Z");
+    fn saved_land_of_another_size_is_not_taken() {
+        let n = LAND_GRID[0] * LAND_GRID[1];
+        assert!(elevations(&json!(vec![1.0; n])).is_some());
+        assert!(elevations(&json!(vec![1.0; n - 1])).is_none());
+        assert!(elevations(&json!("x")).is_none());
     }
 }

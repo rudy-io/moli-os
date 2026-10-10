@@ -1,14 +1,14 @@
 // The sky over the house: the forecast (next hours, next days) and the
-// clouds seen from space (Meteosat images, oldest first). Fetched when a
-// page shows them, refreshed while it does; nothing when the house has no
-// position (the hero falls back to a painted sky).
+// weather map (wind, clouds, rain around the house, the land under it).
+// Fetched when a page shows them, refreshed while it does; nothing when the
+// house has no position.
 
 import { t, locale } from '../../lib/i18n.svelte.js';
 
-export const sky = $state({ forecast: null, satellite: null, wide: null });
+export const sky = $state({ forecast: null, map: null });
 
 const FORECAST_EVERY = 15 * 60_000;
-const SATELLITE_EVERY = 5 * 60_000;
+const MAP_EVERY = 30 * 60_000;
 
 async function json(url) {
   try {
@@ -24,15 +24,9 @@ async function loadForecast() {
   if (f) sky.forecast = f;
 }
 
-async function loadSatellite() {
-  const s = await json('/api/weather/satellite');
-  if (s?.frames?.length) sky.satellite = s;
-}
-
-/** The whole region (the detail's view), only when someone opens it. */
-export async function loadWide() {
-  const s = await json('/api/weather/satellite?zoom=wide');
-  if (s?.frames?.length) sky.wide = s;
+async function loadMap() {
+  const m = await json('/api/weather/map');
+  if (m?.weather?.hours?.length) sky.map = m;
 }
 
 let watchers = 0;
@@ -41,8 +35,8 @@ let timers = [];
 export function watchSky() {
   if (watchers++ === 0) {
     loadForecast();
-    loadSatellite();
-    timers = [setInterval(loadForecast, FORECAST_EVERY), setInterval(loadSatellite, SATELLITE_EVERY)];
+    loadMap();
+    timers = [setInterval(loadForecast, FORECAST_EVERY), setInterval(loadMap, MAP_EVERY)];
   }
   return () => {
     if (--watchers === 0) {
@@ -52,12 +46,8 @@ export function watchSky() {
   };
 }
 
-/** One image's address. */
-export const frameUrl = (time, zoom = 'near') =>
-  `/api/weather/satellite/${encodeURIComponent(time)}.jpg${zoom === 'wide' ? '?zoom=wide' : ''}`;
-
 /** Open-Meteo's local time (« 2026-10-10T15:00 ») as a timestamp. */
-function localTs(iso, offset) {
+export function localTs(iso, offset) {
   return Date.parse(`${iso}:00Z`) - offset * 1000;
 }
 
@@ -128,9 +118,4 @@ export function outlook(rows) {
 export function dayName(date, i) {
   if (i === 0) return t('maison.meteo.aujourdhui');
   return new Date(`${date}T12:00:00`).toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '');
-}
-
-/** An image's time, the house's clock. */
-export function frameClock(time) {
-  return new Date(time).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 }

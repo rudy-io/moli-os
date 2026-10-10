@@ -202,7 +202,6 @@
   "maison.meteo.vent_vers": "Strong gusts around {h}:00 ({kmh} km/h)",
   "maison.meteo.gel": "Cold night: down to {min}°",
   "maison.meteo.sec": "No rain expected until {h}:00",
-  "maison.meteo.nuages_alt": "Satellite image of the region at {time}",
   "maison.meteo.fermer": "Close",
   "maison.meteo.pause": "Pause",
   "maison.meteo.lecture": "Play",
@@ -210,5 +209,8 @@
   "maison.meteo.ouvrir": "Weather: {label}. Open the detail",
   "maison.meteo.titre": "Weather",
   "maison.meteo.dehors": "Everything else outside",
-  "maison.meteo.credit": "Satellite images: {source}, one every 10 minutes. The orange dot is the house."
+  "maison.meteo.legende_pluie": "Rain",
+  "maison.meteo.legende_nuages": "Clouds",
+  "maison.meteo.legende_vent": "Wind (light → strong)",
+  "maison.meteo.credit": "Forecast by Open-Meteo. The orange dot is the house."
 }

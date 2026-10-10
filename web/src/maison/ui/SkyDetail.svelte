@@ -1,26 +1,34 @@
 <script>
-  // The weather in detail, opened from the home page: the whole region's
-  // clouds of the last two hours (play, pause, slide through time), the
-  // house pinned, then the hours and the days to come.
+  // The weather in detail, opened from the home page: the map of the next
+  // day around the house (play, pause, slide through the hours: clouds and
+  // rain moving, the wind flowing), then the hours and the days to come.
   import { onMount } from 'svelte';
-  import { sky, loadWide, frameUrl, frameClock, hours, days, outlook, dayName } from '../lib/sky.svelte.js';
+  import { sky, hours, days, outlook, dayName, localTs } from '../lib/sky.svelte.js';
   import { weatherOf } from '../lib/icons.js';
-  import { num } from '../lib/home.svelte.js';
+  import { home, num } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import WeatherMap from './WeatherMap.svelte';
 
   let { onclose } = $props();
 
-  // The whole region; the close view meanwhile (or for good, without it).
-  const view = $derived(sky.wide ?? sky.satellite);
-  const zoom = $derived(sky.wide ? 'wide' : 'near');
-  const frames = $derived(view?.frames ?? []);
-  const house = $derived(view?.house ?? [0.5, 0.5]);
-  const size = $derived(view?.size ?? [960, 720]);
-  let at = $state(0);
-  let playing = $state(true);
+  const map = $derived(sky.map);
+  const times = $derived(map?.weather?.hours ?? []);
+  const offset = $derived(Number(map?.weather?.utc_offset_seconds ?? 0));
+  // Now, in the map's hours (it starts at the current hour).
+  const nowHour = $derived(times.length ? Math.max(0, (home.now - localTs(times[0], offset)) / 3_600_000) : 0);
+  let hour = $state(null);
+  let playing = $state(false);
   let tab = $state('heures');
   let dialog;
+  const shown = $derived(hour ?? nowHour);
+  const last = $derived(Math.max(0, times.length - 1));
+  const label = $derived.by(() => {
+    if (!times.length) return '';
+    if (Math.abs(shown - nowHour) < 0.5) return t('maison.meteo.maintenant');
+    const i = Math.min(last, Math.round(shown));
+    return t('maison.meteo.heure', { h: Number(times[i].slice(11, 13)) });
+  });
 
   const rows = $derived(hours(sky.forecast));
   const week = $derived(days(sky.forecast));
@@ -30,18 +38,13 @@
 
   onMount(() => {
     dialog.showModal();
-    loadWide();
-    let timer;
-    const tick = () => {
-      if (playing && frames.length) at = (at + 1) % frames.length;
-      timer = setTimeout(tick, at === frames.length - 1 ? 1800 : 450);
-    };
-    timer = setTimeout(tick, 600);
-    return () => clearTimeout(timer);
-  });
-  // A new set of images (the wide one arriving): start from its end.
-  $effect(() => {
-    at = Math.max(0, frames.length - 1);
+    // Playing: an hour every second and a half, then back to now.
+    const timer = setInterval(() => {
+      if (!playing || !times.length) return;
+      const next = (hour ?? nowHour) + 0.05;
+      hour = next > last ? nowHour : next;
+    }, 75);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -51,21 +54,34 @@
     <button class="close" onclick={() => dialog.close()} aria-label={t('maison.meteo.fermer')}><Icon name="close" size={22} /></button>
   </header>
 
-  {#if frames.length}
-    <div class="frame" style="aspect-ratio:{size[0]} / {size[1]}">
-      {#each frames as f, i (zoom + f)}
-        <img src={frameUrl(f, zoom)} alt={i === at ? t('maison.meteo.nuages_alt', { time: frameClock(f) }) : ''} class:on={i === at} />
-      {/each}
-      <span class="dot" style="left:{house[0] * 100}%; top:{house[1] * 100}%" aria-hidden="true"></span>
+  {#if map}
+    <div class="frame">
+      <WeatherMap {map} hour={shown} />
+      <span class="when num">{label}</span>
       <div class="controls">
         <button class="play" onclick={() => (playing = !playing)} aria-label={playing ? t('maison.meteo.pause') : t('maison.meteo.lecture')}>
           <Icon name={playing ? 'pause' : 'play'} size={20} />
         </button>
-        <input type="range" min="0" max={Math.max(0, frames.length - 1)} bind:value={at} oninput={() => (playing = false)} aria-label={t('maison.meteo.moment')} />
-        <strong class="num">{frames[at] ? frameClock(frames[at]) : ''}</strong>
+        <input
+          type="range"
+          min={Math.floor(nowHour * 10) / 10}
+          max={last}
+          step="0.1"
+          value={shown}
+          oninput={(e) => {
+            playing = false;
+            hour = Number(e.currentTarget.value);
+          }}
+          aria-label={t('maison.meteo.moment')}
+        />
       </div>
     </div>
-    <p class="credit">{t('maison.meteo.credit', { source: view?.source ?? 'EUMETSAT' })}</p>
+    <div class="legend">
+      <span><i class="sw rain"></i>{t('maison.meteo.legende_pluie')}</span>
+      <span><i class="sw cloud"></i>{t('maison.meteo.legende_nuages')}</span>
+      <span><i class="sw wind"></i>{t('maison.meteo.legende_vent')}</span>
+      <span class="src">{t('maison.meteo.credit')}</span>
+    </div>
   {/if}
 
   {#if rows.length}
@@ -155,37 +171,24 @@
     position: relative;
     width: min(100%, calc((94dvh - 330px) * 4 / 3));
     min-width: min(100%, 320px);
+    aspect-ratio: 4 / 3;
     margin: 0 auto;
     border-radius: var(--r-lg);
     overflow: hidden;
     background: #000;
   }
 
-  .frame img {
+  .when {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    transition: opacity 0.35s linear;
+    top: 10px;
+    left: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    color: #fff;
+    background: rgb(6 10 20 / 55%);
+    backdrop-filter: blur(8px);
   }
-
-  .frame img.on {
-    opacity: 1;
-  }
-
-  .dot {
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    margin: -6px 0 0 -6px;
-    border-radius: 50%;
-    background: var(--warm);
-    box-shadow:
-      0 0 0 3px rgb(255 255 255 / 90%),
-      0 0 16px 4px rgb(240 165 58 / 60%);
-  }
-
   .controls {
     position: absolute;
     left: 10px;
@@ -219,17 +222,43 @@
     accent-color: var(--warm);
   }
 
-  .controls strong {
-    min-width: 48px;
-    text-align: right;
-  }
-
-  .credit {
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    align-items: center;
     font-size: 12px;
     color: var(--ink-3);
-    margin: 6px 4px 0;
+    margin: 8px 4px 0;
   }
 
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legend .src {
+    margin-left: auto;
+  }
+
+  .sw {
+    width: 22px;
+    height: 8px;
+    border-radius: 4px;
+  }
+
+  .sw.rain {
+    background: linear-gradient(90deg, #5a96ff, #46c88c, #f0d246, #f05a46);
+  }
+
+  .sw.cloud {
+    background: linear-gradient(90deg, #0d1b2c, #eef1f6);
+  }
+
+  .sw.wind {
+    background: linear-gradient(90deg, #ffffff, #cde8ff, #ffd678, #ff785c);
+  }
   .forecast {
     margin-top: 16px;
   }
