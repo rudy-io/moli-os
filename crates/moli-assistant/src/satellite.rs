@@ -15,16 +15,35 @@ use crate::{Assistant, AssistantError, Message, Role, Speech, Turn, voice, word_
 /// A prepared voice stays fetchable this long (the satellite asks at once).
 const PREPARED_TTL: Duration = Duration::from_secs(60);
 const MAX_PREPARED: usize = 64;
+/// The provider's raw voice: 24 kHz, 16-bit, mono.
+const VOICE_RATE: u32 = 24_000;
+/// The provider's voice comes about -25 LUFS, far below a speaker's usual
+/// level (and below the closing chime): +9 dB for the satellites.
+const SATELLITE_GAIN: f32 = 2.8;
+/// Above this, peaks are rounded off instead of clipped.
+const KNEE: f32 = 0.7;
 
 impl Assistant {
-    /// The voice prepared under `name` (`<id>.mp3`), streamed as MP3 while
-    /// the cloud voice makes it; whole (WAV) from the house's voice otherwise.
+    /// The voice prepared under `name` (`<id>.wav`), streamed as WAV while
+    /// the cloud voice makes it, louder for a satellite's small speaker;
+    /// whole (WAV) from the house's voice otherwise.
     pub async fn satellite_voice(&self, name: &str) -> Result<Speech, AssistantError> {
-        let id = name.strip_suffix(".mp3").unwrap_or(name);
+        let id = name
+            .strip_suffix(".wav")
+            .or_else(|| name.strip_suffix(".mp3"))
+            .unwrap_or(name);
         let text = self
             .prepared_text(id)
             .ok_or_else(|| AssistantError::Invalid("unknown or expired voice".into()))?;
-        self.voice_for(&text, None, Some(voice::Stream::Mp3)).await
+        Ok(
+            match self
+                .voice_for(&text, None, Some(voice::Stream::Pcm))
+                .await?
+            {
+                Speech::Stream(stream) => Speech::Stream(louder_wav(stream)),
+                whole @ Speech::Whole(_) => whole,
+            },
+        )
     }
 
     /// Files `text` under a new unguessable id.
@@ -101,7 +120,7 @@ impl VoiceBrain for Assistant {
 
     fn voice_url(&self, base: &str, text: &str) -> Option<String> {
         let id = self.prepare(text.trim())?;
-        Some(format!("{}/api/voice/{id}.mp3", base.trim_end_matches('/')))
+        Some(format!("{}/api/voice/{id}.wav", base.trim_end_matches('/')))
     }
 
     fn is_goodbye(&self, text: &str) -> bool {
@@ -138,9 +157,112 @@ fn goodbye(text: &str, phrases: &[String]) -> bool {
     !said.is_empty() && phrases.iter().any(|p| normalize(p) == said)
 }
 
+/// The raw voice as a WAV stream, louder: the header first (its sizes left
+/// open, the stream ends with the sentence), then each chunk amplified.
+fn louder_wav(stream: voice::SpeechStream) -> voice::SpeechStream {
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+    let mut chunks = stream.chunks;
+    tokio::spawn(async move {
+        if tx
+            .send(Ok(open_wav_header(VOICE_RATE).into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        // A sample may straddle two chunks.
+        let mut carry: Option<u8> = None;
+        while let Some(chunk) = chunks.recv().await {
+            let out = chunk.map(|bytes| {
+                let mut raw = Vec::with_capacity(bytes.len() + 1);
+                raw.extend(carry.take());
+                raw.extend_from_slice(&bytes);
+                if raw.len() % 2 == 1 {
+                    carry = raw.pop();
+                }
+                louder(&raw, SATELLITE_GAIN).into()
+            });
+            if tx.send(out).await.is_err() {
+                return;
+            }
+        }
+    });
+    voice::SpeechStream {
+        mime: "audio/wav",
+        engine: stream.engine,
+        chunks: rx,
+    }
+}
+
+/// A 16-bit mono WAV header whose sizes say « until the end ».
+fn open_wav_header(rate: u32) -> Vec<u8> {
+    let mut h = Vec::with_capacity(44);
+    h.extend_from_slice(b"RIFF");
+    h.extend_from_slice(&u32::MAX.to_le_bytes());
+    h.extend_from_slice(b"WAVEfmt ");
+    h.extend_from_slice(&16u32.to_le_bytes());
+    h.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    h.extend_from_slice(&1u16.to_le_bytes()); // mono
+    h.extend_from_slice(&rate.to_le_bytes());
+    h.extend_from_slice(&(rate * 2).to_le_bytes());
+    h.extend_from_slice(&2u16.to_le_bytes());
+    h.extend_from_slice(&16u16.to_le_bytes());
+    h.extend_from_slice(b"data");
+    h.extend_from_slice(&(u32::MAX - 36).to_le_bytes());
+    h
+}
+
+/// 16-bit little-endian samples times `gain`, the peaks above the knee
+/// rounded off (never a hard clip).
+fn louder(pcm: &[u8], gain: f32) -> Vec<u8> {
+    pcm.as_chunks::<2>()
+        .0
+        .iter()
+        .flat_map(|b| {
+            let x = f32::from(i16::from_le_bytes(*b)) / 32768.0 * gain;
+            let m = x.abs();
+            let y = if m <= KNEE {
+                x
+            } else {
+                x.signum() * (KNEE + (1.0 - KNEE) * ((m - KNEE) / (1.0 - KNEE)).tanh())
+            };
+            #[allow(clippy::cast_possible_truncation)]
+            let s = (y * 32767.0).round() as i16;
+            s.to_le_bytes()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn samples(pcm: &[u8]) -> Vec<i16> {
+        pcm.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect()
+    }
+
+    #[test]
+    fn the_satellite_voice_is_louder_without_clipping() {
+        let quiet = (3277i16).to_le_bytes(); // 0.1
+        let loud = (16384i16).to_le_bytes(); // 0.5: 1.4 after the gain
+        let negative = (-16384i16).to_le_bytes();
+        let pcm = [quiet, loud, negative].concat();
+        let out = samples(&louder(&pcm, SATELLITE_GAIN));
+        assert!((i32::from(out[0]) - 9175).abs() < 3, "{out:?}"); // 0.28
+        assert!(out[1] > 29_000 && out[1] < i16::MAX, "{out:?}");
+        assert_eq!(out[2], -out[1]);
+        let header = open_wav_header(VOICE_RATE);
+        assert_eq!(header.len(), 44);
+        assert_eq!(&header[..4], b"RIFF");
+        assert_eq!(
+            u32::from_le_bytes(header[24..28].try_into().unwrap()),
+            24_000
+        );
+    }
 
     #[test]
     fn closing_words_close_and_questions_do_not() {
@@ -180,10 +302,10 @@ mod tests {
             "{url}"
         );
         assert!(
-            name.strip_suffix(".mp3").is_some_and(|id| id.len() == 32),
+            name.strip_suffix(".wav").is_some_and(|id| id.len() == 32),
             "{name}"
         );
-        let id = name.strip_suffix(".mp3").unwrap();
+        let id = name.strip_suffix(".wav").unwrap();
         assert_eq!(
             moli.prepared_text(id).as_deref(),
             Some("Il fait vingt degrés.")

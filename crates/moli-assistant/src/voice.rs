@@ -42,26 +42,23 @@ pub enum Speech {
 
 pub(crate) const PCM_MIME: &str = "audio/pcm;rate=24000";
 
-/// How a streamed voice is encoded: raw PCM for the dashboard (played piece
-/// by piece), MP3 for a satellite's player (it decodes a stream).
+/// How a streamed voice is encoded: raw PCM, played piece by piece by the
+/// dashboard, and turned into a louder WAV stream for a satellite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stream {
     Pcm,
-    Mp3,
 }
 
 impl Stream {
     fn format(self) -> &'static str {
         match self {
             Self::Pcm => "pcm",
-            Self::Mp3 => "mp3",
         }
     }
 
     fn mime(self) -> &'static str {
         match self {
             Self::Pcm => PCM_MIME,
-            Self::Mp3 => "audio/mpeg",
         }
     }
 }

@@ -34,7 +34,7 @@ pub fn chime() -> Vec<u8> {
             let pos = f64::from(i) / f64::from(n);
             // A quick attack, then a decay: no click at either end.
             let envelope = (pos * 20.0).min(1.0) * (1.0 - pos).powi(2);
-            let s = (2.0 * std::f64::consts::PI * freq * t).sin() * envelope * 0.35;
+            let s = (2.0 * std::f64::consts::PI * freq * t).sin() * envelope * 0.25;
             #[allow(clippy::cast_possible_truncation)]
             let sample = (s * f64::from(i16::MAX)) as i16;
             pcm.extend_from_slice(&sample.to_le_bytes());
