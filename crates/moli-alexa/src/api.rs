@@ -308,6 +308,14 @@ pub(crate) fn operation(
     })
 }
 
+/// The skill that carries an operation sits beside its payload, as the
+/// Alexa app sends it: an order spoken with the skill inside the payload is
+/// accepted, and the Echo stays silent.
+fn by(skill: &str, mut node: Json) -> Json {
+    node["skillId"] = json!(skill);
+    node
+}
+
 /// Several operations side by side.
 pub(crate) fn together(nodes: Vec<Json>) -> Json {
     if nodes.len() == 1 {
@@ -340,29 +348,28 @@ pub(crate) fn music(
 }
 
 pub(crate) fn text_command(echo: &Echo, customer: &str, locale: &str, text: &str) -> Json {
-    operation(
-        "Alexa.TextCommand",
-        echo,
-        customer,
-        locale,
-        &json!({ "text": text.to_lowercase(), "skillId": "amzn1.ask.1p.tellalexa" }),
+    by(
+        "amzn1.ask.1p.tellalexa",
+        operation(
+            "Alexa.TextCommand",
+            echo,
+            customer,
+            locale,
+            &json!({ "text": text.to_lowercase() }),
+        ),
     )
 }
 
 pub(crate) fn speak(echo: &Echo, customer: &str, locale: &str, text: &str) -> Json {
-    operation(
-        "Alexa.Speak",
-        echo,
-        customer,
-        locale,
-        &json!({
-            "textToSpeak": text,
-            "target": {
-                "customerId": customer,
-                "devices": [{ "deviceSerialNumber": echo.serial, "deviceTypeId": echo.device_type }],
-            },
-            "skillId": "amzn1.ask.1p.saysomething",
-        }),
+    by(
+        "amzn1.ask.1p.saysomething",
+        operation(
+            "Alexa.Speak",
+            echo,
+            customer,
+            locale,
+            &json!({ "textToSpeak": text }),
+        ),
     )
 }
 
@@ -372,30 +379,35 @@ pub(crate) fn announce(targets: &[&Echo], customer: &str, locale: &str, text: &s
         .iter()
         .map(|e| json!({ "deviceSerialNumber": e.serial, "deviceTypeId": e.device_type }))
         .collect();
-    json!({
-        "@type": "com.amazon.alexa.behaviors.model.OpaquePayloadOperationNode",
-        "type": "AlexaAnnouncement",
-        "operationPayload": {
-            "customerId": customer,
-            "expireAfter": "PT5S",
-            "content": [{
-                "locale": locale,
-                "display": { "title": "Moli", "body": text },
-                "speak": { "type": "text", "value": text },
-            }],
-            "target": { "customerId": customer, "devices": devices },
-            "skillId": "amzn1.ask.1p.routines.messaging",
-        },
-    })
+    by(
+        "amzn1.ask.1p.routines.messaging",
+        json!({
+            "@type": "com.amazon.alexa.behaviors.model.OpaquePayloadOperationNode",
+            "type": "AlexaAnnouncement",
+            "operationPayload": {
+                "customerId": customer,
+                "expireAfter": "PT5S",
+                "content": [{
+                    "locale": locale,
+                    "display": { "title": "Moli", "body": text },
+                    "speak": { "type": "text", "value": text },
+                }],
+                "target": { "customerId": customer, "devices": devices },
+            },
+        }),
+    )
 }
 
 pub(crate) fn volume(echo: &Echo, customer: &str, locale: &str, value: i64) -> Json {
-    operation(
-        "Alexa.DeviceControls.Volume",
-        echo,
-        customer,
-        locale,
-        &json!({ "value": value.clamp(0, 100) }),
+    by(
+        "amzn1.ask.1p.alexadevicecontrols",
+        operation(
+            "Alexa.DeviceControls.Volume",
+            echo,
+            customer,
+            locale,
+            &json!({ "value": value.clamp(0, 100) }),
+        ),
     )
 }
 
@@ -468,6 +480,27 @@ mod tests {
         assert_eq!(
             text_command(&a, "C", "fr-FR", "Quelle Heure")["operationPayload"]["text"],
             "quelle heure"
+        );
+    }
+
+    #[test]
+    fn the_skill_sits_beside_the_payload() {
+        let e = echo("G0911");
+        let said = speak(&e, "C", "fr-FR", "Bonjour");
+        assert_eq!(said["type"], "Alexa.Speak");
+        assert_eq!(said["skillId"], "amzn1.ask.1p.saysomething");
+        let p = &said["operationPayload"];
+        assert_eq!(p["textToSpeak"], "Bonjour");
+        assert!(p.get("skillId").is_none() && p.get("target").is_none());
+        let asked = text_command(&e, "C", "fr-FR", "Quelle heure");
+        assert_eq!(asked["skillId"], "amzn1.ask.1p.tellalexa");
+        assert!(asked["operationPayload"].get("skillId").is_none());
+        let note = announce(&[&e], "C", "fr-FR", "Bonjour");
+        assert_eq!(note["skillId"], "amzn1.ask.1p.routines.messaging");
+        assert!(note["operationPayload"].get("skillId").is_none());
+        assert_eq!(
+            volume(&e, "C", "fr-FR", 20)["skillId"],
+            "amzn1.ask.1p.alexadevicecontrols"
         );
     }
 
