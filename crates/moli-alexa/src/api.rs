@@ -168,6 +168,29 @@ impl Session {
             .map(|_| ())
     }
 
+    /// Music by search, as the Alexa app plays it: Amazon checks the search
+    /// first and answers the payload to play, so a search it refuses is an
+    /// error here rather than a silent speaker.
+    pub(crate) async fn play(
+        &self,
+        echo: &Echo,
+        phrase: &str,
+        provider: &str,
+    ) -> Result<(), Failure> {
+        let mut node = music(echo, &self.customer, &self.locale, phrase, provider);
+        let answer = self
+            .post(
+                "/api/behaviors/operation/validate",
+                &json!({
+                    "type": node["type"],
+                    "operationPayload": node["operationPayload"].to_string(),
+                }),
+            )
+            .await?;
+        node["operationPayload"] = checked(&answer).map_err(Failure::Other)?;
+        self.run(&node).await
+    }
+
     /// Play, pause, next… (`PlayCommand`, `PauseCommand`, `NextCommand`).
     pub(crate) async fn player(&self, echo: &Echo, command: &str) -> Result<(), Failure> {
         let path = format!(
@@ -269,6 +292,17 @@ fn default_provider(answer: &Json) -> Option<String> {
         .or_else(|| list.iter().find(plays))
         .and_then(|p| p["id"].as_str())
         .map(str::to_owned)
+}
+
+/// The payload Amazon gives back for a search it accepts.
+pub(crate) fn checked(answer: &Json) -> anyhow::Result<Json> {
+    match (answer["result"].as_str(), &answer["operationPayload"]) {
+        (Some("VALID"), payload) if !payload.is_null() => Ok(payload.clone()),
+        (result, _) => bail!(
+            "Amazon refused the search ({})",
+            result.unwrap_or("no answer")
+        ),
+    }
 }
 
 /// The routines' envelope: `sequenceJson` is JSON in a string.
@@ -481,6 +515,17 @@ mod tests {
             text_command(&a, "C", "fr-FR", "Quelle Heure")["operationPayload"]["text"],
             "quelle heure"
         );
+    }
+
+    #[test]
+    fn a_search_plays_what_amazon_checked() {
+        let payload = json!({ "searchPhrase": "du jazz", "sanitizedSearchPhrase": "jazz" });
+        assert_eq!(
+            checked(&json!({ "result": "VALID", "operationPayload": payload })).unwrap(),
+            payload
+        );
+        assert!(checked(&json!({ "result": "INVALID" })).is_err());
+        assert!(checked(&Json::Null).is_err());
     }
 
     #[test]

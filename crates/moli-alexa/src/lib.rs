@@ -437,8 +437,7 @@ async fn send(home: &Home, command: &CommandRequest) -> Result<(), Failure> {
         }
         ("play", v) => {
             let phrase = text(v)?;
-            s.run(&api::music(e, customer, locale, phrase, &home.music))
-                .await
+            s.play(e, phrase, &home.music).await
         }
         ("say", v) => {
             let words = text(v)?;
