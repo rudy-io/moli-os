@@ -7,6 +7,7 @@
   "assistant.prompt.cards_page": "jusqu'à 8, la page est grande",
   "assistant.prompt.cards_bubble": "2 à 4, l'écran est petit",
   "assistant.prompt.spoken": "\n\nCette réponse sera dite à voix haute, dans une conversation : une seule phrase courte, une quinzaine de mots, qui répond à la question et à rien d'autre, sans te répéter ni poser de question en retour. Pas de carte à l'écran : n'appelle pas `show`. Sans liste, sans symbole ni abréviation, nombres arrondis comme on les dit (« vingt-trois degrés », « un peu moins d'un kilowatt »). Si un ordre attend une validation, dis qu'il faut valider à l'écran.",
+  "assistant.prompt.web": "\n\nTu as accès au web : pour une information récente ou que tu ne connais pas (actualité, horaires, résultats, prix), appelle `web_search` avant de répondre ; ne dis jamais que tu n'as pas accès à internet ni à l'actualité.",
   "assistant.power.total": "Électricité en direct : {watts} pour toute la maison (compteur général, ce n'est pas un appareil)",
   "assistant.power.unknown": "Électricité en direct : inconnue",
   "assistant.power.circuits": " ; circuits mesurés : {circuits} ; le reste de la maison (non mesuré à part) : {rest}",

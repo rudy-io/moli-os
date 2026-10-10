@@ -541,7 +541,7 @@ impl Assistant {
 
         let power = self.power_now().await;
         let mut messages = vec![
-            json!({ "role": "system", "content": with_voice(self.system_prompt(&layout, page, &power), turn.spoken) }),
+            json!({ "role": "system", "content": with_voice(self.system_prompt(&layout, page, &power) + &self.web_line(), turn.spoken) }),
         ];
         let skip = turn.messages.len().saturating_sub(MAX_MESSAGES);
         for m in turn.messages.iter().skip(skip) {
@@ -568,7 +568,7 @@ impl Assistant {
             {
                 list.push(forecast_tool());
             }
-            if !self.0.config.search_model.is_empty() && !self.0.endpoint.is_local() {
+            if self.searches() {
                 list.push(search_tool());
             }
         }
@@ -742,6 +742,20 @@ impl Assistant {
                 tracing::warn!(error = %e, "forecast unavailable");
                 json!({ "error": "the forecast is unavailable right now" })
             }
+        }
+    }
+
+    /// The web is searched only through the provider (never a local model).
+    fn searches(&self) -> bool {
+        !self.0.config.search_model.is_empty() && !self.0.endpoint.is_local()
+    }
+
+    /// Models believe they cannot read the news: told otherwise when they can.
+    fn web_line(&self) -> String {
+        if self.searches() {
+            moli_i18n::tr!("assistant.prompt.web")
+        } else {
+            String::new()
         }
     }
 
