@@ -10,6 +10,8 @@ use moli_net::Body as Bytes;
 use serde_json::Value as Json;
 
 const CHAT_LIMIT: Duration = Duration::from_secs(45);
+/// A web search reads pages before it answers.
+const SEARCH_LIMIT: Duration = Duration::from_secs(30);
 const LISTEN_LIMIT: Duration = Duration::from_secs(30);
 const SPEAK_LIMIT: Duration = Duration::from_secs(20);
 /// A streamed voice: its first bytes come within this, or the house's voice speaks.
@@ -226,6 +228,18 @@ impl Endpoint {
             "application/json",
             body.to_string().into_bytes(),
             CHAT_LIMIT,
+        )
+        .await
+    }
+
+    /// A question answered from the web (`/responses` with `web_search`).
+    pub(crate) async fn respond(&self, key: Option<&str>, body: &Json) -> anyhow::Result<Json> {
+        self.post(
+            key,
+            "/responses",
+            "application/json",
+            body.to_string().into_bytes(),
+            SEARCH_LIMIT,
         )
         .await
     }

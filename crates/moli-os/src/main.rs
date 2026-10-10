@@ -449,12 +449,18 @@ fn start_assistant(
     energy: Option<&moli_energy::Energy>,
     history: Option<&moli_history::History>,
 ) -> anyhow::Result<Option<moli_assistant::Assistant>> {
+    let mut settings = config.assistant.clone().unwrap_or_default();
+    // The forecast's location: the one the automations already know.
+    if settings.latitude.zip(settings.longitude).is_none() {
+        settings.latitude = config.automations.latitude;
+        settings.longitude = config.automations.longitude;
+    }
     let moli = moli_assistant::Assistant::new(
         hub.clone(),
         energy.cloned(),
         history.cloned(),
         Some(config.server.data_dir.join("home.json")),
-        config.assistant.clone().unwrap_or_default(),
+        settings,
     )
     .context("[assistant]")?;
     moli.load_voice_prefs(config.server.data_dir.join("assistant.json"));

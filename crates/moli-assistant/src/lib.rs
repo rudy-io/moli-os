@@ -17,6 +17,7 @@ mod auto;
 mod house;
 mod import;
 mod llm;
+mod outside;
 mod satellite;
 mod settings;
 mod voice;
@@ -79,6 +80,15 @@ pub struct Config {
     /// For the date and time the model is told.
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    /// Questions about the world outside, answered from the web (the
+    /// provider's own search); empty to disable it.
+    #[serde(default = "default_model")]
+    pub search_model: String,
+    /// Where the house is, for the forecast; by default `[automations]`'s.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
 }
 
 impl Default for Config {
@@ -97,6 +107,9 @@ impl Default for Config {
             local_voice: default_local_voice(),
             local_listen: default_local_listen(),
             timezone: default_timezone(),
+            search_model: default_model(),
+            latitude: None,
+            longitude: None,
         }
     }
 }
@@ -545,6 +558,20 @@ impl Assistant {
             list.retain(|t| t["function"]["name"] != "show");
             list.push(end_tool());
         }
+        if let Some(list) = offered.as_array_mut() {
+            if self
+                .0
+                .config
+                .latitude
+                .zip(self.0.config.longitude)
+                .is_some()
+            {
+                list.push(forecast_tool());
+            }
+            if !self.0.config.search_model.is_empty() && !self.0.endpoint.is_local() {
+                list.push(search_tool());
+            }
+        }
         let mut run = Run::default();
         for step in 0..MAX_STEPS {
             let mut body = json!({
@@ -702,6 +729,53 @@ impl Assistant {
         }
     }
 
+    /// `forecast`: the days and hours to come where the house is.
+    async fn forecast(&self, args: &Json) -> Json {
+        let (Some(latitude), Some(longitude)) = (self.0.config.latitude, self.0.config.longitude)
+        else {
+            return json!({ "error": "the house's location is unknown" });
+        };
+        let days = args["days"].as_u64().unwrap_or(3);
+        match outside::forecast(latitude, longitude, days).await {
+            Ok(forecast) => forecast,
+            Err(e) => {
+                tracing::warn!(error = %e, "forecast unavailable");
+                json!({ "error": "the forecast is unavailable right now" })
+            }
+        }
+    }
+
+    /// `web_search`: a question about the world, answered from the web.
+    async fn web_search(&self, args: &Json) -> Json {
+        let Some(query) = args["query"]
+            .as_str()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+        else {
+            return json!({ "error": "query is required" });
+        };
+        let key = match self.key() {
+            Ok(key) => key,
+            Err(e) => return json!({ "error": e.to_string() }),
+        };
+        let c = &self.0.config;
+        match outside::search(
+            &self.0.endpoint,
+            key.as_deref(),
+            &c.search_model,
+            &c.timezone,
+            query,
+        )
+        .await
+        {
+            Ok(found) => found,
+            Err(e) => {
+                tracing::warn!(error = %e, "web search failed");
+                json!({ "error": "the web search failed" })
+            }
+        }
+    }
+
     /// Live power, circuit by circuit, and today's figures: the most asked
     /// questions answered without a round trip.
     async fn power_now(&self) -> String {
@@ -763,6 +837,8 @@ impl Assistant {
             }
             "energy" => self.energy(args).await,
             "history" => self.history(args).await,
+            "forecast" => self.forecast(args).await,
+            "web_search" => self.web_search(args).await,
             "automation" => self.automation_tool(args, run).await,
             other => json!({ "error": format!("unknown tool {other}") }),
         }
@@ -1201,6 +1277,42 @@ fn ambiance_tool() -> Json {
                     "white": { "type": "integer", "description": moli_i18n::tr!("assistant.tools.ambiance.white") }
                 },
                 "required": ["lights"]
+            }
+        }
+    })
+}
+
+/// The weather to come: offered when the house's location is known.
+fn forecast_tool() -> Json {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "forecast",
+            "description": moli_i18n::tr!("assistant.tools.forecast.description"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": { "type": "integer", "minimum": 1, "maximum": 7, "description": moli_i18n::tr!("assistant.tools.forecast.days") }
+                },
+                "required": []
+            }
+        }
+    })
+}
+
+/// The world outside the house, from the web.
+fn search_tool() -> Json {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": moli_i18n::tr!("assistant.tools.search.description"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": moli_i18n::tr!("assistant.tools.search.query") }
+                },
+                "required": ["query"]
             }
         }
     })
