@@ -1,0 +1,18 @@
+{
+  "parler.titre": "Faire parler la maison",
+  "parler.sous_titre": "Écris une phrase, choisis où Moli la dit : la sonnette, une Echo, la Sonos, le boîtier vocal…",
+  "parler.texte": "Ce que Moli doit dire",
+  "parler.placeholder": "À table !",
+  "parler.envoi": "Envoi…",
+  "parler.dire": "Dire",
+  "parler.dire_partout": "Dire sur {n} appareils",
+  "parler.dire_sur": "Dire sur {nom}",
+  "parler.reprendre": "Reprendre cette phrase",
+  "parler.ou": "Où",
+  "parler.sans_piece": "Sans pièce",
+  "parler.hors_ligne": "hors ligne",
+  "parler.envoye": "envoyé",
+  "parler.en_attente": "ton code",
+  "parler.echec": "échec",
+  "parler.aucun": "Aucun appareil ne sait encore parler."
+}

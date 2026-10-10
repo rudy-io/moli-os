@@ -1,6 +1,6 @@
 [package]
 name = "moli-reolink"
-description = "Moli OS driver for Reolink cameras and doorbells (HTTPS API, read-only)."
+description = "Moli OS driver for Reolink cameras and doorbells: events and images (HTTPS API), and Moli's voice through a doorbell's speaker (RTSP back channel)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,7 @@ moli-i18n.workspace = true
 anyhow.workspace = true
 moli-core.workspace = true
 moli-net.workspace = true
+md-5.workspace = true
 moli-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true

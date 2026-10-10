@@ -20,6 +20,7 @@
   import MoliSheet from './moli/MoliSheet.svelte';
   import Automatismes from './pages/Automatismes.svelte';
   import Systeme from './pages/Systeme.svelte';
+  import Parler from './pages/Parler.svelte';
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
 
@@ -45,6 +46,7 @@
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
+    { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
@@ -152,6 +154,8 @@
       {#await import('./pages/Carte.svelte') then { default: Carte }}<Carte />{/await}
     {:else if page === 'cameras'}
       <Cameras />
+    {:else if page === 'parler'}
+      <Parler />
     {:else if page === 'energie' && route.startsWith('energie/solaire')}
       <!-- The solar demo (a simulation): loaded only when visited. -->
       {#await import('./pages/Solaire.svelte') then { default: Solaire }}<Solaire />{/await}

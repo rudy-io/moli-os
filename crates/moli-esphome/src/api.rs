@@ -148,6 +148,19 @@ pub fn set_volume(key: u32, volume: f32) -> Vec<u8> {
         .finish()
 }
 
+/// `MediaPlayerCommandRequest`: play `url` as an announcement (over what
+/// plays, which comes back afterwards).
+#[must_use]
+pub fn announce(key: u32, url: &str) -> Vec<u8> {
+    Writer::new()
+        .fixed32(1, key)
+        .bool(6, true)
+        .str(7, url)
+        .bool(8, true)
+        .bool(9, true)
+        .finish()
+}
+
 /// `MediaPlayerCommandRequest`: mute (3) or unmute (4).
 #[must_use]
 pub fn set_muted(key: u32, muted: bool) -> Vec<u8> {
@@ -328,6 +341,14 @@ mod tests {
         assert_eq!(info.friendly_name, "Home Assistant Voice 0a8ccb");
         assert_eq!(info.voice_flags, 61);
         assert_eq!(info.esphome_version, "2026.3.2");
+    }
+
+    #[test]
+    fn an_announcement_is_a_url_marked_as_one() {
+        let message = announce(7, "http://moli/api/voice/a.wav");
+        let m = parse(&message).unwrap();
+        assert_eq!(m.fixed32(1), Some(7));
+        assert_eq!(m.str(7), Some("http://moli/api/voice/a.wav"));
     }
 
     #[test]

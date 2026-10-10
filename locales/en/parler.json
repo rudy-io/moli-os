@@ -1,0 +1,18 @@
+{
+  "parler.titre": "Make the house speak",
+  "parler.sous_titre": "Write a sentence, pick where Moli says it: the doorbell, an Echo, the Sonos, the voice satellite…",
+  "parler.texte": "What Moli should say",
+  "parler.placeholder": "Dinner is ready!",
+  "parler.envoi": "Sending…",
+  "parler.dire": "Say",
+  "parler.dire_partout": "Say on {n} devices",
+  "parler.dire_sur": "Say on {nom}",
+  "parler.reprendre": "Use this sentence again",
+  "parler.ou": "Where",
+  "parler.sans_piece": "No room",
+  "parler.hors_ligne": "offline",
+  "parler.envoye": "sent",
+  "parler.en_attente": "your code",
+  "parler.echec": "failed",
+  "parler.aucun": "No device can speak yet."
+}

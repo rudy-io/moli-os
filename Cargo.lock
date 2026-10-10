@@ -1543,6 +1543,7 @@ name = "moli-reolink"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "md-5",
  "moli-core",
  "moli-i18n",
  "moli-net",

@@ -27,6 +27,13 @@ pub struct Answer {
     pub closes: bool,
 }
 
+/// Sound as samples: 16-bit, mono, `rate` per second.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Pcm {
+    pub samples: Vec<i16>,
+    pub rate: u32,
+}
+
 pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// What was said (a 16 kHz mono 16-bit WAV), in the house's language;
     /// empty when nothing was understood.
@@ -40,6 +47,12 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// An address under `base` the satellite plays: `text` in Moli's voice,
     /// streamed while it is made. `None` when no voice can say it.
     fn voice_url(&self, base: &str, text: &str) -> Option<String>;
+
+    /// `text` in Moli's voice, whole: 16-bit mono samples and their rate,
+    /// for a speaker Moli feeds itself (a doorbell's talk-back).
+    fn voice_pcm(&self, _text: &str) -> BoxFuture<'_, Result<Pcm, String>> {
+        Box::pin(async { Err("no voice".to_owned()) })
+    }
 
     /// Whether `text` only closes the conversation (« merci », « c'est tout »…).
     fn is_goodbye(&self, text: &str) -> bool;

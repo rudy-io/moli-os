@@ -1,12 +1,15 @@
 //! Reolink cameras and doorbells behind a Home Hub (or one camera/NVR),
-//! through the HTTPS API. Read-only: motion, AI detections (person,
-//! vehicle, animal, package) and the doorbell button.
+//! through the HTTPS API: motion, AI detections (person, vehicle, animal,
+//! package) and the doorbell button. A camera with a speaker (a doorbell)
+//! also says what Moli writes to its `say` point (`talk.rs`).
 //!
 //! Credentials come from the encrypted secret store (`username`,
 //! `password`). The station's self-signed certificate is pinned on first
 //! contact, *before* any credential is sent. Events are polled once a
 //! second on a kept-alive connection; one session (token) is kept across
 //! driver restarts, since stations cap concurrent sessions.
+
+mod talk;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -16,7 +19,7 @@ use anyhow::{Context as _, bail};
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Value};
 use moli_net::{Method, PIN_MISMATCH, PinnedHttps};
 use moli_runtime::media::{Image, SnapshotSource};
-use moli_runtime::{BoxFuture, Driver, DriverCtx};
+use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 use tokio::time::Instant;
@@ -30,6 +33,8 @@ const RESCAN: Duration = Duration::from_secs(300);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// Renew the token this long before its lease ends.
 const LEASE_MARGIN: Duration = Duration::from_secs(60);
+/// What a doorbell may say at once.
+const MAX_SAY: usize = 500;
 /// Reolink session errors: « please login first », « login failed ».
 const LOGIN_CODES: [i64; 2] = [-6, -7];
 
@@ -50,10 +55,17 @@ pub struct Config {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// The station's RTSP server: the doorbell's speaker is reached there.
+    #[serde(default = "default_rtsp_port")]
+    pub rtsp_port: u16,
 }
 
 fn default_port() -> u16 {
     443
+}
+
+fn default_rtsp_port() -> u16 {
+    554
 }
 
 /// A session token and when it must be renewed. Never printed.
@@ -252,6 +264,8 @@ struct Channel {
     online: bool,
     /// API event names this channel supports.
     events: Vec<&'static str>,
+    /// It has a speaker Moli can talk through (`None`: not asked yet).
+    talks: Option<bool>,
 }
 
 fn point(key: &str, label: &str) -> PointSpec {
@@ -290,6 +304,15 @@ fn channel_device(ctx: &DriverCtx, model: &str, channel: &Channel) -> Device {
             .iter()
             .filter(|(api, _, _)| channel.events.contains(api))
             .map(|(_, key, label)| point(key, &moli_i18n::tr(label)))
+            .chain((channel.talks == Some(true)).then(|| PointSpec {
+                kind: Kind::Text,
+                access: Access {
+                    read: true,
+                    write: true,
+                },
+                semantic: Semantic::Other,
+                ..point("say", &moli_i18n::tr!("pilotes.reolink.dire"))
+            }))
             .collect(),
     }
 }
@@ -388,6 +411,7 @@ async fn scan(session: &Session, verbose: bool) -> anyhow::Result<(String, Vec<C
             ),
             online,
             events,
+            talks: None,
         });
     }
     Ok((model, channels))
@@ -414,13 +438,19 @@ async fn run(
     } else {
         first_pin(config, ctx).await?
     };
+    let station = talk::Station {
+        host: config.host.clone(),
+        port: config.rtsp_port,
+        user: username.clone(),
+        password: password.clone(),
+    };
     let session = Arc::new(Session {
         http: PinnedHttps::new(&config.host, config.port, Some(pin))?,
         username,
         password,
         token,
     });
-    serve(ctx, &session).await
+    serve(ctx, &session, &station).await
 }
 
 /// First contact: a bare handshake records the certificate, stored before
@@ -437,7 +467,13 @@ async fn first_pin(config: &Config, ctx: &DriverCtx) -> anyhow::Result<String> {
     Ok(seen)
 }
 
-async fn serve(ctx: &mut DriverCtx, session: &Arc<Session>) -> anyhow::Result<()> {
+async fn serve(
+    ctx: &mut DriverCtx,
+    session: &Arc<Session>,
+    station: &talk::Station,
+) -> anyhow::Result<()> {
+    // One sentence at a time through the station.
+    let turn = Arc::new(tokio::sync::Mutex::new(()));
     let mut model = String::from("Reolink");
     let mut channels: BTreeMap<u64, Channel> = BTreeMap::new();
     let mut backoff = Duration::from_secs(2);
@@ -449,7 +485,10 @@ async fn serve(ctx: &mut DriverCtx, session: &Arc<Session>) -> anyhow::Result<()
     loop {
         tokio::select! {
             command = ctx.next_command() => match command {
-                Some(command) => command.reply(Err(moli_i18n::tr!("pilotes.reolink.lecture_seule"))),
+                Some(command) => {
+                    let result = speak(ctx, station, &turn, &channels, &command);
+                    command.reply(result);
+                }
                 None => return Ok(()),
             },
             _ = poll.tick() => {
@@ -457,7 +496,7 @@ async fn serve(ctx: &mut DriverCtx, session: &Arc<Session>) -> anyhow::Result<()
                     continue;
                 }
                 let result = if retry_at.is_some() || Instant::now() >= rescan_at {
-                    rescan(ctx, session, &mut model, &mut channels).await.map(|()| {
+                    rescan(ctx, session, station, &mut model, &mut channels).await.map(|()| {
                         rescan_at = Instant::now() + RESCAN;
                     })
                 } else {
@@ -511,6 +550,7 @@ fn unavailable(ctx: &DriverCtx, channels: &BTreeMap<u64, Channel>) {
 async fn rescan(
     ctx: &DriverCtx,
     session: &Arc<Session>,
+    station: &talk::Station,
     model: &mut String,
     channels: &mut BTreeMap<u64, Channel>,
 ) -> anyhow::Result<()> {
@@ -519,13 +559,18 @@ async fn rescan(
     for channel in found {
         let known = channels.get(&channel.number);
         // An offline channel keeps the events it had.
-        let channel = match known {
+        let mut channel = match known {
             Some(old) if !channel.online => Channel {
                 events: old.events.clone(),
                 ..channel
             },
             _ => channel,
         };
+        // Whether it has a speaker: asked once, when it is first online.
+        channel.talks = known.and_then(|old| old.talks);
+        if channel.talks.is_none() && channel.online {
+            ask_speaker(ctx, station, &mut channel).await;
+        }
         if known != Some(&channel) {
             ctx.upsert_device(channel_device(ctx, model, &channel));
             ctx.provide_snapshots(
@@ -539,6 +584,72 @@ async fn rescan(
         ctx.set_availability(&channel_id(ctx, &channel), channel.online);
         channels.insert(channel.number, channel);
     }
+    Ok(())
+}
+
+/// Asks the station whether `channel` has a speaker; unanswered, it is
+/// asked again at the next scan.
+async fn ask_speaker(ctx: &DriverCtx, station: &talk::Station, channel: &mut Channel) {
+    match talk::offers(station, channel.number).await {
+        Ok(talks) => {
+            tracing::info!(instance = %ctx.instance(), channel = channel.number, talks, "reolink speaker");
+            channel.talks = Some(talks);
+        }
+        Err(e) => tracing::debug!(
+            instance = %ctx.instance(),
+            channel = channel.number,
+            error = %format!("{e:#}"),
+            "reolink back channel not asked"
+        ),
+    }
+}
+
+/// A sentence through a channel's speaker: checked now, said in the
+/// background (Moli's voice is made, then sent in real time), one at a time.
+fn speak(
+    ctx: &DriverCtx,
+    station: &talk::Station,
+    turn: &Arc<tokio::sync::Mutex<()>>,
+    channels: &BTreeMap<u64, Channel>,
+    command: &CommandRequest,
+) -> Result<(), String> {
+    if &*command.key != "say" {
+        return Err(moli_i18n::tr!("pilotes.reolink.lecture_seule"));
+    }
+    let channel = channels
+        .values()
+        .find(|c| c.talks == Some(true) && channel_id(ctx, c) == command.device.id)
+        .ok_or_else(|| moli_i18n::tr!("pilotes.reolink.sans_haut_parleur"))?;
+    let text = match &command.value {
+        Value::Text(t) if !t.trim().is_empty() && t.trim().chars().count() <= MAX_SAY => {
+            t.trim().to_owned()
+        }
+        _ => return Err(moli_i18n::tr!("pilotes.reolink.phrase")),
+    };
+    let brain = ctx
+        .voice_brain()
+        .ok_or_else(|| moli_i18n::tr!("pilotes.reolink.sans_voix"))?;
+    let (station, turn, number) = (station.clone(), Arc::clone(turn), channel.number);
+    let instance = ctx.instance().to_string();
+    tokio::spawn(async move {
+        let _turn = turn.lock().await;
+        let result = async {
+            let pcm = brain.voice_pcm(&text).await.map_err(anyhow::Error::msg)?;
+            #[allow(clippy::cast_precision_loss)]
+            let seconds = pcm.samples.len() as f64 / f64::from(pcm.rate.max(1));
+            let limit = Duration::from_secs_f64(seconds) + Duration::from_secs(15);
+            tokio::time::timeout(limit, talk::say(&station, number, &pcm))
+                .await
+                .context("the doorbell took too long")?
+        }
+        .await;
+        match result {
+            Ok(()) => tracing::info!(instance, channel = number, "said through the doorbell"),
+            Err(e) => {
+                tracing::warn!(instance, channel = number, error = %format!("{e:#}"), "doorbell speech failed");
+            }
+        }
+    });
     Ok(())
 }
 

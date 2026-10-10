@@ -172,6 +172,13 @@ fn device(
                 false,
                 None,
             ),
+            spec(
+                "say",
+                &moli_i18n::tr!("pilotes.esphome.dire"),
+                Kind::Text,
+                true,
+                None,
+            ),
         ],
     }
 }
@@ -549,7 +556,7 @@ async fn session(
                     let _ = tx.send(api::DISCONNECT_REQUEST, &[]).await;
                     return Ok(());
                 };
-                let result = order(&mut tx, &entities, &command).await;
+                let result = order(ctx, &mut tx, &entities, config.media_base.as_deref(), &command).await;
                 command.reply(result);
             }
         }
@@ -672,10 +679,16 @@ async fn until(at: Option<Instant>) {
     }
 }
 
-/// A command for the device: the volume or mute of its media player.
+/// What a satellite may say at once.
+const MAX_SAY: usize = 500;
+
+/// A command for the device: the volume or mute of its media player, or a
+/// sentence in Moli's voice (an announcement over what it plays).
 async fn order(
+    ctx: &DriverCtx,
     tx: &mut Outbox,
     entities: &Entities,
+    media_base: Option<&str>,
     command: &CommandRequest,
 ) -> Result<(), String> {
     let key = entities
@@ -693,6 +706,18 @@ async fn order(
             api::set_volume(key, v)
         }
         ("muted", Value::Bool(m)) => api::set_muted(key, *m),
+        ("say", Value::Text(text)) => {
+            let text = text.trim();
+            if text.is_empty() || text.chars().count() > MAX_SAY {
+                return Err(moli_i18n::tr!("pilotes.esphome.phrase"));
+            }
+            let url = ctx
+                .voice_brain()
+                .zip(media_base)
+                .and_then(|(brain, base)| brain.voice_url(base, text))
+                .ok_or_else(|| moli_i18n::tr!("pilotes.esphome.sans_voix"))?;
+            api::announce(key, &url)
+        }
         (point, _) => {
             return Err(moli_i18n::tr!(
                 "pilotes.esphome.lecture_seule",

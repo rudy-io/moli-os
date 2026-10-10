@@ -11,7 +11,7 @@ crate = "moli-reolink"
 # No discovery: the instance gives the station's address.
 mdns = []
 ssdp = []
-ports = [443]
+ports = [443, 554]
 
 [needs]
 # `cert` (the pinned fingerprint) is written by the driver itself.

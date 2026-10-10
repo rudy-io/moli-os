@@ -7,7 +7,7 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use moli_runtime::BoxFuture;
-use moli_runtime::voice::{Answer, Said, Speaker, VoiceBrain};
+use moli_runtime::voice::{Answer, Pcm, Said, Speaker, VoiceBrain};
 use ring::rand::{SecureRandom as _, SystemRandom};
 
 use crate::{Assistant, AssistantError, Message, Role, Speech, Turn, voice, word_list};
@@ -124,6 +124,34 @@ impl VoiceBrain for Assistant {
         Some(format!("{}/api/voice/{id}.wav", base.trim_end_matches('/')))
     }
 
+    fn voice_pcm(&self, text: &str) -> BoxFuture<'_, Result<Pcm, String>> {
+        let text = text.trim().to_owned();
+        Box::pin(async move {
+            let speech = self
+                .voice_for(&text, None, Some(voice::Stream::Pcm))
+                .await
+                .map_err(|e| e.to_string())?;
+            match speech {
+                Speech::Stream(mut stream) => {
+                    let mut raw = Vec::new();
+                    while let Some(chunk) = stream.chunks.recv().await {
+                        raw.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
+                    }
+                    Ok(Pcm {
+                        samples: samples_of(&louder(&raw, SATELLITE_GAIN)),
+                        rate: VOICE_RATE,
+                    })
+                }
+                Speech::Whole(spoken) => voice::pcm_of(&spoken.audio)
+                    .map(|(rate, pcm)| Pcm {
+                        samples: samples_of(pcm),
+                        rate,
+                    })
+                    .ok_or_else(|| format!("a voice in {}", spoken.mime)),
+            }
+        })
+    }
+
     fn is_goodbye(&self, text: &str) -> bool {
         goodbye(text, &word_list("assistant.voice.goodbye"))
     }
@@ -195,6 +223,15 @@ fn louder_wav(stream: voice::SpeechStream) -> voice::SpeechStream {
     }
 }
 
+/// 16-bit little-endian bytes as samples (an odd last byte dropped).
+fn samples_of(pcm: &[u8]) -> Vec<i16> {
+    pcm.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| i16::from_le_bytes(*b))
+        .collect()
+}
+
 /// A 16-bit mono WAV header whose sizes say « until the end ».
 fn open_wav_header(rate: u32) -> Vec<u8> {
     let mut h = Vec::with_capacity(44);
@@ -238,21 +275,13 @@ fn louder(pcm: &[u8], gain: f32) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    fn samples(pcm: &[u8]) -> Vec<i16> {
-        pcm.as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| i16::from_le_bytes(*b))
-            .collect()
-    }
-
     #[test]
     fn the_satellite_voice_is_louder_without_clipping() {
         let quiet = (3277i16).to_le_bytes(); // 0.1
         let loud = (16384i16).to_le_bytes(); // 0.5: 1.4 after the gain
         let negative = (-16384i16).to_le_bytes();
         let pcm = [quiet, loud, negative].concat();
-        let out = samples(&louder(&pcm, SATELLITE_GAIN));
+        let out = samples_of(&louder(&pcm, SATELLITE_GAIN));
         assert!((i32::from(out[0]) - 9175).abs() < 3, "{out:?}"); // 0.28
         assert!(out[1] > 29_000 && out[1] < i16::MAX, "{out:?}");
         assert_eq!(out[2], -out[1]);
