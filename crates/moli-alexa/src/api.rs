@@ -182,13 +182,20 @@ impl Session {
         .map(|_| ())
     }
 
-    /// What `echo` plays now.
+    /// What `echo` plays now. A speaker with no player at all answers
+    /// 400: it plays nothing.
     pub(crate) async fn playing(&self, echo: &Echo) -> Result<Playing, Failure> {
         let path = format!(
             "/api/np/player?deviceSerialNumber={}&deviceType={}&screenWidth=1392",
             echo.serial, echo.device_type
         );
-        Ok(player_state(&self.get(&path).await?))
+        match self.get(&path).await {
+            Ok(answer) => Ok(player_state(&answer)),
+            Err(Failure::Other(e)) if format!("{e:#}").contains(": HTTP 400") => {
+                Ok(Playing::idle())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Every speaker's volume: (serial, 0-100).
@@ -208,6 +215,15 @@ pub(crate) struct Playing {
     pub title: String,
     pub artist: String,
     pub volume: Option<f64>,
+}
+
+impl Playing {
+    fn idle() -> Self {
+        Self {
+            state: "IDLE".into(),
+            ..Self::default()
+        }
+    }
 }
 
 pub(crate) fn player_state(answer: &Json) -> Playing {

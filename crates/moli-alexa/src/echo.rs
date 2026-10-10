@@ -27,6 +27,9 @@ pub(crate) struct Echo {
 
 /// Apps (iOS, Android, PC, Moli itself) and TV sticks are not speakers.
 const NOT_SPEAKERS: [&str; 3] = [DEVICE_TYPE, "A2TF17PFR55MTB", "A1RTAM01W29CUP"];
+/// The Echo families: Echo and Dot, Show, Spot. Other devices with Alexa
+/// built in (a watch, a Sonos, a car) are not Moli's to drive through Amazon.
+const ECHO_FAMILIES: [&str; 3] = ["ECHO", "KNIGHT", "ROOK"];
 /// Multi-room groups (`WHA`): « Speaker Group ».
 const GROUP_TYPE: &str = "A3C9PE6TNYLTCH";
 
@@ -55,7 +58,7 @@ pub(crate) fn speakers(answer: &Json) -> Vec<Echo> {
             let group = (family == "WHA" || device_type == GROUP_TYPE) && !members.is_empty();
             let speaker = caps.contains(&"AUDIO_PLAYER")
                 && !NOT_SPEAKERS.contains(&device_type.as_str())
-                && family != "FIRE_TV";
+                && ECHO_FAMILIES.contains(&family);
             (group || speaker).then(|| Echo {
                 name: d["accountName"].as_str().unwrap_or(&serial).to_owned(),
                 family: family.to_owned(),
@@ -190,11 +193,17 @@ mod tests {
               "accountName": "Fire TV", "capabilities": ["AUDIO_PLAYER"] },
             { "serialNumber": "GRP", "deviceType": "A3C9PE6TNYLTCH", "deviceFamily": "WHA",
               "accountName": "Partout", "clusterMembers": ["G0911", "G0922"], "capabilities": [] },
-            { "serialNumber": "PLUG", "deviceType": "A1", "deviceFamily": "SMART_PLUG", "capabilities": [] }
+            { "serialNumber": "PLUG", "deviceType": "A1", "deviceFamily": "SMART_PLUG", "capabilities": [] },
+            { "serialNumber": "WATCH", "deviceType": "A1CFVS523BQYZ7", "deviceFamily": "UNKNOWN",
+              "accountName": "Montre", "capabilities": ["AUDIO_PLAYER"] },
+            { "serialNumber": "SONOS", "deviceType": "A15ERDAKK5HQQG", "deviceFamily": "THIRD_PARTY_AVS_MEDIA_DISPLAY",
+              "accountName": "Salon Sonos", "capabilities": ["AUDIO_PLAYER"] },
+            { "serialNumber": "SHOW", "deviceType": "A4ZP7ZC4PI6TO", "deviceFamily": "KNIGHT",
+              "accountName": "Cuisine", "capabilities": ["AUDIO_PLAYER"] }
         ]});
         let found = speakers(&answer);
         let names: Vec<&str> = found.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["Echo du salon", "Partout"]);
+        assert_eq!(names, ["Echo du salon", "Partout", "Cuisine"]);
         assert!(!found[0].group && found[0].online);
         assert!(found[1].group);
         assert_eq!(found[1].members, ["G0911", "G0922"]);
