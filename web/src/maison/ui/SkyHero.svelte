@@ -37,6 +37,22 @@
   const ready = $derived(latest && loaded[latest]);
   const age = $derived(latest ? Math.max(0, Math.round((home.now - Date.parse(latest)) / 60_000)) : null);
 
+  // The crop: the house falls in the open sky between the greeting and the
+  // forecast (never under the glass), the image still covering everything.
+  let W = $state(0);
+  let H = $state(0);
+  let glass = $state();
+  const place = $derived.by(() => {
+    const [iw, ih] = sky.satellite?.size ?? [960, 720];
+    if (!W || !H) return null;
+    const open = glass ? glass.offsetTop : H;
+    const tx = 0.5;
+    const ty = Math.max(0.2, (open * 0.55) / H);
+    const [hx, hy] = house;
+    const s = Math.max(W / iw, H / ih, (tx * W) / (hx * iw), ((1 - tx) * W) / ((1 - hx) * iw), (ty * H) / (hy * ih), ((1 - ty) * H) / ((1 - hy) * ih));
+    return { w: iw * s, h: ih * s, left: tx * W - hx * iw * s, top: ty * H - hy * ih * s, x: tx * W, y: ty * H };
+  });
+
   onMount(() => {
     const stop = watchSky();
     const still = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -60,16 +76,23 @@
   });
 </script>
 
-<section class="hero" class:night={!day} class:live={ready} style="--hx:{house[0] * 100}%; --hy:{house[1] * 100}%">
+<section class="hero" class:night={!day} class:live={ready} bind:clientWidth={W} bind:clientHeight={H}>
   <div class="space" aria-hidden="true">
     {#each frames as f (f)}
-      <img src={frameUrl(f)} alt="" class:on={f === current && loaded[f]} onload={() => (loaded[f] = true)} decoding="async" />
+      <img
+        src={frameUrl(f)}
+        alt=""
+        class:on={f === current && loaded[f]}
+        style={place ? `width:${place.w}px; height:${place.h}px; left:${place.left}px; top:${place.top}px` : ''}
+        onload={() => (loaded[f] = true)}
+        decoding="async"
+      />
     {/each}
   </div>
   <div class="veil" aria-hidden="true"></div>
 
-  {#if ready}
-    <button class="pin" onclick={() => (viewer = true)} aria-label={t('maison.meteo.voir_nuages')}>
+  {#if ready && place}
+    <button class="pin" style="left:{place.x}px; top:{place.y}px" onclick={() => (viewer = true)} aria-label={t('maison.meteo.voir_nuages')}>
       <span class="dot"></span>
       <span class="pin-label">{t('maison.meteo.maison')}</span>
     </button>
@@ -98,7 +121,7 @@
   </div>
 
   {#if rows.length}
-    <div class="glass">
+    <div class="glass" bind:this={glass}>
       <div class="glass-head">
         <p class="outlook">{line ?? ''}</p>
         <div class="tabs" role="tablist" aria-label={t('maison.meteo.previsions')}>
@@ -179,12 +202,7 @@
 
   .space img {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    /* The house stays where the pin is, whatever the crop. */
-    object-position: var(--hx) var(--hy);
+    max-width: none;
     opacity: 0;
     transition: opacity 0.5s linear;
     filter: saturate(1.08) contrast(1.04);
@@ -212,8 +230,6 @@
 
   .pin {
     position: absolute;
-    left: var(--hx);
-    top: var(--hy);
     z-index: 0;
     transform: translate(-7px, -7px);
     display: flex;
