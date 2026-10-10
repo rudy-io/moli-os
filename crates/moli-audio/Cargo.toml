@@ -1,0 +1,16 @@
+[package]
+name = "moli-audio"
+description = "Moli OS sound helpers: is someone speaking (earshot), AAC out of RTP (RFC 3640, decoded by Symphonia), G.711 µ-law, resampling, WAV."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+earshot.workspace = true
+symphonia-codec-aac.workspace = true
+symphonia-core.workspace = true
+
+[lints]
+workspace = true

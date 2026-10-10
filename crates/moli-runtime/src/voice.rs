@@ -27,6 +27,18 @@ pub struct Answer {
     pub closes: bool,
 }
 
+/// What Moli made of a sentence said at a door.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AtDoor {
+    /// Nothing for the household: no words, or words not meant for Moli.
+    Nothing,
+    /// Moli was called by name and nothing more (« Hey Moli ? »): the door
+    /// asks for the message.
+    Called,
+    /// Passed on to the household (empty: a ring without a word).
+    Relayed(String),
+}
+
 /// Sound as samples: 16-bit, mono, `rate` per second.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pcm {
@@ -52,6 +64,22 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// for a speaker Moli feeds itself (a doorbell's talk-back).
     fn voice_pcm(&self, _text: &str) -> BoxFuture<'_, Result<Pcm, String>> {
         Box::pin(async { Err("no voice".to_owned()) })
+    }
+
+    /// What was said at a door (`door`: its device id) — a 16 kHz WAV,
+    /// `None` when the visitor rang and said nothing — passed on to the
+    /// household. `rang`: the visitor pressed the button, all they say is a
+    /// message; otherwise only a sentence that calls Moli by name is one,
+    /// and anything else is dropped, kept nowhere. A door is outside, anyone
+    /// talks to it: nothing said there reaches the model or acts on the
+    /// house.
+    fn at_door(
+        &self,
+        _door: String,
+        _wav: Option<Vec<u8>>,
+        _rang: bool,
+    ) -> BoxFuture<'_, Result<AtDoor, String>> {
+        Box::pin(async { Ok(AtDoor::Nothing) })
     }
 
     /// Whether `text` only closes the conversation (« merci », « c'est tout »…).

@@ -12,6 +12,7 @@ rust-version = "1.88"
 [workspace.dependencies]
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
+moli-audio = { path = "crates/moli-audio" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
@@ -50,6 +51,8 @@ anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "macros"] }
 crc32fast = "1"
 earshot = "1.2"
+symphonia-codec-aac = "0.6"
+symphonia-core = "0.6"
 clap = { version = "4", features = ["derive", "env"] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 http = "1"

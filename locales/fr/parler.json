@@ -14,5 +14,8 @@
   "parler.envoye": "envoyé",
   "parler.en_attente": "ton code",
   "parler.echec": "échec",
+  "parler.porte": "À la porte aujourd’hui",
+  "parler.repondre": "Répondre à la porte",
+  "parler.sonne": "On a sonné, sans message",
   "parler.aucun": "Aucun appareil ne sait encore parler."
 }

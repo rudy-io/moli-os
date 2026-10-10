@@ -14,5 +14,8 @@
   "parler.envoye": "sent",
   "parler.en_attente": "your code",
   "parler.echec": "failed",
+  "parler.porte": "At the door today",
+  "parler.repondre": "Answer the door",
+  "parler.sonne": "Someone rang, no message",
   "parler.aucun": "No device can speak yet."
 }

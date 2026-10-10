@@ -12,6 +12,7 @@ anyhow.workspace = true
 moli-core.workspace = true
 moli-net.workspace = true
 md-5.workspace = true
+moli-audio.workspace = true
 moli-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true

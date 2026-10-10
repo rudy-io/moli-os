@@ -135,5 +135,12 @@
   "assistant.say.unit.kmh": "kilomètres heure",
   "assistant.say.unit.min": "minutes",
   "assistant.say.hours": "{h} heures",
-  "assistant.say.hours_minutes": "{h} heures {m}"
+  "assistant.say.hours_minutes": "{h} heures {m}",
+  "assistant.door.sonne": "🔔 On a sonné ({door}), sans laisser de message.",
+  "assistant.door.message": "🔔 {door} : « {message} »\nPour répondre : page Parler de Moli, cible la sonnette.",
+  "assistant.door.annonce": "Message à la porte : {message}",
+  "assistant.door.porte": "la porte",
+  "assistant.recap.porte": "🔔 À la porte : {n}",
+  "assistant.recap.porte_sonne": "{time} · porte · sonné, sans message",
+  "assistant.recap.porte_message": "{time} · porte · « {message} »"
 }

@@ -24,6 +24,8 @@ pub enum Kind {
     /// A satellite woke and heard nothing it could understand: a wake word
     /// said for nothing, or a false activation.
     Silence,
+    /// A message left at a door, passed on to the household.
+    Door,
 }
 
 /// An order given during a turn, as the history shows it.

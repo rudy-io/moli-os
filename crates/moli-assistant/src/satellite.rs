@@ -7,7 +7,7 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use moli_runtime::BoxFuture;
-use moli_runtime::voice::{Answer, Pcm, Said, Speaker, VoiceBrain};
+use moli_runtime::voice::{Answer, AtDoor, Pcm, Said, Speaker, VoiceBrain};
 use ring::rand::{SecureRandom as _, SystemRandom};
 
 use crate::{Assistant, AssistantError, Message, Role, Speech, Turn, voice, word_list};
@@ -150,6 +150,15 @@ impl VoiceBrain for Assistant {
                     .ok_or_else(|| format!("a voice in {}", spoken.mime)),
             }
         })
+    }
+
+    fn at_door(
+        &self,
+        door: String,
+        wav: Option<Vec<u8>>,
+        rang: bool,
+    ) -> BoxFuture<'_, Result<AtDoor, String>> {
+        Box::pin(async move { self.door(&door, wav, rang).await.map_err(|e| e.to_string()) })
     }
 
     fn is_goodbye(&self, text: &str) -> bool {

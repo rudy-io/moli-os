@@ -135,5 +135,12 @@
   "assistant.say.unit.kmh": "kilometers per hour",
   "assistant.say.unit.min": "minutes",
   "assistant.say.hours": "{h} hours",
-  "assistant.say.hours_minutes": "{h} hours {m}"
+  "assistant.say.hours_minutes": "{h} hours {m}",
+  "assistant.door.sonne": "🔔 Someone rang ({door}) without leaving a message.",
+  "assistant.door.message": "🔔 {door}: “{message}”\nTo answer: Moli’s Speak page, pick the doorbell.",
+  "assistant.door.annonce": "Message at the door: {message}",
+  "assistant.door.porte": "the door",
+  "assistant.recap.porte": "🔔 At the door: {n}",
+  "assistant.recap.porte_sonne": "{time} · door · rang, no message",
+  "assistant.recap.porte_message": "{time} · door · “{message}”"
 }

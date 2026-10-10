@@ -17,8 +17,8 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::api::{self, VoiceEvent, VoiceRequest};
-use crate::vad::{self, Edge, Vad};
 use crate::{Outbox, sound};
+use moli_audio::vad::{self, Edge, Vad};
 
 const RATE: u32 = 16_000;
 /// A sentence longer than this is cut and heard as it is.

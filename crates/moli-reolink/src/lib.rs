@@ -9,6 +9,9 @@
 //! second on a kept-alive connection; one session (token) is kept across
 //! driver restarts, since stations cap concurrent sessions.
 
+mod door;
+mod listen;
+mod rtsp;
 mod talk;
 
 use std::collections::BTreeMap;
@@ -58,6 +61,9 @@ pub struct Config {
     /// The station's RTSP server: the doorbell's speaker is reached there.
     #[serde(default = "default_rtsp_port")]
     pub rtsp_port: u16,
+    /// The doorbell answers when someone rings (absent: it does not).
+    #[serde(default)]
+    pub interphone: Option<door::Interphone>,
 }
 
 fn default_port() -> u16 {
@@ -438,7 +444,7 @@ async fn run(
     } else {
         first_pin(config, ctx).await?
     };
-    let station = talk::Station {
+    let station = rtsp::Station {
         host: config.host.clone(),
         port: config.rtsp_port,
         user: username.clone(),
@@ -450,7 +456,8 @@ async fn run(
         password,
         token,
     });
-    serve(ctx, &session, &station).await
+    let doors = Arc::new(door::Doors::new(station, config.interphone.clone()));
+    serve(ctx, &session, &doors).await
 }
 
 /// First contact: a bare handshake records the certificate, stored before
@@ -470,10 +477,10 @@ async fn first_pin(config: &Config, ctx: &DriverCtx) -> anyhow::Result<String> {
 async fn serve(
     ctx: &mut DriverCtx,
     session: &Arc<Session>,
-    station: &talk::Station,
+    doors: &Arc<door::Doors>,
 ) -> anyhow::Result<()> {
-    // One sentence at a time through the station.
-    let turn = Arc::new(tokio::sync::Mutex::new(()));
+    // Each event's last reading, for its rising edges.
+    let mut last: BTreeMap<(u64, &'static str), bool> = BTreeMap::new();
     let mut model = String::from("Reolink");
     let mut channels: BTreeMap<u64, Channel> = BTreeMap::new();
     let mut backoff = Duration::from_secs(2);
@@ -486,7 +493,7 @@ async fn serve(
         tokio::select! {
             command = ctx.next_command() => match command {
                 Some(command) => {
-                    let result = speak(ctx, station, &turn, &channels, &command);
+                    let result = speak(ctx, doors, &channels, &command);
                     command.reply(result);
                 }
                 None => return Ok(()),
@@ -496,11 +503,13 @@ async fn serve(
                     continue;
                 }
                 let result = if retry_at.is_some() || Instant::now() >= rescan_at {
-                    rescan(ctx, session, station, &mut model, &mut channels).await.map(|()| {
+                    rescan(ctx, session, doors.station(), &mut model, &mut channels).await.map(|()| {
                         rescan_at = Instant::now() + RESCAN;
                     })
                 } else {
-                    poll_events(ctx, session, &channels).await
+                    poll_events(ctx, session, &channels, &mut last)
+                        .await
+                        .map(|risen| at_the_door(ctx, doors, &channels, &risen))
                 };
                 match result {
                     Ok(()) => {
@@ -550,7 +559,7 @@ fn unavailable(ctx: &DriverCtx, channels: &BTreeMap<u64, Channel>) {
 async fn rescan(
     ctx: &DriverCtx,
     session: &Arc<Session>,
-    station: &talk::Station,
+    station: &rtsp::Station,
     model: &mut String,
     channels: &mut BTreeMap<u64, Channel>,
 ) -> anyhow::Result<()> {
@@ -589,7 +598,7 @@ async fn rescan(
 
 /// Asks the station whether `channel` has a speaker; unanswered, it is
 /// asked again at the next scan.
-async fn ask_speaker(ctx: &DriverCtx, station: &talk::Station, channel: &mut Channel) {
+async fn ask_speaker(ctx: &DriverCtx, station: &rtsp::Station, channel: &mut Channel) {
     match talk::offers(station, channel.number).await {
         Ok(talks) => {
             tracing::info!(instance = %ctx.instance(), channel = channel.number, talks, "reolink speaker");
@@ -608,8 +617,7 @@ async fn ask_speaker(ctx: &DriverCtx, station: &talk::Station, channel: &mut Cha
 /// background (Moli's voice is made, then sent in real time), one at a time.
 fn speak(
     ctx: &DriverCtx,
-    station: &talk::Station,
-    turn: &Arc<tokio::sync::Mutex<()>>,
+    doors: &Arc<door::Doors>,
     channels: &BTreeMap<u64, Channel>,
     command: &CommandRequest,
 ) -> Result<(), String> {
@@ -629,20 +637,11 @@ fn speak(
     let brain = ctx
         .voice_brain()
         .ok_or_else(|| moli_i18n::tr!("pilotes.reolink.sans_voix"))?;
-    let (station, turn, number) = (station.clone(), Arc::clone(turn), channel.number);
+    let (doors, number) = (Arc::clone(doors), channel.number);
+    let door = channel_id(ctx, channel).to_string();
     let instance = ctx.instance().to_string();
     tokio::spawn(async move {
-        let _turn = turn.lock().await;
-        let result = async {
-            let pcm = brain.voice_pcm(&text).await.map_err(anyhow::Error::msg)?;
-            #[allow(clippy::cast_precision_loss)]
-            let seconds = pcm.samples.len() as f64 / f64::from(pcm.rate.max(1));
-            let limit = Duration::from_secs_f64(seconds) + Duration::from_secs(15);
-            tokio::time::timeout(limit, talk::say(&station, number, &pcm))
-                .await
-                .context("the doorbell took too long")?
-        }
-        .await;
+        let result = doors.house_says(&brain, &door, number, &text).await;
         match result {
             Ok(()) => tracing::info!(instance, channel = number, "said through the doorbell"),
             Err(e) => {
@@ -653,14 +652,58 @@ fn speak(
     Ok(())
 }
 
+/// Someone rang, or is seen, at a door Moli can talk through: the visit
+/// runs in the background (it takes seconds of speech and listening).
+fn at_the_door(
+    ctx: &DriverCtx,
+    doors: &Arc<door::Doors>,
+    channels: &BTreeMap<u64, Channel>,
+    risen: &[(u64, &'static str)],
+) {
+    for (number, api) in risen {
+        let Some(channel) = channels.get(number).filter(|c| c.talks == Some(true)) else {
+            continue;
+        };
+        let rang = *api == "visitor";
+        let wanted = if rang {
+            doors.answers()
+        } else {
+            *api == "people" && doors.by_name()
+        };
+        if !wanted {
+            continue;
+        }
+        let Some(brain) = ctx.voice_brain() else {
+            continue;
+        };
+        let (doors, number) = (Arc::clone(doors), *number);
+        let door = channel_id(ctx, channel).to_string();
+        let instance = ctx.instance().to_string();
+        tokio::spawn(async move {
+            let result = if rang {
+                doors.rang(&brain, &door, number).await
+            } else {
+                doors.seen(&brain, &door, number).await
+            };
+            if let Err(e) = result {
+                tracing::warn!(instance, channel = number, rang, error = %format!("{e:#}"), "interphone");
+            }
+        });
+    }
+}
+
+/// The events of every online channel, set on their devices; the ones that
+/// just became active (none on a first reading).
 async fn poll_events(
     ctx: &DriverCtx,
     session: &Session,
     channels: &BTreeMap<u64, Channel>,
-) -> anyhow::Result<()> {
+    last: &mut BTreeMap<(u64, &'static str), bool>,
+) -> anyhow::Result<Vec<(u64, &'static str)>> {
+    let mut risen = Vec::new();
     let online: Vec<&Channel> = channels.values().filter(|c| c.online).collect();
     if online.is_empty() {
-        return Ok(());
+        return Ok(risen);
     }
     let body: Vec<Json> = online
         .iter()
@@ -678,10 +721,14 @@ async fn poll_events(
         for (api, support, active) in read_events(value) {
             if support && let Some((_, key, _)) = EVENTS.iter().find(|(a, _, _)| *a == api) {
                 ctx.set_state(&id, key, Value::Bool(active));
+                let was = last.insert((channel.number, api), active).unwrap_or(active);
+                if active && !was {
+                    risen.push((channel.number, api));
+                }
             }
         }
     }
-    Ok(())
+    Ok(risen)
 }
 
 #[cfg(test)]

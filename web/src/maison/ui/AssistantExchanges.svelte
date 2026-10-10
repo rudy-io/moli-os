@@ -70,8 +70,8 @@
     load();
   }
 
-  const turns = $derived((all ?? []).filter((e) => e.kind !== 'silence'));
-  const silences = $derived((all ?? []).length - turns.length);
+  const turns = $derived((all ?? []).filter((e) => e.kind !== 'silence' && e.kind !== 'door'));
+  const silences = $derived((all ?? []).filter((e) => e.kind === 'silence').length);
   const orders = $derived(turns.reduce((n, e) => n + (e.orders?.length ?? 0), 0));
   const searches = $derived(turns.filter((e) => e.tools?.includes('web_search')).length);
   const cost = $derived((all ?? []).reduce((s, e) => s + (e.cost?.total ?? 0), 0));
@@ -139,7 +139,7 @@
         {#each all.slice(0, shown) as e (e.at + e.kind + e.question)}
           <li class:quiet={e.kind === 'silence'} class:failed={e.kind === 'failed'}>
             <span class="when">{when(e.at)}</span>
-            <span class="where">{e.surface === 'satellite' ? t('moli.echanges.boitier') : t('moli.echanges.appli')}</span>
+            <span class="where">{e.surface === 'satellite' ? t('moli.echanges.boitier') : e.surface === 'door' ? t('moli.echanges.porte') : t('moli.echanges.appli')}</span>
             {#if e.kind === 'silence'}
               <span class="what muted">{t('moli.echanges.silence')}</span>
               <span class="side">{@render listen(e)}</span>
@@ -147,7 +147,7 @@
               <span class="what">
                 <span class="q">{e.question}</span>
                 <span class="a">
-                  {#if e.kind === 'failed'}{t('moli.echanges.echec', { error: e.reply })}{:else if e.reply}{e.reply}{:else}{t('moli.echanges.fin')}{/if}
+                  {#if e.kind === 'failed'}{t('moli.echanges.echec', { error: e.reply })}{:else if e.kind === 'door'}{e.question ? t('moli.echanges.transmis') : t('moli.echanges.sonne')}{:else if e.reply}{e.reply}{:else}{t('moli.echanges.fin')}{/if}
                 </span>
                 {#if e.orders?.length || e.tools?.includes('web_search')}
                   <span class="tags">

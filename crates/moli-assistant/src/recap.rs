@@ -32,9 +32,10 @@ pub(crate) fn next_after(now: &Zoned, at: Time) -> Option<Zoned> {
 pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Option<String> {
     let turns: Vec<&Exchange> = exchanges
         .iter()
-        .filter(|e| e.kind != Kind::Silence)
+        .filter(|e| !matches!(e.kind, Kind::Silence | Kind::Door))
         .collect();
-    let silences = exchanges.len() - turns.len();
+    let silences = exchanges.iter().filter(|e| e.kind == Kind::Silence).count();
+    let doors: Vec<&Exchange> = exchanges.iter().filter(|e| e.kind == Kind::Door).collect();
     if exchanges.is_empty() {
         return None;
     }
@@ -61,6 +62,23 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
     }
     if failed > 0 {
         lines.push(moli_i18n::tr!("assistant.recap.failed", n = failed));
+    }
+    if !doors.is_empty() {
+        lines.push(moli_i18n::tr!("assistant.recap.porte", n = doors.len()));
+        for e in &doors {
+            let time = jiff::Timestamp::from_millisecond(e.at)
+                .map(|t| t.to_zoned(tz.clone()).strftime("%H:%M").to_string())
+                .unwrap_or_default();
+            lines.push(if e.question.trim().is_empty() {
+                moli_i18n::tr!("assistant.recap.porte_sonne", time = time)
+            } else {
+                moli_i18n::tr!(
+                    "assistant.recap.porte_message",
+                    time = time,
+                    message = short(&e.question, QUESTION_CHARS)
+                )
+            });
+        }
     }
     let cost: f64 = exchanges.iter().map(|e| e.cost.total).sum();
     if cost > 0.0 {

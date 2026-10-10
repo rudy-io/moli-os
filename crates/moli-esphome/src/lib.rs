@@ -14,7 +14,6 @@ mod frame;
 mod noise;
 mod satellite;
 mod sound;
-mod vad;
 
 use std::time::Duration;
 

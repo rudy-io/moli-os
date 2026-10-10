@@ -14,6 +14,7 @@
 #![recursion_limit = "256"]
 
 mod auto;
+mod door;
 mod exchanges;
 mod house;
 mod import;
@@ -93,6 +94,10 @@ pub struct Config {
     /// time); empty for no recap.
     #[serde(default = "default_recap_at")]
     pub recap_at: String,
+    /// Points that say the messages left at a door (`sonos:…/announce`,
+    /// `alexa:…/say`); none: Telegram only.
+    #[serde(default)]
+    pub door_speakers: Vec<String>,
     /// Where the house is, for the forecast; by default `[automations]`'s.
     #[serde(default)]
     pub latitude: Option<f64>,
@@ -118,6 +123,7 @@ impl Default for Config {
             timezone: default_timezone(),
             search_model: default_model(),
             recap_at: default_recap_at(),
+            door_speakers: Vec::new(),
             latitude: None,
             longitude: None,
         }
@@ -780,12 +786,7 @@ impl Assistant {
         let Some(text) = text else {
             return false;
         };
-        let telegram = self.0.hub.snapshot().devices.iter().find_map(|d| {
-            (d.device.manufacturer.as_deref() == Some("Telegram")
-                && d.device.points.iter().any(|p| &*p.key == "notify"))
-            .then(|| PointId::new(&d.device.id, "notify"))
-        });
-        let Some(point) = telegram else {
+        let Some(point) = self.telegram() else {
             tracing::info!("no Telegram device: the recap is only in the dashboard");
             return false;
         };

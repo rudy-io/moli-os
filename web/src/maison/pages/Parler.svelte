@@ -1,5 +1,6 @@
 <script>
-  import { hub, roomOf, hidden, nameOf, act } from '../lib/home.svelte.js';
+  import { onMount } from 'svelte';
+  import { hub, roomOf, hidden, nameOf, act, clock, relative, home } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
 
@@ -79,6 +80,32 @@
     busy = false;
   }
 
+  // What was said at the doors today (the interphone), newest first.
+  let doorLog = $state([]);
+  async function loadDoor() {
+    try {
+      const res = await fetch('/api/assistant/exchanges?hours=24');
+      if (!res.ok) return;
+      const all = await res.json();
+      doorLog = (Array.isArray(all) ? all : (all.exchanges ?? [])).filter((e) => e.kind === 'door').slice(0, 8);
+    } catch {
+      // The page works without it.
+    }
+  }
+  onMount(() => {
+    loadDoor();
+    const timer = setInterval(loadDoor, 15000);
+    return () => clearInterval(timer);
+  });
+  const doors = $derived(speakers.filter((s) => hub.devices[s.id]?.points?.some((p) => p.key === 'doorbell')));
+
+  /** Answer the door: only the doorbell chosen, the cursor in the text. */
+  function answerDoor() {
+    chosen = doors.filter((d) => d.online).map((d) => d.id);
+    keep('parler-cibles', chosen);
+    document.getElementById('parler-texte')?.focus();
+  }
+
   function onkey(e) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) say(e);
   }
@@ -115,6 +142,25 @@
       </div>
     {/if}
   </form>
+
+  {#if doorLog.length}
+    <section class="card door">
+      <div class="row">
+        <h2><Icon name="bell" size={18} />{t('parler.porte')}</h2>
+        {#if doors.length}
+          <button type="button" class="btn" onclick={answerDoor}><Icon name="talk" size={16} />{t('parler.repondre')}</button>
+        {/if}
+      </div>
+      <ul>
+        {#each doorLog as e (e.at)}
+          <li>
+            <span class="muted when">{clock(e.at)} · {relative(e.at, home.now)}</span>
+            <span>{e.question ? `« ${e.question} »` : t('parler.sonne')}</span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="targets">
     <h2>{t('parler.ou')}</h2>
@@ -236,6 +282,44 @@
   .targets {
     display: grid;
     gap: 16px;
+  }
+
+  .door {
+    display: grid;
+    gap: 10px;
+    padding: 16px 18px;
+    border-radius: var(--r-md);
+    background: var(--warm-soft);
+  }
+
+  .door h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 1.05rem;
+  }
+
+  .door ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 6px;
+  }
+
+  .door li {
+    display: grid;
+    gap: 2px;
+  }
+
+  .door .when {
+    font-size: 0.8rem;
+  }
+
+  .btn:not(.primary) {
+    background: var(--surface);
+    color: inherit;
   }
 
   .targets h2 {

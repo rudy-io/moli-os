@@ -10,4 +10,12 @@
   `Require: www.onvif.org/ver20/backchannel` → piste `sendonly` `PCMU/8000`, puis RTP µ-law 8 kHz
   entrelacé. Chaque session finit par `TEARDOWN` : un canal resté ouvert garde la sonnette en mode
   interphone (carillon muet). Le canal est demandé une fois, quand la caméra apparaît.
+- Interphone (`[driver.options.interphone]`) : on sonne → accueil dit par la sonnette, écoute du
+  micro (piste AAC `MPEG4-GENERIC` 16 kHz du même flux, RFC 3640, décodée par `moli-audio`)
+  jusqu'au silence, puis le cerveau vocal transmet le message (Telegram, `door_speakers`) et
+  la sonnette remercie. `by_name = true` : quelqu'un vu à la porte peut dire « Hey Moli, … » ;
+  seules les phrases qui appellent Moli sont gardées, le reste n'est conservé nulle part. Rien
+  de ce qui est dit à la porte n'atteint le modèle ni n'agit sur la maison. Options :
+  `greeting`, `thanks`, `wait_s` (8), `by_name` (non), `watch_s` (30), `reply_s` (10 : après une
+  phrase dite à la porte depuis la maison dans les 3 min d'une visite, écoute de la réponse).
 - Reste : testé derrière un Home Hub seulement ; caméra seule ou NVR non vérifiés.
