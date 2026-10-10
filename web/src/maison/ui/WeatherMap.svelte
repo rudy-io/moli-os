@@ -1,8 +1,13 @@
+<script module>
+  // The land, decoded once for every map on the page.
+  const lands = new Map();
+</script>
+
 <script>
   // The weather map around the house (lib/windmap.js) in a box of any
   // size: the house at (tx, ty) of the box, the hour shown (0 = now).
   import { onMount } from 'svelte';
-  import { WindMap, viewAround } from '../lib/windmap.js';
+  import { WindMap, viewAround, loadLand } from '../lib/windmap.js';
 
   let { map, hour = 0, tx = 0.5, ty = 0.5, house = true } = $props();
 
@@ -37,6 +42,16 @@
   });
   $effect(() => {
     if (wm && view) wm.resize(W, H, view);
+  });
+  $effect(() => {
+    const land = map?.land;
+    if (!wm || !land) return;
+    const key = `${land.z}/${land.x0}/${land.y0}/${land.x1}/${land.y1}`;
+    if (!lands.has(key)) lands.set(key, loadLand($state.snapshot(land)));
+    lands
+      .get(key)
+      .then((decoded) => wm.setLand(decoded))
+      .catch(() => lands.delete(key));
   });
   $effect(() => {
     if (wm) wm.setHour(hour);

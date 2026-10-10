@@ -24,9 +24,12 @@ async function loadForecast() {
   if (f) sky.forecast = f;
 }
 
+let landTries = 0;
 async function loadMap() {
   const m = await json('/api/weather/map');
   if (m?.weather?.hours?.length) sky.map = m;
+  // The land comes a little later the very first time: asked again soon.
+  if (m && !m.land && landTries++ < 6) setTimeout(loadMap, 20_000);
 }
 
 let watchers = 0;

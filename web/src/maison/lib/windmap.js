@@ -71,8 +71,8 @@ function landColour(e) {
   }
   return LAND.at(-1)[1];
 }
-const SEA = [13, 27, 44];
-const SEA_DEEP = [8, 17, 30];
+const SEA = [18, 38, 58];
+const SEA_DEEP = [7, 15, 27];
 
 // Rain (mm/h): light blue, green, yellow, red, like a radar.
 const RAIN = [
@@ -189,9 +189,24 @@ export class WindMap {
     return p;
   }
 
+  /** The land (decoded tiles, `loadLand`), then the base is redrawn. */
+  setLand(land) {
+    this.land = land;
+    this.base = null;
+    this.drawnHour = null;
+    this.draw();
+  }
+
+  /** Elevation (metres, negative at sea) at area fractions, from the tiles. */
+  elevation(fx, fy) {
+    const { area } = this.data;
+    const lon = area.west + fx * (area.east - area.west);
+    const lat = area.north - fy * (area.north - area.south);
+    return this.land.at(lon, lat);
+  }
+
   /** The land, drawn once per size (half resolution, smoothed up). */
   drawBase() {
-    const land = this.data?.land;
     const scale = 2;
     const bw = Math.max(2, Math.round((this.w * this.dpr) / scale));
     const bh = Math.max(2, Math.round((this.h * this.dpr) / scale));
@@ -199,31 +214,31 @@ export class WindMap {
     const ctx = base.getContext('2d');
     const img = ctx.createImageData(bw, bh);
     const px = img.data;
-    const [nx, ny] = land?.grid ?? [2, 2];
-    const elev = land?.elevation;
-    // Height gradient over one land cell, for the hill shading.
-    const ex = 1 / (nx - 1);
-    const ey = 1 / (ny - 1);
+    // One base pixel, in area fractions: the step of the hill shading.
+    const sx = (this.view.x1 - this.view.x0) / bw;
+    const sy = (this.view.y1 - this.view.y0) / bh;
+    // Metres a base pixel spans: slopes read the same at any zoom.
+    const metres = ((this.data.km?.[0] ?? 400) * 1000 * sx) || 1000;
     for (let y = 0; y < bh; y++) {
       const fy = this.fy((y / bh) * this.h);
       for (let x = 0; x < bw; x++) {
         const fx = this.fx((x / bw) * this.w);
-        let rgb;
-        if (elev) {
-          const e = sample(elev, nx, ny, fx, fy);
-          const t = smooth(0.5, 25, e);
-          const sea = SEA_DEEP.map((c, k) => mix(c, SEA[k], smooth(-0.2, 0.5, t + 0.2)));
-          const dzx = sample(elev, nx, ny, fx + ex * 0.5, fy) - sample(elev, nx, ny, fx - ex * 0.5, fy);
-          const dzy = sample(elev, nx, ny, fx, fy + ey * 0.5) - sample(elev, nx, ny, fx, fy - ey * 0.5);
+        let rgb = SEA;
+        if (this.land) {
+          const e = this.elevation(fx, fy);
+          const t = smooth(-1, 6, e);
+          // The sea: lighter near the shore, darker in the deep.
+          const depth = smooth(0, -900, e);
+          const sea = SEA.map((c, k) => mix(c, SEA_DEEP[k], depth));
+          const dzx = (this.elevation(fx + sx, fy) - this.elevation(fx - sx, fy)) / (2 * metres);
+          const dzy = (this.elevation(fx, fy + sy) - this.elevation(fx, fy - sy)) / (2 * metres);
           // Light from the north-west.
-          const shade = clamp(1 + (-dzx - dzy) / 900, 0.55, 1.45);
-          const ground = landColour(e).map((c) => c * shade);
+          const shade = clamp(1 + (-dzx - dzy) * 2.2, 0.55, 1.5);
+          const ground = landColour(Math.max(0, e)).map((c) => c * shade);
           rgb = sea.map((c, k) => mix(c, ground[k], t));
           // The coast, a fine light line.
           const coast = 1 - Math.abs(t - 0.5) * 2;
-          rgb = rgb.map((c) => c + coast * 38);
-        } else {
-          rgb = SEA;
+          rgb = rgb.map((c) => c + coast * coast * 46);
         }
         const o = (y * bw + x) * 4;
         px[o] = rgb[0];
@@ -250,7 +265,6 @@ export class WindMap {
     const img = sctx.createImageData(ow, oh);
     const px = img.data;
     // The texture drifts with the wind over the hours (km/h → map widths).
-    const span = this.view.x1 - this.view.x0;
     const [kmW, kmH] = this.data.km ?? [400, 300];
     const drift = this.meanWind();
     const dx = (drift[0] * this.hour) / kmW;
@@ -291,7 +305,6 @@ export class WindMap {
     const H = this.landCanvas.height;
     ctx.drawImage(this.base, 0, 0, W, H);
     ctx.drawImage(sky, 0, 0, W, H);
-    void span;
     if (this.still) this.drawStill();
   }
 
@@ -386,4 +399,45 @@ export function viewAround(map, width, height, tx = 0.5, ty = 0.5) {
   const x0 = hx - (tx * width) / mw;
   const y0 = hy - (ty * height) / mh;
   return { x0, y0, x1: x0 + width / mw, y1: y0 + height / mh };
+}
+
+/** The land's tiles (Terrarium PNG: elevation = R·256 + G + B/256 − 32768)
+ *  decoded into one grid of metres; `at(lon, lat)` reads it (bilinear). */
+export async function loadLand(land) {
+  const cols = land.x1 - land.x0 + 1;
+  const rows = land.y1 - land.y0 + 1;
+  const size = 256;
+  const canvas = new OffscreenCanvas(cols * size, rows * size);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  await Promise.all(
+    Array.from({ length: cols * rows }, async (_, i) => {
+      const x = land.x0 + (i % cols);
+      const y = land.y0 + Math.floor(i / cols);
+      const res = await fetch(`/api/weather/land/${land.z}/${x}/${y}.png`);
+      if (!res.ok) throw new Error(`land ${x}/${y}: ${res.status}`);
+      const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+      ctx.drawImage(bitmap, (x - land.x0) * size, (y - land.y0) * size);
+    }),
+  );
+  const w = cols * size;
+  const h = rows * size;
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  const elev = new Float32Array(w * h);
+  for (let i = 0; i < elev.length; i++) elev[i] = rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256 - 32768;
+  const n = 2 ** land.z;
+  return {
+    at(lon, lat) {
+      const r = (lat * Math.PI) / 180;
+      const px = (((lon + 180) / 360) * n - land.x0) * size;
+      const py = (((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n - land.y0) * size;
+      const x = clamp(px - 0.5, 0, w - 1.001);
+      const y = clamp(py - 0.5, 0, h - 1.001);
+      const i = Math.floor(x);
+      const j = Math.floor(y);
+      const tx = x - i;
+      const ty = y - j;
+      const k = j * w + i;
+      return mix(mix(elev[k], elev[k + 1], tx), mix(elev[k + w], elev[k + w + 1], tx), ty);
+    },
+  };
 }
