@@ -510,12 +510,10 @@ async fn session(
     // Moli is the device's voice assistant (the first to subscribe keeps it).
     tx.send(api::SUBSCRIBE_VOICE_ASSISTANT, &api::subscribe_voice())
         .await?;
-    if !config.wake_words.is_empty() {
-        let ids: Vec<&str> = config.wake_words.iter().map(String::as_str).collect();
-        tx.send(api::VOICE_SET_CONFIGURATION, &api::set_wake_words(&ids))
-            .await?;
-    }
+    // What the firmware offers first: the configured words are set only once
+    // the device says it has them (see `wake_words`).
     tx.send(api::VOICE_CONFIGURATION_REQUEST, &[]).await?;
+    let mut words_set = false;
     let (mut voice, mut thoughts) = satellite::Voice::new(
         Duration::from_secs(config.window_s),
         config.media_base.clone(),
@@ -530,7 +528,11 @@ async fn session(
             message = inbox.recv() => {
                 let (kind, payload) = message.context("the connection closed")??;
                 heard = Instant::now();
-                on_message(ctx, &id, &mut tx, &entities, &mut voice, kind, &payload).await?;
+                if kind == api::VOICE_CONFIGURATION_RESPONSE {
+                    words_set |= wake_words(ctx, &mut tx, &config.wake_words, words_set, &payload).await?;
+                } else {
+                    on_message(ctx, &id, &mut tx, &entities, &mut voice, kind, &payload).await?;
+                }
             }
             Some((generation, thought)) = thoughts.recv() => {
                 voice.on_thought(ctx, &id, &mut tx, generation, thought).await?;
@@ -552,6 +554,63 @@ async fn session(
             }
         }
     }
+}
+
+/// The wake words to set: those of `wanted` the firmware has, unless they
+/// are already the active ones. None of them in the firmware: nothing set, the
+/// device keeps its own (a word it lacks would leave it deaf to all).
+fn words_to_set<'a>(
+    wanted: &'a [String],
+    available: &[&str],
+    active: &[String],
+) -> Option<Vec<&'a str>> {
+    let chosen: Vec<&str> = wanted
+        .iter()
+        .map(String::as_str)
+        .filter(|w| available.contains(w))
+        .collect();
+    let same = chosen.len() == active.len() && chosen.iter().all(|c| active.iter().any(|a| a == c));
+    (!chosen.is_empty() && !same).then_some(chosen)
+}
+
+/// The device's wake words: logged, and set to the configured ones it has
+/// (once per connection). Returns whether they were set.
+async fn wake_words(
+    ctx: &DriverCtx,
+    tx: &mut Outbox,
+    wanted: &[String],
+    already: bool,
+    payload: &[u8],
+) -> anyhow::Result<bool> {
+    let Some(words) = api::wake_words(payload) else {
+        return Ok(false);
+    };
+    let available: Vec<&str> = words.available.iter().map(|(id, _)| id.as_str()).collect();
+    tracing::info!(
+        instance = %ctx.instance(),
+        ?available,
+        active = ?words.active,
+        max_active = words.max_active,
+        "wake words"
+    );
+    if already || wanted.is_empty() {
+        return Ok(false);
+    }
+    let Some(chosen) = words_to_set(wanted, &available, &words.active) else {
+        if !wanted.iter().any(|w| available.contains(&w.as_str())) {
+            tracing::warn!(
+                instance = %ctx.instance(),
+                ?wanted,
+                "none of the configured wake words is in the device's firmware: it keeps its own"
+            );
+        }
+        return Ok(false);
+    };
+    tx.send(api::VOICE_SET_CONFIGURATION, &api::set_wake_words(&chosen))
+        .await?;
+    // Read back what the device made of it (logged above, next time).
+    tx.send(api::VOICE_CONFIGURATION_REQUEST, &[]).await?;
+    Ok(true)
 }
 
 /// One message from the device, once connected.
@@ -581,17 +640,6 @@ async fn on_message(
             }
         }
         api::VOICE_ANNOUNCE_FINISHED => voice.on_played(ctx, id),
-        api::VOICE_CONFIGURATION_RESPONSE => {
-            if let Some(words) = api::wake_words(payload) {
-                tracing::info!(
-                    instance = %ctx.instance(),
-                    available = ?words.available.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
-                    active = ?words.active,
-                    max_active = words.max_active,
-                    "wake words"
-                );
-            }
-        }
         api::MEDIA_PLAYER_STATE => {
             if let Some(state) =
                 api::media_state(payload).filter(|s| Some(s.key) == entities.media_player)
@@ -682,5 +730,40 @@ async fn expect(inbox: &mut Inbox, tx: &mut Outbox, kind: u16) -> anyhow::Result
         if got == kind {
             return Ok(payload);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owned(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| (*w).to_owned()).collect()
+    }
+
+    #[test]
+    fn only_the_wake_words_the_firmware_has_are_set() {
+        let wanted = owned(&["hey_moli", "dis_moli"]);
+        // The official firmware: none of ours, nothing set (it would go deaf).
+        let official = ["okay_nabu", "hey_jarvis", "hey_mycroft", "stop"];
+        assert_eq!(
+            words_to_set(&wanted, &official, &owned(&["okay_nabu"])),
+            None
+        );
+        // Ours: both, unless they are already active.
+        let ours = ["hey_moli", "dis_moli", "stop"];
+        assert_eq!(
+            words_to_set(&wanted, &ours, &owned(&["hey_moli"])),
+            Some(vec!["hey_moli", "dis_moli"])
+        );
+        assert_eq!(
+            words_to_set(&wanted, &ours, &owned(&["dis_moli", "hey_moli"])),
+            None
+        );
+        // A firmware with only one of them: that one.
+        assert_eq!(
+            words_to_set(&wanted, &["hey_moli"], &owned(&[])),
+            Some(vec!["hey_moli"])
+        );
     }
 }
