@@ -49,7 +49,9 @@ telles que les appareils les nomment).
   "doors":   [{ "id": "tuya:…", "name": "Entrée" }],
   "outdoor": { "weather": "meteo:…", "air": "air:…", "tempo": "tempo:…", "pool": "piscine:…", "pool_pump": "tuya:…", "garden_lights": [{ "id": "tuya:…", "name": "Lumière du jardin" }] },
   "safety":  ["z2m:…"],
-  "hidden":  ["tuya:…", "compteur:…"]
+  "hidden":  ["tuya:…", "compteur:…"],
+  "quiet":   ["tuya:…"],
+  "outlets": { "tuya:…": { "switch_1": "Prise 1", "switch_2": "Prise 2", "switch_3": "Prise 3" } }
 }
 ```
 
@@ -58,6 +60,13 @@ telles que les appareils les nomment).
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
+- `quiet` : rangé dans sa pièce mais **jamais un bouton** (lave-vaisselle, machine à laver,
+  recharge de la voiture : un appui de travers coupe un cycle). La carte de la pièce dit ce qu'il
+  consomme (« Lave-vaisselle · 1 850 W », dès 3 W) ; débranché, il ne dit rien (sauf dans une
+  vue filtrée). Moli et les automatismes peuvent toujours le commander.
+- `outlets` : une multiprise dont chaque prise a son bouton, dans l'ordre donné, plus un bouton
+  pour toute la multiprise (« 2 sur 3 » ; un appui allume tout, ou éteint tout si tout est
+  allumé). Seuls les points inscriptibles comptent.
 
 ## Conception visuelle
 

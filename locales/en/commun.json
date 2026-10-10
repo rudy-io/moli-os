@@ -173,6 +173,9 @@
   "commun.piece.pile_faible": "{name}: low battery",
   "commun.piece.imprimante_eteinte": "off",
   "commun.piece.lecture": "{name} · {label}: {value}",
+  "commun.piece.consomme": "{name} · {watts} W",
+  "commun.piece.au_repos": "{name} · idle",
+  "commun.piece.prises_allumees": "{on} of {count}",
 
   "commun.clim.label_consigne": "{name}: target",
   "commun.clim.label_arret": "{name}: off",

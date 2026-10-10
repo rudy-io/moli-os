@@ -187,6 +187,23 @@ export function hidden(id) {
   return (home.config?.hidden ?? []).includes(id);
 }
 
+/** In its room but never a button (a dishwasher, a car charger): a chip
+ *  that says what it draws. `home.json` `quiet`. */
+export function quiet(id) {
+  return (home.config?.quiet ?? []).includes(id);
+}
+
+/** A power strip's outlets, each its own pad: `home.json` `outlets`
+ *  `{ "<id>": { "switch_1": "Écran", … } }`, in that order. */
+export function outletsOf(id) {
+  const names = home.config?.outlets?.[id];
+  const d = device(id);
+  if (!names || !d) return [];
+  return Object.entries(names)
+    .filter(([key]) => d.points.some((p) => p.key === key && p.access?.write))
+    .map(([key, name]) => ({ key, name }));
+}
+
 const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge/i;
 /** On/off things that are not lights, whatever their bridge calls them. */
 const NOT_LIGHT = /vmc|ventil|pompe|prise|chauffe|\bfan\b|pump|heater|outlet|socket/i;
@@ -235,11 +252,11 @@ export function roomList() {
         icon: defs.find((r) => r.name === name)?.icon ?? 'home',
         group: by('group')[0] ?? null,
         lights: by('light'),
-        plugs: by('plug'),
+        plugs: by('plug').filter((d) => !quiet(d.id)),
         covers: by('cover'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
-        sensors: by('sensor', 'camera', 'printer'),
+        sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
       };
     });

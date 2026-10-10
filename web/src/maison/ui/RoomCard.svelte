@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -19,6 +19,13 @@
   const locked = $derived(protectedRoom(room.name));
 
   function chips(d) {
+    // An appliance that is no button: what it draws, nothing when unplugged.
+    if (quiet(d.id)) {
+      if (d.online === false) return every ? [{ tone: '', icon: 'alert', text: t('commun.piece.hors_ligne', { name: nameOf(d.id) }) }] : [];
+      const w = value(d.id, 'cur_power') ?? value(d.id, 'power');
+      if (typeof w === 'number' && w >= 3) return [{ tone: 'warm', icon: 'power', text: t('commun.piece.consomme', { name: nameOf(d.id), watts: num(w) }) }];
+      return every ? [{ tone: '', icon: 'power', text: t('commun.piece.au_repos', { name: nameOf(d.id) }) }] : [];
+    }
     // A silent sensor's last readings are old news: say it is silent.
     if (d.online === false && deviceKind(d) === 'sensor') {
       const dead = lowBattery(d.id);
@@ -104,27 +111,47 @@
     return 'light';
   }
 
+  /** A strip's pad for all its outlets (`ALL`), then one per outlet. */
+  const ALL = '*';
+  const plugPads = (d) => {
+    const outlets = outletsOf(d.id);
+    if (!outlets.length) return [{ d, point: null }];
+    return [{ d, point: ALL, outlets }, ...outlets.map((o) => ({ d, point: o.key, name: o.name }))];
+  };
+  const litCount = (outlets, id) => outlets.filter((o) => isOn(id, o.key)).length;
+
   /** The pads: lights, then TV and speakers, then plugs. */
   const pads = $derived([
     ...room.lights.map((d) => ({ d, point: null })),
     ...room.media.map((d) => ({ d, point: deviceKind(d) === 'tv' ? 'power' : null, link: deviceKind(d) === 'speaker' ? '#/salon' : null })),
-    ...room.plugs.map((d) => ({ d, point: null })),
+    ...room.plugs.flatMap(plugPads),
   ]);
 
   let open = $state(null);
 
-  function stateOf(d, point) {
+  function stateOf(d, point, outlets) {
     if (unpowered(d.id) && !isFixture(d)) return t('commun.piece.coupee');
     if (!reachable(d.id)) return t('commun.piece.injoignable');
+    if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
     if (deviceKind(d) === 'speaker') return value(d.id, 'playing') === true ? t('commun.piece.lecture_en_cours') : t('commun.piece.a_l_arret');
     if (!isOn(d.id, point)) return t('commun.piece.eteinte');
     const b = value(d.id, 'brightness');
     return typeof b === 'number' && fine(d) ? t('commun.pourcent', { n: Math.round(b) }) : t('commun.piece.allumee');
   }
 
-  function tap(d, point) {
+  function tap(d, point, outlets, name) {
     if (unpowered(d.id) && !isFixture(d)) {
       note(t('commun.lampe.coupee_note', { label: nameOf(d.id) }));
+      return;
+    }
+    if (outlets) {
+      // All on → all off; otherwise everything on.
+      const on = litCount(outlets, d.id) < outlets.length;
+      for (const o of outlets) if (isOn(d.id, o.key) !== on) act(`${d.id}/${o.key}`, on, `${nameOf(d.id)} · ${o.name}`);
+      return;
+    }
+    if (name) {
+      act(`${d.id}/${point}`, !isOn(d.id, point), `${nameOf(d.id)} · ${name}`);
       return;
     }
     const key = point ?? powerKey(d);
@@ -170,20 +197,21 @@
 
   {#if pads.length}
     <div class="pads" class:icons>
-      {#each pads as { d, point, link } (d.id)}
-        {@const lit = link ? value(d.id, 'playing') === true : isOn(d.id, point)}
+      {#each pads as { d, point, link, outlets, name } (`${d.id}/${point}`)}
+        {@const lit = link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
         {@const cut = unpowered(d.id) && !isFixture(d)}
         {@const more = !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
+        {@const label = name ?? nameOf(d.id)}
         <div class="pad-wrap">
           {#if link}
-            <a class="pad" class:on={lit} href={link} title={nameOf(d.id)} aria-label={t('commun.action', { label: nameOf(d.id), action: stateOf(d, point) })}>
+            <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
               <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
-              {#if !icons}<b>{nameOf(d.id)}</b><small>{stateOf(d, point)}</small>{/if}
+              {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} onclick={() => tap(d, point)} title={nameOf(d.id)} aria-pressed={lit} aria-label={t('commun.action', { label: nameOf(d.id), action: stateOf(d, point) })}>
-              <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
-              {#if !icons}<b>{nameOf(d.id)}</b><small>{stateOf(d, point)}</small>{/if}
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} onclick={() => tap(d, point, outlets, name)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets) })}>
+              <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
+              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets)}</small>{/if}
             </button>
           {/if}
           {#if more}
