@@ -12,7 +12,7 @@ use std::time::Duration;
 use moli_core::{DeviceId, Value};
 use moli_runtime::DriverCtx;
 use moli_runtime::media::Image;
-use moli_runtime::voice::{Said, Speaker, VoiceBrain};
+use moli_runtime::voice::{Answer, Said, Speaker, VoiceBrain};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -31,7 +31,7 @@ const CONTINUE_WAIT: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub(crate) enum Thought {
     Heard(String),
-    Answered(String),
+    Answered(Answer),
     Failed(String),
 }
 
@@ -75,6 +75,9 @@ pub(crate) struct Voice {
     conversation_id: String,
     /// The last answer asked the device to listen again; it must, by then.
     continuing: Option<Instant>,
+    /// The last answer closed the conversation: when the device listens
+    /// again (it does, once the words have played), the chime ends it.
+    closing: bool,
     /// Results of a thinking task are for this generation only (a stop or a
     /// new request makes the old ones stale).
     generation: u64,
@@ -96,6 +99,7 @@ impl Voice {
             conversation: Vec::new(),
             conversation_id: String::new(),
             continuing: None,
+            closing: false,
             generation: 0,
             thoughts_tx,
         };
@@ -158,6 +162,9 @@ impl Voice {
         tx.send(api::VOICE_RESPONSE, &api::voice_response(false))
             .await?;
         Self::event(tx, VoiceEvent::RunStart, &[]).await?;
+        if continued && std::mem::take(&mut self.closing) {
+            return self.end(ctx, id, tx, true).await;
+        }
         Self::event(tx, VoiceEvent::SttStart, &[]).await?;
         self.run = Some(Run {
             vad: Vad::default(),
@@ -231,7 +238,7 @@ impl Voice {
                 text,
             });
             let thought = match brain.answer(lines).await {
-                Ok(reply) => Thought::Answered(reply),
+                Ok(answer) => Thought::Answered(answer),
                 Err(e) => Thought::Failed(e),
             };
             tracing::info!(
@@ -269,7 +276,14 @@ impl Voice {
                 });
                 Self::event(tx, VoiceEvent::IntentStart, &[]).await
             }
-            Thought::Answered(reply) => {
+            Thought::Answered(Answer {
+                text: reply,
+                closes,
+            }) => {
+                // Closed without words: the chime, now.
+                if closes && reply.trim().is_empty() {
+                    return self.end(ctx, id, tx, false).await;
+                }
                 let url = match (ctx.voice_brain(), &self.media_base) {
                     (Some(brain), Some(base)) => brain.voice_url(base, &reply),
                     _ => None,
@@ -295,8 +309,10 @@ impl Voice {
                 Self::event(tx, VoiceEvent::TtsEnd, &[("url", &url)]).await?;
                 Self::event(tx, VoiceEvent::RunEnd, &[]).await?;
                 self.run = None;
-                // Listening again is the device's move once the answer has played.
+                // Listening again is the device's move once the answer has played
+                // (closing too: its new request is answered with the chime).
                 self.continuing = Some(Instant::now() + Duration::from_secs(60));
+                self.closing = closes;
                 Self::state(ctx, id, "speaking");
                 Ok(())
             }
@@ -421,6 +437,7 @@ impl Voice {
     fn forget(&mut self) {
         self.run = None;
         self.continuing = None;
+        self.closing = false;
         self.conversation.clear();
     }
 }

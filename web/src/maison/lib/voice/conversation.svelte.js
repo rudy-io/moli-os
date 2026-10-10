@@ -130,6 +130,11 @@ async function finish() {
   if (!answer) return stopTalk();
   let reply = answer.reply;
   if (answer.actions.some((a) => a.status === 'held') && !mentionsApproval(reply, i18n.language)) reply += ` ${t('moli.voix.valider_ecran')}`;
+  // Asked to stop, in any words: the last answer (if any), then hang up.
+  if (answer.end) {
+    if (reply) await say(reply);
+    return stopTalk();
+  }
   await say(reply);
   if (talk.state === 'speaking') listen();
 }

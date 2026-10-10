@@ -236,6 +236,9 @@ pub struct Reply {
     pub actions: Vec<Action>,
     pub model: String,
     pub usage: Usage,
+    /// The person asked to end the spoken conversation (`end_conversation`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub end: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -540,6 +543,7 @@ impl Assistant {
             && let Some(list) = offered.as_array_mut()
         {
             list.retain(|t| t["function"]["name"] != "show");
+            list.push(end_tool());
         }
         let mut run = Run::default();
         for step in 0..MAX_STEPS {
@@ -611,9 +615,12 @@ impl Assistant {
             .unwrap_or_default()
             .trim()
             .to_owned();
-        let mut carried_out = calls
-            .iter()
-            .all(|c| matches!(c["function"]["name"].as_str(), Some("show" | "set")));
+        let mut carried_out = calls.iter().all(|c| {
+            matches!(
+                c["function"]["name"].as_str(),
+                Some("show" | "set" | "end_conversation")
+            )
+        });
         let mut says: Vec<String> = Vec::new();
         messages.push(json!({
             "role": "assistant",
@@ -632,12 +639,13 @@ impl Assistant {
             let result = self.tool(name, &args, layout, run).await;
             if name == "set" {
                 carried_out &= result["status"] == "done";
-                if let Some(say) = args["say"].as_str().map(str::trim)
-                    && !say.is_empty()
-                    && !says.iter().any(|s| s == say)
-                {
-                    says.push(say.to_owned());
-                }
+            }
+            if (name == "set" || name == "end_conversation")
+                && let Some(say) = args["say"].as_str().map(str::trim)
+                && !say.is_empty()
+                && !says.iter().any(|s| s == say)
+            {
+                says.push(say.to_owned());
             }
             messages.push(json!({
                 "role": "tool",
@@ -648,7 +656,8 @@ impl Assistant {
         if said.is_empty() {
             said = says.join(" ");
         }
-        (carried_out && !said.is_empty()).then_some(said)
+        // Closing needs no words: the satellite's chime says it.
+        (carried_out && (!said.is_empty() || run.end)).then_some(said)
     }
 
     fn finish(&self, text: &str, mut run: Run, layout: &Layout, question: &str) -> Reply {
@@ -667,7 +676,7 @@ impl Assistant {
             }
         }
         let text = trim_filler(&once(text), !run.cards.is_empty());
-        let reply = if !text.is_empty() {
+        let reply = if !text.is_empty() || run.end {
             text
         } else if run.cards.is_empty() && run.actions.is_empty() {
             moli_i18n::tr!("assistant.reply.unknown")
@@ -689,6 +698,7 @@ impl Assistant {
             actions: run.actions,
             model: self.0.config.model.clone(),
             usage: run.usage,
+            end: run.end,
         }
     }
 
@@ -747,6 +757,10 @@ impl Assistant {
             "set" => self.set(args, run).await,
             "ambiance" => self.ambiance(args, run).await,
             "show" => show(&self.0.hub, args, layout, run),
+            "end_conversation" => {
+                run.end = true;
+                json!({ "status": "done" })
+            }
             "energy" => self.energy(args).await,
             "history" => self.history(args).await,
             "automation" => self.automation_tool(args, run).await,
@@ -972,6 +986,8 @@ struct Run {
     usage: Usage,
     /// The tools called, in order, for the log: where a slow turn went.
     tools: Vec<String>,
+    /// `end_conversation` was called.
+    end: bool,
 }
 
 /// The same answer said twice in a row (seen once from a small model)
@@ -1185,6 +1201,25 @@ fn ambiance_tool() -> Json {
                     "white": { "type": "integer", "description": moli_i18n::tr!("assistant.tools.ambiance.white") }
                 },
                 "required": ["lights"]
+            }
+        }
+    })
+}
+
+/// Offered in spoken turns only: the person may end the conversation in
+/// any words (« c'est bon, j'ai fini », « tu peux arrêter »).
+fn end_tool() -> Json {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "end_conversation",
+            "description": moli_i18n::tr!("assistant.tools.end.description"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "say": { "type": "string", "description": moli_i18n::tr!("assistant.tools.end.say") }
+                },
+                "required": []
             }
         }
     })
@@ -1745,6 +1780,44 @@ mod tests {
         )
         .await;
         assert!(moli.turn(spoken("Allume le rien")).await.is_err());
+    }
+
+    /// « Bon, on arrête là » or any other words: the conversation ends,
+    /// nothing to say (the satellite's chime marks it).
+    #[tokio::test]
+    async fn ending_the_conversation_needs_no_words() {
+        let moli = moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"end_conversation",
+            "arguments":"{}"}}]}}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        )
+        .await;
+        let reply = moli.turn(spoken("Bon, on arrête là")).await.unwrap();
+        assert!(reply.end);
+        assert_eq!(reply.reply, "");
+        assert_eq!(reply.usage.steps, 1);
+    }
+
+    #[tokio::test]
+    async fn only_a_spoken_turn_can_end_the_conversation() {
+        let answer = br#"{"choices":[{"message":{"role":"assistant","content":"Oui."}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+        for spoken in [true, false] {
+            let (url, task) = crate::llm::tests::fake_http(200, answer).await;
+            let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+            let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+            let moli = Assistant::new(hub, None, None, None, config).unwrap();
+            let turn: Turn = serde_json::from_value(json!({
+                "spoken": spoken,
+                "messages": [{ "role": "user", "content": "Bonjour" }],
+            }))
+            .unwrap();
+            let reply = moli.turn(turn).await.unwrap();
+            assert!(!reply.end);
+            let request = task.await.unwrap();
+            assert_eq!(request.contains("end_conversation"), spoken);
+        }
     }
 
     /// Two orders, the same words in each: said once.
