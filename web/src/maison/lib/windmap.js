@@ -94,10 +94,10 @@ function rainColour(mm) {
 
 // The wind's colours by speed (km/h): calm white, then warmer.
 const WIND_BANDS = [
-  [15, 'rgba(255,255,255,0.38)'],
-  [30, 'rgba(215,236,255,0.55)'],
-  [50, 'rgba(255,214,120,0.7)'],
-  [Infinity, 'rgba(255,120,92,0.85)'],
+  [15, 'rgba(255,255,255,0.26)'],
+  [30, 'rgba(215,236,255,0.36)'],
+  [50, 'rgba(255,214,120,0.5)'],
+  [Infinity, 'rgba(255,120,92,0.65)'],
 ];
 
 export class WindMap {
@@ -128,7 +128,7 @@ export class WindMap {
     }
     this.base = null;
     this.drawnHour = null;
-    const count = clamp(Math.round((width * height) / 800), 200, 2200);
+    const count = clamp(Math.round((width * height) / 3200), 50, 600);
     this.particles = Array.from({ length: count }, () => this.spawn({}));
     this.draw();
   }
@@ -324,7 +324,7 @@ export class WindMap {
   /** Pixels per frame for a speed: the stream reads well at any size. */
   speed() {
     const kmAcross = (this.data.km?.[0] ?? 400) * (this.view.x1 - this.view.x0);
-    return (this.w / kmAcross) * 0.03;
+    return (this.w / kmAcross) * 0.022;
   }
 
   /** Without motion: short strokes along the wind, drawn once. */
@@ -353,7 +353,7 @@ export class WindMap {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     // The trails fade a little each frame.
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.fillStyle = 'rgba(0,0,0,0.955)';
+    ctx.fillStyle = 'rgba(0,0,0,0.94)';
     ctx.fillRect(0, 0, this.w, this.h);
     ctx.globalCompositeOperation = 'source-over';
     ctx.lineWidth = 0.85;
