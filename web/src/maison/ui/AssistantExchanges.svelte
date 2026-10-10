@@ -73,7 +73,7 @@
       <div class="text">
         <b>{t('moli.echanges.titre')}</b>
         <span class="muted">
-          {t('moli.echanges.resume', { turns: turns.length, orders, searches })}{#if silences} · {t('moli.echanges.silences', { n: silences })}{/if}{#if speed} · {t('moli.echanges.vitesse', { s: speed })}{/if}
+          {t('moli.echanges.resume', { turns: turns.length, orders, searches })}{#if silences}{' · '}{t('moli.echanges.silences', { n: silences })}{/if}{#if speed}{' · '}{t('moli.echanges.vitesse', { s: speed })}{/if}
         </span>
       </div>
       <div class="tones" role="radiogroup" aria-label={t('moli.echanges.periode')}>
@@ -243,6 +243,22 @@
 
   .foot {
     justify-content: flex-start;
+  }
+
+  .btn {
+    border: 0;
+    border-radius: 999px;
+    padding: 9px 16px;
+    font: inherit;
+    font-weight: 650;
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   @media (max-width: 560px) {
