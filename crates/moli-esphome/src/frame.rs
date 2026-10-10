@@ -62,6 +62,17 @@ fn server_hello(body: &[u8]) -> anyhow::Result<ServerHello> {
     Ok(ServerHello { name, mac })
 }
 
+/// What a device says of itself before any key: its hello, after ours.
+pub async fn hello_of<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+) -> anyhow::Result<ServerHello> {
+    let mut out = Vec::with_capacity(3);
+    frame(&[], &mut out)?;
+    stream.write_all(&out).await?;
+    stream.flush().await?;
+    server_hello(&read_frame(stream, MAX_HANDSHAKE).await?)
+}
+
 /// The handshake, both directions' keys out.
 pub async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,

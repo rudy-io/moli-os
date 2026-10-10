@@ -9,6 +9,7 @@
 //! what its voice is doing.
 
 mod api;
+mod find;
 mod frame;
 mod noise;
 mod satellite;
@@ -36,6 +37,10 @@ const PING_EVERY: Duration = Duration::from_secs(20);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(60);
+/// No answer at the device's address: it may have a new one.
+const NOT_THERE: &str = "the device does not answer at its address";
+/// One look around the home network for a device gone silent, at most this often.
+const SEARCH_EVERY: Duration = Duration::from_secs(10 * 60);
 /// What the voice is doing, as the dashboard and automations read it.
 const STATES: [&str; 4] = ["idle", "listening", "thinking", "speaking"];
 
@@ -178,6 +183,10 @@ async fn wait_for_person(ctx: &DriverCtx, why: String) {
 }
 
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
+    // Its address may change (a new lease): the driver follows the device.
+    let mut config = config.clone();
+    let config = &mut config;
+    let mut searched: Option<Instant> = None;
     // No key yet is fine: a device in clear is given one (see `provision`).
     let mut psk = match ctx.secret(API_KEY).map(|k| noise::psk_from_base64(&k)) {
         None => None,
@@ -231,6 +240,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         } else {
             error
         };
+        if error.contains(NOT_THERE) && searched.is_none_or(|at| at.elapsed() >= SEARCH_EVERY) {
+            searched = Some(Instant::now());
+            if let Some(ip) = search(config, ctx).await {
+                config.host = ip.to_string();
+                pause = RETRY_MIN;
+                continue;
+            }
+        }
         // Each new reason once; a device switched off says the same every time.
         if last_error.as_deref() == Some(error.as_str()) {
             tracing::debug!(instance = %ctx.instance(), error, "esphome device unreachable");
@@ -249,6 +266,26 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             () = ctx.cancelled() => return Ok(()),
         }
     }
+}
+
+/// The device's new address on the home network, found by its MAC (only
+/// with `mac` set and an IPv4 `host`).
+async fn search(config: &Config, ctx: &DriverCtx) -> Option<std::net::Ipv4Addr> {
+    let mac = config.mac.as_deref()?;
+    let old: std::net::Ipv4Addr = config.host.parse().ok()?;
+    let found = find::find(&find::neighbours(old), config.port, mac).await;
+    match found {
+        Some(ip) => tracing::warn!(
+            instance = %ctx.instance(),
+            old = %old,
+            new = %ip,
+            "esphome device found at a new address (update `host` in the configuration)"
+        ),
+        None => {
+            tracing::info!(instance = %ctx.instance(), "esphome device not found on the home network");
+        }
+    }
+    found
 }
 
 /// Why a key could not be given: a person must act, or it may work later.
@@ -298,21 +335,18 @@ async fn expect_plain(tcp: &mut TcpStream, kind: u16) -> anyhow::Result<Vec<u8>>
 /// a key the device holds and Moli lost.
 async fn provision(config: &Config, ctx: &DriverCtx, had_key: bool) -> Result<[u8; 32], Provision> {
     let mut tcp = connect(config).await?;
-    frame::send_plain(&mut tcp, api::HELLO_REQUEST, &api::hello()).await?;
-    if let Err(e) = expect_plain(&mut tcp, api::HELLO_RESPONSE).await {
+    let info = match plain_info(&mut tcp).await {
+        Ok(info) => info,
         // It holds a key after all, one Moli does not know.
-        if !had_key && format!("{e:#}").contains("asks for encryption") {
+        Err(e) if !had_key && format!("{e:#}").contains("asks for encryption") => {
             return Err(Provision::Person(moli_i18n::tr!(
                 "pilotes.esphome.cle_manquante",
                 instance = ctx.instance(),
                 key = API_KEY
             )));
         }
-        return Err(e.into());
-    }
-    frame::send_plain(&mut tcp, api::DEVICE_INFO_REQUEST, &[]).await?;
-    let info = api::device_info(&expect_plain(&mut tcp, api::DEVICE_INFO_RESPONSE).await?)
-        .context("unreadable device info")?;
+        Err(e) => return Err(e.into()),
+    };
     if !info.encryption_supported {
         return Err(Provision::Person(moli_i18n::tr!(
             "pilotes.esphome.sans_chiffrement"
@@ -345,14 +379,25 @@ async fn provision(config: &Config, ctx: &DriverCtx, had_key: bool) -> Result<[u
     Ok(noise::psk_from_base64(&key)?)
 }
 
+/// A device in clear: our hello, then what it says of itself.
+async fn plain_info(tcp: &mut TcpStream) -> anyhow::Result<api::DeviceInfo> {
+    frame::send_plain(tcp, api::HELLO_REQUEST, &api::hello()).await?;
+    expect_plain(tcp, api::HELLO_RESPONSE).await?;
+    frame::send_plain(tcp, api::DEVICE_INFO_REQUEST, &[]).await?;
+    api::device_info(&expect_plain(tcp, api::DEVICE_INFO_RESPONSE).await?)
+        .context("unreadable device info")
+}
+
 async fn connect(config: &Config) -> anyhow::Result<TcpStream> {
     let tcp = tokio::time::timeout(
         frame::HANDSHAKE_LIMIT,
         TcpStream::connect((config.host.as_str(), config.port)),
     )
     .await
-    .context("no answer")?
-    .with_context(|| format!("cannot reach {}:{}", config.host, config.port))?;
+    .context("no answer")
+    .context(NOT_THERE)?
+    .with_context(|| format!("cannot reach {}:{}", config.host, config.port))
+    .context(NOT_THERE)?;
     tcp.set_nodelay(true)?;
     Ok(tcp)
 }
