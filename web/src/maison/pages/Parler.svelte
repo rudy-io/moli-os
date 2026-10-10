@@ -16,7 +16,10 @@
       .filter((d) => !hidden(d.id))
       .map((d) => {
         const key = SPEAK.find((k) => d.points?.some((p) => p.key === k && p.access?.write && p.kind?.type === 'text'));
-        return key ? { id: d.id, key, name: nameOf(d.id), room: roomOf(d), online: d.online !== false } : null;
+        if (!key) return null;
+        // Two « Salon » (an Echo, a Sonos) are told apart by what they are.
+        const what = [d.manufacturer, d.model].filter(Boolean).join(' ');
+        return { id: d.id, key, name: nameOf(d.id), what, room: roomOf(d), online: d.online !== false };
       })
       .filter(Boolean)
       .sort((a, b) => (a.room ?? '￿').localeCompare(b.room ?? '￿') || a.name.localeCompare(b.name)),
@@ -129,7 +132,7 @@
               onclick={() => toggle(s.id)}
             >
               <Icon name={s.key === 'announce' ? 'speaker' : 'talk'} size={18} />
-              <span class="name">{s.name}</span>
+              <span class="name">{s.name}<small class="muted">{s.what}</small></span>
               {#if !s.online}
                 <span class="muted small">{t('parler.hors_ligne')}</span>
               {:else if results[s.id] === 'ok'}
@@ -283,9 +286,18 @@
   .target .name {
     flex: 1;
     min-width: 0;
+    display: grid;
+  }
+
+  .target .name,
+  .target .name small {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .target .name small {
+    font-size: 0.78rem;
   }
 
   .small {
