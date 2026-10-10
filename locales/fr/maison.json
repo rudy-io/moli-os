@@ -202,14 +202,13 @@
   "maison.meteo.vent_vers": "Coups de vent vers {h} h ({kmh} km/h)",
   "maison.meteo.gel": "Nuit froide : jusqu’à {min}°",
   "maison.meteo.sec": "Pas de pluie prévue d’ici {h} h",
-  "maison.meteo.maison": "Maison",
-  "maison.meteo.voir_nuages": "Voir les nuages des deux dernières heures",
-  "maison.meteo.vu_espace": "vu de l’espace il y a {min} min",
-  "maison.meteo.nuages_titre": "Les nuages autour de la maison",
   "maison.meteo.nuages_alt": "Image satellite de la région à {time}",
   "maison.meteo.fermer": "Fermer",
   "maison.meteo.pause": "Pause",
   "maison.meteo.lecture": "Lecture",
   "maison.meteo.moment": "Moment",
+  "maison.meteo.ouvrir": "Météo : {label}. Ouvrir le détail",
+  "maison.meteo.titre": "Météo",
+  "maison.meteo.dehors": "Tout le reste dehors",
   "maison.meteo.credit": "Images satellite : {source}, une toutes les 10 minutes. Le point orange, c’est la maison."
 }

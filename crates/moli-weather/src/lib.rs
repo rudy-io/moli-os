@@ -41,13 +41,45 @@ const SKY_RETRY: Duration = Duration::from_secs(60);
 const SKY_LIMIT: Duration = Duration::from_secs(20);
 const MAX_CAPABILITIES: usize = 64 * 1024;
 const MAX_FRAME: usize = 1024 * 1024;
-/// The image: 960 × 720 pixels for 840 × 630 km, the house's region.
-pub const WIDTH_PX: u32 = 960;
-pub const HEIGHT_PX: u32 = 720;
-pub const WIDTH_KM: f64 = 840.0;
-const HEIGHT_KM: f64 = WIDTH_KM * 0.75;
 /// Web Mercator's sphere.
 const EARTH_M: f64 = 6_378_137.0;
+
+/// How far the images look: close around the house (the home page's
+/// picture, about as close as Meteosat's kilometre allows), or the whole
+/// region (the storms seen coming from far).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zoom {
+    Near,
+    Wide,
+}
+
+impl Zoom {
+    /// Width on the ground (the height is three quarters of it).
+    #[must_use]
+    pub const fn width_km(self) -> f64 {
+        match self {
+            Self::Near => 260.0,
+            Self::Wide => 840.0,
+        }
+    }
+
+    /// The image's pixels (4:3): about one per kilometre for the close one,
+    /// the browser smooths it.
+    #[must_use]
+    pub const fn size(self) -> [u32; 2] {
+        match self {
+            Self::Near => [480, 360],
+            Self::Wide => [960, 720],
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Near => 0,
+            Self::Wide => 1,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Weather(Arc<Inner>);
@@ -57,7 +89,8 @@ struct Inner {
     latitude: f64,
     longitude: f64,
     forecast: Mutex<Option<(Instant, Json)>>,
-    sky: Mutex<Sky>,
+    /// One per [`Zoom`].
+    sky: [Mutex<Sky>; 2],
 }
 
 #[derive(Debug, Default)]
@@ -77,15 +110,15 @@ pub struct Region {
 
 impl Region {
     #[must_use]
-    pub fn around(latitude: f64, longitude: f64) -> Self {
-        // The images are asked around a rounded point (a quarter of a degree,
-        // ~25 km): the provider never learns where the house is.
-        let c_lat = (latitude * 4.0).round() / 4.0;
-        let c_lon = (longitude * 4.0).round() / 4.0;
+    pub fn around(latitude: f64, longitude: f64, zoom: Zoom) -> Self {
+        // The images are asked around a rounded point (a tenth of a degree,
+        // ~10 km): the provider never learns where the house is.
+        let c_lat = (latitude * 10.0).round() / 10.0;
+        let c_lon = (longitude * 10.0).round() / 10.0;
         // Mercator stretches distances by 1/cos(latitude).
         let stretch = 1.0 / c_lat.to_radians().cos();
-        let half_w = WIDTH_KM * 500.0 * stretch;
-        let half_h = HEIGHT_KM * 500.0 * stretch;
+        let half_w = zoom.width_km() * 500.0 * stretch;
+        let half_h = half_w * 0.75;
         let (cx, cy) = mercator(c_lat, c_lon);
         let bbox = [cx - half_w, cy - half_h, cx + half_w, cy + half_h];
         let (hx, hy) = mercator(latitude, longitude);
@@ -113,7 +146,7 @@ impl Weather {
             latitude,
             longitude,
             forecast: Mutex::new(None),
-            sky: Mutex::new(Sky::default()),
+            sky: [Mutex::new(Sky::default()), Mutex::new(Sky::default())],
         }))
     }
 
@@ -144,11 +177,11 @@ impl Weather {
 
     /// The images at hand (their times, oldest first) and where the house
     /// is on them; new ones are looked for when it is time.
-    pub async fn sky(&self) -> anyhow::Result<Json> {
-        let region = Region::around(self.0.latitude, self.0.longitude);
-        let mut sky = self.0.sky.lock().await;
+    pub async fn sky(&self, zoom: Zoom) -> anyhow::Result<Json> {
+        let region = Region::around(self.0.latitude, self.0.longitude, zoom);
+        let mut sky = self.0.sky[zoom.index()].lock().await;
         if sky.next_check.is_none_or(|at| Instant::now() >= at) {
-            match refresh(&mut sky, &region).await {
+            match refresh(&mut sky, &region, zoom).await {
                 Ok(()) => sky.next_check = Some(Instant::now() + SKY_CHECK),
                 Err(e) => {
                     tracing::warn!("satellite: {e:#}");
@@ -163,15 +196,15 @@ impl Weather {
             "frames": sky.frames.iter().map(|(t, _)| t).collect::<Vec<_>>(),
             "every_min": FRAME_STEP_MIN,
             "house": region.house,
-            "width_km": WIDTH_KM,
-            "size": [WIDTH_PX, HEIGHT_PX],
+            "width_km": zoom.width_km(),
+            "size": zoom.size(),
             "source": "EUMETSAT · Meteosat",
         }))
     }
 
     /// One image already at hand (never fetched for the asking).
-    pub async fn frame(&self, time: &str) -> Option<Bytes> {
-        let sky = self.0.sky.lock().await;
+    pub async fn frame(&self, zoom: Zoom, time: &str) -> Option<Bytes> {
+        let sky = self.0.sky[zoom.index()].lock().await;
         sky.frames
             .iter()
             .find(|(t, _)| t == time)
@@ -230,7 +263,7 @@ fn wanted(latest: jiff::Timestamp) -> Vec<String> {
         .collect()
 }
 
-async fn refresh(sky: &mut Sky, region: &Region) -> anyhow::Result<()> {
+async fn refresh(sky: &mut Sky, region: &Region, zoom: Zoom) -> anyhow::Result<()> {
     let caps = get(SKY_HOST, SKY_CAPABILITIES, SKY_LIMIT, MAX_CAPABILITIES).await?;
     let latest = latest(&String::from_utf8_lossy(&caps))
         .ok_or_else(|| anyhow::anyhow!("{SKY_HOST}: no image time"))?;
@@ -246,7 +279,8 @@ async fn refresh(sky: &mut Sky, region: &Region) -> anyhow::Result<()> {
         .iter()
         .filter(|t| !kept.iter().any(|(k, _)| k == *t))
         .collect();
-    let fetched = futures::future::join_all(missing.iter().map(|t| fetch_frame(region, t))).await;
+    let fetched =
+        futures::future::join_all(missing.iter().map(|t| fetch_frame(region, zoom, t))).await;
     for (time, image) in missing.into_iter().zip(fetched) {
         match image {
             Ok(jpeg) => kept.push((time.clone(), jpeg)),
@@ -260,12 +294,13 @@ async fn refresh(sky: &mut Sky, region: &Region) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn fetch_frame(region: &Region, time: &str) -> anyhow::Result<Bytes> {
+async fn fetch_frame(region: &Region, zoom: Zoom, time: &str) -> anyhow::Result<Bytes> {
     let [x0, y0, x1, y1] = region.bbox;
+    let [width, height] = zoom.size();
     let path = format!(
         "/geoserver/ows?service=WMS&version=1.3.0&request=GetMap&layers={SKY_LAYER}&styles=\
          &crs=EPSG:3857&bbox={x0:.0},{y0:.0},{x1:.0},{y1:.0}\
-         &width={WIDTH_PX}&height={HEIGHT_PX}&format=image/jpeg&time={time}"
+         &width={width}&height={height}&format=image/jpeg&time={time}"
     );
     let jpeg = get(SKY_HOST, &path, SKY_LIMIT, MAX_FRAME).await?;
     // A WMS error comes back as XML, sometimes with a 200.
@@ -279,17 +314,19 @@ mod tests {
 
     #[test]
     fn the_house_sits_near_the_middle_of_its_region() {
-        let r = Region::around(48.85, 2.35);
-        // The centre is rounded (48.75 ; 2.25): the house is a little off it.
-        assert!((r.house[0] - 0.5).abs() < 0.05, "{:?}", r.house);
-        assert!((r.house[1] - 0.5).abs() < 0.05, "{:?}", r.house);
-        assert!(r.house[0] > 0.5, "east of the centre");
-        assert!(r.house[1] < 0.5, "north of the centre");
-        // 840 km wide on the ground, stretched by Mercator.
-        let width = r.bbox[2] - r.bbox[0];
-        let expected = WIDTH_KM * 1000.0 / 48.75_f64.to_radians().cos();
-        assert!((width - expected).abs() < 1.0);
-        assert!(((r.bbox[3] - r.bbox[1]) / width - 0.75).abs() < 1e-9);
+        for zoom in [Zoom::Near, Zoom::Wide] {
+            let r = Region::around(48.86, 2.33, zoom);
+            // The centre is rounded (48.9 ; 2.3): the house is a little off it.
+            assert!((r.house[0] - 0.5).abs() < 0.05, "{:?}", r.house);
+            assert!((r.house[1] - 0.5).abs() < 0.05, "{:?}", r.house);
+            assert!(r.house[0] > 0.5, "east of the centre");
+            assert!(r.house[1] > 0.5, "south of the centre");
+            // So wide on the ground, stretched by Mercator.
+            let width = r.bbox[2] - r.bbox[0];
+            let expected = zoom.width_km() * 1000.0 / 48.9_f64.to_radians().cos();
+            assert!((width - expected).abs() < 1.0);
+            assert!(((r.bbox[3] - r.bbox[1]) / width - 0.75).abs() < 1e-9);
+        }
     }
 
     #[test]

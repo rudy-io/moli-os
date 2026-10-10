@@ -5,7 +5,7 @@
 
 import { t, locale } from '../../lib/i18n.svelte.js';
 
-export const sky = $state({ forecast: null, satellite: null });
+export const sky = $state({ forecast: null, satellite: null, wide: null });
 
 const FORECAST_EVERY = 15 * 60_000;
 const SATELLITE_EVERY = 5 * 60_000;
@@ -29,6 +29,12 @@ async function loadSatellite() {
   if (s?.frames?.length) sky.satellite = s;
 }
 
+/** The whole region (the detail's view), only when someone opens it. */
+export async function loadWide() {
+  const s = await json('/api/weather/satellite?zoom=wide');
+  if (s?.frames?.length) sky.wide = s;
+}
+
 let watchers = 0;
 let timers = [];
 /** Keeps the sky fresh while a page shows it; returns what stops it. */
@@ -47,7 +53,8 @@ export function watchSky() {
 }
 
 /** One image's address. */
-export const frameUrl = (time) => `/api/weather/satellite/${encodeURIComponent(time)}.jpg`;
+export const frameUrl = (time, zoom = 'near') =>
+  `/api/weather/satellite/${encodeURIComponent(time)}.jpg${zoom === 'wide' ? '?zoom=wide' : ''}`;
 
 /** Open-Meteo's local time (« 2026-10-10T15:00 ») as a timestamp. */
 function localTs(iso, offset) {
