@@ -36,7 +36,8 @@
   const place = $derived.by(() => {
     const [iw, ih] = size;
     if (!W || !H) return null;
-    const [tx, ty] = [0.36, 0.5];
+    // Narrow (phone): the words take more room, the house goes further left.
+    const [tx, ty] = [W < 520 ? 0.17 : 0.36, 0.5];
     const [hx, hy] = house;
     const s = Math.max(W / iw, H / ih, (tx * W) / (hx * iw), ((1 - tx) * W) / ((1 - hx) * iw), (ty * H) / (hy * ih), ((1 - ty) * H) / ((1 - hy) * ih));
     return { w: iw * s, h: ih * s, left: tx * W - hx * iw * s, top: ty * H - hy * ih * s, x: tx * W, y: ty * H };
