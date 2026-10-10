@@ -1053,6 +1053,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-alexa"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-ambiance"
 version = "0.1.0"
 dependencies = [
@@ -1405,6 +1423,7 @@ dependencies = [
  "clap",
  "http",
  "jiff",
+ "moli-alexa",
  "moli-api",
  "moli-assistant",
  "moli-automation",

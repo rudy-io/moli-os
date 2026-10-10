@@ -661,6 +661,31 @@ pub async fn web(
         .with_context(|| format!("{host} did not answer in time"))?
 }
 
+/// Like [`web`], with the answer's headers too (a service that sets cookies).
+pub async fn web_with_headers(
+    host: &str,
+    port: u16,
+    tls: bool,
+    request: Request<Full<Bytes>>,
+    limit: Duration,
+    max_body: usize,
+) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
+    let exchange = async {
+        let (head, body) = web_response(host, port, tls, request, limit)
+            .await?
+            .into_parts();
+        let body = http_body_util::Limited::new(body, max_body)
+            .collect()
+            .await
+            .map_err(|e| anyhow::anyhow!("{host}: {e}"))?
+            .to_bytes();
+        anyhow::Ok((head.status, head.headers, body))
+    };
+    tokio::time::timeout(limit, exchange)
+        .await
+        .with_context(|| format!("{host} did not answer in time"))?
+}
+
 /// Like [`web`], but the answer's body is handed over as it arrives (audio
 /// played while it is made): `limit` bounds the wait for the answer's head
 /// only, the caller bounds the body (time and size).
@@ -668,9 +693,21 @@ pub async fn web_stream(
     host: &str,
     port: u16,
     tls: bool,
-    mut request: Request<Full<Bytes>>,
+    request: Request<Full<Bytes>>,
     limit: Duration,
 ) -> anyhow::Result<(StatusCode, Incoming)> {
+    let response = web_response(host, port, tls, request, limit).await?;
+    Ok((response.status(), response.into_body()))
+}
+
+/// The answer's head (and its body, still to read), within `limit`.
+async fn web_response(
+    host: &str,
+    port: u16,
+    tls: bool,
+    mut request: Request<Full<Bytes>>,
+    limit: Duration,
+) -> anyhow::Result<http::Response<Incoming>> {
     if !request.headers().contains_key(http::header::HOST) {
         let value = if (tls && port == 443) || (!tls && port == 80) {
             host.to_owned()
@@ -703,7 +740,7 @@ pub async fn web_stream(
             });
             sender.send_request(request).await?
         };
-        anyhow::Ok((response.status(), response.into_body()))
+        anyhow::Ok(response)
     };
     tokio::time::timeout(limit, exchange)
         .await

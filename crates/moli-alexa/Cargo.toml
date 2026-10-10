@@ -1,0 +1,27 @@
+[package]
+name = "moli-alexa"
+description = "Moli OS driver for Amazon Echo speakers through the Alexa app's own (unofficial) web API: music by search, volume, play/pause, speech and announcements, with a paste-the-address Amazon sign-in."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

@@ -329,5 +329,19 @@
   "systeme.tuya.remplacer": "Remplacer",
   "systeme.tuya.ajouter": "Ajouter les clés",
   "systeme.tuya.enregistrer": "Enregistrer",
-  "systeme.tuya.code_demande": "Ton code est demandé. Les clés ne réapparaissent nulle part : pour les changer, on les remplace."
+  "systeme.tuya.code_demande": "Ton code est demandé. Les clés ne réapparaissent nulle part : pour les changer, on les remplace.",
+  "systeme.alexa.titre": "Enceintes Amazon Echo (Alexa)",
+  "systeme.alexa.connecte": "Compte Amazon connecté : {n} enceintes et groupes pilotés par Moli.",
+  "systeme.alexa.a_connecter": "Connecte ton compte Amazon pour que Moli pilote tes Echo (musique, volume, annonces).",
+  "systeme.alexa.erreur": "Amazon ne répond pas pour le moment : Moli réessaie tout seul.",
+  "systeme.alexa.connexion": "Connexion à Amazon…",
+  "systeme.alexa.etape1": "Ouvre la page de connexion d'Amazon, de préférence sur un ordinateur.",
+  "systeme.alexa.ouvrir": "Ouvrir la page Amazon",
+  "systeme.alexa.etape2": "Connecte-toi : mot de passe, code de vérification, tout se passe chez Amazon. Il peut te demander tes identifiants deux fois, ou un captcha.",
+  "systeme.alexa.etape3": "Tu arrives sur une page d'erreur « introuvable » : c'est normal. Copie son adresse (elle commence par https://www.amazon.com/ap/maplanding) et colle-la ci-dessous, dans les 5 minutes.",
+  "systeme.alexa.coller": "Adresse de la dernière page",
+  "systeme.alexa.connecter": "Connecter",
+  "systeme.alexa.verification": "Connexion…",
+  "systeme.alexa.aide": "Moli ne voit jamais ton mot de passe : il apparaîtra comme un appareil « Moli » de ton compte Amazon, et garde un jeton chiffré dans son coffre.",
+  "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir."
 }

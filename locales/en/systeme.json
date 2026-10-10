@@ -329,5 +329,19 @@
   "systeme.tuya.remplacer": "Replace",
   "systeme.tuya.ajouter": "Add the keys",
   "systeme.tuya.enregistrer": "Save",
-  "systeme.tuya.code_demande": "You’ll be asked for your code. The keys never show up again: to change them, you replace them."
+  "systeme.tuya.code_demande": "You’ll be asked for your code. The keys never show up again: to change them, you replace them.",
+  "systeme.alexa.titre": "Amazon Echo speakers (Alexa)",
+  "systeme.alexa.connecte": "Amazon account connected: {n} speakers and groups driven by Moli.",
+  "systeme.alexa.a_connecter": "Connect your Amazon account so Moli drives your Echo speakers (music, volume, announcements).",
+  "systeme.alexa.erreur": "Amazon is not answering right now: Moli tries again by itself.",
+  "systeme.alexa.connexion": "Connecting to Amazon…",
+  "systeme.alexa.etape1": "Open Amazon's sign-in page, on a computer if you can.",
+  "systeme.alexa.ouvrir": "Open the Amazon page",
+  "systeme.alexa.etape2": "Sign in: password, verification code, it all happens at Amazon. It may ask for your credentials twice, or show a captcha.",
+  "systeme.alexa.etape3": "You land on a \"not found\" error page: that is expected. Copy its address (it starts with https://www.amazon.com/ap/maplanding) and paste it below within 5 minutes.",
+  "systeme.alexa.coller": "Address of the last page",
+  "systeme.alexa.connecter": "Connect",
+  "systeme.alexa.verification": "Connecting…",
+  "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
+  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice."
 }

@@ -1,0 +1,26 @@
+[integration]
+id = "alexa"
+name = "Enceintes Amazon Echo (Alexa)"
+# Unofficial: the Alexa app's own web API, which Amazon may change at any
+# time. Echo, Echo Dot, Echo Show, Echo Studio and multi-room groups.
+brands = ["Amazon"]
+models = ["Echo", "Echo Dot", "Echo Show", "Echo Studio"]
+transport = "https"
+driver = "alexa"
+crate = "moli-alexa"
+
+[discovery]
+# A cloud account: nothing to find on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# Given by the dashboard's sign-in, never typed into a file.
+secrets = ["refresh_token"]
+vars = []
+options = []
+
+[origin]
+reused = ""
+author = "agent"
