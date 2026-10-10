@@ -267,6 +267,11 @@ impl Voice {
                 let brain = ctx.voice_brain();
                 Self::event(tx, VoiceEvent::SttEnd, &[("text", &text)]).await?;
                 // Nothing understood, or a closing phrase: the conversation ends.
+                if text.is_empty()
+                    && let Some(brain) = &brain
+                {
+                    brain.heard_nothing();
+                }
                 if text.is_empty() || brain.is_some_and(|b| b.is_goodbye(&text)) {
                     return self.end(ctx, id, tx, false).await;
                 }
@@ -346,6 +351,9 @@ impl Voice {
             .filter(|r| r.speech_by.is_some_and(|by| now >= by))
         {
             run.log(ctx, "no voice");
+            if let Some(brain) = ctx.voice_brain() {
+                brain.heard_nothing();
+            }
             return self.end(ctx, id, tx, true).await;
         }
         if self.continuing.is_some_and(|by| now >= by) {

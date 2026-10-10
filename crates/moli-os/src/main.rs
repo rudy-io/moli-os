@@ -437,6 +437,7 @@ async fn start_brains(
         automations.set_writer(Arc::new(moli.clone()));
         // The voice satellites (already running) find Moli from now on.
         hub.set_voice_brain(Arc::new(moli.clone()));
+        moli.start_recap();
     }
     Ok((assistant, automations, task))
 }
@@ -464,6 +465,7 @@ fn start_assistant(
     )
     .context("[assistant]")?;
     moli.load_voice_prefs(config.server.data_dir.join("assistant.json"));
+    moli.open_exchanges(config.server.data_dir.join("assistant-exchanges.jsonl"));
     Ok(Some(moli))
 }
 

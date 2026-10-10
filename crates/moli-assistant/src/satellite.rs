@@ -86,7 +86,7 @@ impl VoiceBrain for Assistant {
                 .collect();
             let turn = Turn {
                 messages,
-                surface: Some("bubble".into()),
+                surface: Some("satellite".into()),
                 spoken: true,
             };
             self.turn(turn)
@@ -106,6 +106,10 @@ impl VoiceBrain for Assistant {
 
     fn is_goodbye(&self, text: &str) -> bool {
         goodbye(text, &word_list("assistant.voice.goodbye"))
+    }
+
+    fn heard_nothing(&self) {
+        self.heard_nothing_on("satellite");
     }
 }
 

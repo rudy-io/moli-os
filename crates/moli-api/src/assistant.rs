@@ -136,6 +136,37 @@ fn speech_response(speech: Result<Speech, AssistantError>) -> Response {
 }
 
 /// The settings card: key filed or not (never the key), voice, tone.
+#[derive(serde::Deserialize)]
+pub(crate) struct Since {
+    #[serde(default = "a_day")]
+    hours: u32,
+}
+
+fn a_day() -> u32 {
+    24
+}
+
+/// What the house asked Moli lately, newest first (at most 30 days).
+pub(crate) async fn exchanges(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::extract::Query(since): axum::extract::Query<Since>,
+) -> Response {
+    match moli {
+        Some(moli) => {
+            axum::Json(json!({ "exchanges": moli.exchanges(since.hours.min(720)) })).into_response()
+        }
+        None => not_configured(),
+    }
+}
+
+/// The evening recap, sent now (to try it).
+pub(crate) async fn recap(Extension(Moli(moli)): Extension<Moli>) -> Response {
+    match moli {
+        Some(moli) => axum::Json(json!({ "sent": moli.send_recap().await })).into_response(),
+        None => not_configured(),
+    }
+}
+
 pub(crate) async fn settings(Extension(Moli(moli)): Extension<Moli>) -> Response {
     match moli {
         Some(moli) => axum::Json(moli.settings()).into_response(),

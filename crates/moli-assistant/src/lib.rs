@@ -14,15 +14,18 @@
 #![recursion_limit = "256"]
 
 mod auto;
+mod exchanges;
 mod house;
 mod import;
 mod llm;
 mod outside;
+mod recap;
 mod satellite;
 mod settings;
 mod voice;
 
 pub use auto::Draft;
+pub use exchanges::{Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
@@ -84,6 +87,10 @@ pub struct Config {
     /// provider's own search); empty to disable it.
     #[serde(default = "default_model")]
     pub search_model: String,
+    /// When the day's exchanges are sent on Telegram (`HH:MM`, the house's
+    /// time); empty for no recap.
+    #[serde(default = "default_recap_at")]
+    pub recap_at: String,
     /// Where the house is, for the forecast; by default `[automations]`'s.
     #[serde(default)]
     pub latitude: Option<f64>,
@@ -108,6 +115,7 @@ impl Default for Config {
             local_listen: default_local_listen(),
             timezone: default_timezone(),
             search_model: default_model(),
+            recap_at: default_recap_at(),
             latitude: None,
             longitude: None,
         }
@@ -163,6 +171,10 @@ fn default_timezone() -> String {
     "Europe/Paris".into()
 }
 
+fn default_recap_at() -> String {
+    "21:00".into()
+}
+
 /// Model round trips per turn (tool calls included).
 const MAX_STEPS: usize = 6;
 /// Messages of the conversation sent back (the model has no memory).
@@ -211,6 +223,8 @@ struct Inner {
     imported: Mutex<std::collections::HashSet<String>>,
     /// Voices prepared for a satellite: id → (until when, text).
     prepared: Mutex<std::collections::HashMap<String, (Instant, String)>>,
+    /// What was asked and answered, for the history and the recap.
+    exchanges: exchanges::Exchanges,
 }
 
 /// One turn, as the dashboard sends it: the conversation so far, the last
@@ -252,6 +266,9 @@ pub struct Reply {
     /// The person asked to end the spoken conversation (`end_conversation`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub end: bool,
+    /// The tools called, for the history.
+    #[serde(skip)]
+    pub tools: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -333,6 +350,7 @@ impl Assistant {
             importing: std::sync::atomic::AtomicBool::new(false),
             imported: Mutex::default(),
             prepared: Mutex::default(),
+            exchanges: exchanges::Exchanges::default(),
         })))
     }
 
@@ -523,7 +541,153 @@ impl Assistant {
 
     /// One turn of the conversation: the model reads the house, may act and
     /// pick cards, then answers.
+    /// One turn, kept in the history (question, answer, orders, time taken).
     pub async fn turn(&self, turn: Turn) -> Result<Reply, AssistantError> {
+        let started = Instant::now();
+        let question = turn
+            .messages
+            .last()
+            .filter(|m| m.role == Role::User)
+            .map(|m| m.content.clone());
+        let surface = turn.surface.clone().unwrap_or_default();
+        let spoken = turn.spoken;
+        let result = self.converse(turn).await;
+        if let Some(question) = question {
+            let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let (kind, reply, tools, orders) = match &result {
+                Ok(r) => (
+                    exchanges::Kind::Turn,
+                    r.reply.clone(),
+                    r.tools.clone(),
+                    r.actions
+                        .iter()
+                        .map(|a| Order {
+                            device: a.device.clone(),
+                            status: a.status.to_owned(),
+                        })
+                        .collect(),
+                ),
+                Err(e) => (
+                    exchanges::Kind::Failed,
+                    e.to_string(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            };
+            self.0.exchanges.add(Exchange {
+                at: jiff::Timestamp::now().as_millisecond(),
+                kind,
+                surface,
+                spoken,
+                question,
+                reply,
+                tools,
+                orders,
+                ms,
+            });
+        }
+        result
+    }
+
+    /// Where the history is kept (the data directory), read back at start.
+    pub fn open_exchanges(&self, path: PathBuf) {
+        self.0
+            .exchanges
+            .open(path, jiff::Timestamp::now().as_millisecond());
+    }
+
+    /// The exchanges of the last `hours`, newest first.
+    #[must_use]
+    pub fn exchanges(&self, hours: u32) -> Vec<Exchange> {
+        let from = jiff::Timestamp::now().as_millisecond() - i64::from(hours) * 3_600_000;
+        let mut all = self.0.exchanges.since(from);
+        all.reverse();
+        all
+    }
+
+    /// A satellite woke and heard nothing it understood: counted in the
+    /// history (false activations show up there).
+    pub(crate) fn heard_nothing_on(&self, surface: &str) {
+        self.0.exchanges.add(Exchange {
+            at: jiff::Timestamp::now().as_millisecond(),
+            kind: exchanges::Kind::Silence,
+            surface: surface.into(),
+            spoken: true,
+            question: String::new(),
+            reply: String::new(),
+            tools: Vec::new(),
+            orders: Vec::new(),
+            ms: 0,
+        });
+    }
+
+    /// Every evening at `recap_at`, the day's exchanges on Telegram.
+    pub fn start_recap(&self) {
+        let Some(at) = recap::parse_time(&self.0.config.recap_at) else {
+            if !self.0.config.recap_at.trim().is_empty() {
+                tracing::warn!(recap_at = %self.0.config.recap_at, "recap_at is not HH:MM: no recap");
+            }
+            return;
+        };
+        let moli = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let now = jiff::Timestamp::now().to_zoned(moli.0.tz.clone());
+                let Some(next) = recap::next_after(&now, at) else {
+                    return;
+                };
+                let wait = next.timestamp().as_millisecond() - now.timestamp().as_millisecond();
+                tokio::time::sleep(Duration::from_millis(u64::try_from(wait).unwrap_or(0))).await;
+                moli.send_recap().await;
+            }
+        });
+    }
+
+    /// The last 24 hours on the house's Telegram (nothing when nothing
+    /// happened). Returns whether a message went out.
+    pub async fn send_recap(&self) -> bool {
+        let now = jiff::Timestamp::now().to_zoned(self.0.tz.clone());
+        let day = recap_day(&now);
+        let text = recap::compose(
+            &self
+                .0
+                .exchanges
+                .since(now.timestamp().as_millisecond() - 24 * 3_600_000),
+            &self.0.tz,
+            &day,
+        );
+        let Some(text) = text else {
+            return false;
+        };
+        let telegram = self.0.hub.snapshot().devices.iter().find_map(|d| {
+            (d.device.manufacturer.as_deref() == Some("Telegram")
+                && d.device.points.iter().any(|p| &*p.key == "notify"))
+            .then(|| PointId::new(&d.device.id, "notify"))
+        });
+        let Some(point) = telegram else {
+            tracing::info!("no Telegram device: the recap is only in the dashboard");
+            return false;
+        };
+        match self
+            .0
+            .hub
+            .command(
+                &point,
+                Value::Text(text.into()),
+                Origin::Assistant,
+                Some("Moli".into()),
+            )
+            .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(error = %e, "the recap was not sent");
+                false
+            }
+        }
+    }
+
+    async fn converse(&self, turn: Turn) -> Result<Reply, AssistantError> {
         if turn.messages.last().is_none_or(|m| m.role != Role::User) {
             return Err(AssistantError::Invalid(
                 "the last message must be the user's".into(),
@@ -726,6 +890,7 @@ impl Assistant {
             model: self.0.config.model.clone(),
             usage: run.usage,
             end: run.end,
+            tools: run.tools,
         }
     }
 
@@ -1498,6 +1663,21 @@ fn english_date(now: &jiff::Zoned) -> String {
         now.hour(),
         now.minute()
     )
+}
+
+/// The recap's day: « samedi 10 octobre » in French, the date otherwise.
+fn recap_day(now: &jiff::Zoned) -> String {
+    if moli_i18n::language().starts_with("fr") {
+        french_date(now)
+            .split(',')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches(char::is_numeric)
+            .trim()
+            .to_owned()
+    } else {
+        now.strftime("%A %-d %B").to_string()
+    }
 }
 
 fn french_date(now: &jiff::Zoned) -> String {

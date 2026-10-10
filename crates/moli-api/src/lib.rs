@@ -238,6 +238,29 @@ fn people(
     (Arc::new(humans), gate, persons)
 }
 
+/// Moli: the conversation, the voice, its history and its settings.
+fn assistant_routes() -> Router<Hub> {
+    Router::new()
+        .route(
+            "/api/assistant",
+            get(assistant::status).post(assistant::turn),
+        )
+        // Voice (audio) and Home Assistant imports are the only big bodies.
+        .route(
+            "/api/assistant/listen",
+            post(assistant::listen).layer(DefaultBodyLimit::max(BIG_BODY)),
+        )
+        .route("/api/assistant/speak", post(assistant::speak))
+        .route("/api/assistant/exchanges", get(assistant::exchanges))
+        .route("/api/assistant/recap", post(assistant::recap))
+        .route("/api/voice/{name}", get(assistant::satellite_voice))
+        .route(
+            "/api/assistant/settings",
+            get(assistant::settings).put(assistant::set_settings),
+        )
+        .route("/api/assistant/key", put(assistant::set_key))
+}
+
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
@@ -263,22 +286,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
         .route("/api/energy/series", get(rest::energy_series))
-        .route(
-            "/api/assistant",
-            get(assistant::status).post(assistant::turn),
-        )
-        // Voice (audio) and Home Assistant imports are the only big bodies.
-        .route(
-            "/api/assistant/listen",
-            post(assistant::listen).layer(DefaultBodyLimit::max(BIG_BODY)),
-        )
-        .route("/api/assistant/speak", post(assistant::speak))
-        .route("/api/voice/{name}", get(assistant::satellite_voice))
-        .route(
-            "/api/assistant/settings",
-            get(assistant::settings).put(assistant::set_settings),
-        )
-        .route("/api/assistant/key", put(assistant::set_key))
+        .merge(assistant_routes())
         .route(
             "/api/automations",
             get(automations::list).post(automations::create),

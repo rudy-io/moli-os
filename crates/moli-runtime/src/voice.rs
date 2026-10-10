@@ -43,4 +43,8 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
 
     /// Whether `text` only closes the conversation (« merci », « c'est tout »…).
     fn is_goodbye(&self, text: &str) -> bool;
+
+    /// The satellite woke and heard nothing it understood (a wake word said
+    /// for nothing, or a false activation): for the history.
+    fn heard_nothing(&self) {}
 }

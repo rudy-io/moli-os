@@ -3,6 +3,7 @@
   import Icon from '../ui/Icon.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
+  import AssistantExchanges from '../ui/AssistantExchanges.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
   import { hub, home } from '../lib/home.svelte.js';
@@ -161,6 +162,8 @@
   <DashboardCode />
 
   <AssistantSettings />
+
+  <AssistantExchanges />
 
   <TuyaCloudKeys />
 
