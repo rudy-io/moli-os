@@ -243,6 +243,8 @@ struct Home {
     session: Session,
     speakers: HashMap<DeviceId, Echo>,
     music: String,
+    /// Speakers whose state could not be read, said once per session.
+    unreadable: std::collections::HashSet<String>,
 }
 
 impl Home {
@@ -272,6 +274,7 @@ async fn connected(
         session,
         speakers: HashMap::new(),
         music,
+        unreadable: std::collections::HashSet::new(),
     };
     discover(ctx, &mut home).await?;
     set_text(ctx, account, "status", "connected");
@@ -298,16 +301,17 @@ async fn connected(
                 command.reply(result.map_err(|e| moli_i18n::tr!("pilotes.alexa.echec", why = e)));
                 poll.reset_after(Duration::from_secs(3));
             }
-            _ = poll.tick() => playing(ctx, &home).await?,
-            _ = volumes.tick() => {
-                if let Ok(all) = home.session.volumes().await {
+            _ = poll.tick() => playing(ctx, &mut home).await?,
+            _ = volumes.tick() => match home.session.volumes().await {
+                Ok(all) => {
                     for (id, e) in &home.speakers {
                         if let Some((_, v)) = all.iter().find(|(s, _)| *s == e.serial) {
                             ctx.set_state(id, "volume", Value::Float(*v));
                         }
                     }
                 }
-            }
+                Err(e) => tracing::warn!(instance = %ctx.instance(), error = %e, "alexa volumes"),
+            },
             _ = devices.tick() => discover(ctx, &mut home).await?,
             () = tokio::time::sleep_until(renew_at) => {
                 // New cookies: `connected` starts again.
@@ -326,6 +330,15 @@ async fn discover(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     home.speakers.clear();
     for e in echo::speakers(&answer) {
+        tracing::info!(
+            instance = %ctx.instance(),
+            name = %e.name,
+            family = %e.family,
+            device_type = %e.device_type,
+            group = e.group,
+            online = e.online,
+            "alexa speaker"
+        );
         let id = ctx.device_id(&e.serial);
         ctx.upsert_device(echo::device(ctx, &id, &e));
         ctx.set_availability(&id, e.online);
@@ -335,12 +348,18 @@ async fn discover(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
 }
 
 /// What each speaker plays (a session over: an error, `connected` starts again).
-async fn playing(ctx: &DriverCtx, home: &Home) -> anyhow::Result<()> {
-    for (id, e) in &home.speakers {
+async fn playing(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
+    let Home {
+        session,
+        speakers,
+        unreadable,
+        ..
+    } = home;
+    for (id, e) in speakers.iter() {
         if !e.online {
             continue;
         }
-        match home.session.playing(e).await {
+        match session.playing(e).await {
             Ok(p) => {
                 ctx.set_state(id, "playing", Value::Bool(p.state == "PLAYING"));
                 set_text(ctx, id, "state", &p.state.to_lowercase());
@@ -352,7 +371,9 @@ async fn playing(ctx: &DriverCtx, home: &Home) -> anyhow::Result<()> {
             }
             Err(Failure::Expired) => anyhow::bail!("{RENEW}"),
             Err(Failure::Other(err)) => {
-                tracing::debug!(speaker = %e.name, error = %format!("{err:#}"), "alexa player state");
+                if unreadable.insert(e.serial.clone()) {
+                    tracing::warn!(speaker = %e.name, error = %format!("{err:#}"), "alexa player state");
+                }
             }
         }
     }

@@ -404,6 +404,7 @@ mod tests {
             serial: serial.into(),
             device_type: "A3S5BH2HU6VAYF".into(),
             name: "Salon".into(),
+            family: "ECHO".into(),
             group: false,
             members: Vec::new(),
             online: true,

@@ -16,6 +16,8 @@ pub(crate) struct Echo {
     pub device_type: String,
     /// The name given in the Alexa app.
     pub name: String,
+    /// `ECHO`, `KNIGHT` (Show), `ROOK` (Spot), `WHA` (group)…
+    pub family: String,
     /// A multi-room music group (its members play together).
     pub group: bool,
     /// A group's members (their serials).
@@ -56,6 +58,7 @@ pub(crate) fn speakers(answer: &Json) -> Vec<Echo> {
                 && family != "FIRE_TV";
             (group || speaker).then(|| Echo {
                 name: d["accountName"].as_str().unwrap_or(&serial).to_owned(),
+                family: family.to_owned(),
                 serial,
                 device_type,
                 group,
