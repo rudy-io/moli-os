@@ -81,6 +81,15 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 
+# IKEA, through a Dirigera hub (local API). Needs the master key: the driver
+# keeps its token encrypted; press the action button under the hub when asked.
+# [[driver]]
+# id = "ikea"
+# kind = "dirigera"
+#
+# [driver.options]
+# host = "192.168.0.x"
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"

@@ -1229,6 +1229,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-dirigera"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "hyper",
+ "jiff",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "moli-energy"
 version = "0.1.0"
 dependencies = [
@@ -1449,6 +1470,7 @@ dependencies = [
  "moli-bambu",
  "moli-core",
  "moli-demo",
+ "moli-dirigera",
  "moli-energy",
  "moli-esphome",
  "moli-frigate",

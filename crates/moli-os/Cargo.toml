@@ -14,6 +14,7 @@ moli-z2m.workspace = true
 moli-api.workspace = true
 moli-weather.workspace = true
 moli-hue.workspace = true
+moli-dirigera.workspace = true
 moli-host.workspace = true
 moli-history.workspace = true
 moli-profile.workspace = true

@@ -72,7 +72,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, hue, tuya, reolink, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
+kind = "sonos"          # z2m, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -164,6 +164,79 @@ host = "192.168.1.x"
 - **Identité** : UUID du `device` Hue (ou de la pièce/zone). Le pont lui-même n'est pas publié.
 - **Pièges** : un renommage ou un changement de pièce/zone déclenche un rechargement complet. Flux muet 10 min : réouverture et rechargement. Un message SSE (ou une ligne) qui dépasse 1 Mio sans fin : flux fermé, rouvert et rechargement complet. Les commandes tournent à côté du flux avec un budget de 4,5 s (sous les 5 s du hub). Le message « certificat changé » donne la commande `secrets forget <instance> cert_sha256` avec l'identifiant réel de l'instance. `Bridge` n'affiche jamais la clé en `Debug`.
 - **Tests** : `src/model.rs` sur `integrations/hue/fixtures/resources.json` (pont réel) : pièces commandables, zones jamais, boutons, capteurs, événements partiels, encodage ; `src/bridge.rs` : parseur SSE découpé en morceaux, plafond de 1 Mio (ligne sans fin, `data:` sans ligne vide).
+
+## `dirigera` : hub IKEA Dirigera (`crates/moli-dirigera`)
+
+- **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
+  puissance, courant, tension, énergie), capteurs (température, humidité, PM2,5, COV, CO₂,
+  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis) et batteries.
+  Pas encore : stores, purificateurs, enceintes, pièces et scènes IKEA.
+- **Protocole** : API locale **non officielle**, HTTPS sur **8443**, certificat épinglé (un
+  certificat d'usine P-384 valable jusqu'en 2071). Chargement complet `GET /v1/home`, puis
+  WebSocket `wss://<hub>:8443/v1` (événements `deviceStateChanged`, `remotePressEvent`…), un
+  événement `ping` toutes les 30 s (le hub répond `pong`). Commandes en
+  `PATCH /v1/devices/<id>` avec `[{"attributes": {…}}]`.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "ikea"
+kind = "dirigera"
+[driver.options]
+host = "192.168.1.x"
+# cert_sha256 = "…"   # optionnel : empreinte du hub si le coffre est indisponible
+```
+
+- **Secrets** (instance) : `cert_sha256`, `token` (un JWT ES256 valable 10 ans) et
+  `token_cert_sha256` (l'empreinte sous laquelle le jeton a été donné), écrits par le pilote
+  lui-même lors de l'appairage. Il faut donc une clé maître. Plusieurs jetons cohabitent
+  (celui de Moli et celui d'un autre client restent valables). **Le jeton est lié à son
+  certificat** : sans empreinte connue (oubliée après un « certificat changé »), ou avec une
+  autre dans les options, il est oublié **avant** tout contact et l'appairage recommence ;
+  celui qui répond à la place du hub ne le reçoit jamais.
+- **Appairage** (OAuth PKCE `S256`) : statut `waiting` « Appuie sur le bouton d'action sous le
+  hub Dirigera », affiché **seulement** quand Moli tient un code. Le pilote demande un code
+  (`/v1/oauth/authorize`, valable 60 s), puis le
+  jeton toutes les 2 s (`/v1/oauth/token`) : `403 Button not pressed…` = pas encore,
+  `403 Pairing request timed out` ou `401 Invalid authorization code` = code périmé, un autre
+  est demandé. Le hub n'appaire qu'un client à la fois (`409 Already one ongoing pairing
+  request`) : le statut dit alors de **ne pas** appuyer (l'appui pourrait profiter à l'autre
+  client), et le pilote attend que l'autre demande expire ; tant que Moli attend l'appui, le
+  hub refuse donc tout autre appairage. Une réponse lente ne fait pas perdre l'appui
+  (nouvel essai ; 16 en 10 h d'attente sur un vrai hub). L'empreinte est
+  stockée **avant** le premier code. Jeton refusé (401/403 sur `/v1/home`) : oublié, et
+  l'appairage recommence. Certificat changé : statut `waiting` avec l'empreinte épinglée et
+  celle présentée, et la commande pour oublier l'empreinte (le jeton part avec elle).
+- **Points** : selon les attributs présents (deux appareils d'un même type peuvent différer).
+  Lampe : `on`, `brightness` (1-100 %), `color_temp` (mired, converti depuis les kelvins ;
+  bornes en mireds acceptées, KAJPLATS), `color` (« #rrggbb », envoyé en teinte et saturation)
+  ; **écrivables** si l'attribut est dans `capabilities.canReceive`. En mode couleur,
+  `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
+  Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
+  `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
+  (`single`, `double`, `long`, en `pulse`). `battery` partout où il y a une pile.
+  Disponibilité : `isReachable` (aussi dans chaque événement).
+- **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
+  MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
+  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
+  lampes elles-mêmes) ne publient que leur pile, ou rien.
+- **Pièges** : un renommage, un changement de pièce, un ajout ou un retrait recharge tout. Le
+  WebSocket coupé (redémarrage du hub) ou muet 95 s : rechargement complet puis reconnexion ;
+  refermé en moins de 10 s : le superviseur reprend la main (attente croissante). Hub
+  redémarré : appareils hors ligne le temps du démarrage, puis rechargés sans nouvel appairage. Les
+  commandes tournent à côté des événements avec un budget de 4,5 s (le hub répond `202` en
+  0,3 s environ) ; la confirmation revient par le WebSocket, valeurs intermédiaires comprises
+  (une luminosité varie en fondu : 60 puis 30). **Un attribut par `PATCH`** : `isOn` et
+  `lightLevel` ensemble, le hub répond `202` mais ignore la luminosité. Le hub arrondit teinte
+  et saturation (pas de 1/254). `Hub` et `Grant` n'affichent jamais le jeton en `Debug`.
+- **Tests** : `src/pkce.rs` (vecteur de l'annexe B de la RFC 7636, base64url de la RFC 4648,
+  formulaire du jeton) ; `src/hub.rs` (réponses d'appairage vues sur un hub) ; `src/lib.rs`,
+  avec le vrai coffre du runtime : un jeton sans son empreinte est oublié avant tout
+  contact, et « Appuie sur le bouton » ne vient qu'après un code (jamais pendant un 409) ;
+  `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
+  TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
+  réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
+  inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
@@ -475,6 +548,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
+| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
