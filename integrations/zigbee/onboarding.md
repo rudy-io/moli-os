@@ -61,16 +61,22 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    n'est remplacé qu'avec `--force`. Jamais Zigbee2MQTT et Moli en même temps sur le même
    réseau.
 7. **Revenir à Zigbee2MQTT** (au besoin) : **arrêter Moli d'abord** (et le laisser arrêté :
-   jamais les deux sur la même clé), puis
+   jamais les deux sur la même clé), puis exporter **tout de suite** (une clé sous tension fait
+   avancer son compteur de trames ; plus l'export tarde, plus la marge s'use) :
    `moli-os zigbee export coordinator_backup.json` (`--instance <id>` au besoin, `--force`
    pour remplacer un fichier existant). Le fichier est une sauvegarde Open Coordinator Backup
    comme celle de Zigbee2MQTT : paramètres du réseau et appareils connus de Moli, clés lues au
    coffre au moment de l'export, compteur de trames = dernier relevé + 65 536 (Zigbee2MQTT
-   repart de ce compteur tel quel). **Il contient la clé du réseau en clair** : il est écrit en
-   mode 0600, ne le copier que dans le dossier de données de Zigbee2MQTT, et le **supprimer**
-   dès que Zigbee2MQTT a repris le réseau. La clé ne doit pas avoir changé : Zigbee2MQTT garde
-   la même clé (dongle d'origine), et son `configuration.yaml` doit porter le même `pan_id`,
-   `ext_pan_id` et `network_key` que la sauvegarde (sinon il en forme un nouveau). Les
+   repart de ce compteur tel quel). **Il contient la clé du réseau en clair** (écrit en mode
+   0600) : le placer dans le dossier de données de Zigbee2MQTT sous le nom
+   `coordinator_backup.json` (ce fichier-là, Zigbee2MQTT le garde et le réécrit lui-même : ne
+   pas le supprimer), et **supprimer toute autre copie** (l'export écrit ailleurs, une copie
+   de transfert) dès que Zigbee2MQTT a repris le réseau. Même clé USB qu'avant (dongle
+   d'origine), et `configuration.yaml` de Zigbee2MQTT (section `advanced`) doit porter le même
+   réseau que la sauvegarde, sinon il en forme un nouveau : `pan_id` = la valeur hex de
+   `pan_id` (`1a62` → `0x1A62`), `channel` = `channel`, `ext_pan_id` et `network_key` = des
+   tableaux d'octets : chaque paire de chiffres hex de `extended_pan_id` et de
+   `network_key.key`, dans l'ordre du fichier, en décimal (`0123…` → `[1, 35, …]`). Les
    appareils appairés sous Moli manquent à la base de Zigbee2MQTT (elle date d'avant la
    reprise) : les réappairer depuis Zigbee2MQTT.
 8. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),

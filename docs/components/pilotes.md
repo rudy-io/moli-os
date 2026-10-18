@@ -181,7 +181,11 @@ base_topic = "zigbee2mqtt"  # défaut
     rappels de la clé être lus ; une lecture ratée est journalisée et retentée l'heure
     suivante, sans effacer le relevé. Une restauration ou un export part de ce relevé
     + 65 536 (`FRAME_COUNTER_MARGIN` : la clé émet en continu, le relevé peut dater d'une heure).
-    Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé.
+    Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé. Un réseau repris
+    qui reste « down » au démarrage n'est pas vérifié : le relevé du `store` cesse d'être
+    restaurable (valeur gardée, `frame_counter_fresh` à faux) ; quand il se lève, il est
+    vérifié comme au démarrage (même réseau, coordinateur ; sinon le pilote attend en le
+    disant, rien n'est adopté), puis son compteur est relevé aussitôt et toutes les heures.
 - **Configuration** :
 
 ```toml

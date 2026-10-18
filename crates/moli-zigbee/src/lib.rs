@@ -224,8 +224,9 @@ where
         network,
         // Up at startup: formed, restored, or resumed and checked to be
         // the store's own network. A resumed network that stayed down was
-        // not checked: its counter is not the store's to record.
-        recording: network == Network::Up,
+        // not checked yet: it is when it comes up.
+        checked: network == Network::Up,
+        check_due: false,
         permit_until: None,
         store: &mut store,
         store_path: &store_path,
@@ -262,7 +263,21 @@ async fn serve(
             },
             () = tokio::time::sleep_until(close_at.unwrap_or_else(tokio::time::Instant::now)),
                 if close_at.is_some() => live.joining_closed(ctx),
-            _ = record_at.tick(), if live.recording => live.record_counter(ctx, &aps, callbacks).await,
+            _ = record_at.tick() => {
+                if live.checked {
+                    live.record_counter(ctx, &aps, callbacks).await;
+                } else {
+                    // A check that failed to read: tried again.
+                    live.check_due = live.network == Network::Up;
+                }
+            }
+        }
+        // The network came up after the startup: checked to be ours (the
+        // startup rules) before its counter is recorded.
+        if live.check_due
+            && let Some(reason) = live.check_network(ctx, &aps, callbacks).await
+        {
+            return park(ctx, ezsp, callbacks, reason).await;
         }
     }
 }
@@ -272,10 +287,12 @@ struct Live<'a> {
     coordinator: DeviceId,
     protocol: u8,
     network: Network,
-    /// Whether the dongle's frame counter is recorded every
-    /// [`backup::COUNTER_RECORD_PERIOD`] (the network was checked to be the
-    /// store's at startup).
-    recording: bool,
+    /// Whether the dongle's network was checked to be the store's (at
+    /// startup, or once it came up later): only then is its frame counter
+    /// recorded, every [`backup::COUNTER_RECORD_PERIOD`].
+    checked: bool,
+    /// The network came up unchecked: check it before anything else.
+    check_due: bool,
     /// When the joining opened from Moli closes by itself (the NCP and the
     /// routers close it on their own then: only the point is updated).
     permit_until: Option<tokio::time::Instant>,
@@ -294,6 +311,7 @@ impl Live<'_> {
         match coordinator::event(callback, self.protocol) {
             Some(Event::Network(network)) => {
                 self.network = network;
+                self.check_due = network == Network::Up && !self.checked;
                 ctx.set_state(&self.coordinator, "network", network_value(network));
                 if network != Network::Up && self.permit_until.is_some() {
                     self.joining_closed(ctx);
@@ -370,6 +388,39 @@ impl Live<'_> {
                 )));
             }
         }
+    }
+
+    /// The network came up after the startup: the startup's checks
+    /// ([`adopt`]), then its counter recorded at once and every hour. Why a
+    /// person is needed when it is not ours (nothing changed). A failed read
+    /// is logged and tried again at the next hour.
+    async fn check_network(
+        &mut self,
+        ctx: &DriverCtx,
+        aps: &Aps,
+        callbacks: &mut mpsc::Receiver<Callback>,
+    ) -> Option<String> {
+        self.check_due = false;
+        let read = network::read_network(aps.ezsp(), self.protocol);
+        let dongle = match self.draining(ctx, aps, callbacks, read).await {
+            Ok(dongle) => dongle,
+            Err(error) => {
+                tracing::warn!(%error, "the network that came up could not be read: tried again in an hour");
+                return None;
+            }
+        };
+        let has_key = ctx.secret(network::NETWORK_KEY).is_some();
+        match adopt(dongle, has_key, self.store, self.store_path) {
+            Ok(None) => {}
+            Ok(Some(reason)) => return Some(reason),
+            Err(error) => {
+                tracing::warn!(%error, "the zigbee store could not be saved: tried again in an hour");
+                return None;
+            }
+        }
+        self.checked = true;
+        self.record_counter(ctx, aps, callbacks).await;
+        None
     }
 
     /// The hourly record of the dongle's NWK frame counter, while the
@@ -609,7 +660,9 @@ fn pan(record: &store::NetworkRecord) -> String {
 /// A network the dongle kept: wait for it to come up, then check it is
 /// ours before recording it. Not up within [`coordinator::NETWORK_UP_TIMEOUT`]:
 /// the coordinator is still ready, its network « down » (no restart loop;
-/// the stack status that follows moves the point).
+/// the stack status that follows moves the point, and the network is
+/// checked when it comes up); meanwhile the store's counter is no longer
+/// restorable ([`unvouched`]).
 ///
 /// Never adopted (a person decides; nothing is changed: the dongle's
 /// network is not left, the store not rewritten): a dongle that is not the
@@ -634,17 +687,66 @@ async fn resume(
         coordinator::wait_network_up(ezsp, callbacks, protocol, coordinator::NETWORK_UP_TIMEOUT)
             .await?;
     if network != Network::Up {
+        unvouched(ezsp, protocol, store, store_path).await?;
         return Ok(Outcome::Ready(network));
     }
     let dongle = network::read_network(ezsp, protocol).await?;
+    if let Some(reason) = adopt(dongle, has_key, store, store_path)? {
+        return Ok(Outcome::Wait { reason, network });
+    }
+    // Ours: its counter recorded from now on.
+    record_counter(ezsp, store, store_path).await;
+    Ok(Outcome::Ready(network))
+}
+
+/// A resumed network not up yet, so not checked: the store's counter for
+/// it is no longer restorable (the dongle may be sending, and nothing
+/// records it until the network is up and checked), its value kept, as
+/// [`store::NetworkRecord::keeping_backup_of`] does. Left alone when the
+/// dongle reads as another network (the store's counter is not this
+/// dongle's); cleared when it cannot be read (conservative).
+async fn unvouched(
+    ezsp: &Ezsp,
+    protocol: u8,
+    store: &mut Store,
+    store_path: &Path,
+) -> anyhow::Result<()> {
+    let Some(known) = store
+        .network
+        .as_mut()
+        .filter(|known| known.frame_counter_fresh)
+    else {
+        return Ok(());
+    };
+    if let Ok(dongle) = network::read_network(ezsp, protocol).await
+        && !known.same_network(&dongle.record)
+    {
+        return Ok(());
+    }
+    tracing::info!(
+        pan_id = %pan(known),
+        "the network is not up: its recorded frame counter is no longer restorable"
+    );
+    known.frame_counter_fresh = false;
+    store.save(store_path)
+}
+
+/// Whether the network a dongle runs is Moli's (startup rules, see
+/// [`resume`]): `None` when it is (the store then updated with it, saved if
+/// it changed), or why a person is needed (nothing changed).
+fn adopt(
+    dongle: network::DongleNetwork,
+    has_key: bool,
+    store: &mut Store,
+    store_path: &Path,
+) -> anyhow::Result<Option<String>> {
     let record = dongle.record;
-    let wait = |reason: String| Ok(Outcome::Wait { reason, network });
     if !dongle.coordinator {
         tracing::warn!(pan_id = %pan(&record), "the dongle is not its network's coordinator");
-        return wait(moli_i18n::tr!(
+        return Ok(Some(moli_i18n::tr!(
             "pilotes.zigbee.pas_coordinateur",
             pan = pan(&record)
-        ));
+        )));
     }
     // What only an imported backup knows of the same network stays.
     let record = match &store.network {
@@ -658,19 +760,19 @@ async fn resume(
                 dongle = %pan(&record),
                 "the dongle runs another network than the one Moli knows"
             );
-            return wait(moli_i18n::tr!(
+            return Ok(Some(moli_i18n::tr!(
                 "pilotes.zigbee.autre_reseau",
                 known = pan(known),
                 dongle = pan(&record)
-            ));
+            )));
         }
         Some(_) => {}
         None if !has_key => {
             tracing::warn!(pan_id = %pan(&record), "the dongle runs a network Moli has no key for");
-            return wait(moli_i18n::tr!(
+            return Ok(Some(moli_i18n::tr!(
                 "pilotes.zigbee.reseau_inconnu",
                 pan = pan(&record)
-            ));
+            )));
         }
         None => tracing::info!(
             pan_id = %pan(&record),
@@ -681,9 +783,7 @@ async fn resume(
         store.network = Some(record);
         store.save(store_path)?;
     }
-    // Ours: its counter recorded from now on.
-    record_counter(ezsp, store, store_path).await;
-    Ok(Outcome::Ready(network))
+    Ok(None)
 }
 
 /// Show `reason` and wait for a person: orders refused, callbacks drained,
@@ -1721,16 +1821,100 @@ mod tests {
         assert_eq!(run.point("network"), Some(text("down")));
         assert_eq!(sent(&ncp, ids::GET_NETWORK_PARAMETERS), None);
         assert_eq!(run.store(), Store::default());
-        // No restart: a later stack status moves the point.
+        // No restart: a later stack status moves the point; the network is
+        // then checked as at startup (here unknown, without a key: a person
+        // decides, nothing written).
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
-        for _ in 0..500 {
-            if run.point("network") == Some(text("up")) {
-                assert_eq!(run.status(), Some(DriverStatus::Running));
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("network still {:?}", run.point("network"));
+        run.wait_point("network", &text("up")).await;
+        let reason = run.wait_waiting().await;
+        assert_eq!(
+            reason,
+            moli_i18n::tr!("pilotes.zigbee.reseau_inconnu", pan = "0x1a62")
+        );
+        assert_eq!(run.store(), Store::default());
+        assert_eq!(counter_reads(&ncp), 0);
+    }
+
+    /// The store's network with a counter recorded live by an earlier run.
+    fn recorded_store(network: store::NetworkRecord) -> Store {
+        known_store(store::NetworkRecord {
+            frame_counter: Some(100_000),
+            frame_counter_fresh: true,
+            key_sequence_number: Some(0),
+            ..network
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_network_up_late_is_checked_then_recorded() {
+        let (ncp, io) = forming_ncp(&[0x00]);
+        let run = Running::with(
+            io,
+            &Setup {
+                vault: true,
+                store: Some(recorded_store(record(0x1a62))),
+                ..Setup::default()
+            },
+        );
+        ncp.wait_received(STARTUP).await;
+        tokio::time::sleep(coordinator::NETWORK_UP_TIMEOUT + Duration::from_secs(1)).await;
+        run.wait_ready().await;
+        assert_eq!(run.point("network"), Some(text("down")));
+        // Down, so unchecked and unrecorded: the counter is kept but no
+        // longer restorable (the dongle may be sending meanwhile).
+        let mut stale = recorded_store(record(0x1a62));
+        stale.network.as_mut().unwrap().frame_counter_fresh = false;
+        assert_eq!(run.store(), stale);
+        assert_eq!(counter_reads(&ncp), 0);
+        // Up later: checked (the store's network), its counter recorded at
+        // once, fresh again.
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        wait_counter(&run, LIVE_COUNTER).await;
+        assert_eq!(run.store(), known_store(live(record(0x1a62))));
+        assert_eq!(counter_reads(&ncp), 1);
+        assert_eq!(run.status(), Some(DriverStatus::Running));
+        // Then every hour.
+        ncp.respond(
+            ids::GET_NETWORK_KEY_INFO,
+            &key_info(0, LIVE_COUNTER + 7_000),
+        );
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD).await;
+        wait_counter(&run, LIVE_COUNTER + 7_000).await;
+        assert!(run.store().network.unwrap().frame_counter_fresh);
+        assert_eq!(counter_reads(&ncp), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn another_network_up_late_is_not_adopted() {
+        let (ncp, io) = forming_ncp(&[0x00]);
+        let known = recorded_store(record(0x1234));
+        let run = Running::with(
+            io,
+            &Setup {
+                vault: true,
+                store: Some(known.clone()),
+                ..Setup::default()
+            },
+        );
+        ncp.wait_received(STARTUP).await;
+        tokio::time::sleep(coordinator::NETWORK_UP_TIMEOUT + Duration::from_secs(1)).await;
+        run.wait_ready().await;
+        // The dongle reads as another network: the store's counter is not
+        // its own, left as it is.
+        assert_eq!(run.store(), known);
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        let reason = run.wait_waiting().await;
+        assert_eq!(
+            reason,
+            moli_i18n::tr!(
+                "pilotes.zigbee.autre_reseau",
+                known = "0x1234",
+                dongle = "0x1a62"
+            )
+        );
+        assert_eq!(run.store(), known, "store untouched");
+        assert_eq!(counter_reads(&ncp), 0);
+        assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
     }
 
     #[tokio::test]
