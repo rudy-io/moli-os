@@ -4,6 +4,7 @@
 //! Dormant: nothing runs unless `[[driver]] kind = "zigbee"` is in `moli.toml`.
 
 pub mod ash;
+pub mod transport;
 
 use std::path::{Path, PathBuf};
 
