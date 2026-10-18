@@ -14,6 +14,7 @@ moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
 moli-z2m = { path = "crates/moli-z2m" }
+moli-zigbee = { path = "crates/moli-zigbee" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-host = { path = "crates/moli-host" }
@@ -61,6 +62,7 @@ http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 md-5 = "0.11"
+libc = "0.2"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
 rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }

@@ -857,6 +857,7 @@ fn start_history(
 /// missing here is unknown, whatever `build_driver`'s match says.
 const KINDS: &[&str] = &[
     "z2m",
+    "zigbee",
     "hue",
     "igd",
     "tapo",
@@ -994,6 +995,10 @@ fn build_driver(
     Ok(match config.kind.as_str() {
         "z2m" => Arc::new(moli_z2m::Z2m::new(
             config.options.clone().try_into().with_context(context)?,
+        )),
+        "zigbee" => Arc::new(moli_zigbee::Zigbee::new(
+            config.options.clone().try_into().with_context(context)?,
+            data_dir,
         )),
         "hue" => Arc::new(moli_hue::Hue::new(
             config.options.clone().try_into().with_context(context)?,

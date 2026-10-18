@@ -433,5 +433,6 @@
   "pilotes.profile.refuse": "refusé par l'appareil : {answer}",
   "pilotes.profile.aucune_valeur": "aucune valeur à envoyer",
   "pilotes.profile.sans_valeur": "{name} sans valeur",
-  "pilotes.profile.absent_reponse": "{names} absent de la dernière réponse de l'appareil"
+  "pilotes.profile.absent_reponse": "{names} absent de la dernière réponse de l'appareil",
+  "pilotes.zigbee.demarrage": "Zigbee natif : démarrage (le réseau n'est pas encore formé)"
 }

@@ -1,0 +1,24 @@
+[integration]
+id = "zigbee"
+name = "Zigbee (natif, clé EZSP)"
+# Any Zigbee device the coordinator can join: no list per brand.
+brands = []
+models = []
+transport = "native"
+driver = "zigbee"
+crate = "moli-zigbee"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# The network key lives in the vault (`network_key`), written by the driver.
+secrets = ["network_key"]
+vars = []
+options = ["port"]
+
+[origin]
+reused = "documentation Silicon Labs (UG100, UG101, UG600) et ZCL ; zigbee-herdsman (MIT) comme référence"
+author = "agent"

@@ -433,5 +433,6 @@
   "pilotes.profile.refuse": "refused by the device: {answer}",
   "pilotes.profile.aucune_valeur": "no value to send",
   "pilotes.profile.sans_valeur": "{name} has no value",
-  "pilotes.profile.absent_reponse": "{names} missing from the device’s last response"
+  "pilotes.profile.absent_reponse": "{names} missing from the device’s last response",
+  "pilotes.zigbee.demarrage": "Native Zigbee: starting (the network is not formed yet)"
 }
