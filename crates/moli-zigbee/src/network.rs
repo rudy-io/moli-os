@@ -258,7 +258,11 @@ pub async fn form(
     }
     let status = set_value(ezsp, protocol, VALUE_STACK_TOKEN_WRITING, &[1]).await?;
     tracing::debug!(?status, "start writing stack tokens");
-    let record = read_network(ezsp, protocol).await?;
+    let dongle = read_network(ezsp, protocol).await?;
+    if !dongle.coordinator {
+        bail!("the formed network's node is not a coordinator");
+    }
+    let record = dongle.record;
     tracing::info!(
         channel = record.channel,
         pan_id = format_args!("{:#06x}", record.pan_id),
@@ -276,32 +280,41 @@ async fn set_value(ezsp: &Ezsp, protocol: u8, id: u8, value: &[u8]) -> anyhow::R
     Ok(read_ezsp_status(&answer, protocol)?.0)
 }
 
-/// The network the coordinator runs (`getNetworkParameters`) and the
-/// dongle's IEEE address (`getEui64`), as herdsman reads them once the
-/// network is up.
+/// The network a dongle runs, as it reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DongleNetwork {
+    /// Whether the dongle is that network's coordinator (`EmberNodeType`);
+    /// a dongle that joined someone else's network as a router is not.
+    pub coordinator: bool,
+    pub record: NetworkRecord,
+}
+
+/// The network the dongle runs (`getNetworkParameters`: node type and
+/// parameters) and its IEEE address (`getEui64`), as herdsman reads them
+/// once the network is up.
 ///
 /// # Errors
 ///
 /// The link failing, an unreadable answer, or the NCP refusing.
-pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<NetworkRecord> {
+pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<DongleNetwork> {
     let answer = ezsp.call(ids::GET_NETWORK_PARAMETERS, &[]).await?;
     let (status, rest) = read_status(&answer, protocol)?;
     if status != SlStatus::Ok {
         bail!("getNetworkParameters failed: {status:?}");
     }
     let (&node_type, rest) = rest.split_first().ok_or(EzspError::TooShort)?;
-    if node_type != NODE_TYPE_COORDINATOR {
-        tracing::warn!(node_type, "the dongle's network node is not a coordinator");
-    }
     let (parameters, _) = NetworkParameters::decode(rest)?;
     let answer = ezsp.call(ids::GET_EUI64, &[]).await?;
     let (eui64, _) = answer.split_first_chunk::<8>().ok_or(EzspError::TooShort)?;
-    Ok(NetworkRecord {
-        pan_id: parameters.pan_id,
-        extended_pan_id: parameters.extended_pan_id,
-        channel: parameters.radio_channel,
-        coordinator_ieee: ieee(*eui64),
-        nwk_update_id: parameters.nwk_update_id,
+    Ok(DongleNetwork {
+        coordinator: node_type == NODE_TYPE_COORDINATOR,
+        record: NetworkRecord {
+            pan_id: parameters.pan_id,
+            extended_pan_id: parameters.extended_pan_id,
+            channel: parameters.radio_channel,
+            coordinator_ieee: ieee(*eui64),
+            nwk_update_id: parameters.nwk_update_id,
+        },
     })
 }
 
@@ -345,7 +358,12 @@ pub(crate) mod tests {
 
     /// `getNetworkParameters` answered by a v13 coordinator on PAN `pan_id`.
     pub(crate) fn network_parameters(pan_id: u16, channel: u8) -> Vec<u8> {
-        let mut answer = vec![0x00, NODE_TYPE_COORDINATOR];
+        network_parameters_of(NODE_TYPE_COORDINATOR, pan_id, channel)
+    }
+
+    /// … by a node of `node_type` (`EmberNodeType`: 2 is a router).
+    pub(crate) fn network_parameters_of(node_type: u8, pan_id: u16, channel: u8) -> Vec<u8> {
+        let mut answer = vec![0x00, node_type];
         NetworkParameters {
             extended_pan_id: [0xDD; 8],
             pan_id,

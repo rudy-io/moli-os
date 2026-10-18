@@ -165,16 +165,24 @@ where
         Value::Text(version.display().into()),
     );
     ctx.set_state(&coordinator, "ezsp_version", Value::Int(protocol.into()));
-    let network = match init {
+    let outcome = match init {
         Init::Resumed => {
+            let has_key = ctx.secret(network::NETWORK_KEY).is_some();
             refusing_orders(
                 ctx,
-                resume(&ezsp, &mut callbacks, protocol, &mut store, &store_path),
+                resume(
+                    &ezsp,
+                    &mut callbacks,
+                    protocol,
+                    has_key,
+                    &mut store,
+                    &store_path,
+                ),
             )
             .await?
         }
         Init::NotJoined => {
-            match first_network(
+            first_network(
                 config,
                 ctx,
                 &ezsp,
@@ -184,13 +192,13 @@ where
                 &store_path,
             )
             .await?
-            {
-                Ok(network) => network,
-                Err(reason) => {
-                    ctx.set_state(&coordinator, "network", network_value(Network::None));
-                    return park(ctx, &ezsp, &mut callbacks, reason).await;
-                }
-            }
+        }
+    };
+    let network = match outcome {
+        Outcome::Ready(network) => network,
+        Outcome::Wait { reason, network } => {
+            ctx.set_state(&coordinator, "network", network_value(network));
+            return park(ctx, &ezsp, &mut callbacks, reason).await;
         }
     };
     ctx.set_state(&coordinator, "network", network_value(network));
@@ -236,9 +244,19 @@ where
     })
 }
 
-/// No network on the dongle: form one (`Ok`, up), or why a person is
-/// needed (`Err`): no vault, or a network the store knows (to restore,
-/// never to form over: that would orphan every paired device).
+/// How the network startup ended.
+#[derive(Debug)]
+enum Outcome {
+    /// The coordinator is ready, its network in this state.
+    Ready(Network),
+    /// A person is needed (`reason`); nothing was changed, on the dongle
+    /// or in the store.
+    Wait { reason: String, network: Network },
+}
+
+/// No network on the dongle: form one, or why a person is needed: no
+/// vault, or a network the store knows (to restore, never to form over:
+/// that would orphan every paired device).
 async fn first_network(
     config: &Config,
     ctx: &mut DriverCtx,
@@ -247,23 +265,26 @@ async fn first_network(
     protocol: u8,
     store: &mut Store,
     store_path: &Path,
-) -> anyhow::Result<Result<Network, String>> {
+) -> anyhow::Result<Outcome> {
     if let Some(known) = &store.network {
         tracing::warn!(
-            pan_id = format_args!("{:#06x}", known.pan_id),
+            pan_id = %pan(known),
             "the dongle has no network but Moli knows one"
         );
-        return Ok(Err(moli_i18n::tr!(
-            "pilotes.zigbee.restauration_a_venir",
-            pan = format!("{:#06x}", known.pan_id)
-        )));
+        return Ok(Outcome::Wait {
+            reason: moli_i18n::tr!("pilotes.zigbee.restauration_a_venir", pan = pan(known)),
+            network: Network::None,
+        });
     }
     if !ctx.can_store_secrets() {
         tracing::warn!("no vault: the network is not formed");
-        return Ok(Err(moli_i18n::tr!(
-            "pilotes.zigbee.coffre_indisponible",
-            problem = ctx.secrets_problem().unwrap_or_default()
-        )));
+        return Ok(Outcome::Wait {
+            reason: moli_i18n::tr!(
+                "pilotes.zigbee.coffre_indisponible",
+                problem = ctx.secrets_problem().unwrap_or_default()
+            ),
+            network: Network::None,
+        });
     }
     // In the vault before anything security-related reaches the NCP.
     let keys = network::keys(ctx).await?;
@@ -275,41 +296,82 @@ async fn first_network(
     .await?;
     store.network = Some(record);
     store.save(store_path)?;
-    Ok(Ok(Network::Up))
+    Ok(Outcome::Ready(Network::Up))
 }
 
-/// A network the dongle kept: wait for it to come up, then record what it
-/// is in the store. Not up within [`coordinator::NETWORK_UP_TIMEOUT`]: the
-/// coordinator is still ready, its network « down » (no restart loop; the
-/// stack status that follows moves the point).
+/// A network's PAN ID as people read it (`0x1a62`).
+fn pan(record: &store::NetworkRecord) -> String {
+    format!("{:#06x}", record.pan_id)
+}
+
+/// A network the dongle kept: wait for it to come up, then check it is
+/// ours before recording it. Not up within [`coordinator::NETWORK_UP_TIMEOUT`]:
+/// the coordinator is still ready, its network « down » (no restart loop;
+/// the stack status that follows moves the point).
+///
+/// Never adopted (a person decides; nothing is changed: the dongle's
+/// network is not left, the store not rewritten): a dongle that is not the
+/// coordinator of its network; a network other than the store's (its keys
+/// are not the vault's); a network an empty store does not know while the
+/// vault holds no `network_key`. An empty store with a key in the vault is
+/// a first formation interrupted before the store was written: adopted.
+/// The same network with a new channel or update id updates the store.
 async fn resume(
     ezsp: &Ezsp,
     callbacks: &mut mpsc::Receiver<Callback>,
     protocol: u8,
+    has_key: bool,
     store: &mut Store,
     store_path: &Path,
-) -> anyhow::Result<Network> {
+) -> anyhow::Result<Outcome> {
     let network =
         coordinator::wait_network_up(ezsp, callbacks, protocol, coordinator::NETWORK_UP_TIMEOUT)
             .await?;
     if network != Network::Up {
-        return Ok(network);
+        return Ok(Outcome::Ready(network));
     }
-    let record = network::read_network(ezsp, protocol).await?;
-    if store.network.as_ref() != Some(&record) {
-        if let Some(known) = &store.network
-            && (known.pan_id, known.extended_pan_id) != (record.pan_id, record.extended_pan_id)
+    let dongle = network::read_network(ezsp, protocol).await?;
+    let record = dongle.record;
+    let wait = |reason: String| Ok(Outcome::Wait { reason, network });
+    if !dongle.coordinator {
+        tracing::warn!(pan_id = %pan(&record), "the dongle is not its network's coordinator");
+        return wait(moli_i18n::tr!(
+            "pilotes.zigbee.pas_coordinateur",
+            pan = pan(&record)
+        ));
+    }
+    match &store.network {
+        Some(known)
+            if (known.pan_id, known.extended_pan_id) != (record.pan_id, record.extended_pan_id) =>
         {
             tracing::warn!(
-                known = format_args!("{:#06x}", known.pan_id),
-                dongle = format_args!("{:#06x}", record.pan_id),
-                "the dongle runs another network than the one Moli knew; following the dongle"
+                known = %pan(known),
+                dongle = %pan(&record),
+                "the dongle runs another network than the one Moli knows"
             );
+            return wait(moli_i18n::tr!(
+                "pilotes.zigbee.autre_reseau",
+                known = pan(known),
+                dongle = pan(&record)
+            ));
         }
-        store.network = Some(record);
-        store.save(store_path)?;
+        Some(known) if *known == record => return Ok(Outcome::Ready(network)),
+        Some(_) => {}
+        None if !has_key => {
+            tracing::warn!(pan_id = %pan(&record), "the dongle runs a network Moli has no key for");
+            return wait(moli_i18n::tr!(
+                "pilotes.zigbee.reseau_inconnu",
+                pan = pan(&record)
+            ));
+        }
+        None => tracing::info!(
+            pan_id = %pan(&record),
+            "adopting the network of an interrupted first formation"
+        ),
     }
-    Ok(network)
+    store.network = Some(record);
+    store.save(store_path)?;
+    Ok(Outcome::Ready(network))
 }
 
 /// Show `reason` and wait for a person: orders refused, callbacks drained,
@@ -414,7 +476,7 @@ mod tests {
     use super::*;
     use crate::ezsp::ids;
     use crate::network::hex;
-    use crate::network::tests::{EUI64, network_parameters};
+    use crate::network::tests::{EUI64, network_parameters, network_parameters_of};
     use crate::sim::FakeNcp;
     use crate::store::tests::{TempDir, record};
 
@@ -492,6 +554,23 @@ mod tests {
         vault: bool,
         /// A store already on disk.
         store: Option<Store>,
+    }
+
+    impl Setup {
+        /// A store that knows the network the fake NCP reports (PAN 0x1a62).
+        fn known() -> Self {
+            Self {
+                store: Some(known_store(record(0x1a62))),
+                ..Self::default()
+            }
+        }
+    }
+
+    fn known_store(network: store::NetworkRecord) -> Store {
+        Store {
+            network: Some(network),
+            ..Store::default()
+        }
     }
 
     /// The hub and the data directory, before the driver starts.
@@ -764,10 +843,7 @@ mod tests {
             io,
             &Setup {
                 vault: true,
-                store: Some(Store {
-                    network: Some(record(0x1a62)),
-                    ..Store::default()
-                }),
+                store: Some(known_store(record(0x1a62))),
                 ..Setup::default()
             },
         );
@@ -784,14 +860,16 @@ mod tests {
     #[tokio::test]
     async fn resumes_existing_network() {
         let (ncp, io) = forming_ncp(&[0x00]);
+        // The same network (PAN, extended PAN), since moved to channel 15.
+        let before = store::NetworkRecord {
+            channel: 11,
+            ..record(0x1a62)
+        };
         let run = Running::with(
             io,
             &Setup {
                 vault: true,
-                store: Some(Store {
-                    network: Some(record(0x1234)),
-                    ..Store::default()
-                }),
+                store: Some(known_store(before)),
                 ..Setup::default()
             },
         );
@@ -802,6 +880,133 @@ mod tests {
         assert_eq!(run.store().network, Some(record(0x1a62)));
         assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
         assert_eq!(sent(&ncp, ids::SET_INITIAL_SECURITY_STATE), None);
+    }
+
+    /// Resumes a network, then waits for the reason the driver gives.
+    async fn resumed_wait(ncp: &FakeNcp, run: &Running) -> String {
+        ncp.wait_received(STARTUP).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        let reason = run.wait_waiting().await;
+        // It stays there, refusing orders, changing nothing on the dongle.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            run.status(),
+            Some(DriverStatus::Waiting {
+                reason: reason.clone()
+            })
+        );
+        let after: Vec<_> = ncp.received()[STARTUP..]
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(after, [ids::GET_NETWORK_PARAMETERS, ids::GET_EUI64]);
+        assert_eq!(run.point("network"), Some(text("up")));
+        reason
+    }
+
+    #[tokio::test]
+    async fn a_different_network_is_not_adopted() {
+        // Another extended PAN only: still another network.
+        for known in [
+            record(0x1234),
+            store::NetworkRecord {
+                extended_pan_id: [0xEE; 8],
+                ..record(0x1a62)
+            },
+        ] {
+            let (ncp, io) = forming_ncp(&[0x00]);
+            let run = Running::with(
+                io,
+                &Setup {
+                    probe: true,
+                    vault: true,
+                    store: Some(known_store(known.clone())),
+                },
+            );
+            let reason = resumed_wait(&ncp, &run).await;
+            assert_eq!(
+                reason,
+                moli_i18n::tr!(
+                    "pilotes.zigbee.autre_reseau",
+                    known = format!("{:#06x}", known.pan_id),
+                    dongle = "0x1a62"
+                )
+            );
+            assert_eq!(run.order().await, not_ready());
+            assert_eq!(run.store(), known_store(known), "store untouched");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_network_without_key_is_not_adopted() {
+        // With a vault holding no key, and without a vault at all.
+        for vault in [true, false] {
+            let (ncp, io) = forming_ncp(&[0x00]);
+            let run = Running::with(
+                io,
+                &Setup {
+                    vault,
+                    ..Setup::default()
+                },
+            );
+            let reason = resumed_wait(&ncp, &run).await;
+            assert_eq!(
+                reason,
+                moli_i18n::tr!("pilotes.zigbee.reseau_inconnu", pan = "0x1a62")
+            );
+            assert_eq!(run.store(), Store::default(), "nothing written");
+            assert!(!run.store_path().exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_non_coordinator_is_not_adopted() {
+        // Known or not, a dongle that joined as a router is never adopted.
+        for store in [Some(known_store(record(0x1a62))), None] {
+            let (ncp, io) = forming_ncp(&[0x00]);
+            ncp.respond(
+                ids::GET_NETWORK_PARAMETERS,
+                &network_parameters_of(2, 0x1a62, 15),
+            );
+            let prepared = Prepared::new(&Setup {
+                vault: true,
+                store: store.clone(),
+                ..Setup::default()
+            });
+            prepared
+                .hub
+                .store_secret(&prepared.instance, network::NETWORK_KEY, &"0".repeat(32))
+                .await
+                .unwrap();
+            let run = Running::spawn(prepared, io, false);
+            let reason = resumed_wait(&ncp, &run).await;
+            assert_eq!(
+                reason,
+                moli_i18n::tr!("pilotes.zigbee.pas_coordinateur", pan = "0x1a62")
+            );
+            assert_eq!(run.store(), store.unwrap_or_default(), "store untouched");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_formation_is_adopted() {
+        // The key reached the vault, the network the dongle, not the store.
+        let (ncp, io) = forming_ncp(&[0x00]);
+        let prepared = Prepared::new(&Setup {
+            vault: true,
+            ..Setup::default()
+        });
+        prepared
+            .hub
+            .store_secret(&prepared.instance, network::NETWORK_KEY, &"0".repeat(32))
+            .await
+            .unwrap();
+        let run = Running::spawn(prepared, io, false);
+        ncp.wait_received(STARTUP).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        assert_eq!(run.store(), known_store(record(0x1a62)));
+        assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
     }
 
     #[tokio::test(start_paused = true)]
@@ -830,7 +1035,7 @@ mod tests {
     #[tokio::test]
     async fn driver_reaches_ready() {
         let (ncp, io) = forming_ncp(&[0x00]);
-        let run = Running::start(io, false);
+        let run = Running::with(io, &Setup::known());
         ncp.wait_received(STARTUP).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
@@ -872,7 +1077,7 @@ mod tests {
     #[tokio::test]
     async fn a_resumed_network_is_up_and_followed() {
         let (ncp, io) = forming_ncp(&[0x00]);
-        let run = Running::start(io, false);
+        let run = Running::with(io, &Setup::known());
         ncp.wait_received(STARTUP).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
@@ -924,7 +1129,7 @@ mod tests {
     #[tokio::test]
     async fn a_lost_link_ends_the_run() {
         let (ncp, io) = forming_ncp(&[0x00]);
-        let run = Running::start(io, false);
+        let run = Running::with(io, &Setup::known());
         ncp.wait_received(STARTUP).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;

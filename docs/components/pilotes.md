@@ -154,7 +154,12 @@ base_topic = "zigbee2mqtt"  # défaut
   et la sienne gardée), les politiques du centre de confiance (`setPolicy`, comme
   `initTrustCenter` de herdsman), puis `networkInit` :
   - réseau gardé par la clé → attente de `stackStatusHandler` « réseau levé » (10 s), puis
-    `getNetworkParameters` + `getEui64` recopiés dans le `store` ;
+    `getNetworkParameters` + `getEui64` : le réseau n'est repris (et recopié dans le `store`,
+    canal et `nwk_update_id` compris) que si la clé en est le coordinateur et que c'est le
+    réseau du `store` (même PAN et PAN étendu), ou, `store` vide, si le coffre a déjà une
+    `network_key` (première formation interrompue). Sinon le pilote attend en le disant
+    (`pilotes.zigbee.pas_coordinateur`, `autre_reseau`, `reseau_inconnu`) **sans rien
+    changer** : ni le réseau de la clé (jamais quitté ni effacé), ni le `store` ;
   - pas de réseau et `store` vide → **formation** (`src/network.rs`, séquence `formNetwork` de
     herdsman) : clé réseau et clé de lien du centre de confiance aléatoires (`ring`), rangées
     au coffre **avant** toute commande de sécurité (reprises si le coffre les a déjà, après un
@@ -194,12 +199,15 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   qui ne se lève pas en 10 s laisse le pilote prêt avec `network = down`, sans relance en
   boucle : le `stackStatusHandler` suivant remet le point à jour (un « réseau tombé » pendant
   l'attente est ignoré, comme herdsman). Une clé qui porte un autre réseau que celui du
-  `store` est suivie (le `store` est réécrit, avertissement au journal).
+  `store`, un réseau inconnu sans clé au coffre ou un réseau dont elle n'est pas le
+  coordinateur n'est jamais adoptée : le `store` et le coffre restent ceux du même réseau.
 - **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
   sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
   refusés avant d'être prêt, lien perdu, formation (clé au coffre avant la clé, canal 15,
   `store` sans clé), clé du coffre reprise, sans coffre pas de réseau, réseau connu jamais
-  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause).
+  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause), autre
+  réseau, réseau inconnu sans clé ou clé non coordinateur jamais adoptés, formation
+  interrompue reprise.
 - **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
   `--device`, groupe du port, mise à jour du firmware).
 
