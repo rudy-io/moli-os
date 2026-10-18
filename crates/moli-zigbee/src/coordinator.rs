@@ -1,5 +1,6 @@
-//! Coordinator startup: the stack configuration a coordinator needs, then
-//! `networkInit`, which resumes the network the NCP keeps in its tokens.
+//! Coordinator startup: the stack configuration a coordinator needs, the
+//! trust center policies, then `networkInit`, which resumes the network the
+//! NCP keeps in its tokens.
 //!
 //! The values and their order follow zigbee-herdsman (MIT),
 //! `src/adapter/ember/adapter/emberAdapter.ts` (`initEzsp`, `initTrustCenter`).
@@ -97,6 +98,42 @@ pub const STACK_CONFIG: [ConfigValue; 9] = [
     },
 ];
 
+/// One `setPolicy`: the `EzspPolicyId`, its name for the logs, and the
+/// `EzspDecisionId` (or `EzspDecisionBitmask`) chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Policy {
+    pub id: u8,
+    pub name: &'static str,
+    pub decision: u8,
+}
+
+/// The trust center policies herdsman's ember adapter sets right before
+/// `networkInit` (`initTrustCenter`, in this order), whether the network is
+/// then resumed or formed: policies live in the NCP's RAM, not its tokens.
+/// Ids and decisions from `src/adapter/ember/ezsp/enums.ts`.
+pub const TRUST_CENTER_POLICIES: [Policy; 3] = [
+    // `ALLOW_TC_KEY_REQUESTS_AND_SEND_CURRENT_KEY`: a joined device asking
+    // for its trust center link key gets it.
+    Policy {
+        id: 0x05,
+        name: "TC_KEY_REQUEST_POLICY",
+        decision: 0x51,
+    },
+    // `DENY_APP_KEY_REQUESTS` (herdsman's `ALLOW_APP_KEY_REQUESTS = false`).
+    Policy {
+        id: 0x06,
+        name: "APP_KEY_REQUEST_POLICY",
+        decision: 0x60,
+    },
+    // `emberSetJoinPolicy(USE_PRECONFIGURED_KEY)`:
+    // `ALLOW_JOINS | ALLOW_UNSECURED_REJOINS` (`EzspDecisionBitmask`).
+    Policy {
+        id: 0x00,
+        name: "TRUST_CENTER_POLICY",
+        decision: 0x01 | 0x02,
+    },
+];
+
 /// How `networkInit` answered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Init {
@@ -131,12 +168,14 @@ impl Network {
 }
 
 /// Configure the stack ([`STACK_CONFIG`]; a value the NCP refuses is
-/// logged and its own kept), then `networkInit`.
+/// logged and its own kept), set the [`TRUST_CENTER_POLICIES`], then
+/// `networkInit`.
 ///
 /// # Errors
 ///
-/// The link failing or a command timing out, an unreadable answer, or
-/// `networkInit` failing otherwise than « not joined ».
+/// The link failing or a command timing out, an unreadable answer, a
+/// trust center policy refused (fatal in herdsman too), or `networkInit`
+/// failing otherwise than « not joined ».
 pub async fn start_ncp(ezsp: &Ezsp, version: &Version) -> anyhow::Result<Init> {
     let protocol = version.protocol;
     for config in STACK_CONFIG {
@@ -157,6 +196,19 @@ pub async fn start_ncp(ezsp: &Ezsp, version: &Version) -> anyhow::Result<Init> {
                 ?status,
                 "the NCP refused a configuration value, its own is kept"
             );
+        }
+    }
+    for policy in TRUST_CENTER_POLICIES {
+        let answer = ezsp
+            .call(ids::SET_POLICY, &[policy.id, policy.decision])
+            .await?;
+        match read_ezsp_status(&answer, protocol)?.0 {
+            SlStatus::Ok => tracing::debug!(
+                policy = policy.name,
+                decision = policy.decision,
+                "EZSP policy set"
+            ),
+            status => bail!("the NCP refused the policy {}: {status:?}", policy.name),
         }
     }
     let answer = ezsp
@@ -195,9 +247,10 @@ pub fn network_change(callback: &Callback, protocol: u8) -> Option<Network> {
     }
 }
 
-/// After a `networkInit` that resumed: wait (reading every callback) for
-/// the stack to report the network up. `Down` after [`NETWORK_UP_TIMEOUT`]
-/// without it, or if it reports the network down.
+/// After a `networkInit` that resumed, or a `formNetwork`: wait (reading
+/// every callback) for the stack to report the network up. A « down » on
+/// the way is ignored, as herdsman waits for `NETWORK_UP` only; `Down`
+/// after `timeout` without it.
 ///
 /// # Errors
 ///
@@ -216,11 +269,11 @@ pub async fn wait_network_up(
                 return Ok(Network::Down);
             }
             Ok(None) => return Err(link_error(ezsp).await),
-            Ok(Some(callback)) => {
-                if let Some(network) = network_change(&callback, protocol) {
-                    return Ok(network);
-                }
-            }
+            Ok(Some(callback)) => match network_change(&callback, protocol) {
+                Some(Network::Up) => return Ok(Network::Up),
+                Some(other) => tracing::debug!(?other, "ignored while waiting for the network"),
+                None => {}
+            },
         }
     }
 }
@@ -255,6 +308,17 @@ mod tests {
         (ids::SET_CONFIGURATION_VALUE, vec![config.id, low, high])
     }
 
+    fn set_policy(policy: Policy) -> (u16, Vec<u8>) {
+        (ids::SET_POLICY, vec![policy.id, policy.decision])
+    }
+
+    /// Every startup command accepted, `networkInit` answering `init`.
+    fn accepting(ncp: &FakeNcp, ok: &[u8], init: &[u8]) {
+        ncp.respond(ids::SET_CONFIGURATION_VALUE, ok);
+        ncp.respond(ids::SET_POLICY, ok);
+        ncp.respond(ids::NETWORK_INIT, init);
+    }
+
     #[test]
     fn stack_config_is_herdsmans() {
         let values: Vec<_> = STACK_CONFIG.iter().map(|c| (c.id, c.value)).collect();
@@ -274,14 +338,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trust_center_policies_are_herdsmans() {
+        let values: Vec<_> = TRUST_CENTER_POLICIES
+            .iter()
+            .map(|p| (p.id, p.decision))
+            .collect();
+        assert_eq!(values, [(0x05, 0x51), (0x06, 0x60), (0x00, 0x03)]);
+    }
+
     #[tokio::test]
     async fn configures_then_inits_the_network() {
         let (ncp, io) = FakeNcp::spawn(EMBER_13);
-        ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0x00]);
-        ncp.respond(ids::NETWORK_INIT, &[0x93]);
+        accepting(&ncp, &[0x00], &[0x93]);
         let (ezsp, version, _callbacks) = Ezsp::connect(io).await.unwrap();
         assert_eq!(start_ncp(&ezsp, &version).await.unwrap(), Init::NotJoined);
         let mut expected: Vec<_> = STACK_CONFIG.into_iter().map(set_config).collect();
+        expected.extend(TRUST_CENTER_POLICIES.into_iter().map(set_policy));
         expected.push((ids::NETWORK_INIT, vec![0x03, 0x00]));
         // After the two `version` commands.
         assert_eq!(ncp.received()[2..], expected);
@@ -292,17 +365,37 @@ mod tests {
         let (ncp, io) = FakeNcp::spawn(EMBER_13);
         // EZSP_ERROR_INVALID_ID for every value.
         ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0x36]);
+        ncp.respond(ids::SET_POLICY, &[0x00]);
         ncp.respond(ids::NETWORK_INIT, &[0x00]);
         let (ezsp, version, _callbacks) = Ezsp::connect(io).await.unwrap();
         assert_eq!(start_ncp(&ezsp, &version).await.unwrap(), Init::Resumed);
-        assert_eq!(ncp.received().len(), 2 + STACK_CONFIG.len() + 1);
+        assert_eq!(
+            ncp.received().len(),
+            2 + STACK_CONFIG.len() + TRUST_CENTER_POLICIES.len() + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_policy_stops_the_start() {
+        let (ncp, io) = FakeNcp::spawn(EMBER_13);
+        accepting(&ncp, &[0x00], &[0x00]);
+        // EZSP_ERROR_INVALID_VALUE
+        ncp.respond(ids::SET_POLICY, &[0x35]);
+        let (ezsp, version, _callbacks) = Ezsp::connect(io).await.unwrap();
+        let err = start_ncp(&ezsp, &version).await.unwrap_err();
+        assert!(err.to_string().contains("TC_KEY_REQUEST_POLICY"), "{err}");
+        assert!(
+            !ncp.received()
+                .iter()
+                .any(|(id, _)| *id == ids::NETWORK_INIT),
+            "no networkInit"
+        );
     }
 
     #[tokio::test]
     async fn statuses_are_read_at_the_ncp_width() {
         let (ncp, io) = FakeNcp::spawn(EMBER_14);
-        ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0, 0, 0, 0]);
-        ncp.respond(ids::NETWORK_INIT, &[0x17, 0, 0, 0]);
+        accepting(&ncp, &[0, 0, 0, 0], &[0x17, 0, 0, 0]);
         let (ezsp, version, _callbacks) = Ezsp::connect(io).await.unwrap();
         assert_eq!(start_ncp(&ezsp, &version).await.unwrap(), Init::NotJoined);
     }
@@ -310,9 +403,8 @@ mod tests {
     #[tokio::test]
     async fn a_failed_network_init_is_an_error() {
         let (ncp, io) = FakeNcp::spawn(EMBER_13);
-        ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0x00]);
         // INVALID_CALL
-        ncp.respond(ids::NETWORK_INIT, &[0x70]);
+        accepting(&ncp, &[0x00], &[0x70]);
         let (ezsp, version, _callbacks) = Ezsp::connect(io).await.unwrap();
         let err = start_ncp(&ezsp, &version).await.unwrap_err();
         assert!(err.to_string().contains("networkInit"), "{err}");
@@ -325,6 +417,18 @@ mod tests {
         let (ezsp, _, mut callbacks) = Ezsp::connect(io).await.unwrap();
         // A message first: logged, not taken for the status.
         ncp.callback(ids::INCOMING_MESSAGE_HANDLER, &[0x00]);
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        let network = wait_network_up(&ezsp, &mut callbacks, 13, NETWORK_UP_TIMEOUT)
+            .await
+            .unwrap();
+        assert_eq!(network, Network::Up);
+    }
+
+    #[tokio::test]
+    async fn a_down_on_the_way_is_ignored() {
+        let (ncp, io) = FakeNcp::spawn(EMBER_13);
+        let (ezsp, _, mut callbacks) = Ezsp::connect(io).await.unwrap();
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         let network = wait_network_up(&ezsp, &mut callbacks, 13, NETWORK_UP_TIMEOUT)
             .await

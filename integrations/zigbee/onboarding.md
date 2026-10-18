@@ -38,8 +38,9 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    # flow = "software"     # défaut ; "hardware" ou "none" selon la clé
    ```
 
-   `moli-os check-config`, redémarrer. Il faut une clé maître (`MOLI_MASTER_KEY_FILE`) : la
-   clé du réseau sera rangée par le pilote dans le coffre, jamais dans un fichier.
+   `moli-os check-config`, redémarrer. Il faut une clé maître (`MOLI_MASTER_KEY_FILE`) : les
+   clés du réseau sont rangées par le pilote dans le coffre, jamais dans un fichier ; sans
+   coffre, aucun réseau n'est formé et le pilote attend en le disant.
 6. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
-   `ezsp_version`, `network` (`none` tant qu'aucun réseau n'est formé : la formation du
-   réseau arrive à l'étape suivante du pilote).
+   `ezsp_version`, `network` (`up` une fois le réseau repris ou formé, sur le canal 15 sauf
+   `channel` dans les options).

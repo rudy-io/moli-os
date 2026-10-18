@@ -42,6 +42,7 @@ pub const SET_INITIAL_SECURITY_STATE: u16 = 0x0068;
 pub const GET_CURRENT_SECURITY_STATE: u16 = 0x0069;
 pub const EXPORT_KEY: u16 = 0x0114;
 pub const IMPORT_KEY: u16 = 0x0115;
+pub const CLEAR_KEY_TABLE: u16 = 0x00b1;
 
 // Trust center frames
 pub const TRUST_CENTER_JOIN_HANDLER: u16 = 0x0024;
@@ -50,7 +51,7 @@ pub const TRUST_CENTER_JOIN_HANDLER: u16 = 0x0024;
 mod tests {
     use super::*;
 
-    const ALL: [u16; 30] = [
+    const ALL: [u16; 31] = [
         VERSION,
         GET_CONFIGURATION_VALUE,
         SET_CONFIGURATION_VALUE,
@@ -80,6 +81,7 @@ mod tests {
         GET_CURRENT_SECURITY_STATE,
         EXPORT_KEY,
         IMPORT_KEY,
+        CLEAR_KEY_TABLE,
         TRUST_CENTER_JOIN_HANDLER,
     ];
 

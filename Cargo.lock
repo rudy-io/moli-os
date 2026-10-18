@@ -1705,6 +1705,7 @@ dependencies = [
  "moli-core",
  "moli-i18n",
  "moli-runtime",
+ "ring",
  "serde",
  "serde_json",
  "tokio",

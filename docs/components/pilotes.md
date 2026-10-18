@@ -143,15 +143,26 @@ base_topic = "zigbee2mqtt"  # défaut
 
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 
-- **Couvre** (phase 1) : la clé coordinateur elle-même. Formation du réseau, appairage et
-  appareils Zigbee arrivent ensuite ; d'ici là, `z2m` reste le pilote des appareils.
+- **Couvre** (phase 2 en cours) : la clé coordinateur et son réseau (formé s'il n'existe pas,
+  repris sinon). Appairage et appareils Zigbee arrivent ensuite ; d'ici là, `z2m` reste le
+  pilote des appareils.
 - **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
   `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
   EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
   (`setConfigurationValue`, liste et valeurs du pilote `ember` de zigbee-herdsman, provenance
   ligne par ligne dans `src/coordinator.rs` ; une valeur refusée par la clé est journalisée
-  et la sienne gardée), puis `networkInit` : réseau gardé par la clé → attente de
-  `stackStatusHandler` (10 s) ; pas de réseau → `network = none`.
+  et la sienne gardée), les politiques du centre de confiance (`setPolicy`, comme
+  `initTrustCenter` de herdsman), puis `networkInit` :
+  - réseau gardé par la clé → attente de `stackStatusHandler` « réseau levé » (10 s), puis
+    `getNetworkParameters` + `getEui64` recopiés dans le `store` ;
+  - pas de réseau et `store` vide → **formation** (`src/network.rs`, séquence `formNetwork` de
+    herdsman) : clé réseau et clé de lien du centre de confiance aléatoires (`ring`), rangées
+    au coffre **avant** toute commande de sécurité (reprises si le coffre les a déjà, après un
+    essai interrompu), `setInitialSecurityState`, masque de sécurité étendu, table des clés
+    vidée, `formNetwork` (canal `channel` ou 15, PAN et PAN étendu aléatoires), attente du
+    réseau levé, puis paramètres écrits dans le `store` ;
+  - pas de réseau mais un réseau connu du `store` → restauration (à venir) : le pilote attend
+    (`pilotes.zigbee.restauration_a_venir`) et ne forme **jamais** un réseau par-dessus.
 - **Configuration** :
 
 ```toml
@@ -162,11 +173,16 @@ kind = "zigbee"
 port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
 # baud = 115200         # défaut
 # flow = "software"     # défaut (XON/XOFF, ZBDongle-E) ; "hardware" ou "none"
-# channel = 15          # canal d'un nouveau réseau (11 à 26) ; choisi par le pilote sinon
+# channel = 15          # canal d'un nouveau réseau (11 à 26, sinon Moli refuse de démarrer) ; 15 par défaut
 ```
 
-- **Secrets** : `network_key`, écrite par le pilote lui-même dans le coffre (jamais dans un
-  fichier ni un journal) quand il formera le réseau ; il faut donc une clé maître.
+- **Secrets** : `network_key` et `tc_link_key` (32 chiffres hexadécimaux), écrites par le
+  pilote lui-même dans le coffre (jamais dans un fichier ni un journal, `Debug` masqué) quand il
+  forme le réseau ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
+  pilote attend (`pilotes.zigbee.coffre_indisponible`).
+- **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
+  réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, **sans clé**),
+  appareils. Écrit dans `<fichier>.tmp` puis renommé.
 - **Points** : appareil `coordinator`, en lecture seule : `firmware` (texte, `7.4.4.0`),
   `ezsp_version` (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`).
 - **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
@@ -174,10 +190,16 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   un nouveau firmware y fait quelque chose. Une clé qui redémarre seule ou un lien perdu
   termine l'exécution (le superviseur relance, tout recommence au RST). Un ordre reçu avant
   que le coordinateur soit prêt est refusé (`pilotes.zigbee.pas_pret`). Les rappels de la clé
-  sont lus en continu (au-delà de 256 en attente, le client les jetterait).
+  sont lus en continu (au-delà de 256 en attente, le client les jetterait). Un réseau repris
+  qui ne se lève pas en 10 s laisse le pilote prêt avec `network = down`, sans relance en
+  boucle : le `stackStatusHandler` suivant remet le point à jour (un « réseau tombé » pendant
+  l'attente est ignoré, comme herdsman). Une clé qui porte un autre réseau que celui du
+  `store` est suivie (le `store` est réécrit, avertissement au journal).
 - **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
   sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
-  refusés avant d'être prêt, lien perdu.
+  refusés avant d'être prêt, lien perdu, formation (clé au coffre avant la clé, canal 15,
+  `store` sans clé), clé du coffre reprise, sans coffre pas de réseau, réseau connu jamais
+  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause).
 - **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
   `--device`, groupe du port, mise à jour du firmware).
 

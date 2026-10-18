@@ -440,5 +440,7 @@
   "pilotes.zigbee.coordinateur": "Coordinateur Zigbee",
   "pilotes.zigbee.firmware": "Firmware",
   "pilotes.zigbee.version_ezsp": "Version EZSP",
-  "pilotes.zigbee.reseau": "Réseau"
+  "pilotes.zigbee.reseau": "Réseau",
+  "pilotes.zigbee.coffre_indisponible": "Zigbee natif : aucun réseau formé, faute de coffre de secrets ({problem}). La clé du réseau ne vit que dans le coffre : configurer la clé maître de Moli, puis redémarrer.",
+  "pilotes.zigbee.restauration_a_venir": "Zigbee natif : la clé n'a plus de réseau, mais Moli en connaît un (PAN {pan}). Sa restauration n'est pas encore possible ; aucun nouveau réseau n'est formé, pour ne pas perdre les appareils appairés."
 }

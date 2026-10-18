@@ -127,6 +127,18 @@ impl FakeNcp {
             .unwrap_or_else(|_| panic!("the fake NCP never received {count} commands"));
     }
 
+    /// Wait until an `id` command was received; panics after 5 s.
+    pub(crate) async fn wait_command(&self, id: u16) {
+        let wait = async {
+            while !self.lock().received.iter().any(|(got, _)| *got == id) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), wait)
+            .await
+            .unwrap_or_else(|_| panic!("the fake NCP never received command {id:#06x}"));
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Script> {
         self.script.lock().unwrap_or_else(PoisonError::into_inner)
     }

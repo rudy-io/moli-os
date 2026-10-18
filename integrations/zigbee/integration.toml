@@ -14,8 +14,8 @@ ssdp = []
 ports = []
 
 [needs]
-# The network key lives in the vault (`network_key`), written by the driver.
-secrets = ["network_key"]
+# The network and trust center link keys live in the vault, written by the driver.
+secrets = ["network_key", "tc_link_key"]
 vars = []
 options = ["port"]
 

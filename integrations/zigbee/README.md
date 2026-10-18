@@ -6,9 +6,11 @@
   EmberZNet) ; les tables du protocole (identifiants de trames, statuts, valeurs de
   configuration d'un coordinateur) sont reprises de zigbee-herdsman (MIT, crédit dans `NOTICE`),
   avec leur provenance dans le code.
-- État : **phase 1**. Le pilote ouvre le port, réinitialise la clé, négocie EZSP (13 ou plus),
-  la configure comme un coordinateur, relance le réseau qu'elle garde (`networkInit`) et
-  publie l'appareil « coordinateur » (`firmware`, `ezsp_version`, `network`), en lecture
-  seule. Formation du réseau, appairage et appareils : phases suivantes.
+- État : **phase 2 en cours**. Le pilote ouvre le port, réinitialise la clé, négocie EZSP (13
+  ou plus), la configure comme un coordinateur, relance le réseau qu'elle garde (`networkInit`)
+  ou en forme un s'il n'y en a pas (clés au coffre, paramètres dans
+  `<data_dir>/zigbee-<instance>.json`), et publie l'appareil « coordinateur » (`firmware`,
+  `ezsp_version`, `network`), en lecture seule. Restauration, appairage et appareils : étapes
+  suivantes.
 - Essayé sur : à remplir (clé, firmware, date).
 - Pas de fixture : les tests rejouent un NCP simulé (`src/sim.rs`) qui parle le vrai ASH.

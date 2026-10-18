@@ -440,5 +440,7 @@
   "pilotes.zigbee.coordinateur": "Zigbee coordinator",
   "pilotes.zigbee.firmware": "Firmware",
   "pilotes.zigbee.version_ezsp": "EZSP version",
-  "pilotes.zigbee.reseau": "Network"
+  "pilotes.zigbee.reseau": "Network",
+  "pilotes.zigbee.coffre_indisponible": "Native Zigbee: no network formed, the secret vault is unavailable ({problem}). The network key only ever lives in the vault: set up Moli's master key, then restart.",
+  "pilotes.zigbee.restauration_a_venir": "Native Zigbee: the dongle has no network, but Moli knows one (PAN {pan}). Restoring it is not possible yet; no new network is formed, so that paired devices are not lost."
 }
