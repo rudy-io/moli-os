@@ -3,6 +3,8 @@
 //!
 //! Dormant: nothing runs unless `[[driver]] kind = "zigbee"` is in `moli.toml`.
 
+pub mod ash;
+
 use std::path::{Path, PathBuf};
 
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
