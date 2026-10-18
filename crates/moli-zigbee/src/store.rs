@@ -25,12 +25,19 @@ pub struct NetworkRecord {
     /// IEEE address of the dongle that runs the network, `0x` and 16 hex digits.
     pub coordinator_ieee: String,
     pub nwk_update_id: u8,
-    /// Outgoing NWK frame counter of the network key, as an imported backup
-    /// recorded it: a restore starts above it (devices drop frames whose
-    /// counter they already saw). Not secret.
+    /// Outgoing NWK frame counter of the network key, as a backup recorded
+    /// it: a restore starts above it (devices drop frames whose counter they
+    /// already saw). Not secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_counter: Option<u32>,
-    /// Sequence number of the network key, as an imported backup recorded it.
+    /// Whether `frame_counter` is fresh: no dongle has sent with this
+    /// network since it was recorded (set by an import; cleared once a
+    /// dongle runs the network again). Only a fresh counter is restored:
+    /// a stale one would start below what the devices already saw, and
+    /// they would drop every frame of the coordinator.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub frame_counter_fresh: bool,
+    /// Sequence number of the network key, as a backup recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_sequence_number: Option<u8>,
 }
@@ -44,12 +51,14 @@ impl NetworkRecord {
     }
 
     /// This record (as the dongle reports it) with what only a backup knows
-    /// of the same network, kept from `known`: the frame counter and the key
-    /// sequence number.
+    /// of the same network, kept from `known`: the frame counter (no longer
+    /// fresh: a dongle runs the network, its counter has moved on) and the
+    /// key sequence number.
     #[must_use]
     pub fn keeping_backup_of(self, known: &Self) -> Self {
         Self {
             frame_counter: known.frame_counter,
+            frame_counter_fresh: false,
             key_sequence_number: known.key_sequence_number,
             ..self
         }
@@ -78,6 +87,11 @@ pub struct Store {
     /// By IEEE address (`0x…`).
     #[serde(default)]
     pub devices: BTreeMap<String, DeviceRecord>,
+    /// `moli-os zigbee import` wrote this store but may not have put the
+    /// keys into the vault yet: the network and the vault may not match.
+    /// The driver waits until the same import is run again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub import_pending: bool,
 }
 
 impl Default for Store {
@@ -86,6 +100,7 @@ impl Default for Store {
             version: VERSION,
             network: None,
             devices: BTreeMap::new(),
+            import_pending: false,
         }
     }
 }
@@ -193,6 +208,7 @@ pub(crate) mod tests {
             coordinator_ieee: "0x00124b0000000001".into(),
             nwk_update_id: 0,
             frame_counter: None,
+            frame_counter_fresh: false,
             key_sequence_number: None,
         }
     }

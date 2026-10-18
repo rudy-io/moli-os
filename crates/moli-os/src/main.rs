@@ -97,7 +97,9 @@ enum ZigbeeCommand {
     /// (`coordinator_backup.json`, Open Coordinator Backup), put its keys
     /// into the encrypted store and its network into the driver's state;
     /// the driver restores it on the dongle at its next start, without
-    /// re-pairing. Keys are never printed. Restart moli-os afterwards.
+    /// re-pairing. Keys are never printed. Stop moli-os first (a running
+    /// Moli keeps its vault and the driver's state in memory and would
+    /// overwrite the import at its next save), start it again afterwards.
     Import {
         /// The backup file Zigbee2MQTT writes in its data folder.
         file: PathBuf,
@@ -612,8 +614,13 @@ fn zigbee_import(
             "a new random one: the backup has no stack_specific.ezsp.hashed_tclk",
         ),
     };
-    // The vault first: a store naming a network whose key is nowhere would
-    // make the driver wait for a person.
+    // Store, vault, store: the vault and the store cannot be written at
+    // once, so the store first says an import is under way. Interrupted
+    // anywhere, the driver waits (`import_pending`) instead of misreading
+    // a store and a vault that do not match, until this same import runs
+    // again (same network: no --force needed).
+    state.import_pending = true;
+    state.save(&store_path)?;
     let secrets = data_dir.join("secrets.enc");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -627,8 +634,14 @@ fn zigbee_import(
             master,
             &format!("{instance}/{name}"),
             &key.to_hex(),
-        ))?;
+        ))
+        .with_context(|| {
+            format!(
+                "the import was interrupted while storing {instance}/{name}: run the same command again"
+            )
+        })?;
     }
+    state.import_pending = false;
     state.save(&store_path)?;
     let record = &import.record;
     Ok(format!(
@@ -636,7 +649,8 @@ fn zigbee_import(
          network key stored (encrypted) as {instance}/{}\n\
          trust center link key stored (encrypted) as {instance}/{} ({tc_link_origin})\n\
          frame counter {} (a restore starts {} above it)\n\
-         Restart moli-os: the driver takes this network over, restoring it on its own dongle if the dongle has none.",
+         moli-os must stay stopped during an import (a running Moli would overwrite it); start it now: \
+         the driver takes this network over, restoring it on its own dongle if the dongle has none.",
         record.pan_id,
         record.channel,
         import.devices_text(),
@@ -1301,11 +1315,14 @@ mod tests {
         let network = store.network.unwrap();
         assert_eq!(network.pan_id, 0x1a62);
         assert_eq!(network.frame_counter, Some(123_456));
+        assert!(network.frame_counter_fresh);
         assert_eq!(store.devices.len(), 2);
         assert!(summary.contains("0x1a62"), "{summary}");
         assert!(summary.contains("channel 15"), "{summary}");
         assert!(summary.contains("2 devices"), "{summary}");
         assert!(summary.contains("zigbee/network_key"), "{summary}");
+        assert!(summary.contains("stay stopped"), "{summary}");
+        assert!(!store.import_pending);
     }
 
     #[test]
@@ -1325,6 +1342,35 @@ mod tests {
     }
 
     #[test]
+    fn an_interrupted_import_waits() {
+        let data = Scratch::new("zigbee-import-interrupted");
+        let master = MasterKey::generate().unwrap();
+        // The vault cannot be written: the import stops between its steps.
+        std::fs::create_dir_all(data.0.join("secrets.enc")).unwrap();
+        let error =
+            zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap_err();
+        let shown = format!("{error:#}");
+        assert!(shown.contains("run the same command again"), "{shown}");
+        // The store says so (the driver waits on it), the key went nowhere.
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let pending = moli_zigbee::store::Store::load(&store_path).unwrap();
+        assert!(pending.import_pending);
+        assert_eq!(pending.network.as_ref().unwrap().pan_id, 0x1a62);
+        // Run again (the vault writable now): completed, without --force.
+        std::fs::remove_dir(data.0.join("secrets.enc")).unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let done = moli_zigbee::store::Store::load(&store_path).unwrap();
+        assert!(!done.import_pending);
+        assert_eq!(done.network, pending.network);
+        assert_eq!(
+            vault_secret(&data.0, &master, "network_key").as_deref(),
+            Some("01030507090b0d0f00020406080a0c0d")
+        );
+        let text = std::fs::read_to_string(&store_path).unwrap();
+        assert!(!text.contains("import_pending"), "{text}");
+    }
+
+    #[test]
     fn import_over_another_network_needs_force() {
         let data = Scratch::new("zigbee-import-force");
         let master = MasterKey::generate().unwrap();
@@ -1337,6 +1383,7 @@ mod tests {
                 coordinator_ieee: "0x00124b0000000001".into(),
                 nwk_update_id: 0,
                 frame_counter: None,
+                frame_counter_fresh: false,
                 key_sequence_number: None,
             }),
             ..moli_zigbee::store::Store::default()

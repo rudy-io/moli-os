@@ -15,7 +15,7 @@
   },
   "coordinator_ieee": "01000000004b1200",
   "pan_id": "1a62",
-  "extended_pan_id": "dddddddddddddddd",
+  "extended_pan_id": "0123456789abcdef",
   "nwk_update_id": 0,
   "security_level": 5,
   "channel": 15,

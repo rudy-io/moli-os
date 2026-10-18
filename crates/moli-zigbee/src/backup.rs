@@ -143,14 +143,25 @@ impl OpenCoordinatorBackup {
     /// # Errors
     ///
     /// Not JSON, not an Open Coordinator Backup, or another version than 1.
+    /// The message never quotes the file: serde's would (an `invalid type:
+    /// string "…"` may be a key), only its position is given.
     pub fn parse(bytes: &[u8]) -> anyhow::Result<Self> {
-        let backup: Self =
-            serde_json::from_slice(bytes).context("not an Open Coordinator Backup (JSON)")?;
+        let backup: Self = serde_json::from_slice(bytes).map_err(|error| {
+            let what = match error.classify() {
+                serde_json::error::Category::Data => "a field is missing or of the wrong type",
+                serde_json::error::Category::Eof => "the file ends too early",
+                serde_json::error::Category::Syntax | serde_json::error::Category::Io => {
+                    "it is not JSON"
+                }
+            };
+            anyhow!(
+                "not a readable Open Coordinator Backup: {what} (line {}, column {})",
+                error.line(),
+                error.column()
+            )
+        })?;
         if backup.metadata.format != FORMAT {
-            bail!(
-                "not an Open Coordinator Backup: metadata.format is {:?}, not {FORMAT:?}",
-                backup.metadata.format
-            );
+            bail!("not an Open Coordinator Backup: metadata.format is not {FORMAT:?}");
         }
         if backup.metadata.version != FORMAT_VERSION {
             bail!(
@@ -262,6 +273,8 @@ impl OpenCoordinatorBackup {
                 coordinator_ieee,
                 nwk_update_id: self.nwk_update_id,
                 frame_counter: Some(self.network_key.frame_counter),
+                // Fresh: Zigbee2MQTT is stopped, no dongle has sent since.
+                frame_counter_fresh: true,
                 key_sequence_number: Some(self.network_key.sequence_number),
             },
             network_key,
@@ -338,6 +351,38 @@ impl Import {
     }
 }
 
+/// The outgoing NWK frame counter a restore starts from: the saved one
+/// plus [`FRAME_COUNTER_MARGIN`]; `None` when that leaves no room below
+/// the `uint32_t` limit (the stack would stop sending; the network needs a
+/// new key, never a saturated counter).
+#[must_use]
+pub fn restore_counter(saved: u32) -> Option<u32> {
+    saved
+        .checked_add(FRAME_COUNTER_MARGIN)
+        .filter(|start| *start < u32::MAX)
+}
+
+/// The dongle's IEEE address when it is not `record`'s coordinator
+/// (`getEui64`, nothing written): `None` when it is.
+///
+/// # Errors
+///
+/// The link failing or an unreadable answer.
+pub async fn other_dongle(ezsp: &Ezsp, record: &NetworkRecord) -> anyhow::Result<Option<String>> {
+    let answer = ezsp.call(ids::GET_EUI64, &[]).await?;
+    let (eui64, _) = answer.split_first_chunk::<8>().ok_or(EzspError::TooShort)?;
+    let dongle = network::ieee(*eui64);
+    if dongle.eq_ignore_ascii_case(&record.coordinator_ieee) {
+        return Ok(None);
+    }
+    tracing::warn!(
+        %dongle,
+        expected = %record.coordinator_ieee,
+        "the dongle is not the coordinator of the network to restore"
+    );
+    Ok(Some(dongle))
+}
+
 /// How a restore ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Restored {
@@ -369,7 +414,8 @@ pub enum Restored {
 ///
 /// # Errors
 ///
-/// The link failing, the NCP refusing a step, or the network not coming up.
+/// A counter without room for the margin ([`restore_counter`]), the link
+/// failing, the NCP refusing a step, or the network not coming up.
 pub async fn restore(
     ezsp: &Ezsp,
     callbacks: &mut mpsc::Receiver<Callback>,
@@ -378,15 +424,12 @@ pub async fn restore(
     record: &NetworkRecord,
     frame_counter: u32,
 ) -> anyhow::Result<Restored> {
-    let answer = ezsp.call(ids::GET_EUI64, &[]).await?;
-    let (eui64, _) = answer.split_first_chunk::<8>().ok_or(EzspError::TooShort)?;
-    let dongle = network::ieee(*eui64);
-    if !dongle.eq_ignore_ascii_case(&record.coordinator_ieee) {
-        tracing::warn!(
-            %dongle,
-            expected = %record.coordinator_ieee,
-            "the dongle is not the coordinator of the network to restore"
+    let Some(start) = restore_counter(frame_counter) else {
+        bail!(
+            "the saved frame counter {frame_counter} leaves no room for the restore margin: the network needs a new key"
         );
+    };
+    if let Some(dongle) = other_dongle(ezsp, record).await? {
         return Ok(Restored::OtherDongle { dongle });
     }
     if frame_counter > FRAME_COUNTER_NEAR_END {
@@ -395,7 +438,6 @@ pub async fn restore(
             "the network key frame counter is reaching its limit: a new network key will be needed soon"
         );
     }
-    let start = frame_counter.saturating_add(FRAME_COUNTER_MARGIN);
     tracing::info!(
         pan_id = format_args!("{:#06x}", record.pan_id),
         channel = record.channel,
@@ -426,7 +468,7 @@ pub async fn restore(
 mod tests {
     use super::*;
     use crate::ezsp::{NetworkParameters, Version, ids};
-    use crate::network::tests::{EUI64, network_parameters};
+    use crate::network::tests::{EUI64, network_parameters_on};
     use crate::network::{Key, hex};
     use crate::sim::FakeNcp;
     use crate::store::tests::record;
@@ -455,11 +497,24 @@ mod tests {
         serde_json::to_vec(&json).unwrap()
     }
 
+    /// The fixture's extended PAN ID: asymmetric, its byte order is pinned
+    /// (the stack's order, copied as herdsman writes it).
+    const EXTENDED_PAN_ID: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
+
+    /// The fixture's network, as the store keeps it.
+    fn on_fixture_pan(pan_id: u16) -> NetworkRecord {
+        NetworkRecord {
+            extended_pan_id: EXTENDED_PAN_ID,
+            ..record(pan_id)
+        }
+    }
+
     fn imported() -> NetworkRecord {
         NetworkRecord {
             frame_counter: Some(123_456),
+            frame_counter_fresh: true,
             key_sequence_number: Some(0),
-            ..record(0x1a62)
+            ..on_fixture_pan(0x1a62)
         }
     }
 
@@ -580,6 +635,31 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_backup_never_shows_its_keys() {
+        // A key where an object belongs: serde's own message would quote it.
+        let bare = changed(|json| json["network_key"] = DOC_KEY.to_uppercase().into());
+        let error = OpenCoordinatorBackup::parse(&bare).unwrap_err();
+        let shown = format!("{error:#} {error:?}").to_lowercase();
+        assert!(!shown.contains("0103"), "{shown}");
+        assert!(shown.contains("wrong type"), "{shown}");
+        assert!(shown.contains("line"), "{shown}");
+        // A device link key where a string belongs: same fixed message.
+        let bare = changed(|json| {
+            json["devices"][0]["link_key"] =
+                serde_json::json!({"key": 5, "rx_counter": 0, "tx_counter": 0});
+        });
+        let shown = format!("{:#}", OpenCoordinatorBackup::parse(&bare).unwrap_err());
+        assert!(!shown.contains("integer"), "{shown}");
+        assert!(shown.contains("wrong type"), "{shown}");
+        // Not JSON at all: no excerpt either.
+        let shown = format!(
+            "{:#}",
+            OpenCoordinatorBackup::parse(b"01030507090B0D0F00020406080A0C0D").unwrap_err()
+        );
+        assert!(!shown.contains("0103"), "{shown}");
+    }
+
+    #[test]
     fn another_network_is_replaced_only_with_force() {
         let import = fixture().import().unwrap();
         let mut other = Store {
@@ -614,7 +694,7 @@ mod tests {
         let mut same = Store {
             network: Some(NetworkRecord {
                 channel: 20,
-                ..record(0x1a62)
+                ..on_fixture_pan(0x1a62)
             }),
             ..Store::default()
         };
@@ -640,7 +720,10 @@ mod tests {
         ] {
             ncp.respond(id, &[0x00]);
         }
-        ncp.respond(ids::GET_NETWORK_PARAMETERS, &network_parameters(0x1a62, 20));
+        ncp.respond(
+            ids::GET_NETWORK_PARAMETERS,
+            &network_parameters_on(EXTENDED_PAN_ID, 0x1a62, 20),
+        );
         ncp.respond(ids::GET_EUI64, &eui64);
         (ncp, io)
     }
@@ -675,7 +758,7 @@ mod tests {
             restored.unwrap(),
             Restored::Network(NetworkRecord {
                 channel: 20,
-                ..record(0x1a62)
+                ..on_fixture_pan(0x1a62)
             })
         );
         let received = ncp.received();
@@ -709,7 +792,8 @@ mod tests {
         assert_eq!(
             formed,
             NetworkParameters {
-                extended_pan_id: [0xDD; 8],
+                // The fixture's `0123456789abcdef`, byte for byte.
+                extended_pan_id: EXTENDED_PAN_ID,
                 pan_id: 0x1a62,
                 radio_tx_power: 5,
                 radio_channel: 20,
@@ -722,29 +806,33 @@ mod tests {
         assert_eq!(received[7].1, [0x07, 1, 1]);
     }
 
+    #[test]
+    fn the_restore_counter_never_saturates() {
+        assert_eq!(restore_counter(123_456), Some(124_480));
+        assert_eq!(restore_counter(0), Some(1024));
+        assert_eq!(restore_counter(u32::MAX - 1025), Some(u32::MAX - 1));
+        for full in [u32::MAX - 1024, u32::MAX - 10, u32::MAX] {
+            assert_eq!(restore_counter(full), None, "{full:#x}");
+        }
+    }
+
     #[tokio::test]
-    async fn a_counter_near_its_end_does_not_wrap() {
+    async fn a_counter_without_room_is_refused() {
         let (ncp, io) = restoring_ncp(EUI64);
         let (ezsp, version, mut callbacks) = Ezsp::connect(io).await.unwrap();
-        let forming = async {
-            ncp.wait_command(ids::FORM_NETWORK).await;
-            ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
-        };
-        let keys = doc_keys();
-        let saved = imported();
-        let (restored, ()) = tokio::join!(
-            restore(
-                &ezsp,
-                &mut callbacks,
-                version.protocol,
-                &keys,
-                &saved,
-                u32::MAX - 10
-            ),
-            forming
-        );
-        restored.unwrap();
-        assert_eq!(ncp.received()[3].1, [0x23, 4, 0xFF, 0xFF, 0xFF, 0xFF]);
+        let error = restore(
+            &ezsp,
+            &mut callbacks,
+            version.protocol,
+            &doc_keys(),
+            &imported(),
+            u32::MAX - 10,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("no room"), "{error}");
+        assert_eq!(ncp.received().len(), 2, "nothing sent after the handshake");
     }
 
     #[tokio::test]

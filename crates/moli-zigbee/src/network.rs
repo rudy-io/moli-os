@@ -426,6 +426,7 @@ pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<DongleNet
             coordinator_ieee: ieee(*eui64),
             nwk_update_id: parameters.nwk_update_id,
             frame_counter: None,
+            frame_counter_fresh: false,
             key_sequence_number: None,
         },
     })
@@ -476,9 +477,27 @@ pub(crate) mod tests {
 
     /// … by a node of `node_type` (`EmberNodeType`: 2 is a router).
     pub(crate) fn network_parameters_of(node_type: u8, pan_id: u16, channel: u8) -> Vec<u8> {
+        parameters_answer(node_type, [0xDD; 8], pan_id, channel)
+    }
+
+    /// … by a coordinator on `extended_pan_id` (as the stack stores it).
+    pub(crate) fn network_parameters_on(
+        extended_pan_id: [u8; 8],
+        pan_id: u16,
+        channel: u8,
+    ) -> Vec<u8> {
+        parameters_answer(NODE_TYPE_COORDINATOR, extended_pan_id, pan_id, channel)
+    }
+
+    fn parameters_answer(
+        node_type: u8,
+        extended_pan_id: [u8; 8],
+        pan_id: u16,
+        channel: u8,
+    ) -> Vec<u8> {
         let mut answer = vec![0x00, node_type];
         NetworkParameters {
-            extended_pan_id: [0xDD; 8],
+            extended_pan_id,
             pan_id,
             radio_tx_power: 5,
             radio_channel: channel,
@@ -574,6 +593,7 @@ pub(crate) mod tests {
                 coordinator_ieee: "0x00124b0000000001".into(),
                 nwk_update_id: 0,
                 frame_counter: None,
+                frame_counter_fresh: false,
                 key_sequence_number: None,
             }
         );

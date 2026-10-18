@@ -44,12 +44,18 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
 6. **Reprendre un réseau Zigbee2MQTT** (facultatif, sans réappairer) : arrêter Zigbee2MQTT,
    copier sa sauvegarde `coordinator_backup.json` (dossier de données de Zigbee2MQTT), puis
    `moli-os zigbee import coordinator_backup.json` (`--instance <id>` si l'instance ne
-   s'appelle pas `zigbee`). Les clés vont au coffre (jamais affichées), le réseau dans
-   `<data_dir>/zigbee-<instance>.json`. Au redémarrage, le pilote reprend le réseau que la clé
+   s'appelle pas `zigbee`). **Moli doit être arrêté pendant l'import** : un Moli en marche
+   garde son coffre et l'état du pilote en mémoire et écraserait l'import à sa prochaine
+   sauvegarde ; le démarrer ensuite. Les clés vont au coffre (jamais affichées), le réseau dans
+   `<data_dir>/zigbee-<instance>.json`. Au démarrage, le pilote reprend le réseau que la clé
    porte encore, ou le restaure s'il a été effacé (par le flash du firmware). **Même clé
    seulement** : Moli ne réécrit pas l'adresse d'une clé ; changer de clé, c'est réappairer.
-   Un réseau déjà connu de l'instance n'est remplacé qu'avec `--force`. Jamais Zigbee2MQTT et
-   Moli en même temps sur le même réseau.
+   **Sauvegarde récente seulement** : la restauration repart du compteur de trames de la
+   sauvegarde (+ 1024) et ne s'en sert qu'une fois ; une fois que la clé a fait tourner le
+   réseau, ce compteur est dépassé, et une nouvelle restauration demande une sauvegarde
+   récente (sinon le pilote attend en le disant). Un import interrompu se termine en relançant
+   la même commande. Un réseau déjà connu de l'instance n'est remplacé qu'avec `--force`.
+   Jamais Zigbee2MQTT et Moli en même temps sur le même réseau.
 7. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
    `ezsp_version`, `network` (`up` une fois le réseau repris ou formé, sur le canal 15 sauf
    `channel` dans les options).
