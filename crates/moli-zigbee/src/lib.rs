@@ -5,6 +5,8 @@
 
 pub mod ash;
 pub mod ezsp;
+#[cfg(test)]
+mod sim;
 pub mod transport;
 
 use std::path::{Path, PathBuf};

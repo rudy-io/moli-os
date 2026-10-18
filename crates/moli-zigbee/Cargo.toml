@@ -14,12 +14,9 @@ anyhow.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-# Test-only: `read_exact` / `write_all` on the transport.
+# io-util: the EZSP client reads and writes the port.
 tokio = { workspace = true, features = ["io-util"] }
+tracing.workspace = true
 
 # The workspace table, except `unsafe_code`: `forbid` cannot be relaxed by an
 # `#[allow]`, and termios (src/transport.rs) has no safe libc binding. It is
