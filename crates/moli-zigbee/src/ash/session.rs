@@ -44,7 +44,8 @@ const INITIAL_TIMEOUT: Duration = Duration::from_millis(1600);
 /// Bounds of the adaptive retransmission timeout.
 const MIN_TIMEOUT: Duration = Duration::from_millis(400);
 const MAX_TIMEOUT: Duration = Duration::from_millis(3200);
-/// Timer expiries (each followed by a retransmission) before the link fails.
+/// Retransmissions of a frame (after a timer expiry or a NAK) before the
+/// next failed attempt brings the link down.
 const MAX_RETRANSMISSIONS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,8 +66,9 @@ struct InFlight {
     sent_at: Option<Instant>,
     /// Copies written so far; from the second one on, they are marked `re_tx`.
     copies: u8,
-    /// Timer expiries so far.
-    timeouts: u8,
+    /// Failed attempts so far (timer expiries and NAKs), each answered by a
+    /// retransmission.
+    retries: u8,
 }
 
 /// The ASH link with the NCP.
@@ -86,7 +88,7 @@ pub struct Session {
     rejecting: bool,
     /// Current retransmission timeout.
     timeout: Duration,
-    /// Events not handed out yet (a failure found by `poll_transmit`).
+    /// Events gathered by the current `on_bytes` call (only it raises events).
     events: Vec<Event>,
 }
 
@@ -125,7 +127,8 @@ impl Session {
     }
 
     /// Feed the bytes read from the NCP (possibly none, to run the timer)
-    /// and collect what happened. Drain [`Session::poll_transmit`] after.
+    /// and collect what happened. Every event comes from here, [`Event::Failed`]
+    /// included. Drain [`Session::poll_transmit`] after.
     pub fn on_bytes(&mut self, bytes: &[u8], now: Instant) -> Vec<Event> {
         for &byte in bytes {
             match self.decoder.push(byte) {
@@ -140,7 +143,7 @@ impl Session {
             }
         }
         // After the frames: an ACK in this very read beats the timer.
-        self.tick(now);
+        self.tick(now, true);
         std::mem::take(&mut self.events)
     }
 
@@ -158,7 +161,7 @@ impl Session {
             payload,
             sent_at: None,
             copies: 0,
-            timeouts: 0,
+            retries: 0,
         });
         self.tx_seq = (self.tx_seq + 1) & 7;
         Ok(())
@@ -166,8 +169,12 @@ impl Session {
 
     /// The next frame to write (ACK or NAK first, then our DATA frame or its
     /// retransmission), or `None`. Call it until `None` after every change.
+    ///
+    /// It raises no event: when it meets the final expiry, it writes nothing
+    /// and leaves that deadline armed, so [`Session::next_timeout`] is already
+    /// past and the next `on_bytes` reports [`Event::Failed`].
     pub fn poll_transmit(&mut self, now: Instant) -> Option<Vec<u8>> {
-        self.tick(now);
+        self.tick(now, false);
         if self.state != State::Connected {
             return None;
         }
@@ -190,8 +197,12 @@ impl Session {
     }
 
     /// When the retransmission timer of our frame in flight expires, if one
-    /// runs. At that instant, call `on_bytes(&[], now)` and drain
-    /// [`Session::poll_transmit`].
+    /// runs; it may already be past, meaning "now".
+    ///
+    /// The caller loop: wait for bytes from the NCP or for this instant,
+    /// whichever comes first; then call `on_bytes(read, now)` (an empty slice
+    /// on a timer wake-up) and handle its events; then write every frame
+    /// [`Session::poll_transmit`] returns until `None`; then ask again.
     #[must_use]
     pub fn next_timeout(&self) -> Option<Instant> {
         if self.state != State::Connected {
@@ -249,9 +260,15 @@ impl Session {
             (State::Connected, Frame::Ack { ack, .. }) => self.on_ack(ack, now),
             (State::Connected, Frame::Nak { ack, .. }) => {
                 self.on_ack(ack, now);
-                // The NCP still expects our frame: send it again now.
-                if let Some(frame) = self.in_flight.as_mut().filter(|f| f.frm == ack) {
-                    frame.sent_at = None;
+                // The NCP still expects the copy it just saw fail: a failed
+                // attempt, answered at once. A NAK while a copy is already due
+                // is the same loss told twice.
+                if self
+                    .in_flight
+                    .as_ref()
+                    .is_some_and(|f| f.frm == ack && f.sent_at.is_some())
+                {
+                    self.retry_or_fail();
                 }
             }
             _ => {}
@@ -288,29 +305,38 @@ impl Session {
         }
     }
 
-    /// Run the retransmission timer.
-    fn tick(&mut self, now: Instant) {
+    /// Run the retransmission timer. Without `may_fail` (outside `on_bytes`,
+    /// which alone hands out events), the final expiry is left for later.
+    fn tick(&mut self, now: Instant, may_fail: bool) {
         if self.state != State::Connected {
             return;
         }
-        let timeout = self.timeout;
-        let Some(frame) = self.in_flight.as_mut() else {
+        let Some(frame) = &self.in_flight else {
             return;
         };
         let Some(sent_at) = frame.sent_at else {
             return;
         };
-        if now < sent_at + timeout {
+        if now < sent_at + self.timeout || (!may_fail && frame.retries >= MAX_RETRANSMISSIONS) {
             return;
         }
-        if frame.timeouts >= MAX_RETRANSMISSIONS {
+        self.retry_or_fail();
+        // Back off on loss (UG101), within the ceiling.
+        self.timeout = (self.timeout * 2).min(MAX_TIMEOUT);
+    }
+
+    /// One more failed attempt for the frame in flight: send it again, or
+    /// bring the link down once the retransmissions are spent.
+    fn retry_or_fail(&mut self) {
+        let Some(frame) = self.in_flight.as_mut() else {
+            return;
+        };
+        if frame.retries >= MAX_RETRANSMISSIONS {
             self.stop();
             self.events.push(Event::Failed);
         } else {
-            frame.timeouts += 1;
+            frame.retries += 1;
             frame.sent_at = None;
-            // Back off on loss (UG101), within the ceiling.
-            self.timeout = (timeout * 2).min(MAX_TIMEOUT);
         }
     }
 
@@ -532,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn failure_waits_for_on_bytes() {
+    fn final_expiry_seen_by_poll_wakes_the_caller() {
         let t0 = Instant::now();
         let mut s = connected(t0);
         s.send(vec![3]).unwrap();
@@ -542,10 +568,53 @@ mod tests {
             assert_eq!(next_frame(&mut s, deadline), data(0, true, 0, &[3]));
         }
         let deadline = s.next_timeout().unwrap();
-        // The client polls first: nothing to write, the failure is kept for on_bytes.
-        assert_eq!(s.poll_transmit(deadline), None);
-        assert_eq!(s.on_bytes(&[], deadline), [Event::Failed]);
+        // The client polls first, a little late: nothing to write...
+        let late = deadline + ms(5);
+        assert_eq!(s.poll_transmit(late), None);
+        // ...but the timer stays armed and already past: it wakes up at once.
+        let wake = s.next_timeout().expect("a timer still armed");
+        assert!(wake <= late);
+        assert_eq!(s.on_bytes(&[], late), [Event::Failed]);
+        assert_eq!(s.next_timeout(), None);
+        assert!(s.on_bytes(&[], late).is_empty());
+    }
+
+    #[test]
+    fn endless_naks_fail() {
+        let t0 = Instant::now();
+        let mut s = connected(t0);
+        s.send(vec![6]).unwrap();
+        assert_eq!(next_frame(&mut s, t0), data(0, false, 0, &[6]));
+        for _ in 0..3 {
+            assert!(s.on_bytes(&nak(0).encode(), t0).is_empty());
+            assert_eq!(next_frame(&mut s, t0), data(0, true, 0, &[6]));
+        }
+        // The 4th NAK for the same frame spends the budget.
+        assert_eq!(s.on_bytes(&nak(0).encode(), t0), [Event::Failed]);
+        assert_eq!(s.poll_transmit(t0), None);
+        assert_eq!(s.next_timeout(), None);
+        assert_eq!(s.send(vec![7]), Err(Busy));
+    }
+
+    #[test]
+    fn naks_and_timeouts_share_the_budget() {
+        let t0 = Instant::now();
+        let mut s = connected(t0);
+        s.send(vec![6]).unwrap();
+        next_frame(&mut s, t0);
+        // Two NAKs in one read, before the copy is rewritten: one attempt.
+        let mut twice = nak(0).encode();
+        twice.extend(nak(0).encode());
+        assert!(s.on_bytes(&twice, t0).is_empty());
+        assert_eq!(next_frame(&mut s, t0), data(0, true, 0, &[6]));
+        // A timer expiry: second attempt.
+        let deadline = s.next_timeout().unwrap();
         assert!(s.on_bytes(&[], deadline).is_empty());
+        assert_eq!(next_frame(&mut s, deadline), data(0, true, 0, &[6]));
+        // A NAK: third and last retransmission.
+        assert!(s.on_bytes(&nak(0).encode(), deadline).is_empty());
+        assert_eq!(next_frame(&mut s, deadline), data(0, true, 0, &[6]));
+        assert_eq!(s.on_bytes(&nak(0).encode(), deadline), [Event::Failed]);
     }
 
     #[test]
