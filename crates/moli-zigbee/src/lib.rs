@@ -28,6 +28,14 @@ use crate::coordinator::{Event, Init, Network};
 use crate::ezsp::{Callback, Ezsp, EzspFailure, Version};
 use crate::store::Store;
 
+/// The wall clock, in unix seconds ([`backup::unix_now`]; fixed in tests):
+/// when a frame counter is recorded, and how old it is at a restore.
+type Clock = fn() -> u64;
+
+/// How long a clean stop may take (joining closed, the counter recorded a
+/// last time) before Moli goes on stopping without it.
+const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Driver configuration (`[driver.options]` in `moli.toml`).
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,7 +115,7 @@ async fn run(config: &Config, data_dir: &Path, ctx: &mut DriverCtx) -> anyhow::R
     );
     ctx.wait_for(moli_i18n::tr!("pilotes.zigbee.demarrage"));
     let io = refusing_orders(ctx, transport::open(config)).await?;
-    run_on(config, data_dir, ctx, io).await
+    run_on(config, data_dir, ctx, io, backup::unix_now).await
 }
 
 /// What the startup brings back.
@@ -131,6 +139,7 @@ async fn run_on<T>(
     data_dir: &Path,
     ctx: &mut DriverCtx,
     io: T,
+    clock: Clock,
 ) -> anyhow::Result<()>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -184,21 +193,19 @@ where
                         has_key,
                         &mut store,
                         &store_path,
+                        clock,
                     ),
                 )
                 .await?
             }
             Init::NotJoined => {
-                first_network(
-                    config,
-                    ctx,
-                    &ezsp,
-                    &mut callbacks,
+                let dongle = Dongle {
+                    ezsp: &ezsp,
                     protocol,
-                    &mut store,
-                    &store_path,
-                )
-                .await?
+                    store_path: &store_path,
+                    clock,
+                };
+                first_network(config, ctx, &dongle, &mut callbacks, &mut store).await?
             }
         }
     };
@@ -230,12 +237,14 @@ where
         permit_until: None,
         store: &mut store,
         store_path: &store_path,
+        clock,
     };
     serve(ctx, &ezsp, &mut callbacks, live).await
 }
 
 /// The coordinator ready: follow callbacks and orders until the link ends
-/// (an error: the supervisor restarts the driver) or Moli stops.
+/// (an error: the supervisor restarts the driver) or Moli stops (cleanly:
+/// [`Live::stop`]).
 async fn serve(
     ctx: &mut DriverCtx,
     ezsp: &Ezsp,
@@ -257,10 +266,13 @@ async fn serve(
                 Some(callback) => live.on_callback(ctx, &aps, &callback),
                 None => return Err(coordinator::link_error(ezsp).await),
             },
-            order = ctx.next_command() => match order {
-                Some(order) => live.on_order(ctx, &aps, callbacks, order).await,
-                None => return Ok(()),
-            },
+            order = ctx.next_command() => {
+                let Some(order) = order else {
+                    live.stop(ctx, &aps, callbacks).await;
+                    return Ok(());
+                };
+                live.on_order(ctx, &aps, callbacks, order).await;
+            }
             () = tokio::time::sleep_until(close_at.unwrap_or_else(tokio::time::Instant::now)),
                 if close_at.is_some() => live.joining_closed(ctx),
             _ = record_at.tick() => {
@@ -298,6 +310,7 @@ struct Live<'a> {
     permit_until: Option<tokio::time::Instant>,
     store: &'a mut Store,
     store_path: &'a Path,
+    clock: Clock,
 }
 
 impl Live<'_> {
@@ -447,11 +460,36 @@ impl Live<'_> {
         }
         let read = network::network_key_info(aps.ezsp());
         let recorded = match self.draining(ctx, aps, callbacks, read).await {
-            Ok(info) => backup::store_counter(self.store, self.store_path, info),
+            Ok(info) => backup::store_counter(self.store, self.store_path, info, (self.clock)()),
             Err(error) => Err(error),
         };
         if let Err(error) = recorded {
             tracing::warn!(%error, "the NWK frame counter could not be recorded: tried again in an hour");
+        }
+    }
+
+    /// Moli stops: on a network up and checked to be ours, joining closed
+    /// if Moli opened it, then the frame counter recorded a last time, so
+    /// that an export right after (or a later restore) starts from it,
+    /// stamped with the stop. Within [`STOP_TIMEOUT`]: whatever does not
+    /// answer in time is left (the store keeps its last record), and Moli
+    /// goes on stopping.
+    async fn stop(&mut self, ctx: &DriverCtx, aps: &Aps, callbacks: &mut mpsc::Receiver<Callback>) {
+        if !self.checked || self.network != Network::Up {
+            return;
+        }
+        let stopping = async {
+            if self.permit_until.is_some() {
+                let close = coordinator::permit_joining(aps, 0);
+                match self.draining(ctx, aps, callbacks, close).await {
+                    Ok(()) => self.joining_closed(ctx),
+                    Err(error) => tracing::warn!(%error, "joining could not be closed at stop"),
+                }
+            }
+            self.record_counter(ctx, aps, callbacks).await;
+        };
+        if tokio::time::timeout(STOP_TIMEOUT, stopping).await.is_err() {
+            tracing::warn!("the zigbee stop took too long: the last record is the one kept");
         }
     }
 
@@ -528,14 +566,18 @@ enum Outcome {
 async fn first_network(
     config: &Config,
     ctx: &mut DriverCtx,
-    ezsp: &Ezsp,
+    dongle: &Dongle<'_>,
     callbacks: &mut mpsc::Receiver<Callback>,
-    protocol: u8,
     store: &mut Store,
-    store_path: &Path,
 ) -> anyhow::Result<Outcome> {
+    let &Dongle {
+        ezsp,
+        protocol,
+        store_path,
+        clock,
+    } = dongle;
     if let Some(known) = store.network.clone() {
-        return restore_known(ctx, ezsp, callbacks, protocol, store, store_path, &known).await;
+        return restore_known(ctx, dongle, callbacks, store, &known).await;
     }
     if !ctx.can_store_secrets() {
         tracing::warn!("no vault: the network is not formed");
@@ -557,15 +599,15 @@ async fn first_network(
     .await?;
     store.network = Some(record);
     store.save(store_path)?;
-    refusing_orders(ctx, record_counter(ezsp, store, store_path)).await;
+    refusing_orders(ctx, record_counter(ezsp, store, store_path, clock())).await;
     Ok(Outcome::Ready(Network::Up))
 }
 
-/// The dongle's NWK frame counter recorded as soon as the network runs
-/// ([`backup::record_counter`]); a failure is logged, the next try is an
-/// hour later (the store keeps what it had).
-async fn record_counter(ezsp: &Ezsp, store: &mut Store, store_path: &Path) {
-    if let Err(error) = backup::record_counter(ezsp, store, store_path).await {
+/// The dongle's NWK frame counter recorded (at `now`) as soon as the
+/// network runs ([`backup::record_counter`]); a failure is logged, the next
+/// try is an hour later (the store keeps what it had).
+async fn record_counter(ezsp: &Ezsp, store: &mut Store, store_path: &Path, now: u64) {
+    if let Err(error) = backup::record_counter(ezsp, store, store_path, now).await {
         tracing::warn!(%error, "the NWK frame counter could not be recorded: tried again in an hour");
     }
 }
@@ -578,19 +620,25 @@ async fn record_counter(ezsp: &Ezsp, store: &mut Store, store_path: &Path) {
 /// nor written (vault or store), without a vault, without the network key
 /// in it, without a fresh counter (a Moli-formed network, or a counter a
 /// dongle has run past since: the devices would drop every frame of a
-/// coordinator counting below what they saw), with a counter at its end,
-/// or with another dongle plugged in. A restored network's saved counter is
-/// no longer fresh (it is never used twice); the restored dongle's own is
+/// coordinator counting below what they saw), with a counter recorded more
+/// than [`backup::COUNTER_MAX_AGE`] ago (a dongle left powered meanwhile
+/// may have run past the margin), with a counter at its end, or with
+/// another dongle plugged in. A restored network's saved counter is no
+/// longer fresh (it is never used twice); the restored dongle's own is
 /// recorded instead.
 async fn restore_known(
     ctx: &mut DriverCtx,
-    ezsp: &Ezsp,
+    dongle: &Dongle<'_>,
     callbacks: &mut mpsc::Receiver<Callback>,
-    protocol: u8,
     store: &mut Store,
-    store_path: &Path,
     known: &store::NetworkRecord,
 ) -> anyhow::Result<Outcome> {
+    let &Dongle {
+        ezsp,
+        protocol,
+        store_path,
+        clock,
+    } = dongle;
     let wait = |reason: String| {
         Ok(Outcome::Wait {
             reason,
@@ -621,6 +669,17 @@ async fn restore_known(
             pan = pan(known)
         ));
     };
+    if !backup::counter_recent(known, clock()) {
+        tracing::warn!(
+            pan_id = %pan(known),
+            recorded_at = ?known.frame_counter_recorded_at,
+            "the frame counter was recorded too long ago: the network is not restored"
+        );
+        return wait(moli_i18n::tr!(
+            "pilotes.zigbee.compteur_ancien",
+            pan = pan(known)
+        ));
+    }
     if backup::restore_counter(saved).is_none() {
         tracing::warn!(pan_id = %pan(known), saved, "the frame counter is at its end");
         return wait(moli_i18n::tr!(
@@ -655,10 +714,20 @@ async fn restore_known(
             // own, recorded at once, takes over.
             store.network = Some(record.keeping_backup_of(known));
             store.save(store_path)?;
-            refusing_orders(ctx, record_counter(ezsp, store, store_path)).await;
+            refusing_orders(ctx, record_counter(ezsp, store, store_path, clock())).await;
             Ok(Outcome::Ready(Network::Up))
         }
     }
+}
+
+/// What forming or restoring a network works with, besides the store and
+/// the callbacks: the link, the protocol, where the store is saved, the
+/// clock its counters are recorded with.
+struct Dongle<'a> {
+    ezsp: &'a Ezsp,
+    protocol: u8,
+    store_path: &'a Path,
+    clock: Clock,
 }
 
 /// A network's PAN ID as people read it (`0x1a62`).
@@ -691,6 +760,7 @@ async fn resume(
     has_key: bool,
     store: &mut Store,
     store_path: &Path,
+    clock: Clock,
 ) -> anyhow::Result<Outcome> {
     let network =
         coordinator::wait_network_up(ezsp, callbacks, protocol, coordinator::NETWORK_UP_TIMEOUT)
@@ -704,7 +774,7 @@ async fn resume(
         return Ok(Outcome::Wait { reason, network });
     }
     // Ours: its counter recorded from now on.
-    record_counter(ezsp, store, store_path).await;
+    record_counter(ezsp, store, store_path, clock()).await;
     Ok(Outcome::Ready(network))
 }
 
@@ -969,9 +1039,17 @@ mod tests {
                 }
                 let io = self.io.lock().unwrap().take();
                 let io = io.ok_or_else(|| anyhow::anyhow!("simulated link already used"))?;
-                run_on(&self.config, &self.data_dir, ctx, io).await
+                run_on(&self.config, &self.data_dir, ctx, io, test_clock).await
             })
         }
+    }
+
+    /// The wall clock of every simulated run (unix seconds): what the
+    /// driver records its counters at.
+    const NOW: u64 = 1_800_000_000;
+
+    fn test_clock() -> u64 {
+        NOW
     }
 
     fn probe(ctx: &DriverCtx) -> Device {
@@ -1219,6 +1297,7 @@ mod tests {
         store::NetworkRecord {
             frame_counter: Some(LIVE_COUNTER),
             frame_counter_fresh: true,
+            frame_counter_recorded_at: Some(NOW),
             key_sequence_number: Some(0),
             ..network
         }
@@ -1336,7 +1415,7 @@ mod tests {
     }
 
     /// The network an import just left in the store: a fresh frame counter
-    /// (123456).
+    /// (123456), imported just now.
     fn imported_store() -> Store {
         known_store(imported_record())
     }
@@ -1345,6 +1424,7 @@ mod tests {
         store::NetworkRecord {
             frame_counter: Some(123_456),
             frame_counter_fresh: true,
+            frame_counter_recorded_at: Some(NOW),
             key_sequence_number: Some(0),
             ..record(0x1a62)
         }
@@ -1500,7 +1580,7 @@ mod tests {
         };
         for force in [false, true] {
             let mut store = after.clone();
-            let error = again.apply(&mut store, force).unwrap_err().to_string();
+            let error = again.apply(&mut store, force, NOW).unwrap_err().to_string();
             assert_eq!(
                 error,
                 moli_i18n::tr!(
@@ -1526,7 +1606,7 @@ mod tests {
             ..again
         };
         let mut store = after.clone();
-        newer.apply(&mut store, false).unwrap();
+        newer.apply(&mut store, false, NOW).unwrap();
         let (ncp, io) = forming_ncp(&[0x93]);
         let run = Running::spawn(imported(store, Some(IMPORTED_KEY)).await, io, false);
         ncp.wait_command(ids::FORM_NETWORK).await;
@@ -1549,6 +1629,34 @@ mod tests {
         let run = Running::spawn(imported(ended.clone(), Some(IMPORTED_KEY)).await, io, true);
         let reason = moli_i18n::tr!("pilotes.zigbee.compteur_epuise", pan = "0x1a62");
         waits_untouched(&ncp, &run, &ended, &reason).await;
+    }
+
+    #[tokio::test]
+    async fn an_old_counter_never_restores() {
+        // Recorded (here imported) more than a day ago, or at no known
+        // time: a dongle left powered since may have sent past the margin.
+        let day = backup::COUNTER_MAX_AGE.as_secs();
+        for recorded_at in [Some(NOW - day - 1), None] {
+            let old = known_store(store::NetworkRecord {
+                frame_counter_recorded_at: recorded_at,
+                ..imported_record()
+            });
+            let (ncp, io) = forming_ncp(&[0x93]);
+            let run = Running::spawn(imported(old.clone(), Some(IMPORTED_KEY)).await, io, true);
+            let reason = moli_i18n::tr!("pilotes.zigbee.compteur_ancien", pan = "0x1a62");
+            waits_untouched(&ncp, &run, &old, &reason).await;
+        }
+        // A day old at most: restored.
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let recent = known_store(store::NetworkRecord {
+            frame_counter_recorded_at: Some(NOW - day),
+            ..imported_record()
+        });
+        let run = Running::spawn(imported(recent, Some(IMPORTED_KEY)).await, io, false);
+        ncp.wait_command(ids::FORM_NETWORK).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        assert_eq!(run.store(), known_store(live(record(0x1a62))));
     }
 
     #[tokio::test]
@@ -1849,6 +1957,7 @@ mod tests {
         known_store(store::NetworkRecord {
             frame_counter: Some(100_000),
             frame_counter_fresh: true,
+            frame_counter_recorded_at: Some(NOW),
             key_sequence_number: Some(0),
             ..network
         })
@@ -2410,6 +2519,67 @@ mod tests {
         let reads = counter_reads(&ncp);
         tokio::time::sleep(backup::COUNTER_RECORD_PERIOD * 2).await;
         assert_eq!(counter_reads(&ncp), reads);
+    }
+
+    /// Stops Moli (the supervisor's cancellation) and waits for the driver
+    /// to be stopped; returns how long that took.
+    async fn stop(run: &Running) -> Duration {
+        let asked = tokio::time::Instant::now();
+        run.cancel.cancel();
+        run.wait_status(|status| (*status == DriverStatus::Stopped).then_some(()))
+            .await;
+        asked.elapsed()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_clean_stop_closes_joining_and_records_the_counter() {
+        let (ncp, run) = running_network().await;
+        run.set("permit_join", Value::Bool(true)).await.unwrap();
+        ncp.respond(
+            ids::GET_NETWORK_KEY_INFO,
+            &key_info(0, LIVE_COUNTER + 3_000),
+        );
+        let before = ncp.received().len();
+        stop(&run).await;
+        // Joining closed on the dongle and the routers, then the counter
+        // read a last time: an export right after starts from it.
+        let after = since(&ncp, before);
+        let ids: Vec<_> = after.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            ids,
+            [
+                ids::CLEAR_TRANSIENT_LINK_KEYS,
+                ids::SET_POLICY,
+                ids::PERMIT_JOINING,
+                ids::SEND_BROADCAST,
+                ids::GET_NETWORK_KEY_INFO,
+            ]
+        );
+        assert_eq!(after[2].1, [0], "closed");
+        let network = run.store().network.unwrap();
+        assert_eq!(network.frame_counter, Some(LIVE_COUNTER + 3_000));
+        assert!(network.frame_counter_fresh);
+        assert_eq!(network.frame_counter_recorded_at, Some(NOW));
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_never_hangs_nor_touches_an_unchecked_network() {
+        // An NCP that no longer answers: the stop gives up in time, the
+        // recorded counter kept.
+        let (ncp, run) = running_network().await;
+        ncp.silence(ids::GET_NETWORK_KEY_INFO);
+        let took = stop(&run).await;
+        assert!(took <= STOP_TIMEOUT + Duration::from_secs(1), "{took:?}");
+        assert_eq!(counter_reads(&ncp), 2, "tried once more");
+        assert_eq!(run.store(), known_store(live(record(0x1a62))));
+        // A network that is down (or not checked): nothing sent at all.
+        let (ncp, run) = running_network().await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
+        run.wait_point("network", &text("down")).await;
+        let before = ncp.received().len();
+        stop(&run).await;
+        assert_eq!(ncp.received().len(), before, "nothing sent");
     }
 
     /// Fails if a file under `dir` holds any of `keys` (hex, either case).

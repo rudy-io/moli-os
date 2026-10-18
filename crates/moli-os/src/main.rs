@@ -654,6 +654,7 @@ fn zigbee_export(
         &tc_link_key,
         &format!("moli-os@{}", env!("CARGO_PKG_VERSION")),
         &jiff::Timestamp::now().to_string(),
+        backup::unix_now(),
     )?;
     exported.write_private(path, force)?;
     Ok(format!(
@@ -702,8 +703,9 @@ fn zigbee_import(
         .with_context(|| format!("{} cannot be imported", file.display()))?;
     let store_path = store::path(data_dir, instance);
     let mut state = store::Store::load(&store_path)?;
-    // Refused over another network before anything is written.
-    import.apply(&mut state, force)?;
+    // Refused over another network before anything is written; its counter
+    // recorded now (a restore refuses it a day later).
+    import.apply(&mut state, force, moli_zigbee::backup::unix_now())?;
     let (tc_link_key, tc_link_origin) = match &import.tc_link_key {
         Some(key) => (key.clone(), "from the backup"),
         None => (
@@ -1390,7 +1392,9 @@ mod tests {
     fn import_stores_key_in_vault_only() {
         let data = Scratch::new("zigbee-import");
         let master = MasterKey::generate().unwrap();
+        let started = moli_zigbee::backup::unix_now();
         let summary = zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let ended = moli_zigbee::backup::unix_now();
         // The keys: in the vault, never in the store nor in what is printed.
         let key = "01030507090b0d0f00020406080a0c0d";
         let tclk = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
@@ -1413,6 +1417,9 @@ mod tests {
         assert_eq!(network.pan_id, 0x1a62);
         assert_eq!(network.frame_counter, Some(123_456));
         assert!(network.frame_counter_fresh);
+        // Recorded at the time of the import, whatever the backup's date.
+        let at = network.frame_counter_recorded_at.unwrap();
+        assert!((started..=ended).contains(&at), "{at}");
         assert_eq!(store.devices.len(), 2);
         assert!(summary.contains("0x1a62"), "{summary}");
         assert!(summary.contains("channel 15"), "{summary}");
@@ -1458,7 +1465,14 @@ mod tests {
         zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
         let done = moli_zigbee::store::Store::load(&store_path).unwrap();
         assert!(!done.import_pending);
-        assert_eq!(done.network, pending.network);
+        let network = done.network.unwrap();
+        assert_eq!(
+            network,
+            moli_zigbee::store::NetworkRecord {
+                frame_counter_recorded_at: network.frame_counter_recorded_at,
+                ..pending.network.unwrap()
+            }
+        );
         assert_eq!(
             vault_secret(&data.0, &master, "network_key").as_deref(),
             Some("01030507090b0d0f00020406080a0c0d")
@@ -1481,6 +1495,7 @@ mod tests {
                 nwk_update_id: 0,
                 frame_counter: None,
                 frame_counter_fresh: false,
+                frame_counter_recorded_at: None,
                 key_sequence_number: None,
             }),
             ..moli_zigbee::store::Store::default()
@@ -1567,12 +1582,14 @@ mod tests {
             moli_zigbee::store::Store::load(&moli_zigbee::store::path(dir, "zigbee")).unwrap()
         };
         let (before, after) = (load(&data.0), load(&other.0));
+        let network = after.network.unwrap();
         assert_eq!(
-            after.network,
-            Some(moli_zigbee::store::NetworkRecord {
+            network,
+            moli_zigbee::store::NetworkRecord {
                 frame_counter: Some(188_992),
+                frame_counter_recorded_at: network.frame_counter_recorded_at,
                 ..before.network.unwrap()
-            })
+            }
         );
         assert_eq!(after.devices, before.devices);
         assert_eq!(
@@ -1583,6 +1600,29 @@ mod tests {
             vault_secret(&other.0, &other_master, "tc_link_key"),
             Some(tclk)
         );
+    }
+
+    #[test]
+    fn an_old_counter_is_not_exported() {
+        let data = Scratch::new("zigbee-export-old");
+        let master = MasterKey::generate().unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        // Moli stopped for more than a day after its last record.
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let mut store = moli_zigbee::store::Store::load(&store_path).unwrap();
+        let day = moli_zigbee::backup::COUNTER_MAX_AGE.as_secs();
+        store.network.as_mut().unwrap().frame_counter_recorded_at =
+            Some(moli_zigbee::backup::unix_now() - day - 60);
+        store.save(&store_path).unwrap();
+        let out = data.0.join("coordinator_backup.json");
+        let error = zigbee_export(&data.0, &master, "zigbee", &out, false)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            moli_i18n::tr!("pilotes.zigbee.export_compteur_ancien")
+        );
+        assert!(!out.exists(), "nothing written");
     }
 
     #[test]

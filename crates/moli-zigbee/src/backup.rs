@@ -39,6 +39,13 @@ pub const FRAME_COUNTER_MARGIN: u32 = 65_536;
 /// network is up (and at once when it comes up), so that a restore or an
 /// export starts at most that much behind (see [`FRAME_COUNTER_MARGIN`]).
 pub const COUNTER_RECORD_PERIOD: std::time::Duration = std::time::Duration::from_secs(3600);
+/// How old a recorded frame counter may be for a restore or an export
+/// ([`counter_recent`]). The margin covers a dongle sending for an hour at
+/// a sustained rate, or for a day at the pace of a quiet network; a dongle
+/// left powered longer while Moli was stopped (nothing records it then)
+/// may have run past it, and the devices would drop every frame of a
+/// coordinator restored below what they saw.
+pub const COUNTER_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 /// `metadata.internal.ezspVersion` of an export: this driver runs EZSP 13
 /// or later only; zigbee-herdsman reads the field only to refuse backups
 /// older than its `BACKUP_OLDEST_SUPPORTED_EZSP_VERSION` (12).
@@ -291,6 +298,8 @@ impl OpenCoordinatorBackup {
                 frame_counter: Some(self.network_key.frame_counter),
                 // Fresh: Zigbee2MQTT is stopped, no dongle has sent since.
                 frame_counter_fresh: true,
+                // The time of the import, set when it is filed (`apply`).
+                frame_counter_recorded_at: None,
                 key_sequence_number: Some(self.network_key.sequence_number),
             },
             network_key,
@@ -329,17 +338,19 @@ fn devices(count: usize) -> String {
 }
 
 impl Import {
-    /// Puts this network in `store`. Over another network (another PAN or
-    /// extended PAN), refused unless `force`; then its devices go too. Over
-    /// the same network, refused (even with `force`) unless this backup's
-    /// counter is above the one the store records, or equal to an imported
-    /// one no dongle used yet.
+    /// Puts this network in `store`, its counter recorded at `now` (unix
+    /// seconds: the time of the import, whatever the backup's own date; the
+    /// guard below keeps out a backup older than what was used). Over
+    /// another network (another PAN or extended PAN), refused unless
+    /// `force`; then its devices go too. Over the same network, refused
+    /// (even with `force`) unless this backup's counter is above the one
+    /// the store records, or equal to an imported one no dongle used yet.
     ///
     /// # Errors
     ///
     /// The store records another network and `force` is not set, or the
     /// same network with a counter this backup does not exceed.
-    pub fn apply(&self, store: &mut Store, force: bool) -> anyhow::Result<()> {
+    pub fn apply(&self, store: &mut Store, force: bool, now: u64) -> anyhow::Result<()> {
         // The same network, whose recorded counter is either one a dongle
         // ran past (a restore or a resume cleared its freshness) or one the
         // driver read live from the dongle (fresh again, and only ever
@@ -373,7 +384,10 @@ impl Import {
             }
             store.devices.clear();
         }
-        store.network = Some(self.record.clone());
+        store.network = Some(NetworkRecord {
+            frame_counter_recorded_at: Some(now),
+            ..self.record.clone()
+        });
         for device in &self.devices {
             store
                 .devices
@@ -401,8 +415,27 @@ pub fn restore_counter(saved: u32) -> Option<u32> {
         .filter(|start| *start < u32::MAX)
 }
 
+/// The wall clock in unix seconds: when a frame counter is recorded.
+#[must_use]
+pub fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// Whether `record`'s frame counter was recorded recently enough at `now`
+/// (unix seconds) to restore or export from: within [`COUNTER_MAX_AGE`]. A
+/// counter of no known age is not; one from a clock that went back since
+/// is (its age reads as nothing).
+#[must_use]
+pub fn counter_recent(record: &NetworkRecord, now: u64) -> bool {
+    record
+        .frame_counter_recorded_at
+        .is_some_and(|at| now.saturating_sub(at) <= COUNTER_MAX_AGE.as_secs())
+}
+
 /// Reads the dongle's outgoing NWK frame counter ([`network::network_key_info`])
-/// and records it in `store` ([`store_counter`]), saved to `path`.
+/// and records it in `store` at `now` ([`store_counter`]), saved to `path`.
 ///
 /// # Errors
 ///
@@ -411,16 +444,19 @@ pub async fn record_counter(
     ezsp: &Ezsp,
     store: &mut Store,
     path: &std::path::Path,
+    now: u64,
 ) -> anyhow::Result<()> {
     let info = network::network_key_info(ezsp).await?;
-    store_counter(store, path, info)
+    store_counter(store, path, info, now)
 }
 
-/// Records a counter read live from the dongle that runs `store`'s network:
-/// restorable (`frame_counter_fresh`), with the key's sequence number, then
-/// the store saved (atomically). Never lowered: a dongle reporting less
-/// than recorded keeps the recorded one (a restore from the lower one would
-/// start below what the devices saw). Nothing without a network.
+/// Records a counter read live (at `now`, unix seconds) from the dongle
+/// that runs `store`'s network: restorable (`frame_counter_fresh`), with
+/// its time and the key's sequence number, then the store saved
+/// (atomically). Never lowered: a dongle reporting less than recorded keeps
+/// the recorded one (a restore from the lower one would start below what
+/// the devices saw; it is still above the dongle's, so its time is the
+/// read's). Nothing without a network.
 ///
 /// # Errors
 ///
@@ -429,6 +465,7 @@ pub fn store_counter(
     store: &mut Store,
     path: &std::path::Path,
     info: network::NetworkKeyInfo,
+    now: u64,
 ) -> anyhow::Result<()> {
     let Some(network) = store.network.as_mut() else {
         return Ok(());
@@ -447,6 +484,7 @@ pub fn store_counter(
     let recorded = NetworkRecord {
         frame_counter: Some(counter),
         frame_counter_fresh: true,
+        frame_counter_recorded_at: Some(now),
         key_sequence_number: Some(info.sequence_number),
         ..network.clone()
     };
@@ -470,13 +508,16 @@ pub fn store_counter(
 /// # Errors
 ///
 /// No network recorded, no restorable frame counter (never recorded, or
-/// spent), or one without room for the margin.
+/// spent), one recorded more than [`COUNTER_MAX_AGE`] before `now` (unix
+/// seconds; `pilotes.zigbee.export_compteur_ancien`), or one without room
+/// for the margin.
 pub fn export(
     store: &Store,
     network_key: &Key,
     tc_link_key: &Key,
     source: &str,
     date: &str,
+    now: u64,
 ) -> anyhow::Result<OpenCoordinatorBackup> {
     let Some(record) = &store.network else {
         bail!("this instance records no network yet: nothing to export");
@@ -487,6 +528,9 @@ pub fn export(
              a backup from it could start below what the devices saw"
         );
     };
+    if !counter_recent(record, now) {
+        bail!(moli_i18n::tr!("pilotes.zigbee.export_compteur_ancien"));
+    }
     let Some(frame_counter) = restore_counter(saved) else {
         bail!(
             "the frame counter {saved} leaves no room for the margin: the network needs a new key"
@@ -762,6 +806,21 @@ mod tests {
         }
     }
 
+    /// When the tests import (unix seconds).
+    const NOW: u64 = 1_800_000_000;
+
+    /// … as an import at `at` files it.
+    fn filed_at(at: u64) -> NetworkRecord {
+        NetworkRecord {
+            frame_counter_recorded_at: Some(at),
+            ..imported()
+        }
+    }
+
+    fn filed() -> NetworkRecord {
+        filed_at(NOW)
+    }
+
     fn doc_keys() -> Keys {
         Keys {
             network: Key::from_hex(DOC_KEY).unwrap(),
@@ -917,7 +976,10 @@ mod tests {
         let refused = |store: &Store, used: u32| {
             for force in [false, true] {
                 let mut tried = store.clone();
-                let error = import.apply(&mut tried, force).unwrap_err().to_string();
+                let error = import
+                    .apply(&mut tried, force, NOW)
+                    .unwrap_err()
+                    .to_string();
                 assert_eq!(
                     error,
                     moli_i18n::tr!(
@@ -950,17 +1012,18 @@ mod tests {
             ..import.clone()
         };
         let mut store = spent.clone();
-        newer.apply(&mut store, false).unwrap();
+        newer.apply(&mut store, false, NOW).unwrap();
         let network = store.network.unwrap();
         assert_eq!(network.frame_counter, Some(123_457));
         assert!(network.frame_counter_fresh);
+        assert_eq!(network.frame_counter_recorded_at, Some(NOW), "imported now");
         // Finishing an interrupted import of the same backup: allowed.
         let mut pending = Store {
             import_pending: true,
             ..spent.clone()
         };
-        import.apply(&mut pending, false).unwrap();
-        assert_eq!(pending.network, Some(imported()));
+        import.apply(&mut pending, false, NOW).unwrap();
+        assert_eq!(pending.network, Some(filed()));
         // A counter the driver recorded live (restorable, so fresh): an
         // older backup is still refused, live counters only grow.
         let live = Store {
@@ -972,13 +1035,14 @@ mod tests {
             ..Store::default()
         };
         refused(&live, 189_200);
-        // A counter never used yet: importing it again changes nothing.
+        // A counter never used yet: importing it again changes nothing but
+        // the time of the import.
         let mut fresh = Store {
-            network: Some(imported()),
+            network: Some(filed()),
             ..Store::default()
         };
-        import.apply(&mut fresh, false).unwrap();
-        assert_eq!(fresh.network, Some(imported()));
+        import.apply(&mut fresh, false, NOW + 60).unwrap();
+        assert_eq!(fresh.network, Some(filed_at(NOW + 60)));
     }
 
     #[test]
@@ -997,22 +1061,25 @@ mod tests {
             },
         );
         let before = other.clone();
-        let error = import.apply(&mut other, false).unwrap_err().to_string();
+        let error = import
+            .apply(&mut other, false, NOW)
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains("0x1234") && error.contains("--force"),
             "{error}"
         );
         assert!(error.contains("1 device"), "{error}");
         assert_eq!(other, before, "untouched");
-        import.apply(&mut other, true).unwrap();
-        assert_eq!(other.network, Some(imported()));
+        import.apply(&mut other, true, NOW).unwrap();
+        assert_eq!(other.network, Some(filed()));
         let ieees: Vec<_> = other.devices.keys().map(String::as_str).collect();
         assert_eq!(ieees, ["0x00124b0000000002", "0x00124b0000000003"]);
         // An empty store, or the same network: no force needed; what the
         // store knows of a device stays.
         let mut empty = Store::default();
-        import.apply(&mut empty, false).unwrap();
-        assert_eq!(empty.network, Some(imported()));
+        import.apply(&mut empty, false, NOW).unwrap();
+        assert_eq!(empty.network, Some(filed()));
         let mut same = Store {
             network: Some(NetworkRecord {
                 channel: 20,
@@ -1026,8 +1093,8 @@ mod tests {
             interviewed: true,
         };
         same.devices.insert(known.ieee.clone(), known.clone());
-        import.apply(&mut same, false).unwrap();
-        assert_eq!(same.network, Some(imported()));
+        import.apply(&mut same, false, NOW).unwrap();
+        assert_eq!(same.network, Some(filed()));
         assert_eq!(same.devices["0x00124b0000000002"], known);
         assert_eq!(same.devices.len(), 2);
     }
@@ -1228,23 +1295,32 @@ mod tests {
             sequence_number: 1,
             frame_counter,
         };
-        store_counter(&mut store, &path, read(200_000)).unwrap();
+        store_counter(&mut store, &path, read(200_000), NOW).unwrap();
         let live = NetworkRecord {
             frame_counter: Some(200_000),
             frame_counter_fresh: true,
+            frame_counter_recorded_at: Some(NOW),
             key_sequence_number: Some(1),
             ..imported()
         };
         assert_eq!(store.network, Some(live.clone()));
         assert_eq!(Store::load(&path).unwrap(), store, "saved");
         // A dongle reporting less than recorded: the higher one stays (a
-        // restore from the lower one would start below what devices saw).
-        store_counter(&mut store, &path, read(150_000)).unwrap();
-        assert_eq!(store.network, Some(live));
+        // restore from the lower one would start below what devices saw),
+        // vouched for at the time of that read.
+        store_counter(&mut store, &path, read(150_000), NOW + 3600).unwrap();
+        assert_eq!(
+            store.network,
+            Some(NetworkRecord {
+                frame_counter_recorded_at: Some(NOW + 3600),
+                ..live
+            })
+        );
+        assert_eq!(Store::load(&path).unwrap(), store, "saved");
         // No network in the store: nothing to record, nothing written.
         let mut empty = Store::default();
         let other = crate::store::path(&dir.0, "other");
-        store_counter(&mut empty, &other, read(1)).unwrap();
+        store_counter(&mut empty, &other, read(1), NOW).unwrap();
         assert_eq!(empty, Store::default());
         assert!(!other.exists());
     }
@@ -1255,7 +1331,7 @@ mod tests {
         fixture()
             .import()
             .unwrap()
-            .apply(&mut store, false)
+            .apply(&mut store, false, NOW)
             .unwrap();
         store
     }
@@ -1269,6 +1345,7 @@ mod tests {
             &keys.tc_link,
             "moli-os@1.2.3",
             "2026-10-18T08:00:00Z",
+            NOW,
         )
         .unwrap();
         // Read back as it was written, field for field.
@@ -1333,7 +1410,7 @@ mod tests {
     fn what_cannot_be_exported_is_refused() {
         let keys = doc_keys();
         let refused = |store: &Store| {
-            export(store, &keys.network, &keys.tc_link, "moli-os", "now")
+            export(store, &keys.network, &keys.tc_link, "moli-os", "now", NOW)
                 .map(|_| ())
                 .unwrap_err()
                 .to_string()
@@ -1345,7 +1422,7 @@ mod tests {
         for network in [
             NetworkRecord {
                 frame_counter_fresh: false,
-                ..imported()
+                ..filed()
             },
             on_fixture_pan(0x1a62),
         ] {
@@ -1358,7 +1435,7 @@ mod tests {
         let ended = Store {
             network: Some(NetworkRecord {
                 frame_counter: Some(u32::MAX - 10),
-                ..imported()
+                ..filed()
             }),
             ..Store::default()
         };
@@ -1374,8 +1451,39 @@ mod tests {
             &keys.tc_link,
             "moli-os",
             "now",
+            NOW,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_old_counter_is_not_exported() {
+        let keys = doc_keys();
+        let export_at = |store: &Store, now: u64| {
+            export(store, &keys.network, &keys.tc_link, "moli-os", "now", now).map(|_| ())
+        };
+        let old = moli_i18n::tr!("pilotes.zigbee.export_compteur_ancien");
+        let day = COUNTER_MAX_AGE.as_secs();
+        assert_eq!(day, 24 * 3600);
+        // Recorded (here imported) a day ago at most: exported.
+        let store = fixture_store();
+        export_at(&store, NOW + day).unwrap();
+        // Any older: a dongle left powered since may have run past the
+        // margin.
+        let error = export_at(&store, NOW + day + 1).unwrap_err();
+        assert_eq!(error.to_string(), old);
+        // A counter of no known age: as old.
+        let untimed = Store {
+            network: Some(imported()),
+            ..store.clone()
+        };
+        assert_eq!(export_at(&untimed, NOW).unwrap_err().to_string(), old);
+        // A clock that went back since: its age reads as nothing.
+        export_at(&store, NOW - 3600).unwrap();
+        assert!(counter_recent(&filed(), NOW - 3600));
+        assert!(counter_recent(&filed(), NOW + day));
+        assert!(!counter_recent(&filed(), NOW + day + 1));
+        assert!(!counter_recent(&imported(), NOW));
     }
 
     #[test]

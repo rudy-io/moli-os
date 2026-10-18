@@ -427,6 +427,7 @@ pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<DongleNet
             nwk_update_id: parameters.nwk_update_id,
             frame_counter: None,
             frame_counter_fresh: false,
+            frame_counter_recorded_at: None,
             key_sequence_number: None,
         },
     })
@@ -638,6 +639,7 @@ pub(crate) mod tests {
                 nwk_update_id: 0,
                 frame_counter: None,
                 frame_counter_fresh: false,
+                frame_counter_recorded_at: None,
                 key_sequence_number: None,
             }
         );

@@ -41,6 +41,13 @@ pub struct NetworkRecord {
     /// they would drop every frame of the coordinator.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub frame_counter_fresh: bool,
+    /// When `frame_counter` was recorded, in unix seconds: by a live read
+    /// of the dongle, or by `moli-os zigbee import` (the time of the
+    /// import). A dongle left powered while Moli is stopped keeps sending:
+    /// a restore or an export refuses a counter older than
+    /// [`crate::backup::COUNTER_MAX_AGE`] (or of no known age), fresh or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_counter_recorded_at: Option<u64>,
     /// Sequence number of the network key, as a backup recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_sequence_number: Option<u8>,
@@ -56,13 +63,14 @@ impl NetworkRecord {
 
     /// This record (as the dongle reports it) with what only a backup knows
     /// of the same network, kept from `known`: the frame counter (no longer
-    /// fresh: a dongle runs the network, its counter has moved on) and the
-    /// key sequence number.
+    /// fresh: a dongle runs the network, its counter has moved on) and its
+    /// time, and the key sequence number.
     #[must_use]
     pub fn keeping_backup_of(self, known: &Self) -> Self {
         Self {
             frame_counter: known.frame_counter,
             frame_counter_fresh: false,
+            frame_counter_recorded_at: known.frame_counter_recorded_at,
             key_sequence_number: known.key_sequence_number,
             ..self
         }
@@ -240,6 +248,7 @@ pub(crate) mod tests {
             nwk_update_id: 0,
             frame_counter: None,
             frame_counter_fresh: false,
+            frame_counter_recorded_at: None,
             key_sequence_number: None,
         }
     }
@@ -282,6 +291,23 @@ pub(crate) mod tests {
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains("\"version\": 1"), "{text}");
         assert!(text.contains("\"pan_id\": 6754"), "{text}");
+        // A counter's time, kept; a file written before it was: no time.
+        let mut timed = full();
+        let network = timed.network.as_mut().unwrap();
+        network.frame_counter = Some(42);
+        network.frame_counter_recorded_at = Some(1_800_000_000);
+        timed.save(&file).unwrap();
+        assert_eq!(Store::load(&file).unwrap(), timed);
+        let mut json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(json["network"]["frame_counter_recorded_at"], 1_800_000_000);
+        json["network"]
+            .as_object_mut()
+            .unwrap()
+            .remove("frame_counter_recorded_at");
+        std::fs::write(&file, json.to_string()).unwrap();
+        let older = Store::load(&file).unwrap();
+        assert_eq!(older.network.unwrap().frame_counter_recorded_at, None);
     }
 
     #[test]
