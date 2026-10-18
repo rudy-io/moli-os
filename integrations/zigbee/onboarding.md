@@ -53,7 +53,8 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    **Sauvegarde récente seulement** : la restauration repart du compteur de trames de la
    sauvegarde (+ 1024) et ne s'en sert qu'une fois ; une fois que la clé a fait tourner le
    réseau, ce compteur est dépassé, et une nouvelle restauration demande une sauvegarde
-   récente (sinon le pilote attend en le disant). Un import interrompu se termine en relançant
+   **plus récente que la dernière utilisée** (sinon le pilote attend en le disant ; réimporter
+   la même sauvegarde est refusé, même avec `--force`). Un import interrompu se termine en relançant
    la même commande. Un réseau déjà connu de l'instance n'est remplacé qu'avec `--force`.
    Jamais Zigbee2MQTT et Moli en même temps sur le même réseau.
 7. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),

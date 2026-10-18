@@ -1088,6 +1088,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_old_backup_is_not_reimported() {
+        // Imported, restored (the counter spent), then the dongle reflashed.
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let after = restored(&ncp, io).await.store();
+        assert_eq!(after, spent_store());
+        // The same backup again: refused, even forced, the store unchanged.
+        let again = backup::Import {
+            record: imported_record(),
+            network_key: network::Key::from_hex(IMPORTED_KEY).unwrap(),
+            tc_link_key: None,
+            devices: Vec::new(),
+        };
+        for force in [false, true] {
+            let mut store = after.clone();
+            let error = again.apply(&mut store, force).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                moli_i18n::tr!(
+                    "pilotes.zigbee.sauvegarde_pas_plus_recente",
+                    backup = 123_456,
+                    used = 123_456
+                )
+            );
+            assert_eq!(store, after);
+        }
+        // So the driver still waits, touching nothing.
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = Running::spawn(imported(after.clone(), Some(IMPORTED_KEY)).await, io, true);
+        let reason = moli_i18n::tr!("pilotes.zigbee.compteur_inconnu", pan = "0x1a62");
+        waits_untouched(&ncp, &run, &after, &reason).await;
+        drop(run);
+        // A newer backup is accepted, and restores from its counter.
+        let newer = backup::Import {
+            record: store::NetworkRecord {
+                frame_counter: Some(200_000),
+                ..imported_record()
+            },
+            ..again
+        };
+        let mut store = after.clone();
+        newer.apply(&mut store, false).unwrap();
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = Running::spawn(imported(store, Some(IMPORTED_KEY)).await, io, false);
+        ncp.wait_command(ids::FORM_NETWORK).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        // 200000 + 1024 = 0x00031140, little-endian.
+        assert_eq!(
+            sent(&ncp, ids::SET_VALUE).unwrap(),
+            [0x23, 4, 0x40, 0x11, 0x03, 0x00]
+        );
+    }
+
+    #[tokio::test]
     async fn a_counter_at_its_end_never_restores() {
         let ended = known_store(store::NetworkRecord {
             frame_counter: Some(u32::MAX - 100),

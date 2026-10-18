@@ -314,12 +314,32 @@ fn devices(count: usize) -> String {
 
 impl Import {
     /// Puts this network in `store`. Over another network (another PAN or
-    /// extended PAN), refused unless `force`; then its devices go too.
+    /// extended PAN), refused unless `force`; then its devices go too. Over
+    /// the same network whose recorded counter is spent, refused (even with
+    /// `force`) unless this backup's counter is higher.
     ///
     /// # Errors
     ///
-    /// The store records another network and `force` is not set.
+    /// The store records another network and `force` is not set, or the
+    /// same network with a spent counter this backup does not exceed.
     pub fn apply(&self, store: &mut Store, force: bool) -> anyhow::Result<()> {
+        // The same network whose counter a dongle already ran past (a
+        // restore or a resume cleared its freshness): a backup that is not
+        // newer would restore below what the devices saw. `--force` does
+        // not change that; finishing an interrupted import does.
+        if let Some(known) = &store.network
+            && known.same_network(&self.record)
+            && !store.import_pending
+            && !known.frame_counter_fresh
+            && let (Some(used), Some(backup)) = (known.frame_counter, self.record.frame_counter)
+            && backup <= used
+        {
+            bail!(moli_i18n::tr!(
+                "pilotes.zigbee.sauvegarde_pas_plus_recente",
+                backup = backup,
+                used = used
+            ));
+        }
         if let Some(known) = &store.network
             && !known.same_network(&self.record)
         {
@@ -657,6 +677,73 @@ mod tests {
             OpenCoordinatorBackup::parse(b"01030507090B0D0F00020406080A0C0D").unwrap_err()
         );
         assert!(!shown.contains("0103"), "{shown}");
+    }
+
+    #[test]
+    fn a_spent_counter_needs_a_newer_backup() {
+        let import = fixture().import().unwrap();
+        // A dongle ran this network since the import: its counter is spent.
+        let spent = Store {
+            network: Some(NetworkRecord {
+                frame_counter_fresh: false,
+                ..imported()
+            }),
+            ..Store::default()
+        };
+        let refused = |store: &Store, used: u32| {
+            for force in [false, true] {
+                let mut tried = store.clone();
+                let error = import.apply(&mut tried, force).unwrap_err().to_string();
+                assert_eq!(
+                    error,
+                    moli_i18n::tr!(
+                        "pilotes.zigbee.sauvegarde_pas_plus_recente",
+                        backup = 123_456,
+                        used = used
+                    ),
+                    "force {force}"
+                );
+                assert_eq!(tried, *store, "untouched");
+            }
+        };
+        // The same backup again, or an older one: refused, even forced.
+        refused(&spent, 123_456);
+        let later = Store {
+            network: Some(NetworkRecord {
+                frame_counter: Some(200_000),
+                frame_counter_fresh: false,
+                ..imported()
+            }),
+            ..Store::default()
+        };
+        refused(&later, 200_000);
+        // A newer backup: accepted, its counter fresh.
+        let newer = Import {
+            record: NetworkRecord {
+                frame_counter: Some(123_457),
+                ..import.record.clone()
+            },
+            ..import.clone()
+        };
+        let mut store = spent.clone();
+        newer.apply(&mut store, false).unwrap();
+        let network = store.network.unwrap();
+        assert_eq!(network.frame_counter, Some(123_457));
+        assert!(network.frame_counter_fresh);
+        // Finishing an interrupted import of the same backup: allowed.
+        let mut pending = Store {
+            import_pending: true,
+            ..spent.clone()
+        };
+        import.apply(&mut pending, false).unwrap();
+        assert_eq!(pending.network, Some(imported()));
+        // A counter never used yet: importing it again changes nothing.
+        let mut fresh = Store {
+            network: Some(imported()),
+            ..Store::default()
+        };
+        import.apply(&mut fresh, false).unwrap();
+        assert_eq!(fresh.network, Some(imported()));
     }
 
     #[test]
