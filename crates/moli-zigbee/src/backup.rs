@@ -27,10 +27,25 @@ use crate::store::{DeviceRecord, NetworkRecord, Store};
 pub const FORMAT: &str = "zigpy/open-coordinator-backup";
 /// `metadata.version` this reader knows.
 pub const FORMAT_VERSION: u32 = 1;
-/// Added to the saved NWK frame counter on restore: the network kept
-/// sending after the backup was written, and a device drops a frame whose
-/// counter it already saw.
-pub const FRAME_COUNTER_MARGIN: u32 = 1024;
+/// Added to the saved NWK frame counter on restore (and on export, for
+/// Zigbee2MQTT, which restores from the counter as written): the network
+/// kept sending after the counter was saved, and a device drops a frame
+/// whose counter it already saw. The coordinator sends NWK frames all the
+/// time (link status, routing, every message), and a counter the driver
+/// recorded may be up to [`COUNTER_RECORD_PERIOD`] old: 65536 covers more
+/// than 18 frames a second for that hour, and costs nothing (2^32 frames).
+pub const FRAME_COUNTER_MARGIN: u32 = 65_536;
+/// How often the driver records the dongle's NWK frame counter while the
+/// network is up (and at once when it comes up), so that a restore or an
+/// export starts at most that much behind (see [`FRAME_COUNTER_MARGIN`]).
+pub const COUNTER_RECORD_PERIOD: std::time::Duration = std::time::Duration::from_secs(3600);
+/// `metadata.internal.ezspVersion` of an export: this driver runs EZSP 13
+/// or later only; zigbee-herdsman reads the field only to refuse backups
+/// older than its `BACKUP_OLDEST_SUPPORTED_EZSP_VERSION` (12).
+const EXPORT_EZSP_VERSION: u8 = crate::ezsp::MIN_PROTOCOL;
+/// `security_level` of an export: herdsman's `SECURITY_LEVEL_Z3`
+/// (`src/adapter/ember/consts.ts`), what its ember adapter writes.
+const SECURITY_LEVEL_Z3: u8 = 5;
 /// herdsman's `BACKUP_OLDEST_SUPPORTED_EZSP_VERSION`: older EmberZNet
 /// backups are not restored.
 const OLDEST_EZSP_VERSION: u64 = 12;
@@ -188,11 +203,12 @@ impl OpenCoordinatorBackup {
     /// is not what it should be (key, PAN, channel, IEEE address).
     pub fn import(&self) -> anyhow::Result<Import> {
         // The byte order of the EUI64s and the extended PAN ID depends on
-        // the writer: only zigbee-herdsman's ember adapter is read.
+        // the writer: only zigbee-herdsman's ember adapter is read, and
+        // Moli's own exports (written in that order, [`export`]).
         let source = self.metadata.source.as_deref().unwrap_or_default();
-        if !source.starts_with("zigbee-herdsman") {
+        if !source.starts_with("zigbee-herdsman") && !source.starts_with("moli-os") {
             bail!(
-                "this backup was written by {source:?}: only Zigbee2MQTT's (zigbee-herdsman) are read"
+                "this backup was written by {source:?}: only Zigbee2MQTT's (zigbee-herdsman) and Moli's are read"
             );
         }
         // herdsman's `getStoredBackup`.
@@ -315,24 +331,27 @@ fn devices(count: usize) -> String {
 impl Import {
     /// Puts this network in `store`. Over another network (another PAN or
     /// extended PAN), refused unless `force`; then its devices go too. Over
-    /// the same network whose recorded counter is spent, refused (even with
-    /// `force`) unless this backup's counter is higher.
+    /// the same network, refused (even with `force`) unless this backup's
+    /// counter is above the one the store records, or equal to an imported
+    /// one no dongle used yet.
     ///
     /// # Errors
     ///
     /// The store records another network and `force` is not set, or the
-    /// same network with a spent counter this backup does not exceed.
+    /// same network with a counter this backup does not exceed.
     pub fn apply(&self, store: &mut Store, force: bool) -> anyhow::Result<()> {
-        // The same network whose counter a dongle already ran past (a
-        // restore or a resume cleared its freshness): a backup that is not
-        // newer would restore below what the devices saw. `--force` does
-        // not change that; finishing an interrupted import does.
+        // The same network, whose recorded counter is either one a dongle
+        // ran past (a restore or a resume cleared its freshness) or one the
+        // driver read live from the dongle (fresh again, and only ever
+        // growing): a backup below it, or equal to a spent one, would
+        // restore below what the devices saw. `--force` does not change
+        // that; finishing an interrupted import does. The same unused
+        // import again (equal and fresh) changes nothing.
         if let Some(known) = &store.network
             && known.same_network(&self.record)
             && !store.import_pending
-            && !known.frame_counter_fresh
             && let (Some(used), Some(backup)) = (known.frame_counter, self.record.frame_counter)
-            && backup <= used
+            && (backup < used || (backup == used && !known.frame_counter_fresh))
         {
             bail!(moli_i18n::tr!(
                 "pilotes.zigbee.sauvegarde_pas_plus_recente",
@@ -380,6 +399,211 @@ pub fn restore_counter(saved: u32) -> Option<u32> {
     saved
         .checked_add(FRAME_COUNTER_MARGIN)
         .filter(|start| *start < u32::MAX)
+}
+
+/// Reads the dongle's outgoing NWK frame counter ([`network::network_key_info`])
+/// and records it in `store` ([`store_counter`]), saved to `path`.
+///
+/// # Errors
+///
+/// The read failing (the store is then untouched), or the save failing.
+pub async fn record_counter(
+    ezsp: &Ezsp,
+    store: &mut Store,
+    path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let info = network::network_key_info(ezsp).await?;
+    store_counter(store, path, info)
+}
+
+/// Records a counter read live from the dongle that runs `store`'s network:
+/// restorable (`frame_counter_fresh`), with the key's sequence number, then
+/// the store saved (atomically). Never lowered: a dongle reporting less
+/// than recorded keeps the recorded one (a restore from the lower one would
+/// start below what the devices saw). Nothing without a network.
+///
+/// # Errors
+///
+/// The store cannot be saved (it is kept in memory).
+pub fn store_counter(
+    store: &mut Store,
+    path: &std::path::Path,
+    info: network::NetworkKeyInfo,
+) -> anyhow::Result<()> {
+    let Some(network) = store.network.as_mut() else {
+        return Ok(());
+    };
+    let counter = match network.frame_counter {
+        Some(recorded) if recorded > info.frame_counter => {
+            tracing::warn!(
+                recorded,
+                dongle = info.frame_counter,
+                "the dongle reports a lower frame counter than recorded: the recorded one is kept"
+            );
+            recorded
+        }
+        _ => info.frame_counter,
+    };
+    let recorded = NetworkRecord {
+        frame_counter: Some(counter),
+        frame_counter_fresh: true,
+        key_sequence_number: Some(info.sequence_number),
+        ..network.clone()
+    };
+    if *network == recorded {
+        return Ok(());
+    }
+    *network = recorded;
+    store.save(path)?;
+    tracing::debug!(frame_counter = counter, "NWK frame counter recorded");
+    Ok(())
+}
+
+/// The network `store` records as an Open Coordinator Backup Zigbee2MQTT
+/// restores (zigbee-herdsman's `toUnifiedBackup` of its ember adapter's
+/// `backup()`: same fields, byte orders and number formats), with the
+/// vault's keys: its frame counter is the recorded one plus
+/// [`FRAME_COUNTER_MARGIN`] (herdsman restores from it as written). The
+/// devices are the store's, without link keys (herdsman's ember adapter
+/// writes none either).
+///
+/// # Errors
+///
+/// No network recorded, no restorable frame counter (never recorded, or
+/// spent), or one without room for the margin.
+pub fn export(
+    store: &Store,
+    network_key: &Key,
+    tc_link_key: &Key,
+    source: &str,
+    date: &str,
+) -> anyhow::Result<OpenCoordinatorBackup> {
+    let Some(record) = &store.network else {
+        bail!("this instance records no network yet: nothing to export");
+    };
+    let (Some(saved), true) = (record.frame_counter, record.frame_counter_fresh) else {
+        bail!(
+            "no up-to-date frame counter recorded for this network (Moli records it while the network runs): \
+             a backup from it could start below what the devices saw"
+        );
+    };
+    let Some(frame_counter) = restore_counter(saved) else {
+        bail!(
+            "the frame counter {saved} leaves no room for the margin: the network needs a new key"
+        );
+    };
+    let mut internal = serde_json::Map::new();
+    internal.insert("date".into(), date.into());
+    internal.insert("ezspVersion".into(), EXPORT_EZSP_VERSION.into());
+    let devices = store
+        .devices
+        .values()
+        .map(|device| {
+            Ok(BackupDevice {
+                nwk_address: device.nwk.map(|nwk| format!("{nwk:x}")),
+                ieee_address: herdsman_eui64_hex(&device.ieee)
+                    .ok_or_else(|| anyhow!("the store's device {} is not an EUI64", device.ieee))?,
+                is_child: Some(false),
+                link_key: None,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(OpenCoordinatorBackup {
+        metadata: Metadata {
+            format: FORMAT.into(),
+            version: FORMAT_VERSION,
+            source: Some(source.into()),
+            internal,
+        },
+        stack_specific: Some(StackSpecific {
+            ezsp: Some(EzspSpecific {
+                hashed_tclk: Some(SecretHex(tc_link_key.to_hex())),
+                other: serde_json::Map::new(),
+            }),
+            other: serde_json::Map::new(),
+        }),
+        coordinator_ieee: herdsman_eui64_hex(&record.coordinator_ieee).ok_or_else(|| {
+            anyhow!(
+                "the store's coordinator {} is not an EUI64",
+                record.coordinator_ieee
+            )
+        })?,
+        pan_id: format!("{:x}", record.pan_id),
+        extended_pan_id: network::hex(&record.extended_pan_id),
+        nwk_update_id: record.nwk_update_id,
+        security_level: SECURITY_LEVEL_Z3,
+        channel: record.channel,
+        // Moli forms and restores on every channel (`ALL_CHANNELS_MASK`).
+        channel_mask: network::CHANNELS.collect(),
+        network_key: NetworkKey {
+            key: SecretHex(network_key.to_hex()),
+            sequence_number: record.key_sequence_number.unwrap_or(0),
+            frame_counter,
+        },
+        devices,
+    })
+}
+
+/// The usual `0x…` form of an EUI64 to the way herdsman's ember adapter
+/// writes it in a backup (the bytes little-endian, no `0x`): the inverse of
+/// [`herdsman_eui64`].
+fn herdsman_eui64_hex(ieee: &str) -> Option<String> {
+    let mut bytes = hex_bytes::<8>(ieee.strip_prefix("0x")?)?;
+    bytes.reverse();
+    Some(network::hex(&bytes))
+}
+
+impl OpenCoordinatorBackup {
+    /// Writes the backup to `path` for a person: readable by its owner only
+    /// (0600 on unix: it may hold a network key), atomically (`<path>.tmp`,
+    /// flushed, then renamed). An existing `path` is replaced only with
+    /// `force`.
+    ///
+    /// # Errors
+    ///
+    /// `path` exists and `force` is not set; a `<path>.tmp` left by an
+    /// interrupted export (it may hold a key: the person deletes it); the
+    /// file cannot be written or renamed.
+    pub fn write_private(&self, path: &std::path::Path, force: bool) -> anyhow::Result<()> {
+        use std::io::Write as _;
+        if !force && std::fs::symlink_metadata(path).is_ok() {
+            bail!(
+                "{} already exists: run again with --force to replace it",
+                path.display()
+            );
+        }
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = std::path::PathBuf::from(tmp);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = match options.open(&tmp) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => bail!(
+                "{} already exists, left by an interrupted export: it may hold the network key, delete it, then run again",
+                tmp.display()
+            ),
+            Err(error) => {
+                return Err(error).with_context(|| format!("creating {}", tmp.display()));
+            }
+        };
+        let mut json = self.to_json();
+        json.push('\n');
+        let written = file
+            .write_all(json.as_bytes())
+            .and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = written.and_then(|()| std::fs::rename(&tmp, path)) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(error).with_context(|| format!("writing {}", path.display()));
+        }
+        Ok(())
+    }
 }
 
 /// The dongle's IEEE address when it is not `record`'s coordinator
@@ -491,7 +715,7 @@ mod tests {
     use crate::network::tests::{EUI64, network_parameters_on};
     use crate::network::{Key, hex};
     use crate::sim::FakeNcp;
-    use crate::store::tests::record;
+    use crate::store::tests::{TempDir, record};
 
     const EMBER_13: Version = Version {
         protocol: 13,
@@ -737,6 +961,17 @@ mod tests {
         };
         import.apply(&mut pending, false).unwrap();
         assert_eq!(pending.network, Some(imported()));
+        // A counter the driver recorded live (restorable, so fresh): an
+        // older backup is still refused, live counters only grow.
+        let live = Store {
+            network: Some(NetworkRecord {
+                frame_counter: Some(189_200),
+                frame_counter_fresh: true,
+                ..imported()
+            }),
+            ..Store::default()
+        };
+        refused(&live, 189_200);
         // A counter never used yet: importing it again changes nothing.
         let mut fresh = Store {
             network: Some(imported()),
@@ -864,9 +1099,9 @@ mod tests {
                 ids::GET_EUI64,
             ]
         );
-        // `NWK_FRAME_COUNTER` (0x23), 4 bytes: 123456 + 1024, little-endian.
-        assert_eq!(123_456 + FRAME_COUNTER_MARGIN, 0x0001_E640);
-        assert_eq!(received[3].1, [0x23, 4, 0x40, 0xE6, 0x01, 0x00]);
+        // `NWK_FRAME_COUNTER` (0x23), 4 bytes: 123456 + 65536, little-endian.
+        assert_eq!(123_456 + FRAME_COUNTER_MARGIN, 0x0002_E240);
+        assert_eq!(received[3].1, [0x23, 4, 0x40, 0xE2, 0x02, 0x00]);
         let state = &received[4].1;
         // ... | NO_FRAME_COUNTER_RESET (0x1000): 0x1B84.
         assert_eq!(state[..2], [0x84, 0x1B]);
@@ -894,11 +1129,17 @@ mod tests {
     }
 
     #[test]
+    fn restore_uses_the_65536_margin() {
+        assert_eq!(FRAME_COUNTER_MARGIN, 65_536);
+        assert_eq!(restore_counter(123_456), Some(188_992));
+        assert_eq!(restore_counter(200_000), Some(265_536));
+        assert_eq!(restore_counter(0), Some(65_536));
+    }
+
+    #[test]
     fn the_restore_counter_never_saturates() {
-        assert_eq!(restore_counter(123_456), Some(124_480));
-        assert_eq!(restore_counter(0), Some(1024));
-        assert_eq!(restore_counter(u32::MAX - 1025), Some(u32::MAX - 1));
-        for full in [u32::MAX - 1024, u32::MAX - 10, u32::MAX] {
+        assert_eq!(restore_counter(u32::MAX - 65_537), Some(u32::MAX - 1));
+        for full in [u32::MAX - 65_536, u32::MAX - 10, u32::MAX] {
             assert_eq!(restore_counter(full), None, "{full:#x}");
         }
     }
@@ -970,5 +1211,212 @@ mod tests {
             }),
             "nothing formed"
         );
+    }
+
+    #[test]
+    fn a_live_counter_is_recorded() {
+        let dir = TempDir::new();
+        let path = crate::store::path(&dir.0, "zigbee");
+        let mut store = Store {
+            network: Some(NetworkRecord {
+                frame_counter_fresh: false,
+                ..imported()
+            }),
+            ..Store::default()
+        };
+        let read = |frame_counter| network::NetworkKeyInfo {
+            sequence_number: 1,
+            frame_counter,
+        };
+        store_counter(&mut store, &path, read(200_000)).unwrap();
+        let live = NetworkRecord {
+            frame_counter: Some(200_000),
+            frame_counter_fresh: true,
+            key_sequence_number: Some(1),
+            ..imported()
+        };
+        assert_eq!(store.network, Some(live.clone()));
+        assert_eq!(Store::load(&path).unwrap(), store, "saved");
+        // A dongle reporting less than recorded: the higher one stays (a
+        // restore from the lower one would start below what devices saw).
+        store_counter(&mut store, &path, read(150_000)).unwrap();
+        assert_eq!(store.network, Some(live));
+        // No network in the store: nothing to record, nothing written.
+        let mut empty = Store::default();
+        let other = crate::store::path(&dir.0, "other");
+        store_counter(&mut empty, &other, read(1)).unwrap();
+        assert_eq!(empty, Store::default());
+        assert!(!other.exists());
+    }
+
+    /// The fixture's network as an import leaves it in the store.
+    fn fixture_store() -> Store {
+        let mut store = Store::default();
+        fixture()
+            .import()
+            .unwrap()
+            .apply(&mut store, false)
+            .unwrap();
+        store
+    }
+
+    #[test]
+    fn exports_the_store_and_the_keys() {
+        let keys = doc_keys();
+        let backup = export(
+            &fixture_store(),
+            &keys.network,
+            &keys.tc_link,
+            "moli-os@1.2.3",
+            "2026-10-18T08:00:00Z",
+        )
+        .unwrap();
+        // Read back as it was written, field for field.
+        assert_eq!(
+            OpenCoordinatorBackup::parse(backup.to_json().as_bytes()).unwrap(),
+            backup
+        );
+        assert_eq!(backup.metadata.format, FORMAT);
+        assert_eq!(backup.metadata.version, 1);
+        assert_eq!(backup.metadata.source.as_deref(), Some("moli-os@1.2.3"));
+        assert_eq!(
+            serde_json::Value::Object(backup.metadata.internal.clone()),
+            serde_json::json!({"date": "2026-10-18T08:00:00Z", "ezspVersion": 13})
+        );
+        // herdsman's byte orders and number formats, as in the fixture.
+        let written: serde_json::Value = serde_json::from_str(&backup.to_json()).unwrap();
+        let read: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+        for field in [
+            "coordinator_ieee",
+            "pan_id",
+            "extended_pan_id",
+            "nwk_update_id",
+            "security_level",
+            "channel",
+            "channel_mask",
+            "stack_specific",
+        ] {
+            assert_eq!(written[field], read[field], "{field}");
+        }
+        assert_eq!(backup.network_key.key.0, DOC_KEY);
+        assert_eq!(backup.network_key.sequence_number, 0);
+        // The recorded counter plus the margin: Zigbee2MQTT restores from
+        // it as it is.
+        assert_eq!(backup.network_key.frame_counter, 123_456 + 65_536);
+        let devices: Vec<_> = backup
+            .devices
+            .iter()
+            .map(|d| (d.ieee_address.as_str(), d.nwk_address.as_deref()))
+            .collect();
+        assert_eq!(
+            devices,
+            [
+                ("02000000004b1200", Some("4f2a")),
+                ("03000000004b1200", None)
+            ]
+        );
+        // Moli reads it back as the same network.
+        let import = backup.import().unwrap();
+        assert_eq!(
+            import.record,
+            NetworkRecord {
+                frame_counter: Some(188_992),
+                ..imported()
+            }
+        );
+        assert_eq!(import.network_key, keys.network);
+        assert_eq!(import.tc_link_key, Some(keys.tc_link));
+        assert_eq!(import.devices, fixture().import().unwrap().devices);
+    }
+
+    #[test]
+    fn what_cannot_be_exported_is_refused() {
+        let keys = doc_keys();
+        let refused = |store: &Store| {
+            export(store, &keys.network, &keys.tc_link, "moli-os", "now")
+                .map(|_| ())
+                .unwrap_err()
+                .to_string()
+        };
+        let error = refused(&Store::default());
+        assert!(error.contains("no network"), "{error}");
+        // A counter no dongle vouches for (spent, or never recorded): an
+        // export from it could start below what the devices saw.
+        for network in [
+            NetworkRecord {
+                frame_counter_fresh: false,
+                ..imported()
+            },
+            on_fixture_pan(0x1a62),
+        ] {
+            let error = refused(&Store {
+                network: Some(network),
+                ..Store::default()
+            });
+            assert!(error.contains("frame counter"), "{error}");
+        }
+        let ended = Store {
+            network: Some(NetworkRecord {
+                frame_counter: Some(u32::MAX - 10),
+                ..imported()
+            }),
+            ..Store::default()
+        };
+        let error = refused(&ended);
+        assert!(error.contains("new key"), "{error}");
+    }
+
+    fn exported() -> OpenCoordinatorBackup {
+        let keys = doc_keys();
+        export(
+            &fixture_store(),
+            &keys.network,
+            &keys.tc_link,
+            "moli-os",
+            "now",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn export_refuses_to_overwrite() {
+        let dir = TempDir::new();
+        let path = dir.0.join("coordinator_backup.json");
+        std::fs::write(&path, "kept").unwrap();
+        let error = exported()
+            .write_private(&path, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--force"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "kept");
+        // Forced: replaced whole.
+        exported().write_private(&path, true).unwrap();
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(OpenCoordinatorBackup::parse(&written).unwrap(), exported());
+        // A new file needs no force; no temporary file left behind.
+        let fresh = dir.0.join("new.json");
+        exported().write_private(&fresh, false).unwrap();
+        let mut names: Vec<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["coordinator_backup.json", "new.json"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new();
+        let path = dir.0.join("coordinator_backup.json");
+        exported().write_private(&path, false).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+        // Over a readable file: the new one is private too.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        exported().write_private(&path, true).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 }

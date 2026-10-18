@@ -13,8 +13,11 @@
   `ezsp_version`, `network`), en lecture seule. Reprise d'un réseau Zigbee2MQTT :
   `moli-os zigbee import <coordinator_backup.json>` range ses clés au coffre et son réseau dans
   le fichier d'état ; si la clé n'a plus de réseau, le pilote le restaure au démarrage (même
-  clé seulement, compteur de trames sauvegardé + 1024), sans réappairage. Appairage et
-  appareils : étapes suivantes.
+  clé seulement, compteur de trames sauvegardé + 65 536), sans réappairage. Le pilote relève
+  le compteur de trames de la clé (au démarrage du réseau, puis toutes les heures) : une clé
+  effacée plus tard se restaure depuis ce relevé. Retour à Zigbee2MQTT :
+  `moli-os zigbee export <fichier>` écrit une sauvegarde Open Coordinator Backup (clés lues au
+  coffre, fichier privé à supprimer après usage). Appairage et appareils : étapes suivantes.
 - Essayé sur : à remplir (clé, firmware, date).
 - Les tests rejouent un NCP simulé (`src/sim.rs`) qui parle le vrai ASH. Fixture :
   `fixtures/coordinator_backup.json`, une sauvegarde **fictive** au format Open Coordinator

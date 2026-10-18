@@ -432,6 +432,50 @@ pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<DongleNet
     })
 }
 
+/// What the NCP reports of the current network key, never the key itself:
+/// herdsman's `SecManNetworkKeyInfo` (`src/adapter/ember/types.ts`), as its
+/// ember adapter reads it for its own backups (`backup()` in
+/// `src/adapter/ember/adapter/emberAdapter.ts`: `ezspGetNetworkKeyInfo`,
+/// then `networkKeyInfo.frameCounter = netKeyInfo.networkKeyFrameCounter`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkKeyInfo {
+    pub sequence_number: u8,
+    /// The outgoing NWK frame counter of the network key.
+    pub frame_counter: u32,
+}
+
+/// `getNetworkKeyInfo` (frame `0x0116`, no parameters), herdsman's
+/// `ezspGetNetworkKeyInfo` (`src/adapter/ember/ezsp/ezsp.ts`): a 32-bit
+/// `SlStatus` in every EZSP version this driver speaks (13 and later: a
+/// security manager command, herdsman reads `readUInt32()` without a
+/// version branch), then `readSecManNetworkKeyInfo` (`ezsp/buffalo.ts`):
+/// network key set, alternate key set, sequence number, alternate sequence
+/// number (one byte each), frame counter (`uint32_t`, little-endian).
+///
+/// # Errors
+///
+/// The link failing, an unreadable answer, the NCP refusing, or no
+/// network key set.
+pub async fn network_key_info(ezsp: &Ezsp) -> anyhow::Result<NetworkKeyInfo> {
+    let answer = ezsp.call(ids::GET_NETWORK_KEY_INFO, &[]).await?;
+    let (status, rest) = answer.split_first_chunk::<4>().ok_or(EzspError::TooShort)?;
+    let status = SlStatus::from_u32(u32::from_le_bytes(*status));
+    if status != SlStatus::Ok {
+        bail!("getNetworkKeyInfo failed: {status:?}");
+    }
+    let (&[set, _alternate_set, sequence_number, _alternate_sequence], rest) =
+        rest.split_first_chunk::<4>().ok_or(EzspError::TooShort)?;
+    let (counter, _) = rest.split_first_chunk::<4>().ok_or(EzspError::TooShort)?;
+    // herdsman's « [BACKUP] No network key set. »
+    if set == 0 {
+        bail!("the NCP has no network key set");
+    }
+    Ok(NetworkKeyInfo {
+        sequence_number,
+        frame_counter: u32::from_le_bytes(*counter),
+    })
+}
+
 /// An EUI64 as it travels (little-endian) to its usual form, `0x` and the
 /// bytes most significant first (herdsman's `eui64LEBufferToHex`).
 #[must_use]
@@ -616,6 +660,54 @@ pub(crate) mod tests {
         let formed = NetworkParameters::decode(&received[5].1).unwrap().0;
         assert_eq!(formed.radio_channel, 20);
         assert_eq!(received[6].1, [0x07, 1, 1]);
+    }
+
+    /// `getNetworkKeyInfo` answered: status, a network key set, no
+    /// alternate one, the key's `sequence` number, `counter`.
+    pub(crate) fn key_info(sequence: u8, counter: u32) -> Vec<u8> {
+        let mut answer = vec![0, 0, 0, 0, 1, 0, sequence, 0];
+        answer.extend_from_slice(&counter.to_le_bytes());
+        answer
+    }
+
+    #[tokio::test]
+    async fn reads_the_network_key_info() {
+        // The status is a 32-bit `SlStatus` in EZSP 13 as in 14.
+        for version in [
+            EMBER_13,
+            Version {
+                protocol: 14,
+                stack_type: 2,
+                stack_version: 0x8000,
+            },
+        ] {
+            let (ncp, io) = FakeNcp::spawn(version);
+            ncp.respond(ids::GET_NETWORK_KEY_INFO, &key_info(2, 0x0001_E240));
+            let (ezsp, _, _callbacks) = Ezsp::connect(io).await.unwrap();
+            assert_eq!(
+                network_key_info(&ezsp).await.unwrap(),
+                NetworkKeyInfo {
+                    sequence_number: 2,
+                    frame_counter: 123_456,
+                }
+            );
+            assert_eq!(ncp.received()[2], (ids::GET_NETWORK_KEY_INFO, Vec::new()));
+            // No network key set: nothing to record.
+            ncp.respond(
+                ids::GET_NETWORK_KEY_INFO,
+                &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            );
+            let error = network_key_info(&ezsp).await.unwrap_err().to_string();
+            assert!(error.contains("no network key"), "{error}");
+            // Refused (SL_STATUS_FAIL), or cut short.
+            let mut refused = key_info(0, 1);
+            refused[0] = 0x01;
+            ncp.respond(ids::GET_NETWORK_KEY_INFO, &refused);
+            let error = network_key_info(&ezsp).await.unwrap_err().to_string();
+            assert!(error.contains("getNetworkKeyInfo"), "{error}");
+            ncp.respond(ids::GET_NETWORK_KEY_INFO, &key_info(0, 1)[..9]);
+            assert!(network_key_info(&ezsp).await.is_err());
+        }
     }
 
     #[tokio::test]

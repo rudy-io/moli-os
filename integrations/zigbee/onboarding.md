@@ -51,12 +51,28 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    porte encore, ou le restaure s'il a été effacé (par le flash du firmware). **Même clé
    seulement** : Moli ne réécrit pas l'adresse d'une clé ; changer de clé, c'est réappairer.
    **Sauvegarde récente seulement** : la restauration repart du compteur de trames de la
-   sauvegarde (+ 1024) et ne s'en sert qu'une fois ; une fois que la clé a fait tourner le
-   réseau, ce compteur est dépassé, et une nouvelle restauration demande une sauvegarde
-   **plus récente que la dernière utilisée** (sinon le pilote attend en le disant ; réimporter
-   la même sauvegarde est refusé, même avec `--force`). Un import interrompu se termine en relançant
-   la même commande. Un réseau déjà connu de l'instance n'est remplacé qu'avec `--force`.
-   Jamais Zigbee2MQTT et Moli en même temps sur le même réseau.
-7. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
+   sauvegarde (+ 65 536) et ne s'en sert qu'une fois. Ensuite, le pilote relève lui-même le
+   compteur de la clé (dès que le réseau tourne, puis toutes les heures, sans clé dans aucun
+   fichier) : si la clé est effacée plus tard, il restaure depuis ce relevé (+ 65 536, de quoi
+   couvrir l'heure écoulée). Sans relevé à jour, une nouvelle restauration demande une
+   sauvegarde **plus récente que le compteur connu** (sinon le pilote attend en le disant ;
+   réimporter une sauvegarde plus ancienne est refusé, même avec `--force`). Un import
+   interrompu se termine en relançant la même commande. Un réseau déjà connu de l'instance
+   n'est remplacé qu'avec `--force`. Jamais Zigbee2MQTT et Moli en même temps sur le même
+   réseau.
+7. **Revenir à Zigbee2MQTT** (au besoin) : **arrêter Moli d'abord** (et le laisser arrêté :
+   jamais les deux sur la même clé), puis
+   `moli-os zigbee export coordinator_backup.json` (`--instance <id>` au besoin, `--force`
+   pour remplacer un fichier existant). Le fichier est une sauvegarde Open Coordinator Backup
+   comme celle de Zigbee2MQTT : paramètres du réseau et appareils connus de Moli, clés lues au
+   coffre au moment de l'export, compteur de trames = dernier relevé + 65 536 (Zigbee2MQTT
+   repart de ce compteur tel quel). **Il contient la clé du réseau en clair** : il est écrit en
+   mode 0600, ne le copier que dans le dossier de données de Zigbee2MQTT, et le **supprimer**
+   dès que Zigbee2MQTT a repris le réseau. La clé ne doit pas avoir changé : Zigbee2MQTT garde
+   la même clé (dongle d'origine), et son `configuration.yaml` doit porter le même `pan_id`,
+   `ext_pan_id` et `network_key` que la sauvegarde (sinon il en forme un nouveau). Les
+   appareils appairés sous Moli manquent à la base de Zigbee2MQTT (elle date d'avant la
+   reprise) : les réappairer depuis Zigbee2MQTT.
+8. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
    `ezsp_version`, `network` (`up` une fois le réseau repris ou formé, sur le canal 15 sauf
    `channel` dans les options).

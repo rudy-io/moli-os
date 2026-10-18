@@ -222,6 +222,10 @@ where
         coordinator,
         protocol,
         network,
+        // Up at startup: formed, restored, or resumed and checked to be
+        // the store's own network. A resumed network that stayed down was
+        // not checked: its counter is not the store's to record.
+        recording: network == Network::Up,
         permit_until: None,
         store: &mut store,
         store_path: &store_path,
@@ -238,6 +242,12 @@ async fn serve(
     mut live: Live<'_>,
 ) -> anyhow::Result<()> {
     let aps = Aps::new(ezsp.clone(), live.protocol);
+    // The first record was made at startup: the next one an hour later.
+    let mut record_at = tokio::time::interval_at(
+        tokio::time::Instant::now() + backup::COUNTER_RECORD_PERIOD,
+        backup::COUNTER_RECORD_PERIOD,
+    );
+    record_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let close_at = live.permit_until;
         tokio::select! {
@@ -252,6 +262,7 @@ async fn serve(
             },
             () = tokio::time::sleep_until(close_at.unwrap_or_else(tokio::time::Instant::now)),
                 if close_at.is_some() => live.joining_closed(ctx),
+            _ = record_at.tick(), if live.recording => live.record_counter(ctx, &aps, callbacks).await,
         }
     }
 }
@@ -261,6 +272,10 @@ struct Live<'a> {
     coordinator: DeviceId,
     protocol: u8,
     network: Network,
+    /// Whether the dongle's frame counter is recorded every
+    /// [`backup::COUNTER_RECORD_PERIOD`] (the network was checked to be the
+    /// store's at startup).
+    recording: bool,
     /// When the joining opened from Moli closes by itself (the NCP and the
     /// routers close it on their own then: only the point is updated).
     permit_until: Option<tokio::time::Instant>,
@@ -354,6 +369,29 @@ impl Live<'_> {
                     error = error
                 )));
             }
+        }
+    }
+
+    /// The hourly record of the dongle's NWK frame counter, while the
+    /// network is up: read with the callbacks still handled meanwhile, then
+    /// written to the store. A failed read is logged and tried again at the
+    /// next hour; it never clears the recorded counter.
+    async fn record_counter(
+        &mut self,
+        ctx: &DriverCtx,
+        aps: &Aps,
+        callbacks: &mut mpsc::Receiver<Callback>,
+    ) {
+        if self.network != Network::Up {
+            return;
+        }
+        let read = network::network_key_info(aps.ezsp());
+        let recorded = match self.draining(ctx, aps, callbacks, read).await {
+            Ok(info) => backup::store_counter(self.store, self.store_path, info),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = recorded {
+            tracing::warn!(%error, "the NWK frame counter could not be recorded: tried again in an hour");
         }
     }
 
@@ -459,7 +497,17 @@ async fn first_network(
     .await?;
     store.network = Some(record);
     store.save(store_path)?;
+    refusing_orders(ctx, record_counter(ezsp, store, store_path)).await;
     Ok(Outcome::Ready(Network::Up))
+}
+
+/// The dongle's NWK frame counter recorded as soon as the network runs
+/// ([`backup::record_counter`]); a failure is logged, the next try is an
+/// hour later (the store keeps what it had).
+async fn record_counter(ezsp: &Ezsp, store: &mut Store, store_path: &Path) {
+    if let Err(error) = backup::record_counter(ezsp, store, store_path).await {
+        tracing::warn!(%error, "the NWK frame counter could not be recorded: tried again in an hour");
+    }
 }
 
 /// The dongle has no network, the store knows one (an imported Zigbee2MQTT
@@ -471,8 +519,9 @@ async fn first_network(
 /// in it, without a fresh counter (a Moli-formed network, or a counter a
 /// dongle has run past since: the devices would drop every frame of a
 /// coordinator counting below what they saw), with a counter at its end,
-/// or with another dongle plugged in. A restored network's counter is no
-/// longer fresh: it is never used twice.
+/// or with another dongle plugged in. A restored network's saved counter is
+/// no longer fresh (it is never used twice); the restored dongle's own is
+/// recorded instead.
 async fn restore_known(
     ctx: &mut DriverCtx,
     ezsp: &Ezsp,
@@ -542,9 +591,11 @@ async fn restore_known(
             anyhow::bail!("the dongle changed during the restore ({dongle})")
         }
         backup::Restored::Network(record) => {
-            // The counter is spent: never restored from twice.
+            // The counter is spent: never restored from twice. The dongle's
+            // own, recorded at once, takes over.
             store.network = Some(record.keeping_backup_of(known));
             store.save(store_path)?;
+            refusing_orders(ctx, record_counter(ezsp, store, store_path)).await;
             Ok(Outcome::Ready(Network::Up))
         }
     }
@@ -569,7 +620,8 @@ fn pan(record: &store::NetworkRecord) -> String {
 /// The same network with a new channel or update id updates the store
 /// (keeping what an imported backup recorded: frame counter, key sequence
 /// number); a backup imported for the network the dongle still runs is
-/// thus taken over as it is.
+/// thus taken over as it is. A network kept is then the dongle's to count:
+/// its frame counter is recorded.
 async fn resume(
     ezsp: &Ezsp,
     callbacks: &mut mpsc::Receiver<Callback>,
@@ -612,7 +664,6 @@ async fn resume(
                 dongle = pan(&record)
             ));
         }
-        Some(known) if *known == record => return Ok(Outcome::Ready(network)),
         Some(_) => {}
         None if !has_key => {
             tracing::warn!(pan_id = %pan(&record), "the dongle runs a network Moli has no key for");
@@ -626,8 +677,12 @@ async fn resume(
             "adopting the network of an interrupted first formation"
         ),
     }
-    store.network = Some(record);
-    store.save(store_path)?;
+    if store.network.as_ref() != Some(&record) {
+        store.network = Some(record);
+        store.save(store_path)?;
+    }
+    // Ours: its counter recorded from now on.
+    record_counter(ezsp, store, store_path).await;
     Ok(Outcome::Ready(network))
 }
 
@@ -764,7 +819,7 @@ mod tests {
     use super::*;
     use crate::ezsp::ids;
     use crate::network::hex;
-    use crate::network::tests::{EUI64, network_parameters, network_parameters_of};
+    use crate::network::tests::{EUI64, key_info, network_parameters, network_parameters_of};
     use crate::sim::FakeNcp;
     use crate::store::tests::{TempDir, record};
 
@@ -1044,7 +1099,24 @@ mod tests {
         (ncp, io)
     }
 
-    /// … that also forms, and reports the network it runs.
+    /// The outgoing NWK frame counter the fake NCP reports
+    /// (`getNetworkKeyInfo`): above every counter a test restores from.
+    const LIVE_COUNTER: u32 = 270_000;
+    /// `getNetworkKeyInfo` refused (`SL_STATUS_FAIL`): no counter read.
+    const KEY_INFO_REFUSED: [u8; 12] = [0x01, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+
+    /// `network` once the driver recorded the dongle's counter: restorable.
+    fn live(network: store::NetworkRecord) -> store::NetworkRecord {
+        store::NetworkRecord {
+            frame_counter: Some(LIVE_COUNTER),
+            frame_counter_fresh: true,
+            key_sequence_number: Some(0),
+            ..network
+        }
+    }
+
+    /// … that also forms, and reports the network it runs and its key's
+    /// frame counter ([`LIVE_COUNTER`]).
     fn forming_ncp(init: &[u8]) -> (FakeNcp, DuplexStream) {
         let (ncp, io) = ncp_with_init(init);
         for id in [
@@ -1057,6 +1129,7 @@ mod tests {
         }
         ncp.respond(ids::GET_NETWORK_PARAMETERS, &network_parameters(0x1a62, 15));
         ncp.respond(ids::GET_EUI64, &EUI64);
+        ncp.respond(ids::GET_NETWORK_KEY_INFO, &key_info(0, LIVE_COUNTER));
         (ncp, io)
     }
 
@@ -1097,9 +1170,9 @@ mod tests {
         let formed = sent(&ncp, ids::FORM_NETWORK).unwrap();
         let formed = ezsp::NetworkParameters::decode(&formed).unwrap().0;
         assert_eq!(formed.radio_channel, 15);
-        // The store has the network, never the key.
+        // The store has the network and its counter, never the key.
         let saved = run.store();
-        assert_eq!(saved.network, Some(record(0x1a62)));
+        assert_eq!(saved.network, Some(live(record(0x1a62))));
         let file = std::fs::read_to_string(run.store_path()).unwrap();
         assert!(!file.contains(&key), "{file}");
     }
@@ -1196,6 +1269,7 @@ mod tests {
     }
 
     /// Restores the imported network on a wiped dongle; returns the run.
+    /// The dongle's counter is recorded unless `ncp` refuses to give it.
     async fn restored(ncp: &FakeNcp, io: DuplexStream) -> Running {
         let run = Running::spawn(
             imported(imported_store(), Some(IMPORTED_KEY)).await,
@@ -1231,12 +1305,14 @@ mod tests {
                 ids::SET_VALUE,
                 ids::GET_NETWORK_PARAMETERS,
                 ids::GET_EUI64,
+                // Its counter, recorded at once.
+                ids::GET_NETWORK_KEY_INFO,
             ],
             "restored, never formed anew (no key table cleared)"
         );
-        // The saved counter plus the margin; the vault's keys.
+        // The saved counter plus the margin (123456 + 65536); the vault's keys.
         let counter = sent(&ncp, ids::SET_VALUE).unwrap();
-        assert_eq!(counter, [0x23, 4, 0x40, 0xE6, 0x01, 0x00]);
+        assert_eq!(counter, [0x23, 4, 0x40, 0xE2, 0x02, 0x00]);
         let state = sent(&ncp, ids::SET_INITIAL_SECURITY_STATE).unwrap();
         assert_eq!(hex(&state[18..34]), IMPORTED_KEY);
         // No trust center link key in the vault: a new one, kept there.
@@ -1248,8 +1324,9 @@ mod tests {
         let formed = sent(&ncp, ids::FORM_NETWORK).unwrap();
         let formed = ezsp::NetworkParameters::decode(&formed).unwrap().0;
         assert_eq!((formed.pan_id, formed.extended_pan_id), (0x1a62, [0xDD; 8]));
-        // The counter is kept, but spent.
-        assert_eq!(run.store(), spent_store());
+        // The backup's counter is spent; the dongle's own, recorded, is
+        // what a later restore starts from.
+        assert_eq!(run.store(), known_store(live(record(0x1a62))));
     }
 
     /// Waits for `reason`, then checks nothing went to the dongle, the
@@ -1283,9 +1360,12 @@ mod tests {
     #[tokio::test]
     async fn a_used_counter_is_not_reused() {
         let (ncp, io) = forming_ncp(&[0x93]);
+        // The dongle's counter could not be read: only the backup's is
+        // known, and it is spent.
+        ncp.respond(ids::GET_NETWORK_KEY_INFO, &KEY_INFO_REFUSED);
         let run = restored(&ncp, io).await;
         let after = run.store();
-        assert!(!after.network.as_ref().unwrap().frame_counter_fresh);
+        assert_eq!(after, spent_store());
         drop(run);
         // The dongle wiped again later: that counter is long behind.
         let (ncp, io) = forming_ncp(&[0x93]);
@@ -1296,8 +1376,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_old_backup_is_not_reimported() {
-        // Imported, restored (the counter spent), then the dongle reflashed.
+        // Imported, restored (the counter spent, the dongle's own not
+        // read), then the dongle reflashed.
         let (ncp, io) = forming_ncp(&[0x93]);
+        ncp.respond(ids::GET_NETWORK_KEY_INFO, &KEY_INFO_REFUSED);
         let after = restored(&ncp, io).await.store();
         assert_eq!(after, spent_store());
         // The same backup again: refused, even forced, the store unchanged.
@@ -1341,10 +1423,10 @@ mod tests {
         ncp.wait_command(ids::FORM_NETWORK).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
-        // 200000 + 1024 = 0x00031140, little-endian.
+        // 200000 + 65536 = 265536 = 0x00040D40, little-endian.
         assert_eq!(
             sent(&ncp, ids::SET_VALUE).unwrap(),
-            [0x23, 4, 0x40, 0x11, 0x03, 0x00]
+            [0x23, 4, 0x40, 0x0D, 0x04, 0x00]
         );
     }
 
@@ -1453,20 +1535,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_resumed_network_keeps_the_backup_counter() {
+    async fn a_resumed_network_records_the_dongle_counter() {
         // The dongle kept the imported network (Zigbee2MQTT's own dongle):
-        // adopted, its counter kept but spent (the dongle sends again).
-        let (ncp, io) = forming_ncp(&[0x00]);
-        let run = Running::spawn(
-            imported(imported_store(), Some(IMPORTED_KEY)).await,
-            io,
-            false,
-        );
-        ncp.wait_received(STARTUP).await;
-        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
-        run.wait_ready().await;
-        assert_eq!(run.store(), spent_store());
-        assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
+        // adopted, the backup's counter spent (the dongle sends again), the
+        // dongle's own recorded instead; kept spent if it cannot be read.
+        for (answer, after) in [
+            (key_info(0, LIVE_COUNTER), known_store(live(record(0x1a62)))),
+            (KEY_INFO_REFUSED.to_vec(), spent_store()),
+        ] {
+            let (ncp, io) = forming_ncp(&[0x00]);
+            ncp.respond(ids::GET_NETWORK_KEY_INFO, &answer);
+            let run = Running::spawn(
+                imported(imported_store(), Some(IMPORTED_KEY)).await,
+                io,
+                false,
+            );
+            ncp.wait_received(STARTUP).await;
+            ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+            run.wait_ready().await;
+            assert_eq!(run.store(), after);
+            assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
+        }
     }
 
     #[tokio::test]
@@ -1489,7 +1578,7 @@ mod tests {
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
         assert_eq!(run.point("network"), Some(text("up")));
-        assert_eq!(run.store().network, Some(record(0x1a62)));
+        assert_eq!(run.store().network, Some(live(record(0x1a62))));
         assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
         assert_eq!(sent(&ncp, ids::SET_INITIAL_SECURITY_STATE), None);
     }
@@ -1617,7 +1706,7 @@ mod tests {
         ncp.wait_received(STARTUP).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
-        assert_eq!(run.store(), known_store(record(0x1a62)));
+        assert_eq!(run.store(), known_store(live(record(0x1a62))));
         assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
     }
 
@@ -1687,7 +1776,8 @@ mod tests {
             [
                 ids::NETWORK_INIT,
                 ids::GET_NETWORK_PARAMETERS,
-                ids::GET_EUI64
+                ids::GET_EUI64,
+                ids::GET_NETWORK_KEY_INFO,
             ]
         );
     }
@@ -1919,7 +2009,11 @@ mod tests {
             interviewed: false,
         };
         assert_eq!(run.store().devices.get(name), Some(&device));
-        assert_eq!(run.store().network, Some(record(0x1a62)), "network kept");
+        assert_eq!(
+            run.store().network,
+            Some(live(record(0x1a62))),
+            "network kept"
+        );
         // Its announce later, from a new address.
         ncp.callback(
             ids::INCOMING_MESSAGE_HANDLER,
@@ -1949,6 +2043,181 @@ mod tests {
         assert_eq!(devices.len(), 2);
         assert!(devices.contains_key(name));
         assert_eq!(run.point("joining"), Some(text("0x00124b0000000003")));
+    }
+
+    /// How many times the NCP was asked for its key's frame counter.
+    fn counter_reads(ncp: &FakeNcp) -> usize {
+        ncp.received()
+            .iter()
+            .filter(|(id, _)| *id == ids::GET_NETWORK_KEY_INFO)
+            .count()
+    }
+
+    /// Waits (5 s) for the NCP to have been asked `count` times.
+    async fn wait_reads(ncp: &FakeNcp, count: usize) {
+        for _ in 0..500 {
+            if counter_reads(ncp) >= count {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("{} counter reads, not {count}", counter_reads(ncp));
+    }
+
+    /// Waits (5 s) for the store's network to record `counter`.
+    async fn wait_counter(run: &Running, counter: u32) {
+        for _ in 0..500 {
+            if run.store().network.and_then(|n| n.frame_counter) == Some(counter) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the store still records {:?}", run.store().network);
+    }
+
+    #[tokio::test]
+    async fn counter_is_recorded_after_form() {
+        let (ncp, io) = forming_ncp(&[0x93]);
+        ncp.respond(ids::GET_NETWORK_KEY_INFO, &key_info(0, 42));
+        let run = Running::with(
+            io,
+            &Setup {
+                vault: true,
+                ..Setup::default()
+            },
+        );
+        ncp.wait_command(ids::FORM_NETWORK).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        // Read once the network is up, before the coordinator is ready.
+        let last = ncp.received().last().map(|(id, _)| *id);
+        assert_eq!(last, Some(ids::GET_NETWORK_KEY_INFO));
+        assert_eq!(counter_reads(&ncp), 1);
+        let network = run.store().network.unwrap();
+        assert_eq!(network.frame_counter, Some(42));
+        assert!(network.frame_counter_fresh, "restorable");
+        assert_eq!(network.key_sequence_number, Some(0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn counter_is_recorded_hourly() {
+        let (ncp, run) = running_network().await;
+        assert_eq!(run.store().network, Some(live(record(0x1a62))));
+        assert_eq!(counter_reads(&ncp), 1, "read once at the start");
+        ncp.respond(
+            ids::GET_NETWORK_KEY_INFO,
+            &key_info(0, LIVE_COUNTER + 5_000),
+        );
+        tokio::time::sleep(Duration::from_secs(3599)).await;
+        assert_eq!(counter_reads(&ncp), 1, "not before the hour");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        wait_counter(&run, LIVE_COUNTER + 5_000).await;
+        assert_eq!(counter_reads(&ncp), 2);
+        assert!(run.store().network.unwrap().frame_counter_fresh);
+        // A read the NCP does not answer: the callbacks are still handled
+        // while it waits (a device arriving meanwhile is recorded); it
+        // fails, the counter stays, and is read again an hour later.
+        ncp.silence(ids::GET_NETWORK_KEY_INFO);
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD).await;
+        wait_reads(&ncp, 3).await;
+        let asked = tokio::time::Instant::now();
+        let ieee = [0x02, 0, 0, 0, 0, 0x4b, 0x12, 0x00];
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x1234, ieee, 1),
+        );
+        run.wait_point("joining", &text("0x00124b0000000002")).await;
+        assert!(
+            asked.elapsed() < Duration::from_secs(1),
+            "handled while the read was pending"
+        );
+        assert!(run.store().devices.contains_key("0x00124b0000000002"));
+        // Refused, too: kept.
+        ncp.respond(ids::GET_NETWORK_KEY_INFO, &KEY_INFO_REFUSED);
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD).await;
+        wait_reads(&ncp, 4).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let network = run.store().network.unwrap();
+        assert_eq!(network.frame_counter, Some(LIVE_COUNTER + 5_000));
+        assert!(network.frame_counter_fresh);
+        assert_eq!(run.status(), Some(DriverStatus::Running), "still running");
+        ncp.respond(
+            ids::GET_NETWORK_KEY_INFO,
+            &key_info(0, LIVE_COUNTER + 9_000),
+        );
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD).await;
+        wait_counter(&run, LIVE_COUNTER + 9_000).await;
+        // The network down: nothing read.
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
+        run.wait_point("network", &text("down")).await;
+        let reads = counter_reads(&ncp);
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD * 2).await;
+        assert_eq!(counter_reads(&ncp), reads);
+    }
+
+    /// Fails if a file under `dir` holds any of `keys` (hex, either case).
+    fn assert_no_key_under(dir: &Path, keys: &[&str]) {
+        let mut seen = 0;
+        let mut todo = vec![dir.to_path_buf()];
+        while let Some(path) = todo.pop() {
+            if path.is_dir() {
+                for entry in std::fs::read_dir(&path).unwrap() {
+                    todo.push(entry.unwrap().path());
+                }
+                continue;
+            }
+            seen += 1;
+            let bytes = std::fs::read(&path).unwrap();
+            let text = String::from_utf8_lossy(&bytes).to_lowercase();
+            for key in keys {
+                assert_eq!(key.len(), 32);
+                let raw: Vec<u8> = (0..16)
+                    .map(|i| u8::from_str_radix(&key[2 * i..2 * i + 2], 16).unwrap())
+                    .collect();
+                assert!(
+                    !text.contains(&key.to_lowercase()),
+                    "{} holds a key",
+                    path.display()
+                );
+                assert!(
+                    !bytes.windows(16).any(|w| w == raw.as_slice()),
+                    "{} holds a key",
+                    path.display()
+                );
+            }
+        }
+        assert!(seen >= 2, "the store and the vault at least");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_key_at_rest() {
+        // Restored from an import, then recorded live and hourly.
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = restored(&ncp, io).await;
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD + Duration::from_secs(1)).await;
+        wait_reads(&ncp, 2).await;
+        let tclk = run.hub.secret(&run.instance, network::TC_LINK_KEY).unwrap();
+        assert!(run.dir.0.join("secrets.enc").exists());
+        assert_no_key_under(&run.dir.0, &[IMPORTED_KEY, &tclk]);
+        drop(run);
+        // Formed, then recorded live and hourly.
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = Running::with(
+            io,
+            &Setup {
+                vault: true,
+                ..Setup::default()
+            },
+        );
+        ncp.wait_command(ids::FORM_NETWORK).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD + Duration::from_secs(1)).await;
+        wait_reads(&ncp, 2).await;
+        let key = run.hub.secret(&run.instance, network::NETWORK_KEY).unwrap();
+        let tclk = run.hub.secret(&run.instance, network::TC_LINK_KEY).unwrap();
+        assert_eq!(run.store().network, Some(live(record(0x1a62))));
+        assert_no_key_under(&run.dir.0, &[&key, &tclk]);
     }
 
     #[tokio::test]

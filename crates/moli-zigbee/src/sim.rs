@@ -87,6 +87,11 @@ impl FakeNcp {
         self.lock().responses.insert(id, params.to_vec());
     }
 
+    /// Never answer `id` commands again (until the next [`Self::respond`]).
+    pub(crate) fn silence(&self, id: u16) {
+        self.lock().responses.remove(&id);
+    }
+
     /// Hold the next `count` responses, then send them in reverse order.
     pub(crate) fn reverse_next(&self, count: usize) {
         let mut script = self.lock();

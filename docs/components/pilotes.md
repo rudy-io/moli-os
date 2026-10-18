@@ -169,8 +169,19 @@ base_topic = "zigbee2mqtt"  # défaut
     essai interrompu), `setInitialSecurityState`, masque de sécurité étendu, table des clés
     vidée, `formNetwork` (canal `channel` ou 15, PAN et PAN étendu aléatoires), attente du
     réseau levé, puis paramètres écrits dans le `store` ;
-  - pas de réseau mais un réseau connu du `store` → restauration (à venir) : le pilote attend
-    (`pilotes.zigbee.restauration_a_venir`) et ne forme **jamais** un réseau par-dessus.
+  - pas de réseau mais un réseau connu du `store` → **restauration** (`src/backup.rs`,
+    `formNetwork` « depuis une sauvegarde » de herdsman) avec les clés du coffre, sur la clé
+    d'origine seulement, depuis un compteur de trames frais seulement (+ 65 536), sinon le
+    pilote attend en le disant ; jamais de formation par-dessus.
+  - **compteur de trames** : dès que le réseau tourne (formé, restauré ou repris et reconnu),
+    puis toutes les heures tant qu'il est levé, le pilote lit le compteur de trames NWK sortant
+    de la clé (`getNetworkKeyInfo`, comme `backup()` de l'adaptateur ember de herdsman ; statut
+    `SlStatus` sur 32 bits en EZSP 13 comme 14) et l'écrit dans le `store`
+    (`frame_counter`, `frame_counter_fresh`, jamais à la baisse). La lecture horaire laisse les
+    rappels de la clé être lus ; une lecture ratée est journalisée et retentée l'heure
+    suivante, sans effacer le relevé. Une restauration ou un export part de ce relevé
+    + 65 536 (`FRAME_COUNTER_MARGIN` : la clé émet en continu, le relevé peut dater d'une heure).
+    Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé.
 - **Configuration** :
 
 ```toml
@@ -189,8 +200,18 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   forme le réseau ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
   pilote attend (`pilotes.zigbee.coffre_indisponible`).
 - **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
-  réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, **sans clé**),
-  appareils. Écrit dans `<fichier>.tmp` puis renommé.
+  réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, compteur de trames
+  et numéro de séquence de la clé, **sans clé**), appareils. Écrit dans `<fichier>.tmp` puis
+  renommé. Aucun fichier de sauvegarde avec la clé n'est tenu à jour : la clé ne vit qu'au
+  coffre.
+- **Retour à Zigbee2MQTT** : `moli-os zigbee export <fichier> [--instance <id>] [--force]`
+  (Moli arrêté) écrit une sauvegarde Open Coordinator Backup au format de l'adaptateur ember
+  de herdsman (`toUnifiedBackup`) : réseau et appareils du `store`, `network_key` et
+  `hashed_tclk` lus au coffre à ce moment, compteur = relevé + 65 536. Fichier privé (0600),
+  écrit atomiquement, jamais par-dessus un fichier existant sans `--force` ; rien n'est écrit
+  sans les deux clés au coffre ni sans compteur frais. La clé n'est jamais affichée ; un
+  avertissement (`pilotes.zigbee.export_avertissement`) rappelle de supprimer le fichier après
+  usage. `moli-os zigbee import` relit ce fichier.
 - **Points** : appareil `coordinator` : `firmware` (texte, `7.4.4.0`), `ezsp_version`
   (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`), en lecture seule ;
   `permit_join` (booléen, **écrivable**) : vrai ouvre l'appairage 254 s comme le `permitJoin`

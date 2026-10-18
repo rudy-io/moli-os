@@ -27,6 +27,6 @@ pub use hub::{
     ApprovalError, CORE_NAMESPACE, CommandError, DeviceView, DriverView, Hub, HubOptions,
     LabelError, LabelPatch, MAX_LABEL, Snapshot,
 };
-pub use secrets::{MasterKey, forget_secret, set_secret};
+pub use secrets::{MasterKey, forget_secret, read_secret, set_secret};
 pub use stats::Stats;
 pub use supervisor::spawn_driver;

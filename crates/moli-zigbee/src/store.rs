@@ -25,14 +25,18 @@ pub struct NetworkRecord {
     /// IEEE address of the dongle that runs the network, `0x` and 16 hex digits.
     pub coordinator_ieee: String,
     pub nwk_update_id: u8,
-    /// Outgoing NWK frame counter of the network key, as a backup recorded
-    /// it: a restore starts above it (devices drop frames whose counter they
-    /// already saw). Not secret.
+    /// Outgoing NWK frame counter of the network key, as an imported backup
+    /// recorded it or as the driver last read it from the dongle (at once
+    /// when the network runs, then hourly): a restore or an export starts
+    /// above it (devices drop frames whose counter they already saw). Not
+    /// secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_counter: Option<u32>,
-    /// Whether `frame_counter` is fresh: no dongle has sent with this
-    /// network since it was recorded (set by an import; cleared once a
-    /// dongle runs the network again). Only a fresh counter is restored:
+    /// Whether `frame_counter` is fresh, that is restorable: set by an
+    /// import (no dongle has sent since) or by a live read of the dongle
+    /// (the restore margin covers what it sent since, up to an hour);
+    /// cleared when a dongle takes the network over from a saved counter,
+    /// until its own is read. Only a fresh counter is restored or exported:
     /// a stale one would start below what the devices already saw, and
     /// they would drop every frame of the coordinator.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
