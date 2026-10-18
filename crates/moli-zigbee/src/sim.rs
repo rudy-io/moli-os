@@ -33,6 +33,8 @@ struct Script {
     /// newest first.
     reverse: usize,
     held: Vec<Vec<u8>>,
+    /// DATA frames are lost on the line: neither acknowledged nor logged.
+    muted: bool,
 }
 
 #[derive(Debug)]
@@ -59,6 +61,7 @@ impl FakeNcp {
             received: Vec::new(),
             reverse: 0,
             held: Vec::new(),
+            muted: false,
         }));
         let (control, control_rx) = mpsc::unbounded_channel();
         let link = Link {
@@ -91,6 +94,12 @@ impl FakeNcp {
         script.held.clear();
     }
 
+    /// Lose (`true`) or take again the host's DATA frames; the host
+    /// retransmits a lost one.
+    pub(crate) fn mute(&self, muted: bool) {
+        self.lock().muted = muted;
+    }
+
     /// Send a callback frame to the host.
     pub(crate) fn callback(&self, id: u16, params: &[u8]) {
         let _ = self.control.send(Control::Callback(id, params.to_vec()));
@@ -106,14 +115,14 @@ impl FakeNcp {
         self.lock().received.clone()
     }
 
-    /// Wait until at least `count` commands were received; panics after 2 s.
+    /// Wait until at least `count` commands were received; panics after 5 s.
     pub(crate) async fn wait_received(&self, count: usize) {
         let wait = async {
             while self.lock().received.len() < count {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         };
-        tokio::time::timeout(Duration::from_secs(2), wait)
+        tokio::time::timeout(Duration::from_secs(5), wait)
             .await
             .unwrap_or_else(|_| panic!("the fake NCP never received {count} commands"));
     }
@@ -204,6 +213,9 @@ impl Link {
                 payload,
                 ..
             } if self.up => {
+                if self.lock().muted {
+                    return Ok(());
+                }
                 if frm != self.rx_seq {
                     // A copy of a frame already taken (its ACK was lost), or a gap.
                     let ack = self.rx_seq;
@@ -242,7 +254,7 @@ impl Link {
         let Ok((header, params)) = decode(frame) else {
             return Vec::new();
         };
-        let mut script = self.script.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut script = self.lock();
         script.received.push((header.id, params.to_vec()));
         let reply = if header.id == ids::VERSION {
             let v = script.version;
@@ -272,6 +284,10 @@ impl Link {
         let mut held = std::mem::take(&mut script.held);
         held.reverse();
         held
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Script> {
+        self.script.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     async fn send_data(&mut self, payload: Vec<u8>) -> std::io::Result<()> {

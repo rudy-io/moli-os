@@ -4,14 +4,15 @@
 //! The task (the "pump") owns the port and the [`Session`]: it writes the
 //! commands one at a time (the ASH window is one frame), runs the
 //! retransmission timer, routes responses to their callers by sequence
-//! number and callbacks to a channel. [`Ezsp`] is a cheap handle on it.
+//! number and callbacks to a channel. [`Ezsp`] is a cheap handle on it; a
+//! command whose caller gave up before it left the queue is never sent.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{bail, ensure};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
@@ -28,6 +29,9 @@ pub const MAX_PROTOCOL: u8 = 0x13;
 /// How long the NCP gets to answer an RST, and to answer a command.
 const RESET_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// A write the port cannot take within this delay (the dongle holding XOFF
+/// for good, a dead adapter) brings the link down.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 /// RSTs sent before giving up on the NCP.
 const RESET_ATTEMPTS: u8 = 2;
 /// Commands waiting for the pump.
@@ -77,46 +81,35 @@ pub struct Callback {
 struct Timing {
     reset: Duration,
     call: Duration,
+    write: Duration,
 }
 
 impl Timing {
     const DEFAULT: Self = Self {
         reset: RESET_TIMEOUT,
         call: CALL_TIMEOUT,
+        write: WRITE_TIMEOUT,
     };
 }
 
 /// What a command gets back: its response, or the failure that ended the link.
 type Reply = Result<(Header, Vec<u8>), EzspFailure>;
 
-/// Commands awaiting a response, shared by the handles and the pump.
-#[derive(Debug, Default)]
-struct Calls {
-    next_seq: u8,
-    pending: HashMap<u8, oneshot::Sender<Reply>>,
-    /// Set once the pump stopped: every later command fails with it.
-    failure: Option<EzspFailure>,
-}
-
-impl Calls {
-    fn fail(&mut self, failure: EzspFailure) {
-        let failure = *self.failure.get_or_insert(failure);
-        for (_, waiter) in self.pending.drain() {
-            let _ = waiter.send(Err(failure));
-        }
-    }
-}
-
-fn lock(calls: &Mutex<Calls>) -> MutexGuard<'_, Calls> {
-    calls.lock().unwrap_or_else(PoisonError::into_inner)
+/// A command on its way to the pump: its frame, whose sequence number the
+/// pump sets when it sends it, and where its response goes.
+#[derive(Debug)]
+struct Command {
+    frame: Vec<u8>,
+    reply: oneshot::Sender<Reply>,
 }
 
 /// A handle on the EZSP link; clones share it. The link closes when the
 /// last one is dropped.
 #[derive(Clone, Debug)]
 pub struct Ezsp {
-    frames: mpsc::Sender<Vec<u8>>,
-    calls: Arc<Mutex<Calls>>,
+    commands: mpsc::Sender<Command>,
+    /// Set by the pump when it stops: every later command fails with it.
+    failure: Arc<OnceLock<EzspFailure>>,
     timing: Timing,
 }
 
@@ -142,49 +135,54 @@ impl Ezsp {
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let (frames, frames_rx) = mpsc::channel(COMMAND_QUEUE);
+        let (commands, commands_rx) = mpsc::channel(COMMAND_QUEUE);
         let (callbacks, callbacks_rx) = mpsc::channel(CALLBACK_QUEUE);
         let (up, up_rx) = oneshot::channel();
-        let calls = Arc::new(Mutex::new(Calls::default()));
+        let failure = Arc::new(OnceLock::new());
         let pump = Pump {
             io,
             session: Session::new(),
-            frames: frames_rx,
+            commands: commands_rx,
             queue: VecDeque::new(),
             sending: false,
-            calls: Arc::clone(&calls),
+            next_seq: 0,
+            pending: HashMap::new(),
+            failure: Arc::clone(&failure),
             callbacks,
+            write_timeout: timing.write,
         };
         tokio::spawn(pump.run(timing.reset, up));
         let reset_code = up_rx.await.unwrap_or(Err(EzspFailure::LinkLost))?;
         tracing::debug!(reset_code, "ASH link up");
         let ezsp = Self {
-            frames,
-            calls,
+            commands,
+            failure,
             timing,
         };
         let version = ezsp.negotiate().await?;
         Ok((ezsp, version, callbacks_rx))
     }
 
-    /// Send a command and wait (5 s) for its response; returns the response
-    /// parameters.
+    /// Send a command and wait (5 s, queueing included) for its response;
+    /// returns the response parameters.
+    ///
+    /// A timeout does not guarantee the command was not executed: it may
+    /// already be with the NCP. A command still queued when its caller gives
+    /// up (timeout, or a dropped future) is never sent.
     ///
     /// # Errors
     ///
     /// An [`EzspFailure`] once the link is down (at once for every later
     /// call); otherwise a timeout, or a response that is not this command's.
     pub async fn call(&self, id: u16, params: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let (header, params) = self.request(id, |seq| encode(seq, id, params)).await?;
+        let (header, params) = self.request(id, encode(0, id, params)).await?;
         check(id, header)?;
         Ok(params)
     }
 
     async fn negotiate(&self) -> anyhow::Result<Version> {
         let (header, params) = self
-            .request(ids::VERSION, |seq| {
-                legacy_version_request(seq, MIN_PROTOCOL)
-            })
+            .request(ids::VERSION, legacy_version_request(0, MIN_PROTOCOL))
             .await?;
         check(ids::VERSION, header)?;
         let announced = Version::parse(&params)?;
@@ -209,62 +207,31 @@ impl Ezsp {
         Ok(version)
     }
 
-    /// Send the frame `build` makes with a fresh sequence number, and wait
-    /// for the response carrying that number.
-    async fn request(
-        &self,
-        id: u16,
-        build: impl FnOnce(u8) -> Vec<u8>,
-    ) -> anyhow::Result<(Header, Vec<u8>)> {
-        let (seq, mut reply) = self.register()?;
-        if self.frames.send(build(seq)).await.is_err() {
-            // The pump is gone, having failed every pending command.
-            let mut calls = lock(&self.calls);
-            calls.pending.remove(&seq);
-            return Err(calls.failure.unwrap_or(EzspFailure::LinkLost).into());
-        }
-        match tokio::time::timeout(self.timing.call, &mut reply).await {
-            Ok(Ok(reply)) => reply.map_err(anyhow::Error::from),
-            Ok(Err(_)) => Err(lock(&self.calls)
-                .failure
-                .unwrap_or(EzspFailure::LinkLost)
-                .into()),
-            Err(_) => {
-                // Free the number, unless a response took it meanwhile and
-                // another command reuses it (that one's receiver is alive).
-                drop(reply);
-                let mut calls = lock(&self.calls);
-                if calls
-                    .pending
-                    .get(&seq)
-                    .is_some_and(oneshot::Sender::is_closed)
-                {
-                    calls.pending.remove(&seq);
-                }
-                bail!(
-                    "EZSP command {id:#06x}: no response within {:?}",
-                    self.timing.call
-                )
-            }
-        }
-    }
-
-    /// Take a sequence number no pending command uses.
-    fn register(&self) -> anyhow::Result<(u8, oneshot::Receiver<Reply>)> {
-        let mut calls = lock(&self.calls);
-        if let Some(failure) = calls.failure {
+    /// Hand `frame` to the pump and wait for its response, both within the
+    /// call timeout.
+    async fn request(&self, id: u16, frame: Vec<u8>) -> anyhow::Result<(Header, Vec<u8>)> {
+        if let Some(&failure) = self.failure.get() {
             return Err(failure.into());
         }
-        // Callers that gave up (a dropped `call` future) free their number.
-        calls.pending.retain(|_, waiter| !waiter.is_closed());
-        let seq = (0..=u8::MAX)
-            .map(|i| calls.next_seq.wrapping_add(i))
-            .find(|seq| !calls.pending.contains_key(seq))
-            .ok_or_else(|| anyhow!("too many EZSP commands awaiting a response"))?;
-        calls.next_seq = seq.wrapping_add(1);
-        let (waiter, reply) = oneshot::channel();
-        calls.pending.insert(seq, waiter);
-        Ok((seq, reply))
+        let (reply, response) = oneshot::channel();
+        let exchange = async {
+            self.commands.send(Command { frame, reply }).await.ok()?;
+            response.await.ok()
+        };
+        match tokio::time::timeout(self.timing.call, exchange).await {
+            Ok(Some(reply)) => reply.map_err(anyhow::Error::from),
+            // The pump is gone; it recorded why before letting go of the commands.
+            Ok(None) => Err(self
+                .failure
+                .get()
+                .copied()
+                .unwrap_or(EzspFailure::LinkLost)
+                .into()),
+            Err(_) => bail!(
+                "EZSP command {id:#06x}: no response within {:?}",
+                self.timing.call
+            ),
+        }
     }
 }
 
@@ -289,13 +256,17 @@ fn check(id: u16, header: Header) -> anyhow::Result<()> {
 struct Pump<T> {
     io: T,
     session: Session,
-    frames: mpsc::Receiver<Vec<u8>>,
+    commands: mpsc::Receiver<Command>,
     /// Commands not yet handed to the session.
-    queue: VecDeque<Vec<u8>>,
+    queue: VecDeque<Command>,
     /// The session holds a command awaiting its ACK.
     sending: bool,
-    calls: Arc<Mutex<Calls>>,
+    next_seq: u8,
+    /// Commands sent, awaiting their response, by sequence number.
+    pending: HashMap<u8, oneshot::Sender<Reply>>,
+    failure: Arc<OnceLock<EzspFailure>>,
     callbacks: mpsc::Sender<Callback>,
+    write_timeout: Duration,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
@@ -312,7 +283,22 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
         };
         if let Some(failure) = failure {
             tracing::warn!(%failure, "EZSP link stopped");
-            lock(&self.calls).fail(failure);
+            self.fail(failure);
+        }
+    }
+
+    /// Record the failure, then fail every command, sent, queued or still
+    /// in the channel.
+    fn fail(&mut self, failure: EzspFailure) {
+        let _ = self.failure.set(failure);
+        self.commands.close();
+        let mut waiters: Vec<_> = self.pending.drain().map(|(_, reply)| reply).collect();
+        waiters.extend(self.queue.drain(..).map(|command| command.reply));
+        while let Ok(command) = self.commands.try_recv() {
+            waiters.push(command.reply);
+        }
+        for reply in waiters {
+            let _ = reply.send(Err(failure));
         }
     }
 
@@ -361,9 +347,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
                     }
                     Ok(n) => self.session.on_bytes(&buf[..n], Instant::now()),
                 },
-                frame = self.frames.recv() => match frame {
-                    Some(frame) => {
-                        self.queue.push_back(frame);
+                command = self.commands.recv() => match command {
+                    Some(command) => {
+                        self.queue.push_back(command);
                         continue;
                     }
                     None => return None,
@@ -380,16 +366,31 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
         }
     }
 
-    /// Hand the next command to the session if it is free, then write every
-    /// frame the session has for the NCP.
+    /// Hand the next command whose caller still waits to the session if it
+    /// is free, then write every frame the session has for the NCP.
     async fn transmit(&mut self) -> Result<(), EzspFailure> {
-        if !self.sending
-            && let Some(frame) = self.queue.pop_front()
+        while !self.sending
+            && let Some(command) = self.queue.pop_front()
         {
+            if command.reply.is_closed() {
+                // Timed out or dropped while queued: never sent, so never run.
+                tracing::debug!("EZSP command abandoned before it was sent");
+                continue;
+            }
+            let Some(seq) = self.free_seq() else {
+                // 256 commands awaiting a response: wait for one to end.
+                self.queue.push_front(command);
+                break;
+            };
+            let Command { mut frame, reply } = command;
+            if let Some(first) = frame.first_mut() {
+                *first = seq;
+            }
             // Free and up (a down link stops the pump), so never busy here.
             self.session
                 .send(frame)
                 .map_err(|_| EzspFailure::LinkLost)?;
+            self.pending.insert(seq, reply);
             self.sending = true;
         }
         let now = Instant::now();
@@ -399,15 +400,35 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
         Ok(())
     }
 
+    /// A sequence number no command awaiting its response uses.
+    fn free_seq(&mut self) -> Option<u8> {
+        // Callers that gave up free their number.
+        self.pending.retain(|_, reply| !reply.is_closed());
+        let seq = (0..=u8::MAX)
+            .map(|i| self.next_seq.wrapping_add(i))
+            .find(|seq| !self.pending.contains_key(seq))?;
+        self.next_seq = seq.wrapping_add(1);
+        Some(seq)
+    }
+
+    /// Write within the write timeout: a port that takes nothing for that
+    /// long (flow control stuck, dead adapter) loses the link.
     async fn write(&mut self, bytes: &[u8]) -> Result<(), EzspFailure> {
-        let written = async {
+        let write = async {
             self.io.write_all(bytes).await?;
             self.io.flush().await
         };
-        written.await.map_err(|error| {
-            tracing::warn!(%error, "NCP port write failed");
-            EzspFailure::LinkLost
-        })
+        match tokio::time::timeout(self.write_timeout, write).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "NCP port write failed");
+                Err(EzspFailure::LinkLost)
+            }
+            Err(_) => {
+                tracing::warn!(timeout = ?self.write_timeout, "NCP port write blocked");
+                Err(EzspFailure::LinkLost)
+            }
+        }
     }
 
     fn on_event(&mut self, event: Event) -> Option<EzspFailure> {
@@ -429,7 +450,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
     }
 
     /// Route an EZSP frame: a callback to the channel, a response to its caller.
-    fn on_frame(&self, frame: &[u8]) {
+    fn on_frame(&mut self, frame: &[u8]) {
         let (header, params) = match decode(frame) {
             Ok(decoded) => decoded,
             Err(error) => {
@@ -452,7 +473,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
         }
         let waiter = header
             .is_response
-            .then(|| lock(&self.calls).pending.remove(&header.seq))
+            .then(|| self.pending.remove(&header.seq))
             .flatten();
         if let Some(waiter) = waiter {
             let _ = waiter.send(Ok((header, params.to_vec())));
@@ -468,9 +489,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Pump<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll};
     use std::time::Instant;
 
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, DuplexStream, ReadBuf};
+    use tokio::task::JoinSet;
 
     use super::*;
     use crate::ash::{Decoder, Frame};
@@ -622,5 +647,130 @@ mod tests {
             .filter(|frame| frame == &Ok(Frame::Rst))
             .count();
         assert_eq!(resets, 2);
+    }
+
+    #[tokio::test]
+    async fn abandoned_queued_calls_are_never_sent() {
+        let timing = Timing {
+            call: Duration::from_millis(100),
+            ..Timing::DEFAULT
+        };
+        let (ncp, ezsp, _callbacks) = connected(timing).await;
+        // The first command is lost on the line: it holds the ASH window
+        // until its retransmission, while the others wait behind it.
+        ncp.mute(true);
+        let dropped = tokio::time::timeout(
+            Duration::from_millis(20),
+            ezsp.call(ids::SET_RADIO_CHANNEL, &[15]),
+        );
+        let (first, queued, dropped) = tokio::join!(
+            ezsp.call(ids::NETWORK_INIT, &[0x00, 0x00]),
+            ezsp.call(ids::PERMIT_JOINING, &[0xfe]),
+            dropped
+        );
+        assert!(first.unwrap_err().to_string().contains("no response"));
+        assert!(queued.unwrap_err().to_string().contains("no response"));
+        assert!(dropped.is_err(), "the caller gave up");
+        ncp.mute(false);
+        // The retransmission of the first one gets through...
+        ncp.wait_received(3).await;
+        ncp.respond(ids::NOP, &[]);
+        ezsp.call(ids::NOP, &[]).await.unwrap();
+        // ...and the abandoned ones never reach the NCP.
+        assert_eq!(
+            ncp.received()[2..],
+            [(ids::NETWORK_INIT, vec![0x00, 0x00]), (ids::NOP, vec![])]
+        );
+    }
+
+    /// A port whose writes can be made to block for good (XOFF held).
+    struct Gate {
+        io: DuplexStream,
+        blocked: Arc<AtomicBool>,
+    }
+
+    impl AsyncRead for Gate {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.io).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for Gate {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            if self.blocked.load(Ordering::SeqCst) {
+                return Poll::Pending;
+            }
+            Pin::new(&mut self.io).poll_write(cx, buf)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.io).poll_flush(cx)
+        }
+
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.io).poll_shutdown(cx)
+        }
+    }
+
+    async fn gated(timing: Timing) -> (FakeNcp, Ezsp, Arc<AtomicBool>) {
+        let (ncp, io) = FakeNcp::spawn(EMBER_13);
+        let blocked = Arc::new(AtomicBool::new(false));
+        let gate = Gate {
+            io,
+            blocked: Arc::clone(&blocked),
+        };
+        let (ezsp, _, _) = Ezsp::connect_with(gate, timing).await.unwrap();
+        (ncp, ezsp, blocked)
+    }
+
+    #[tokio::test]
+    async fn calls_time_out_even_when_they_cannot_be_queued() {
+        let timing = Timing {
+            call: Duration::from_millis(200),
+            write: Duration::from_secs(60),
+            ..Timing::DEFAULT
+        };
+        let (_ncp, ezsp, blocked) = gated(timing).await;
+        blocked.store(true, Ordering::SeqCst);
+        // One stuck in the write, a full queue, and more waiting to enter it.
+        let mut calls = JoinSet::new();
+        for _ in 0..COMMAND_QUEUE + 8 {
+            let ezsp = ezsp.clone();
+            calls.spawn(async move { ezsp.call(ids::NOP, &[]).await });
+        }
+        let started = Instant::now();
+        let results = tokio::time::timeout(Duration::from_secs(2), calls.join_all())
+            .await
+            .expect("every call ends within its timeout");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        for result in results {
+            let err = result.unwrap_err();
+            assert!(err.to_string().contains("no response"), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_that_never_completes_loses_the_link() {
+        let timing = Timing {
+            write: Duration::from_millis(100),
+            ..Timing::DEFAULT
+        };
+        let (_ncp, ezsp, blocked) = gated(timing).await;
+        blocked.store(true, Ordering::SeqCst);
+        let started = Instant::now();
+        let err = ezsp.call(ids::NOP, &[]).await.unwrap_err();
+        assert_eq!(failure(&err), Some(EzspFailure::LinkLost));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
