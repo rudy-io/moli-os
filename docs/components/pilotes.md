@@ -141,6 +141,46 @@ base_topic = "zigbee2mqtt"  # défaut
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
 - **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (7 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
 
+## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
+
+- **Couvre** (phase 1) : la clé coordinateur elle-même. Formation du réseau, appairage et
+  appareils Zigbee arrivent ensuite ; d'ici là, `z2m` reste le pilote des appareils.
+- **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
+  `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
+  EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
+  (`setConfigurationValue`, liste et valeurs du pilote `ember` de zigbee-herdsman, provenance
+  ligne par ligne dans `src/coordinator.rs` ; une valeur refusée par la clé est journalisée
+  et la sienne gardée), puis `networkInit` : réseau gardé par la clé → attente de
+  `stackStatusHandler` (10 s) ; pas de réseau → `network = none`.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "zigbee"
+kind = "zigbee"
+[driver.options]
+port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
+# baud = 115200         # défaut
+# flow = "software"     # défaut (XON/XOFF, ZBDongle-E) ; "hardware" ou "none"
+# channel = 15          # canal d'un nouveau réseau (11 à 26) ; choisi par le pilote sinon
+```
+
+- **Secrets** : `network_key`, écrite par le pilote lui-même dans le coffre (jamais dans un
+  fichier ni un journal) quand il formera le réseau ; il faut donc une clé maître.
+- **Points** : appareil `coordinator`, en lecture seule : `firmware` (texte, `7.4.4.0`),
+  `ezsp_version` (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`).
+- **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
+  `pilotes.zigbee.firmware_ancien` avec la version trouvée) **sans relance en boucle** : seul
+  un nouveau firmware y fait quelque chose. Une clé qui redémarre seule ou un lien perdu
+  termine l'exécution (le superviseur relance, tout recommence au RST). Un ordre reçu avant
+  que le coordinateur soit prêt est refusé (`pilotes.zigbee.pas_pret`). Les rappels de la clé
+  sont lus en continu (au-delà de 256 en attente, le client les jetterait).
+- **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
+  sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
+  refusés avant d'être prêt, lien perdu.
+- **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
+  `--device`, groupe du port, mise à jour du firmware).
+
 ## `hue` : Philips Hue (`crates/moli-hue`)
 
 - **Couvre** : lumières, interrupteurs (boutons), détecteurs (mouvement, température, luminosité, contact), batteries, pièces et zones Hue.
@@ -474,6 +514,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | Pilote | Crate | Protocole | Écriture possible | Vérifié sur du vrai matériel |
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
+| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | non (phase 1 : le coordinateur seul) | pas encore (cible : ZBDongle-E) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |

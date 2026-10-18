@@ -1,7 +1,45 @@
 # Onboarding : Zigbee natif
 
-1. Demander où est branchée la clé coordinateur (`/dev/ttyUSB0`, ou `tcp://<hôte>:6638` pour un
-   adaptateur réseau) et son firmware (EZSP 13 ou plus).
-2. Déclarer `kind = "zigbee"` avec `port` (et `baud`, `flow`, `channel` si besoin). La clé du
-   réseau est rangée par le pilote dans le coffre, jamais dans un fichier.
-3. `moli-os check-config`, redémarrer. Le pilote est encore provisoire : il attend son réseau.
+Moli parle directement à une clé coordinateur Silicon Labs (EZSP), sans Zigbee2MQTT ni
+broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flux logiciel).
+
+1. **Brancher la clé** sur la machine de Moli, de préférence avec une rallonge USB (loin des
+   ports USB 3 et du Wi-Fi, qui brouillent le 2,4 GHz). Une clé déjà utilisée par un autre
+   logiciel (Zigbee2MQTT, ZHA) doit être libérée : un seul programme à la fois sur le port.
+2. **Trouver son chemin stable** : `ls -l /dev/serial/by-id/`. Garder ce chemin
+   (`/dev/serial/by-id/usb-…-if00-port0`) plutôt que `/dev/ttyUSB0`, dont le numéro change
+   au gré des branchements. Un adaptateur réseau se déclare `tcp://<hôte>:6638`.
+3. **Passer le périphérique au conteneur** : `--device /dev/serial/by-id/<clé>:/dev/ttyUSB0`
+   (`docker run`), ou dans `compose.yaml` :
+
+   ```yaml
+       devices:
+         - /dev/serial/by-id/<clé>:/dev/ttyUSB0
+       group_add:
+         - "20"   # le groupe du port sur l'hôte : stat -c %g /dev/serial/by-id/<clé>
+   ```
+
+   Moli tourne sous l'utilisateur 1000 : sans le groupe du port, l'ouverture est refusée.
+4. **Mettre à jour le firmware** : il faut EmberZNet 7.4 ou plus récent (EZSP 13+). Avec un
+   firmware plus ancien, le pilote attend avec le message « le firmware de la clé parle
+   EZSP … ». Flasher la clé avec le flasheur web du fabricant (pour la ZBDongle-E : celui
+   de Sonoff, image « EmberZNet NCP » 7.4.x ou plus, 115 200 bauds),
+   depuis un navigateur Chrome ou Edge, la clé branchée sur l'ordinateur ; puis la rebrancher
+   sur la machine de Moli.
+5. **Déclarer l'instance** dans `moli.toml` :
+
+   ```toml
+   [[driver]]
+   id = "zigbee"
+   kind = "zigbee"
+   [driver.options]
+   port = "/dev/ttyUSB0"   # le chemin vu dans le conteneur
+   # baud = 115200         # défaut
+   # flow = "software"     # défaut ; "hardware" ou "none" selon la clé
+   ```
+
+   `moli-os check-config`, redémarrer. Il faut une clé maître (`MOLI_MASTER_KEY_FILE`) : la
+   clé du réseau sera rangée par le pilote dans le coffre, jamais dans un fichier.
+6. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
+   `ezsp_version`, `network` (`none` tant qu'aucun réseau n'est formé : la formation du
+   réseau arrive à l'étape suivante du pilote).

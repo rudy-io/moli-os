@@ -20,5 +20,5 @@ vars = []
 options = ["port"]
 
 [origin]
-reused = "documentation Silicon Labs (UG100, UG101, UG600) et ZCL ; zigbee-herdsman (MIT) comme référence"
+reused = "documentation Silicon Labs (UG100 EZSP, UG101 ASH, UG600 EmberZNet) ; tables du protocole reprises de zigbee-herdsman (MIT, voir NOTICE)"
 author = "agent"

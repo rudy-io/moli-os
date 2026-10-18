@@ -434,5 +434,11 @@
   "pilotes.profile.aucune_valeur": "aucune valeur à envoyer",
   "pilotes.profile.sans_valeur": "{name} sans valeur",
   "pilotes.profile.absent_reponse": "{names} absent de la dernière réponse de l'appareil",
-  "pilotes.zigbee.demarrage": "Zigbee natif : démarrage (le réseau n'est pas encore formé)"
+  "pilotes.zigbee.demarrage": "Zigbee natif : démarrage (le réseau n'est pas encore formé)",
+  "pilotes.zigbee.firmware_ancien": "Zigbee natif : le firmware de la clé parle EZSP {version}, il faut EZSP 13 ou plus (EmberZNet 7.4 ou plus récent). Mettre à jour le firmware de la clé avec le flasheur web (voir l'onboarding de l'intégration zigbee), puis redémarrer Moli.",
+  "pilotes.zigbee.pas_pret": "le coordinateur Zigbee n'est pas encore prêt",
+  "pilotes.zigbee.coordinateur": "Coordinateur Zigbee",
+  "pilotes.zigbee.firmware": "Firmware",
+  "pilotes.zigbee.version_ezsp": "Version EZSP",
+  "pilotes.zigbee.reseau": "Réseau"
 }
