@@ -33,7 +33,9 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
 - **Superviseur** : chaque pilote tourne dans sa tâche ; à chaque échec, sa file de commandes
   est vidée et ses appareils passent hors ligne ; un `panic` est capturé, relance avec
   attente croissante, statut exposé (`starting`, `running`, `waiting{reason}`, `backoff`,
-  `stopped`). Une panne de pilote n'emporte jamais le cœur.
+  `stopped`). Une panne de pilote n'emporte jamais le cœur. À l'arrêt de Moli, un pilote voit
+  `next_command()` finir et a 5 s pour terminer proprement (un dernier relevé, une dernière
+  écriture à son appareil) avant d'être abandonné ; cet arrêt n'est pas compté comme une panne.
 - **Journal** : chaque écriture (commande, étiquette, décision d'approbation, appareil
   retrouvé à une autre adresse) avec origine,
   acteur déclaré (borné à 64 caractères) et résultat ; persistant (`data/journal.jsonl`,

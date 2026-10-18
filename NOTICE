@@ -11,5 +11,5 @@ This product includes data derived from zigbee-herdsman
 (https://github.com/Koenkk/zigbee-herdsman): the EZSP protocol tables of
 crates/moli-zigbee (frame IDs, statuses, coordinator configuration values,
 the coordinator endpoint, APS and ZDO frame layouts).
-Copyright (c) 2019 the zigbee-herdsman authors. Licensed under the MIT License;
-see licenses/zigbee-herdsman-MIT.txt.
+Copyright (c) 2019 Jack Wu, Simen Li, Hedy Wang and Koen Kanters.
+Licensed under the MIT License; see licenses/zigbee-herdsman-MIT.txt.

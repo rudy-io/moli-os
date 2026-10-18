@@ -47,14 +47,18 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    s'appelle pas `zigbee`). **Moli doit être arrêté pendant l'import** : un Moli en marche
    garde son coffre et l'état du pilote en mémoire et écraserait l'import à sa prochaine
    sauvegarde ; le démarrer ensuite. Les clés vont au coffre (jamais affichées), le réseau dans
-   `<data_dir>/zigbee-<instance>.json`. Au démarrage, le pilote reprend le réseau que la clé
+   `<data_dir>/zigbee-<instance>.json`. **Supprimer ensuite la copie** de
+   `coordinator_backup.json` faite pour l'import : elle contient la clé du réseau en clair
+   (celui du dossier de données de Zigbee2MQTT ne se garde que si Zigbee2MQTT reste là pour un
+   retour en arrière). Au démarrage, le pilote reprend le réseau que la clé
    porte encore, ou le restaure s'il a été effacé (par le flash du firmware). **Même clé
    seulement** : Moli ne réécrit pas l'adresse d'une clé ; changer de clé, c'est réappairer.
    **Sauvegarde récente seulement** : la restauration repart du compteur de trames de la
-   sauvegarde (+ 65 536) et ne s'en sert qu'une fois. Ensuite, le pilote relève lui-même le
-   compteur de la clé (dès que le réseau tourne, puis toutes les heures, sans clé dans aucun
-   fichier) : si la clé est effacée plus tard, il restaure depuis ce relevé (+ 65 536, de quoi
-   couvrir l'heure écoulée). Sans relevé à jour, une nouvelle restauration demande une
+   sauvegarde (+ 65 536) et ne s'en sert qu'une fois, dans les 24 h qui suivent l'import
+   (démarrer Moli aussitôt). Ensuite, le pilote relève lui-même le compteur de la clé (dès
+   que le réseau tourne, toutes les heures et à l'arrêt, sans clé dans aucun fichier) : si la
+   clé est effacée plus tard, il restaure depuis ce relevé (+ 65 536, de quoi couvrir l'heure
+   écoulée), s'il date de 24 h au plus. Sans relevé à jour, une nouvelle restauration demande une
    sauvegarde **plus récente que le compteur connu** (sinon le pilote attend en le disant ;
    réimporter une sauvegarde plus ancienne est refusé, même avec `--force`). Un import
    interrompu se termine en relançant la même commande. Un réseau déjà connu de l'instance
@@ -62,7 +66,8 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    réseau.
 7. **Revenir à Zigbee2MQTT** (au besoin) : **arrêter Moli d'abord** (et le laisser arrêté :
    jamais les deux sur la même clé), puis exporter **tout de suite** (une clé sous tension fait
-   avancer son compteur de trames ; plus l'export tarde, plus la marge s'use) :
+   avancer son compteur de trames ; plus l'export tarde, plus la marge s'use ; au-delà de
+   24 h après le dernier relevé, l'export est refusé) :
    `moli-os zigbee export coordinator_backup.json` (`--instance <id>` au besoin, `--force`
    pour remplacer un fichier existant). Le fichier est une sauvegarde Open Coordinator Backup
    comme celle de Zigbee2MQTT : paramètres du réseau et appareils connus de Moli, clés lues au

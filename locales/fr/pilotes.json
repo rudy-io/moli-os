@@ -434,7 +434,7 @@
   "pilotes.profile.aucune_valeur": "aucune valeur à envoyer",
   "pilotes.profile.sans_valeur": "{name} sans valeur",
   "pilotes.profile.absent_reponse": "{names} absent de la dernière réponse de l'appareil",
-  "pilotes.zigbee.demarrage": "Zigbee natif : démarrage (le réseau n'est pas encore formé)",
+  "pilotes.zigbee.demarrage": "Zigbee natif : démarrage de la clé Zigbee",
   "pilotes.zigbee.firmware_ancien": "Zigbee natif : le firmware de la clé parle EZSP {version}, il faut EZSP 13 ou plus (EmberZNet 7.4 ou plus récent). Mettre à jour le firmware de la clé avec le flasheur web (voir l'onboarding de l'intégration zigbee), puis redémarrer Moli.",
   "pilotes.zigbee.pas_pret": "le coordinateur Zigbee n'est pas encore prêt",
   "pilotes.zigbee.coordinateur": "Coordinateur Zigbee",
@@ -460,5 +460,6 @@
   "pilotes.zigbee.port_occupe": "Zigbee natif : le port {port} est déjà utilisé par un autre programme (Zigbee2MQTT, ZHA…) ; un seul à la fois sur la clé. Arrêter Zigbee2MQTT d'abord : Moli réessaie de lui-même.",
   "pilotes.zigbee.appairage_echec": "l'appairage Zigbee n'a pas pu être ouvert ou fermé : {error}",
   "pilotes.zigbee.ecriture_refusee": "le coordinateur Zigbee ne prend que l'ouverture ou la fermeture de l'appairage (permit_join, vrai ou faux)",
+  "pilotes.zigbee.import_avertissement": "Ce fichier ({path}) contient la clé du réseau Zigbee en clair : l'import fait, supprimer cette copie. Si c'est le coordinator_backup.json du dossier de données de Zigbee2MQTT lui-même, ne le garder que si Zigbee2MQTT reste là pour un retour en arrière.",
   "pilotes.zigbee.export_avertissement": "Ce fichier ({path}) contient la clé du réseau Zigbee en clair : le garder privé. Le placer dans le dossier de données de Zigbee2MQTT sous le nom coordinator_backup.json (celui-là, Zigbee2MQTT le garde et le réécrit), et supprimer toute autre copie (celle-ci si elle est ailleurs) dès que Zigbee2MQTT a repris le réseau. Exporter juste après l'arrêt de Moli (une clé sous tension fait avancer son compteur de trames), et laisser Moli arrêté : jamais Moli et Zigbee2MQTT en même temps sur la même clé."
 }

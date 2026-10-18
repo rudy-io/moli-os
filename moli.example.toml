@@ -73,7 +73,9 @@ base_topic = "zigbee2mqtt"
 # password_env = "MOLI_Z2M_PASSWORD"
 
 # Zigbee, natively: Moli talks EZSP to a Silicon Labs coordinator dongle
-# (EmberZNet 7.4+), without Zigbee2MQTT. Phase 1: the coordinator only.
+# (EmberZNet 7.4+), without Zigbee2MQTT: its network (formed, kept, or
+# taken over with `moli-os zigbee import`) and pairing (`permit_join`);
+# device points come later (keep z2m for them meanwhile).
 # See integrations/zigbee/onboarding.md (device path, firmware update).
 # [[driver]]
 # id = "zigbee"
@@ -83,6 +85,7 @@ base_topic = "zigbee2mqtt"
 # port = "/dev/ttyUSB0"   # or "tcp://192.168.1.x:6638"
 # baud = 115200
 # flow = "software"       # "hardware" or "none"
+# channel = 15            # a new network's channel, 11 to 26 (default 15)
 
 # Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
 # keep the pairing key encrypted; press the link button when asked.

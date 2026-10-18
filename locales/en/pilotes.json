@@ -434,7 +434,7 @@
   "pilotes.profile.aucune_valeur": "no value to send",
   "pilotes.profile.sans_valeur": "{name} has no value",
   "pilotes.profile.absent_reponse": "{names} missing from the device’s last response",
-  "pilotes.zigbee.demarrage": "Native Zigbee: starting (the network is not formed yet)",
+  "pilotes.zigbee.demarrage": "Native Zigbee: starting the Zigbee dongle",
   "pilotes.zigbee.firmware_ancien": "Native Zigbee: the dongle firmware speaks EZSP {version}, EZSP 13 or newer is needed (EmberZNet 7.4 or later). Update the dongle firmware with the web flasher (see the zigbee integration onboarding), then restart Moli.",
   "pilotes.zigbee.pas_pret": "the Zigbee coordinator is not ready yet",
   "pilotes.zigbee.coordinateur": "Zigbee coordinator",
@@ -460,5 +460,6 @@
   "pilotes.zigbee.port_occupe": "Native Zigbee: port {port} is already used by another program (Zigbee2MQTT, ZHA…); only one at a time on the dongle. Stop Zigbee2MQTT first: Moli tries again by itself.",
   "pilotes.zigbee.appairage_echec": "Zigbee pairing could not be opened or closed: {error}",
   "pilotes.zigbee.ecriture_refusee": "the Zigbee coordinator only takes opening or closing pairing (permit_join, true or false)",
+  "pilotes.zigbee.import_avertissement": "This file ({path}) holds the Zigbee network key in clear: now that it is imported, delete this copy. If it is Zigbee2MQTT's own coordinator_backup.json in its data folder, keep it only if Zigbee2MQTT stays around to go back to.",
   "pilotes.zigbee.export_avertissement": "This file ({path}) holds the Zigbee network key in clear: keep it private. Put it in Zigbee2MQTT's data folder as coordinator_backup.json (that one Zigbee2MQTT keeps and rewrites), and delete every other copy (this one, if it is elsewhere) as soon as Zigbee2MQTT has taken the network over. Export right after stopping Moli (a powered dongle keeps advancing its frame counter), and keep Moli stopped: never Moli and Zigbee2MQTT on the same dongle at once."
 }

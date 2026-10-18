@@ -143,10 +143,11 @@ base_topic = "zigbee2mqtt"  # défaut
 
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 
-- **Couvre** (phase 2 en cours) : la clé coordinateur et son réseau (formé s'il n'existe pas,
-  repris sinon), l'appairage ouvert depuis Moli et les appareils qui arrivent, notés dans le
-  `store` (leur interview et leurs points arrivent ensuite) ; d'ici là, `z2m` reste le pilote
-  des appareils.
+- **Couvre** (phases 1-2 sur simulateur ; matériel à vérifier) : la clé coordinateur et son
+  réseau (formé s'il n'existe pas, repris sinon, restauré depuis une sauvegarde importée),
+  l'appairage ouvert depuis Moli et les appareils qui arrivent, notés dans le `store`, l'import
+  et l'export d'une sauvegarde Zigbee2MQTT ; l'interview des appareils et leurs points sont la
+  phase 3 : d'ici là, `z2m` reste le pilote des appareils.
 - **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
   `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
   EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
@@ -172,20 +173,29 @@ base_topic = "zigbee2mqtt"  # défaut
   - pas de réseau mais un réseau connu du `store` → **restauration** (`src/backup.rs`,
     `formNetwork` « depuis une sauvegarde » de herdsman) avec les clés du coffre, sur la clé
     d'origine seulement, depuis un compteur de trames frais seulement (+ 65 536), sinon le
-    pilote attend en le disant ; jamais de formation par-dessus.
+    pilote attend en le disant ; jamais de formation par-dessus. Un relevé de plus de 24 h
+    (ou sans date) n'est pas restauré non plus (`pilotes.zigbee.compteur_ancien`) : une clé
+    restée sous tension, Moli arrêté, a pu dépasser la marge.
   - **compteur de trames** : dès que le réseau tourne (formé, restauré ou repris et reconnu),
     puis toutes les heures tant qu'il est levé, le pilote lit le compteur de trames NWK sortant
     de la clé (`getNetworkKeyInfo`, comme `backup()` de l'adaptateur ember de herdsman ; statut
     `SlStatus` sur 32 bits en EZSP 13 comme 14) et l'écrit dans le `store`
-    (`frame_counter`, `frame_counter_fresh`, jamais à la baisse). La lecture horaire laisse les
+    (`frame_counter`, `frame_counter_fresh`, jamais à la baisse, daté en secondes unix dans
+    `frame_counter_recorded_at`, comme l'import, daté de son heure). À l'arrêt propre de Moli,
+    sur un réseau levé et vérifié, le pilote referme l'appairage s'il est ouvert et relève le
+    compteur une dernière fois (3 s au plus : le superviseur lui laisse 5 s), pour qu'un
+    export juste après parte de là. La lecture horaire laisse les
     rappels de la clé être lus ; une lecture ratée est journalisée et retentée l'heure
     suivante, sans effacer le relevé. Une restauration ou un export part de ce relevé
     + 65 536 (`FRAME_COUNTER_MARGIN` : la clé émet en continu, le relevé peut dater d'une heure).
     Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé. Un réseau repris
     qui reste « down » au démarrage n'est pas vérifié : le relevé du `store` cesse d'être
-    restaurable (valeur gardée, `frame_counter_fresh` à faux) ; quand il se lève, il est
-    vérifié comme au démarrage (même réseau, coordinateur ; sinon le pilote attend en le
-    disant, rien n'est adopté), puis son compteur est relevé aussitôt et toutes les heures.
+    restaurable (valeur gardée, `frame_counter_fresh` à faux), sauf si la clé se lit comme un
+    autre réseau (ce relevé n'est alors pas le sien) ; quand il se lève, il est vérifié comme
+    au démarrage (même réseau, coordinateur ; sinon le pilote attend en le disant, rien n'est
+    adopté), puis son compteur est relevé aussitôt et toutes les heures. Tant que cette
+    vérification n'a pas pu lire la clé (nouvel essai à l'heure), l'appairage est refusé
+    (`pilotes.zigbee.reseau_non_verifie`) et aucune arrivée n'est notée dans le `store`.
 - **Configuration** :
 
 ```toml
@@ -199,9 +209,10 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
 # channel = 15          # canal d'un nouveau réseau (11 à 26, sinon Moli refuse de démarrer) ; 15 par défaut
 ```
 
-- **Secrets** : `network_key` et `tc_link_key` (32 chiffres hexadécimaux), écrites par le
-  pilote lui-même dans le coffre (jamais dans un fichier ni un journal, `Debug` masqué) quand il
-  forme le réseau ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
+- **Secrets** : `network_key` et `tc_link_key` (32 chiffres hexadécimaux), écrites dans le
+  coffre (jamais dans un fichier ni un journal, `Debug` masqué) par le pilote lui-même quand il
+  forme le réseau, ou par `moli-os zigbee import` (Moli arrêté) depuis une sauvegarde
+  Zigbee2MQTT ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
   pilote attend (`pilotes.zigbee.coffre_indisponible`).
 - **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
   réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, compteur de trames
@@ -213,7 +224,8 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   de herdsman (`toUnifiedBackup`) : réseau et appareils du `store`, `network_key` et
   `hashed_tclk` lus au coffre à ce moment, compteur = relevé + 65 536. Fichier privé (0600),
   écrit atomiquement, jamais par-dessus un fichier existant sans `--force` ; rien n'est écrit
-  sans les deux clés au coffre ni sans compteur frais. La clé n'est jamais affichée ; un
+  sans les deux clés au coffre ni sans compteur frais relevé depuis 24 h au plus
+  (`pilotes.zigbee.export_compteur_ancien`). La clé n'est jamais affichée ; un
   avertissement (`pilotes.zigbee.export_avertissement`) rappelle de supprimer le fichier après
   usage. `moli-os zigbee import` relit ce fichier.
 - **Points** : appareil `coordinator` : `firmware` (texte, `7.4.4.0`), `ezsp_version`
@@ -222,7 +234,8 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   de herdsman (clé transitoire « ZigBeeAlliance09 », politique d'arrivée, `permitJoining`
   sur la clé, puis `Mgmt_Permit_Joining_req` diffusé à `0xFFFC`), et retombe seul à faux au
   bout de 254 s ; faux le referme tout de suite ; refusé si le réseau n'est pas levé
-  (`pilotes.zigbee.reseau_absent`) ; sémantique `control` : un agent qui le demande attend
+  (`pilotes.zigbee.reseau_absent`) ou pas encore reconnu comme celui du `store`
+  (`pilotes.zigbee.reseau_non_verifie`) ; sémantique `control` : un agent qui le demande attend
   l'accord d'un humain ; une ouverture qui échoue en route est refermée sur la clé (au mieux)
   avant que l'erreur soit rendue ; `joining` (texte) : l'IEEE du dernier appareil arrivé
   (`trustCenterJoinHandler` ou annonce ZDO), noté dans le `store` (`interviewed: false`) ;
@@ -237,14 +250,23 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   boucle : le `stackStatusHandler` suivant remet le point à jour (un « réseau tombé » pendant
   l'attente est ignoré, comme herdsman). Une clé qui porte un autre réseau que celui du
   `store`, un réseau inconnu sans clé au coffre ou un réseau dont elle n'est pas le
-  coordinateur n'est jamais adoptée : le `store` et le coffre restent ceux du même réseau.
+  coordinateur n'est jamais adoptée : le `store` et le coffre restent ceux du même réseau. Le
+  port série est pris en exclusivité (`flock`, comme Zigbee2MQTT, puis `TIOCEXCL`, rendu à la
+  fermeture) : un port déjà tenu par un autre programme est refusé en le nommant
+  (`pilotes.zigbee.port_occupe`), le superviseur réessaie.
 - **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
   sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
   refusés avant d'être prêt, lien perdu, formation (clé au coffre avant la clé, canal 15,
   `store` sans clé), clé du coffre reprise, sans coffre pas de réseau, réseau connu jamais
-  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause), autre
-  réseau, réseau inconnu sans clé ou clé non coordinateur jamais adoptés, formation
-  interrompue reprise.
+  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause), réseau
+  levé tard vérifié puis relevé, autre réseau, réseau inconnu sans clé ou clé non coordinateur jamais
+  adoptés, formation interrompue reprise ; restauration d'un réseau importé (compteur inconnu,
+  usé, épuisé, de plus de 24 h, autre clé, import interrompu : rien n'est touché), import
+  (`moli-os zigbee import` : clés au coffre seulement, `--force`, sauvegarde plus ancienne
+  refusée), export (format de herdsman, fichier privé, compteur trop ancien refusé),
+  appairage (accord humain pour un agent, ouverture et fermeture, échec refermé, refusé sur
+  un réseau pas encore vérifié), arrivées notées, relevé horaire du compteur, arrêt propre
+  (appairage refermé, dernier relevé, jamais bloquant), port série exclusif (pty).
 - **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
   `--device`, groupe du port, mise à jour du firmware).
 
@@ -581,7 +603,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | Pilote | Crate | Protocole | Écriture possible | Vérifié sur du vrai matériel |
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
-| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | non (phase 1 : le coordinateur seul) | pas encore (cible : ZBDongle-E) |
+| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent) ; points des appareils en phase 3 | pas encore (phases 1-2 sur simulateur ; cible : ZBDongle-E) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |

@@ -749,7 +749,8 @@ fn zigbee_import(
          trust center link key stored (encrypted) as {instance}/{} ({tc_link_origin})\n\
          frame counter {} (a restore starts {} above it)\n\
          moli-os must stay stopped during an import (a running Moli would overwrite it); start it now: \
-         the driver takes this network over, restoring it on its own dongle if the dongle has none.",
+         the driver takes this network over, restoring it on its own dongle if the dongle has none.\n\
+         {}",
         record.pan_id,
         record.channel,
         import.devices_text(),
@@ -758,6 +759,7 @@ fn zigbee_import(
         network::TC_LINK_KEY,
         record.frame_counter.unwrap_or_default(),
         moli_zigbee::backup::FRAME_COUNTER_MARGIN,
+        moli_i18n::tr!("pilotes.zigbee.import_avertissement", path = file.display()),
     ))
 }
 
@@ -1426,6 +1428,14 @@ mod tests {
         assert!(summary.contains("2 devices"), "{summary}");
         assert!(summary.contains("zigbee/network_key"), "{summary}");
         assert!(summary.contains("stay stopped"), "{summary}");
+        // The copy made for the import holds the key: deleted afterwards.
+        assert!(
+            summary.contains(&moli_i18n::tr!(
+                "pilotes.zigbee.import_avertissement",
+                path = zigbee_fixture().display()
+            )),
+            "{summary}"
+        );
         assert!(!store.import_pending);
     }
 
