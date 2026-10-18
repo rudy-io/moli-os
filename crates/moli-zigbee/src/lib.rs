@@ -318,11 +318,13 @@ impl Live<'_> {
         callbacks: &mut mpsc::Receiver<Callback>,
         order: CommandRequest,
     ) {
-        let (true, Value::Bool(open)) = (&*order.key == "permit_join", &order.value) else {
-            refuse(order);
-            return;
+        let open = match permit_order(&order.key, &order.value) {
+            Ok(open) => open,
+            Err(reason) => {
+                order.reply(Err(reason));
+                return;
+            }
         };
-        let open = *open;
         if self.network != Network::Up {
             order.reply(Err(moli_i18n::tr!("pilotes.zigbee.reseau_absent")));
             return;
@@ -662,6 +664,15 @@ async fn refusing_orders<F: std::future::Future>(ctx: &mut DriverCtx, work: F) -
     }
 }
 
+/// What a write to the coordinator asks: open (`true`) or close joining;
+/// `permit_join` with a boolean is the only write it takes.
+fn permit_order(key: &str, value: &Value) -> Result<bool, String> {
+    match (key, value) {
+        ("permit_join", &Value::Bool(open)) => Ok(open),
+        _ => Err(moli_i18n::tr!("pilotes.zigbee.ecriture_refusee")),
+    }
+}
+
 fn refuse(order: CommandRequest) {
     order.reply(Err(moli_i18n::tr!("pilotes.zigbee.pas_pret")));
 }
@@ -685,11 +696,14 @@ fn coordinator_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
         unit: None,
         semantic: Semantic::Config,
     };
+    // Opening pairing is an order: an agent asking gets a human's
+    // approval first.
     let permit_join = PointSpec {
         access: Access {
             read: true,
             write: true,
         },
+        semantic: Semantic::Control,
         ..point(
             "permit_join",
             &moli_i18n::tr!("pilotes.zigbee.appairage"),
@@ -969,11 +983,20 @@ mod tests {
             store::path(&self.dir.0, self.instance.as_str())
         }
 
-        /// Writes `value` to the coordinator's `key`.
+        /// A person writes `value` to the coordinator's `key`.
         async fn set(&self, key: &str, value: Value) -> Result<(), CommandError> {
+            self.set_from(Origin::Ui, key, value).await
+        }
+
+        async fn set_from(
+            &self,
+            origin: Origin,
+            key: &str,
+            value: Value,
+        ) -> Result<(), CommandError> {
             let device = DeviceId::new(&self.instance, "coordinator");
             self.hub
-                .command(&PointId::new(&device, key), value, Origin::Api, None)
+                .command(&PointId::new(&device, key), value, origin, None)
                 .await
         }
 
@@ -1639,16 +1662,18 @@ mod tests {
         let points: Vec<_> = device
             .points
             .iter()
-            .map(|p| (&*p.key, p.access.write))
+            .map(|p| (&*p.key, p.access.write, p.semantic))
             .collect();
+        // Opening pairing is an order: an agent asking needs a human's
+        // approval first.
         assert_eq!(
             points,
             [
-                ("firmware", false),
-                ("ezsp_version", false),
-                ("network", false),
-                ("permit_join", true),
-                ("joining", false),
+                ("firmware", false, Semantic::Config),
+                ("ezsp_version", false, Semantic::Config),
+                ("network", false, Semantic::Config),
+                ("permit_join", true, Semantic::Control),
+                ("joining", false, Semantic::Config),
             ]
         );
         assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
@@ -1711,6 +1736,15 @@ mod tests {
         let (ncp, run) = running_network().await;
         assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
         let before = ncp.received().len();
+        // An agent asking: a human approves first, nothing is sent.
+        for agent in [Origin::Api, Origin::Mcp] {
+            let asked = run.set_from(agent, "permit_join", Value::Bool(true)).await;
+            assert!(
+                matches!(asked, Err(CommandError::NeedsApproval { .. })),
+                "{asked:?}"
+            );
+        }
+        assert_eq!(ncp.received().len(), before);
         run.set("permit_join", Value::Bool(true)).await.unwrap();
         assert_eq!(run.point("permit_join"), Some(Value::Bool(true)));
         let opened = since(&ncp, before);
@@ -1796,6 +1830,50 @@ mod tests {
         );
         assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
         assert_eq!(run.status(), Some(DriverStatus::Running), "still running");
+    }
+
+    #[tokio::test]
+    async fn a_failed_open_leaves_joining_closed() {
+        let (ncp, run) = running_network().await;
+        // The broadcast refused (NETWORK_BUSY) once the coordinator opened.
+        ncp.respond(ids::SEND_BROADCAST, &[0xA1, 0x00]);
+        let before = ncp.received().len();
+        let Err(CommandError::Driver(reason)) = run.set("permit_join", Value::Bool(true)).await
+        else {
+            panic!("accepted");
+        };
+        assert!(reason.contains("sendBroadcast"), "{reason}");
+        let after = since(&ncp, before);
+        let ids: Vec<_> = after.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            ids,
+            [
+                ids::IMPORT_TRANSIENT_KEY,
+                ids::SET_POLICY,
+                ids::PERMIT_JOINING,
+                ids::SEND_BROADCAST,
+                ids::CLEAR_TRANSIENT_LINK_KEYS,
+                ids::SET_POLICY,
+                ids::PERMIT_JOINING,
+            ]
+        );
+        assert_eq!(after[5].1, [0x00, 0x02], "rejoins only again");
+        assert_eq!(after[6].1, [0], "the coordinator closed again");
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn only_permit_join_is_written() {
+        assert_eq!(permit_order("permit_join", &Value::Bool(true)), Ok(true));
+        assert_eq!(permit_order("permit_join", &Value::Bool(false)), Ok(false));
+        let unsupported = Err(moli_i18n::tr!("pilotes.zigbee.ecriture_refusee"));
+        assert_eq!(permit_order("permit_join", &Value::Int(1)), unsupported);
+        assert_eq!(permit_order("network", &text("up")), unsupported);
+        assert_eq!(permit_order("joining", &Value::Bool(true)), unsupported);
+        assert_ne!(
+            moli_i18n::tr!("pilotes.zigbee.ecriture_refusee"),
+            moli_i18n::tr!("pilotes.zigbee.pas_pret")
+        );
     }
 
     /// `trustCenterJoinHandler` for `ieee` (as it travels) at `nwk`.

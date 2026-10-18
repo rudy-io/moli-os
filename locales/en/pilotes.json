@@ -454,5 +454,6 @@
   "pilotes.zigbee.appairage": "Pairing open",
   "pilotes.zigbee.arrivee": "Last device joined",
   "pilotes.zigbee.reseau_absent": "the Zigbee network is not up: pairing can be neither opened nor closed",
-  "pilotes.zigbee.appairage_echec": "Zigbee pairing could not be opened or closed: {error}"
+  "pilotes.zigbee.appairage_echec": "Zigbee pairing could not be opened or closed: {error}",
+  "pilotes.zigbee.ecriture_refusee": "the Zigbee coordinator only takes opening or closing pairing (permit_join, true or false)"
 }

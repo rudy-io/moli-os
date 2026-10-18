@@ -392,41 +392,92 @@ pub async fn wait_network_up(
 /// then a Mgmt_Permit_Joining_req broadcast to every router. Closing
 /// clears the transient keys and lets only rejoins in.
 ///
+/// An open that fails once the transient key is in (policy relaxed,
+/// `permitJoining` or the broadcast refused, a timeout) is closed again
+/// on the coordinator, best effort, before the error is returned: never a
+/// coordinator accepting joins while Moli says joining is closed.
+///
 /// # Errors
 ///
 /// The link failing, or the NCP refusing a step.
 pub async fn permit_joining(aps: &Aps, seconds: u8) -> anyhow::Result<()> {
+    if seconds == 0 {
+        close_on_coordinator(aps).await?;
+        broadcast_permit(aps, 0).await?;
+        tracing::info!("joining closed on the network");
+        return Ok(());
+    }
     let ezsp = aps.ezsp();
     let protocol = aps.protocol();
-    let policy = if seconds > 0 {
-        let mut params = BLANK_EUI64.to_vec();
-        params.extend_from_slice(&INTEROPERABILITY_LINK_KEY);
-        if protocol < SL_STATUS_VERSION {
-            // `SecManFlag.NONE`, v13 only.
-            params.push(0);
-        }
-        let answer = ezsp.call(ids::IMPORT_TRANSIENT_KEY, &params).await?;
-        // An `SlStatus` whatever the version (`ezspImportTransientKey`).
-        let status = answer
-            .first_chunk::<4>()
-            .map(|code| SlStatus::from_u32(u32::from_le_bytes(*code)));
-        ensure!(
-            status == Some(SlStatus::Ok),
-            "importTransientKey failed: {status:?}"
-        );
-        ALLOW_JOINS | ALLOW_UNSECURED_REJOINS
-    } else {
-        ezsp.call(ids::CLEAR_TRANSIENT_LINK_KEYS, &[]).await?;
-        ALLOW_UNSECURED_REJOINS
+    let mut params = BLANK_EUI64.to_vec();
+    params.extend_from_slice(&INTEROPERABILITY_LINK_KEY);
+    if protocol < SL_STATUS_VERSION {
+        // `SecManFlag.NONE`, v13 only.
+        params.push(0);
+    }
+    let answer = ezsp.call(ids::IMPORT_TRANSIENT_KEY, &params).await?;
+    // An `SlStatus` whatever the version (`ezspImportTransientKey`).
+    let status = answer
+        .first_chunk::<4>()
+        .map(|code| SlStatus::from_u32(u32::from_le_bytes(*code)));
+    ensure!(
+        status == Some(SlStatus::Ok),
+        "importTransientKey failed: {status:?}"
+    );
+    let opened = async {
+        set_join_policy(aps, ALLOW_JOINS | ALLOW_UNSECURED_REJOINS).await?;
+        let answer = ezsp.call(ids::PERMIT_JOINING, &[seconds]).await?;
+        let status = read_status(&answer, protocol)?.0;
+        ensure!(status == SlStatus::Ok, "permitJoining failed: {status:?}");
+        broadcast_permit(aps, seconds).await
     };
-    let answer = ezsp
-        .call(ids::SET_POLICY, &[TRUST_CENTER_POLICY, policy])
+    if let Err(error) = opened.await {
+        tracing::warn!(%error, "opening joining failed: closing it again on the coordinator");
+        if let Err(close) = close_on_coordinator(aps).await {
+            tracing::warn!(error = %close, "joining could not be closed again");
+        }
+        return Err(error);
+    }
+    tracing::info!(seconds, "joining permitted for {seconds} s");
+    Ok(())
+}
+
+/// Joining closed on the coordinator: transient keys cleared, rejoins
+/// only, `permitJoining(0)`. Every step is tried; the first failure is
+/// returned.
+async fn close_on_coordinator(aps: &Aps) -> anyhow::Result<()> {
+    let ezsp = aps.ezsp();
+    let cleared = ezsp
+        .call(ids::CLEAR_TRANSIENT_LINK_KEYS, &[])
+        .await
+        .map(|_| ());
+    let policy = set_join_policy(aps, ALLOW_UNSECURED_REJOINS).await;
+    let closed = async {
+        let answer = ezsp.call(ids::PERMIT_JOINING, &[0]).await?;
+        let status = read_status(&answer, aps.protocol())?.0;
+        ensure!(
+            status == SlStatus::Ok,
+            "permitJoining(0) failed: {status:?}"
+        );
+        Ok(())
+    }
+    .await;
+    cleared.and(policy).and(closed)
+}
+
+/// `emberSetJoinPolicy`: the trust center policy, as `decision`.
+async fn set_join_policy(aps: &Aps, decision: u8) -> anyhow::Result<()> {
+    let answer = aps
+        .ezsp()
+        .call(ids::SET_POLICY, &[TRUST_CENTER_POLICY, decision])
         .await?;
-    let status = read_ezsp_status(&answer, protocol)?.0;
+    let status = read_ezsp_status(&answer, aps.protocol())?.0;
     ensure!(status == SlStatus::Ok, "join policy refused: {status:?}");
-    let answer = ezsp.call(ids::PERMIT_JOINING, &[seconds]).await?;
-    let status = read_status(&answer, protocol)?.0;
-    ensure!(status == SlStatus::Ok, "permitJoining failed: {status:?}");
+    Ok(())
+}
+
+/// Mgmt_Permit_Joining_req for `seconds` to every router.
+async fn broadcast_permit(aps: &Aps, seconds: u8) -> anyhow::Result<()> {
     let tag = aps.next_tag();
     aps.send_broadcast(
         zdo::BROADCAST_ROUTERS,
@@ -435,9 +486,7 @@ pub async fn permit_joining(aps: &Aps, seconds: u8) -> anyhow::Result<()> {
         tag,
         &zdo::mgmt_permit_joining_request(tag, seconds),
     )
-    .await?;
-    tracing::info!(seconds, "joining permitted for {seconds} s");
-    Ok(())
+    .await
 }
 
 /// What a callback means to the running coordinator.
@@ -896,6 +945,61 @@ mod tests {
                 .any(|(id, _)| *id == ids::SEND_BROADCAST),
             "nothing broadcast"
         );
+        // The join policy was relaxed: closed again, best effort.
+        assert_eq!(ncp.received()[2..].to_vec(), opened_then_closed(13, 3));
+    }
+
+    /// What the NCP gets when an open fails at its `failed`-th step
+    /// (counted from 1, after the transient key) and is closed again on
+    /// the coordinator: the steps up to it, then the transient keys
+    /// cleared, rejoins only, `permitJoining(0)`; no closing broadcast.
+    fn opened_then_closed(protocol: u8, failed: usize) -> Vec<(u16, Vec<u8>)> {
+        let mut key = vec![0xFF; 8];
+        key.extend_from_slice(b"ZigBeeAlliance09");
+        if protocol < 14 {
+            key.push(0);
+        }
+        let mut expected = vec![
+            (ids::IMPORT_TRANSIENT_KEY, key),
+            (ids::SET_POLICY, vec![0x00, 0x03]),
+            (ids::PERMIT_JOINING, vec![254]),
+        ];
+        expected.truncate(failed);
+        expected.extend([
+            (ids::CLEAR_TRANSIENT_LINK_KEYS, Vec::new()),
+            (ids::SET_POLICY, vec![0x00, 0x02]),
+            (ids::PERMIT_JOINING, vec![0]),
+        ]);
+        expected
+    }
+
+    #[tokio::test]
+    async fn a_failed_open_is_closed_again() {
+        for version in [EMBER_13, EMBER_14] {
+            let protocol = version.protocol;
+            let (ncp, aps) = joining_ncp(version).await;
+            // The broadcast refused (NETWORK_BUSY), after permitJoining took.
+            let busy: &[u8] = if protocol >= 14 {
+                &[0x04, 0, 0, 0, 0]
+            } else {
+                &[0xA1, 0]
+            };
+            ncp.respond(ids::SEND_BROADCAST, busy);
+            let err = permit_joining(&aps, PERMIT_JOIN_SECONDS).await.unwrap_err();
+            assert!(err.to_string().contains("sendBroadcast"), "{err}");
+            let received = ncp.received()[2..].to_vec();
+            let (broadcast, after) = received.split_at(4);
+            assert_eq!(broadcast[3].0, ids::SEND_BROADCAST, "v{protocol}");
+            let mut expected = broadcast[..3].to_vec();
+            expected.extend_from_slice(after);
+            assert_eq!(expected, opened_then_closed(protocol, 3), "v{protocol}");
+        }
+        // A refused transient key: nothing was opened, nothing to close.
+        let (ncp, aps) = joining_ncp(EMBER_13).await;
+        ncp.respond(ids::IMPORT_TRANSIENT_KEY, &[0x01, 0, 0, 0]);
+        permit_joining(&aps, PERMIT_JOIN_SECONDS).await.unwrap_err();
+        let ids: Vec<_> = ncp.received()[2..].iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, [ids::IMPORT_TRANSIENT_KEY]);
     }
 
     /// `0x00124b0000000001` as it travels.

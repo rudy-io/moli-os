@@ -454,5 +454,6 @@
   "pilotes.zigbee.appairage": "Appairage ouvert",
   "pilotes.zigbee.arrivee": "Dernier appareil arrivé",
   "pilotes.zigbee.reseau_absent": "le réseau Zigbee n'est pas en service : l'appairage ne peut être ni ouvert ni fermé",
-  "pilotes.zigbee.appairage_echec": "l'appairage Zigbee n'a pas pu être ouvert ou fermé : {error}"
+  "pilotes.zigbee.appairage_echec": "l'appairage Zigbee n'a pas pu être ouvert ou fermé : {error}",
+  "pilotes.zigbee.ecriture_refusee": "le coordinateur Zigbee ne prend que l'ouverture ou la fermeture de l'appairage (permit_join, vrai ou faux)"
 }

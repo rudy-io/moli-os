@@ -197,7 +197,9 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
   de herdsman (clé transitoire « ZigBeeAlliance09 », politique d'arrivée, `permitJoining`
   sur la clé, puis `Mgmt_Permit_Joining_req` diffusé à `0xFFFC`), et retombe seul à faux au
   bout de 254 s ; faux le referme tout de suite ; refusé si le réseau n'est pas levé
-  (`pilotes.zigbee.reseau_absent`) ; `joining` (texte) : l'IEEE du dernier appareil arrivé
+  (`pilotes.zigbee.reseau_absent`) ; sémantique `control` : un agent qui le demande attend
+  l'accord d'un humain ; une ouverture qui échoue en route est refermée sur la clé (au mieux)
+  avant que l'erreur soit rendue ; `joining` (texte) : l'IEEE du dernier appareil arrivé
   (`trustCenterJoinHandler` ou annonce ZDO), noté dans le `store` (`interviewed: false`) ;
   un appareil qui part reste dans le `store` (v1).
 - **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
