@@ -48,7 +48,7 @@ const ESCAPE: u8 = 0x7D;
 const XON: u8 = 0x11;
 const XOFF: u8 = 0x13;
 const SUBSTITUTE: u8 = 0x18;
-const CANCEL: u8 = 0x1A;
+pub(super) const CANCEL: u8 = 0x1A;
 /// Bytes that must not appear bare on the wire.
 const RESERVED: [u8; 6] = [FLAG, ESCAPE, XON, XOFF, SUBSTITUTE, CANCEL];
 /// Longest frame body kept (control byte, data and CRC, unstuffed). An ASH
