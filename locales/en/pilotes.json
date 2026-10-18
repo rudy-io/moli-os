@@ -450,5 +450,9 @@
   "pilotes.zigbee.import_interrompu": "Native Zigbee: a Zigbee2MQTT backup import was interrupted; the network state and the vault may not match, nothing is touched. With Moli stopped, run the same command again (moli-os zigbee import), then restart Moli.",
   "pilotes.zigbee.autre_reseau": "Native Zigbee: the dongle carries another network (PAN {dongle}) than the one this Moli knows (PAN {known}). Nothing was changed, on the dongle or in Moli. Plug in this network's dongle, then restart Moli.",
   "pilotes.zigbee.reseau_inconnu": "Native Zigbee: the dongle already carries a network (PAN {pan}) Moli has no key for; it is not adopted. Import its Zigbee2MQTT backup (moli-os zigbee import) or reset the dongle, then restart Moli.",
-  "pilotes.zigbee.pas_coordinateur": "Native Zigbee: the dongle joined a network (PAN {pan}) as a plain node, not as its coordinator; Moli does not adopt it. Reset the dongle, then restart Moli."
+  "pilotes.zigbee.pas_coordinateur": "Native Zigbee: the dongle joined a network (PAN {pan}) as a plain node, not as its coordinator; Moli does not adopt it. Reset the dongle, then restart Moli.",
+  "pilotes.zigbee.appairage": "Pairing open",
+  "pilotes.zigbee.arrivee": "Last device joined",
+  "pilotes.zigbee.reseau_absent": "the Zigbee network is not up: pairing can be neither opened nor closed",
+  "pilotes.zigbee.appairage_echec": "Zigbee pairing could not be opened or closed: {error}"
 }

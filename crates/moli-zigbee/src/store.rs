@@ -164,6 +164,33 @@ impl Store {
     }
 }
 
+impl Store {
+    /// A device arrived (joined, rejoined or announced itself) at `nwk`: a
+    /// new one is recorded, not yet interviewed; a known one keeps what was
+    /// learnt of it, at its new address. Returns whether anything changed
+    /// (the store then needs saving).
+    pub fn record_join(&mut self, ieee: &str, nwk: u16) -> bool {
+        match self.devices.get_mut(ieee) {
+            Some(device) if device.nwk == Some(nwk) => false,
+            Some(device) => {
+                device.nwk = Some(nwk);
+                true
+            }
+            None => {
+                self.devices.insert(
+                    ieee.to_owned(),
+                    DeviceRecord {
+                        ieee: ieee.to_owned(),
+                        nwk: Some(nwk),
+                        interviewed: false,
+                    },
+                );
+                true
+            }
+        }
+    }
+}
+
 fn tmp_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
@@ -263,6 +290,33 @@ pub(crate) mod tests {
         let text = std::fs::read_to_string(&file).unwrap().to_lowercase();
         assert!(!text.contains(key), "{text}");
         assert!(!text.contains("key"), "{text}");
+    }
+
+    #[test]
+    fn a_join_is_recorded_once() {
+        let mut store = full();
+        // A new device: recorded, not interviewed.
+        assert!(store.record_join("0x00124b0000000003", 0x1234));
+        assert_eq!(
+            store.devices["0x00124b0000000003"],
+            DeviceRecord {
+                ieee: "0x00124b0000000003".into(),
+                nwk: Some(0x1234),
+                interviewed: false,
+            }
+        );
+        // Its announce after its join: nothing new.
+        assert!(!store.record_join("0x00124b0000000003", 0x1234));
+        // A known device at a new address keeps its interview.
+        assert!(store.record_join("0x00124b0000000002", 0x0001));
+        assert_eq!(
+            store.devices["0x00124b0000000002"],
+            DeviceRecord {
+                ieee: "0x00124b0000000002".into(),
+                nwk: Some(0x0001),
+                interviewed: true,
+            }
+        );
     }
 
     #[test]

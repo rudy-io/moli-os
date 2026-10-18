@@ -3,6 +3,7 @@
 //!
 //! Dormant: nothing runs unless `[[driver]] kind = "zigbee"` is in `moli.toml`.
 
+pub mod aps;
 pub mod ash;
 pub mod backup;
 pub mod coordinator;
@@ -12,6 +13,7 @@ pub mod network;
 mod sim;
 pub mod store;
 pub mod transport;
+pub mod zdo;
 
 use std::path::{Path, PathBuf};
 
@@ -21,7 +23,8 @@ use serde::{Deserialize, Deserializer};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
-use crate::coordinator::{Init, Network};
+use crate::aps::Aps;
+use crate::coordinator::{Event, Init, Network};
 use crate::ezsp::{Callback, Ezsp, EzspFailure, Version};
 use crate::store::Store;
 
@@ -207,6 +210,7 @@ where
         }
     };
     ctx.set_state(&coordinator, "network", network_value(network));
+    ctx.set_state(&coordinator, "permit_join", Value::Bool(false));
     tracing::info!(
         firmware = %version.display(),
         protocol,
@@ -214,22 +218,163 @@ where
         "zigbee coordinator ready"
     );
     ctx.ready();
+    let live = Live {
+        coordinator,
+        protocol,
+        network,
+        permit_until: None,
+        store: &mut store,
+        store_path: &store_path,
+    };
+    serve(ctx, &ezsp, &mut callbacks, live).await
+}
+
+/// The coordinator ready: follow callbacks and orders until the link ends
+/// (an error: the supervisor restarts the driver) or Moli stops.
+async fn serve(
+    ctx: &mut DriverCtx,
+    ezsp: &Ezsp,
+    callbacks: &mut mpsc::Receiver<Callback>,
+    mut live: Live<'_>,
+) -> anyhow::Result<()> {
+    let aps = Aps::new(ezsp.clone(), live.protocol);
     loop {
+        let close_at = live.permit_until;
         tokio::select! {
             callback = callbacks.recv() => match callback {
                 // Read continuously: the client drops what is not read in time.
-                Some(callback) => {
-                    if let Some(network) = coordinator::network_change(&callback, protocol) {
-                        ctx.set_state(&coordinator, "network", network_value(network));
-                    }
-                }
-                None => return Err(coordinator::link_error(&ezsp).await),
+                Some(callback) => live.on_callback(ctx, &aps, &callback),
+                None => return Err(coordinator::link_error(ezsp).await),
             },
             order = ctx.next_command() => match order {
-                // No writable point yet: devices arrive with the network.
-                Some(order) => refuse(order),
+                Some(order) => live.on_order(ctx, &aps, callbacks, order).await,
                 None => return Ok(()),
             },
+            () = tokio::time::sleep_until(close_at.unwrap_or_else(tokio::time::Instant::now)),
+                if close_at.is_some() => live.joining_closed(ctx),
+        }
+    }
+}
+
+/// The running coordinator: what its callbacks and orders change.
+struct Live<'a> {
+    coordinator: DeviceId,
+    protocol: u8,
+    network: Network,
+    /// When the joining opened from Moli closes by itself (the NCP and the
+    /// routers close it on their own then: only the point is updated).
+    permit_until: Option<tokio::time::Instant>,
+    store: &'a mut Store,
+    store_path: &'a Path,
+}
+
+impl Live<'_> {
+    /// One callback: a `messageSentHandler` goes to the unicast awaiting
+    /// it, the stack status to the `network` point, an arrival to the store
+    /// and the `joining` point; the rest is logged.
+    fn on_callback(&mut self, ctx: &DriverCtx, aps: &Aps, callback: &Callback) {
+        if aps.on_message_sent(callback) {
+            return;
+        }
+        match coordinator::event(callback, self.protocol) {
+            Some(Event::Network(network)) => {
+                self.network = network;
+                ctx.set_state(&self.coordinator, "network", network_value(network));
+                if network != Network::Up && self.permit_until.is_some() {
+                    self.joining_closed(ctx);
+                }
+            }
+            Some(Event::Arrival { nwk, ieee }) => self.arrival(ctx, nwk, ieee),
+            None => {}
+        }
+    }
+
+    /// A device joined or announced itself: recorded (not interviewed yet;
+    /// saved only when something changed), and shown as the last arrival.
+    fn arrival(&mut self, ctx: &DriverCtx, nwk: u16, ieee: [u8; 8]) {
+        let device = network::ieee(ieee);
+        if self.store.record_join(&device, nwk)
+            && let Err(error) = self.store.save(self.store_path)
+        {
+            // Kept in memory: the next change saves it too.
+            tracing::error!(%error, %device, "the zigbee store could not be saved");
+        }
+        ctx.set_state(&self.coordinator, "joining", Value::Text(device.into()));
+    }
+
+    fn joining_closed(&mut self, ctx: &DriverCtx) {
+        self.permit_until = None;
+        ctx.set_state(&self.coordinator, "permit_join", Value::Bool(false));
+        tracing::info!("joining closed");
+    }
+
+    /// An order: `permit_join` is the coordinator's only writable point.
+    /// Opening (254 s) or closing joining needs the network up; the
+    /// callbacks keep being read meanwhile.
+    async fn on_order(
+        &mut self,
+        ctx: &mut DriverCtx,
+        aps: &Aps,
+        callbacks: &mut mpsc::Receiver<Callback>,
+        order: CommandRequest,
+    ) {
+        let (true, Value::Bool(open)) = (&*order.key == "permit_join", &order.value) else {
+            refuse(order);
+            return;
+        };
+        let open = *open;
+        if self.network != Network::Up {
+            order.reply(Err(moli_i18n::tr!("pilotes.zigbee.reseau_absent")));
+            return;
+        }
+        if order.abandoned() {
+            // Nobody waits for it any more: never run late.
+            tracing::debug!(open, "permit join order abandoned");
+            return;
+        }
+        let seconds = if open {
+            coordinator::PERMIT_JOIN_SECONDS
+        } else {
+            0
+        };
+        let work = coordinator::permit_joining(aps, seconds);
+        match self.draining(ctx, aps, callbacks, work).await {
+            Ok(()) => {
+                self.permit_until =
+                    open.then(|| tokio::time::Instant::now() + coordinator::PERMIT_JOIN);
+                ctx.set_state(&self.coordinator, "permit_join", Value::Bool(open));
+                order.reply(Ok(()));
+            }
+            Err(error) => {
+                tracing::warn!(%error, open, "permit join failed");
+                order.reply(Err(moli_i18n::tr!(
+                    "pilotes.zigbee.appairage_echec",
+                    error = error
+                )));
+            }
+        }
+    }
+
+    /// Runs `work` while handling the callbacks that arrive meanwhile (a
+    /// unicast's `messageSentHandler` among them). A link that ends fails
+    /// the work; the run loop then reports it.
+    async fn draining<F: std::future::Future>(
+        &mut self,
+        ctx: &DriverCtx,
+        aps: &Aps,
+        callbacks: &mut mpsc::Receiver<Callback>,
+        work: F,
+    ) -> F::Output {
+        let mut work = std::pin::pin!(work);
+        let mut linked = true;
+        loop {
+            tokio::select! {
+                output = &mut work => return output,
+                callback = callbacks.recv(), if linked => match callback {
+                    Some(callback) => self.on_callback(ctx, aps, &callback),
+                    None => linked = false,
+                },
+            }
         }
     }
 }
@@ -525,7 +670,9 @@ fn network_value(network: Network) -> Value {
     Value::Text(network.as_str().into())
 }
 
-/// The coordinator as a Moli device: what the dongle runs, read-only.
+/// The coordinator as a Moli device: what the dongle runs, read-only; the
+/// joining it opens (`permit_join`, writable) and the last device that
+/// arrived (`joining`, its IEEE address).
 fn coordinator_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
     let point = |key: &str, label: &str, kind: Kind| PointSpec {
         key: key.into(),
@@ -537,6 +684,17 @@ fn coordinator_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
         },
         unit: None,
         semantic: Semantic::Config,
+    };
+    let permit_join = PointSpec {
+        access: Access {
+            read: true,
+            write: true,
+        },
+        ..point(
+            "permit_join",
+            &moli_i18n::tr!("pilotes.zigbee.appairage"),
+            Kind::Binary,
+        )
     };
     Device {
         id: id.clone(),
@@ -568,6 +726,12 @@ fn coordinator_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
                 Kind::Enum {
                     values: Network::VALUES.iter().map(|&v| v.into()).collect(),
                 },
+            ),
+            permit_join,
+            point(
+                "joining",
+                &moli_i18n::tr!("pilotes.zigbee.arrivee"),
+                Kind::Text,
             ),
         ],
     }
@@ -602,9 +766,9 @@ mod tests {
         stack_version: 0x6a00,
     };
     /// Commands the NCP receives up to `networkInit`: `version` twice, the
-    /// configuration, the trust center policies, `networkInit`.
+    /// configuration, the endpoint, the trust center policies, `networkInit`.
     const STARTUP: usize =
-        2 + coordinator::STACK_CONFIG.len() + coordinator::TRUST_CENTER_POLICIES.len() + 1;
+        2 + coordinator::STACK_CONFIG.len() + 1 + coordinator::TRUST_CENTER_POLICIES.len() + 1;
 
     /// The driver on a simulated link, run by the real supervisor; with
     /// `probe`, it first publishes a writable point to send orders to.
@@ -805,6 +969,25 @@ mod tests {
             store::path(&self.dir.0, self.instance.as_str())
         }
 
+        /// Writes `value` to the coordinator's `key`.
+        async fn set(&self, key: &str, value: Value) -> Result<(), CommandError> {
+            let device = DeviceId::new(&self.instance, "coordinator");
+            self.hub
+                .command(&PointId::new(&device, key), value, Origin::Api, None)
+                .await
+        }
+
+        /// Waits (5 s) for the coordinator's `key` to read `value`.
+        async fn wait_point(&self, key: &str, value: &Value) {
+            for _ in 0..500 {
+                if self.point(key).as_ref() == Some(value) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("{key} still {:?}, not {value:?}", self.point(key));
+        }
+
         async fn order(&self) -> Result<(), CommandError> {
             let device = DeviceId::new(&self.instance, "probe");
             self.hub
@@ -832,6 +1015,7 @@ mod tests {
     fn ncp_with_init(init: &[u8]) -> (FakeNcp, DuplexStream) {
         let (ncp, io) = FakeNcp::spawn(EMBER_13);
         ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0x00]);
+        ncp.respond(ids::ADD_ENDPOINT, &[0x00]);
         ncp.respond(ids::SET_POLICY, &[0x00]);
         ncp.respond(ids::NETWORK_INIT, init);
         (ncp, io)
@@ -1462,9 +1646,13 @@ mod tests {
             [
                 ("firmware", false),
                 ("ezsp_version", false),
-                ("network", false)
+                ("network", false),
+                ("permit_join", true),
+                ("joining", false),
             ]
         );
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+        assert_eq!(run.point("joining"), None, "nobody arrived yet");
         let after: Vec<_> = ncp.received()[STARTUP - 1..]
             .iter()
             .map(|(id, _)| *id)
@@ -1498,6 +1686,193 @@ mod tests {
         panic!("network still {:?}", run.point("network"));
     }
 
+    /// The NCP of a known network, up and ready, also accepting what
+    /// joining needs.
+    async fn running_network() -> (FakeNcp, Running) {
+        let (ncp, io) = forming_ncp(&[0x00]);
+        ncp.respond(ids::IMPORT_TRANSIENT_KEY, &[0, 0, 0, 0]);
+        ncp.respond(ids::CLEAR_TRANSIENT_LINK_KEYS, &[]);
+        ncp.respond(ids::PERMIT_JOINING, &[0x00]);
+        ncp.respond(ids::SEND_BROADCAST, &[0x00, 0x10]);
+        let run = Running::with(io, &Setup::known());
+        ncp.wait_received(STARTUP).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        (ncp, run)
+    }
+
+    /// The commands the NCP received since the first `from`.
+    fn since(ncp: &FakeNcp, from: usize) -> Vec<(u16, Vec<u8>)> {
+        ncp.received()[from..].to_vec()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn permit_join_opens_and_closes() {
+        let (ncp, run) = running_network().await;
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+        let before = ncp.received().len();
+        run.set("permit_join", Value::Bool(true)).await.unwrap();
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(true)));
+        let opened = since(&ncp, before);
+        let ids: Vec<_> = opened.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            ids,
+            [
+                ids::IMPORT_TRANSIENT_KEY,
+                ids::SET_POLICY,
+                ids::PERMIT_JOINING,
+                ids::SEND_BROADCAST
+            ]
+        );
+        assert_eq!(opened[2].1, [254], "the coordinator for 254 s");
+        // … and every router, by Mgmt_Permit_Joining_req to 0xFFFC.
+        let broadcast = &opened[3].1;
+        assert_eq!(broadcast[..2], [0xFC, 0xFF]);
+        assert_eq!(broadcast[broadcast.len() - 2..], [254, 1]);
+        // It closes by itself after 254 s, without a word to the NCP.
+        let after_open = ncp.received().len();
+        tokio::time::sleep(Duration::from_secs(253)).await;
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(true)));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        run.wait_point("permit_join", &Value::Bool(false)).await;
+        assert_eq!(ncp.received().len(), after_open);
+        // Opened again, then closed at once.
+        run.set("permit_join", Value::Bool(true)).await.unwrap();
+        let before = ncp.received().len();
+        run.set("permit_join", Value::Bool(false)).await.unwrap();
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+        let closed = since(&ncp, before);
+        let ids: Vec<_> = closed.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            ids,
+            [
+                ids::CLEAR_TRANSIENT_LINK_KEYS,
+                ids::SET_POLICY,
+                ids::PERMIT_JOINING,
+                ids::SEND_BROADCAST
+            ]
+        );
+        assert_eq!(closed[2].1, [0]);
+        let broadcast = &closed[3].1;
+        assert_eq!(broadcast[broadcast.len() - 2..], [0, 1]);
+        // The closing deadline of the second opening is gone with it.
+        tokio::time::sleep(Duration::from_secs(300)).await;
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+    }
+
+    #[tokio::test]
+    async fn permit_join_needs_the_network() {
+        let (ncp, run) = running_network().await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
+        run.wait_point("network", &text("down")).await;
+        let before = ncp.received().len();
+        for open in [true, false] {
+            assert_eq!(
+                run.set("permit_join", Value::Bool(open)).await,
+                Err(CommandError::Driver(moli_i18n::tr!(
+                    "pilotes.zigbee.reseau_absent"
+                )))
+            );
+        }
+        assert_eq!(ncp.received().len(), before, "nothing sent");
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+    }
+
+    #[tokio::test]
+    async fn a_refused_permit_join_is_reported() {
+        let (ncp, run) = running_network().await;
+        // INVALID_CALL
+        ncp.respond(ids::PERMIT_JOINING, &[0x70]);
+        let Err(CommandError::Driver(reason)) = run.set("permit_join", Value::Bool(true)).await
+        else {
+            panic!("accepted");
+        };
+        assert!(
+            reason.starts_with(&moli_i18n::tr!(
+                "pilotes.zigbee.appairage_echec",
+                error = ""
+            )),
+            "{reason}"
+        );
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+        assert_eq!(run.status(), Some(DriverStatus::Running), "still running");
+    }
+
+    /// `trustCenterJoinHandler` for `ieee` (as it travels) at `nwk`.
+    fn trust_center_join(nwk: u16, ieee: [u8; 8], status: u8) -> Vec<u8> {
+        let mut params = nwk.to_le_bytes().to_vec();
+        params.extend_from_slice(&ieee);
+        // status, decision (preconfigured key), parent
+        params.extend_from_slice(&[status, 0x00, 0x00, 0x00]);
+        params
+    }
+
+    /// A v13 `incomingMessageHandler` carrying a device announce.
+    fn device_announce(nwk: u16, ieee: [u8; 8]) -> Vec<u8> {
+        let mut params = vec![0x04]; // BROADCAST
+        crate::zdo::frame(crate::zdo::DEVICE_ANNOUNCE).encode(&mut params);
+        params.push(200); // lqi
+        params.push(0xC4); // rssi
+        params.extend_from_slice(&nwk.to_le_bytes());
+        params.extend_from_slice(&[0xFF, 0xFF]);
+        let mut zdo = vec![0x81];
+        zdo.extend_from_slice(&nwk.to_le_bytes());
+        zdo.extend_from_slice(&ieee);
+        zdo.push(0x80);
+        params.push(u8::try_from(zdo.len()).unwrap());
+        params.extend_from_slice(&zdo);
+        params
+    }
+
+    #[tokio::test]
+    async fn join_creates_record() {
+        let (ncp, run) = running_network().await;
+        // 0x00124b0000000002
+        let ieee = [0x02, 0, 0, 0, 0, 0x4b, 0x12, 0x00];
+        let name = "0x00124b0000000002";
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x1234, ieee, 1),
+        );
+        run.wait_point("joining", &text(name)).await;
+        let device = store::DeviceRecord {
+            ieee: name.into(),
+            nwk: Some(0x1234),
+            interviewed: false,
+        };
+        assert_eq!(run.store().devices.get(name), Some(&device));
+        assert_eq!(run.store().network, Some(record(0x1a62)), "network kept");
+        // Its announce later, from a new address.
+        ncp.callback(
+            ids::INCOMING_MESSAGE_HANDLER,
+            &device_announce(0x5678, ieee),
+        );
+        for _ in 0..500 {
+            if run.store().devices[name].nwk == Some(0x5678) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(run.store().devices[name].nwk, Some(0x5678));
+        // Another device; then the first one leaves: kept in the store (v1).
+        let other = [0x03, 0, 0, 0, 0, 0x4b, 0x12, 0x00];
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x2222, other, 1),
+        );
+        run.wait_point("joining", &text("0x00124b0000000003")).await;
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x5678, ieee, 2),
+        );
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
+        run.wait_point("network", &text("down")).await;
+        let devices = run.store().devices;
+        assert_eq!(devices.len(), 2);
+        assert!(devices.contains_key(name));
+        assert_eq!(run.point("joining"), Some(text("0x00124b0000000003")));
+    }
+
     #[tokio::test]
     async fn old_firmware_waits_with_reason() {
         let (_ncp, io) = FakeNcp::spawn(EMBER_OLD);
@@ -1523,6 +1898,7 @@ mod tests {
     async fn commands_before_ready_are_refused() {
         let (ncp, io) = FakeNcp::spawn(EMBER_13);
         ncp.respond(ids::SET_CONFIGURATION_VALUE, &[0x00]);
+        ncp.respond(ids::ADD_ENDPOINT, &[0x00]);
         ncp.respond(ids::SET_POLICY, &[0x00]);
         // networkInit never answered: the driver stays in its startup.
         let run = Running::start(io, true);

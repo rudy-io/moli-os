@@ -144,15 +144,18 @@ base_topic = "zigbee2mqtt"  # défaut
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 
 - **Couvre** (phase 2 en cours) : la clé coordinateur et son réseau (formé s'il n'existe pas,
-  repris sinon). Appairage et appareils Zigbee arrivent ensuite ; d'ici là, `z2m` reste le
-  pilote des appareils.
+  repris sinon), l'appairage ouvert depuis Moli et les appareils qui arrivent, notés dans le
+  `store` (leur interview et leurs points arrivent ensuite) ; d'ici là, `z2m` reste le pilote
+  des appareils.
 - **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
   `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
   EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
   (`setConfigurationValue`, liste et valeurs du pilote `ember` de zigbee-herdsman, provenance
   ligne par ligne dans `src/coordinator.rs` ; une valeur refusée par la clé est journalisée
-  et la sienne gardée), les politiques du centre de confiance (`setPolicy`, comme
-  `initTrustCenter` de herdsman), puis `networkInit` :
+  et la sienne gardée), l'endpoint 1 du coordinateur (`addEndpoint` : profil Home Automation,
+  identifiant et clusters de `FIXED_ENDPOINTS` de herdsman ; refusé, le démarrage échoue),
+  les politiques du centre de confiance (`setPolicy`, comme `initTrustCenter` de herdsman),
+  puis `networkInit` :
   - réseau gardé par la clé → attente de `stackStatusHandler` « réseau levé » (10 s), puis
     `getNetworkParameters` + `getEui64` : le réseau n'est repris (et recopié dans le `store`,
     canal et `nwk_update_id` compris) que si la clé en est le coordinateur et que c'est le
@@ -188,8 +191,15 @@ port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
 - **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
   réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, **sans clé**),
   appareils. Écrit dans `<fichier>.tmp` puis renommé.
-- **Points** : appareil `coordinator`, en lecture seule : `firmware` (texte, `7.4.4.0`),
-  `ezsp_version` (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`).
+- **Points** : appareil `coordinator` : `firmware` (texte, `7.4.4.0`), `ezsp_version`
+  (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`), en lecture seule ;
+  `permit_join` (booléen, **écrivable**) : vrai ouvre l'appairage 254 s comme le `permitJoin`
+  de herdsman (clé transitoire « ZigBeeAlliance09 », politique d'arrivée, `permitJoining`
+  sur la clé, puis `Mgmt_Permit_Joining_req` diffusé à `0xFFFC`), et retombe seul à faux au
+  bout de 254 s ; faux le referme tout de suite ; refusé si le réseau n'est pas levé
+  (`pilotes.zigbee.reseau_absent`) ; `joining` (texte) : l'IEEE du dernier appareil arrivé
+  (`trustCenterJoinHandler` ou annonce ZDO), noté dans le `store` (`interviewed: false`) ;
+  un appareil qui part reste dans le `store` (v1).
 - **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
   `pilotes.zigbee.firmware_ancien` avec la version trouvée) **sans relance en boucle** : seul
   un nouveau firmware y fait quelque chose. Une clé qui redémarre seule ou un lien perdu
