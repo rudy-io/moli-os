@@ -4,6 +4,7 @@
 //! Dormant: nothing runs unless `[[driver]] kind = "zigbee"` is in `moli.toml`.
 
 pub mod ash;
+pub mod backup;
 pub mod coordinator;
 pub mod ezsp;
 pub mod network;
@@ -254,9 +255,9 @@ enum Outcome {
     Wait { reason: String, network: Network },
 }
 
-/// No network on the dongle: form one, or why a person is needed: no
-/// vault, or a network the store knows (to restore, never to form over:
-/// that would orphan every paired device).
+/// No network on the dongle: restore the one the store knows (never form
+/// over it: that would orphan every paired device), else form one; or why
+/// a person is needed: no vault.
 async fn first_network(
     config: &Config,
     ctx: &mut DriverCtx,
@@ -266,15 +267,8 @@ async fn first_network(
     store: &mut Store,
     store_path: &Path,
 ) -> anyhow::Result<Outcome> {
-    if let Some(known) = &store.network {
-        tracing::warn!(
-            pan_id = %pan(known),
-            "the dongle has no network but Moli knows one"
-        );
-        return Ok(Outcome::Wait {
-            reason: moli_i18n::tr!("pilotes.zigbee.restauration_a_venir", pan = pan(known)),
-            network: Network::None,
-        });
+    if let Some(known) = store.network.clone() {
+        return restore_known(ctx, ezsp, callbacks, protocol, store, store_path, &known).await;
     }
     if !ctx.can_store_secrets() {
         tracing::warn!("no vault: the network is not formed");
@@ -299,6 +293,61 @@ async fn first_network(
     Ok(Outcome::Ready(Network::Up))
 }
 
+/// The dongle has no network, the store knows one (an imported Zigbee2MQTT
+/// backup, or a dongle wiped since): restore it with the vault's keys, on
+/// that network's own dongle only. A person is needed without a vault,
+/// without the network key in it, or with another dongle plugged in;
+/// nothing is then sent to the dongle nor written.
+async fn restore_known(
+    ctx: &mut DriverCtx,
+    ezsp: &Ezsp,
+    callbacks: &mut mpsc::Receiver<Callback>,
+    protocol: u8,
+    store: &mut Store,
+    store_path: &Path,
+    known: &store::NetworkRecord,
+) -> anyhow::Result<Outcome> {
+    let wait = |reason: String| {
+        Ok(Outcome::Wait {
+            reason,
+            network: Network::None,
+        })
+    };
+    if !ctx.can_store_secrets() {
+        tracing::warn!("no vault: the network is not restored");
+        return wait(moli_i18n::tr!(
+            "pilotes.zigbee.coffre_indisponible",
+            problem = ctx.secrets_problem().unwrap_or_default()
+        ));
+    }
+    let Some(keys) = network::held_keys(ctx).await? else {
+        tracing::warn!(pan_id = %pan(known), "no network key in the vault: the network is not restored");
+        return wait(moli_i18n::tr!(
+            "pilotes.zigbee.cle_absente",
+            pan = pan(known)
+        ));
+    };
+    let frame_counter = known.frame_counter.unwrap_or(0);
+    let restored = refusing_orders(
+        ctx,
+        backup::restore(ezsp, callbacks, protocol, &keys, known, frame_counter),
+    )
+    .await?;
+    match restored {
+        backup::Restored::OtherDongle { dongle } => wait(moli_i18n::tr!(
+            "pilotes.zigbee.autre_dongle",
+            pan = pan(known),
+            expected = known.coordinator_ieee.as_str(),
+            dongle = dongle
+        )),
+        backup::Restored::Network(record) => {
+            store.network = Some(record.keeping_backup_of(known));
+            store.save(store_path)?;
+            Ok(Outcome::Ready(Network::Up))
+        }
+    }
+}
+
 /// A network's PAN ID as people read it (`0x1a62`).
 fn pan(record: &store::NetworkRecord) -> String {
     format!("{:#06x}", record.pan_id)
@@ -315,7 +364,10 @@ fn pan(record: &store::NetworkRecord) -> String {
 /// are not the vault's); a network an empty store does not know while the
 /// vault holds no `network_key`. An empty store with a key in the vault is
 /// a first formation interrupted before the store was written: adopted.
-/// The same network with a new channel or update id updates the store.
+/// The same network with a new channel or update id updates the store
+/// (keeping what an imported backup recorded: frame counter, key sequence
+/// number); a backup imported for the network the dongle still runs is
+/// thus taken over as it is.
 async fn resume(
     ezsp: &Ezsp,
     callbacks: &mut mpsc::Receiver<Callback>,
@@ -340,10 +392,13 @@ async fn resume(
             pan = pan(&record)
         ));
     }
+    // What only an imported backup knows of the same network stays.
+    let record = match &store.network {
+        Some(known) if known.same_network(&record) => record.keeping_backup_of(known),
+        _ => record,
+    };
     match &store.network {
-        Some(known)
-            if (known.pan_id, known.extended_pan_id) != (record.pan_id, record.extended_pan_id) =>
-        {
+        Some(known) if !known.same_network(&record) => {
             tracing::warn!(
                 known = %pan(known),
                 dongle = %pan(&record),
@@ -836,25 +891,169 @@ mod tests {
         assert_eq!(run.store(), Store::default(), "nothing written");
     }
 
+    /// The network an imported backup left in the store (frame counter
+    /// 123456) and the key it left in the vault.
+    fn imported_store() -> Store {
+        known_store(store::NetworkRecord {
+            frame_counter: Some(123_456),
+            key_sequence_number: Some(0),
+            ..record(0x1a62)
+        })
+    }
+
+    const IMPORTED_KEY: &str = "01030507090b0d0f00020406080a0c0d";
+
+    /// A hub with a vault and `store`; `key` in the vault if given.
+    async fn imported(store: Store, key: Option<&str>) -> Prepared {
+        let prepared = Prepared::new(&Setup {
+            vault: true,
+            store: Some(store),
+            ..Setup::default()
+        });
+        if let Some(key) = key {
+            prepared
+                .hub
+                .store_secret(&prepared.instance, network::NETWORK_KEY, key)
+                .await
+                .unwrap();
+        }
+        prepared
+    }
+
     #[tokio::test]
-    async fn a_known_network_is_not_formed_over() {
+    async fn a_known_network_is_restored() {
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = Running::spawn(
+            imported(imported_store(), Some(IMPORTED_KEY)).await,
+            io,
+            false,
+        );
+        ncp.wait_command(ids::FORM_NETWORK).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        assert_eq!(run.point("network"), Some(text("up")));
+        let after: Vec<_> = ncp.received()[STARTUP..]
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(
+            after,
+            [
+                ids::GET_EUI64,
+                ids::SET_VALUE,
+                ids::SET_INITIAL_SECURITY_STATE,
+                ids::SET_VALUE,
+                ids::FORM_NETWORK,
+                ids::SET_VALUE,
+                ids::GET_NETWORK_PARAMETERS,
+                ids::GET_EUI64,
+            ],
+            "restored, never formed anew (no key table cleared)"
+        );
+        // The saved counter plus the margin; the vault's keys.
+        let counter = sent(&ncp, ids::SET_VALUE).unwrap();
+        assert_eq!(counter, [0x23, 4, 0x40, 0xE6, 0x01, 0x00]);
+        let state = sent(&ncp, ids::SET_INITIAL_SECURITY_STATE).unwrap();
+        assert_eq!(hex(&state[18..34]), IMPORTED_KEY);
+        // No trust center link key in the vault: a new one, kept there.
+        let tclk = run
+            .hub
+            .secret(&run.instance, network::TC_LINK_KEY)
+            .expect("tc_link_key in the vault");
+        assert_eq!(hex(&state[2..18]), tclk);
+        let formed = sent(&ncp, ids::FORM_NETWORK).unwrap();
+        let formed = ezsp::NetworkParameters::decode(&formed).unwrap().0;
+        assert_eq!((formed.pan_id, formed.extended_pan_id), (0x1a62, [0xDD; 8]));
+        assert_eq!(
+            run.store(),
+            imported_store(),
+            "what the backup knew is kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_known_network_without_its_key_waits() {
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let run = Running::spawn(imported(imported_store(), None).await, io, true);
+        let reason = run.wait_waiting().await;
+        assert_eq!(
+            reason,
+            moli_i18n::tr!("pilotes.zigbee.cle_absente", pan = "0x1a62")
+        );
+        assert_eq!(run.order().await, not_ready());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(ncp.received().len(), STARTUP, "nothing sent");
+        assert_eq!(run.hub.secret(&run.instance, network::NETWORK_KEY), None);
+        assert_eq!(run.store(), imported_store());
+    }
+
+    #[tokio::test]
+    async fn a_known_network_without_vault_waits() {
         let (ncp, io) = forming_ncp(&[0x93]);
         let run = Running::with(
             io,
             &Setup {
-                vault: true,
-                store: Some(known_store(record(0x1a62))),
+                store: Some(imported_store()),
                 ..Setup::default()
             },
         );
         let reason = run.wait_waiting().await;
+        let problem = moli_i18n::tr!("serveur.coffre.cle_absente");
         assert_eq!(
             reason,
-            moli_i18n::tr!("pilotes.zigbee.restauration_a_venir", pan = "0x1a62")
+            moli_i18n::tr!("pilotes.zigbee.coffre_indisponible", problem = problem)
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(ncp.received().len(), STARTUP);
-        assert_eq!(run.hub.secret(&run.instance, network::NETWORK_KEY), None);
+        assert_eq!(ncp.received().len(), STARTUP, "nothing sent");
+    }
+
+    #[tokio::test]
+    async fn a_known_network_on_another_dongle_waits() {
+        let (ncp, io) = forming_ncp(&[0x93]);
+        let elsewhere = known_store(store::NetworkRecord {
+            coordinator_ieee: "0x00124b0000000009".into(),
+            ..imported_store().network.unwrap()
+        });
+        let run = Running::spawn(
+            imported(elsewhere.clone(), Some(IMPORTED_KEY)).await,
+            io,
+            true,
+        );
+        let reason = run.wait_waiting().await;
+        assert_eq!(
+            reason,
+            moli_i18n::tr!(
+                "pilotes.zigbee.autre_dongle",
+                pan = "0x1a62",
+                expected = "0x00124b0000000009",
+                dongle = "0x00124b0000000001"
+            )
+        );
+        assert_eq!(run.order().await, not_ready());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let after: Vec<_> = ncp.received()[STARTUP..]
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(after, [ids::GET_EUI64], "nothing written to the dongle");
+        assert_eq!(run.point("network"), Some(text("none")));
+        assert_eq!(run.store(), elsewhere, "store untouched");
+    }
+
+    #[tokio::test]
+    async fn a_resumed_network_keeps_the_backup_counter() {
+        // The dongle kept the imported network (Zigbee2MQTT's own dongle).
+        let (ncp, io) = forming_ncp(&[0x00]);
+        let run = Running::spawn(
+            imported(imported_store(), Some(IMPORTED_KEY)).await,
+            io,
+            false,
+        );
+        ncp.wait_received(STARTUP).await;
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_ready().await;
+        assert_eq!(run.store(), imported_store());
+        assert_eq!(sent(&ncp, ids::FORM_NETWORK), None);
     }
 
     #[tokio::test]

@@ -22,3 +22,8 @@ options = ["port"]
 [origin]
 reused = "documentation Silicon Labs (UG100 EZSP, UG101 ASH, UG600 EmberZNet) ; tables du protocole reprises de zigbee-herdsman (MIT, voir NOTICE)"
 author = "agent"
+
+# Fictitious: an Open Coordinator Backup as Zigbee2MQTT (zigbee-herdsman, ember
+# adapter) writes it, read by `moli-os zigbee import`.
+[[fixture]]
+file = "fixtures/coordinator_backup.json"

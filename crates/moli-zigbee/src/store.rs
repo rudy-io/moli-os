@@ -25,6 +25,35 @@ pub struct NetworkRecord {
     /// IEEE address of the dongle that runs the network, `0x` and 16 hex digits.
     pub coordinator_ieee: String,
     pub nwk_update_id: u8,
+    /// Outgoing NWK frame counter of the network key, as an imported backup
+    /// recorded it: a restore starts above it (devices drop frames whose
+    /// counter they already saw). Not secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_counter: Option<u32>,
+    /// Sequence number of the network key, as an imported backup recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_sequence_number: Option<u8>,
+}
+
+impl NetworkRecord {
+    /// Whether `other` is the same network: same PAN ID and extended PAN ID
+    /// (its channel and update id may have moved).
+    #[must_use]
+    pub fn same_network(&self, other: &Self) -> bool {
+        (self.pan_id, self.extended_pan_id) == (other.pan_id, other.extended_pan_id)
+    }
+
+    /// This record (as the dongle reports it) with what only a backup knows
+    /// of the same network, kept from `known`: the frame counter and the key
+    /// sequence number.
+    #[must_use]
+    pub fn keeping_backup_of(self, known: &Self) -> Self {
+        Self {
+            frame_counter: known.frame_counter,
+            key_sequence_number: known.key_sequence_number,
+            ..self
+        }
+    }
 }
 
 /// A device that joined the network.
@@ -32,8 +61,10 @@ pub struct NetworkRecord {
 pub struct DeviceRecord {
     /// `0x` and 16 hex digits, as Zigbee2MQTT writes it.
     pub ieee: String,
-    /// Its current short (network) address.
-    pub nwk: u16,
+    /// Its current short (network) address, when known (an imported backup
+    /// may not have it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nwk: Option<u16>,
     /// Whether its descriptors and `Basic` cluster were read.
     pub interviewed: bool,
 }
@@ -161,6 +192,8 @@ pub(crate) mod tests {
             channel: 15,
             coordinator_ieee: "0x00124b0000000001".into(),
             nwk_update_id: 0,
+            frame_counter: None,
+            key_sequence_number: None,
         }
     }
 
@@ -173,7 +206,7 @@ pub(crate) mod tests {
             "0x00124b0000000002".into(),
             DeviceRecord {
                 ieee: "0x00124b0000000002".into(),
-                nwk: 0x4f2a,
+                nwk: Some(0x4f2a),
                 interviewed: true,
             },
         );

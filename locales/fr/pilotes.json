@@ -442,8 +442,9 @@
   "pilotes.zigbee.version_ezsp": "Version EZSP",
   "pilotes.zigbee.reseau": "Réseau",
   "pilotes.zigbee.coffre_indisponible": "Zigbee natif : aucun réseau formé, faute de coffre de secrets ({problem}). La clé du réseau ne vit que dans le coffre : configurer la clé maître de Moli, puis redémarrer.",
-  "pilotes.zigbee.restauration_a_venir": "Zigbee natif : la clé n'a plus de réseau, mais Moli en connaît un (PAN {pan}). Sa restauration n'est pas encore possible ; aucun nouveau réseau n'est formé, pour ne pas perdre les appareils appairés.",
+  "pilotes.zigbee.cle_absente": "Zigbee natif : la clé n'a plus de réseau, et Moli en connaît un (PAN {pan}) mais le coffre n'a pas sa clé de réseau. Rien n'est formé, pour ne pas perdre les appareils appairés : réimporter la sauvegarde Zigbee2MQTT (moli-os zigbee import), puis redémarrer Moli.",
+  "pilotes.zigbee.autre_dongle": "Zigbee natif : la clé branchée ({dongle}) n'est pas le coordinateur du réseau à restaurer (PAN {pan}, coordinateur {expected}). Moli ne réécrit pas l'adresse d'une clé : brancher la clé d'origine, puis redémarrer Moli. Avec une autre clé, il faudra réappairer les appareils sur un nouveau réseau. Rien n'a été modifié.",
   "pilotes.zigbee.autre_reseau": "Zigbee natif : la clé porte un autre réseau (PAN {dongle}) que celui que ce Moli connaît (PAN {known}). Rien n'a été modifié, ni sur la clé ni dans Moli. Brancher la clé de ce réseau, puis redémarrer Moli.",
-  "pilotes.zigbee.reseau_inconnu": "Zigbee natif : la clé porte déjà un réseau (PAN {pan}) dont Moli n'a pas la clé ; il n'est pas repris. Importer sa sauvegarde Zigbee2MQTT (moli-os zigbee import, à venir) ou réinitialiser la clé, puis redémarrer Moli.",
+  "pilotes.zigbee.reseau_inconnu": "Zigbee natif : la clé porte déjà un réseau (PAN {pan}) dont Moli n'a pas la clé ; il n'est pas repris. Importer sa sauvegarde Zigbee2MQTT (moli-os zigbee import) ou réinitialiser la clé, puis redémarrer Moli.",
   "pilotes.zigbee.pas_coordinateur": "Zigbee natif : la clé a rejoint un réseau (PAN {pan}) comme simple nœud, pas comme coordinateur ; Moli ne la reprend pas. Réinitialiser la clé, puis redémarrer Moli."
 }

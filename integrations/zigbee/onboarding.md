@@ -41,6 +41,15 @@ broker. Clé de référence : Sonoff ZBDongle-E (115 200 bauds, contrôle de flu
    `moli-os check-config`, redémarrer. Il faut une clé maître (`MOLI_MASTER_KEY_FILE`) : les
    clés du réseau sont rangées par le pilote dans le coffre, jamais dans un fichier ; sans
    coffre, aucun réseau n'est formé et le pilote attend en le disant.
-6. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
+6. **Reprendre un réseau Zigbee2MQTT** (facultatif, sans réappairer) : arrêter Zigbee2MQTT,
+   copier sa sauvegarde `coordinator_backup.json` (dossier de données de Zigbee2MQTT), puis
+   `moli-os zigbee import coordinator_backup.json` (`--instance <id>` si l'instance ne
+   s'appelle pas `zigbee`). Les clés vont au coffre (jamais affichées), le réseau dans
+   `<data_dir>/zigbee-<instance>.json`. Au redémarrage, le pilote reprend le réseau que la clé
+   porte encore, ou le restaure s'il a été effacé (par le flash du firmware). **Même clé
+   seulement** : Moli ne réécrit pas l'adresse d'une clé ; changer de clé, c'est réappairer.
+   Un réseau déjà connu de l'instance n'est remplacé qu'avec `--force`. Jamais Zigbee2MQTT et
+   Moli en même temps sur le même réseau.
+7. **Vérifier** : l'appareil « Coordinateur Zigbee » apparaît, `firmware` (ex. `7.4.4.0`),
    `ezsp_version`, `network` (`up` une fois le réseau repris ou formé, sur le canal 15 sauf
    `channel` dans les options).

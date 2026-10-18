@@ -10,7 +10,12 @@
   ou plus), la configure comme un coordinateur, relance le réseau qu'elle garde (`networkInit`)
   ou en forme un s'il n'y en a pas (clés au coffre, paramètres dans
   `<data_dir>/zigbee-<instance>.json`), et publie l'appareil « coordinateur » (`firmware`,
-  `ezsp_version`, `network`), en lecture seule. Restauration, appairage et appareils : étapes
-  suivantes.
+  `ezsp_version`, `network`), en lecture seule. Reprise d'un réseau Zigbee2MQTT :
+  `moli-os zigbee import <coordinator_backup.json>` range ses clés au coffre et son réseau dans
+  le fichier d'état ; si la clé n'a plus de réseau, le pilote le restaure au démarrage (même
+  clé seulement, compteur de trames sauvegardé + 1024), sans réappairage. Appairage et
+  appareils : étapes suivantes.
 - Essayé sur : à remplir (clé, firmware, date).
-- Pas de fixture : les tests rejouent un NCP simulé (`src/sim.rs`) qui parle le vrai ASH.
+- Les tests rejouent un NCP simulé (`src/sim.rs`) qui parle le vrai ASH. Fixture :
+  `fixtures/coordinator_backup.json`, une sauvegarde **fictive** au format Open Coordinator
+  Backup tel que l'écrit zigbee-herdsman (adaptateur ember).

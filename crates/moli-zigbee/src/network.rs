@@ -2,7 +2,8 @@
 //!
 //! The sequence and its values follow zigbee-herdsman (MIT),
 //! `src/adapter/ember/adapter/emberAdapter.ts`, `formNetwork` (the « from
-//! config » path of `initTrustCenter`), with the encodings of
+//! config » path of `initTrustCenter`, and its « from backup » variant that
+//! [`crate::backup::restore`] takes), with the encodings of
 //! `src/adapter/ember/ezsp/ezsp.ts` and `ezsp/buffalo.ts` and the values of
 //! `src/adapter/ember/enums.ts`, `ezsp/enums.ts` and `src/zspec/consts.ts`.
 //!
@@ -39,6 +40,9 @@ pub const CHANNELS: std::ops::RangeInclusive<u8> = 11..=26;
 /// `TRUST_CENTER_GLOBAL_LINK_KEY | HAVE_PRECONFIGURED_KEY | HAVE_NETWORK_KEY
 /// | TRUST_CENTER_USES_HASHED_LINK_KEY | REQUIRE_ENCRYPTED_KEY`.
 const INITIAL_SECURITY_BITMASK: u16 = 0x0004 | 0x0100 | 0x0200 | 0x0084 | 0x0800;
+/// `EmberInitialSecurityBitmask.NO_FRAME_COUNTER_RESET`, added from a backup:
+/// the stack keeps the NWK frame counter set just before.
+const NO_FRAME_COUNTER_RESET: u16 = 0x1000;
 /// `EmberExtendedSecurityBitmask` of `formNetwork`:
 /// `JOINER_GLOBAL_LINK_KEY | NWK_LEAVE_REQUEST_NOT_ALLOWED`.
 const EXTENDED_SECURITY_BITMASK: u16 = 0x0010 | 0x0100;
@@ -46,6 +50,9 @@ const EXTENDED_SECURITY_BITMASK: u16 = 0x0010 | 0x0100;
 const VALUE_EXTENDED_SECURITY_BITMASK: u8 = 0x0a;
 /// `EzspValueId.STACK_TOKEN_WRITING` (`ezspStartWritingStackTokens`).
 const VALUE_STACK_TOKEN_WRITING: u8 = 0x07;
+/// `EzspValueId.NWK_FRAME_COUNTER` (`ezspSetNWKFrameCounter`: 4 bytes,
+/// little-endian).
+const VALUE_NWK_FRAME_COUNTER: u8 = 0x23;
 /// `preconfiguredTrustCenterEui64`: `ZSpec.BLANK_EUI64`.
 const BLANK_EUI64: [u8; 8] = [0xff; 8];
 /// `radioTxPower` when none is configured (`transmitPower || 5`), dBm.
@@ -70,6 +77,15 @@ impl fmt::Debug for Key {
 }
 
 impl Key {
+    /// A new random key.
+    ///
+    /// # Errors
+    ///
+    /// No randomness from the system.
+    pub fn generate() -> anyhow::Result<Self> {
+        Self::random(&SystemRandom::new())
+    }
+
     fn random(rng: &SystemRandom) -> anyhow::Result<Self> {
         let mut bytes = [0u8; 16];
         rng.fill(&mut bytes)
@@ -124,6 +140,28 @@ pub async fn keys(ctx: &DriverCtx) -> anyhow::Result<Keys> {
     })
 }
 
+/// The keys of a network to restore: the network key the vault holds (an
+/// import put it there; never a new one, the devices know only that one),
+/// `None` without it; the trust center link key the vault holds, or a new
+/// random one written there first.
+///
+/// # Errors
+///
+/// No vault, a vault entry that is not a key, or the vault write failing.
+pub async fn held_keys(ctx: &DriverCtx) -> anyhow::Result<Option<Keys>> {
+    if !ctx.can_store_secrets() {
+        bail!("no secret vault: a network is never restored without one");
+    }
+    let Some(held) = ctx.secret(NETWORK_KEY) else {
+        return Ok(None);
+    };
+    let Some(network) = Key::from_hex(&held) else {
+        bail!("the vault's {NETWORK_KEY} is not a 128-bit key (32 hex digits)");
+    };
+    let tc_link = vault_key(ctx, TC_LINK_KEY, &SystemRandom::new()).await?;
+    Ok(Some(Keys { network, tc_link }))
+}
+
 async fn vault_key(ctx: &DriverCtx, name: &str, rng: &SystemRandom) -> anyhow::Result<Key> {
     if let Some(held) = ctx.secret(name) {
         let Some(key) = Key::from_hex(&held) else {
@@ -140,17 +178,38 @@ async fn vault_key(ctx: &DriverCtx, name: &str, rng: &SystemRandom) -> anyhow::R
     Ok(key)
 }
 
-/// `EmberInitialSecurityState` (`writeEmberInitialSecurityState`): bitmask
-/// (`uint16_t`), preconfigured (trust center link) key, network key, key
-/// sequence number, preconfigured trust center EUI64.
+/// `EmberInitialSecurityState` (`writeEmberInitialSecurityState`) of a new
+/// network.
 fn initial_security_state(keys: &Keys) -> Vec<u8> {
+    security_state(keys, INITIAL_SECURITY_BITMASK, 0)
+}
+
+/// `EmberInitialSecurityState`: bitmask (`uint16_t`), preconfigured (trust
+/// center link) key, network key, key sequence number, preconfigured trust
+/// center EUI64.
+fn security_state(keys: &Keys, bitmask: u16, key_sequence_number: u8) -> Vec<u8> {
     let mut state = Vec::with_capacity(2 + 16 + 16 + 1 + 8);
-    state.extend_from_slice(&INITIAL_SECURITY_BITMASK.to_le_bytes());
+    state.extend_from_slice(&bitmask.to_le_bytes());
     state.extend_from_slice(&keys.tc_link.0);
     state.extend_from_slice(&keys.network.0);
-    state.push(0);
+    state.push(key_sequence_number);
     state.extend_from_slice(&BLANK_EUI64);
     state
+}
+
+/// The parameters `formNetwork` gets for a saved network (herdsman's
+/// `netParams` of `formNetwork`, from the backup's values).
+pub(crate) fn saved_parameters(record: &NetworkRecord) -> NetworkParameters {
+    NetworkParameters {
+        extended_pan_id: record.extended_pan_id,
+        pan_id: record.pan_id,
+        radio_tx_power: RADIO_TX_POWER,
+        radio_channel: record.channel,
+        join_method: JOIN_METHOD_MAC_ASSOCIATION,
+        nwk_manager_id: COORDINATOR_ADDRESS,
+        nwk_update_id: record.nwk_update_id,
+        channels: ALL_CHANNELS_MASK,
+    }
 }
 
 /// The parameters `formNetwork` gets: random PAN and extended PAN on
@@ -206,12 +265,63 @@ pub async fn form(
     channel: u8,
     keys: &Keys,
 ) -> anyhow::Result<NetworkRecord> {
-    let answer = ezsp
-        .call(
-            ids::SET_INITIAL_SECURITY_STATE,
-            &initial_security_state(keys),
+    let parameters = new_parameters(channel)?;
+    tracing::info!(
+        channel,
+        pan_id = format_args!("{:#06x}", parameters.pan_id),
+        "forming a new Zigbee network"
+    );
+    let record = form_network(ezsp, callbacks, protocol, keys, &parameters, None).await?;
+    tracing::info!(
+        channel = record.channel,
+        pan_id = format_args!("{:#06x}", record.pan_id),
+        coordinator = %record.coordinator_ieee,
+        "new Zigbee network formed"
+    );
+    Ok(record)
+}
+
+/// What a network formed again from a backup keeps of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FromBackup {
+    pub key_sequence_number: u8,
+    /// The outgoing NWK frame counter to start from.
+    pub frame_counter: u32,
+}
+
+/// herdsman's `formNetwork`: from a backup (`from_backup`), the NWK frame
+/// counter is set first and kept (`NO_FRAME_COUNTER_RESET`), the key
+/// sequence number is the backup's and the key table is not cleared.
+pub(crate) async fn form_network(
+    ezsp: &Ezsp,
+    callbacks: &mut mpsc::Receiver<Callback>,
+    protocol: u8,
+    keys: &Keys,
+    parameters: &NetworkParameters,
+    from_backup: Option<FromBackup>,
+) -> anyhow::Result<NetworkRecord> {
+    let state = match from_backup {
+        None => initial_security_state(keys),
+        Some(backup) => security_state(
+            keys,
+            INITIAL_SECURITY_BITMASK | NO_FRAME_COUNTER_RESET,
+            backup.key_sequence_number,
+        ),
+    };
+    if let Some(backup) = from_backup {
+        match set_value(
+            ezsp,
+            protocol,
+            VALUE_NWK_FRAME_COUNTER,
+            &backup.frame_counter.to_le_bytes(),
         )
-        .await?;
+        .await?
+        {
+            SlStatus::Ok => {}
+            status => bail!("setting the NWK frame counter failed: {status:?}"),
+        }
+    }
+    let answer = ezsp.call(ids::SET_INITIAL_SECURITY_STATE, &state).await?;
     match read_status(&answer, protocol)?.0 {
         SlStatus::Ok => {}
         status => bail!("setInitialSecurityState failed: {status:?}"),
@@ -228,18 +338,14 @@ pub async fn form(
         SlStatus::Ok => {}
         status => bail!("setting the extended security bitmask failed: {status:?}"),
     }
-    let answer = ezsp.call(ids::CLEAR_KEY_TABLE, &[]).await?;
-    match read_status(&answer, protocol)?.0 {
-        SlStatus::Ok => {}
-        // herdsman logs it and goes on.
-        status => tracing::warn!(?status, "clearKeyTable failed"),
+    if from_backup.is_none() {
+        let answer = ezsp.call(ids::CLEAR_KEY_TABLE, &[]).await?;
+        match read_status(&answer, protocol)?.0 {
+            SlStatus::Ok => {}
+            // herdsman logs it and goes on.
+            status => tracing::warn!(?status, "clearKeyTable failed"),
+        }
     }
-    let parameters = new_parameters(channel)?;
-    tracing::info!(
-        channel,
-        pan_id = format_args!("{:#06x}", parameters.pan_id),
-        "forming a new Zigbee network"
-    );
     let mut params = Vec::with_capacity(NetworkParameters::LEN);
     parameters.encode(&mut params);
     let answer = ezsp.call(ids::FORM_NETWORK, &params).await?;
@@ -252,7 +358,7 @@ pub async fn form(
             .await?;
     if network != Network::Up {
         bail!(
-            "the new network did not come up within {:?}",
+            "the network did not come up within {:?}",
             coordinator::NETWORK_UP_TIMEOUT
         );
     }
@@ -263,12 +369,17 @@ pub async fn form(
         bail!("the formed network's node is not a coordinator");
     }
     let record = dongle.record;
-    tracing::info!(
-        channel = record.channel,
-        pan_id = format_args!("{:#06x}", record.pan_id),
-        coordinator = %record.coordinator_ieee,
-        "new Zigbee network formed"
-    );
+    // A restore must bring back that very network: the devices know no other.
+    if from_backup.is_some()
+        && (record.pan_id, record.extended_pan_id)
+            != (parameters.pan_id, parameters.extended_pan_id)
+    {
+        bail!(
+            "the dongle runs PAN {:#06x}, not the {:#06x} it was asked to restore",
+            record.pan_id,
+            parameters.pan_id
+        );
+    }
     Ok(record)
 }
 
@@ -314,6 +425,8 @@ pub async fn read_network(ezsp: &Ezsp, protocol: u8) -> anyhow::Result<DongleNet
             channel: parameters.radio_channel,
             coordinator_ieee: ieee(*eui64),
             nwk_update_id: parameters.nwk_update_id,
+            frame_counter: None,
+            key_sequence_number: None,
         },
     })
 }
@@ -460,6 +573,8 @@ pub(crate) mod tests {
                 channel: 20,
                 coordinator_ieee: "0x00124b0000000001".into(),
                 nwk_update_id: 0,
+                frame_counter: None,
+                key_sequence_number: None,
             }
         );
         let received = ncp.received();
