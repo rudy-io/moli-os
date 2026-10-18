@@ -454,6 +454,8 @@
   "pilotes.zigbee.appairage": "Appairage ouvert",
   "pilotes.zigbee.arrivee": "Dernier appareil arrivé",
   "pilotes.zigbee.reseau_absent": "le réseau Zigbee n'est pas en service : l'appairage ne peut être ni ouvert ni fermé",
+  "pilotes.zigbee.reseau_non_verifie": "le réseau Zigbee levé n'a pas encore pu être vérifié comme celui de ce Moli (nouvel essai dans l'heure) : l'appairage ne peut être ni ouvert ni fermé",
+  "pilotes.zigbee.port_occupe": "Zigbee natif : le port {port} est déjà utilisé par un autre programme (Zigbee2MQTT, ZHA…) ; un seul à la fois sur la clé. Arrêter Zigbee2MQTT d'abord : Moli réessaie de lui-même.",
   "pilotes.zigbee.appairage_echec": "l'appairage Zigbee n'a pas pu être ouvert ou fermé : {error}",
   "pilotes.zigbee.ecriture_refusee": "le coordinateur Zigbee ne prend que l'ouverture ou la fermeture de l'appairage (permit_join, vrai ou faux)",
   "pilotes.zigbee.export_avertissement": "Ce fichier ({path}) contient la clé du réseau Zigbee en clair : le garder privé. Le placer dans le dossier de données de Zigbee2MQTT sous le nom coordinator_backup.json (celui-là, Zigbee2MQTT le garde et le réécrit), et supprimer toute autre copie (celle-ci si elle est ailleurs) dès que Zigbee2MQTT a repris le réseau. Exporter juste après l'arrêt de Moli (une clé sous tension fait avancer son compteur de trames), et laisser Moli arrêté : jamais Moli et Zigbee2MQTT en même temps sur la même clé."

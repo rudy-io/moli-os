@@ -322,11 +322,15 @@ impl Live<'_> {
         }
     }
 
-    /// A device joined or announced itself: recorded (not interviewed yet;
-    /// saved only when something changed), and shown as the last arrival.
+    /// A device joined or announced itself: shown as the last arrival, and
+    /// recorded (not interviewed yet; saved only when something changed)
+    /// once the network is checked to be the store's: never into the store
+    /// of another network.
     fn arrival(&mut self, ctx: &DriverCtx, nwk: u16, ieee: [u8; 8]) {
         let device = network::ieee(ieee);
-        if self.store.record_join(&device, nwk)
+        if !self.checked {
+            tracing::info!(%device, "a device arrived on a network not checked yet: not recorded");
+        } else if self.store.record_join(&device, nwk)
             && let Err(error) = self.store.save(self.store_path)
         {
             // Kept in memory: the next change saves it too.
@@ -342,8 +346,9 @@ impl Live<'_> {
     }
 
     /// An order: `permit_join` is the coordinator's only writable point.
-    /// Opening (254 s) or closing joining needs the network up; the
-    /// callbacks keep being read meanwhile.
+    /// Opening (254 s) or closing joining needs the network up and checked
+    /// to be the store's (a network that came up late and could not be
+    /// read yet is not); the callbacks keep being read meanwhile.
     async fn on_order(
         &mut self,
         ctx: &mut DriverCtx,
@@ -360,6 +365,10 @@ impl Live<'_> {
         };
         if self.network != Network::Up {
             order.reply(Err(moli_i18n::tr!("pilotes.zigbee.reseau_absent")));
+            return;
+        }
+        if !self.checked {
+            order.reply(Err(moli_i18n::tr!("pilotes.zigbee.reseau_non_verifie")));
             return;
         }
         if order.abandoned() {
@@ -2084,6 +2093,70 @@ mod tests {
         }
         assert_eq!(ncp.received().len(), before, "nothing sent");
         assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unchecked_network_neither_pairs_nor_records() {
+        let (ncp, io) = forming_ncp(&[0x00]);
+        ncp.respond(ids::IMPORT_TRANSIENT_KEY, &[0, 0, 0, 0]);
+        ncp.respond(ids::PERMIT_JOINING, &[0x00]);
+        ncp.respond(ids::SEND_BROADCAST, &[0x00, 0x10]);
+        let run = Running::with(
+            io,
+            &Setup {
+                vault: true,
+                store: Some(recorded_store(record(0x1a62))),
+                ..Setup::default()
+            },
+        );
+        ncp.wait_received(STARTUP).await;
+        tokio::time::sleep(coordinator::NETWORK_UP_TIMEOUT + Duration::from_secs(1)).await;
+        run.wait_ready().await;
+        let before = run.store();
+        // Up later, but its check cannot read the dongle: not known to be
+        // the store's network yet.
+        ncp.respond(ids::GET_NETWORK_PARAMETERS, &[0x01, 0x00]);
+        ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
+        run.wait_point("network", &text("up")).await;
+        let sent_before = ncp.received().len();
+        for open in [true, false] {
+            assert_eq!(
+                run.set("permit_join", Value::Bool(open)).await,
+                Err(CommandError::Driver(moli_i18n::tr!(
+                    "pilotes.zigbee.reseau_non_verifie"
+                )))
+            );
+        }
+        assert_eq!(sent(&ncp, ids::PERMIT_JOINING), None, "never opened");
+        assert_eq!(ncp.received().len(), sent_before, "nothing sent");
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(false)));
+        // A device announcing itself meanwhile is shown, not recorded.
+        let ieee = [0x02, 0, 0, 0, 0, 0x4b, 0x12, 0x00];
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x1234, ieee, 1),
+        );
+        run.wait_point("joining", &text("0x00124b0000000002")).await;
+        assert_eq!(run.store(), before, "nothing recorded");
+        assert_eq!(counter_reads(&ncp), 0);
+        // The check succeeds an hour later: ours, so pairing opens and
+        // arrivals are recorded.
+        ncp.respond(ids::GET_NETWORK_PARAMETERS, &network_parameters(0x1a62, 15));
+        tokio::time::sleep(backup::COUNTER_RECORD_PERIOD).await;
+        wait_counter(&run, LIVE_COUNTER).await;
+        run.set("permit_join", Value::Bool(true)).await.unwrap();
+        assert_eq!(run.point("permit_join"), Some(Value::Bool(true)));
+        ncp.callback(
+            ids::TRUST_CENTER_JOIN_HANDLER,
+            &trust_center_join(0x1234, ieee, 1),
+        );
+        for _ in 0..500 {
+            if run.store().devices.contains_key("0x00124b0000000002") {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the arrival was never recorded: {:?}", run.store().devices);
     }
 
     #[tokio::test]

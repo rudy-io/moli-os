@@ -454,6 +454,8 @@
   "pilotes.zigbee.appairage": "Pairing open",
   "pilotes.zigbee.arrivee": "Last device joined",
   "pilotes.zigbee.reseau_absent": "the Zigbee network is not up: pairing can be neither opened nor closed",
+  "pilotes.zigbee.reseau_non_verifie": "the Zigbee network that came up could not be checked to be this Moli's yet (tried again within the hour): pairing can be neither opened nor closed",
+  "pilotes.zigbee.port_occupe": "Native Zigbee: port {port} is already used by another program (Zigbee2MQTT, ZHA…); only one at a time on the dongle. Stop Zigbee2MQTT first: Moli tries again by itself.",
   "pilotes.zigbee.appairage_echec": "Zigbee pairing could not be opened or closed: {error}",
   "pilotes.zigbee.ecriture_refusee": "the Zigbee coordinator only takes opening or closing pairing (permit_join, true or false)",
   "pilotes.zigbee.export_avertissement": "This file ({path}) holds the Zigbee network key in clear: keep it private. Put it in Zigbee2MQTT's data folder as coordinator_backup.json (that one Zigbee2MQTT keeps and rewrites), and delete every other copy (this one, if it is elsewhere) as soon as Zigbee2MQTT has taken the network over. Export right after stopping Moli (a powered dongle keeps advancing its frame counter), and keep Moli stopped: never Moli and Zigbee2MQTT on the same dongle at once."

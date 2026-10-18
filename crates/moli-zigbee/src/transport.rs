@@ -110,23 +110,67 @@ pub struct SerialPort {
 #[cfg(unix)]
 impl SerialPort {
     /// Opens `path` non-blocking, without becoming its controlling terminal,
-    /// and applies a raw termios configuration.
+    /// for Moli alone ([`configure`]), and applies a raw termios
+    /// configuration.
     ///
     /// Must be called inside a tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// The port cannot be opened or configured; one another program holds
+    /// is refused, naming it (`pilotes.zigbee.port_occupe`).
     pub fn open(path: &str, baud: u32, flow: Flow) -> anyhow::Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
 
+        let busy = || anyhow::anyhow!(moli_i18n::tr!("pilotes.zigbee.port_occupe", port = path));
         let speed = speed_constant(baud)?;
-        let file = std::fs::OpenOptions::new()
+        let file = match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK)
             .open(path)
-            .with_context(|| format!("opening serial port {path}"))?;
-        configure(&file, speed, flow).with_context(|| format!("configuring serial port {path}"))?;
+        {
+            Ok(file) => file,
+            // Held exclusively (`TIOCEXCL`) by another program.
+            Err(error) if error.kind() == io::ErrorKind::ResourceBusy => return Err(busy()),
+            Err(error) => {
+                return Err(error).with_context(|| format!("opening serial port {path}"));
+            }
+        };
+        match configure(&file, speed, flow) {
+            Ok(()) => {}
+            // Another program's: left as it is.
+            Err(error) if error.kind() == io::ErrorKind::ResourceBusy => return Err(busy()),
+            Err(error) => {
+                release(&file);
+                return Err(error).with_context(|| format!("configuring serial port {path}"));
+            }
+        }
         let fd = tokio::io::unix::AsyncFd::new(file)
             .with_context(|| format!("registering serial port {path}"))?;
         Ok(Self { fd })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SerialPort {
+    fn drop(&mut self) {
+        release(self.fd.get_ref());
+    }
+}
+
+/// Gives the port up before it closes (`TIOCNXCL`): a tty that outlives
+/// its last close (a pseudo-terminal) would otherwise keep refusing every
+/// open. The `flock` goes with the descriptor.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn release(file: &std::fs::File) {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: a valid open descriptor owned by `file`; no pointer passed.
+    // Best effort: the descriptor closes right after anyway.
+    unsafe {
+        libc::ioctl(file.as_raw_fd(), libc::TIOCNXCL);
     }
 }
 
@@ -146,8 +190,16 @@ fn speed_constant(baud: u32) -> anyhow::Result<libc::speed_t> {
     })
 }
 
-/// Raw mode, 8N1, receiver on, modem lines ignored, then the flow control.
-// libc has no safe termios: this is the only unsafe code of the crate.
+/// The port for Moli alone, then raw mode, 8N1, receiver on, modem lines
+/// ignored, then the flow control.
+///
+/// Exclusive as Zigbee2MQTT's own serial port is: `flock(LOCK_EX |
+/// LOCK_NB)` (what it takes too, so neither opens a port the other holds),
+/// then `TIOCEXCL` (the tty refuses any further open, whatever the program,
+/// across containers too, until Moli closes it). A port another program
+/// holds is `ResourceBusy`, nothing changed on it.
+// libc has no safe termios: with `release`, the only unsafe code outside
+// tests.
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn configure(file: &std::fs::File, speed: libc::speed_t, flow: Flow) -> io::Result<()> {
@@ -155,6 +207,21 @@ fn configure(file: &std::fs::File, speed: libc::speed_t, flow: Flow) -> io::Resu
     use std::os::fd::AsRawFd;
 
     let fd = file.as_raw_fd();
+    // SAFETY: `fd` is a valid open descriptor owned by `file`; `flock` and
+    // `ioctl(TIOCEXCL)` take no pointer. The lock goes with the descriptor.
+    unsafe {
+        if libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) != 0 {
+            let error = io::Error::last_os_error();
+            return Err(if error.kind() == io::ErrorKind::WouldBlock {
+                io::Error::from(io::ErrorKind::ResourceBusy)
+            } else {
+                error
+            });
+        }
+        if libc::ioctl(fd, libc::TIOCEXCL) != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
     let mut tio = MaybeUninit::<libc::termios>::uninit();
     // SAFETY: `fd` is a valid open descriptor owned by `file`; `tio` is a
     // writable termios, and it is only read after tcgetattr reported success.
@@ -385,6 +452,32 @@ mod tests {
             let mut back = [0u8; 3];
             master.read_exact(&mut back).unwrap();
             assert_eq!(back, [0x81, 0x60, 0x59]);
+        }
+
+        #[tokio::test]
+        async fn a_port_in_use_is_refused() {
+            let (_master, path) = pty();
+            let first = open(&config(&path, 115_200, Flow::Software)).await.unwrap();
+            // Another program (or another Moli) on the same port: refused,
+            // naming the port, the first one left alone.
+            let error = open(&config(&path, 115_200, Flow::Software))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                moli_i18n::tr!("pilotes.zigbee.port_occupe", port = path)
+            );
+            assert!(error.to_string().contains(&path), "{error:#}");
+            let Port::Serial(serial) = &first else {
+                panic!("expected a serial port");
+            };
+            assert_eq!(
+                termios_of(serial.fd.get_ref()).c_cflag & libc::CSIZE,
+                libc::CS8
+            );
+            // Once closed, the port is free again.
+            drop(first);
+            open(&config(&path, 115_200, Flow::Software)).await.unwrap();
         }
 
         #[tokio::test]
