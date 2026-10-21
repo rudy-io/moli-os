@@ -221,7 +221,7 @@ host = "192.168.1.x"
 
 ## `eufy` : Eufy Security (`crates/moli-eufy`)
 
-- **Couvre** : HomeBase, caméras (eufyCam, Indoor Cam, Wall Light Cam) et sonnettes du compte. **Lecture seule**, par le cloud : nom, modèle, batterie, mode de sécurité d'une station. Le P2P local (événements, images, commandes) est l'étape suivante.
+- **Couvre** : HomeBase, caméras (eufyCam, Indoor Cam, Wall Light Cam) et sonnettes du compte. **Lecture seule** : nom, modèle, batterie, mode de sécurité (cloud), et les **détections en direct** (mouvement, personne, sonnette, animal, véhicule, son, pleurs) par les notifications push. Le P2P local (mode de sécurité en écriture, images) est l'étape suivante.
 - **Origine** : protocole porté d'eufy-security-client (MIT, voir `NOTICE`) : le « vieux » serveur d'Eufy (`v2/passport/login_sec`, listes `v2/house/station_list` et `device_list`), celui que la bibliothèque garde pour les données. Le nouveau serveur (« v6 / mega ») n'est pas encore porté.
 - **Configuration** :
 
@@ -234,12 +234,13 @@ country = "FR"     # pays du compte : choisit les serveurs (domain/<pays> sur ex
 # language = "fr"
 ```
 
-- **Secrets** : `email`, `password` posés par l'humain (un **compte invité** réservé à Moli : Eufy ne garde qu'une session par compte). Écrits par le pilote : `session` (clé P-256 de Moli, identité de « téléphone » tirée au hasard, jeton, clé du serveur) et `captcha_id`. Posés par l'humain quand Eufy les demande : `verify_code` (code reçu par e-mail), `captcha`. Chacun sert **une fois**, juste ou faux, puis est effacé.
+- **Secrets** : `email`, `password` posés par l'humain (un **compte invité** réservé à Moli : Eufy ne garde qu'une session par compte). Écrits par le pilote : `session` (clé P-256 de Moli, identité de « téléphone » tirée au hasard, jeton, clé du serveur), `push` (identité auprès de Google) et `captcha_id`. Posés par l'humain quand Eufy les demande : `verify_code` (code reçu par e-mail), `captcha`. Chacun sert **une fois**, juste ou faux, puis est effacé.
 - **Connexion** : mot de passe en AES-256-CBC (clé = secret ECDH P-256 avec la clé publique de connexion d'Eufy, IV = ses 16 premiers octets), réponses chiffrées vers la clé que le serveur donne à la connexion. Code par e-mail (26052) : le pilote le demande, attend (`waiting`) ; avec le code, il se fait ajouter aux **appareils de confiance** (`v1/app/trust_device/add`) : les connexions suivantes n'en demandent plus. Captcha (100032) : l'image est publiée par `/api/media/…`, le lien est dans le message d'attente. Le jeton (plusieurs mois) est renouvelé quand il reste moins d'un jour, ou sur un 401.
-- **Points** : `battery` (%, paramètre 1101), `guard_mode` (paramètre 1224 : `away`, `home`, `schedule`, `custom1`…`custom3`, `geofencing`, `disarmed`). Liste relue toutes les 10 min.
+- **Points** : `battery` (%, paramètre 1101 ; caché sur les appareils filaires : S100, Indoor Cam), `guard_mode` (paramètre 1224 : `away`, `home`, `schedule`, `custom1`…`custom3`, `geofencing`, `disarmed`), liste relue toutes les 10 min. Détections binaires selon le modèle : eufyCam `motion`, `person` ; sonnette `motion`, `person`, `doorbell`, `animal`, `vehicle` ; Indoor Cam `motion`, `person`, `animal`, `sound`, `crying`. Une détection reste vraie **10 s** après sa notification.
+- **Événements** (`src/push.rs`, `src/events.rs`) : comme l'appli sur un téléphone Android. Moli s'enregistre comme l'appli Eufy auprès de Firebase (`firebaseinstallations`, projet de l'appli), fait un *checkin* Android (`android.clients.google.com/checkin`, protobuf), obtient un jeton GCM (`c2dm/register3`) et le donne à Eufy (`v1/apppush/register_push_token`). Puis une connexion TLS permanente au MCS de Google (`mtalk.google.com:5228`, protobuf : `LoginRequest`, battements toutes les 5 min, silence de 12 min = connexion morte, reconnexion de 5 s à 5 min). Chaque `DataMessageStanza` porte l'`app_data` d'Eufy : `type`, `device_sn`, `station_sn`, `payload` (JSON en base64). Codes : `a = 1` (caméra de HomeBase : mouvement ; personne si `i`), `a = 9` (changement de mode, `arming`), `event_type` 3101 mouvement, 3102 personne, 3103 sonnette, 3104 pleurs, 3105 son, 3106 animal, 3107 véhicule. L'identité (installation Firebase, id Android, jetons) est gardée dans le coffre (`push`) ; refusée par Google, elle est oubliée et refaite au démarrage suivant. Sans push (Google injoignable), les appareils restent listés, sans événements.
 - **Identité** : numéro de série Eufy. Une caméra Wi-Fi est à la fois station et appareil : un seul appareil Moli.
 - **Pièges** : une réponse indéchiffrable veut dire une clé de serveur périmée : se reconnecter (`moli-os secrets forget eufy session`). Le code et le captcha arrivent par le coffre, donc par un redémarrage (le coffre est lu au démarrage).
-- **Tests** : `src/crypto.rs` contre des vecteurs produits par le `crypto` de Node (ECDH, AES-256-CBC) comme eufy-security-client l'emploie ; `src/cloud.rs` (paramètres nombre ou texte, fuseau, hôtes suivis) ; `src/lib.rs` (batterie, mode, image du captcha).
+- **Tests** : `src/crypto.rs` contre des vecteurs produits par le `crypto` de Node (ECDH, AES-256-CBC) comme eufy-security-client l'emploie ; `src/cloud.rs` (paramètres nombre ou texte, fuseau, hôtes suivis) ; `src/push.rs` (FID, réponse du checkin, découpage du flux MCS, `app_data` d'une notification, requête de connexion) ; `src/events.rs` (codes par famille d'appareil, changement de mode) ; `src/lib.rs` (batterie, mode, image du captcha).
 
 ## `sonos` : enceintes Sonos (`crates/moli-sonos`)
 
@@ -500,7 +501,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
-| `eufy` | `moli-eufy` | HTTPS cloud Eufy (ECDH P-256 + AES) | non | pas encore (cible : HomeBase 2, eufyCam, Indoor Cam, S100, sonnette T8210) |
+| `eufy` | `moli-eufy` | HTTPS cloud Eufy (ECDH P-256 + AES) ; push Google (MCS 5228) | non | HomeBase 2, eufyCam, Indoor Cam Pan & Tilt, S100, sonnette T8210 (inventaire) ; mouvement reçu par push (Indoor Cam) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |

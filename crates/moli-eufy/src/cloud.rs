@@ -319,6 +319,31 @@ impl Cloud {
         Ok(())
     }
 
+    /// Where Eufy pushes this account's events: Moli's GCM token.
+    pub async fn register_push(&mut self, token: &str) -> anyhow::Result<()> {
+        let body = json!({
+            "is_notification_enable": true,
+            "token": token,
+            "transaction": now_ms().to_string(),
+        });
+        check(
+            &self
+                .post("v1/apppush/register_push_token", &body, true)
+                .await?,
+        )
+        .context("registering for push")?;
+        // Some accounts fail this check yet receive their pushes (the
+        // library listens anyway too): said, not fatal.
+        let body = json!({ "app_type": "eufySecurity", "transaction": now_ms().to_string() });
+        let answer = self
+            .post("v1/app/review/app_push_check", &body, true)
+            .await?;
+        if let Err(e) = check(&answer) {
+            tracing::info!(error = %e, "eufy: push check refused (listening anyway)");
+        }
+        Ok(())
+    }
+
     pub async fn stations(&mut self) -> anyhow::Result<Vec<Station>> {
         self.list("v2/house/station_list").await
     }

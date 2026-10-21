@@ -1,7 +1,8 @@
 # Onboarding : Eufy Security
 
 Lecture seule pour l'instant, par le cloud Eufy : les HomeBases, caméras et sonnettes du compte,
-leur batterie et le mode de sécurité. Le flux local (P2P) et les événements viennent ensuite.
+leur batterie, le mode de sécurité, et les détections en direct (notifications push, comme
+l'appli). Le flux local (P2P) vient ensuite.
 
 1. Faire créer à la personne un **compte Eufy invité réservé à Moli** (application Eufy → partage
    de la maison ou de chaque appareil), avec son propre e-mail. Eufy ne garde qu'une session par
@@ -28,4 +29,5 @@ leur batterie et le mode de sécurité. Le flux local (P2P) et les événements 
    demande d'abord un **captcha** : son image est servie par Moli (lien dans le message
    d'attente), la réponse va dans `captcha`, puis redémarrer.
 5. Tester : chaque appareil apparaît avec son nom Eufy, sa batterie et, pour une station, son mode
-   de sécurité. Aucune commande n'est envoyée.
+   de sécurité. Les journaux disent `eufy: listening for events` ; passer devant une caméra
+   (pas dans une pièce où l'on dort) : `motion` passe à vrai 10 s. Aucune commande n'est envoyée.

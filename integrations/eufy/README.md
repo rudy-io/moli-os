@@ -5,7 +5,7 @@
   par e-mail et appareil de confiance, captcha, listes des stations et des appareils.
 - Aucune capture : les vecteurs des tests (`crates/moli-eufy/src/crypto.rs`) sont produits par le
   `crypto` de Node, comme la bibliothèque l'emploie ; les réponses d'API sont écrites dans le code.
-- Lecture : nom, modèle, batterie, mode de sécurité (par le cloud, toutes les 10 min).
-- Reste : P2P local avec les stations (UDP 32108 : événements, images, mode de sécurité en
-  écriture sous la garde), nouveau serveur « v6 / mega » pour les comptes migrés. Jamais vu
-  répondre sur du vrai matériel.
+- Lecture : nom, modèle, batterie, mode de sécurité (par le cloud, toutes les 10 min) ; détections
+  et changements de mode en direct par les notifications push (Firebase, checkin Android, GCM, MCS).
+- Reste : P2P local avec les stations (UDP 32108 : mode de sécurité en écriture sous la garde,
+  images), nouveau serveur « v6 / mega » pour les comptes migrés.

@@ -1,5 +1,7 @@
 //! Eufy Security: HomeBases, cameras and doorbells, through Eufy's cloud
 //! (read-only for now). Ported from eufy-security-client (MIT, see NOTICE).
+//! Detections (motion, person, doorbell…) and mode changes arrive as push
+//! notifications through Google, as they do to the app (`push.rs`).
 //!
 //! The account (`email`, `password`) comes from the encrypted secret store:
 //! a guest account of its own, since Eufy keeps one session per account. A
@@ -10,6 +12,8 @@
 
 mod cloud;
 mod crypto;
+mod events;
+mod push;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -19,6 +23,8 @@ use moli_core::{Access, Device, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::media::Image;
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use serde::Deserialize;
+use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use crate::cloud::{Answer, Cloud, Login, Refusal, Session};
 
@@ -31,6 +37,12 @@ const CODE: &str = "verify_code";
 const CAPTCHA: &str = "captcha";
 /// Written by the driver: which captcha the answer is for.
 const CAPTCHA_ID: &str = "captcha_id";
+
+/// Written by the driver: Moli's identity with Google's push service.
+const PUSH: &str = "push";
+
+/// A detection stays « on » this long after its push.
+const HOLD: Duration = Duration::from_secs(10);
 
 /// The list is read again this often (names, battery, guard mode).
 const RESCAN: Duration = Duration::from_secs(10 * 60);
@@ -230,6 +242,12 @@ async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
     let mut known: BTreeMap<String, Device> = BTreeMap::new();
     let mut rescan = tokio::time::interval(RESCAN);
     rescan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut expire = tokio::time::interval(Duration::from_secs(1));
+    expire.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Detections held until then.
+    let mut holds: BTreeMap<(String, &'static str), Instant> = BTreeMap::new();
+    let (up_tx, mut up) = mpsc::channel(32);
+    let _push = Abort(listen_for_pushes(ctx, cloud, up_tx).await);
     loop {
         tokio::select! {
             command = ctx.next_command() => match command {
@@ -246,6 +264,112 @@ async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
                     return Err(e);
                 }
                 ctx.ready();
+            }
+            Some(message) = up.recv() => match message {
+                push::Up::Connected => tracing::info!(instance = %ctx.instance(), "eufy: listening for events"),
+                push::Up::Push(push) => {
+                    for change in events::read(&push) {
+                        apply(ctx, &known, &mut holds, change);
+                    }
+                }
+                push::Up::Refused => {
+                    // A stale identity with Google: a new one next run.
+                    ctx.forget_secret(PUSH).await?;
+                    anyhow::bail!("Google refused Moli's push identity");
+                }
+            },
+            _ = expire.tick(), if !holds.is_empty() => {
+                let now = Instant::now();
+                holds.retain(|(serial, key), until| {
+                    if *until > now {
+                        return true;
+                    }
+                    ctx.set_state(&ctx.device_id(serial), key, Value::Bool(false));
+                    false
+                });
+            }
+        }
+    }
+}
+
+/// Aborts the task when the driver's run ends.
+struct Abort(Option<tokio::task::JoinHandle<()>>);
+
+impl Drop for Abort {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.abort();
+        }
+    }
+}
+
+/// Moli's push identity (kept, or a new one), given to Eufy, then the
+/// connection to Google in its own task. Without it the devices are still
+/// listed: events wait for the next run.
+async fn listen_for_pushes(
+    ctx: &DriverCtx,
+    cloud: &mut Cloud,
+    up: mpsc::Sender<push::Up>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let instance = ctx.instance().to_string();
+    let stored = ctx
+        .secret(PUSH)
+        .and_then(|text| serde_json::from_str::<push::Credentials>(&text).ok());
+    let creds = if let Some(creds) = stored {
+        creds
+    } else {
+        match push::register().await {
+            Ok(creds) => {
+                let text = serde_json::to_string(&creds).ok()?;
+                if let Err(e) = ctx.store_secret(PUSH, &text).await {
+                    tracing::warn!(instance, error = %e, "eufy: push identity not kept");
+                }
+                tracing::info!(instance, "eufy: registered for push notifications");
+                creds
+            }
+            Err(e) => {
+                tracing::warn!(
+                    instance,
+                    error = format!("{e:#}"),
+                    "eufy: no events (push registration failed)"
+                );
+                return None;
+            }
+        }
+    };
+    if let Err(e) = cloud.register_push(&creds.token).await {
+        tracing::warn!(
+            instance,
+            error = format!("{e:#}"),
+            "eufy: no events (Eufy refused the push token)"
+        );
+        return None;
+    }
+    Some(tokio::spawn(push::run(creds, up, instance)))
+}
+
+fn apply(
+    ctx: &DriverCtx,
+    known: &BTreeMap<String, Device>,
+    holds: &mut BTreeMap<(String, &'static str), Instant>,
+    change: events::Change,
+) {
+    match change {
+        events::Change::Detected { serial, key } => {
+            let Some(device) = known.get(&serial) else {
+                return;
+            };
+            if !device.points.iter().any(|p| &*p.key == key) {
+                return;
+            }
+            ctx.set_state(&device.id, key, Value::Bool(true));
+            holds.insert((serial, key), Instant::now() + HOLD);
+        }
+        events::Change::Mode { serial, mode } => {
+            if let (Some(device), Some((_, mode))) =
+                (known.get(&serial), MODES.iter().find(|(m, _)| *m == mode))
+            {
+                ctx.set_state(&device.id, "guard_mode", Value::Text((*mode).into()));
             }
         }
     }
@@ -327,9 +451,11 @@ fn read_only(key: &str, label: String, kind: Kind, unit: Option<Unit>) -> PointS
     }
 }
 
-fn values(params: &[cloud::Param]) -> Vec<(&'static str, Value)> {
+fn values(model: &str, params: &[cloud::Param]) -> Vec<(&'static str, Value)> {
     let mut out = Vec::new();
-    if let Some(level) = cloud::param(params, BATTERY).and_then(|v| v.trim().parse::<i64>().ok())
+    if !events::wired(model)
+        && let Some(level) =
+            cloud::param(params, BATTERY).and_then(|v| v.trim().parse::<i64>().ok())
         && (0..=100).contains(&level)
     {
         out.push(("battery", Value::Int(level)));
@@ -367,6 +493,11 @@ fn device(ctx: &DriverCtx, found: &Found<'_>, values: &[(&str, Value)]) -> Devic
             ),
         });
     }
+    for key in events::detections(found.model) {
+        if let Some((_, label)) = events::DETECTIONS.iter().find(|(k, _)| k == key) {
+            points.push(read_only(key, moli_i18n::tr(label), Kind::Binary, None));
+        }
+    }
     Device {
         id: ctx.device_id(found.serial),
         instance: ctx.instance().clone(),
@@ -388,7 +519,7 @@ fn publish(ctx: &DriverCtx, known: &mut BTreeMap<String, Device>, found: &Found<
     if found.serial.is_empty() {
         return;
     }
-    let values = values(found.params);
+    let values = values(found.model, found.params);
     let device = device(ctx, found, &values);
     let id = device.id.clone();
     if known.get(found.serial) != Some(&device) {
@@ -415,7 +546,7 @@ mod tests {
 
     #[test]
     fn battery_and_guard_mode_are_read_from_parameters() {
-        let v = values(&[p(1101, "87"), p(1224, "63"), p(9999, "x")]);
+        let v = values("T8111", &[p(1101, "87"), p(1224, "63"), p(9999, "x")]);
         assert_eq!(
             v,
             vec![
@@ -423,7 +554,9 @@ mod tests {
                 ("guard_mode", Value::Text("disarmed".into()))
             ]
         );
-        assert!(values(&[p(1101, "250"), p(1224, "12")]).is_empty());
+        assert!(values("T8111", &[p(1101, "250"), p(1224, "12")]).is_empty());
+        // A wired light camera's « battery » is not shown.
+        assert!(values("T84A1", &[p(1101, "100")]).is_empty());
     }
 
     #[test]
