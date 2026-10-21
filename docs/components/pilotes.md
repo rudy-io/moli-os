@@ -72,7 +72,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, hue, tuya, reolink, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
+kind = "sonos"          # z2m, hue, tuya, reolink, eufy, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -218,6 +218,28 @@ host = "192.168.1.x"
 - **Identité** : UID de la caméra (stable même si elle change de canal) ; à défaut `ch<N>` (numéro de canal, moins stable).
 - **Pièges** : le certificat est épinglé par une poignée de main nue **avant** tout envoi d'identifiants ; c'est un **X.509 v1**, vérifié à la main par `moli-net`. Une seule session (jeton) est gardée même à travers les redémarrages du pilote : les stations limitent les sessions simultanées. Codes `-6`/`-7` : nouvelle connexion. Le jeton voyage dans l'URL : aucune erreur ne cite l'URL. Une caméra sur batterie peut mettre ~10 s à se réveiller (14 s accordées à l'image). Station injoignable : toutes les détections passent à `null` (jamais de « personne vue » périmée).
 - **Tests** : `src/lib.rs` (événements lus aux deux niveaux `md`/`visitor` et `ai`, erreurs par commande, jeton masqué au débogage) ; `crates/moli-net/src/legacy.rs` sur le certificat public réel du Home Hub (`integrations/reolink/fixtures/home-hub-cert.b64`).
+
+## `eufy` : Eufy Security (`crates/moli-eufy`)
+
+- **Couvre** : HomeBase, caméras (eufyCam, Indoor Cam, Wall Light Cam) et sonnettes du compte. **Lecture seule**, par le cloud : nom, modèle, batterie, mode de sécurité d'une station. Le P2P local (événements, images, commandes) est l'étape suivante.
+- **Origine** : protocole porté d'eufy-security-client (MIT, voir `NOTICE`) : le « vieux » serveur d'Eufy (`v2/passport/login_sec`, listes `v2/house/station_list` et `device_list`), celui que la bibliothèque garde pour les données. Le nouveau serveur (« v6 / mega ») n'est pas encore porté.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "eufy"
+kind = "eufy"
+[driver.options]
+country = "FR"     # pays du compte : choisit les serveurs (domain/<pays> sur extend.eufylife.com)
+# language = "fr"
+```
+
+- **Secrets** : `email`, `password` posés par l'humain (un **compte invité** réservé à Moli : Eufy ne garde qu'une session par compte). Écrits par le pilote : `session` (clé P-256 de Moli, identité de « téléphone » tirée au hasard, jeton, clé du serveur) et `captcha_id`. Posés par l'humain quand Eufy les demande : `verify_code` (code reçu par e-mail), `captcha`. Chacun sert **une fois**, juste ou faux, puis est effacé.
+- **Connexion** : mot de passe en AES-256-CBC (clé = secret ECDH P-256 avec la clé publique de connexion d'Eufy, IV = ses 16 premiers octets), réponses chiffrées vers la clé que le serveur donne à la connexion. Code par e-mail (26052) : le pilote le demande, attend (`waiting`) ; avec le code, il se fait ajouter aux **appareils de confiance** (`v1/app/trust_device/add`) : les connexions suivantes n'en demandent plus. Captcha (100032) : l'image est publiée par `/api/media/…`, le lien est dans le message d'attente. Le jeton (plusieurs mois) est renouvelé quand il reste moins d'un jour, ou sur un 401.
+- **Points** : `battery` (%, paramètre 1101), `guard_mode` (paramètre 1224 : `away`, `home`, `schedule`, `custom1`…`custom3`, `geofencing`, `disarmed`). Liste relue toutes les 10 min.
+- **Identité** : numéro de série Eufy. Une caméra Wi-Fi est à la fois station et appareil : un seul appareil Moli.
+- **Pièges** : une réponse indéchiffrable veut dire une clé de serveur périmée : se reconnecter (`moli-os secrets forget eufy session`). Le code et le captcha arrivent par le coffre, donc par un redémarrage (le coffre est lu au démarrage).
+- **Tests** : `src/crypto.rs` contre des vecteurs produits par le `crypto` de Node (ECDH, AES-256-CBC) comme eufy-security-client l'emploie ; `src/cloud.rs` (paramètres nombre ou texte, fuseau, hôtes suivis) ; `src/lib.rs` (batterie, mode, image du captcha).
 
 ## `sonos` : enceintes Sonos (`crates/moli-sonos`)
 
@@ -478,6 +500,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
+| `eufy` | `moli-eufy` | HTTPS cloud Eufy (ECDH P-256 + AES) | non | pas encore (cible : HomeBase 2, eufyCam, Indoor Cam, S100, sonnette T8210) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |

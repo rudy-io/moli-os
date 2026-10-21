@@ -6,3 +6,8 @@ This product includes data derived from Powercalc
 the light power profiles in crates/moli-energy/src/estimate.rs.
 Copyright (c) 2021 Bram Gerritsen. Licensed under the MIT License;
 see licenses/powercalc-MIT.txt.
+
+This product includes software derived from eufy-security-client
+(https://github.com/bropat/eufy-security-client): the Eufy cloud protocol
+in crates/moli-eufy. Copyright (c) 2021-2024 bropat. Licensed under the
+MIT License; see licenses/eufy-security-client-MIT.txt.

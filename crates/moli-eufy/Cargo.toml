@@ -1,0 +1,29 @@
+[package]
+name = "moli-eufy"
+description = "Moli OS driver for Eufy Security (HomeBase, cameras, doorbells), ported from eufy-security-client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+aes.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+jiff.workspace = true
+md-5.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "std"] }
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

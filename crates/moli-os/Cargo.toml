@@ -20,6 +20,7 @@ moli-profile.workspace = true
 moli-energy.workspace = true
 moli-tuya.workspace = true
 moli-reolink.workspace = true
+moli-eufy.workspace = true
 moli-sonos.workspace = true
 moli-bambu.workspace = true
 moli-esphome.workspace = true

@@ -1,0 +1,26 @@
+[integration]
+id = "eufy"
+name = "Eufy Security (HomeBase, caméras, sonnettes)"
+brands = ["Eufy", "Anker"]
+models = ["HomeBase 2 (T8010)", "eufyCam (T8111)", "Indoor Cam Pan & Tilt (T8410, T8411)", "Wall Light Cam S100 (T84A1)", "Video Doorbell 2K (T8210)"]
+transport = "https"
+driver = "eufy"
+crate = "moli-eufy"
+
+[discovery]
+# No discovery yet: the cloud lists the account's devices. The stations'
+# local P2P port, for the next step.
+mdns = []
+ssdp = []
+ports = [32108]
+
+[needs]
+# `session`, `captcha_id` are written by the driver; `verify_code` and
+# `captcha` by the person, when Eufy asks.
+secrets = ["email", "password"]
+vars = []
+options = ["country"]
+
+[origin]
+reused = "https://github.com/bropat/eufy-security-client (MIT)"
+author = "agent"
