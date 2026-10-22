@@ -205,14 +205,16 @@
       <Routines />
     </div>
 
-    <section class="card climate">
-      <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
-      <div class="clims">
-        {#each cfg.favorites?.climate ?? [] as c (c.id)}
-          <ClimateCard id={c.id} name={c.name} />
-        {/each}
-      </div>
-    </section>
+    {#if (cfg.favorites?.climate ?? []).length}
+      <section class="card climate">
+        <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
+        <div class="clims">
+          {#each cfg.favorites?.climate ?? [] as c (c.id)}
+            <ClimateCard id={c.id} name={c.name} />
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     {#if bell}
       <section class="card doorbell">
@@ -243,7 +245,9 @@
         <div><small>{t('maison.accueil.air')}</small><b>{aqiWord}</b></div>
         <div><small>UV</small><b class="num">{num(value(out.air, 'uv_index'), 0)}</b></div>
         <div><small>{t('maison.accueil.humidite')}</small><b class="num">{value(out.weather, 'humidity') != null ? `${num(value(out.weather, 'humidity'))} %` : '—'}</b></div>
-        <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
+        {#if out.pool}
+          <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
+        {/if}
       </div>
     </a>
   </div>

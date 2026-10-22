@@ -1,5 +1,5 @@
 <script>
-  import { home, value, reachable, nameOf, act, since, clock } from '../lib/home.svelte.js';
+  import { home, hub, value, reachable, nameOf, act, since, clock } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import Remote from '../ui/Remote.svelte';
@@ -11,6 +11,7 @@
   const tv = $derived(s.tv);
   const sp = $derived(s.speaker);
   const tvOn = $derived(value(tv, 'power') === true);
+  const tvPoints = $derived(hub.devices[tv]?.points ?? []);
   const app = $derived(value(tv, 'app'));
 
   const APPS = {
@@ -110,7 +111,9 @@
         <div class="card-head"><h2><Icon name="light-group" size={18} />{t('salon.ambiance')}</h2></div>
         <div class="amb">
           {#if s.room_light}<LightTile id={s.room_light} name={t('salon.tout_le_salon')} icon="sofa" dimmer members={s.lamps ?? []} />{/if}
-          {#if tv}<LightTile id={tv} point="ambilight" name="Ambilight" icon="ambilight" />{/if}
+          {#if tv && tvPoints.some((p) => p.key === 'ambilight')}
+            <LightTile id={tv} point="ambilight" name="Ambilight" icon="ambilight" />
+          {/if}
         </div>
         <AmbiancePicker lights={s.lamps ?? []} label={t('salon.titre')} />
         <div class="lamps">
