@@ -218,6 +218,7 @@ fn device(ctx: &DriverCtx, config: &Config) -> Device {
         model: None,
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

@@ -108,6 +108,7 @@ impl Entry {
             model: definition.model.or(raw.model_id).map(Into::into),
             description: definition.description.map(Into::into),
             native_room: None,
+            parent: None,
             members: Vec::new(),
             points,
         };
@@ -490,6 +491,7 @@ mod tests {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points,
             },
@@ -561,6 +563,7 @@ mod tests {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points,
             },

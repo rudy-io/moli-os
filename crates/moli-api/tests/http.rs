@@ -27,6 +27,7 @@ impl Driver for Lamp {
                 model: Some("L1".into()),
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points: vec![PointSpec {
                     key: "state".into(),
@@ -541,6 +542,7 @@ impl Driver for Phone {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points: vec![
                     spec("latitude", number, false),

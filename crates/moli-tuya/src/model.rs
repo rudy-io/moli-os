@@ -261,6 +261,7 @@ impl TuyaDevice {
             model: self.product.as_deref().map(|p| p.trim().into()),
             description: None,
             native_room: self.room.as_deref().map(Into::into),
+            parent: None,
             members: Vec::new(),
             points: self.dps.iter().filter_map(Dp::point).collect(),
         }

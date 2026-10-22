@@ -201,6 +201,7 @@ fn person_device(ctx: &DriverCtx, id: &str, name: &str) -> Device {
         model: Some(moli_i18n::tr!("serveur.personnes.modele").into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(
@@ -253,6 +254,7 @@ fn house_device(ctx: &DriverCtx) -> Device {
         model: Some(moli_i18n::tr!("serveur.personnes.modele_foyer").into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(

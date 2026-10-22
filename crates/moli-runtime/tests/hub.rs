@@ -59,6 +59,7 @@ impl Driver for FakePlug {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points: vec![
                     spec("state", Kind::Binary, true, Semantic::OnOff),
@@ -569,6 +570,7 @@ async fn foreign_devices_are_refused() {
                     model: None,
                     description: None,
                     native_room: None,
+                    parent: None,
                     members: Vec::new(),
                     points: vec![],
                 });
@@ -614,6 +616,7 @@ impl Driver for FakeGroup {
                     model: None,
                     description: None,
                     native_room: Some(room.into()),
+                    parent: None,
                     members,
                     points: vec![spec("state", Kind::Binary, true, Semantic::OnOff)],
                 });
@@ -749,6 +752,7 @@ impl Driver for FakeCamera {
                 model: None,
                 description: None,
                 native_room: Some("Entrée".into()),
+                parent: None,
                 members: Vec::new(),
                 points: Vec::new(),
             });
@@ -816,6 +820,7 @@ impl Driver for Sluggish {
                 model: None,
                 description: None,
                 native_room: Some("Salon".into()),
+                parent: None,
                 members: Vec::new(),
                 points: vec![spec("state", Kind::Binary, true, Semantic::OnOff)],
             });
@@ -944,6 +949,7 @@ impl Driver for OnceAnnounced {
                 model: None,
                 description: None,
                 native_room: Some("Salon".into()),
+                parent: None,
                 members: Vec::new(),
                 points: vec![spec("state", Kind::Binary, true, Semantic::OnOff)],
             });

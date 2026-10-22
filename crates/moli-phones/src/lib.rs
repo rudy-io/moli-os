@@ -573,6 +573,7 @@ fn device(ctx: &DriverCtx, phone: &Phone) -> Device {
         ),
         description: Some(moli_i18n::tr!("pilotes.phones.description").into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(

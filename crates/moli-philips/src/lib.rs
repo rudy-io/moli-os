@@ -287,6 +287,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64) -> Device
         model: Some("Android TV".into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(

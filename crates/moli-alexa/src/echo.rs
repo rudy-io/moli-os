@@ -172,6 +172,7 @@ pub(crate) fn device(ctx: &DriverCtx, id: &DeviceId, echo: &Echo) -> Device {
         }),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

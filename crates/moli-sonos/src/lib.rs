@@ -99,6 +99,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, room: &str, model: &str, speaks: bool)
         model: Some(model.into()),
         description: None,
         native_room: Some(room.into()),
+        parent: None,
         members: Vec::new(),
         points: vec![
             point(

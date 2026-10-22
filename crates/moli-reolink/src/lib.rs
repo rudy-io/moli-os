@@ -305,6 +305,7 @@ fn channel_device(ctx: &DriverCtx, model: &str, channel: &Channel) -> Device {
         model: Some(model.into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: EVENTS
             .iter()

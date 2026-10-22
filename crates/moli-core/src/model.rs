@@ -22,6 +22,10 @@ pub struct Device {
     /// the user's label always wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_room: Option<Arc<str>>,
+    /// The device this one hangs from (a camera → its Eufy HomeBase): the
+    /// house shows it under its parent. Never an order's route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<DeviceId>,
     /// For groups (a Hue room…): the devices an order on this one reaches.
     /// The guard checks their rooms too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

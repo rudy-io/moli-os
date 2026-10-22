@@ -279,6 +279,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 |---|---|---|---|---|---|
 | GET | `/api/health` | libre | aucune | `{name:"moli-os", version, stats, guard, drivers}` | aucune |
 | GET | `/api/devices` | libre ; un invité : ses pièces seulement (§ 3.1) | aucune | `Snapshot` : `{devices:[DeviceView], drivers:[DriverView], approvals:[ApprovalRequest], guard}` | aucune |
+| GET | `/api/house` | libre ; un invité : ses pièces seulement | aucune | la maison en un objet : `{title, rooms:[{name, icon, devices:[nœud]}], unplaced:[nœud]}` ; nœud = `{id, name, model, parent, online, children:[nœud]}` (une caméra Eufy sous sa HomeBase quand elles sont dans la même pièce) | aucune |
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
 | GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
@@ -387,6 +388,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 | `instance` | texte | instance de pilote propriétaire |
 | `native_name` | texte | nom dans le système source (peut changer) |
 | `manufacturer`, `model`, `description`, `native_room` | texte, facultatifs | |
+| `parent` | `device_id`, facultatif | l'appareil dont celui-ci dépend (une caméra → sa HomeBase) ; la maison (`/api/house`) l'y range ; jamais une route de commande |
 | `members` | `[device_id]`, facultatif | pour un groupe : appareils atteints (la garde vérifie leurs pièces) |
 | `points` | `[PointSpec]` | |
 | `label` | `{name?, room?}` | étiquettes de l'utilisateur (priment sur le natif) |
@@ -556,7 +558,7 @@ rend sa place.
 
 | `type` | Champs | Sens |
 |---|---|---|
-| `device_upserted` | `device` : l'appareil (`id`, `instance`, `native_name`, `manufacturer?`, `model?`, `description?`, `native_room?`, `members?`, `points`) | appareil publié ou redéfini par son pilote |
+| `device_upserted` | `device` : l'appareil (`id`, `instance`, `native_name`, `manufacturer?`, `model?`, `description?`, `native_room?`, `parent?`, `members?`, `points`) | appareil publié ou redéfini par son pilote |
 | `device_removed` | `device` : device_id | appareil retiré |
 | `state` | `point`, `value`, `ts` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence) ; aussi à la restauration du cache |
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |

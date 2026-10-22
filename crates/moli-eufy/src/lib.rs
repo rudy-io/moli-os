@@ -587,6 +587,7 @@ async fn inventory(
             name: &device.name,
             model: &device.model,
             params: &params,
+            station: &device.station_sn,
         };
         publish(ctx, known, &found);
         let did = stations
@@ -607,6 +608,7 @@ async fn inventory(
             name: &station.name,
             model: &station.model,
             params: &station.params,
+            station: "",
         };
         publish(ctx, known, &found);
         watch_pictures(ctx, cameras, &found, &station.p2p_did);
@@ -633,6 +635,8 @@ struct Found<'a> {
     name: &'a str,
     model: &'a str,
     params: &'a [cloud::Param],
+    /// The HomeBase it hangs from (empty: it is its own station).
+    station: &'a str,
 }
 
 fn read_only(key: &str, label: String, kind: Kind, unit: Option<Unit>) -> PointSpec {
@@ -716,6 +720,8 @@ fn device(ctx: &DriverCtx, found: &Found<'_>, values: &[(&str, Value)]) -> Devic
         model: (!found.model.is_empty()).then(|| found.model.into()),
         description: None,
         native_room: None,
+        parent: (!found.station.is_empty() && found.station != found.serial)
+            .then(|| ctx.device_id(found.station)),
         members: Vec::new(),
         points,
     }

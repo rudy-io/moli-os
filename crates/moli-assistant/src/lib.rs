@@ -30,6 +30,24 @@ mod voice;
 pub use auto::Draft;
 pub use exchanges::{Cost, Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
+
+/// The house as one object (`GET /api/house`): rooms, their devices, and
+/// each station's devices under it. `home` is the dashboard's `home.json`.
+pub async fn house(
+    home: Option<&std::path::Path>,
+    devices: &[moli_runtime::DeviceView],
+) -> serde_json::Value {
+    let layout = Layout::load(home).await;
+    let raw = match home {
+        Some(path) => tokio::fs::read(path)
+            .await
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default(),
+        None => serde_json::Value::Null,
+    };
+    house::tree(devices, &layout, &raw)
+}
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
 #[cfg(test)]
@@ -2192,6 +2210,7 @@ mod tests {
                     model: None,
                     description: None,
                     native_room: None,
+                    parent: None,
                     members: Vec::new(),
                     points: vec![moli_core::PointSpec {
                         key: "on".into(),
@@ -2274,6 +2293,7 @@ mod tests {
                         model: None,
                         description: None,
                         native_room: None,
+                        parent: None,
                         members: Vec::new(),
                         points: points.clone(),
                     });

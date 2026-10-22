@@ -176,6 +176,7 @@ async fn meet(
         model: machine.map(Into::into),
         description: Some(moli_i18n::tr!("pilotes.moonraker.imprimante_3d").into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: shape.points(),
     });

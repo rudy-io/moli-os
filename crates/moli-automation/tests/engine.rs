@@ -45,6 +45,7 @@ impl Driver for Fake {
                     model: None,
                     description: None,
                     native_room: None,
+                    parent: None,
                     members: Vec::new(),
                     points: vec![onoff("on")],
                 });
@@ -59,6 +60,7 @@ impl Driver for Fake {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points: vec![PointSpec {
                     key: "announce".into(),

@@ -162,6 +162,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         model: Some(format!("@{bot}").into()),
         description: Some(moli_i18n::tr!("pilotes.telegram.description").into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![PointSpec {
             key: "notify".into(),

@@ -149,6 +149,7 @@ fn upload(
 fn device_routes() -> Router<Hub> {
     Router::new()
         .route("/api/devices", get(rest::devices))
+        .route("/api/house", get(rest::house))
         .route("/api/devices/{id}", get(rest::device))
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
         .route(

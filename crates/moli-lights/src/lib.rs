@@ -639,6 +639,7 @@ fn device(id: DeviceId, instance: &InstanceId, fixture: &Fixture, keyring: &[Key
         model: Some("Luminaire".into()),
         description: None,
         native_room: fixture.room.as_deref().map(Into::into),
+        parent: None,
         members: fixture.members(),
         points,
     }

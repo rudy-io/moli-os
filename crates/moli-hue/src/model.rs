@@ -183,6 +183,7 @@ pub fn load(instance: &InstanceId, resources: &[Json]) -> Load {
             model: str_at(raw, &["product_data", "model_id"]).map(Into::into),
             description: str_at(raw, &["product_data", "product_name"]).map(Into::into),
             native_room: rooms.get(hue_id).map(|r| (*r).into()),
+            parent: None,
             members: Vec::new(),
             points,
         });
@@ -291,6 +292,7 @@ fn groups(
                 .into(),
             ),
             native_room: is_room.then(|| name.trim().into()),
+            parent: None,
             // The guard checks every member's rooms: a lamp labelled
             // « Petite chambre » but in the Hue room « Salon » keeps its
             // protection when an agent targets « Salon ».

@@ -403,6 +403,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, model: Option<&str>, inks: &[String]) 
         model,
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

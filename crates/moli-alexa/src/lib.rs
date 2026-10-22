@@ -111,6 +111,7 @@ fn account_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
         model: Some("Alexa".into()),
         description: Some(moli_i18n::tr!("pilotes.alexa.description").into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             text_point(

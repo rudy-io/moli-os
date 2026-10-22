@@ -172,6 +172,7 @@ pub(crate) fn read(
             model: Some("AMS".into()),
             description: None,
             native_room: None,
+            parent: None,
             members: Vec::new(),
             points,
         });
@@ -210,6 +211,7 @@ pub(crate) fn read(
             model: Some(moli_i18n::tr!("pilotes.bambu.bobine_externe").into()),
             description: None,
             native_room: None,
+            parent: None,
             members: Vec::new(),
             points: vec![
                 text("spool", &moli_i18n::tr!("pilotes.bambu.bobine")),

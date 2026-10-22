@@ -155,6 +155,7 @@ fn device(id: &DeviceId, instance: &InstanceId, config: &crate::Config) -> Devic
         model: Some(moli_i18n::tr!("serveur.energie.modele").into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

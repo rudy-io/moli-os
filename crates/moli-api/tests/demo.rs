@@ -28,6 +28,7 @@ impl Driver for Lamp {
                 model: None,
                 description: None,
                 native_room: None,
+                parent: None,
                 members: Vec::new(),
                 points: vec![PointSpec {
                     key: "state".into(),

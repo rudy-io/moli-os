@@ -167,6 +167,7 @@ impl Driver for Helpers {
                     model: Some("Aide".into()),
                     description: None,
                     native_room: h.room.as_deref().map(Into::into),
+                    parent: None,
                     members: Vec::new(),
                     points: vec![spec.clone()],
                 });

@@ -171,6 +171,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str) -> Device {
         model: Some(moli_i18n::tr!("pilotes.igd.box_internet").into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(

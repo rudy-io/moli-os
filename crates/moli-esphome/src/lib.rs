@@ -157,6 +157,7 @@ fn device(
         ),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(

@@ -1082,6 +1082,7 @@ async fn serve(
         model: profile.meta.model.as_deref().map(Into::into),
         description: Some(profile.meta.name.as_str().into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: profile.points.iter().map(|p| p.spec.clone()).collect(),
     });

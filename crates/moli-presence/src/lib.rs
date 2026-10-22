@@ -206,6 +206,7 @@ async fn run(this: &Presence, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             model: Some("Présence".into()),
             description: None,
             native_room: None,
+            parent: None,
             members: Vec::new(),
             points: vec![PointSpec {
                 key: "home".into(),
@@ -298,6 +299,7 @@ fn machine_device(ctx: &DriverCtx, id: &moli_core::DeviceId, m: &Machine) -> Dev
         // Its address: where to find it, and how a bench matches HA's « ping ».
         description: Some(m.ip.to_string().into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![PointSpec {
             key: "online".into(),

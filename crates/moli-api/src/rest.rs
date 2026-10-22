@@ -41,6 +41,20 @@ pub(crate) async fn devices(State(hub): State<Hub>, caller: Caller) -> Response 
     }
 }
 
+/// The house as one object: rooms, their devices, a station's devices
+/// under it; a guest's rooms only, for a guest.
+pub(crate) async fn house(
+    State(hub): State<Hub>,
+    Extension(HomeFile(path)): Extension<HomeFile>,
+    caller: Caller,
+) -> Response {
+    let snapshot = match caller.person.as_ref().filter(|p| p.is_guest()) {
+        Some(guest) => guest.guest_view(&hub).0,
+        None => hub.snapshot(),
+    };
+    Json(moli_assistant::house(path.as_deref(), &snapshot.devices).await).into_response()
+}
+
 pub(crate) async fn device(
     State(hub): State<Hub>,
     caller: Caller,

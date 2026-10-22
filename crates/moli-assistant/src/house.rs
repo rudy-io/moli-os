@@ -321,6 +321,89 @@ fn trim(f: f64) -> String {
     }
 }
 
+/// The house as one object: its rooms (the dashboard's order and icons),
+/// each with its devices; a device sits under its parent (a camera under
+/// its HomeBase) when both are in the same room. Devices with no room, or
+/// in one `home.json` doesn't know, come after.
+pub(crate) fn tree(
+    devices: &[DeviceView],
+    layout: &Layout,
+    raw: &serde_json::Value,
+) -> serde_json::Value {
+    use serde_json::json;
+
+    let shown: Vec<&DeviceView> = devices
+        .iter()
+        .filter(|d| !layout.hides(d.device.id.as_str()))
+        .collect();
+    let room_of: BTreeMap<&str, String> = shown
+        .iter()
+        .map(|d| (d.device.id.as_str(), layout.room_of(d)))
+        .collect();
+    let no_room = no_room();
+    // Where a device sits: under its parent when it is shown, in the same room.
+    let parent_of = |d: &DeviceView| -> Option<String> {
+        let parent = d.device.parent.as_ref()?.as_str();
+        (room_of.get(parent) == room_of.get(d.device.id.as_str())).then(|| parent.to_owned())
+    };
+    let mut children: BTreeMap<String, Vec<&DeviceView>> = BTreeMap::new();
+    for d in &shown {
+        if let Some(parent) = parent_of(d) {
+            children.entry(parent).or_default().push(d);
+        }
+    }
+    let mut by_room: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
+    for d in shown.iter().filter(|d| parent_of(d).is_none()) {
+        by_room
+            .entry(room_of[d.device.id.as_str()].clone())
+            .or_default()
+            .push(tree_node(d, &children, 0));
+    }
+    let mut rooms = Vec::new();
+    for def in raw["rooms"].as_array().into_iter().flatten() {
+        let Some(name) = def["name"].as_str() else {
+            continue;
+        };
+        let devices = by_room.remove(name).unwrap_or_default();
+        rooms.push(json!({ "name": name, "icon": def["icon"], "devices": devices }));
+    }
+    let unplaced = by_room.remove(&no_room).unwrap_or_default();
+    // Rooms the devices name that the dashboard doesn't know.
+    for (name, devices) in by_room {
+        rooms.push(json!({ "name": name, "icon": null, "devices": devices }));
+    }
+    json!({ "title": layout.title, "rooms": rooms, "unplaced": unplaced })
+}
+
+fn tree_node(
+    d: &DeviceView,
+    children: &BTreeMap<String, Vec<&DeviceView>>,
+    depth: usize,
+) -> serde_json::Value {
+    use serde_json::json;
+
+    let kids: Vec<_> = if depth < 4 {
+        children
+            .get(d.device.id.as_str())
+            .map(|list| {
+                list.iter()
+                    .map(|k| tree_node(k, children, depth + 1))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    json!({
+        "id": d.device.id,
+        "name": name_of(d),
+        "model": d.device.model,
+        "parent": d.device.parent,
+        "online": d.online,
+        "children": kids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +434,7 @@ mod tests {
                 model: Some(model.into()),
                 description: None,
                 native_room: Some("Salon".into()),
+                parent: None,
                 members: members.iter().map(|m| (*m).into()).collect(),
                 points: Vec::new(),
             }),
@@ -535,5 +619,24 @@ mod tests {
         assert_eq!(trim(21.04), "21");
         assert_eq!(trim(21.25), "21.3");
         assert_eq!(norm(" Entrée "), "entree");
+    }
+
+    #[test]
+    fn the_house_puts_a_camera_under_its_station_in_the_same_room() {
+        let mut station = view("eufy:hb", "T8010", &[]);
+        std::sync::Arc::make_mut(&mut station.device).native_room = Some("Entrée".into());
+        let mut camera = view("eufy:cam", "T8410", &[]);
+        std::sync::Arc::make_mut(&mut camera.device).parent = Some("eufy:hb".into());
+        std::sync::Arc::make_mut(&mut camera.device).native_room = Some("Entrée".into());
+        let mut elsewhere = view("eufy:bell", "T8210", &[]);
+        std::sync::Arc::make_mut(&mut elsewhere.device).parent = Some("eufy:hb".into());
+        let raw = serde_json::json!({"rooms":[{"name":"Salon","icon":"sofa"},{"name":"Entrée"}]});
+        let layout: Layout = serde_json::from_value(raw.clone()).unwrap();
+        let house = tree(&[station, camera, elsewhere], &layout, &raw);
+        assert_eq!(house["rooms"][0]["name"], "Salon");
+        assert_eq!(house["rooms"][0]["devices"][0]["id"], "eufy:bell");
+        let entree = &house["rooms"][1]["devices"][0];
+        assert_eq!(entree["id"], "eufy:hb");
+        assert_eq!(entree["children"][0]["id"], "eufy:cam");
     }
 }

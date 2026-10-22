@@ -244,6 +244,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str) -> Device {
         model: Some("Serveur de la maison".into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             spec(
@@ -473,6 +474,7 @@ fn machine_device(ctx: &DriverCtx, id: &DeviceId, machine: &Machine) -> Device {
         model: Some("Ordinateur".into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

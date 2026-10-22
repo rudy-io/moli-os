@@ -356,6 +356,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, info: &Json) -> Device {
         model: info["model"].as_str().map(Into::into),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

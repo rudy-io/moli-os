@@ -43,6 +43,7 @@ fn device(ctx: &DriverCtx, name: &str, points: Vec<PointSpec>) -> Device {
         model: None,
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }

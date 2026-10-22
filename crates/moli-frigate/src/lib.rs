@@ -169,6 +169,7 @@ fn camera_device(ctx: &DriverCtx, camera: &str) -> Device {
         model: Some(moli_i18n::tr!("pilotes.frigate.camera").into()),
         description: None,
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points,
     }
@@ -204,6 +205,7 @@ fn server_device(ctx: &DriverCtx) -> Device {
         model: Some("NVR".into()),
         description: Some(moli_i18n::tr!("pilotes.frigate.enregistreur").into()),
         native_room: None,
+        parent: None,
         members: Vec::new(),
         points: vec![
             point(
