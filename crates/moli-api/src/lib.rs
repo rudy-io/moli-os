@@ -261,6 +261,7 @@ fn assistant_routes() -> Router<Hub> {
             "/api/assistant/listen",
             post(assistant::listen).layer(DefaultBodyLimit::max(BIG_BODY)),
         )
+        .route("/api/assistant/stop", post(assistant::stop))
         .route("/api/assistant/speak", post(assistant::speak))
         .route("/api/assistant/exchanges", get(assistant::exchanges))
         .route("/api/assistant/recap", post(assistant::recap))

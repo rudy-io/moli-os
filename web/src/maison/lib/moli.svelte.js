@@ -81,6 +81,11 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(humanError(res.status, body.error));
+    // Coupée : on efface la question restée sans réponse et on se tait.
+    if (body.interrupted) {
+      moli.messages.pop();
+      return null;
+    }
     moli.messages.push({ role: 'assistant', content: body.reply, cards: body.cards ?? [], actions: body.actions ?? [] });
     moli.focus = moli.messages.length - 1;
     if (spoken && !silent) speak(body.reply);
@@ -90,6 +95,17 @@ export async function ask(text, surface = 'bubble', spoken = false, { silent = f
     return null;
   } finally {
     moli.busy = false;
+  }
+}
+
+/** Coupe la réflexion en cours. Rend vrai si quelque chose a été coupé. */
+export async function arreter() {
+  try {
+    const res = await fetch('/api/assistant/stop', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    return body.stopped === true;
+  } catch {
+    return false;
   }
 }
 

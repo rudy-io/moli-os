@@ -228,6 +228,9 @@ struct Inner {
     prefs_path: std::sync::RwLock<Option<PathBuf>>,
     /// For drafting automations from the conversation.
     automations: std::sync::RwLock<Option<moli_automation::Automations>>,
+    /// The turn being thought out right now, so a person can cut it short.
+    /// One at a time: `running` already keeps turns from overlapping.
+    in_flight: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// A Home Assistant import is running.
     importing: std::sync::atomic::AtomicBool,
     /// SHA-256 of the HA automations translated since start: not paid for
@@ -339,6 +342,8 @@ pub enum AssistantError {
     Invalid(String),
     /// The model's provider failed.
     Upstream(String),
+    /// A person cut the thinking short. What was already done stays done.
+    Interrupted,
 }
 
 impl std::fmt::Display for AssistantError {
@@ -348,6 +353,7 @@ impl std::fmt::Display for AssistantError {
             Self::Busy => f.write_str("assistant busy, try again in a moment"),
             Self::Invalid(why) => write!(f, "invalid request: {why}"),
             Self::Upstream(why) => write!(f, "model unavailable: {why}"),
+            Self::Interrupted => f.write_str("interrupted"),
         }
     }
 }
@@ -369,6 +375,7 @@ impl Assistant {
             "speech_speed must be between 0.25 and 4"
         );
         Ok(Self(Arc::new(Inner {
+            in_flight: Mutex::new(None),
             hub,
             energy,
             history,
@@ -581,6 +588,25 @@ impl Assistant {
     /// One turn of the conversation: the model reads the house, may act and
     /// pick cards, then answers.
     /// One turn, kept in the history (question, answer, orders, time taken).
+    /// Cuts the turn being thought out, if there is one. Says whether there
+    /// was: a person pressing « stop » on nothing should be told so.
+    #[must_use]
+    pub fn interrupt(&self) -> bool {
+        let token = self
+            .0
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match token {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
     pub async fn turn(&self, turn: Turn) -> Result<Reply, AssistantError> {
         let started = Instant::now();
         let question = turn
@@ -590,7 +616,24 @@ impl Assistant {
             .map(|m| m.content.clone());
         let surface = turn.surface.clone().unwrap_or_default();
         let spoken = turn.spoken;
-        let result = self.converse(turn).await;
+        // Interruptible: the thinking is dropped where it stands. What the
+        // turn already did (a light switched) is done and stays done — only
+        // what had not happened yet is given up.
+        let token = tokio_util::sync::CancellationToken::new();
+        *self
+            .0
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(token.clone());
+        let result = tokio::select! {
+            answer = self.converse(turn) => answer,
+            () = token.cancelled() => Err(AssistantError::Interrupted),
+        };
+        *self
+            .0
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         if let Some(question) = question {
             let heard = self.take_heard();
             let c = &self.0.config;

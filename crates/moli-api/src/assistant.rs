@@ -36,8 +36,21 @@ pub(crate) async fn turn(
     };
     match moli.turn(turn).await {
         Ok(reply) => axum::Json(reply).into_response(),
+        // Cutting is not failing: the surface has nothing to announce, only
+        // to stop waiting.
+        Err(AssistantError::Interrupted) => {
+            axum::Json(json!({ "interrupted": true })).into_response()
+        }
         Err(e) => failure(&e),
     }
+}
+
+/// `POST /api/assistant/stop`: cut the thinking short.
+pub(crate) async fn stop(Extension(Moli(moli)): Extension<Moli>) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    axum::Json(json!({ "stopped": moli.interrupt() })).into_response()
 }
 
 pub(crate) async fn listen(
@@ -315,6 +328,7 @@ pub(crate) fn failure(e: &AssistantError) -> Response {
         AssistantError::Busy => StatusCode::TOO_MANY_REQUESTS,
         AssistantError::Invalid(_) => StatusCode::BAD_REQUEST,
         AssistantError::Upstream(_) => StatusCode::BAD_GATEWAY,
+        AssistantError::Interrupted => StatusCode::CONFLICT,
     };
     if status != StatusCode::BAD_REQUEST {
         tracing::warn!(error = %e, "assistant");
