@@ -43,7 +43,7 @@ mod kind {
     pub const CURRENT_POSITION: &str = "6D";
     pub const TARGET_POSITION: &str = "7C";
     pub const POSITION_STATE: &str = "72";
-    pub const CURRENT_DOOR: &str = "0E";
+    pub const CURRENT_DOOR: &str = "E";
     pub const TARGET_DOOR: &str = "32";
     pub const OBSTRUCTION: &str = "24";
     pub const ON: &str = "25";
@@ -634,6 +634,36 @@ mod tests {
             kinds,
             [["3E", "8C"], ["3E", "41"], ["3E", "49"]].map(|k| k.map(String::from).to_vec())
         );
+    }
+
+    #[test]
+    fn short_types_have_no_leading_zero() {
+        // HomeKit drops the whole bridge over one « 0E » (it wants « E »).
+        let sources = [source(
+            "tout:aabb",
+            &[
+                "guard_mode",
+                "motion",
+                "person",
+                "doorbell",
+                "control",
+                "percent_control",
+                "door_control",
+                "door_position",
+                "gate",
+            ],
+        )];
+        let mut aids = BTreeMap::new();
+        assign(&mut aids, &sources);
+        let built = build("Moli", &sources, &aids, &labels());
+        for accessory in built.json["accessories"].as_array().unwrap() {
+            for service in accessory["services"].as_array().unwrap() {
+                let chars = service["characteristics"].as_array().unwrap();
+                for t in chars.iter().chain([service]).map(|j| j["type"].as_str().unwrap()) {
+                    assert!(!t.starts_with('0'), "{t}");
+                }
+            }
+        }
     }
 
     #[test]
