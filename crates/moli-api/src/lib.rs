@@ -243,6 +243,7 @@ fn people(
         },
         |h| h.0.clone(),
     );
+    persons.set_access(access.is_some());
     // The phone of someone no longer of the house hears nothing more of it.
     if let Some(phones) = &options.phones {
         let persons = Arc::clone(&persons);

@@ -37,7 +37,7 @@ qu'il se connecte avec son compte.
   sont les siennes (un groupe compte les pièces de ses membres ; un appareil sans pièce n'est à
   personne). Jamais un appareil qui dit où est quelqu'un (téléphones, présence, personnes),
   même donné.
-- Il reste toujours au moins un administrateur.
+- Il reste toujours au moins un administrateur. Tant qu'aucun ne peut se connecter (ni mot de passe, ni Access configuré pour son e-mail), une session ouverte avec le code de la maison sur le réseau local agit en administrateur : le temps de s'inviter soi-même et de choisir un mot de passe.
 - La date de fin passée, l'invité ne peut plus se connecter et ses téléphones ne reçoivent
   plus rien.
 

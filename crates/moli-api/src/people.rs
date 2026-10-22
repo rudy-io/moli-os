@@ -275,6 +275,9 @@ pub(crate) struct People {
     book: Mutex<Book>,
     sessions: Mutex<HashMap<String, PersonSession>>,
     write: tokio::sync::Mutex<()>,
+    /// Whether Cloudflare Access is configured: only then does an e-mail
+    /// let someone in.
+    access: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for People {
@@ -664,6 +667,7 @@ impl People {
             book: Mutex::new(book),
             sessions: Mutex::new(sessions),
             write: tokio::sync::Mutex::new(()),
+            access: std::sync::atomic::AtomicBool::new(false),
         };
         if changed && let Err(e) = people.save_now() {
             tracing::error!(error = %e, "people.json not written");
@@ -702,14 +706,22 @@ impl People {
         lock(&self.book).clone()
     }
 
+    /// Says whether Cloudflare Access is configured (set once at the start).
+    pub(crate) fn set_access(&self, configured: bool) {
+        self.access.store(configured, Ordering::Relaxed);
+    }
+
     /// Whether an owner can sign in (a password set, or an e-mail Access
-    /// vouches for): until then, the house's code manages the people (else
-    /// the first owner, created but not yet invited, could never be).
+    /// vouches for, when Access is configured): until then, the house's code
+    /// manages the people (else the first owner, created but not yet
+    /// invited, or whose Access went away, could never be).
     pub(crate) fn has_owner(&self) -> bool {
+        let access = self.access.load(Ordering::Relaxed);
         lock(&self.book).people.iter().any(|p| {
             p.role == Role::Owner
                 && active(p)
-                && (!p.emails.is_empty() || self.hub.core_secret(&password_key(&p.id)).is_some())
+                && ((access && !p.emails.is_empty())
+                    || self.hub.core_secret(&password_key(&p.id)).is_some())
         })
     }
 
@@ -1509,6 +1521,22 @@ mod tests {
         let p = People::open(hub(), Some(&dir), &owners);
         assert_eq!(p.book().people.len(), 1, "not added twice");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn an_owner_without_a_way_in_leaves_the_house_code_in_charge() {
+        let hub = hub_with_store();
+        let p = People::open(hub.clone(), None, &["moi@example.org".to_owned()]);
+        // An e-mail, but no Access to vouch for it: nobody can sign in.
+        assert!(!p.has_owner());
+        p.set_access(true);
+        assert!(p.has_owner());
+        p.set_access(false);
+        let kept = hash_password("une longue phrase de passe").unwrap();
+        hub.store_core_secret(&password_key("moi"), &kept)
+            .await
+            .unwrap();
+        assert!(p.has_owner(), "a password is a way in");
     }
 
     #[tokio::test]
