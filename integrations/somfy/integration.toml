@@ -20,5 +20,5 @@ vars = []
 options = []
 
 [origin]
-reused = "https://github.com/Minims/somfy-protect-api (GPL-3.0), as a reference only: no code taken"
+reused = "https://github.com/Minims/somfy-protect-api and https://github.com/jeremiehuchet/somfy-protect-api-rs (GPL-3.0), as references only: no code taken"
 author = "agent"

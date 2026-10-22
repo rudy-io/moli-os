@@ -1,7 +1,10 @@
-//! Somfy Protect alarms (Home Alarm, Somfy One), through Somfy's cloud:
-//! read-only for now. Each site (an alarm) is a Moli device with its mode,
-//! each of its devices (Link, detectors, sirens, remotes, cameras) another,
-//! hanging from it, with its battery, radio and temperature when it has them.
+//! Somfy Protect alarms (Home Alarm, Somfy One), through Somfy's cloud.
+//! Each site (an alarm) is a Moli device with its mode (writable: an
+//! agent's order waits for a person) and whether it rings; each of its
+//! devices (Link, detectors, sirens, remotes, cameras) another, hanging
+//! from it, with its battery, radio and temperature when it has them.
+//! Changes arrive live on Somfy's event feed (`events.rs`); the lists are
+//! read again every minute all the same.
 //!
 //! The account (`email`, `password`) and the app's OAuth client
 //! (`client_id`, `client_secret`) come from the encrypted secret store; the
@@ -9,6 +12,7 @@
 //! best: Moli's reads then never get mixed with a person's.
 
 mod cloud;
+mod events;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -17,6 +21,7 @@ use anyhow::Context as _;
 use moli_core::{Access, Device, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use serde::Deserialize;
+use tokio::sync::{mpsc, watch};
 
 use crate::cloud::{Client, Cloud, Refusal, Session};
 
@@ -37,6 +42,9 @@ const MODES: [(&str, &str); 3] = [
     ("partial", "home"),
     ("armed", "away"),
 ];
+
+/// Whether a site's alarm rings, and why (Somfy's words).
+const ALARMS: [&str; 4] = ["none", "trespass", "panic", "smoke"];
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,13 +122,30 @@ async fn run(ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut cloud = Cloud { session };
     let mut known: BTreeMap<String, Device> = BTreeMap::new();
     let mut shapes: BTreeSet<String> = BTreeSet::new();
+    let mut others: BTreeSet<String> = BTreeSet::new();
     let mut rescan = tokio::time::interval(RESCAN);
     rescan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let (token_tx, token_rx) = watch::channel(String::new());
+    let (up_tx, mut up) = mpsc::channel(32);
+    let (done_tx, mut done) = mpsc::channel::<(String, &'static str)>(8);
+    let mut feed: Option<Abort> = None;
     loop {
         tokio::select! {
             command = ctx.next_command() => match command {
-                Some(command) => command.reply(Err(moli_i18n::tr!("pilotes.somfy.lecture_seule"))),
+                Some(command) => order(&cloud, &known, command, &done_tx),
                 None => return Ok(()),
+            },
+            Some((site, mode)) = done.recv() => {
+                ctx.set_state(&ctx.device_id(&site), "guard_mode", Value::Text(mode.into()));
+            }
+            Some(message) = up.recv() => match message {
+                events::Up::Connected => tracing::info!(instance, "somfy: listening for events"),
+                events::Up::Change(change) => apply(ctx, &known, &mut others, change),
+                events::Up::TokenRefused => {
+                    // A new token now, rather than at the next scan.
+                    cloud.session.access_token.clear();
+                    rescan.reset_immediately();
+                }
             },
             _ = rescan.tick() => {
                 if let Err(e) = connect(ctx, &mut cloud, &client, &email, &password).await {
@@ -135,6 +160,16 @@ async fn run(ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     }
                     return Err(e);
                 }
+                token_tx.send_if_modified(|t| {
+                    let changed = *t != cloud.session.access_token;
+                    if changed {
+                        t.clone_from(&cloud.session.access_token);
+                    }
+                    changed
+                });
+                if feed.is_none() {
+                    feed = Some(Abort(tokio::spawn(events::run(token_rx.clone(), up_tx.clone(), instance.clone()))));
+                }
                 match inventory(ctx, &cloud, &mut known, &mut shapes).await {
                     Ok(()) => ctx.ready(),
                     Err(e) => {
@@ -146,6 +181,98 @@ async fn run(ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         return Err(e);
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Aborts the task when the driver's run ends.
+struct Abort(tokio::task::JoinHandle<()>);
+
+impl Drop for Abort {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// An order: only a site's mode is writable. Sent in its own task, within
+/// the hub's time; the new mode is shown once Somfy took it.
+fn order(
+    cloud: &Cloud,
+    known: &BTreeMap<String, Device>,
+    command: moli_runtime::CommandRequest,
+    done: &mpsc::Sender<(String, &'static str)>,
+) {
+    if &*command.key != "guard_mode" {
+        command.reply(Err(moli_i18n::tr!("pilotes.somfy.lecture_seule")));
+        return;
+    }
+    let mode = match &command.value {
+        Value::Text(text) => MODES.iter().find(|(_, moli)| *moli == &**text).copied(),
+        _ => None,
+    };
+    let site = known
+        .iter()
+        .find(|(_, d)| d.id == command.device.id)
+        .map(|(native, _)| native.clone());
+    let (Some((level, mode)), Some(site)) = (mode, site) else {
+        command.reply(Err(moli_i18n::tr!("pilotes.somfy.mode_inconnu")));
+        return;
+    };
+    let (cloud, done) = (cloud.clone(), done.clone());
+    tokio::spawn(async move {
+        if command.abandoned() {
+            return;
+        }
+        let limit = command
+            .deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .saturating_sub(Duration::from_millis(300));
+        let outcome = tokio::time::timeout(limit, cloud.set_level(&site, level)).await;
+        tracing::info!(level, outcome = ?outcome.as_ref().map(|r| r.as_ref().map_err(ToString::to_string)), "somfy: mode order");
+        match outcome {
+            Ok(Ok(())) => {
+                command.reply(Ok(()));
+                let _ = done.send((site, mode)).await;
+            }
+            Ok(Err(e)) => command.reply(Err(format!("{e:#}"))),
+            Err(_) => command.reply(Err(moli_i18n::tr!("pilotes.somfy.sans_reponse"))),
+        }
+    });
+}
+
+/// A message of the event feed, on the devices it names.
+fn apply(
+    ctx: &DriverCtx,
+    known: &BTreeMap<String, Device>,
+    others: &mut BTreeSet<String>,
+    change: events::Change,
+) {
+    match change {
+        events::Change::Level { site, level } => {
+            if let (Some(device), Some((_, mode))) =
+                (known.get(&site), MODES.iter().find(|(s, _)| *s == level))
+            {
+                ctx.set_state(&device.id, "guard_mode", Value::Text((*mode).into()));
+            }
+        }
+        events::Change::Alarm { site, kind } => {
+            if let Some(device) = known.get(&site) {
+                tracing::info!(instance = %ctx.instance(), kind, "somfy: alarm");
+                ctx.set_state(&device.id, "alarm", Value::Text(kind.into()));
+            }
+        }
+        events::Change::Status { device, status } => {
+            if let Some(device) = known.get(&device) {
+                for (key, value) in values(&status) {
+                    ctx.set_state(&device.id, key, value);
+                }
+            }
+        }
+        events::Change::Other(key) => {
+            // Each kind once, to learn what else Somfy says.
+            if others.insert(key.clone()) {
+                tracing::info!(instance = %ctx.instance(), key, "somfy: event not read");
             }
         }
     }
@@ -195,13 +322,12 @@ async fn inventory(
             .iter()
             .find(|(somfy, _)| *somfy == site.security_level)
             .map(|(_, moli)| Value::Text((*moli).into()));
-        publish(
-            ctx,
-            known,
-            &site.id,
-            device,
-            mode.map(|m| ("guard_mode", m)).into_iter().collect(),
-        );
+        let mut now: Vec<(&'static str, Value)> =
+            mode.map(|m| ("guard_mode", m)).into_iter().collect();
+        if let Some(ringing) = ALARMS.iter().find(|a| **a == site.alarm.ringing()) {
+            now.push(("alarm", Value::Text((*ringing).into())));
+        }
+        publish(ctx, known, &site.id, device, now);
         seen.insert(site.id.clone());
         let devices = cloud.devices(&site.id).await.context("Somfy devices")?;
         for d in &devices {
@@ -210,7 +336,7 @@ async fn inventory(
                 let keys: Vec<&str> = d.status.keys().map(String::as_str).collect();
                 tracing::info!(instance = %ctx.instance(), kind = %d.definition.label, keys = keys.join(","), "somfy: device seen");
             }
-            let values = values(d);
+            let values = values(&d.status);
             publish(
                 ctx,
                 known,
@@ -256,8 +382,8 @@ fn publish(
 }
 
 /// Battery, radio and temperature, from what the device reports.
-fn values(device: &cloud::Device) -> Vec<(&'static str, Value)> {
-    let number = |key: &str| device.status.get(key).and_then(serde_json::Value::as_f64);
+fn values(status: &serde_json::Map<String, serde_json::Value>) -> Vec<(&'static str, Value)> {
+    let number = |key: &str| status.get(key).and_then(serde_json::Value::as_f64);
     let mut out = Vec::new();
     #[allow(clippy::cast_possible_truncation)] // checked to be 0..=100
     if let Some(level) = number("battery_level").filter(|l| (0.0..=100.0).contains(l)) {
@@ -296,8 +422,13 @@ fn percent() -> Kind {
 }
 
 fn site_device(ctx: &DriverCtx, site: &cloud::Site) -> Device {
+    // Writable; an agent's order waits for a person.
     let mode = PointSpec {
         semantic: Semantic::Control,
+        access: Access {
+            read: true,
+            write: true,
+        },
         ..read_only(
             "guard_mode",
             moli_i18n::tr!("pilotes.somfy.mode"),
@@ -321,7 +452,17 @@ fn site_device(ctx: &DriverCtx, site: &cloud::Site) -> Device {
         native_room: None,
         parent: None,
         members: Vec::new(),
-        points: vec![mode],
+        points: vec![
+            mode,
+            read_only(
+                "alarm",
+                moli_i18n::tr!("pilotes.somfy.alarme"),
+                Kind::Enum {
+                    values: ALARMS.iter().map(|a| (*a).into()).collect(),
+                },
+                None,
+            ),
+        ],
     }
 }
 
@@ -381,8 +522,8 @@ fn part_device(
 mod tests {
     use super::*;
 
-    fn device(status: &serde_json::Value) -> cloud::Device {
-        serde_json::from_value(serde_json::json!({ "device_id": "d", "status": status })).unwrap()
+    fn device(status: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        status.as_object().cloned().unwrap()
     }
 
     #[test]

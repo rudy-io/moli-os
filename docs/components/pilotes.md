@@ -246,8 +246,8 @@ country = "FR"     # pays du compte : choisit les serveurs (domain/<pays> sur ex
 
 ## `somfy` : alarme Somfy Protect (`crates/moli-somfy`)
 
-- **Couvre** : alarmes Somfy Protect (Home Alarm, Somfy One) du compte. **Lecture seule** : le mode de chaque site, et ses appareils (Link, détecteurs, sirènes, télécommandes, caméras) avec batterie, signal radio et température quand ils les donnent.
-- **Origine** : écrit d'après l'API cloud de l'appli Somfy Protect (ex-Myfox) ; somfy-protect-api (GPL-3.0) a servi de référence pour les adresses et les champs, aucun code n'en est repris.
+- **Couvre** : alarmes Somfy Protect (Home Alarm, Somfy One) du compte : le **mode** de chaque site (en écriture), s'il **sonne** et pourquoi, et ses appareils (Link, détecteurs, sirènes, télécommandes, caméras) avec batterie, signal radio et température quand ils les donnent. L'état ouvert/fermé des IntelliTAG n'est pas donné par l'API (seule une intrusion, alarme armée).
+- **Origine** : écrit d'après l'API cloud de l'appli Somfy Protect (ex-Myfox) ; somfy-protect-api et somfy-protect-api-rs (GPL-3.0) ont servi de référence pour les adresses, les champs et les messages, aucun code n'en est repris.
 - **Configuration** :
 
 ```toml
@@ -258,9 +258,12 @@ kind = "somfy"
 
 - **Secrets** : `email`, `password` (un **compte invité** réservé à Moli), `client_id`, `client_secret` (le client OAuth de l'appli, gardé hors du dépôt), posés par l'humain. Écrit par le pilote : `session` (jeton d'accès, jeton de renouvellement, échéance).
 - **Connexion** : `POST sso.myfox.io/oauth/oauth/v2/token` en formulaire (`grant_type=password`), puis `refresh_token` une minute avant l'échéance ; renouvellement refusé : nouvelle connexion. 400/401 à la connexion : `waiting` (compte ou client à corriger).
-- **Points** : site → `guard_mode` (`disarmed`, `partial` → `home`, `armed` → `away` : le vocabulaire des autres alarmes, donc le *système de sécurité* HomeKit sans rien de plus) ; appareil → `battery` (`battery_level`), `signal` (`rlink_quality_percent`), `temperature`. Relus toutes les minutes (`api.myfox.io/v3/site`, `/v3/site/<id>/device`). Chaque type d'appareil est journalisé une fois avec les clés de son `status` (jamais les valeurs), pour apprendre ce qu'il reste à lire.
+- **Points** : site → `guard_mode` (`disarmed`, `partial` → `home`, `armed` → `away` : le vocabulaire des autres alarmes, donc le *système de sécurité* HomeKit sans rien de plus) et `alarm` (`none`, `trespass`, `panic`, `smoke` ; lu dans `alarm.status` / `alarm_type` du site) ; appareil → `battery` (`battery_level`), `signal` (`rlink_quality_percent`), `temperature`. Relus toutes les minutes (`api.myfox.io/v3/site`, `/v3/site/<id>/device`). Chaque type d'appareil est journalisé une fois avec les clés de son `status` (jamais les valeurs).
+- **Mode en écriture** : `PUT /v3/site/<id>/security` `{"status": "disarmed" | "partial" | "armed"}`, dans le délai du hub (5 s). Sémantique `Control` : l'ordre d'un agent attend une personne. Le nouveau mode est affiché dès que Somfy l'accepte, puis confirmé par le flux.
+- **Événements** (`src/events.rs`) : websocket `wss://websocket.myfox.io/events/websocket?token=…`, dans sa propre tâche avec le dernier jeton. Chaque message à `message_id` est acquitté (`{"ack": true, "message_id", "client": "Android"}`), ping après 45 s de silence, reconnexion de 5 s à 5 min. `security.level.change` → `guard_mode` ; `alarm.trespass`, `alarm.panic`, `alarm.domestic.fire`, `alarm.end` → `alarm` ; `device.status` → batterie, signal, température. `websocket.error.token` : un nouveau jeton tout de suite, le flux l'attend. Les autres clés sont journalisées une fois (clé seule).
+- **HomeKit** : un site qui sonne (`alarm` ≠ `none`) se lit « alarme déclenchée » (état 4 du système de sécurité), pour Somfy comme pour tout appareil qui a un point `alarm`.
 - **Identité** : `site_id` et `device_id` de Somfy ; chaque appareil a son site pour parent.
-- **Tests** : `src/cloud.rs` (formulaire échappé, fraîcheur du jeton, listes lues) ; `src/lib.rs` (valeurs bornées, modes).
+- **Tests** : `src/cloud.rs` (formulaire échappé, fraîcheur du jeton, listes lues, alarme du site) ; `src/events.rs` (mode, alarmes, statut, messages inconnus ou incomplets) ; `src/lib.rs` (valeurs bornées, modes).
 
 ## `sonos` : enceintes Sonos (`crates/moli-sonos`)
 
@@ -522,7 +525,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `eufy` | `moli-eufy` | HTTPS cloud Eufy (ECDH P-256 + AES) ; push Google (MCS 5228) ; P2P UDP 32108 | mode de sécurité (humain pour un agent) | HomeBase 2, eufyCam, Indoor Cam Pan & Tilt, S100, sonnette T8210 (inventaire) ; mouvement reçu par push (Indoor Cam, S100 avec personne), photo de l'événement (S100, Indoor Cam) ; mode de sécurité changé (HomeBase 2, Indoor Cam, S100) |
-| `somfy` | `moli-somfy` | HTTPS cloud Somfy Protect (OAuth2) | non | Home Alarm (inventaire : Link, IntelliTag, sirène extérieure, badges ; mode en lecture) |
+| `somfy` | `moli-somfy` | HTTPS cloud Somfy Protect (OAuth2) ; websocket d'événements | mode de l'alarme (humain pour un agent) | Home Alarm (inventaire : Link, IntelliTag, sirène extérieure, badges ; mode en lecture ; flux d'événements connecté) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |

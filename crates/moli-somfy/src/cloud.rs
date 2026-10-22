@@ -70,6 +70,30 @@ pub struct Site {
     /// `disarmed`, `partial` or `armed`.
     #[serde(default)]
     pub security_level: String,
+    #[serde(default)]
+    pub alarm: SiteAlarm,
+}
+
+/// Whether the alarm is ringing, and why.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SiteAlarm {
+    /// `none` or `ongoing`.
+    #[serde(default)]
+    pub status: String,
+    /// `trespass`, `panic` or `smoke`: the last one.
+    #[serde(default)]
+    pub alarm_type: Option<String>,
+}
+
+impl SiteAlarm {
+    /// `none`, or what rings (`trespass` when Somfy does not say).
+    pub fn ringing(&self) -> &str {
+        if self.status == "ongoing" {
+            self.alarm_type.as_deref().unwrap_or("trespass")
+        } else {
+            "none"
+        }
+    }
 }
 
 /// A device of a site (Link, detector, siren, remote, camera…).
@@ -117,7 +141,7 @@ pub fn form(fields: &[(&str, &str)]) -> String {
         .join("&")
 }
 
-fn escape(text: &str) -> String {
+pub fn escape(text: &str) -> String {
     use std::fmt::Write as _;
     text.bytes().fold(String::new(), |mut out, b| {
         if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -129,7 +153,7 @@ fn escape(text: &str) -> String {
     })
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Cloud {
     pub session: Session,
 }
@@ -211,24 +235,50 @@ impl Cloud {
         Ok(items.items)
     }
 
-    /// One read; the token travels in a header, never in an error.
+    /// Orders a site's level (`disarmed`, `partial`, `armed`); Somfy
+    /// confirms it on the event feed.
+    pub async fn set_level(&self, site: &str, level: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(is_id(site), "Somfy: odd site id");
+        let body = serde_json::json!({ "status": level });
+        self.call(
+            Method::PUT,
+            &format!("/v3/site/{site}/security"),
+            Some(&body),
+        )
+        .await
+        .map(drop)
+    }
+
     async fn get(&self, path: &str) -> anyhow::Result<Json> {
-        let request = Request::builder()
-            .method(Method::GET)
+        self.call(Method::GET, path, None).await
+    }
+
+    /// One call; the token travels in a header, never in an error.
+    async fn call(&self, method: Method, path: &str, body: Option<&Json>) -> anyhow::Result<Json> {
+        let builder = Request::builder()
+            .method(method)
             .uri(path)
             .header("Accept", "application/json")
             .header("User-Agent", "Somfy Protect")
             .header(
                 "Authorization",
                 format!("Bearer {}", self.session.access_token),
-            )
-            .body(Full::new(moli_net::Body::new()))?;
+            );
+        let request = match body {
+            Some(body) => builder
+                .header("Content-Type", "application/json")
+                .body(Full::new(serde_json::to_vec(body)?.into()))?,
+            None => builder.body(Full::new(moli_net::Body::new()))?,
+        };
         let (status, bytes) = moli_net::web(API_HOST, 443, true, request, LIMIT, MAX_BODY).await?;
         if status.as_u16() == 401 {
             return Err(Refusal::Expired.into());
         }
         if !status.is_success() {
             bail!("Somfy answered {status} on {path}");
+        }
+        if bytes.is_empty() {
+            return Ok(Json::Null);
         }
         serde_json::from_slice(&bytes).context("Somfy: not JSON")
     }
@@ -273,6 +323,12 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(sites.items[0].security_level, "partial");
+        assert_eq!(sites.items[0].alarm.ringing(), "none");
+        let ringing: SiteAlarm = serde_json::from_value(
+            serde_json::json!({ "status": "ongoing", "alarm_type": "smoke" }),
+        )
+        .unwrap();
+        assert_eq!(ringing.ringing(), "smoke");
         let devices: Items<Device> = serde_json::from_value(serde_json::json!({
             "items": [{
                 "device_id": "dev-1",

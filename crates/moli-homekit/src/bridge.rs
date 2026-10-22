@@ -54,8 +54,9 @@ mod kind {
 pub enum Binding {
     /// A constant (names, models…).
     Fixed(Json),
-    /// The security system's state, from `guard_mode`.
-    Current(PointId),
+    /// The security system's state, from `guard_mode`; « triggered » while
+    /// `alarm` (when the device has one) is anything but `none`.
+    Current { mode: PointId, alarm: PointId },
     /// What the person asked; writing it orders `guard_mode`.
     Target(PointId),
     /// A detection, as a boolean (motion) or 0/1 (occupancy).
@@ -80,11 +81,10 @@ impl Binding {
     pub fn watches(&self, point: &PointId) -> bool {
         match self {
             Self::Fixed(_) | Self::Press(_) | Self::Pulse(_) => false,
-            Self::Current(p)
-            | Self::Target(p)
-            | Self::Detected(p, _)
-            | Self::Position(p)
-            | Self::Moving(p) => p == point,
+            Self::Current { mode, alarm } => mode == point || alarm == point,
+            Self::Target(p) | Self::Detected(p, _) | Self::Position(p) | Self::Moving(p) => {
+                p == point
+            }
             Self::DoorCurrent { control, position } | Self::DoorTarget { control, position } => {
                 control == point || position == point
             }
@@ -133,7 +133,11 @@ pub fn security_mode(state: u64) -> Option<&'static str> {
 pub fn read(binding: &Binding, current: impl Fn(&PointId) -> Option<Value>) -> Json {
     match binding {
         Binding::Fixed(v) => v.clone(),
-        Binding::Current(p) | Binding::Target(p) => match current(p) {
+        Binding::Current { alarm, .. } if matches!(current(alarm), Some(Value::Text(a)) if &*a != "none") =>
+        {
+            json!(4)
+        }
+        Binding::Current { mode: p, .. } | Binding::Target(p) => match current(p) {
             Some(Value::Text(mode)) => security_state(&mode).map_or(Json::Null, Json::from),
             _ => Json::Null,
         },
@@ -368,7 +372,10 @@ pub fn build(
                 &["pr", "ev"],
                 "uint8",
                 states,
-                Binding::Current(point("guard_mode")),
+                Binding::Current {
+                    mode: point("guard_mode"),
+                    alarm: point("alarm"),
+                },
             );
             let targets = json!({ "valid-values": [0, 1, 2, 3] });
             let target = b.char(
@@ -587,18 +594,34 @@ mod tests {
 
     #[test]
     fn modes_and_detections_read_as_homekit_values() {
-        let p = PointId::new(&DeviceId::from("eufy:T8010P0000000000"), "guard_mode");
-        let mode = |m: &'static str| move |_: &PointId| Some(Value::Text(m.into()));
-        assert_eq!(read(&Binding::Current(p.clone()), mode("away")), json!(1));
+        let device = DeviceId::from("eufy:T8010P0000000000");
+        let p = PointId::new(&device, "guard_mode");
+        let current = Binding::Current {
+            mode: p.clone(),
+            alarm: PointId::new(&device, "alarm"),
+        };
+        let mode = |m: &'static str| {
+            let p = p.clone();
+            move |q: &PointId| (*q == p).then(|| Value::Text(m.into()))
+        };
+        assert_eq!(read(&current, mode("away")), json!(1));
+        let ringing = |q: &PointId| {
+            Some(Value::Text(
+                if q.split().is_some_and(|(_, k)| k == "alarm") {
+                    "trespass"
+                } else {
+                    "away"
+                }
+                .into(),
+            ))
+        };
+        assert_eq!(read(&current, ringing), json!(4));
         assert_eq!(
             read(&Binding::Target(p.clone()), mode("disarmed")),
             json!(3)
         );
-        assert_eq!(
-            read(&Binding::Current(p.clone()), mode("custom2")),
-            json!(2)
-        );
-        assert_eq!(read(&Binding::Current(p.clone()), |_| None), Json::Null);
+        assert_eq!(read(&current, mode("custom2")), json!(2));
+        assert_eq!(read(&current, |_| None), Json::Null);
         assert_eq!(security_mode(0), Some("home"));
         assert_eq!(security_mode(4), None);
         let on = |_: &PointId| Some(Value::Bool(true));
