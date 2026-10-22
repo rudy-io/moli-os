@@ -82,6 +82,11 @@ pub struct Meta {
     /// (MAC, serial…). Without it, the host is the identity.
     #[serde(default)]
     pub identity: Option<String>,
+    /// `GET` path answering with one image (a camera still, a screen
+    /// preview). Declared here, the device makes images on demand: the hub
+    /// asks only when a surface wants one, and nothing is ever polled.
+    #[serde(default)]
+    pub snapshot: Option<String>,
     /// `request.path` of the device's own MAC address. The driver finds a
     /// device whose address changed by its MAC: given here, it is known even
     /// before the device answered (when it is also the identity); otherwise
@@ -335,6 +340,9 @@ impl Profile {
         }
         if self.requests.is_empty() {
             return Err(fail("at least one [[request]] is required".into()));
+        }
+        if let Some(path) = &self.profile.snapshot {
+            check_shape(path).map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
         }
         let secrets = Secrets {
             declared: self.profile.secret.is_some(),
@@ -1184,6 +1192,22 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snapshot_path_is_checked_like_any_other() {
+        let with = |path: &str| {
+            builtin("iopool").unwrap().replace(
+                "[profile]",
+                &format!(
+                    "[profile]
+snapshot = \"{path}\""
+                ),
+            )
+        };
+        assert!(try_compile(&with("/apercu.jpg")).is_ok());
+        let err = try_compile(&with("apercu.jpg")).unwrap_err();
+        assert!(err.message.contains("snapshot"), "{}", err.message);
+    }
 
     fn compile(id: &str) -> Compiled {
         Profile::parse(builtin(id).unwrap())

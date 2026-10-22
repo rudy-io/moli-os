@@ -784,6 +784,9 @@ fn print_profile(compiled: &moli_profile::Compiled, file: Option<&moli_profile::
             p.spec.kind
         );
     }
+    if let Some(path) = &compiled.meta.snapshot {
+        println!("  image   on demand           GET {path}");
+    }
     if compiled.writes.is_empty() {
         println!("  writes: none (read-only)");
         return;

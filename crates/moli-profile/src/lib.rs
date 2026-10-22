@@ -26,6 +26,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
 use moli_core::{Device, DeviceId, Value};
+use moli_runtime::media::{Image, SnapshotSource};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
 use tokio::net::TcpStream;
@@ -41,6 +42,10 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// Consecutive failed polls before the device is shown offline.
 const OFFLINE_AFTER: u32 = 3;
 const MAX_BODY: usize = 1024 * 1024;
+/// An image weighs more than a reading: a still from a camera or a screen
+/// does not fit in `MAX_BODY`. Bounded all the same, so a device that
+/// answers with a film never fills memory.
+const MAX_IMAGE: usize = 8 * 1024 * 1024;
 /// A failed request is retried after at most this long.
 const RETRY_SOON: Duration = Duration::from_secs(15);
 /// A silent device is looked for at once, then after this pause, doubled
@@ -460,6 +465,43 @@ impl Driver for ProfileDriver {
     }
 }
 
+/// An image on demand: the profile's `snapshot` path, asked only when a
+/// surface wants one. Nothing is polled, nothing is kept.
+#[derive(Debug)]
+struct Snapshots {
+    target: Target,
+    path: String,
+}
+
+impl SnapshotSource for Snapshots {
+    fn snapshot(&self) -> BoxFuture<'_, anyhow::Result<Image>> {
+        Box::pin(async move {
+            let bytes =
+                exchange(&self.target, &self.path, &[], &self.path, None, MAX_IMAGE).await?;
+            Ok(Image {
+                content_type: image_type(&bytes).to_owned(),
+                bytes: bytes.to_vec(),
+            })
+        })
+    }
+}
+
+/// What the bytes are, read from them: a device often says `text/html` or
+/// nothing at all, and an image announced wrong simply does not show.
+fn image_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF") {
+        "image/gif"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    }
+}
+
 /// One HTTP(S) exchange (`GET`, or `POST` of a JSON body), bounded in time
 /// and size. `label` names the request in errors: the path *template*, so a
 /// `{secret}` never ends up in a log.
@@ -469,6 +511,7 @@ async fn exchange(
     headers: &[(String, String)],
     label: &str,
     json_body: Option<Vec<u8>>,
+    limit: usize,
 ) -> anyhow::Result<Bytes> {
     let (host, port) = (target.host.as_str(), target.port);
     let fetch = async {
@@ -518,7 +561,7 @@ async fn exchange(
         if !response.status().is_success() {
             bail!("{label}: HTTP {}", response.status());
         }
-        let body = http_body_util::Limited::new(response.into_body(), MAX_BODY)
+        let body = http_body_util::Limited::new(response.into_body(), limit)
             .collect()
             .await
             .map_err(|e| anyhow::anyhow!("{label}: {e}"))?
@@ -563,7 +606,7 @@ async fn fetch(
         .map(|(n, v)| (n.clone(), profile::expand(v, value, false)))
         .collect();
     let body = match &request.call {
-        Call::Get => exchange(target, &path, &headers, &request.path, None).await?,
+        Call::Get => exchange(target, &path, &headers, &request.path, None, MAX_BODY).await?,
         Call::Meross { namespace, payload } => {
             let key = secret.context("meross request without its key")?;
             let message = meross_message(namespace, payload, key);
@@ -573,6 +616,7 @@ async fn fetch(
                 &headers,
                 &request.path,
                 Some(message.to_string().into_bytes()),
+                MAX_BODY,
             )
             .await?
         }
@@ -820,7 +864,7 @@ impl<'a> Session<'a> {
             })?;
         }
         let path = render(write, value, &self.answers, self.target, self.secret)?;
-        let body = exchange(self.target, &path, &[], &write.path, None)
+        let body = exchange(self.target, &path, &[], &write.path, None, MAX_BODY)
             .await
             .map_err(|e| format!("{e:#}"))?;
         if let Some(expect) = &write.expect {
@@ -1085,6 +1129,15 @@ async fn serve(
         members: Vec::new(),
         points: profile.points.iter().map(|p| p.spec.clone()).collect(),
     });
+    if let Some(path) = &profile.meta.snapshot {
+        ctx.provide_snapshots(
+            &id,
+            Arc::new(Snapshots {
+                target: target.clone(),
+                path: path.clone(),
+            }),
+        );
+    }
     for (request, answer) in &session.answers {
         publish(ctx, profile, &id, request, answer);
     }
