@@ -1,0 +1,26 @@
+[integration]
+id = "shelly-uni-gate"
+name = "Shelly Uni (portail à impulsion)"
+brands = ["Shelly"]
+models = ["Shelly Uni", "SHUNI-1"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the device's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code ni donnée repris : API locale documentée par Shelly (génération 1) ; réponse de test capturée sur un vrai Shelly Uni, adresse et MAC remplacées"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/status.json"
+request = "status"

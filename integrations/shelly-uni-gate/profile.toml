@@ -1,0 +1,49 @@
+# Shelly Uni (first generation, firmware 1.x) driving a gate: relay 1 is a
+# pulse (the device turns it off by itself, `auto_off`), relay 2 is read only. Local
+# HTTP API, no authentication unless one is set in the device. Protocol from
+# Shelly's public documentation; no code copied.
+
+[profile]
+id = "shelly-uni-gate"
+name = "Shelly Uni (portail à impulsion)"
+manufacturer = "Shelly"
+model = "Shelly Uni"
+identity = "status.mac"
+mac = "status.mac"
+
+[[request]]
+id = "status"
+path = "/status"
+format = "json"
+every = "10s"
+
+[[point]]
+key = "gate"
+label = "Portail"
+from = "status.relays.0.ison"
+kind = "binary"
+semantic = "other"
+
+[[point]]
+key = "relay_2"
+label = "Sortie 2"
+from = "status.relays.1.ison"
+kind = "binary"
+semantic = "other"
+
+[[point]]
+key = "signal"
+label = "Signal Wi-Fi"
+from = "status.wifi_sta.rssi"
+kind = "numeric"
+unit = "dBm"
+semantic = "signal_strength"
+
+# ---- writes ----
+
+[[write]]
+point = "gate"
+path = "/relay/0?turn={value}"
+map = { true = "on", false = "off" }
+expect = "\"ison\""
+refresh = "status"

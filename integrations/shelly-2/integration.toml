@@ -1,0 +1,26 @@
+[integration]
+id = "shelly-2"
+name = "Shelly 2 / 2.5 (volet)"
+brands = ["Shelly"]
+models = ["Shelly 2", "Shelly 2.5", "SHSW-21", "SHSW-25"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the device's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code ni donnée repris : API locale documentée par Shelly (génération 1) ; réponse de test capturée sur un vrai Shelly 2, adresse et MAC remplacées"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/status.json"
+request = "status"

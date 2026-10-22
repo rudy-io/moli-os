@@ -1179,6 +1179,9 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
     "iopool",
     "meross-em06",
     "moonraker",
+    "shelly-2",
+    "shelly-2-garage",
+    "shelly-uni-gate",
 ];
 
 #[cfg(test)]
@@ -1207,10 +1210,12 @@ mod tests {
                 .filter(|p| p.spec.access.write)
                 .map(|p| &*p.spec.key)
                 .collect();
-            let declared: &[&str] = if *id == "daikin-brp069" {
-                &["on", "mode", "target_temperature", "fan"]
-            } else {
-                &[]
+            let declared: &[&str] = match *id {
+                "daikin-brp069" => &["on", "mode", "target_temperature", "fan"],
+                "shelly-2" => &["control", "percent_control"],
+                "shelly-2-garage" => &["door_control", "door_position"],
+                "shelly-uni-gate" => &["gate"],
+                _ => &[],
             };
             assert_eq!(writable, declared, "{id}: only declared writes");
             assert_eq!(c.writes.len(), declared.len());

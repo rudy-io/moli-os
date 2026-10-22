@@ -104,6 +104,9 @@
   "commun.capteur.bonne": "Good",
   "commun.capteur.pas_de_mesure": "No readings yet.",
 
+  "commun.portail.actionner": "Open / close",
+  "commun.porte.ouverte": "Open",
+  "commun.porte.fermee": "Closed",
   "commun.volet.ouvrir": "Open",
   "commun.volet.stop": "Stop",
   "commun.volet.fermer": "Close",

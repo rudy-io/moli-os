@@ -1,0 +1,94 @@
+# Shelly 2 / 2.5 (first generation, firmware 1.x) in roller mode, driving a
+# garage door (same device as `shelly-2`; other point keys, so that Moli shows
+# a door, not a shutter): local HTTP
+# API, no authentication unless one is set in the device. Protocol from
+# Shelly's public documentation; no code copied.
+
+[profile]
+id = "shelly-2-garage"
+name = "Shelly 2 / 2.5 (porte de garage)"
+manufacturer = "Shelly"
+model = "Shelly 2 / 2.5"
+# Stable identity: the MAC address, which also finds it again when the box
+# gives it another address.
+identity = "status.mac"
+mac = "status.mac"
+
+[[request]]
+id = "status"
+path = "/status"
+format = "json"
+every = "10s"
+
+# The state is both read and ordered: the device uses the same words.
+[[point]]
+key = "door_control"
+label = "Porte"
+from = "status.rollers.0.state"
+kind = "enum"
+values = ["open", "close", "stop"]
+semantic = "config"
+
+[[point]]
+key = "door_position"
+label = "Position"
+from = "status.rollers.0.current_pos"
+kind = "numeric"
+unit = "%"
+semantic = "config"
+min = 0.0
+max = 100.0
+step = 1.0
+
+[[point]]
+key = "power"
+label = "Puissance"
+from = "status.meters.0.power"
+kind = "numeric"
+unit = "W"
+semantic = "power"
+round = 1
+
+# The meter counts watt-minutes.
+[[point]]
+key = "energy"
+label = "Énergie"
+from = "status.meters.0.total"
+kind = "numeric"
+unit = "Wh"
+semantic = "energy"
+scale = 0.016666666666666666
+round = 1
+
+[[point]]
+key = "voltage"
+label = "Tension"
+from = "status.voltage"
+kind = "numeric"
+unit = "V"
+semantic = "voltage"
+round = 1
+
+[[point]]
+key = "signal"
+label = "Signal Wi-Fi"
+from = "status.wifi_sta.rssi"
+kind = "numeric"
+unit = "dBm"
+semantic = "signal_strength"
+
+# ---- writes ----
+# The device answers with the roller's state; `refresh` reads `status` again
+# right after, the dashboard shows what the shutter did, not what was asked.
+
+[[write]]
+point = "door_control"
+path = "/roller/0?go={value}"
+expect = "\"state\""
+refresh = "status"
+
+[[write]]
+point = "door_position"
+path = "/roller/0?go=to_pos&roller_pos={value}"
+expect = "\"state\""
+refresh = "status"

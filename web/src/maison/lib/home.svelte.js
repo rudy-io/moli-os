@@ -217,7 +217,8 @@ export function deviceKind(d) {
   if (has(d, 'target_temperature')) return 'climate';
   if (has(d, 'key', true)) return 'tv';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
+  // A shutter, a garage door (Shelly 2) or a pulse gate (Shelly Uni): one tile, three looks.
+  if (has(d, 'door_control') || has(d, 'gate', true) || has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
     return 'cover';
   if (powerKey(d)) {
     if (isGroup(d)) return 'group';

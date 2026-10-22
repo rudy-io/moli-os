@@ -410,6 +410,9 @@ dossier dans les deux sens.
 | `daikin-brp069` | climatiseur Daikin, adaptateur Wi-Fi BRP069 | HTTP local, sans auth, `kv` | `basic` 1 h, `sensor` 60 s, `control` 30 s | aucun | oui, en lecture (écritures d'après le protocole documenté par pydaikin) |
 | `meross-em06` | compteur d'énergie Meross EM06/EM06P, 6 circuits | HTTP local signé (`meross`) | `all` 1 h, `e` 15 s | `key` | oui (EM06P) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
+| `shelly-2` | Shelly 2 / 2.5 de première génération, mode volet | HTTP local, sans auth, `json` | `status` 10 s | aucun | lecture oui ; ordres d'après la documentation Shelly, à tester en présence |
+| `shelly-2-garage` | le même, qui commande une porte de garage (points `door_control`, `door_position`) | idem | idem | aucun | idem |
+| `shelly-uni-gate` | Shelly Uni de première génération qui commande un portail à impulsion (`gate` : le relais 1 se coupe seul, `auto_off`) | idem | idem | aucun | idem |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
 | `tempo` | couleur EDF Tempo du jour et du lendemain | HTTPS `www.api-couleur-tempo.fr` | `today` 1 h, `tomorrow` 30 min | aucun | oui (sans fixture) |
@@ -439,6 +442,16 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
 - Champs vérifiés sur une réponse capturée sur un vrai BRP069 ; écritures pas encore
   essayées sur une vraie unité. Si `f_dir` manque (unités à `f_dir_ud`/`f_dir_lr`), l'écriture est refusée
   avec « control.f_dir absent… », sans rien envoyer.
+
+#### `shelly-2`, `shelly-2-garage`, `shelly-uni-gate`
+
+- Identité et MAC : `status.mac` ; une seule requête, `GET /status` toutes les 10 s. Pas d'authentification
+  Shelly (le mot de passe de l'appareil n'est pas pris en charge), pas de deuxième génération (`/rpc`).
+- Les clés des points décident de la tuile et de l'accessoire HomeKit : `control` + `percent_control` = volet
+  (Window Covering), `door_control` + `door_position` = porte de garage (Garage Door Opener), `gate` = portail
+  (interrupteur qui fait une impulsion puis retombe). Le même Shelly 2 peut donc être un volet ou une porte
+  selon le profil choisi. Ordres : `/roller/0?go=open|close|stop`, `go=to_pos&roller_pos=N`, `/relay/0?turn=on`.
+- Le compteur de Shelly 2 compte des watts-minutes : `energy` = total ÷ 60 (Wh).
 
 #### `meross-em06`
 
