@@ -267,11 +267,11 @@ mod tests {
             Reset::Never,
             &[(4_294_967.0, H), (12_001.0, 2 * H)],
         );
-        assert_eq!(counted(&out), 1.0);
+        assert!((counted(&out) - 1.0).abs() < 1e-9);
         assert_eq!(last, r(12_001.0, 2 * H));
         // An index never restarts: a fall is a glitch.
         let (out, _) = feed(r(12.0, 0), Reset::Never, &[(0.25, H), (12.5, 2 * H)]);
-        assert_eq!(counted(&out), 0.5);
+        assert!((counted(&out) - 0.5).abs() < 1e-9);
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
             &[(9_000.0, H), (9_001.0, 2 * H), (9_002.0, 3 * H)],
         );
         assert_eq!(out[2], Outcome::Rebase);
-        assert_eq!(counted(&out), 0.0);
+        assert!((counted(&out) - 0.0).abs() < 1e-9);
     }
 
     #[test]
@@ -330,7 +330,7 @@ mod tests {
         // First seen: nothing counted yet.
         assert_eq!(i.observe(Some(0.1), 0, 0), r(10.0, 0));
         // 100 W for 6 minutes (a tick re-reads the same power).
-        assert_eq!(i.observe(Some(0.1), 6 * min, 0).kwh, 10.0 + 0.01);
+        assert!((i.observe(Some(0.1), 6 * min, 0).kwh - (10.0 + 0.01)).abs() < 1e-9);
         // Then 1 kW for 3 minutes: the 100 W counted until the change.
         let after = i.observe(Some(1.0), 9 * min, 0).kwh;
         assert!((after - (10.01 + 0.005)).abs() < 1e-9, "{after}");

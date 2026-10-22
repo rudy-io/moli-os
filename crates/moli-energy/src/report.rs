@@ -291,10 +291,10 @@ mod tests {
         ];
         let b = buckets(&rows, d1, d1 + 72 * HOUR_MS, Step::Day, &tz).unwrap();
         assert_eq!(b.len(), 3);
-        assert_eq!(b[0].meters["hp"].kwh, 1.5);
+        assert!((b[0].meters["hp"].kwh - 1.5).abs() < 1e-9);
         assert_eq!(b[0].meters["hp"].cost, Some(0.3));
         assert!(b[1].meters.is_empty());
-        assert_eq!(b[2].meters["hp"].kwh, 2.0);
+        assert!((b[2].meters["hp"].kwh - 2.0).abs() < 1e-9);
         assert!(buckets(&rows, 0, u64::MAX / 4, Step::Hour, &tz).is_err());
     }
 
@@ -367,6 +367,6 @@ mod tests {
         let month = Period::of(&config, &rows, 0, 2 * 24 * HOUR_MS);
         assert_eq!(projection(&month, HOUR_MS, 30 * 24 * HOUR_MS), None);
         let pace = projection(&month, 2 * 24 * HOUR_MS, 30 * 24 * HOUR_MS).unwrap();
-        assert_eq!(pace.kwh, 150.0);
+        assert!((pace.kwh - 150.0).abs() < 1e-9);
     }
 }

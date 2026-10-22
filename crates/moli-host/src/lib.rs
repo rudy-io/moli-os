@@ -812,7 +812,7 @@ mod tests {
     fn memory_and_swap() {
         let meminfo = "MemTotal:       16149128 kB\nMemFree:  100 kB\nMemAvailable:    8074564 kB\nSwapTotal: 2000 kB\nSwapFree: 1500 kB\n";
         assert_eq!(memory(meminfo), Some((16_149_128, 8_074_564, 2000, 1500)));
-        assert_eq!(kb_to_gb(16_149_128), 15.4);
+        assert!((kb_to_gb(16_149_128) - 15.4).abs() < 1e-9);
     }
 
     #[test]
