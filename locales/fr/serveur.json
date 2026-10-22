@@ -125,6 +125,9 @@
   "serveur.demo.reserve": "pas dans la démo : ce changement resterait pour les visiteurs suivants",
 
   "serveur.personnes.mot_de_passe_court": "un mot de passe de {min} caractères au moins",
+  "serveur.personnes.mot_de_passe_facile": "ce mot de passe est trop facile à deviner : prends plutôt une phrase de trois ou quatre mots",
+  "serveur.personnes.connecte_seulement": "connecte-toi d'abord avec ton mot de passe",
+  "serveur.personnes.session_inconnue": "cette session est déjà fermée",
   "serveur.personnes.trop": "trop de personnes dans la maison",
   "serveur.personnes.zones_trop": "trop de zones",
   "serveur.personnes.zone_invalide": "zone « {zone} » : nom, position (latitude, longitude) et rayon de 20 m à 50 km",

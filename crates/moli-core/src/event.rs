@@ -171,6 +171,28 @@ pub enum Action {
         from: String,
         to: String,
     },
+    /// Who may enter the house: a sign-in, a password, a person added or
+    /// changed. Never a password, never what a stranger typed.
+    Access {
+        person: String,
+        change: AccessChange,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessChange {
+    SignedIn,
+    /// A wrong password for a person Moli knows.
+    Refused,
+    SignedOut,
+    PasswordChanged,
+    /// A session ended from the list (a lost phone…).
+    SessionEnded,
+    Added,
+    Changed,
+    Removed,
+    Invited,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

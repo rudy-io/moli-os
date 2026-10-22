@@ -430,6 +430,14 @@ impl Sessions {
             .is_some_and(|s| s.ip == key && now_ms().saturating_sub(s.created) < max_age_ms)
     }
 
+    /// Whether `caller` is a person deciding: an adult of the house signed
+    /// in (password, or Access), or a session opened with the house's code
+    /// on this client. One secret per person: an adult never needs the
+    /// house's code on top of their own password.
+    pub(crate) fn human(&self, caller: &Caller, headers: &HeaderMap) -> bool {
+        caller.person.as_ref().is_some_and(|p| !p.is_guest()) || self.is_human(headers, &caller.key)
+    }
+
     /// Checks the PIN; on success returns a new session token bound to the
     /// caller's key.
     pub(crate) async fn login(&self, attempt: &str, caller: &Caller) -> Result<String, LoginError> {
@@ -448,6 +456,25 @@ impl Sessions {
     /// One attempt at a code (the house's, a password, an invitation) from
     /// `caller`, behind its own lockout and its side's hourly budget:
     /// `matches` is only asked when neither is spent.
+    /// Whether `caller` may try at all now (its lockout, its side's budget),
+    /// without counting a try: asked before a slow check (a password), which
+    /// [`Self::attempt`] then counts, checking the lockouts again (tries made
+    /// side by side are counted, and none answers past a lockout).
+    pub(crate) fn admit(&self, caller: &Caller) -> Result<(), LoginError> {
+        let side = Side::of(caller);
+        let spent = lock(&self.global[side as usize])
+            .2
+            .is_some_and(|until| Instant::now() < until);
+        let locked = lock(&self.limiters)
+            .get(caller.key.as_str())
+            .is_some_and(|l| l.locked_until.is_some_and(|t| Instant::now() < t));
+        if spent || locked {
+            Err(LoginError::Locked)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn attempt(
         &self,
         caller: &Caller,
@@ -678,6 +705,41 @@ mod tests {
             Some(UiPin::new(pin)),
             &["Moi@Example.org".into()],
         )
+    }
+
+    #[test]
+    fn an_adult_signed_in_needs_no_house_code() {
+        let s = sessions("482913");
+        let as_person = |role| Caller {
+            person: Some(crate::people::PersonRef {
+                id: "sam".into(),
+                name: "Sam".into(),
+                role,
+                rooms: Vec::new(),
+                devices: Vec::new(),
+            }),
+            ..internet("person:sam")
+        };
+        let none = HeaderMap::new();
+        assert!(s.human(&as_person(crate::people::Role::Member), &none));
+        assert!(s.human(&as_person(crate::people::Role::Owner), &none));
+        assert!(!s.human(&as_person(crate::people::Role::Guest), &none));
+        assert!(
+            !s.human(&lan(HOME), &none),
+            "the network alone is not a person"
+        );
+    }
+
+    #[test]
+    fn a_locked_client_is_not_admitted_to_try() {
+        let s = sessions("482913");
+        let from = lan(AGENT);
+        assert!(s.admit(&from).is_ok());
+        for _ in 0..MAX_FAILURES {
+            let _ = s.attempt(&from, || false);
+        }
+        assert_eq!(s.admit(&from), Err(LoginError::Locked));
+        assert!(s.admit(&lan(HOME)).is_ok(), "per client");
     }
 
     #[tokio::test]

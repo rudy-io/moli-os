@@ -63,7 +63,7 @@ pub(crate) async fn set_tuya_cloud(
     let refuse = |status: StatusCode, message: &str| {
         (status, Json(json!({ "error": message }))).into_response()
     };
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return refuse(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.cle.tuya_humain"),

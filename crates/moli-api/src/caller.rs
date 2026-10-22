@@ -77,6 +77,7 @@ fn guest_allowed(method: &Method, path: &str) -> bool {
                     | "/api/events"
                     | "/api/people"
                     | "/api/plan"
+                    | "/api/me/sessions"
             )
             || (path.starts_with("/api/devices/") && !path.ends_with("/snapshot"))
             || path.starts_with("/api/plan/images/")
@@ -84,6 +85,7 @@ fn guest_allowed(method: &Method, path: &str) -> bool {
     }
     matches!(path, "/api/command" | "/api/ambiance" | "/api/session")
         || (path.starts_with("/api/people/") && path.ends_with("/password"))
+        || path.starts_with("/api/me/sessions/")
 }
 
 /// What a stranger may reach: the dashboard's files (its sign-in page) and
@@ -152,6 +154,14 @@ impl Caller {
             Via::Visitor => "tableau de bord (visiteur de la démo)".to_owned(),
             _ => format!("tableau de bord ({})", self.key),
         }
+    }
+
+    /// Whether the page was reached over HTTPS, so a session cookie can be
+    /// `Secure`: through the tunnel, or a proxy of the house that says so
+    /// (a device that lies only keeps its own cookie off plain HTTP).
+    pub(crate) fn https(&self, headers: &HeaderMap) -> bool {
+        matches!(self.via, Via::Access { .. } | Via::Outside | Via::Person)
+            || header(headers, "x-forwarded-proto").is_some_and(|p| p.eq_ignore_ascii_case("https"))
     }
 
     pub(crate) fn via_name(&self) -> &'static str {
@@ -491,6 +501,10 @@ mod tests {
         assert!(!guest_allowed(&Method::POST, "/api/mobile/register"));
         assert!(!guest_allowed(&Method::PUT, "/api/zones"));
         assert!(!guest_allowed(&Method::POST, "/api/people"));
+        // Its own sessions, nobody else's.
+        assert!(guest_allowed(&Method::GET, "/api/me/sessions"));
+        assert!(guest_allowed(&Method::DELETE, "/api/me/sessions/0a1b2c"));
+        assert!(!guest_allowed(&Method::DELETE, "/api/people/sam/sessions"));
     }
 
     #[test]

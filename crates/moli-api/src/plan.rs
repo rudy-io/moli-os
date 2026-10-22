@@ -405,7 +405,7 @@ pub(crate) async fn put(
     headers: HeaderMap,
     axum::Json(plan): axum::Json<Plan>,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.plan.humain_arrange"),
@@ -449,7 +449,7 @@ pub(crate) async fn upload(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.plan.humain_ajoute"),

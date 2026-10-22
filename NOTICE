@@ -11,3 +11,9 @@ This product includes software derived from eufy-security-client
 (https://github.com/bropat/eufy-security-client): the Eufy cloud protocol
 in crates/moli-eufy. Copyright (c) 2021-2024 bropat. Licensed under the
 MIT License; see licenses/eufy-security-client-MIT.txt.
+
+This product includes data derived from SecLists
+(https://github.com/danielmiessler/SecLists): the common passwords refused
+in crates/moli-api/src/common-passwords.txt (from the NCSC's 100,000 most
+used passwords). Copyright (c) 2018 Daniel Miessler. Licensed under the
+MIT License; see licenses/seclists-MIT.txt.

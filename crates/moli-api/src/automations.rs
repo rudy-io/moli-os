@@ -30,7 +30,7 @@ pub(crate) struct Autos(pub(crate) Option<Automations>);
 
 type Humans = Extension<Arc<Sessions>>;
 fn actor(headers: &HeaderMap, humans: &Sessions, caller: &Caller) -> Actor {
-    let human = humans.is_human(headers, &caller.key);
+    let human = humans.human(caller, headers);
     Actor {
         human,
         author: if human { Author::Human } else { Author::Agent },
@@ -411,7 +411,7 @@ pub(crate) async fn import(
 ) -> Response {
     // Before the body is even looked at: without a session, nothing else
     // is answered.
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return failure(&AutomationError::NeedsHuman);
     }
     let axum::Json(body) = match body {

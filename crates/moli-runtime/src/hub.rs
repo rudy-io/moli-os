@@ -869,6 +869,31 @@ impl Hub {
         );
     }
 
+    /// Journals a change to who may enter: a sign-in, a password, a person.
+    pub fn record_access(
+        &self,
+        origin: Origin,
+        actor: Option<String>,
+        person: &str,
+        change: moli_core::AccessChange,
+    ) {
+        let outcome = if change == moli_core::AccessChange::Refused {
+            Outcome::Err("wrong password".into())
+        } else {
+            Outcome::Ok
+        };
+        self.record(
+            origin,
+            actor,
+            Action::Access {
+                person: person.to_owned(),
+                change,
+            },
+            outcome,
+            Instant::now(),
+        );
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {

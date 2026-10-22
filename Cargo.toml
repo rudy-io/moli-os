@@ -50,6 +50,7 @@ moli-somfy = { path = "crates/moli-somfy" }
 moli-homekit = { path = "crates/moli-homekit" }
 
 aes = "0.8"
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "macros"] }
 crc32fast = "1"

@@ -125,6 +125,9 @@
   "serveur.demo.reserve": "not in the demo: this change would stay for the next visitors",
 
   "serveur.personnes.mot_de_passe_court": "a password of {min} characters at least",
+  "serveur.personnes.mot_de_passe_facile": "this password is too easy to guess: try a phrase of three or four words instead",
+  "serveur.personnes.connecte_seulement": "sign in with your password first",
+  "serveur.personnes.session_inconnue": "this session is already closed",
   "serveur.personnes.trop": "too many people in the house",
   "serveur.personnes.zones_trop": "too many zones",
   "serveur.personnes.zone_invalide": "zone “{zone}”: name, position (latitude, longitude) and a radius from 20 m to 50 km",

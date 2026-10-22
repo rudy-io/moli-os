@@ -10,6 +10,11 @@
 //! - `POST /api/invitation {code, password}`: anyone (a stranger too):
 //!   behind the same lockouts as the house's code; sets the password and
 //!   signs the person in.
+//! - `GET /api/me/sessions`, `DELETE /api/me/sessions/{id}`: a person signed
+//!   in, their own sessions (a forgotten computer, a lost phone).
+//! - `DELETE /api/people/{id}/sessions`: an owner ends all of someone's.
+//!
+//! Every change is journaled (who, which person, what), never a secret.
 
 use std::sync::Arc;
 
@@ -18,6 +23,7 @@ use axum::http::StatusCode;
 use axum::http::header::SET_COOKIE;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use moli_core::AccessChange;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -109,6 +115,7 @@ pub(crate) async fn list(
             if owner {
                 v["emails"] = json!(p.emails);
                 v["rooms"] = json!(p.rooms);
+                v["devices"] = json!(p.devices);
                 v["expires"] = json!(p.expires);
                 v["macs"] = json!(p.macs);
                 v["has_password"] = json!(persons.has_password(&p.id));
@@ -156,7 +163,10 @@ pub(crate) async fn create(
         return owners_only();
     }
     match persons.create(draft).await {
-        Ok(p) => (StatusCode::CREATED, Json(p)).into_response(),
+        Ok(p) => {
+            persons.journal(&caller, &p.id, AccessChange::Added);
+            (StatusCode::CREATED, Json(p)).into_response()
+        }
         Err(r) => refused(r),
     }
 }
@@ -173,7 +183,10 @@ pub(crate) async fn update(
         return owners_only();
     }
     match persons.update(&id, draft).await {
-        Ok(p) => Json(p).into_response(),
+        Ok(p) => {
+            persons.journal(&caller, &p.id, AccessChange::Changed);
+            Json(p).into_response()
+        }
         Err(r) => refused(r),
     }
 }
@@ -194,6 +207,7 @@ pub(crate) async fn remove(
     if let Err(r) = persons.remove(&id).await {
         return refused(r);
     }
+    persons.journal(&caller, &id, AccessChange::Removed);
     // Not forgotten (the disk): still refused, as nobody's of the house.
     if let Some(Err(e)) = phones.map(|gate| gate.forget(&id)) {
         tracing::warn!(person = id, error = %e, "phones of a removed person not forgotten");
@@ -212,7 +226,10 @@ pub(crate) async fn invite(
         return owners_only();
     }
     match persons.invite(&id).await {
-        Ok((code, expires)) => Json(json!({ "code": code, "expires": expires })).into_response(),
+        Ok((code, expires)) => {
+            persons.journal(&caller, &id, AccessChange::Invited);
+            Json(json!({ "code": code, "expires": expires })).into_response()
+        }
         Err(r) => refused(r),
     }
 }
@@ -239,7 +256,10 @@ pub(crate) async fn password(
     }
     match persons.set_password(&id, &body.password).await {
         // Every session of this person ended: sign in again on this one.
-        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Ok(()) => {
+            persons.journal(&caller, &id, AccessChange::PasswordChanged);
+            Json(json!({ "ok": true })).into_response()
+        }
         Err(r) => refused(r),
     }
 }
@@ -271,20 +291,78 @@ pub(crate) async fn redeem(
     Extension(humans): Extension<Arc<Sessions>>,
     Extension(persons): Persons,
     caller: Caller,
+    headers: axum::http::HeaderMap,
     Json(body): Json<InvitationBody>,
 ) -> Response {
     match persons
-        .redeem(&humans, &body.code, &body.password, &caller)
+        .redeem(&humans, &body.code, &body.password, &caller, &headers)
         .await
     {
         Ok((token, person)) => (
-            [(SET_COOKIE, People::cookie(&token))],
+            [(SET_COOKIE, People::cookie(&token, caller.https(&headers)))],
             Json(json!({ "person": person })),
         )
             .into_response(),
         Err(Ok(e)) => login_error(e, "serveur.personnes.invitation_incorrecte"),
         Err(Err(r)) => refused(r),
     }
+}
+
+fn signed_in_only() -> Response {
+    error(
+        StatusCode::FORBIDDEN,
+        &moli_i18n::tr!("serveur.personnes.connecte_seulement"),
+    )
+}
+
+/// The sessions of the person signed in.
+pub(crate) async fn my_sessions(
+    Extension(persons): Persons,
+    caller: Caller,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let Some(me) = &caller.person else {
+        return signed_in_only();
+    };
+    Json(json!({ "sessions": persons.sessions_of(&me.id, &headers) })).into_response()
+}
+
+/// Ends one of the signed-in person's sessions.
+pub(crate) async fn end_my_session(
+    Extension(persons): Persons,
+    caller: Caller,
+    Path(handle): Path<String>,
+) -> Response {
+    let Some(me) = &caller.person else {
+        return signed_in_only();
+    };
+    if !persons.end_session(&me.id, &handle).await {
+        return error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.personnes.session_inconnue"),
+        );
+    }
+    persons.journal(&caller, &me.id, AccessChange::SessionEnded);
+    Json(json!({ "ended": handle })).into_response()
+}
+
+/// An owner ends every session of someone (a lost phone, a guest gone).
+pub(crate) async fn end_sessions_of(
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(persons): Persons,
+    caller: Caller,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !is_owner(&caller, &humans, &persons, &headers) {
+        return owners_only();
+    }
+    if persons.get(&id).is_none() && !persons.book().people.iter().any(|p| p.id == id) {
+        return refused(Refused::NotFound);
+    }
+    persons.end_all_sessions(&id).await;
+    persons.journal(&caller, &id, AccessChange::SessionEnded);
+    Json(json!({ "ended": id })).into_response()
 }
 
 /// A sign-in that did not go through, said the same way everywhere.

@@ -41,7 +41,7 @@ mod weather;
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{MethodRouter, get, post, put};
+use axum::routing::{MethodRouter, delete, get, post, put};
 use axum::{Extension, Router, middleware};
 use moli_history::History;
 use moli_runtime::Hub;
@@ -198,6 +198,12 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         )
         .route("/api/people/{id}/invite", post(people_api::invite))
         .route("/api/people/{id}/password", put(people_api::password))
+        .route(
+            "/api/people/{id}/sessions",
+            delete(people_api::end_sessions_of),
+        )
+        .route("/api/me/sessions", get(people_api::my_sessions))
+        .route("/api/me/sessions/{id}", delete(people_api::end_my_session))
         .route("/api/zones", put(people_api::zones))
         .route("/api/invitation", post(people_api::redeem))
         .route("/api/session/setup", post(rest::setup))

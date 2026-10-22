@@ -100,7 +100,7 @@ pub(crate) async fn remote(
     Path(id): Path<String>,
 ) -> Response {
     let Some(gate) = gate else { return no_gate() };
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.machine.distance_humain"),

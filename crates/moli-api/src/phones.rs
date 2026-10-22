@@ -92,7 +92,7 @@ pub(crate) async fn remove(
             &moli_i18n::tr!("serveur.pilote.absent", pilote = "phones"),
         );
     };
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.telephone.retrait_humain"),

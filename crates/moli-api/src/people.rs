@@ -4,15 +4,20 @@
 //! - `data/people.json` (written aside, then renamed; readable by Moli's user
 //!   only, 0600 on unix): people, zones, pending invitations. Who lives here,
 //!   their e-mails and places, but nothing that opens the house: a password
-//!   lives in the encrypted store (`core/person/<id>/password`,
-//!   PBKDF2-HMAC-SHA256), so do the sessions (their tokens as SHA-256 only);
+//!   lives in the encrypted store (`core/person/<id>/password`, Argon2id;
+//!   an older PBKDF2 one is replaced at the next sign-in), so do the
+//!   sessions (their tokens as SHA-256 only);
 //!   an invitation code is kept as an HMAC-SHA256 under a key of that store
 //!   (`core/invite_key`), so the file alone cannot be tried against every
 //!   code.
-//! - Roles: `owner` (everything, manages people and the code), `member`
-//!   (commands, approves automations with the code), `guest` (sees and
-//!   commands its rooms only, until it expires: nothing of the rest of the
-//!   house, nobody's whereabouts).
+//! - Roles: `owner` (« admin »: everything, manages people and the code),
+//!   `member` (« adult »: commands, approves automations, signed in or with
+//!   the code), `guest` (sees and commands its rooms and the devices given
+//!   to it only, until it expires: nothing of the rest of the house,
+//!   nobody's whereabouts).
+//! - Passwords: 15 characters at least, none of the most common ones, none
+//!   made of the person's name (NIST SP 800-63B-4: length and a blocklist,
+//!   no composition rule). Checked one at a time, off the async workers.
 //! - Signing in: Cloudflare Access's verified e-mail names the person who has
 //!   it (no password then); otherwise a password, from anywhere (a session
 //!   bound to the person, not to an address: a phone changes address); a new
@@ -23,7 +28,8 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
@@ -34,7 +40,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{hmac, pbkdf2};
 use serde::{Deserialize, Serialize};
 
-use crate::caller::Caller;
+use crate::caller::{Caller, Via};
 use crate::session::{LoginError, Sessions};
 
 pub(crate) const FILE: &str = "people.json";
@@ -44,7 +50,7 @@ const SESSION_MAX_AGE_S: u64 = 30 * 24 * 3600;
 const MAX_SESSIONS_PER_PERSON: usize = 10;
 const MAX_PEOPLE: usize = 50;
 const MAX_ZONES: usize = 50;
-pub(crate) const MIN_PASSWORD: usize = 10;
+pub(crate) const MIN_PASSWORD: usize = 15;
 const MAX_PASSWORD: usize = 200;
 const INVITE_TTL_MS: u64 = 7 * 24 * 3600 * 1000;
 /// An invitation code: letters none can misread, eight of them.
@@ -52,10 +58,18 @@ const INVITE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const INVITE_LEN: usize = 8;
 /// The key invitation codes are kept under (encrypted store).
 const INVITE_KEY: &str = "invite_key";
+/// Argon2id (RFC 9106) as OWASP sets it: 12 MiB, 3 passes, one lane (its
+/// equal of 19 MiB × 2, lighter on a small board). Tests: cheap.
 #[cfg(not(test))]
-const PBKDF2_ROUNDS: u32 = 600_000;
+const ARGON2: (u32, u32) = (12 * 1024, 3);
 #[cfg(test)]
-const PBKDF2_ROUNDS: u32 = 1_000;
+const ARGON2: (u32, u32) = (64, 1);
+/// Sign-ins waiting for their turn at the hash, past which one is refused
+/// as too many tries (a burst would otherwise queue without end).
+const MAX_WAITING: usize = 8;
+/// The most common passwords long enough to be allowed (NCSC, lowercase).
+const COMMON: &str = include_str!("common-passwords.txt");
+const MAX_DEVICES: usize = 100;
 /// Drivers whose devices say where someone is (their phones, where each
 /// person is, who is home): never a guest's, whatever their room.
 const WHEREABOUTS: [&str; 3] = ["phones", "people", "presence"];
@@ -83,6 +97,9 @@ pub(crate) struct Person {
     /// A guest's rooms (the only ones it may command).
     #[serde(default)]
     pub(crate) rooms: Vec<String>,
+    /// Devices given to a guest besides its rooms (`hue:…`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) devices: Vec<String>,
     /// A guest's end (ms): past it, the person may no longer sign in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) expires: Option<u64>,
@@ -141,6 +158,9 @@ pub(crate) struct PersonRef {
     /// A guest's rooms.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) rooms: Vec<String>,
+    /// Devices given to a guest, whatever their room.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) devices: Vec<String>,
 }
 
 impl PersonRef {
@@ -152,9 +172,10 @@ impl PersonRef {
         self.role == Role::Guest
     }
 
-    /// What a guest sees of the house, and commands: the devices whose rooms
-    /// are all its own (a group's members' count too; a device without a
-    /// room is nobody's), never one that says where someone is.
+    /// What a guest sees of the house, and commands: the devices given to it,
+    /// and those whose rooms are all its own (a group's members' count too; a
+    /// device without a room is nobody's), never one that says where someone
+    /// is.
     pub(crate) fn guest_devices(&self, hub: &Hub, snapshot: &Snapshot) -> HashSet<DeviceId> {
         let hidden = whereabouts(snapshot);
         snapshot
@@ -194,6 +215,9 @@ impl PersonRef {
         if hidden.contains(&device.instance()) {
             return false;
         }
+        if self.devices.iter().any(|d| d == device.as_str()) {
+            return true;
+        }
         let rooms = hub.rooms_of(device);
         !rooms.is_empty() && rooms.iter().all(|r| self.rooms.contains(r))
     }
@@ -213,7 +237,28 @@ fn whereabouts(snapshot: &Snapshot) -> HashSet<InstanceId> {
 struct PersonSession {
     person: String,
     created: u64,
+    /// What it was opened on (« iPhone · Safari »), for the person's list.
+    #[serde(default)]
+    device: String,
+    /// Opened from the Internet rather than the home network.
+    #[serde(default)]
+    remote: bool,
 }
+
+/// A session as its person sees it, in their list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct SessionView {
+    /// A short handle (the start of the token's digest), to end it by.
+    pub(crate) id: String,
+    pub(crate) created: u64,
+    pub(crate) device: String,
+    pub(crate) remote: bool,
+    /// The one this request came with.
+    pub(crate) current: bool,
+}
+
+/// How long a session's handle is (hex digits of the token's digest).
+const HANDLE: usize = 12;
 
 /// Why a change to the people was refused (a sentence for the person).
 #[derive(Debug, PartialEq, Eq)]
@@ -272,26 +317,69 @@ fn password_key(id: &str) -> String {
     format!("person/{id}/password")
 }
 
-/// `pbkdf2-sha256$<rounds>$<salt>$<hash>` (hex).
+fn argon2(memory_kib: u32, passes: u32, password: &str, salt: &[u8]) -> Option<[u8; 32]> {
+    let params = argon2::Params::new(memory_kib, passes, 1, Some(32)).ok()?;
+    let mut out = [0u8; 32];
+    argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+        .hash_password_into(password.as_bytes(), salt, &mut out)
+        .ok()?;
+    Some(out)
+}
+
+/// The prefix of a password kept with today's settings.
+fn current_scheme() -> String {
+    format!("argon2id$v=19$m={},t={},p=1$", ARGON2.0, ARGON2.1)
+}
+
+/// `argon2id$v=19$m=<KiB>,t=<passes>,p=1$<salt>$<hash>` (hex). Slow on
+/// purpose: call it through [`off_thread`].
 fn hash_password(password: &str) -> Option<String> {
     let mut salt = [0u8; 16];
     SystemRandom::new().fill(&mut salt).ok()?;
-    let mut out = [0u8; 32];
-    pbkdf2::derive(
-        pbkdf2::PBKDF2_HMAC_SHA256,
-        NonZeroU32::new(PBKDF2_ROUNDS)?,
-        &salt,
-        password.as_bytes(),
-        &mut out,
-    );
-    Some(format!(
-        "pbkdf2-sha256${PBKDF2_ROUNDS}${}${}",
-        hex(&salt),
-        hex(&out)
-    ))
+    let out = argon2(ARGON2.0, ARGON2.1, password, &salt)?;
+    Some(format!("{}{}${}", current_scheme(), hex(&salt), hex(&out)))
+}
+
+/// Whether a kept password should be hashed again (older scheme, older
+/// settings): done at a sign-in, the only time the password is at hand.
+fn needs_rehash(stored: &str) -> bool {
+    !stored.starts_with(&current_scheme())
+}
+
+/// Same bytes, in a time that does not say where they differ.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn password_matches(stored: &str, attempt: &str) -> bool {
+    if let Some(rest) = stored.strip_prefix("argon2id$v=19$") {
+        let mut parts = rest.split('$');
+        let (Some(params), Some(salt), Some(expected), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return false;
+        };
+        let mut m = None;
+        let mut t = None;
+        for kv in params.split(',') {
+            match kv.split_once('=') {
+                Some(("m", v)) => m = v.parse::<u32>().ok(),
+                Some(("t", v)) => t = v.parse::<u32>().ok(),
+                Some(("p", "1")) => {}
+                _ => return false,
+            }
+        }
+        // Never more than a password of this house could have cost.
+        let (Some(m), Some(t), Some(salt), Some(expected)) = (
+            m.filter(|m| (8..=64 * 1024).contains(m)),
+            t.filter(|t| (1..=10).contains(t)),
+            unhex(salt),
+            unhex(expected),
+        ) else {
+            return false;
+        };
+        return argon2(m, t, attempt, &salt).is_some_and(|out| same(&out, &expected));
+    }
     let mut parts = stored.split('$');
     let (Some("pbkdf2-sha256"), Some(rounds), Some(salt), Some(expected)) =
         (parts.next(), parts.next(), parts.next(), parts.next())
@@ -313,6 +401,101 @@ fn password_matches(stored: &str, attempt: &str) -> bool {
         &expected,
     )
     .is_ok()
+}
+
+/// A kept password nobody has, checked in place of an unknown login's: a
+/// wrong name takes as long as a wrong password, and says nothing more.
+fn decoy() -> &'static str {
+    static DECOY: OnceLock<String> = OnceLock::new();
+    DECOY.get_or_init(|| hash_password("no one has this password").unwrap_or_default())
+}
+
+/// Runs a password hash off the async workers, one at a time (each takes
+/// its memory and a fraction of a second). `None`: too many waiting.
+async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    static TURN: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    static WAITING: AtomicUsize = AtomicUsize::new(0);
+    if WAITING.fetch_add(1, Ordering::SeqCst) >= MAX_WAITING {
+        WAITING.fetch_sub(1, Ordering::SeqCst);
+        return None;
+    }
+    let permit = TURN.acquire().await;
+    WAITING.fetch_sub(1, Ordering::SeqCst);
+    let _permit = permit.ok()?;
+    tokio::task::spawn_blocking(work).await.ok()
+}
+
+/// Why a password is too easy, if it is: too short, one of the most common,
+/// a handful of characters over and over, or little more than the person's
+/// name or the house's.
+fn weak(password: &str, name: &str, id: &str) -> Option<String> {
+    let n = password.chars().count();
+    if !(MIN_PASSWORD..=MAX_PASSWORD).contains(&n) {
+        return Some(moli_i18n::tr!(
+            "serveur.personnes.mot_de_passe_court",
+            min = MIN_PASSWORD
+        ));
+    }
+    let lower = password.trim().to_lowercase();
+    let distinct: HashSet<char> = lower.chars().collect();
+    let mut left: String = lower.chars().filter(|c| c.is_alphanumeric()).collect();
+    for word in [
+        &name.to_lowercase(),
+        id,
+        "moli",
+        "maison",
+        "motdepasse",
+        "password",
+        "azerty",
+        "qwerty",
+        "123456789",
+    ] {
+        let word: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
+        if word.chars().count() >= 3 {
+            left = left.replace(&word, "");
+        }
+    }
+    let easy = distinct.len() < 5
+        || left.chars().count() < 8
+        || COMMON.lines().any(|common| common == lower);
+    easy.then(|| moli_i18n::tr!("serveur.personnes.mot_de_passe_facile"))
+}
+
+/// What a session was opened on, from the browser's own words: enough for
+/// a person to tell their phone from their computer, nothing more kept.
+fn device_of(headers: &HeaderMap) -> String {
+    let agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let system = [
+        ("iPhone", "iPhone"),
+        ("iPad", "iPad"),
+        ("Android", "Android"),
+        ("Macintosh", "Mac"),
+        ("Windows", "Windows"),
+        ("CrOS", "ChromeOS"),
+        ("Linux", "Linux"),
+    ]
+    .iter()
+    .find(|(k, _)| agent.contains(k))
+    .map(|(_, v)| *v);
+    let browser = [
+        ("Edg/", "Edge"),
+        ("Firefox/", "Firefox"),
+        ("FxiOS/", "Firefox"),
+        ("CriOS/", "Chrome"),
+        ("Chrome/", "Chrome"),
+        ("Safari/", "Safari"),
+    ]
+    .iter()
+    .find(|(k, _)| agent.contains(k))
+    .map(|(_, v)| *v);
+    match (system, browser) {
+        (Some(s), Some(b)) => format!("{s} · {b}"),
+        (Some(one), None) | (None, Some(one)) => one.to_owned(),
+        (None, None) => String::new(),
+    }
 }
 
 fn token() -> Option<String> {
@@ -447,6 +630,7 @@ impl People {
                 emails: vec![email],
                 color: None,
                 rooms: Vec::new(),
+                devices: Vec::new(),
                 expires: None,
                 macs: Vec::new(),
                 created: now_ms(),
@@ -535,6 +719,7 @@ impl People {
             name: p.name.clone(),
             role: p.role,
             rooms: p.rooms.clone(),
+            devices: p.devices.clone(),
         }
     }
 
@@ -576,29 +761,79 @@ impl People {
 
     /// Signs in with a password, behind the same lockouts as the house's
     /// code (per client, and for its side of the house: from the Internet,
-    /// a budget apart from the household's).
+    /// a budget apart from the household's). An unknown name is checked
+    /// against a decoy, as slowly: the answer never says who exists.
     pub(crate) async fn login(
         &self,
         guard: &Sessions,
         login: &str,
         password: &str,
         caller: &Caller,
+        headers: &HeaderMap,
     ) -> Result<(String, PersonRef), LoginError> {
+        guard.admit(caller)?;
         let person = self.find_login(login).filter(active);
         let stored = person
             .as_ref()
             .and_then(|p| self.hub.core_secret(&password_key(&p.id)));
-        guard.attempt(caller, || {
-            stored
-                .as_deref()
-                .is_some_and(|s| password_matches(s, password))
-        })?;
+        let (kept, attempt) = (stored.clone(), password.to_owned());
+        let matched = off_thread(move || {
+            let against = kept.as_deref().unwrap_or_else(|| decoy());
+            password_matches(against, &attempt) && kept.is_some()
+        })
+        .await
+        .ok_or(LoginError::Locked)?;
+        let counted = guard.attempt(caller, || matched);
+        if counted == Err(LoginError::Wrong)
+            && let Some(p) = &person
+        {
+            self.journal(caller, &p.id, moli_core::AccessChange::Refused);
+        }
+        counted?;
         let person = person.ok_or(LoginError::Wrong)?;
-        let token = self.open_session(&person.id).await?;
+        if stored.as_deref().is_some_and(needs_rehash) {
+            self.rehash(&person.id, password).await;
+        }
+        let token = self
+            .open_session(
+                &person.id,
+                device_of(headers),
+                caller.via != Via::Lan && caller.via != Via::Loopback,
+            )
+            .await?;
+        self.journal(caller, &person.id, moli_core::AccessChange::SignedIn);
         Ok((token, Self::reference(&person)))
     }
 
-    async fn open_session(&self, person: &str) -> Result<String, LoginError> {
+    /// A password kept the older way, kept again today's way (it is at hand
+    /// only now). A failure leaves the older one, still good.
+    async fn rehash(&self, id: &str, password: &str) {
+        let password = password.to_owned();
+        let Some(Some(stored)) = off_thread(move || hash_password(&password)).await else {
+            return;
+        };
+        match self.hub.store_core_secret(&password_key(id), &stored).await {
+            Ok(()) => tracing::info!(person = id, "password kept again with Argon2id"),
+            Err(e) => tracing::warn!(person = id, error = %e, "password not kept again"),
+        }
+    }
+
+    /// Writes in the journal who entered, changed or left (never a secret).
+    pub(crate) fn journal(&self, caller: &Caller, person: &str, change: moli_core::AccessChange) {
+        self.hub.record_access(
+            moli_core::Origin::Ui,
+            Some(caller.describe()),
+            person,
+            change,
+        );
+    }
+
+    async fn open_session(
+        &self,
+        person: &str,
+        device: String,
+        remote: bool,
+    ) -> Result<String, LoginError> {
         let token = token().ok_or(LoginError::Disabled)?;
         let max_age = SESSION_MAX_AGE_S * 1000;
         let json = {
@@ -619,6 +854,8 @@ impl People {
                 PersonSession {
                     person: person.to_owned(),
                     created: now_ms(),
+                    device,
+                    remote,
                 },
             );
             serde_json::to_string(&*sessions).unwrap_or_default()
@@ -657,9 +894,58 @@ impl People {
         self.persist_sessions(json).await;
     }
 
-    pub(crate) fn cookie(token: &str) -> String {
+    /// A person's sessions, newest first; `current` marks this request's.
+    pub(crate) fn sessions_of(&self, person: &str, headers: &HeaderMap) -> Vec<SessionView> {
+        let mine = cookie_token(headers).map(hash);
+        let max_age = SESSION_MAX_AGE_S * 1000;
+        let mut list: Vec<SessionView> = lock(&self.sessions)
+            .iter()
+            .filter(|(_, s)| s.person == person && now_ms().saturating_sub(s.created) < max_age)
+            .map(|(key, s)| SessionView {
+                id: key.chars().take(HANDLE).collect(),
+                created: s.created,
+                device: s.device.clone(),
+                remote: s.remote,
+                current: mine.as_deref() == Some(key.as_str()),
+            })
+            .collect();
+        list.sort_by_key(|s| std::cmp::Reverse(s.created));
+        list
+    }
+
+    /// Ends one of a person's sessions by its handle; `false`: none such.
+    pub(crate) async fn end_session(&self, person: &str, handle: &str) -> bool {
+        if handle.len() != HANDLE {
+            return false;
+        }
+        let json = {
+            let mut sessions = lock(&self.sessions);
+            let Some(key) = sessions
+                .iter()
+                .find(|(k, s)| s.person == person && k.starts_with(handle))
+                .map(|(k, _)| k.clone())
+            else {
+                return false;
+            };
+            sessions.remove(&key);
+            serde_json::to_string(&*sessions).unwrap_or_default()
+        };
+        self.persist_sessions(json).await;
+        true
+    }
+
+    /// Ends every session of a person (an owner, for a lost phone).
+    pub(crate) async fn end_all_sessions(&self, person: &str) {
+        self.end_sessions(person).await;
+    }
+
+    /// The session cookie: `Secure` when the page came over HTTPS (on the
+    /// home network, Moli is often reached in plain HTTP, where a `Secure`
+    /// cookie would never come back).
+    pub(crate) fn cookie(token: &str, secure: bool) -> String {
+        let secure = if secure { "; Secure" } else { "" };
         format!(
-            "{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE_S}"
+            "{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE_S}{secure}"
         )
     }
 
@@ -674,17 +960,19 @@ impl People {
 
     /// A new password: the person's sessions end, except the one that set it.
     pub(crate) async fn set_password(&self, id: &str, password: &str) -> Result<(), Refused> {
-        let n = password.chars().count();
-        if !(MIN_PASSWORD..=MAX_PASSWORD).contains(&n) {
-            return Err(Refused::Invalid(moli_i18n::tr!(
-                "serveur.personnes.mot_de_passe_court",
-                min = MIN_PASSWORD
-            )));
+        let person = self.get(id);
+        let name = person.as_ref().map(|p| p.name.as_str()).unwrap_or_default();
+        if let Some(why) = weak(password, name, id) {
+            return Err(Refused::Invalid(why));
         }
-        if self.get(id).is_none() {
+        if person.is_none() {
             return Err(Refused::NotFound);
         }
-        let stored = hash_password(password).ok_or(Refused::Store)?;
+        let password = password.to_owned();
+        let stored = off_thread(move || hash_password(&password))
+            .await
+            .flatten()
+            .ok_or(Refused::Store)?;
         self.hub
             .store_core_secret(&password_key(id), &stored)
             .await
@@ -749,6 +1037,7 @@ impl People {
         code: &str,
         password: &str,
         caller: &Caller,
+        headers: &HeaderMap,
     ) -> Result<(String, PersonRef), Result<LoginError, Refused>> {
         // No key yet: no invitation was ever made.
         let typed = self
@@ -770,7 +1059,15 @@ impl People {
         .await
         .map_err(Err)?;
         let reference = self.get(&person).ok_or(Err(Refused::NotFound))?;
-        let token = self.open_session(&person).await.map_err(Ok)?;
+        let token = self
+            .open_session(
+                &person,
+                device_of(headers),
+                caller.via != Via::Lan && caller.via != Via::Loopback,
+            )
+            .await
+            .map_err(Ok)?;
+        self.journal(caller, &person, moli_core::AccessChange::SignedIn);
         Ok((token, reference))
     }
 
@@ -789,6 +1086,7 @@ impl People {
                 emails: draft.emails,
                 color: draft.color,
                 rooms: draft.rooms,
+                devices: draft.devices,
                 expires: draft.expires,
                 macs: draft.macs,
                 created: now_ms(),
@@ -823,6 +1121,7 @@ impl People {
                 p.emails = draft.emails;
                 p.color = draft.color;
                 p.rooms = draft.rooms;
+                p.devices = draft.devices;
                 p.expires = draft.expires;
                 p.macs = draft.macs;
                 Ok(p.clone())
@@ -927,6 +1226,8 @@ pub(crate) struct Draft {
     #[serde(default)]
     pub(crate) rooms: Vec<String>,
     #[serde(default)]
+    pub(crate) devices: Vec<String>,
+    #[serde(default)]
     pub(crate) expires: Option<u64>,
     #[serde(default)]
     pub(crate) macs: Vec<String>,
@@ -966,6 +1267,16 @@ impl Draft {
         if self.rooms.len() > 30 || self.rooms.iter().any(|r| !text_ok(r, 60)) {
             return bad("rooms");
         }
+        self.devices.sort();
+        self.devices.dedup();
+        if self.devices.len() > MAX_DEVICES
+            || self
+                .devices
+                .iter()
+                .any(|d| !text_ok(d, 120) || !d.contains(':') || d.chars().any(char::is_whitespace))
+        {
+            return bad("devices");
+        }
         self.macs = self.macs.iter().map(|m| m.trim().to_lowercase()).collect();
         if self.macs.len() > 10
             || self.macs.iter().any(|m| {
@@ -979,6 +1290,7 @@ impl Draft {
         }
         if self.role != Role::Guest {
             self.rooms.clear();
+            self.devices.clear();
             self.expires = None;
         }
         Ok(self)
@@ -1027,6 +1339,7 @@ mod tests {
             emails: Vec::new(),
             color: None,
             rooms: Vec::new(),
+            devices: Vec::new(),
             expires: None,
             macs: Vec::new(),
         }
@@ -1040,6 +1353,141 @@ mod tests {
         assert!(password_matches(&a, "correct horse battery"));
         assert!(!password_matches(&a, "correct horse batterY"));
         assert!(!password_matches("garbage", "x"));
+    }
+
+    /// A password as older versions kept it.
+    fn pbkdf2_kept(password: &str) -> String {
+        let salt = [7u8; 16];
+        let mut out = [0u8; 32];
+        pbkdf2::derive(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            NonZeroU32::new(1_000).unwrap(),
+            &salt,
+            password.as_bytes(),
+            &mut out,
+        );
+        format!("pbkdf2-sha256$1000${}${}", hex(&salt), hex(&out))
+    }
+
+    #[test]
+    fn passwords_are_kept_with_argon2id() {
+        let kept = hash_password("une longue phrase de passe").unwrap();
+        assert!(kept.starts_with("argon2id$v=19$m="), "{kept}");
+        assert!(!needs_rehash(&kept));
+        let old = pbkdf2_kept("une longue phrase de passe");
+        assert!(password_matches(&old, "une longue phrase de passe"));
+        assert!(needs_rehash(&old));
+        // A kept string asking for more than any house set: refused, not run.
+        let greedy = kept.replacen(&format!("m={}", ARGON2.0), "m=4000000", 1);
+        assert!(!password_matches(&greedy, "une longue phrase de passe"));
+    }
+
+    #[test]
+    fn easy_passwords_are_refused() {
+        let easy = |pw: &str| weak(pw, "Élodie", "elodie").is_some();
+        assert!(easy("court"), "too short");
+        assert!(easy("1q2w3e4r5t6y7u8i9o0p"), "among the most common");
+        assert!(easy("aaaaaaaaaaaaaaaaaaaa"), "one letter over and over");
+        assert!(easy("elodie2026elodie!"), "her name and a year");
+        assert!(easy("MoliMaison123456789"), "the house's name");
+        assert!(!easy("cerf-volant sous la pluie"));
+        assert!(
+            !easy("Élodie aime les cerfs-volants"),
+            "a name inside a phrase"
+        );
+    }
+
+    #[test]
+    fn a_device_given_to_a_guest_is_its_own() {
+        let hub = hub();
+        let guest = PersonRef {
+            id: "sam".into(),
+            name: "Sam".into(),
+            role: Role::Guest,
+            rooms: vec!["Chambre d'amis".into()],
+            devices: vec!["hue:lampe-salon".into()],
+        };
+        let hidden = HashSet::new();
+        assert!(guest.in_rooms(&hub, &hidden, &DeviceId::from("hue:lampe-salon")));
+        assert!(!guest.in_rooms(&hub, &hidden, &DeviceId::from("hue:autre")));
+        // Never a device that says where someone is, even given.
+        let whereabouts: HashSet<InstanceId> =
+            [DeviceId::from("hue:lampe-salon").instance()].into();
+        assert!(!guest.in_rooms(&hub, &whereabouts, &DeviceId::from("hue:lampe-salon")));
+    }
+
+    #[tokio::test]
+    async fn a_person_sees_and_ends_their_sessions() {
+        let hub = hub_with_store();
+        let guard = Sessions::new(hub.clone(), None, &[]);
+        let p = People::open(hub.clone(), None, &[]);
+        let sam = p.create(draft("Sam", Role::Member)).await.unwrap();
+        let kept = pbkdf2_kept("une longue phrase de passe");
+        hub.store_core_secret(&password_key(&sam.id), &kept)
+            .await
+            .unwrap();
+        let mut phone = HeaderMap::new();
+        phone.insert(
+            axum::http::header::USER_AGENT,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Version/18.0 Mobile Safari/604.1"
+                .parse()
+                .unwrap(),
+        );
+        let (first, _) = p
+            .login(
+                &guard,
+                "sam",
+                "une longue phrase de passe",
+                &stranger("k"),
+                &phone,
+            )
+            .await
+            .unwrap();
+        // The older password, kept again the new way at the sign-in.
+        let again = hub.core_secret(&password_key(&sam.id)).unwrap();
+        assert!(again.starts_with("argon2id$"), "{again}");
+        assert!(password_matches(&again, "une longue phrase de passe"));
+        let (second, _) = p
+            .login(
+                &guard,
+                "sam",
+                "une longue phrase de passe",
+                &stranger("k"),
+                &HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let mut on_phone = HeaderMap::new();
+        on_phone.insert(COOKIE, format!("{COOKIE_NAME}={first}").parse().unwrap());
+        let list = p.sessions_of(&sam.id, &on_phone);
+        assert_eq!(list.len(), 2);
+        let phone_session = list.iter().find(|s| s.current).unwrap();
+        assert_eq!(phone_session.device, "iPhone · Safari");
+        assert!(phone_session.remote);
+        // The other one ends; the phone stays signed in.
+        let other = list.iter().find(|s| !s.current).unwrap().id.clone();
+        assert!(
+            !p.end_session("someone-else", &other).await,
+            "only one's own"
+        );
+        assert!(p.end_session(&sam.id, &other).await);
+        let mut on_computer = HeaderMap::new();
+        on_computer.insert(COOKIE, format!("{COOKIE_NAME}={second}").parse().unwrap());
+        assert!(p.signed_in(&on_computer).is_none());
+        assert_eq!(p.signed_in(&on_phone).unwrap().id, sam.id);
+        // An unknown name: refused like a wrong password.
+        assert_eq!(
+            p.login(
+                &guard,
+                "personne",
+                "une longue phrase de passe",
+                &stranger("k4"),
+                &HeaderMap::new()
+            )
+            .await
+            .err(),
+            Some(LoginError::Wrong)
+        );
     }
 
     #[test]
@@ -1084,13 +1532,21 @@ mod tests {
         let elodie = p.create(draft("Élodie", Role::Member)).await.unwrap();
         let (code, _) = p.invite(&elodie.id).await.unwrap();
         let typed = code.to_lowercase().replace('-', " ");
-        let short = p.redeem(&guard, &typed, "court", &stranger("k")).await;
+        let short = p
+            .redeem(&guard, &typed, "court", &stranger("k"), &HeaderMap::new())
+            .await;
         assert!(
             matches!(short, Err(Err(Refused::Invalid(_)))),
             "password too short"
         );
         let (token, who) = p
-            .redeem(&guard, &typed, "un mot de passe long", &stranger("k"))
+            .redeem(
+                &guard,
+                &typed,
+                "une longue phrase de passe",
+                &stranger("k"),
+                &HeaderMap::new(),
+            )
             .await
             .unwrap();
         assert_eq!(who.id, "elodie");
@@ -1098,20 +1554,38 @@ mod tests {
         headers.insert(COOKIE, format!("{COOKIE_NAME}={token}").parse().unwrap());
         assert_eq!(p.signed_in(&headers).unwrap().id, "elodie");
         assert!(
-            p.redeem(&guard, &code, "un mot de passe long", &stranger("k"))
-                .await
-                .is_err(),
+            p.redeem(
+                &guard,
+                &code,
+                "une longue phrase de passe",
+                &stranger("k"),
+                &HeaderMap::new()
+            )
+            .await
+            .is_err(),
             "once"
         );
         let (_, again) = p
-            .login(&guard, "ELODIE", "un mot de passe long", &stranger("k2"))
+            .login(
+                &guard,
+                "ELODIE",
+                "une longue phrase de passe",
+                &stranger("k2"),
+                &HeaderMap::new(),
+            )
             .await
             .unwrap();
         assert_eq!(again.role, Role::Member);
         assert_eq!(
-            p.login(&guard, "elodie", "faux mot de passe", &stranger("k3"))
-                .await
-                .err(),
+            p.login(
+                &guard,
+                "elodie",
+                "faux mot de passe",
+                &stranger("k3"),
+                &HeaderMap::new()
+            )
+            .await
+            .err(),
             Some(LoginError::Wrong)
         );
     }
@@ -1124,14 +1598,20 @@ mod tests {
         let mut d = draft("Invité", Role::Guest);
         d.expires = Some(1);
         let g = p.create(d).await.unwrap();
-        p.set_password(&g.id, "un mot de passe long")
+        p.set_password(&g.id, "une longue phrase de passe")
             .await
             .unwrap_err();
         assert!(p.get(&g.id).is_none());
         assert!(
-            p.login(&guard, &g.id, "un mot de passe long", &stranger("k"))
-                .await
-                .is_err()
+            p.login(
+                &guard,
+                &g.id,
+                "une longue phrase de passe",
+                &stranger("k"),
+                &HeaderMap::new()
+            )
+            .await
+            .is_err()
         );
     }
 
@@ -1170,9 +1650,17 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600, "for Moli's user alone");
         }
         // The code itself works, once.
-        let long = "un mot de passe long";
-        assert!(p.redeem(&guard, &code, long, &stranger("k")).await.is_ok());
-        assert!(p.redeem(&guard, &code, long, &stranger("k")).await.is_err());
+        let long = "une longue phrase de passe";
+        assert!(
+            p.redeem(&guard, &code, long, &stranger("k"), &HeaderMap::new())
+                .await
+                .is_ok()
+        );
+        assert!(
+            p.redeem(&guard, &code, long, &stranger("k"), &HeaderMap::new())
+                .await
+                .is_err()
+        );
         // No store, no key: no invitation either.
         let bare = People::open(self::hub(), None, &[]);
         let alone = bare.create(draft("Seul", Role::Member)).await.unwrap();
@@ -1198,9 +1686,15 @@ mod tests {
         let p = People::open(hub, Some(&dir), &[]);
         assert!(p.get("sam").is_some(), "the people are still known");
         assert_eq!(
-            p.redeem(&guard, "ABCD-EFGH", "un mot de passe long", &stranger("k"))
-                .await
-                .err(),
+            p.redeem(
+                &guard,
+                "ABCD-EFGH",
+                "une longue phrase de passe",
+                &stranger("k"),
+                &HeaderMap::new()
+            )
+            .await
+            .err(),
             Some(Ok(LoginError::Wrong)),
             "never taken unverified"
         );

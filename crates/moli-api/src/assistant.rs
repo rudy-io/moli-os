@@ -175,7 +175,7 @@ pub(crate) async fn set_recording(
     headers: HeaderMap,
     axum::Json(recording): axum::Json<Recording>,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return people_only();
     }
     let Some(moli) = moli else {
@@ -196,7 +196,7 @@ pub(crate) async fn recording(
     headers: HeaderMap,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return people_only();
     }
     let Some(path) = moli.and_then(|m| m.recording(&name)) else {
@@ -274,7 +274,7 @@ pub(crate) async fn set_key(
     headers: HeaderMap,
     axum::Json(key): axum::Json<Key>,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    if !humans.human(&caller, &headers) {
         return (
             StatusCode::FORBIDDEN,
             axum::Json(json!({ "error": moli_i18n::tr!("serveur.cle.assistant_humain") })),

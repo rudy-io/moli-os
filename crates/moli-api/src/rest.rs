@@ -86,7 +86,7 @@ pub(crate) struct CommandBody {
 /// not the tunnel that also ends here.
 pub(crate) fn origin(hub: &Hub, headers: &HeaderMap, humans: &Sessions, caller: &Caller) -> Origin {
     match headers.get("x-moli-origin").and_then(|v| v.to_str().ok()) {
-        Some("ui") if humans.is_human(headers, &caller.key) => Origin::Ui,
+        Some("ui") if humans.human(caller, headers) => Origin::Ui,
         Some("ui") if hub.dashboard() == Dashboard::Trusted && caller.is_household() => {
             Origin::Household
         }
@@ -237,7 +237,7 @@ pub(crate) async fn decide(
     headers: HeaderMap,
     Json(body): Json<DecisionBody>,
 ) -> Response {
-    let origin = if humans.is_human(&headers, &caller.key) {
+    let origin = if humans.human(&caller, &headers) {
         Origin::Ui
     } else {
         Origin::Api
@@ -309,7 +309,7 @@ pub(crate) async fn session(
         "person": caller.person,
         // From the Internet without signing in: only the sign-in page.
         "login_required": caller.via == Via::Outside,
-        "human": humans.is_human(&headers, &caller.key),
+        "human": humans.human(&caller, &headers),
         "pin_configured": humans.pin_configured(),
         "locked": humans.locked(&caller.key),
         // Commands from this dashboard need no code.
@@ -483,13 +483,17 @@ pub(crate) async fn login(
     Extension(humans): Humans,
     Extension(persons): Extension<Arc<People>>,
     caller: Caller,
+    headers: HeaderMap,
     Json(body): Json<LoginBody>,
 ) -> Response {
     let pin = match body {
         LoginBody::Person { login, password } => {
-            return match persons.login(&humans, &login, &password, &caller).await {
+            return match persons
+                .login(&humans, &login, &password, &caller, &headers)
+                .await
+            {
                 Ok((token, person)) => (
-                    [(SET_COOKIE, People::cookie(&token))],
+                    [(SET_COOKIE, People::cookie(&token, caller.https(&headers)))],
                     Json(json!({ "person": person })),
                 )
                     .into_response(),
@@ -530,10 +534,14 @@ pub(crate) async fn login(
 pub(crate) async fn logout(
     Extension(humans): Humans,
     Extension(persons): Extension<Arc<People>>,
+    caller: Caller,
     headers: HeaderMap,
 ) -> Response {
     humans.logout(&headers).await;
-    persons.logout(&headers).await;
+    if let Some(me) = persons.signed_in(&headers) {
+        persons.logout(&headers).await;
+        persons.journal(&caller, &me.id, moli_core::AccessChange::SignedOut);
+    }
     (
         axum::response::AppendHeaders([
             (SET_COOKIE, Sessions::clear_cookie()),
@@ -725,7 +733,7 @@ pub(crate) async fn snapshot(
         );
     }
     if let Some(room) = hub.protected_room(&id)
-        && !humans.is_human(&headers, &caller.key)
+        && !humans.human(&caller, &headers)
     {
         return error(
             StatusCode::FORBIDDEN,

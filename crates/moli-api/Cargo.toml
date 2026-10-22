@@ -20,6 +20,7 @@ moli-automation.workspace = true
 moli-net.workspace = true
 moli-weather.workspace = true
 anyhow.workspace = true
+argon2.workspace = true
 axum.workspace = true
 futures.workspace = true
 http.workspace = true
