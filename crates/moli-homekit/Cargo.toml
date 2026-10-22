@@ -1,0 +1,23 @@
+[package]
+name = "moli-homekit"
+description = "Moli OS as a HomeKit bridge: its devices in Apple's Home app (HAP over IP, mDNS)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+num-bigint = "0.4"
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+socket2 = "0.6"
+tokio = { workspace = true, features = ["io-util"] }
+tracing.workspace = true
+
+[lints]
+workspace = true

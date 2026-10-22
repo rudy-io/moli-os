@@ -130,7 +130,10 @@ impl GuardPolicy {
     #[must_use]
     pub fn check(&self, rooms: &[&str], origin: Origin, now: Timestamp) -> Verdict {
         // Humans, the system itself, and automations a human approved.
-        if matches!(origin, Origin::Ui | Origin::System | Origin::Automation) {
+        if matches!(
+            origin,
+            Origin::Ui | Origin::System | Origin::Automation | Origin::HomeKit
+        ) {
             return Verdict::Allow;
         }
         if let Some(protected) = self.protected(rooms) {
@@ -296,6 +299,15 @@ mod tests {
             unassigned.check(&[], Origin::Household, night),
             Verdict::Approval(_)
         ));
+    }
+
+    #[test]
+    fn homekit_is_a_paired_person() {
+        let night = at("2026-10-02T23:00:00Z");
+        assert_eq!(
+            policy().check(&["Petite chambre"], Origin::HomeKit, night),
+            Verdict::Allow
+        );
     }
 
     #[test]

@@ -54,6 +54,10 @@ pub struct Config {
     /// Automations: the house's position (sunrise, sunset) and time zone.
     #[serde(default)]
     pub automations: moli_automation::Config,
+    /// Moli as a HomeKit bridge (absent: none). Its setup code:
+    /// `moli-os secrets set homekit setup_code`.
+    #[serde(default)]
+    pub homekit: Option<moli_homekit::Config>,
 }
 
 /// Where and when agents need a human's approval. Edited by humans only:
@@ -305,6 +309,7 @@ impl Config {
                 moli_energy::points::INSTANCE,
                 moli_lights::INSTANCE,
                 moli_api::PEOPLE_INSTANCE,
+                moli_homekit::INSTANCE,
             ]
             .contains(&driver.id.as_str())
             {

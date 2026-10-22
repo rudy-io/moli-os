@@ -131,8 +131,40 @@ pub struct Station {
     pub name: String,
     #[serde(default, rename = "station_model")]
     pub model: String,
+    /// Its P2P id: it also keys the event pictures.
+    #[serde(default)]
+    pub p2p_did: String,
+    /// On the home network: where Moli reaches it in P2P.
+    #[serde(default)]
+    pub ip_addr: String,
+    #[serde(default)]
+    pub main_sw_version: String,
+    /// The account that owns it (the guard mode is set in its name).
+    #[serde(default)]
+    pub member: Member,
     #[serde(default)]
     pub params: Vec<Param>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Member {
+    #[serde(default)]
+    pub admin_user_id: String,
+    #[serde(default)]
+    pub nick_name: String,
+    #[serde(default, rename = "member_nick")]
+    pub nick: String,
+}
+
+impl Member {
+    /// The name the guard mode is set in (both fields may come).
+    pub fn name(&self) -> &str {
+        if self.nick_name.is_empty() {
+            &self.nick
+        } else {
+            &self.nick_name
+        }
+    }
 }
 
 /// A camera, a doorbell, a sensor (or a Wi-Fi camera, again).
@@ -144,6 +176,8 @@ pub struct Device {
     pub name: String,
     #[serde(default, rename = "device_model")]
     pub model: String,
+    #[serde(default)]
+    pub station_sn: String,
     #[serde(default)]
     pub params: Vec<Param>,
 }
@@ -195,6 +229,10 @@ fn gmt(offset_ms: i64) -> String {
 }
 
 impl Cloud {
+    pub fn token(&self) -> &str {
+        &self.session.token
+    }
+
     pub fn new(session: Session, country: &str, language: &str) -> anyhow::Result<Self> {
         Ok(Self {
             key: ClientKey::from_hex(&session.client_key)?,
@@ -479,6 +517,16 @@ mod tests {
         assert!(!s.logged_in(100_000 - 24 * 3600));
         assert_eq!(s.phone_id.len(), 16);
         assert!(!format!("{s:?}").contains(&s.client_key));
+    }
+
+    #[test]
+    fn a_member_may_carry_both_names() {
+        let station: Station = serde_json::from_value(json!({
+            "station_sn": "T8010P0000000000",
+            "member": { "admin_user_id": "u1", "nick_name": "", "member_nick": "Moli" },
+        }))
+        .unwrap();
+        assert_eq!(station.member.name(), "Moli");
     }
 
     #[test]

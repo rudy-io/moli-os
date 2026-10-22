@@ -128,6 +128,12 @@ pub enum Origin {
     /// An automation a human approved (that exact version): their intent,
     /// carried out by the house.
     Automation,
+    /// Apple's Home app, through Moli's HomeKit bridge: only an Apple device
+    /// paired with the setup code a person chose reaches it, for a person
+    /// or the Home automations they made. Obeyed like the dashboard with a
+    /// code.
+    #[serde(rename = "homekit")]
+    HomeKit,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

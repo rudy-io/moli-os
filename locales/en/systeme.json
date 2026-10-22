@@ -60,6 +60,7 @@
   "systeme.journal.origine.system": "System",
   "systeme.journal.origine.assistant": "Moli (assistant)",
   "systeme.journal.origine.automation": "Automation",
+  "systeme.journal.origine.homekit": "HomeKit (Home app)",
   "systeme.journal.automatisme": "Automation “{name}”",
   "systeme.journal.changement.created": "created",
   "systeme.journal.changement.updated": "changed",

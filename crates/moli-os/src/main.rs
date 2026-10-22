@@ -902,6 +902,14 @@ fn spawn_house_drivers(
             cancel.clone(),
         ));
     }
+    if let Some(homekit) = &config.homekit {
+        tasks.push(spawn_driver(
+            hub,
+            InstanceId::from(moli_homekit::INSTANCE),
+            Arc::new(moli_homekit::HomeKit::new(hub.clone(), homekit.clone())),
+            cancel.clone(),
+        ));
+    }
     if let Some(energy) = energy {
         tasks.push(spawn_driver(
             hub,

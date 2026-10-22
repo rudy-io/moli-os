@@ -52,6 +52,8 @@ pub enum Change {
     Detected { serial: String, key: &'static str },
     /// The station's guard mode is now this one.
     Mode { serial: String, mode: i64 },
+    /// The event's picture is there.
+    Picture { serial: String, url: String },
 }
 
 fn number(value: &Json) -> Option<i64> {
@@ -79,7 +81,14 @@ pub fn read(push: &Push) -> Vec<Change> {
             })
             .collect()
     };
-    match code {
+    let picture = p["pic_url"]
+        .as_str()
+        .filter(|u| u.starts_with("https://"))
+        .map(|url| Change::Picture {
+            serial: serial.clone(),
+            url: url.to_owned(),
+        });
+    let mut changes: Vec<Change> = match code {
         Some(SECURITY) if p.get("i").is_some_and(|i| !i.is_null()) => {
             detected(&["motion", "person"])
         }
@@ -106,7 +115,12 @@ pub fn read(push: &Push) -> Vec<Change> {
         Some(3106) => detected(&["animal", "motion"]),
         Some(3107) => detected(&["vehicle", "motion"]),
         _ => Vec::new(),
+    };
+    // Only with a detection: a mode switch carries no picture worth showing.
+    if !changes.is_empty() && !matches!(changes[0], Change::Mode { .. }) {
+        changes.extend(picture);
     }
+    changes
 }
 
 #[cfg(test)]
@@ -128,7 +142,7 @@ mod tests {
             .iter()
             .filter_map(|c| match c {
                 Change::Detected { key, .. } => Some(*key),
-                Change::Mode { .. } => None,
+                Change::Mode { .. } | Change::Picture { .. } => None,
             })
             .collect()
     }
@@ -166,6 +180,22 @@ mod tests {
             ["person", "motion"]
         );
         assert!(read(&push("T8410P0000000000", json!({ "event_type": 4242 }))).is_empty());
+        let with_picture = read(&push(
+            "T8410P0000000000",
+            json!({ "event_type": 3101, "pic_url": "https://example.org/p.jpg" }),
+        ));
+        assert_eq!(
+            with_picture.last(),
+            Some(&Change::Picture {
+                serial: "T8410P0000000000".into(),
+                url: "https://example.org/p.jpg".into()
+            })
+        );
+        let insecure = read(&push(
+            "T8410P0000000000",
+            json!({ "event_type": 3101, "pic_url": "http://example.org/p.jpg" }),
+        ));
+        assert_eq!(insecure.len(), 1);
     }
 
     #[test]

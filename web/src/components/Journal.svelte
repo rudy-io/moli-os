@@ -4,7 +4,7 @@
   import { ago, deviceName } from '../lib/format.js';
   import { t } from '../lib/i18n.svelte.js';
 
-  const ORIGIN = ['ui', 'household', 'api', 'mcp', 'cli', 'system', 'assistant', 'automation'];
+  const ORIGIN = ['ui', 'household', 'api', 'mcp', 'cli', 'system', 'assistant', 'automation', 'homekit'];
   const CHANGE = ['created', 'updated', 'approved', 'switched_off', 'restored', 'deleted'];
   const VERDICT = ['approved', 'denied', 'expired'];
   const word = (table, area, id) => (table.includes(id) ? t(`systeme.journal.${area}.${id}`) : id);

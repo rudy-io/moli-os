@@ -1,8 +1,9 @@
 # Onboarding : Eufy Security
 
-Lecture seule pour l'instant, par le cloud Eufy : les HomeBases, caméras et sonnettes du compte,
+Par le cloud Eufy : les HomeBases, caméras et sonnettes du compte,
 leur batterie, le mode de sécurité, et les détections en direct (notifications push, comme
-l'appli). Le flux local (P2P) vient ensuite.
+l'appli). Le mode de sécurité se change en P2P local : Moli doit être sur le même réseau que les
+stations (UDP 32108). Tester en redonnant à une station le mode qu'elle a déjà.
 
 1. Faire créer à la personne un **compte Eufy invité réservé à Moli** (application Eufy → partage
    de la maison ou de chaque appareil), avec son propre e-mail. Eufy ne garde qu'une session par

@@ -16,7 +16,7 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
 | `Value` | `Null`, `Bool`, `Int`, `Float`, `Text` ; `validate(kind, value)` refuse ce qui ne colle pas |
 | `Label` | nom et pièce choisis par l'humain : **une étiquette ne change jamais une identité** |
 | `Event` | `device_upserted`, `device_removed`, `state`, `availability`, `driver_status`, `label_changed`, `journal`, `approval_requested`, `approval_resolved`, `notice` |
-| `Origin` | `ui`, `api`, `mcp`, `cli`, `system`, `assistant`, `automation` : par où arrive une action |
+| `Origin` | `ui`, `api`, `mcp`, `cli`, `system`, `assistant`, `automation`, `homekit` : par où arrive une action |
 
 ## `moli-runtime` : le hub
 
@@ -67,7 +67,9 @@ un humain.**
   confiance (`hub.rs`, `is_control`). Une impression ratée ou un plateau abîmé ne se rattrape
   pas : un agent propose, un humain décide.
 - Origines de confiance (jamais retenues) : `ui` (le dashboard avec une session PIN),
-  `system`, `automation` (un automatisme validé par un humain = son intention).
+  `system`, `automation` (un automatisme validé par un humain = son intention), `homekit` (l'app
+  Maison par le pont HomeKit : seul un appareil Apple appairé avec le code qu'une personne a choisi
+  y parle, pour une personne ou un automatisme Maison qu'elle a fait).
 - `household` (le dashboard du foyer **sans** code, mode `dashboard = "trusted"` : réseau
   local ou personne reconnue par Cloudflare Access) : obéi partout, heures calmes comprises,
   **sauf** dans une pièce protégée, sur une machine (`control`) et pour sortir un appareil

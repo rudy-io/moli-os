@@ -13,9 +13,12 @@
 mod cloud;
 mod crypto;
 mod events;
+mod image;
+mod p2p;
 mod push;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -240,6 +243,9 @@ fn captcha_image(url: &str) -> Option<Image> {
 
 async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
     let mut known: BTreeMap<String, Device> = BTreeMap::new();
+    let mut cameras: BTreeMap<String, Camera> = BTreeMap::new();
+    let mut stations: BTreeMap<String, Arming> = BTreeMap::new();
+    let (done_tx, mut done) = mpsc::channel::<(String, i64)>(8);
     let mut rescan = tokio::time::interval(RESCAN);
     rescan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut expire = tokio::time::interval(Duration::from_secs(1));
@@ -251,11 +257,11 @@ async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
     loop {
         tokio::select! {
             command = ctx.next_command() => match command {
-                Some(command) => command.reply(Err(moli_i18n::tr!("pilotes.eufy.lecture_seule"))),
+                Some(command) => order(&known, &stations, command, &done_tx),
                 None => return Ok(()),
             },
             _ = rescan.tick() => {
-                if let Err(e) = inventory(ctx, cloud, &mut known).await {
+                if let Err(e) = inventory(ctx, cloud, &mut known, &mut cameras, &mut stations).await {
                     if matches!(e.downcast_ref::<Refusal>(), Some(Refusal::Expired)) {
                         // Log in again on the next run.
                         cloud.session.token.clear();
@@ -269,7 +275,7 @@ async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
                 push::Up::Connected => tracing::info!(instance = %ctx.instance(), "eufy: listening for events"),
                 push::Up::Push(push) => {
                     for change in events::read(&push) {
-                        apply(ctx, &known, &mut holds, change);
+                        apply(ctx, &known, &cameras, cloud.token(), &mut holds, change);
                     }
                 }
                 push::Up::Refused => {
@@ -278,6 +284,9 @@ async fn serve(ctx: &mut DriverCtx, cloud: &mut Cloud) -> anyhow::Result<()> {
                     anyhow::bail!("Google refused Moli's push identity");
                 }
             },
+            Some((serial, mode)) = done.recv() => {
+                apply(ctx, &known, &cameras, cloud.token(), &mut holds, events::Change::Mode { serial, mode });
+            }
             _ = expire.tick(), if !holds.is_empty() => {
                 let now = Instant::now();
                 holds.retain(|(serial, key), until| {
@@ -348,9 +357,155 @@ async fn listen_for_pushes(
     Some(tokio::spawn(push::run(creds, up, instance)))
 }
 
+/// How a station's guard mode is set, in P2P on the home network.
+#[derive(Clone, Debug)]
+struct Arming {
+    station: p2p::Station,
+    /// Recent firmwares take a JSON payload, older ones and the Wi-Fi
+    /// indoor cameras a number (as the library decides).
+    payload: bool,
+    admin_user_id: String,
+    nick_name: String,
+}
+
+impl Arming {
+    fn of(station: &cloud::Station) -> Option<Self> {
+        if station.ip_addr.is_empty() || station.p2p_did.is_empty() {
+            return None;
+        }
+        let serial = &station.serial;
+        let integrated = INTEGRATED.iter().any(|p| serial.starts_with(p));
+        let solo = SOLO.iter().any(|p| serial.starts_with(p));
+        Some(Self {
+            station: p2p::Station {
+                serial: serial.clone(),
+                ip: station.ip_addr.clone(),
+                p2p_did: station.p2p_did.clone(),
+            },
+            payload: (at_least(&station.main_sw_version, [2, 0, 7, 9]) && !integrated) || solo,
+            admin_user_id: station.member.admin_user_id.clone(),
+            nick_name: station.member.name().to_owned(),
+        })
+    }
+
+    fn command(&self, mode: i64) -> (u16, Vec<u8>, Option<[u8; 16]>) {
+        let key = p2p::level1_key(&self.station.serial, &self.station.p2p_did);
+        let value = u32::try_from(mode).unwrap_or(0);
+        if self.payload {
+            let json = serde_json::json!({
+                "account_id": self.admin_user_id,
+                "cmd": p2p::CMD_SET_ARMING,
+                "mValue3": 0,
+                "payload": { "mode_type": mode, "user_name": self.nick_name },
+            });
+            let body = p2p::string_command(
+                key.as_ref(),
+                p2p::CMD_SET_PAYLOAD,
+                &json.to_string(),
+                p2p::STATION,
+            );
+            (p2p::CMD_SET_PAYLOAD, body, key)
+        } else {
+            let body = p2p::int_command(
+                key.as_ref(),
+                p2p::CMD_SET_ARMING,
+                value,
+                &self.admin_user_id,
+                p2p::STATION,
+            );
+            (p2p::CMD_SET_ARMING, body, key)
+        }
+    }
+}
+
+/// Serial prefixes the library calls « integrated » and « solo »
+/// (`isIntegratedDeviceBySn`, `isSoloCameraBySn`).
+const INTEGRATED: [&str; 22] = [
+    "T8420", "T820", "T8410", "T8400", "T8401", "T8411", "T8414", "T8130", "T8131", "T8171",
+    "T8172", "T8173", "T86P2", "T8214", "T8422", "T8423", "T8424", "T8425", "T8426", "T8440",
+    "T8441", "T8442",
+];
+const SOLO: [&str; 9] = [
+    "T8130", "T8131", "T8122", "T8123", "T8124", "T8171", "T8173", "T86P2", "T8134",
+];
+
+/// `2.0.7.9` or later (unreadable: no).
+fn at_least(version: &str, minimum: [u32; 4]) -> bool {
+    let parts: Option<Vec<u32>> = version.trim().split('.').map(|p| p.parse().ok()).collect();
+    let Some(mut parts) = parts else {
+        return false;
+    };
+    parts.resize(4, 0);
+    parts.as_slice() >= minimum.as_slice()
+}
+
+/// An order to an Eufy device: only the guard mode is writable. Sent in
+/// its own task; the result comes back through `done`.
+fn order(
+    known: &BTreeMap<String, Device>,
+    stations: &BTreeMap<String, Arming>,
+    command: moli_runtime::CommandRequest,
+    done: &mpsc::Sender<(String, i64)>,
+) {
+    if &*command.key != "guard_mode" {
+        command.reply(Err(moli_i18n::tr!("pilotes.eufy.lecture_seule")));
+        return;
+    }
+    let mode = match &command.value {
+        Value::Text(text) => MODES
+            .iter()
+            .find(|(_, name)| *name == &**text)
+            .map(|(n, _)| *n),
+        _ => None,
+    };
+    let serial = known
+        .iter()
+        .find(|(_, d)| d.id == command.device.id)
+        .map(|(s, _)| s.clone());
+    let (Some(mode), Some(serial)) = (mode, serial) else {
+        command.reply(Err(moli_i18n::tr!("pilotes.eufy.mode_inconnu")));
+        return;
+    };
+    let Some(arming) = stations.get(&serial).cloned() else {
+        command.reply(Err(moli_i18n::tr!("pilotes.eufy.pas_de_p2p")));
+        return;
+    };
+    let done = done.clone();
+    tokio::spawn(async move {
+        if command.abandoned() {
+            return;
+        }
+        let (kind, body, key) = arming.command(mode);
+        // Answered before the hub gives up on us.
+        let limit = command
+            .deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .saturating_sub(Duration::from_millis(300));
+        let outcome = p2p::send(&arming.station, kind, body, key, limit).await;
+        tracing::info!(station = %arming.station.serial, mode, payload = arming.payload, outcome = ?outcome.as_ref().map_err(ToString::to_string), "eufy: guard mode order");
+        match outcome {
+            Ok(0) => {
+                command.reply(Ok(()));
+                let _ = done.send((serial, mode)).await;
+            }
+            Ok(code) => command.reply(Err(moli_i18n::tr!("pilotes.eufy.mode_refuse", code = code))),
+            Err(e) => command.reply(Err(format!("{e:#}"))),
+        }
+    });
+}
+
+/// A camera's picture: the station's P2P id keys it, the last one is kept.
+#[derive(Debug)]
+struct Camera {
+    p2p_did: String,
+    last: Arc<image::Last>,
+}
+
 fn apply(
     ctx: &DriverCtx,
     known: &BTreeMap<String, Device>,
+    cameras: &BTreeMap<String, Camera>,
+    token: &str,
     holds: &mut BTreeMap<(String, &'static str), Instant>,
     change: events::Change,
 ) {
@@ -372,6 +527,34 @@ fn apply(
                 ctx.set_state(&device.id, "guard_mode", Value::Text((*mode).into()));
             }
         }
+        events::Change::Picture { serial, url } => {
+            let Some(camera) = cameras.get(&serial) else {
+                return;
+            };
+            let (did, last, token) = (
+                camera.p2p_did.clone(),
+                Arc::clone(&camera.last),
+                token.to_owned(),
+            );
+            let instance = ctx.instance().to_string();
+            // Fetched aside: the driver keeps listening meanwhile.
+            tokio::spawn(async move {
+                match image::fetch(&url, &token).await {
+                    Ok(data) => {
+                        if let Some(jpeg) = image::decode(&did, &data) {
+                            last.set(jpeg);
+                        } else {
+                            tracing::info!(
+                                instance,
+                                shape = image::shape(&data),
+                                "eufy: picture not understood"
+                            );
+                        }
+                    }
+                    Err(e) => tracing::info!(instance, error = %e, "eufy: picture not fetched"),
+                }
+            });
+        }
     }
 }
 
@@ -381,9 +564,17 @@ async fn inventory(
     ctx: &DriverCtx,
     cloud: &mut Cloud,
     known: &mut BTreeMap<String, Device>,
+    cameras: &mut BTreeMap<String, Camera>,
+    arming: &mut BTreeMap<String, Arming>,
 ) -> anyhow::Result<()> {
     let stations = cloud.stations().await.context("Eufy stations")?;
     let devices = cloud.devices().await.context("Eufy devices")?;
+    arming.clear();
+    for station in &stations {
+        if let Some(a) = Arming::of(station) {
+            arming.insert(station.serial.clone(), a);
+        }
+    }
     let mut seen = Vec::new();
     for device in &devices {
         let station = stations.iter().find(|s| s.serial == device.serial);
@@ -398,6 +589,12 @@ async fn inventory(
             params: &params,
         };
         publish(ctx, known, &found);
+        let did = stations
+            .iter()
+            .find(|s| s.serial == device.station_sn || s.serial == device.serial)
+            .map(|s| s.p2p_did.as_str())
+            .unwrap_or_default();
+        watch_pictures(ctx, cameras, &found, did);
         seen.push(device.serial.clone());
     }
     let alone: Vec<_> = stations
@@ -412,6 +609,7 @@ async fn inventory(
             params: &station.params,
         };
         publish(ctx, known, &found);
+        watch_pictures(ctx, cameras, &found, &station.p2p_did);
         seen.push(station.serial.clone());
     }
     for gone in known
@@ -483,14 +681,22 @@ fn device(ctx: &DriverCtx, found: &Found<'_>, values: &[(&str, Value)]) -> Devic
                 },
                 Some(Unit::Percent),
             ),
-            _ => read_only(
-                "guard_mode",
-                moli_i18n::tr!("pilotes.eufy.mode"),
-                Kind::Enum {
-                    values: MODES.iter().map(|(_, v)| (*v).into()).collect(),
+            // Writable, in P2P; an agent's order waits for a person.
+            _ => PointSpec {
+                access: Access {
+                    read: true,
+                    write: true,
                 },
-                None,
-            ),
+                semantic: Semantic::Control,
+                ..read_only(
+                    "guard_mode",
+                    moli_i18n::tr!("pilotes.eufy.mode"),
+                    Kind::Enum {
+                        values: MODES.iter().map(|(_, v)| (*v).into()).collect(),
+                    },
+                    None,
+                )
+            },
         });
     }
     for key in events::detections(found.model) {
@@ -513,6 +719,34 @@ fn device(ctx: &DriverCtx, found: &Found<'_>, values: &[(&str, Value)]) -> Devic
         members: Vec::new(),
         points,
     }
+}
+
+/// A camera (a model that detects) shows its last event picture.
+fn watch_pictures(
+    ctx: &DriverCtx,
+    cameras: &mut BTreeMap<String, Camera>,
+    found: &Found<'_>,
+    p2p_did: &str,
+) {
+    if found.serial.is_empty() || events::detections(found.model).is_empty() {
+        return;
+    }
+    if let Some(camera) = cameras.get_mut(found.serial) {
+        p2p_did.clone_into(&mut camera.p2p_did);
+        return;
+    }
+    let last = Arc::new(image::Last::default());
+    ctx.provide_snapshots(
+        &ctx.device_id(found.serial),
+        Arc::new(image::Pictures(Arc::clone(&last))),
+    );
+    cameras.insert(
+        found.serial.to_owned(),
+        Camera {
+            p2p_did: p2p_did.to_owned(),
+            last,
+        },
+    );
 }
 
 fn publish(ctx: &DriverCtx, known: &mut BTreeMap<String, Device>, found: &Found<'_>) {
@@ -557,6 +791,45 @@ mod tests {
         assert!(values("T8111", &[p(1101, "250"), p(1224, "12")]).is_empty());
         // A wired light camera's « battery » is not shown.
         assert!(values("T84A1", &[p(1101, "100")]).is_empty());
+    }
+
+    #[test]
+    fn firmware_versions_are_compared_part_by_part() {
+        assert!(at_least("2.0.7.9", [2, 0, 7, 9]));
+        assert!(at_least("3.2.4.1", [2, 0, 7, 9]));
+        assert!(at_least("2.1", [2, 0, 7, 9]));
+        assert!(!at_least("2.0.7.8", [2, 0, 7, 9]));
+        assert!(!at_least("1.10.0.0", [2, 0, 7, 9]));
+        assert!(!at_least("", [2, 0, 7, 9]));
+    }
+
+    #[test]
+    fn a_homebase_takes_a_payload_an_indoor_camera_a_number() {
+        let station = |serial: &str, version: &str| cloud::Station {
+            serial: serial.into(),
+            name: String::new(),
+            model: String::new(),
+            p2p_did: "ABCDEFG-012345-HIJKL".into(),
+            ip_addr: "192.168.1.10".into(),
+            main_sw_version: version.into(),
+            member: cloud::Member {
+                admin_user_id: "u1".into(),
+                nick_name: "Moli".into(),
+                nick: String::new(),
+            },
+            params: Vec::new(),
+        };
+        let hb = Arming::of(&station("T8010P0000001234", "3.2.4.1")).unwrap();
+        assert!(hb.payload);
+        let (kind, _, key) = hb.command(63);
+        assert_eq!(kind, p2p::CMD_SET_PAYLOAD);
+        assert!(key.is_some());
+        let indoor = Arming::of(&station("T8410P0000001234", "2.2.1.0")).unwrap();
+        assert!(!indoor.payload);
+        assert_eq!(indoor.command(1).0, p2p::CMD_SET_ARMING);
+        let mut far = station("T8010P0000001234", "3.2.4.1");
+        far.ip_addr.clear();
+        assert!(Arming::of(&far).is_none());
     }
 
     #[test]
