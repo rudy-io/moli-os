@@ -868,6 +868,7 @@ const KINDS: &[&str] = &[
     "sonos",
     "reolink",
     "eufy",
+    "somfy",
     "tuya",
     "helpers",
     "presence",
@@ -1046,6 +1047,9 @@ fn build_driver(
         "eufy" => Arc::new(moli_eufy::Eufy::new(
             config.options.clone().try_into().with_context(context)?,
         )?),
+        "somfy" => Arc::new(moli_somfy::Somfy::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "tuya" => Arc::new(moli_tuya::Tuya::new(
             config.options.clone().try_into().with_context(context)?,
         )),

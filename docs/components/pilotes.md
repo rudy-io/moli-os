@@ -72,7 +72,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, hue, tuya, reolink, eufy, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
+kind = "sonos"          # z2m, hue, tuya, reolink, eufy, somfy, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -243,6 +243,24 @@ country = "FR"     # pays du compte : choisit les serveurs (domain/<pays> sur ex
 - **Identité** : numéro de série Eufy. Une caméra Wi-Fi est à la fois station et appareil : un seul appareil Moli.
 - **Pièges** : une réponse indéchiffrable veut dire une clé de serveur périmée : se reconnecter (`moli-os secrets forget eufy session`). Le code et le captcha arrivent par le coffre, donc par un redémarrage (le coffre est lu au démarrage).
 - **Tests** : `src/crypto.rs` contre des vecteurs produits par le `crypto` de Node (ECDH, AES-256-CBC) comme eufy-security-client l'emploie ; `src/cloud.rs` (paramètres nombre ou texte, fuseau, hôtes suivis) ; `src/push.rs` (FID, réponse du checkin, découpage du flux MCS, `app_data` d'une notification, requête de connexion) ; `src/events.rs` (codes par famille d'appareil, changement de mode, `pic_url` en https seulement) ; `src/p2p.rs` (P2P id écrit et lu, clé de niveau 1, commande construite comme la bibliothèque, résultat chiffré) ; `src/image.rs` (clé d'image et image chiffrée contre la bibliothèque passée dans Node, en-tête v2, jeton réservé à Eufy) ; `src/lib.rs` (batterie, mode, image du captcha).
+
+## `somfy` : alarme Somfy Protect (`crates/moli-somfy`)
+
+- **Couvre** : alarmes Somfy Protect (Home Alarm, Somfy One) du compte. **Lecture seule** : le mode de chaque site, et ses appareils (Link, détecteurs, sirènes, télécommandes, caméras) avec batterie, signal radio et température quand ils les donnent.
+- **Origine** : écrit d'après l'API cloud de l'appli Somfy Protect (ex-Myfox) ; somfy-protect-api (GPL-3.0) a servi de référence pour les adresses et les champs, aucun code n'en est repris.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "somfy"
+kind = "somfy"
+```
+
+- **Secrets** : `email`, `password` (un **compte invité** réservé à Moli), `client_id`, `client_secret` (le client OAuth de l'appli, gardé hors du dépôt), posés par l'humain. Écrit par le pilote : `session` (jeton d'accès, jeton de renouvellement, échéance).
+- **Connexion** : `POST sso.myfox.io/oauth/oauth/v2/token` en formulaire (`grant_type=password`), puis `refresh_token` une minute avant l'échéance ; renouvellement refusé : nouvelle connexion. 400/401 à la connexion : `waiting` (compte ou client à corriger).
+- **Points** : site → `guard_mode` (`disarmed`, `partial` → `home`, `armed` → `away` : le vocabulaire des autres alarmes, donc le *système de sécurité* HomeKit sans rien de plus) ; appareil → `battery` (`battery_level`), `signal` (`rlink_quality_percent`), `temperature`. Relus toutes les minutes (`api.myfox.io/v3/site`, `/v3/site/<id>/device`). Chaque type d'appareil est journalisé une fois avec les clés de son `status` (jamais les valeurs), pour apprendre ce qu'il reste à lire.
+- **Identité** : `site_id` et `device_id` de Somfy ; chaque appareil a son site pour parent.
+- **Tests** : `src/cloud.rs` (formulaire échappé, fraîcheur du jeton, listes lues) ; `src/lib.rs` (valeurs bornées, modes).
 
 ## `sonos` : enceintes Sonos (`crates/moli-sonos`)
 
@@ -504,6 +522,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `eufy` | `moli-eufy` | HTTPS cloud Eufy (ECDH P-256 + AES) ; push Google (MCS 5228) ; P2P UDP 32108 | mode de sécurité (humain pour un agent) | HomeBase 2, eufyCam, Indoor Cam Pan & Tilt, S100, sonnette T8210 (inventaire) ; mouvement reçu par push (Indoor Cam, S100 avec personne), photo de l'événement (S100, Indoor Cam) ; mode de sécurité changé (HomeBase 2, Indoor Cam, S100) |
+| `somfy` | `moli-somfy` | HTTPS cloud Somfy Protect (OAuth2) | non | Home Alarm (inventaire : Link, IntelliTag, sirène extérieure, badges ; mode en lecture) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |

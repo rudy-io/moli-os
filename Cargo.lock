@@ -1645,6 +1645,7 @@ dependencies = [
  "moli-profile",
  "moli-reolink",
  "moli-runtime",
+ "moli-somfy",
  "moli-sonos",
  "moli-tapo",
  "moli-telegram",
@@ -1769,6 +1770,24 @@ dependencies = [
  "toml",
  "tracing",
  "unicode-normalization",
+]
+
+[[package]]
+name = "moli-somfy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

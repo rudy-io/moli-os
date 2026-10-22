@@ -1,0 +1,24 @@
+[integration]
+id = "somfy"
+name = "Somfy Protect (Home Alarm, Somfy One)"
+brands = ["Somfy", "Myfox"]
+models = ["Home Alarm", "Somfy One", "Somfy One+"]
+transport = "https"
+driver = "somfy"
+crate = "moli-somfy"
+
+[discovery]
+# No discovery: the cloud lists the account's alarms.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# `session` is written by the driver.
+secrets = ["email", "password", "client_id", "client_secret"]
+vars = []
+options = []
+
+[origin]
+reused = "https://github.com/Minims/somfy-protect-api (GPL-3.0), as a reference only: no code taken"
+author = "agent"

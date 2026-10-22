@@ -21,6 +21,7 @@ moli-energy.workspace = true
 moli-tuya.workspace = true
 moli-reolink.workspace = true
 moli-eufy.workspace = true
+moli-somfy.workspace = true
 moli-homekit.workspace = true
 moli-sonos.workspace = true
 moli-bambu.workspace = true
