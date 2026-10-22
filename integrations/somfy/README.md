@@ -14,4 +14,5 @@
   fumée, fin), statut des appareils.
 - Écriture : le mode de l'alarme (`PUT /v3/site/<id>/security`) ; l'ordre d'un agent attend une
   personne.
+- HomeKit : le système de sécurité (mode pilotable, « déclenchée » quand elle sonne) et, pour la sirène extérieure, un capteur de température.
 - L'API ne donne pas l'état ouvert/fermé des IntelliTAG.
