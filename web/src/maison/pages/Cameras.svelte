@@ -12,7 +12,12 @@
     const others = Object.values(hub.devices)
       .filter((d) => d.camera && !known.has(d.id) && !hidden(d.id))
       .map((d) => ({ id: d.id, name: nameOf(d.id), refresh: 15 }));
-    return [...listed, ...others].map((c) => ({ ...c, locked: protectedRoom(roomOf(hub.devices[c.id]) ?? '') }));
+    return [...listed, ...others]
+      .map((c) => {
+        const station = hub.devices[hub.devices[c.id]?.parent];
+        return { ...c, locked: protectedRoom(roomOf(hub.devices[c.id]) ?? ''), station: station ? nameOf(station.id) : null };
+      })
+      .sort((a, b) => (a.station ?? '￿').localeCompare(b.station ?? '￿'));
   });
 
   let open = $state(null);
@@ -78,6 +83,7 @@
     {#each cameras as cam (cam.id)}
       <div class="slot">
         <CameraTile id={cam.id} name={cam.name} refresh={cam.refresh} battery={cam.battery} onopen={(id) => (open = id)} />
+        {#if cam.station}<span class="chip station"><Icon name="shield" size={14} />{t('salon.cameras.via', { nom: cam.station })}</span>{/if}
         {#if cam.locked}<span class="chip cool lock"><Icon name="lock" size={14} />{t('salon.cameras.protegee')}</span>{/if}
       </div>
     {:else}
@@ -133,7 +139,8 @@
     gap: 8px;
   }
 
-  .lock {
+  .lock,
+  .station {
     justify-self: start;
   }
 

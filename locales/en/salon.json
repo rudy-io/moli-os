@@ -77,6 +77,7 @@
   "salon.cameras.sous_titre": "What’s going on around the house. Tap a picture to enlarge it.",
   "salon.cameras.protegee": "Protected room: only you can see it",
   "salon.cameras.aucune": "No cameras yet.",
+  "salon.cameras.via": "Via {nom}",
   "salon.cameras.camera": "{nom} camera",
   "salon.cameras.aujourdhui": "Today",
   "salon.cameras.rien": "Nothing to report in the last 24 h.",

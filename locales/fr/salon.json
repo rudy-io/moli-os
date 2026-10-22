@@ -77,6 +77,7 @@
   "salon.cameras.sous_titre": "Ce qui se passe autour de la maison. Touche une image pour l’agrandir.",
   "salon.cameras.protegee": "Pièce protégée : visible par toi seul",
   "salon.cameras.aucune": "Aucune caméra pour l’instant.",
+  "salon.cameras.via": "Via {nom}",
   "salon.cameras.camera": "Caméra {nom}",
   "salon.cameras.aujourdhui": "Aujourd’hui",
   "salon.cameras.rien": "Rien de signalé depuis 24 h.",
