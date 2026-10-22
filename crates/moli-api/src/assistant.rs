@@ -290,6 +290,78 @@ pub(crate) async fn set_key(
     }
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct Provider {
+    provider: String,
+}
+
+/// Begin the official Codex device authorization flow. Only a person with a
+/// current PIN session may start a login for the household.
+pub(crate) async fn start_codex_login(
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({ "error": moli_i18n::tr!("serveur.cle.assistant_humain") })),
+        )
+            .into_response();
+    }
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    match moli.start_codex_login().await {
+        Ok(login) => (StatusCode::ACCEPTED, axum::Json(login)).into_response(),
+        Err(error) => failure(&error),
+    }
+}
+
+pub(crate) async fn codex_login_status(
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({ "error": moli_i18n::tr!("serveur.cle.assistant_humain") })),
+        )
+            .into_response();
+    }
+    match moli {
+        Some(moli) => axum::Json(moli.codex_login_status()).into_response(),
+        None => not_configured(),
+    }
+}
+
+/// Select the credential Moli should use for new assistant requests.
+pub(crate) async fn set_provider(
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    axum::Json(provider): axum::Json<Provider>,
+) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({ "error": moli_i18n::tr!("serveur.cle.assistant_humain") })),
+        )
+            .into_response();
+    }
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    match moli.use_auth_provider(&provider.provider).await {
+        Ok(settings) => axum::Json(settings).into_response(),
+        Err(error) => failure(&error),
+    }
+}
+
 /// The satellites' recordings: switched on and heard by a person only.
 fn people_only() -> Response {
     (

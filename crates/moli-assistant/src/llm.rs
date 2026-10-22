@@ -1,5 +1,5 @@
-//! OpenAI-compatible endpoints: OpenAI itself, Mistral, a local Ollama…
-//! Three calls: chat completions (with tools), transcription and speech.
+//! OpenAI-compatible endpoints (OpenAI, Mistral, local Ollama…) plus the
+//! ChatGPT Codex Responses endpoint. Also handles transcription and speech.
 
 use std::time::Duration;
 
@@ -10,8 +10,6 @@ use moli_net::Body as Bytes;
 use serde_json::Value as Json;
 
 const CHAT_LIMIT: Duration = Duration::from_secs(45);
-/// A web search reads pages before it answers.
-const SEARCH_LIMIT: Duration = Duration::from_secs(30);
 const LISTEN_LIMIT: Duration = Duration::from_secs(30);
 const SPEAK_LIMIT: Duration = Duration::from_secs(20);
 /// A streamed voice: its first bytes come within this, or the house's voice speaks.
@@ -26,6 +24,16 @@ pub(crate) struct Endpoint {
     port: u16,
     /// Path prefix (`/v1`), without a trailing slash; empty for none.
     base: String,
+}
+
+/// Credentials for one provider request. Codex OAuth tokens are only sent to
+/// the first-party Codex endpoint, with the account routing header it expects.
+pub(crate) enum RequestAuth<'a> {
+    ApiKey(Option<&'a str>),
+    Codex {
+        access_token: &'a str,
+        account_id: Option<&'a str>,
+    },
 }
 
 impl Endpoint {
@@ -72,14 +80,42 @@ impl Endpoint {
         accept: &str,
         body: Vec<u8>,
     ) -> anyhow::Result<Request<Full<Bytes>>> {
+        self.request_with_auth(&RequestAuth::ApiKey(key), tail, content_type, accept, body)
+    }
+
+    fn request_with_auth(
+        &self,
+        auth: &RequestAuth<'_>,
+        tail: &str,
+        content_type: &str,
+        accept: &str,
+        body: Vec<u8>,
+    ) -> anyhow::Result<Request<Full<Bytes>>> {
         let mut builder = Request::builder()
             .method(Method::POST)
             .uri(format!("{}{tail}", self.base))
             .header("content-type", content_type)
             .header("accept", accept);
-        // Over TLS only, whatever the vault holds.
-        if let Some(key) = key.filter(|_| self.tls) {
-            builder = builder.header("authorization", format!("Bearer {key}"));
+        // Credentials only travel over TLS. Local HTTP models never receive
+        // either an API key or a ChatGPT session token.
+        if self.tls {
+            match auth {
+                RequestAuth::ApiKey(Some(key)) => {
+                    builder = builder.header("authorization", format!("Bearer {key}"));
+                }
+                RequestAuth::ApiKey(None) => {}
+                RequestAuth::Codex {
+                    access_token,
+                    account_id,
+                } => {
+                    builder = builder
+                        .header("authorization", format!("Bearer {access_token}"))
+                        .header("originator", "codex_cli_rs");
+                    if let Some(account_id) = account_id {
+                        builder = builder.header("ChatGPT-Account-ID", *account_id);
+                    }
+                }
+            }
         }
         Ok(builder.body(Full::new(Bytes::from(body)))?)
     }
@@ -105,6 +141,24 @@ impl Endpoint {
         limit: Duration,
     ) -> anyhow::Result<Bytes> {
         let request = self.request(key, tail, content_type, accept, body)?;
+        let (status, answer) =
+            moli_net::web(&self.host, self.port, self.tls, request, limit, MAX_ANSWER).await?;
+        if !status.is_success() {
+            return Err(self.refused(status, &answer));
+        }
+        Ok(answer)
+    }
+
+    async fn send_with_auth(
+        &self,
+        auth: &RequestAuth<'_>,
+        tail: &str,
+        content_type: &str,
+        accept: &str,
+        body: Vec<u8>,
+        limit: Duration,
+    ) -> anyhow::Result<Bytes> {
+        let request = self.request_with_auth(auth, tail, content_type, accept, body)?;
         let (status, answer) =
             moli_net::web(&self.host, self.port, self.tls, request, limit, MAX_ANSWER).await?;
         if !status.is_success() {
@@ -244,16 +298,42 @@ impl Endpoint {
         .await
     }
 
-    /// A question answered from the web (`/responses` with `web_search`).
-    pub(crate) async fn respond(&self, key: Option<&str>, body: &Json) -> anyhow::Result<Json> {
-        self.post(
-            key,
-            "/responses",
-            "application/json",
-            body.to_string().into_bytes(),
-            SEARCH_LIMIT,
-        )
-        .await
+    /// Responses API request with a provider-specific authentication scheme.
+    pub(crate) async fn respond_with_auth(
+        &self,
+        auth: &RequestAuth<'_>,
+        body: &Json,
+    ) -> anyhow::Result<Json> {
+        let answer = self
+            .send_with_auth(
+                auth,
+                "/responses",
+                "application/json",
+                "text/event-stream",
+                body.to_string().into_bytes(),
+                CHAT_LIMIT,
+            )
+            .await?;
+        completed_response(&self.host, &answer)
+    }
+
+    /// A small, bounded POST for the fixed OAuth endpoints used by Codex.
+    /// The caller supplies only compile-time provider URLs; no request key is
+    /// attached here.
+    pub(crate) async fn post_raw(
+        &self,
+        tail: &str,
+        content_type: &str,
+        body: Vec<u8>,
+        limit: Duration,
+    ) -> anyhow::Result<(http::StatusCode, Bytes)> {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{}{tail}", self.base))
+            .header("content-type", content_type)
+            .header("accept", "application/json")
+            .body(Full::new(Bytes::from(body)))?;
+        moli_net::web(&self.host, self.port, self.tls, request, limit, 64 * 1024).await
     }
 
     /// Speech to text (`/audio/transcriptions`), in the house's language.
@@ -309,6 +389,69 @@ impl Endpoint {
             .trim()
             .to_owned())
     }
+}
+
+/// Codex requires Responses requests to stream. The body is buffered under
+/// `MAX_ANSWER`, then reduced to the completed response for the existing
+/// deterministic tool loop.
+fn completed_response(host: &str, answer: &[u8]) -> anyhow::Result<Json> {
+    if answer
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+        == Some(b'{')
+    {
+        return serde_json::from_slice(answer)
+            .with_context(|| format!("{host}: invalid Responses API JSON"));
+    }
+
+    let text = String::from_utf8_lossy(answer);
+    let mut data = String::new();
+    let mut response = None;
+
+    for line in text.lines().chain(std::iter::once("")) {
+        if let Some(value) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value.strip_prefix(' ').unwrap_or(value));
+        } else if line.is_empty() && !data.is_empty() {
+            if data == "[DONE]" {
+                data.clear();
+                continue;
+            }
+            let event: Json = serde_json::from_str(&data)
+                .with_context(|| format!("{host}: invalid Codex stream event"))?;
+            data.clear();
+
+            match event["type"].as_str() {
+                Some("response.completed" | "response.incomplete" | "response.done") => {
+                    let result = event.get("response").cloned().unwrap_or_else(|| {
+                        if event.get("output").is_some() {
+                            event.clone()
+                        } else {
+                            Json::Null
+                        }
+                    });
+                    if !result.is_null() {
+                        response = Some(result);
+                    }
+                }
+                Some("response.failed" | "error") => {
+                    let message = event
+                        .pointer("/response/error/message")
+                        .or_else(|| event.pointer("/error/message"))
+                        .or_else(|| event.get("message"))
+                        .and_then(Json::as_str)
+                        .unwrap_or("Codex stream failed");
+                    bail!("{host}: {message}");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    response.ok_or_else(|| anyhow::anyhow!("{host}: Codex stream ended without a response"))
 }
 
 /// The body of a speech request; `format` as the provider names it.

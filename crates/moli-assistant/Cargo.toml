@@ -17,6 +17,7 @@ moli-energy.workspace = true
 moli-net.workspace = true
 moli-automation.workspace = true
 anyhow.workspace = true
+base64.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 jiff.workspace = true

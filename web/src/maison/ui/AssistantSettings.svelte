@@ -7,23 +7,143 @@
   import { fetchSpeech } from '../lib/voice/speech.js';
   import Icon from './Icon.svelte';
 
-  /** Moli's settings: the OpenAI key (given by a person, code asked;
-   *  tested, filed encrypted in Moli, never shown again) and the voice. */
+  /** Moli's provider credentials (person-authorized, encrypted, never shown
+   *  again) and voice preferences. */
   let s = $state(null);
   let open = $state(false);
   let key = $state('');
   let busy = $state(false);
   let playing = $state(null);
+  let deviceLogin = $state(null);
+  let codexPhase = $state('idle');
+  let providerBusy = $state(false);
+  let pollTimer = null;
 
   async function load() {
     try {
-      const res = await fetch('/api/assistant/settings');
-      if (res.ok) s = await res.json();
+      const [settingsResult, loginResult] = await Promise.allSettled([
+        fetch('/api/assistant/settings'),
+        fetch('/api/assistant/codex'),
+      ]);
+      if (settingsResult.status === 'fulfilled' && settingsResult.value.ok) {
+        s = await settingsResult.value.json();
+      }
+      if (loginResult.status === 'fulfilled' && loginResult.value.ok) {
+        const loginRes = loginResult.value;
+        const status = await loginRes.json();
+        codexPhase = status.phase ?? 'idle';
+        if (status.user_code && status.verification_url) {
+          deviceLogin = {
+            user_code: status.user_code,
+            verification_url: status.verification_url,
+            expires_at: status.expires_at,
+          };
+          scheduleCodexPoll();
+        }
+      }
     } catch {
       /* the card stays hidden */
     }
   }
-  onMount(load);
+  onMount(() => {
+    load();
+    return () => clearTimeout(pollTimer);
+  });
+
+  function scheduleCodexPoll() {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(pollCodexLogin, 2000);
+  }
+
+  async function pollCodexLogin() {
+    if (!deviceLogin) return;
+    try {
+      const res = await fetch('/api/assistant/codex');
+      if (res.status === 403) {
+        home.held = {
+          label: t('moli.reglages.codex_titre'),
+          reason: t('moli.reglages.code'),
+          custom: pollCodexLogin,
+        };
+        return;
+      }
+      if (!res.ok) return;
+      const status = await res.json();
+      codexPhase = status.phase ?? 'idle';
+      if (status.phase === 'connected') {
+        deviceLogin = null;
+        note(t('moli.reglages.codex_connecte_succes'), 'info');
+        moli.status = null;
+        await load();
+        await fetch('/api/assistant').then((r) => r.json()).then((j) => (moli.status = j));
+        return;
+      }
+      if (status.phase === 'failed' || (deviceLogin.expires_at && Date.now() > deviceLogin.expires_at * 1000)) {
+        deviceLogin = null;
+        note(t('moli.reglages.codex_erreur'), 'error');
+        await load();
+        return;
+      }
+      scheduleCodexPoll();
+    } catch {
+      scheduleCodexPoll();
+    }
+  }
+
+  async function startCodexLogin() {
+    providerBusy = true;
+    try {
+      const res = await fetch('/api/assistant/codex', {
+        method: 'POST',
+        headers: { 'x-moli-origin': 'ui' },
+      });
+      if (res.status === 403) {
+        home.held = { label: t('moli.reglages.codex_titre'), reason: t('moli.reglages.code'), custom: startCodexLogin };
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      deviceLogin = {
+        user_code: body.user_code,
+        verification_url: body.verification_url,
+        expires_at: Math.floor(Date.now() / 1000) + (body.expires_in ?? 900),
+      };
+      codexPhase = 'waiting';
+      scheduleCodexPoll();
+    } catch (e) {
+      note(t('moli.reglages.codex_erreur'), 'error');
+    } finally {
+      providerBusy = false;
+    }
+  }
+
+  async function chooseProvider(provider) {
+    providerBusy = true;
+    try {
+      const res = await fetch('/api/assistant/provider', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
+        body: JSON.stringify({ provider }),
+      });
+      if (res.status === 403) {
+        home.held = {
+          label: t('moli.reglages.titre'),
+          reason: t('moli.reglages.code'),
+          custom: () => chooseProvider(provider),
+        };
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      await load();
+      moli.status = null;
+      await fetch('/api/assistant').then((r) => r.json()).then((j) => (moli.status = j));
+    } catch {
+      note(t('moli.reglages.auth_erreur'), 'error');
+    } finally {
+      providerBusy = false;
+    }
+  }
 
   async function saveKey() {
     busy = true;
@@ -35,7 +155,7 @@
       });
       if (res.status === 403) {
         // A person's gesture: the code first, then the same request again.
-        home.held = { label: t('moli.reglages.cle_titre'), reason: 'ton code', custom: saveKey };
+        home.held = { label: t('moli.reglages.cle_titre'), reason: t('moli.reglages.code'), custom: saveKey };
         return;
       }
       const body = await res.json().catch(() => ({}));
@@ -109,25 +229,51 @@
 {/snippet}
 
 {#if s}
-  <section class="card" class:done={s.key || s.local_model}>
+  <section class="card" class:done={s.key || s.codex || s.local_model}>
     <div class="row">
-      <span class="ico"><Icon name={s.key || s.local_model ? 'talk' : 'lock'} size={18} /></span>
+      <span class="ico"><Icon name={s.key || s.codex || s.local_model ? 'talk' : 'lock'} size={18} /></span>
       <div class="text">
         <b>{t('moli.reglages.titre')}</b>
         <span class="muted">
-          {#if s.local_model}
-            {t('moli.reglages.local', { model: s.model })}
-          {:else if s.key}
+          {#if s.provider === 'codex' && s.codex}
+            {t('moli.reglages.codex_ok', { model: s.codex_model })}
+          {:else if s.provider === 'api_key' && s.key}
             {t('moli.reglages.cle_ok')}
+          {:else if s.provider === 'local' || (s.local_model && !s.key && !s.codex)}
+            {t('moli.reglages.local', { model: s.model })}
+          {:else if s.codex}
+            {t('moli.reglages.codex_connecte')}
           {:else}
             {t('moli.reglages.cle_manque')}
           {/if}
         </span>
       </div>
+      {#if s.key && s.provider !== 'api_key'}
+        <button class="btn" disabled={providerBusy} onclick={() => chooseProvider('api_key')}>{t('moli.reglages.auth_api')}</button>
+      {/if}
+      {#if s.codex && s.provider !== 'codex'}
+        <button class="btn" disabled={providerBusy} onclick={() => chooseProvider('codex')}>{t('moli.reglages.auth_codex')}</button>
+      {/if}
+      {#if s.local_model && s.provider !== 'local'}
+        <button class="btn" disabled={providerBusy} onclick={() => chooseProvider('local')}>{t('moli.reglages.auth_local')}</button>
+      {/if}
       {#if !s.local_model}
         <button class="btn" onclick={() => (open = !open)}>{s.key ? t('moli.reglages.remplacer') : t('moli.reglages.ajouter')}</button>
       {/if}
+      <button class="btn" disabled={providerBusy || codexPhase === 'waiting' || codexPhase === 'starting'} onclick={startCodexLogin}>
+        {providerBusy ? t('moli.reglages.verification') : s.codex ? t('moli.reglages.codex_reconnecter') : t('moli.reglages.codex_connecter')}
+      </button>
     </div>
+
+    {#if deviceLogin}
+      <div class="codex-login">
+        <b>{t('moli.reglages.codex_titre')}</b>
+        <span>{t('moli.reglages.codex_instructions')}</span>
+        <a href={deviceLogin.verification_url} target="_blank" rel="noopener">{t('moli.reglages.codex_site')}</a>
+        <code>{deviceLogin.user_code}</code>
+        <small class="muted">{t('moli.reglages.codex_attente')}</small>
+      </div>
+    {/if}
 
     {#if open}
       <div class="how">
@@ -147,7 +293,7 @@
       </form>
     {/if}
 
-    {#if s.cloud_voice && (s.key || s.local_model)}
+    {#if (s.cloud_voice || s.local_voice) && (s.key || s.local_model)}
       <div class="voice">
         <div class="head">
           <b>{t('moli.reglages.voix')}</b>
@@ -270,6 +416,31 @@
   .how a {
     color: var(--ink);
     font-weight: 650;
+  }
+
+  .codex-login {
+    display: grid;
+    justify-items: start;
+    gap: 7px;
+    padding: 12px 14px;
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    font-size: 14px;
+  }
+
+  .codex-login a {
+    color: var(--ink);
+    font-weight: 650;
+  }
+
+  .codex-login code {
+    padding: 8px 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: 750;
+    letter-spacing: 0.12em;
   }
 
   .form {

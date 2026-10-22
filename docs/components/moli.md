@@ -1,9 +1,10 @@
 # Moli, l'assistant (`crates/moli-assistant`)
 
 Une conversation (écrite, ou parlée en HTTPS) avec un modèle **compatible OpenAI** (OpenAI,
-Mistral, un Ollama local en `http://`…). Moli lit l'inventaire de la maison, agit sous la
-garde, **choisit ce que l'écran montre**, crée des automatismes en brouillon et rédige les
-messages des automatismes. Il ne voit jamais d'image de caméra ni de secret, ni où est quelqu'un
+Mistral, un Ollama local en `http://`…), ou avec ChatGPT Codex après connexion. Moli lit
+l'inventaire de la maison, agit sous la garde, **choisit ce que l'écran montre**, crée des
+automatismes en brouillon et rédige les messages des automatismes. Il ne voit jamais d'image
+de caméra ni de secret, ni où est quelqu'un
 au mètre près : la position d'un téléphone (`latitude`, `longitude`, `accuracy`) et son Wi-Fi
 (`wifi`) ne sont ni dans l'inventaire, ni dans `get_device`, ni dans `history`, ni dans la
 consigne d'un nœud « Moli écrit » (`house::private`) ; il lit `home`, `zone` et la batterie.
@@ -12,17 +13,33 @@ consigne d'un nœud « Moli écrit » (`house::private`) ; il lit `home`, `zone`
 
 ```toml
 [assistant]
-model = "gpt-4.1-mini"                 # la conversation
+model = "gpt-4.1-mini"                 # conversation avec une clé API
+codex_model = "gpt-6-luna"             # modèle économique pour ChatGPT Codex
 builder_model = "gpt-4.1"              # dessiner des automatismes (rare, donc un modèle plus fort)
 transcribe_model = "gpt-4o-mini-transcribe"   # voix → texte ; "" = pas de voix
 # base_url = "https://api.openai.com/v1"      # http://… pour un modèle local (pas de clé exigée)
 # timezone = "Europe/Paris"
 ```
 
-Clé : `moli-os secrets set assistant api_key` (une clé déjà donnée à l'intégration
+Deux connexions sont possibles. La **clé API OpenAI** se range avec
+`moli-os secrets set assistant api_key` (une clé déjà donnée à l'intégration
 `openai_conversation` de HA peut être reprise, toujours par tube). Elle ne part qu'en
-https : un `base_url` en `http://` ne la reçoit jamais, même rangée dans le coffre. Les modèles « à
-raisonnement » (gpt-5…, o…) sont reconnus (`max_completion_tokens`, `reasoning_effort: low`, pas de température).
+https : un `base_url` en `http://` ne la reçoit jamais, même rangée dans le coffre.
+La **connexion ChatGPT Codex** se fait depuis Système → Moli : une personne ouvre la page
+de connexion OpenAI, saisit le code à usage unique et revient au dashboard. Moli utilise
+`codex_model` avec l'API Responses de Codex. Sa valeur par défaut est `gpt-6-luna`, le modèle
+GPT-6 le plus économique, disponible dans Codex selon l'offre et le déploiement du compte
+([modèles et disponibilité](https://help.openai.com/en/articles/20001354-gpt-6-and-other-models-in-chatgpt)).
+OpenAI a retiré GPT-5.4 de Codex avec connexion ChatGPT le 31 août 2026. Ce réglage indépendant
+évite d'envoyer à Codex les modèles configurés pour l'API, comme `gpt-4.1-mini`. Les jetons
+d'accès et de renouvellement restent dans le coffre chiffré (`assistant/codex_tokens`) et sont
+renouvelés par Moli ; ils ne sont jamais renvoyés au navigateur. La connexion sélectionnée
+est gardée dans le coffre (`assistant/auth_mode`). Les appels Moli passent par l'offre
+ChatGPT/Codex du compte ; les appels avec une clé API restent facturés au compte API OpenAI.
+
+Les modèles « à raisonnement » (gpt-5…, gpt-6…, o…) sont reconnus (`max_completion_tokens`,
+`reasoning_effort: low`, pas de température). La voix cloud et la transcription cloud
+continuent à utiliser une clé API ; sans clé, Moli garde les voix locales configurées.
 
 ### Pourquoi ces modèles (mesuré le 3 oct.)
 
@@ -180,13 +197,19 @@ masqué raccroche.
   si `base_url` est en `http://`), puis rangée chiffrée dans le coffre
   (`assistant/api_key`), jamais renvoyée. Tuto pas à pas dans la carte (compte, crédit,
   limite de dépense, création de la clé). Prise en compte immédiatement.
+- **ChatGPT Codex** : `POST /api/assistant/codex` (**humain**, code demandé) démarre la
+  connexion par code d'appareil ; le dashboard ouvre `https://auth.openai.com/codex/device`
+  et affiche le code. `GET /api/assistant/codex` (humain) suit l'attente, sans retourner
+  les jetons. À la fin, le coffre garde les jetons OAuth et Moli sélectionne Codex.
+  `PUT /api/assistant/provider` `{provider: "api_key"|"codex"|"local"}` (**humain**)
+  permet de choisir un fournisseur déjà configuré. Seul l'état de connexion est renvoyé.
 - **Voix, ton et débit** : `GET|PUT /api/assistant/settings` `{voice?, style?, pace?}` (sans code :
   un goût, pas un pouvoir). Tons : `enjoue` (défaut), `pose`, `doux`. Débits : `normal` (1),
   `rapide` (1,2, le défaut de `speech_speed`), `tres_rapide` (1,4). Gardés dans
   `data/assistant.json` ; sans ce fichier, `speech_voice`/`speech_style` de `moli.toml`.
   ▶ à côté de chaque voix pour l'écouter.
 - **Moli toujours présent** : sans `[assistant]` dans `moli.toml`, il démarre avec ses
-  défauts et attend une clé (nouvelle installation).
+  défauts et attend une clé API ou une connexion ChatGPT Codex (nouvelle installation).
 
 ### Navigateur (`web/src/maison/lib/voice/`)
 

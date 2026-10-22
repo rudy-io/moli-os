@@ -172,11 +172,11 @@ impl Assistant {
             })
             .transpose()
             .map_err(|e| AssistantError::Invalid(e.to_string()))?;
-        let key = self.key()?;
+        let _ = self.key()?;
         let _permit = self.admit()?;
         let request: String = request.chars().take(crate::MAX_MESSAGE_CHARS).collect();
         // Not an exchange with Moli: its cost is not kept.
-        self.draft_with(key.as_deref(), autos, &request, current.as_ref(), &mut 0.0)
+        self.draft_with(autos, &request, current.as_ref(), &mut 0.0)
             .await
     }
 
@@ -185,7 +185,6 @@ impl Assistant {
     /// drafts included.
     pub(crate) async fn draft_with(
         &self,
-        key: Option<&str>,
         autos: &Automations,
         request: &str,
         current: Option<&Automation>,
@@ -235,13 +234,10 @@ impl Assistant {
                 }
                 body["max_tokens"] = json!(3_000);
             }
-            let answer = self
-                .0
-                .endpoint
-                .chat(key, &body)
-                .await
-                .map_err(|e| AssistantError::Upstream(e.to_string()))?;
-            *spent += pricing::chat(model, &answer["usage"]);
+            let answer = self.complete_chat(&body).await?;
+            if self.provider_mode() != "codex" {
+                *spent += pricing::chat(model, &answer["usage"]);
+            }
             let content = answer["choices"][0]["message"]["content"]
                 .as_str()
                 .unwrap_or_default()
@@ -294,7 +290,7 @@ impl Assistant {
     /// A text for a « Moli écrit » node: words for people, from the house's
     /// current state. Never a decision.
     pub async fn compose(&self, prompt: &str) -> Result<String, AssistantError> {
-        let key = self.key()?;
+        let _ = self.key()?;
         // Not counted against the conversation: automations are limited on
         // their own (20 runs a minute), and a busy chat must not silence them.
 
@@ -325,12 +321,7 @@ impl Assistant {
             }
             body["max_tokens"] = json!(400);
         }
-        let answer = self
-            .0
-            .endpoint
-            .chat(key.as_deref(), &body)
-            .await
-            .map_err(|e| AssistantError::Upstream(e.to_string()))?;
+        let answer = self.complete_chat(&body).await?;
         Ok(answer["choices"][0]["message"]["content"]
             .as_str()
             .unwrap_or_default()
@@ -502,17 +493,17 @@ impl Assistant {
         let Some(request) = args["request"].as_str() else {
             return json!({ "error": "request is required" });
         };
-        let key = match self.key() {
-            Ok(k) => k,
+        match self.key() {
+            Ok(_) => {}
             Err(e) => return json!({ "error": e.to_string() }),
-        };
+        }
         if run.drafts == crate::MAX_DRAFTS {
             return crate::over_budget("automation", crate::MAX_DRAFTS);
         }
         run.drafts += 1;
         let request: String = request.chars().take(crate::MAX_MESSAGE_CHARS).collect();
         let draft = match self
-            .draft_with(key.as_deref(), &autos, &request, None, &mut run.draft_cost)
+            .draft_with(&autos, &request, None, &mut run.draft_cost)
             .await
         {
             Ok(d) => d,

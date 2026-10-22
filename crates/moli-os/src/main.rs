@@ -464,7 +464,7 @@ async fn start_brains(
 }
 
 /// The home's own assistant: always there (without `[assistant]`, with its
-/// defaults), waiting for a key given from the dashboard if it has none.
+/// defaults), waiting for an API key or ChatGPT Codex sign-in if it has none.
 fn start_assistant(
     config: &Config,
     hub: &Hub,

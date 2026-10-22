@@ -275,6 +275,11 @@ fn assistant_routes() -> Router<Hub> {
             get(assistant::settings).put(assistant::set_settings),
         )
         .route("/api/assistant/key", put(assistant::set_key))
+        .route(
+            "/api/assistant/codex",
+            get(assistant::codex_login_status).post(assistant::start_codex_login),
+        )
+        .route("/api/assistant/provider", put(assistant::set_provider))
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {

@@ -9,7 +9,7 @@ use http_body_util::Full;
 use moli_net::Body as Bytes;
 use serde_json::{Value as Json, json};
 
-use crate::llm::Endpoint;
+use crate::llm::{Endpoint, RequestAuth};
 
 const FORECAST_HOST: &str = "api.open-meteo.com";
 const FORECAST_LIMIT: Duration = Duration::from_secs(10);
@@ -105,13 +105,13 @@ fn sky(code: Option<u64>) -> String {
 /// search model used (`input_tokens`, `output_tokens`…, for the cost).
 pub(crate) async fn search(
     endpoint: &Endpoint,
-    key: Option<&str>,
+    auth: &RequestAuth<'_>,
     model: &str,
     timezone: &str,
     query: &str,
 ) -> anyhow::Result<(Json, Json)> {
     let body = request(model, timezone, query);
-    let answer = endpoint.respond(key, &body).await?;
+    let answer = endpoint.respond_with_auth(auth, &body).await?;
     let text = output_text(&answer);
     anyhow::ensure!(!text.is_empty(), "the search gave no answer");
     Ok((json!({ "answer": text }), answer["usage"].clone()))
@@ -194,6 +194,37 @@ mod tests {
         });
         assert_eq!(output_text(&answer), "Le match a lieu à 21 h.");
         assert_eq!(output_text(&json!({ "output": [] })), "");
+    }
+
+    #[tokio::test]
+    async fn a_search_accepts_the_json_response_used_by_api_key_providers() {
+        let (url, task) = crate::llm::tests::fake_http(
+            200,
+            r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"Le match commence à 21 h."}]}],"usage":{"input_tokens":17,"output_tokens":3}}"#.as_bytes(),
+        )
+        .await;
+        let endpoint = Endpoint::parse(&url).unwrap();
+        let auth = RequestAuth::ApiKey(Some("sk-test"));
+
+        let (answer, usage) = search(
+            &endpoint,
+            &auth,
+            "gpt-4.1-mini",
+            "Europe/Paris",
+            "Quand commence le match ?",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(answer["answer"], "Le match commence à 21 h.");
+        assert_eq!(usage["input_tokens"], 17);
+        let request = task.await.unwrap();
+        assert!(request.starts_with("POST /v1/responses "), "{request}");
+        assert!(request.contains("web_search"), "{request}");
+        assert!(
+            !request.to_ascii_lowercase().contains("authorization"),
+            "{request}"
+        );
     }
 
     #[test]

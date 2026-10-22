@@ -58,12 +58,13 @@ pub struct Exchange {
     /// What the satellite heard, while recording is on (`recordings/`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<String>,
-    /// What it cost, estimated (dollars of the provider's credit).
+    /// Estimated direct API charges in dollars. ChatGPT Codex plan usage is
+    /// covered by the plan and has no per-call dollar estimate here.
     #[serde(default)]
     pub cost: Cost,
 }
 
-/// An exchange's estimated cost, in dollars, by what was paid for.
+/// An exchange's estimated direct API charge, in dollars, by what was paid for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Cost {
     /// The model's thinking (tokens).

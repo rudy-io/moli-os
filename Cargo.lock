@@ -1136,8 +1136,9 @@ dependencies = [
 name = "moli-assistant"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "http",
+  "anyhow",
+  "base64",
+  "http",
  "http-body-util",
  "jiff",
  "moli-ambiance",

@@ -62,7 +62,7 @@ impl Assistant {
         autos: &Automations,
         items: Vec<HaAutomation>,
     ) -> Result<usize, AssistantError> {
-        let key = self.key()?;
+        let _ = self.key()?;
         if items.len() > MAX_ITEMS {
             return Err(AssistantError::Invalid(format!(
                 "at most {MAX_ITEMS} automations"
@@ -90,7 +90,7 @@ impl Assistant {
                     left = count - i;
                     break;
                 };
-                match this.translate(key.as_deref(), &autos, &item).await {
+                match this.translate(&autos, &item).await {
                     Ok(()) => {
                         done += 1;
                         this.0
@@ -133,16 +133,13 @@ impl Assistant {
 
     async fn translate(
         &self,
-        key: Option<&str>,
         autos: &Automations,
         item: &HaAutomation,
     ) -> Result<(), AssistantError> {
         let yaml: String = item.yaml.chars().take(MAX_YAML).collect();
         let entities = serde_json::to_string(&item.entities).unwrap_or_default();
         let request = import_request(item, &yaml, &entities);
-        let draft = self
-            .draft_with(key, autos, &request, None, &mut 0.0)
-            .await?;
+        let draft = self.draft_with(autos, &request, None, &mut 0.0).await?;
         let a = Automation {
             id: String::new(),
             name: tidy_name(&item.alias),

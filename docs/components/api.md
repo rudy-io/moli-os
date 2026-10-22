@@ -322,8 +322,14 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
 |---|---|---|---|---|---|
-| GET | `/api/assistant` | libre | aucune | `{ready, model, listen}` ; non configuré : `{ready:false, listen:false, configured:false}` | aucune |
-| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page"}`, dernier message = utilisateur | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}}` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| GET | `/api/assistant` | libre | aucune | `{ready, model, listen, provider}` ; non configuré : `{ready:false, listen:false, configured:false}` | aucune |
+| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page"}`, dernier message = utilisateur | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}}` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / aucun fournisseur |
+| GET | `/api/assistant/settings` | libre | aucune | `{key, codex, provider, local_model, voice, style, pace, …}` ; aucun secret | aucune |
+| PUT | `/api/assistant/settings` | libre | `{voice?, style?, pace?}` | préférences de voix | `400` valeur inconnue |
+| PUT | `/api/assistant/key` | **humain** | `{api_key}` | `{stored:true}` après vérification et chiffrement dans le coffre | `400` clé refusée ; `403` session humaine requise ; `502` fournisseur injoignable |
+| POST | `/api/assistant/codex` | **humain** | aucune | `202 {verification_url, user_code, interval, expires_in}` ; le code ne vaut que pour l'autorisation OpenAI en cours | `403` ; `429` si une connexion est déjà en cours ; `502` amont indisponible |
+| GET | `/api/assistant/codex` | **humain** | aucune | `{phase, connected, provider, verification_url?, user_code?, expires_at?}` ; aucun jeton | `403` |
+| PUT | `/api/assistant/provider` | **humain** | `{provider:"api_key"|"codex"|"local"}` | `{provider}` ; sélectionne un identifiant déjà enregistré, sans le retourner | `400` fournisseur absent/invalide ; `403` |
 | POST | `/api/assistant/listen` | libre | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text}` (transcription) | `400` pas de l'audio / trop court ; `429` ; `502` ; `503` voix désactivée |
 | PUT | `/api/assistant/recording` | **humain** | `{days}` (7 au plus, 0 = arrêt) | `{recording_until}` : ce qu'entendent les boîtiers est gardé jusque-là | `403` ; `503` |
 | GET | `/api/assistant/recordings/{name}` | **humain** | aucune | le WAV d'un boîtier (gardé 7 jours) | `403` ; `404` |

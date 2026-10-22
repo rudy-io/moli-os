@@ -1,6 +1,6 @@
-//! Moli's settings from the dashboard: the API key (tested, then filed in
-//! the encrypted store, never sent back) and the voice (which one, which
-//! tone), kept in `data/assistant.json` and applied at once.
+//! Moli's settings from the dashboard: API key and ChatGPT Codex credentials
+//! are encrypted and never sent back; voice preferences live in
+//! `data/assistant.json` and apply at once.
 
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
@@ -158,8 +158,11 @@ impl Assistant {
         };
         json!({
             "key": self.0.hub.secret(&InstanceId::from("assistant"), "api_key").is_some(),
+            "codex": self.codex_connected(),
+            "provider": self.provider_mode(),
             "local_model": self.0.endpoint.is_local(),
             "model": c.model,
+            "codex_model": c.codex_model,
             "cloud_voice": !c.speech_model.is_empty(),
             "local_voice": crate::voice::host_port(&c.local_speech).is_some(),
             "voice": voice,
@@ -251,6 +254,13 @@ impl Assistant {
         self.0
             .hub
             .store_secret(&InstanceId::from("assistant"), "api_key", key)
+            .await
+            .map_err(|e| {
+                AssistantError::Upstream(moli_i18n::tr!("assistant.settings.vault", error = e))
+            })?;
+        self.0
+            .hub
+            .store_secret(&InstanceId::from("assistant"), "auth_mode", "api_key")
             .await
             .map_err(|e| {
                 AssistantError::Upstream(moli_i18n::tr!("assistant.settings.vault", error = e))

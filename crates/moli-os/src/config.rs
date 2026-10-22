@@ -48,7 +48,7 @@ pub struct Config {
     #[serde(default, rename = "fixture")]
     pub fixtures: Vec<moli_lights::Fixture>,
     /// The home's own assistant (absent: no conversation in the dashboard).
-    /// Its API key: `moli-os secrets set assistant api_key`.
+    /// Its API key (`moli-os secrets set assistant api_key`) or ChatGPT Codex sign-in.
     #[serde(default)]
     pub assistant: Option<moli_assistant::Config>,
     /// Automations: the house's position (sunrise, sunset) and time zone.
