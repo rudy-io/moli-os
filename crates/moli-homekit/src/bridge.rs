@@ -3,6 +3,7 @@
 //!
 //! - a `guard_mode` point (a security station) → *Security System*;
 //! - `motion` → *Motion Sensor*, `person` → *Occupancy Sensor*;
+//! - `temperature` → *Temperature Sensor*;
 //! - `doorbell` → *Doorbell* (a press each time it turns true);
 //! - `control` + `percent_control` → *Window Covering* (a shutter);
 //! - `door_control` + `door_position` → *Garage Door Opener*;
@@ -27,6 +28,7 @@ mod kind {
     pub const COVERING: &str = "8C";
     pub const GARAGE: &str = "41";
     pub const SWITCH: &str = "49";
+    pub const TEMPERATURE: &str = "8A";
 
     pub const IDENTIFY: &str = "14";
     pub const MANUFACTURER: &str = "20";
@@ -47,6 +49,7 @@ mod kind {
     pub const TARGET_DOOR: &str = "32";
     pub const OBSTRUCTION: &str = "24";
     pub const ON: &str = "25";
+    pub const CURRENT_TEMPERATURE: &str = "11";
 }
 
 /// What a characteristic reflects of Moli.
@@ -71,6 +74,8 @@ pub enum Binding {
     DoorCurrent { control: PointId, position: PointId },
     /// A garage door's target (0 open, 1 closed); writing it orders the control.
     DoorTarget { control: PointId, position: PointId },
+    /// A temperature in °C, read only.
+    Temperature(PointId),
     /// A pulse: always off when read; writing « on » orders the point.
     Pulse(PointId),
 }
@@ -82,9 +87,11 @@ impl Binding {
         match self {
             Self::Fixed(_) | Self::Press(_) | Self::Pulse(_) => false,
             Self::Current { mode, alarm } => mode == point || alarm == point,
-            Self::Target(p) | Self::Detected(p, _) | Self::Position(p) | Self::Moving(p) => {
-                p == point
-            }
+            Self::Target(p)
+            | Self::Detected(p, _)
+            | Self::Position(p)
+            | Self::Moving(p)
+            | Self::Temperature(p) => p == point,
             Self::DoorCurrent { control, position } | Self::DoorTarget { control, position } => {
                 control == point || position == point
             }
@@ -170,6 +177,10 @@ pub fn read(binding: &Binding, current: impl Fn(&PointId) -> Option<Value>) -> J
                 percent(current(position))
             ))
         }
+        Binding::Temperature(p) => current(p)
+            .and_then(|v| v.as_f64())
+            .filter(|t| t.is_finite())
+            .map_or(Json::Null, |t| json!((t * 10.0).round() / 10.0)),
         Binding::Pulse(_) => json!(false),
     }
 }
@@ -229,6 +240,7 @@ impl Source {
             "doorbell",
             "door_control",
             "gate",
+            "temperature",
         ]
         .iter()
         .any(|k| self.has(k))
@@ -485,6 +497,18 @@ pub fn build(
                 &[current, target, obstruction],
             ));
         }
+        if source.has("temperature") {
+            let _service = b.next();
+            let degrees = b.char(
+                kind::CURRENT_TEMPERATURE,
+                &["pr", "ev"],
+                "float",
+                json!({ "minValue": -40, "maxValue": 80, "minStep": 0.1, "unit": "celsius" }),
+                Binding::Temperature(point("temperature")),
+            );
+            let named = b.fixed(kind::NAME, &labels.temperature);
+            services.push(Builder::service(kind::TEMPERATURE, &[degrees, named]));
+        }
         if source.has("gate") {
             let _service = b.next();
             let on = b.char(
@@ -510,6 +534,7 @@ pub struct Labels {
     pub motion: String,
     pub person: String,
     pub doorbell: String,
+    pub temperature: String,
 }
 
 /// Gives every shown device an accessory id, once and for all (2, 3…).
@@ -535,6 +560,7 @@ mod tests {
             motion: "Mouvement".into(),
             person: "Personne".into(),
             doorbell: "Sonnette".into(),
+            temperature: "Température".into(),
         }
     }
 
@@ -590,6 +616,25 @@ mod tests {
         }
         let station = &list[2];
         assert_eq!(station["services"][1]["type"], "7E");
+    }
+
+    #[test]
+    fn a_temperature_becomes_a_sensor_service() {
+        let sources = vec![source("somfy:abc", &["battery", "temperature"])];
+        let mut aids = BTreeMap::new();
+        assert!(assign(&mut aids, &sources));
+        let built = build("Moli", &sources, &aids, &labels());
+        let services = built.json["accessories"][1]["services"].as_array().unwrap();
+        assert_eq!(services[1]["type"], "8A");
+        assert_eq!(services[1]["characteristics"][0]["type"], "11");
+        let device = DeviceId::from("somfy:abc");
+        let p = PointId::new(&device, "temperature");
+        let binding = Binding::Temperature(p.clone());
+        let at = |t: Option<Value>| move |_: &PointId| t.clone();
+        assert_eq!(read(&binding, at(Some(Value::Float(19.54)))), json!(19.5));
+        assert_eq!(read(&binding, at(Some(Value::Int(21)))), json!(21.0));
+        assert_eq!(read(&binding, at(None)), Json::Null);
+        assert!(binding.watches(&p));
     }
 
     #[test]

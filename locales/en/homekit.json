@@ -2,6 +2,7 @@
   "homekit.mouvement": "Motion",
   "homekit.personne": "Person",
   "homekit.sonnette": "Doorbell",
+  "homekit.temperature": "Temperature",
   "homekit.code_manquant": "choose the HomeKit code (8 digits, not 12345678 nor all the same) and file it: printf %s \"$C\" | moli-os secrets set {instance} {code}, then restart Moli",
   "homekit.code_invalide": "the HomeKit code filed is not valid (8 digits, not 12345678 nor all the same): replace it (moli-os secrets set {instance} {code}), then restart Moli"
 }

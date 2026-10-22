@@ -144,6 +144,7 @@ fn labels() -> bridge::Labels {
         motion: moli_i18n::tr!("homekit.mouvement"),
         person: moli_i18n::tr!("homekit.personne"),
         doorbell: moli_i18n::tr!("homekit.sonnette"),
+        temperature: moli_i18n::tr!("homekit.temperature"),
     }
 }
 
