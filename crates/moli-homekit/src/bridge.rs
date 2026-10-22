@@ -659,7 +659,11 @@ mod tests {
         for accessory in built.json["accessories"].as_array().unwrap() {
             for service in accessory["services"].as_array().unwrap() {
                 let chars = service["characteristics"].as_array().unwrap();
-                for t in chars.iter().chain([service]).map(|j| j["type"].as_str().unwrap()) {
+                for t in chars
+                    .iter()
+                    .chain([service])
+                    .map(|j| j["type"].as_str().unwrap())
+                {
                     assert!(!t.starts_with('0'), "{t}");
                 }
             }
