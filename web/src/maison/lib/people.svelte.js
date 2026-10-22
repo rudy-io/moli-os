@@ -108,3 +108,14 @@ export function colorOf(person) {
 }
 
 export const ROLES = ['owner', 'member', 'guest'];
+
+/** What the server asks of a new password (moli-api people.rs). */
+export const MIN_PASSWORD = 15;
+
+/** `{sessions: [{id, created, device, remote, current}]}`: the signed-in person's. */
+export const mySessions = () => call('GET', '/api/me/sessions');
+
+export const endMySession = (id) => call('DELETE', `/api/me/sessions/${encodeURIComponent(id)}`);
+
+/** An owner signs someone out everywhere (a lost phone, a guest gone). */
+export const endSessionsOf = (id) => call('DELETE', `/api/people/${encodeURIComponent(id)}/sessions`);

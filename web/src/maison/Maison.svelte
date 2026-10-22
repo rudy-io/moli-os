@@ -20,6 +20,7 @@
   import MoliSheet from './moli/MoliSheet.svelte';
   import Automatismes from './pages/Automatismes.svelte';
   import Systeme from './pages/Systeme.svelte';
+  import Famille from './pages/Famille.svelte';
   import Parler from './pages/Parler.svelte';
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
@@ -51,6 +52,7 @@
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
+    { path: 'famille', label: 'commun.nav.famille', icon: 'people' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
   ];
 
@@ -171,6 +173,8 @@
       <Automatismes {route} />
     {:else if page === 'systeme'}
       <Systeme />
+    {:else if page === 'famille'}
+      <Famille />
     {:else if page === 'infra'}
       <!-- The house's machines: loaded only when visited. -->
       {#await import('./pages/Infra.svelte') then { default: Infra }}<Infra />{/await}

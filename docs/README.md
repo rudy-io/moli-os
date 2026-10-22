@@ -51,6 +51,7 @@ téléphones passent sans Access, avec leur propre jeton.
 
 | Doc | Contenu |
 |---|---|
+| [famille.md](components/famille.md) | les personnes : rôles (administrateur, adulte, invité), invitations, mots de passe, connexions, ce qu'un invité atteint |
 | [coeur.md](components/coeur.md) | vocabulaire, hub, bus, garde et approbations, sessions PIN, journal, étiquettes, coffre des secrets, superviseur |
 | [pilotes.md](components/pilotes.md) | trait `Driver`, chaque pilote natif, `moli-net` |
 | [profils.md](components/profils.md) | moteur de profils déclaratifs, format TOML, ajouter un appareil sans code |

@@ -6,7 +6,6 @@
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
   import AlexaAccount from '../ui/AlexaAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
-  import PeopleCard from '../ui/PeopleCard.svelte';
   import { hub, home } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
@@ -157,8 +156,6 @@
   </header>
 
   {#if error}<p class="muted">{error}</p>{/if}
-
-  <PeopleCard />
 
   <DashboardCode />
 

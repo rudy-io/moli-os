@@ -1,6 +1,6 @@
 <script>
   import { t } from '../../lib/i18n.svelte.js';
-  import { signIn, redeem } from '../lib/people.svelte.js';
+  import { signIn, redeem, MIN_PASSWORD } from '../lib/people.svelte.js';
   import Icon from './Icon.svelte';
 
   /** From the Internet, before anything of the house: a person signs in
@@ -15,7 +15,7 @@
   let error = $state('');
   let busy = $state(false);
 
-  const MIN = 10;
+  const MIN = MIN_PASSWORD;
   const ready = $derived(
     mode === 'login'
       ? login.trim().length > 0 && password.length > 0

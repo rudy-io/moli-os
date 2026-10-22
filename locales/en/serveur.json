@@ -141,7 +141,7 @@
   "serveur.personnes.invitation_incorrecte": "unknown or expired invitation code",
   "serveur.personnes.identifiants_incorrects": "wrong name or password",
   "serveur.personnes.invite_limite": "a guest may only command in their rooms",
-  "serveur.personnes.invite_piece": "this device is not in this guest's rooms",
+  "serveur.personnes.invite_piece": "this device is not this guest's (neither in their rooms nor among their devices)",
   "serveur.personnes.zone_maison": "Home",
   "serveur.personnes.ailleurs": "Away",
   "serveur.personnes.modele": "Person",

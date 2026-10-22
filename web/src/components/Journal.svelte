@@ -7,6 +7,7 @@
   const ORIGIN = ['ui', 'household', 'api', 'mcp', 'cli', 'system', 'assistant', 'automation', 'homekit'];
   const CHANGE = ['created', 'updated', 'approved', 'switched_off', 'restored', 'deleted'];
   const VERDICT = ['approved', 'denied', 'expired'];
+  const ACCESS = ['signed_in', 'refused', 'signed_out', 'password_changed', 'session_ended', 'added', 'changed', 'removed', 'invited'];
   const word = (table, area, id) => (table.includes(id) ? t(`systeme.journal.${area}.${id}`) : id);
 
   let now = $state(Date.now());
@@ -30,6 +31,9 @@
       const d = hub.devices[id];
       const verdict = word(VERDICT, 'verdict', a.decision);
       return { target: d ? deviceName(d) : id, detail: t('systeme.journal.demande', { request: a.request, verdict }) };
+    }
+    if (a.kind === 'access') {
+      return { target: t('systeme.journal.personne', { person: a.person }), detail: word(ACCESS, 'acces', a.change) };
     }
     if (a.kind === 'address') {
       const d = a.device && hub.devices[a.device];

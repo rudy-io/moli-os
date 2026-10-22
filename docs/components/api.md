@@ -94,7 +94,7 @@ serveur**, jamais déclarée librement :
 
 | Origine | Attribuée quand | Surface |
 |---|---|---|
-| `ui` | en-tête `x-moli-origin: ui` **et** une session humaine valide (cookie `moli_session` ouvert par PIN, même `Caller::key`, moins de 30 jours) | dashboard |
+| `ui` | en-tête `x-moli-origin: ui` **et** une session humaine valide : cookie `moli_session` ouvert par PIN (même `Caller::key`, moins de 30 jours), ou une personne adulte ou administrateur connectée (cookie `moli_person` ou Access ; [famille.md](famille.md)) | dashboard |
 | `household` | en-tête `x-moli-origin: ui` **sans** session, depuis le foyer (`lan`, `local`, `access`), si `[guard] dashboard = "trusted"` (défaut). N'importe quel programme du réseau peut l'envoyer : la garde le traite comme une personne **sauf** dans une pièce protégée, sur un point `Control` (machine) et pour sortir un appareil d'une pièce protégée, où l'ordre attend le code (202). Les heures calmes ne le retiennent pas | dashboard sans code |
 | `cli` | en-tête `x-moli-origin: cli` **et** `via = local` (jamais à travers le tunnel) | scripts sur la machine |
 | `api` | tout le reste en REST : pas d'en-tête, valeur inconnue, `ui` sans session, `cli` depuis le réseau, `mcp`… | scripts, applications |

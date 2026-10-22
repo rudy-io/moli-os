@@ -1,30 +1,46 @@
 <script>
   import { onMount } from 'svelte';
-  import { hub, home } from '../lib/home.svelte.js';
+  import { hub, home, roomList, nameOf } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
-  import { people, loadPeople, savePerson, removePerson, invite, setPassword, assignPhone, signOut, whereabouts, colorOf, ROLES } from '../lib/people.svelte.js';
+  import { people, loadPeople, savePerson, removePerson, invite, setPassword, assignPhone, signOut, whereabouts, colorOf, ROLES, MIN_PASSWORD, endSessionsOf } from '../lib/people.svelte.js';
   import Icon from './Icon.svelte';
   import Login from './Login.svelte';
 
-  /** Système › Personnes: who lives here, what each may do, their phones.
-   *  An owner adds, invites, changes and removes; everyone sees who is
-   *  home and changes their own password. */
+  /** Famille › Personnes: who lives here, what each may do, their phones.
+   *  An owner adds, invites, changes and removes, gives a guest its rooms
+   *  and devices; everyone sees who is home and changes their own password. */
   onMount(loadPeople);
 
   let editing = $state(null); // null, 'new' or a person id
   let draft = $state(empty());
   let invited = $state(null); // { name, code, expires }
   let message = $state('');
+  let notice = $state('');
   let busy = $state(false);
   let newPassword = $state('');
   let passwordDone = $state(false);
   let signingIn = $state(false);
 
   function empty() {
-    return { name: '', role: 'member', emails: '', rooms: [], expires: '' };
+    return { name: '', role: 'member', emails: '', rooms: [], devices: [], expires: '' };
   }
 
   const rooms = $derived((home.config?.rooms ?? []).map((r) => r.name));
+  // A guest's devices besides its rooms: those of the rooms not given,
+  // room by room, found by name.
+  let find = $state('');
+  const ALL = ['group', 'lights', 'plugs', 'covers', 'climates', 'media', 'sensors'];
+  const others = $derived(
+    roomList()
+      .filter((r) => !draft.rooms.includes(r.name))
+      .map((r) => ({
+        name: r.name,
+        devices: ALL.flatMap((k) => (k === 'group' ? (r.group ? [r.group] : []) : r[k]))
+          .map((d) => ({ id: d.id, name: nameOf(d.id) }))
+          .filter((d) => !find.trim() || `${d.name} ${r.name}`.toLowerCase().includes(find.trim().toLowerCase())),
+      }))
+      .filter((r) => r.devices.length),
+  );
   // Signed in with a password (Access signs out by itself).
   const signedIn = $derived(!!hub.session?.person && hub.session?.via !== 'access');
 
@@ -33,7 +49,7 @@
     invited = null;
     message = '';
     draft = p
-      ? { name: p.name, role: p.role, emails: (p.emails ?? []).join(', '), rooms: [...(p.rooms ?? [])], expires: p.expires ? new Date(p.expires).toISOString().slice(0, 10) : '' }
+      ? { name: p.name, role: p.role, emails: (p.emails ?? []).join(', '), rooms: [...(p.rooms ?? [])], devices: [...(p.devices ?? [])], expires: p.expires ? new Date(p.expires).toISOString().slice(0, 10) : '' }
       : empty();
   }
 
@@ -47,6 +63,7 @@
         role: draft.role,
         emails: draft.emails.split(/[\s,;]+/).filter(Boolean),
         rooms: draft.role === 'guest' ? draft.rooms : [],
+        devices: draft.role === 'guest' ? draft.devices : [],
         expires: draft.role === 'guest' && draft.expires ? new Date(`${draft.expires}T23:59:59`).getTime() : null,
       };
       await savePerson(editing === 'new' ? null : editing, body);
@@ -63,6 +80,18 @@
     try {
       const { code, expires } = await invite(p.id);
       invited = { name: p.name, code, expires };
+    } catch (err) {
+      message = err.message;
+    }
+  }
+
+  async function signOutEverywhere(p) {
+    if (!confirm(t('personnes.carte.deconnecter_confirmer', { name: p.name }))) return;
+    message = '';
+    notice = '';
+    try {
+      await endSessionsOf(p.id);
+      notice = t('personnes.carte.deconnecte_partout', { name: p.name });
     } catch (err) {
       message = err.message;
     }
@@ -122,6 +151,7 @@
 
   {#if people.error}<p class="error">{people.error}</p>{/if}
   {#if message}<p class="error" role="alert">{message}</p>{/if}
+  {#if notice}<p class="good" role="status">{notice}</p>{/if}
 
   <ul class="list">
     {#each people.list as p (p.id)}
@@ -133,6 +163,12 @@
             {t(`personnes.role.${p.role}`)} · {placeOf(p)}
             {#if p.role === 'guest' && p.expires} · {t('personnes.carte.jusqu_au', { date: date(p.expires) })}{/if}
           </span>
+          {#if p.role === 'guest' && (p.rooms?.length || p.devices?.length)}
+            <span class="phones">
+              {#each p.rooms ?? [] as r (r)}<span class="chip"><Icon name="home" size={14} />{r}</span>{/each}
+              {#each p.devices ?? [] as d (d)}<span class="chip">{nameOf(d)}</span>{/each}
+            </span>
+          {/if}
           {#if phonesOf(p.id).length}
             <span class="phones">{#each phonesOf(p.id) as ph (ph.id)}<span class="chip"><Icon name="phone" size={14} />{ph.name}</span>{/each}</span>
           {/if}
@@ -141,6 +177,9 @@
           <div class="actions">
             <button class="ghost small" onclick={() => sendInvite(p)}>{p.has_password ? t('personnes.carte.reinviter') : t('personnes.carte.inviter')}</button>
             <button class="ghost small" onclick={() => edit(p)}>{t('personnes.carte.modifier')}</button>
+            {#if p.has_password}
+              <button class="ghost small" onclick={() => signOutEverywhere(p)} title={t('personnes.carte.deconnecter_titre')}><Icon name="logout" size={16} /></button>
+            {/if}
             <button class="ghost small danger" onclick={() => remove(p)} aria-label={t('personnes.carte.retirer')}><Icon name="trash" size={16} /></button>
           </div>
         {/if}
@@ -187,6 +226,23 @@
             {/each}
           </div>
         </fieldset>
+        <fieldset>
+          <legend>{t('personnes.carte.appareils')}</legend>
+          <small>{t('personnes.carte.appareils_aide')}</small>
+          <input bind:value={find} type="search" placeholder={t('personnes.carte.chercher')} />
+          <div class="devices">
+            {#each others as r (r.name)}
+              <div class="room">
+                <span class="room-name">{r.name}</span>
+                {#each r.devices as d (d.id)}
+                  <label class="check"><input type="checkbox" value={d.id} bind:group={draft.devices} />{d.name}</label>
+                {/each}
+              </div>
+            {:else}
+              <small>{t('personnes.carte.aucun_appareil')}</small>
+            {/each}
+          </div>
+        </fieldset>
         <label>
           <span>{t('personnes.carte.fin')}</span>
           <input bind:value={draft.expires} type="date" />
@@ -218,9 +274,9 @@
     <form class="password" onsubmit={changePassword}>
       <label>
         <span>{t('personnes.carte.mon_mot_de_passe')}</span>
-        <input bind:value={newPassword} type="password" autocomplete="new-password" placeholder={t('personnes.connexion.min', { min: 10 })} />
+        <input bind:value={newPassword} type="password" autocomplete="new-password" placeholder={t('personnes.connexion.min', { min: MIN_PASSWORD })} />
       </label>
-      <button class="ghost" type="submit" disabled={newPassword.length < 10}>{t('personnes.carte.changer')}</button>
+      <button class="ghost" type="submit" disabled={newPassword.length < MIN_PASSWORD}>{t('personnes.carte.changer')}</button>
       {#if passwordDone}<span class="good">{t('personnes.carte.mot_de_passe_change')}</span>{/if}
     </form>
   {/if}
@@ -363,6 +419,26 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px 14px;
+  }
+
+  .devices {
+    display: grid;
+    gap: 10px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .room {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+
+  .room-name {
+    flex-basis: 100%;
+    color: var(--ink-3);
+    font-size: 13px;
+    font-weight: 650;
   }
 
   .check {
