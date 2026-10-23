@@ -38,7 +38,9 @@
     const open = doorOpen(d.id);
     if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
     else if (open === false) out.push({ tone: '', icon: 'door-closed', text: t('commun.piece.fermee', { name: nameOf(d.id) }) });
-    // The temperature is the room's, in the head.
+    // A sensor's own temperature (the head says the room's).
+    const deg = v('temperature') ?? v('temp_current');
+    if (typeof deg === 'number') out.push({ tone: '', icon: 'thermometer', text: `${num(deg, 1)}°` });
     const hum = v('humidity') ?? v('humidity_value');
     if (typeof hum === 'number') out.push({ tone: '', icon: 'humidity', text: t('commun.pourcent', { n: num(hum) }) });
     const co2 = v('co2_value') ?? v('co2');
@@ -67,11 +69,16 @@
 
   // ---- the room's temperature ----------------------------------------------------------
 
+  // Its sensors' when it has some: a heater's or a unit's own probe, next to
+  // what it heats or cools, only stands in for them.
   const temp = $derived.by(() => {
-    const readings = [...room.sensors, ...room.climates]
-      .filter((d) => d.online !== false)
-      .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current'))
-      .filter((x) => typeof x === 'number');
+    const read = (list) =>
+      list
+        .filter((d) => d.online !== false)
+        .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current'))
+        .filter((x) => typeof x === 'number');
+    const sensed = read(room.sensors);
+    const readings = sensed.length ? sensed : read(room.climates);
     return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
   });
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
