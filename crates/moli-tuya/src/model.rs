@@ -100,8 +100,8 @@ impl Dp {
         10f64.powi(i32::try_from(self.scale.min(9)).unwrap_or(0))
     }
 
-    /// The Moli point for this DP; `None` for opaque types.
-    fn point(&self) -> Option<PointSpec> {
+    /// The Moli point for this DP, under `key`; `None` for opaque types.
+    fn point(&self, key: &str) -> Option<PointSpec> {
         let (unit, factor) = self.unit();
         let kind = match self.kind {
             DpKind::Boolean => Kind::Binary,
@@ -122,7 +122,7 @@ impl Dp {
         let writable =
             self.writable && matches!(self.kind, DpKind::Boolean | DpKind::Integer | DpKind::Enum);
         Some(PointSpec {
-            key: self.code.as_str().into(),
+            key: key.into(),
             label: label(&self.code).into(),
             semantic: semantic(&self.code, unit.as_ref()),
             kind,
@@ -179,6 +179,16 @@ fn round(v: f64, decimals: u32) -> f64 {
     (v * p).round() / p
 }
 
+/// Thermostats and heaters (`wk` thermostat, `wkf` radiator valve, `qn`
+/// heater): their codes in Moli's climate words, so that the dashboard and
+/// Moli see a heating device, not a light.
+const CLIMATE_CATEGORIES: [&str; 3] = ["wk", "wkf", "qn"];
+const CLIMATE_KEYS: [(&str, &str); 3] = [
+    ("switch", "on"),
+    ("temp_set", "target_temperature"),
+    ("temp_current", "temperature"),
+];
+
 /// What Tuya's standard codes mean, where the name alone does not say it.
 /// `doorcontact_state` stays `Other`: it is true when the door is *open*,
 /// the opposite of a `contact`.
@@ -230,6 +240,7 @@ fn label(code: &str) -> String {
         "battery_state" => "pilotes.tuya.etat_pile",
         "pir" => "pilotes.tuya.mouvement",
         "temp_current" | "va_temperature" => "pilotes.tuya.temperature",
+        "temp_set" => "pilotes.tuya.consigne",
         "humidity_value" | "va_humidity" => "pilotes.tuya.humidite",
         "co2_value" => "pilotes.tuya.co2",
         "voc_value" => "pilotes.tuya.cov",
@@ -262,8 +273,25 @@ impl TuyaDevice {
             description: None,
             native_room: self.room.as_deref().map(Into::into),
             members: Vec::new(),
-            points: self.dps.iter().filter_map(Dp::point).collect(),
+            points: self
+                .dps
+                .iter()
+                .filter_map(|dp| dp.point(self.key(dp)))
+                .collect(),
         }
+    }
+
+    /// The Moli point key of a DP: its code, or the climate word for a
+    /// thermostat's (unless another DP already has that code).
+    #[must_use]
+    pub fn key<'a>(&self, dp: &'a Dp) -> &'a str {
+        if !CLIMATE_CATEGORIES.contains(&self.category.as_str()) {
+            return &dp.code;
+        }
+        CLIMATE_KEYS
+            .iter()
+            .find(|(code, key)| dp.code == *code && self.dp_by_code(key).is_none())
+            .map_or(dp.code.as_str(), |(_, key)| key)
     }
 
     #[must_use]
@@ -271,14 +299,20 @@ impl TuyaDevice {
         self.dps.iter().find(|d| d.code == code)
     }
 
-    /// `{"1": true, "18": 120}` → `[(code, value)]`, unknown DPs skipped.
+    /// The DP behind a Moli point key.
+    #[must_use]
+    pub fn dp_by_key(&self, key: &str) -> Option<&Dp> {
+        self.dps.iter().find(|d| self.key(d) == key)
+    }
+
+    /// `{"1": true, "18": 120}` → `[(key, value)]`, unknown DPs skipped.
     #[must_use]
     pub fn decode_dps(&self, dps: &serde_json::Map<String, Json>) -> Vec<(String, Value)> {
         let by_id: BTreeMap<u32, &Dp> = self.dps.iter().map(|d| (d.id, d)).collect();
         dps.iter()
             .filter_map(|(id, raw)| {
                 let dp = by_id.get(&id.parse().ok()?)?;
-                Some((dp.code.clone(), dp.decode(raw)?))
+                Some((self.key(dp).to_owned(), dp.decode(raw)?))
             })
             .collect()
     }
@@ -415,5 +449,90 @@ mod tests {
             dev.dp_by_code("switch_1").unwrap().encode(&Value::Int(1)),
             None
         );
+    }
+
+    fn thermostat(category: &str) -> TuyaDevice {
+        serde_json::from_value(serde_json::json!({
+            "id": "bf42", "name": "Radiateur", "category": category, "product": "FP Thermostat",
+            "gateway": "tuya",
+            "dps": [
+                { "id": 1, "code": "switch", "type": "Boolean", "writable": true },
+                { "id": 2, "code": "mode", "type": "Enum", "writable": true, "range": ["comfort", "eco"] },
+                { "id": 16, "code": "temp_set", "type": "Integer", "writable": true, "unit": "℃", "scale": 1, "min": 50, "max": 400, "step": 5 },
+                { "id": 24, "code": "temp_current", "type": "Integer", "unit": "℃", "scale": 1 },
+                { "id": 40, "code": "child_lock", "type": "Boolean", "writable": true },
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_thermostat_speaks_moli_climate_words() {
+        let dev = thermostat("wk");
+        let d = dev.device(&InstanceId::from("tuya"));
+        let keys: Vec<&str> = d.points.iter().map(|p| &*p.key).collect();
+        assert_eq!(
+            keys,
+            [
+                "on",
+                "mode",
+                "target_temperature",
+                "temperature",
+                "child_lock"
+            ]
+        );
+        let target = d.point("target_temperature").unwrap();
+        assert!(target.access.write);
+        assert_eq!(target.unit, Some(Unit::Celsius));
+        assert_eq!(&*target.label, "Consigne");
+        assert_eq!(d.point("on").unwrap().semantic, Semantic::OnOff);
+
+        // States, local or cloud, arrive under the same keys…
+        let raw = serde_json::json!({ "1": true, "16": 175, "24": 190 });
+        assert_eq!(
+            dev.decode_dps(raw.as_object().unwrap()),
+            vec![
+                ("on".into(), Value::Bool(true)),
+                ("target_temperature".into(), Value::Float(17.5)),
+                ("temperature".into(), Value::Float(19.0)),
+            ]
+        );
+        // …and an order on a climate word reaches the right DP.
+        let set = dev.dp_by_key("target_temperature").unwrap();
+        assert_eq!(set.id, 16);
+        assert_eq!(set.encode(&Value::Float(17.0)), Some(Json::from(170)));
+        assert!(dev.dp_by_key("temp_set").is_none());
+        assert_eq!(dev.dp_by_key("child_lock").unwrap().id, 40);
+    }
+
+    #[test]
+    fn only_heating_categories_are_renamed() {
+        let d = thermostat("cz").device(&InstanceId::from("tuya"));
+        assert!(d.point("temp_set").is_some(), "a plug keeps Tuya's codes");
+        assert!(d.point("target_temperature").is_none());
+        assert!(
+            plug()
+                .device(&InstanceId::from("tuya"))
+                .point("on")
+                .is_none()
+        );
+
+        // A DP already coded with the climate word keeps it: no two points share a key.
+        let mut dev = thermostat("wk");
+        dev.dps.push(Dp {
+            id: 50,
+            code: "temperature".into(),
+            kind: DpKind::Integer,
+            writable: false,
+            unit: None,
+            scale: 0,
+            min: None,
+            max: None,
+            step: None,
+            range: Vec::new(),
+        });
+        let d = dev.device(&InstanceId::from("tuya"));
+        assert!(d.point("temp_current").is_some());
+        assert_eq!(dev.dp_by_key("temperature").unwrap().id, 50);
     }
 }

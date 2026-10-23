@@ -344,7 +344,7 @@ fn dispatch(
     };
     let raw = devices[*index]
         .1
-        .dp_by_code(&command.key)
+        .dp_by_key(&command.key)
         .and_then(|dp| Some((dp.id, dp.encode(&command.value)?)));
     let Some((dp, raw)) = raw else {
         let message = moli_i18n::tr!("pilotes.tuya.ne_se_regle_pas", point = command.key);

@@ -286,6 +286,7 @@
   "pilotes.tuya.etat_pile": "Battery status",
   "pilotes.tuya.mouvement": "Motion",
   "pilotes.tuya.temperature": "Temperature",
+  "pilotes.tuya.consigne": "Setpoint",
   "pilotes.tuya.humidite": "Humidity",
   "pilotes.tuya.co2": "CO₂",
   "pilotes.tuya.cov": "VOC",
