@@ -263,6 +263,16 @@ docker exec -i homeassistant python3 - < tuya-export.py \
   | docker exec -i moli-os /moli-os tuya import                        # clés jamais affichées
 ```
 
+  **Sans Home Assistant** : `tools/tuya-iot/tuya-iot-export.py`, sur n'importe quelle machine, par un projet cloud Tuya IoT (platform.tuya.com, le compte Smart Life lié au projet) dont la personne tape l'Access ID et l'Access Secret à l'invite, masqués, jamais gardés. Même sortie : les DP du modèle de l'appareil (leurs numéros locaux) sous les codes standard avec lesquels le cloud rapporte les états (un code standard absent du modèle prend le seul DP de même type, unité et bornes), et pour un sous-appareil sa passerelle et son `cid`. `--summary` contrôle sans secret ; `--key=<fin d'identifiant>` donne une seule clé, dans un tube seulement. Lancer l'import avec la version de Moli qui lira le fichier (une plus ancienne laisse tomber les champs qu'elle ne connaît pas).
+
+```sh
+python3 -I tools/tuya-iot/tuya-iot-export.py --summary                 # contrôle, sans secret
+python3 -I tools/tuya-iot/tuya-iot-export.py \
+  | ssh <hôte> docker exec -i moli-os /moli-os tuya import             # clés jamais affichées
+```
+
+  Une passerelle répond-elle pour un sous-appareil ? `crates/moli-tuya/examples/gateway-probe.rs` lui pose la question du pilote (`{"cid", "t"}`, 3.3) et montre la réponse, sans jamais envoyer d'ordre : `python3 -I tools/tuya-iot/tuya-iot-export.py --key=<fin> | cargo run -q -p moli-tuya --example gateway-probe -- <ip> <id passerelle> <cid>`.
+
   Le script ne rafraîchit jamais le jeton de HA (cela révoquerait celui de HA) et refuse de tourner s'il expire dans moins de 15 min. `moli-os tuya import [--instance tuya] [--devices-file …]` refuse un terminal, range les clés dans le coffre et écrit `tuya.json` **sans clé**. Les champs `ip`, `version` et `room` modifiés à la main sont conservés. Redémarrer ensuite.
 - **`tuya.json`** : `id`, `name`, `category`, `product`, `ip`, `version` (`"3.3"`, `"3.4"`, `"3.5"`), `room`, `gateway` (identifiant de la passerelle, ou `"tuya"` quand on ne la connaît pas), `cid` (adresse dans la passerelle), `dps[]` (`id`, `code`, `type`, `writable`, `unit`, `scale`, `min`, `max`, `step`, `range`).
 - **Points** : clé = code du DP (`switch_1`, `cur_power`). Exceptions, là où le dashboard et Moli cherchent les mots de Moli : les thermostats et chauffages (catégories `wk`, `wkf`, `qn`, dont les modules fil pilote) parlent le vocabulaire climat, `switch` → `on`, `temp_set` → `target_temperature`, `temp_current` → `temperature`, pour y voir un chauffage et non une lampe ; les capteurs de température et d'humidité (`wsdcg`) donnent `va_temperature` / `temp_current` → `temperature` et `va_humidity` / `humidity_value` → `humidity`, pour que la pièce ait ses relevés. Un mot n'est pris que si aucun DP ne porte déjà ce code, et par un seul DP. Ordres et états, en local comme par le cloud, suivent la même correspondance. Un historique enregistré avant ce changement reste sous l'ancienne clé. Booléen → binaire ; entier → numérique divisé par `10^scale` ; enum → enum ; texte → texte ; `Json`, `Raw`, `Bitmap` ignorés. Unités : `mA` affiché en A, `℃` en °C, `度` en kWh. Écrivable si `writable` **et** type booléen, entier ou enum (jamais le texte libre). À l'envoi, un entier est arrondi au pas de l'appareil (si `step` > 1).
