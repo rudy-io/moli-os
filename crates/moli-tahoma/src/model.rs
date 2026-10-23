@@ -187,7 +187,8 @@ impl Load {
                 });
                 continue;
             };
-            if device.url.is_empty() || device.label.is_empty() {
+            let label = device.label.trim();
+            if device.url.is_empty() || label.is_empty() {
                 continue;
             }
             let id = DeviceId::new(instance, &device.url);
@@ -208,7 +209,7 @@ impl Load {
             devices.push(Device {
                 id: id.clone(),
                 instance: instance.clone(),
-                native_name: device.label.as_str().into(),
+                native_name: label.into(),
                 manufacturer: Some("Somfy".into()),
                 model: Some(
                     if device.controllable_name.is_empty() {
@@ -498,6 +499,22 @@ mod tests {
         assert_eq!(
             state(&load, &fixture(), awning, "percent_control"),
             Some(Value::Int(40))
+        );
+    }
+
+    #[test]
+    fn a_label_keeps_its_words_but_loses_the_padding() {
+        let mut raw = fixture();
+        for device in &mut raw {
+            if device.label == "Volet salon" {
+                device.label = "  Volet salon  ".to_owned();
+            }
+        }
+        let load = Load::new(&instance(), &raw);
+        assert!(
+            load.devices
+                .iter()
+                .any(|d| &*d.native_name == "Volet salon")
         );
     }
 
