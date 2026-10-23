@@ -146,5 +146,6 @@
   "assistant.door.porte": "la porte",
   "assistant.recap.porte": "🔔 À la porte : {n}",
   "assistant.recap.porte_sonne": "{time} · porte · sonné, sans message",
-  "assistant.recap.porte_message": "{time} · porte · « {message} »"
+  "assistant.recap.porte_message": "{time} · porte · « {message} »",
+  "assistant.reply.too_long": "J’ai été coupé en pleine réponse : il n’y avait plus de place. Raccourcis ta demande, ou coupe-la en deux."
 }

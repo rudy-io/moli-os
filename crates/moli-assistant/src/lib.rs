@@ -854,11 +854,7 @@ impl Assistant {
         let mut messages = vec![
             json!({ "role": "system", "content": with_voice(self.system_prompt(&layout, page, &power) + &self.web_line(), turn.spoken) }),
         ];
-        let skip = turn.messages.len().saturating_sub(MAX_MESSAGES);
-        for m in turn.messages.iter().skip(skip) {
-            let content: String = m.content.chars().take(MAX_MESSAGE_CHARS).collect();
-            messages.push(json!({ "role": m.role, "content": content }));
-        }
+        messages.extend(recent(&turn.messages));
 
         // Spoken, nobody waits for cards: no `show`, one round trip less
         // (the screen still gets the cards the question calls for).
@@ -917,6 +913,10 @@ impl Assistant {
             run.usage.cached_tokens += answer["usage"]["prompt_tokens_details"]["cached_tokens"]
                 .as_u64()
                 .unwrap_or(0);
+            if answer["choices"][0]["finish_reason"] == "length" {
+                tracing::warn!(step, "the model was cut: no room left to answer");
+                run.cut = true;
+            }
             let message = &answer["choices"][0]["message"];
             let calls = message["tool_calls"].as_array().filter(|c| !c.is_empty());
             if let Some(calls) = calls {
@@ -1018,14 +1018,9 @@ impl Assistant {
                 }
             }
         }
-        let text = trim_filler(&once(text), !run.cards.is_empty());
-        let reply = if !text.is_empty() || run.end {
-            text
-        } else if run.cards.is_empty() && run.actions.is_empty() {
-            moli_i18n::tr!("assistant.reply.unknown")
-        } else {
-            moli_i18n::tr!("assistant.reply.done")
-        };
+        let whole = once(text);
+        let filtered = trim_filler(&whole, !run.cards.is_empty());
+        let reply = spoken_reply(&whole, filtered, &run);
         tracing::info!(
             steps = run.usage.steps,
             prompt_tokens = run.usage.prompt_tokens,
@@ -1421,6 +1416,10 @@ struct Run {
     tools: Vec<String>,
     /// `end_conversation` was called.
     end: bool,
+    /// The model ran out of room mid-answer: what came back is incomplete,
+    /// and a cut-off tool call is simply lost. Not the same as having
+    /// nothing to say, so it must not be reported as such.
+    cut: bool,
     /// What the web searches cost (dollars).
     search_cost: f64,
     /// Web searches and automation drafts made (`MAX_SEARCHES`, `MAX_DRAFTS`).
@@ -1449,6 +1448,52 @@ fn once(text: &str) -> String {
         }
     }
     t.to_owned()
+}
+
+/// The conversation sent to the model: the last `MAX_MESSAGES` at most, each
+/// one no longer than `MAX_MESSAGE_CHARS`. A message trimmed here is one the
+/// model never sees the end of, so the trimming is said out loud — silence
+/// about it buys a wrong answer that nothing afterwards can explain.
+fn recent(messages: &[Message]) -> Vec<Json> {
+    let skip = messages.len().saturating_sub(MAX_MESSAGES);
+    messages
+        .iter()
+        .skip(skip)
+        .map(|m| {
+            let whole = m.content.chars().count();
+            if whole > MAX_MESSAGE_CHARS {
+                tracing::warn!(
+                    role = ?m.role,
+                    kept = MAX_MESSAGE_CHARS,
+                    was = whole,
+                    "message cut short before the model saw it"
+                );
+            }
+            let content: String = m.content.chars().take(MAX_MESSAGE_CHARS).collect();
+            json!({ "role": m.role, "content": content })
+        })
+        .collect()
+}
+
+/// What the family is told. `trim_filler` is cosmetic, so when it empties a
+/// real answer and nothing was shown or done either, the model's own words
+/// stand: saying « I did not understand » would hide them. Only silence is
+/// unknown, and an answer cut short says so. Measured on 22 Oct. 2026: a lone
+/// « Veux-tu... ? » was erased and reported as a failure to understand.
+fn spoken_reply(whole: &str, filtered: String, run: &Run) -> String {
+    if !filtered.is_empty() || run.end {
+        return filtered;
+    }
+    if !run.cards.is_empty() || !run.actions.is_empty() {
+        return moli_i18n::tr!("assistant.reply.done");
+    }
+    if !whole.trim().is_empty() {
+        return whole.to_owned();
+    }
+    if run.cut {
+        return moli_i18n::tr!("assistant.reply.too_long");
+    }
+    moli_i18n::tr!("assistant.reply.unknown")
 }
 
 /// Sentences that only point at the screen (« Voici… ») when cards are
@@ -3007,6 +3052,50 @@ mod tests {
         set["required"] = json!(["point", "value", "say"]);
         assert_eq!(tools(), then);
         assert_eq!(ambiance_tool(), before::ambiance_tool());
+    }
+
+    #[test]
+    fn a_filtered_answer_is_never_turned_into_an_admission_of_failure() {
+        // Measured on 22 Oct. 2026: the model asked one question, the offer
+        // filter erased it, and the house was told Â« Je nâai pas su
+        // rÃ©pondre Â» â the words existed and nobody ever saw them.
+        let asked = "Veux-tu que je confie cette demande Ã  lâagent extÃ©rieur ?";
+        let filtered = trim_filler(asked, false);
+        assert_eq!(filtered, "", "the filter still trims an offer");
+        let run = Run::default();
+        assert_eq!(
+            spoken_reply(asked, filtered, &run),
+            asked,
+            "what the model said is what the house hears"
+        );
+        assert_eq!(
+            spoken_reply("", String::new(), &run),
+            moli_i18n::tr!("assistant.reply.unknown")
+        );
+        let mut shown = Run::default();
+        shown.cards.push(json!({ "kind": "device", "id": "salon" }));
+        assert_eq!(
+            spoken_reply("Voici les images.", String::new(), &shown),
+            moli_i18n::tr!("assistant.reply.done")
+        );
+    }
+
+    #[test]
+    fn an_answer_cut_short_says_so_instead_of_pleading_ignorance() {
+        let cut = Run {
+            cut: true,
+            ..Run::default()
+        };
+        assert_eq!(
+            spoken_reply("", String::new(), &cut),
+            moli_i18n::tr!("assistant.reply.too_long"),
+            "running out of room is not the same as having nothing to say"
+        );
+        // Room ran out, but words did come: the words win.
+        assert_eq!(
+            spoken_reply("Presque fini.", String::new(), &cut),
+            "Presque fini."
+        );
     }
 
     #[test]

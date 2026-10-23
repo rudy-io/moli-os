@@ -146,5 +146,6 @@
   "assistant.door.porte": "the door",
   "assistant.recap.porte": "🔔 At the door: {n}",
   "assistant.recap.porte_sonne": "{time} · door · rang, no message",
-  "assistant.recap.porte_message": "{time} · door · “{message}”"
+  "assistant.recap.porte_message": "{time} · door · “{message}”",
+  "assistant.reply.too_long": "I was cut off mid-answer: there was no room left. Make the request shorter, or split it in two."
 }
