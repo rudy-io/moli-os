@@ -71,7 +71,7 @@ La carte vivante de ce schéma est dans le dashboard : `#/systeme` (« Comment �
 | `moli-core` | domaine pur : identifiants, points, valeurs, événements, origines, journal | [coeur](components/coeur.md) |
 | `moli-runtime` | hub, garde, superviseur, journal, étiquettes, coffre, médias | [coeur](components/coeur.md) |
 | `moli-net` | HTTPS avec certificat épinglé, TLS public, HTTP, UPnP, AirPlay 1 (RAOP), requêtes web bornées | [pilotes](components/pilotes.md) |
-| `moli-z2m`, `moli-hue`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-airplay`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
+| `moli-z2m`, `moli-hue`, `moli-tahoma`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-airplay`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
 | `moli-announce` | annonces vocales communes aux enceintes qui parlent : file, `quiet`, `announce_volume`, synthèse Piper | [pilotes](components/pilotes.md) |
 | `moli-profile` + catalogue | moteur de profils déclaratifs (lecture **et écriture** déclarées) | [profils](components/profils.md) |
 | `moli-history` | historique SQLite, SQL en lecture seule pour agents | [historique & énergie](components/historique-energie.md) |

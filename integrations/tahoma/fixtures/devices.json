@@ -1,0 +1,97 @@
+[
+  {
+    "deviceURL": "io://1234-5678-1234/12345678",
+    "label": "Volet salon",
+    "uiClass": "RollerShutter",
+    "controllableName": "io:RollerShutterWithLowSpeedManagementIOComponent",
+    "available": true,
+    "enabled": true,
+    "states": [
+      { "name": "core:ClosureState", "type": 1, "value": 100 },
+      { "name": "core:TargetClosureState", "type": 1, "value": 100 },
+      { "name": "core:OpenClosedState", "type": 3, "value": "closed" },
+      { "name": "core:MovingState", "type": 6, "value": false }
+    ],
+    "definition": {
+      "uiClass": "RollerShutter",
+      "commands": [
+        { "commandName": "open", "nparams": 0 },
+        { "commandName": "close", "nparams": 0 },
+        { "commandName": "stop", "nparams": 0 },
+        { "commandName": "setClosure", "nparams": 1 }
+      ]
+    }
+  },
+  {
+    "deviceURL": "io://1234-5678-1234/23456789",
+    "label": "Volet atelier",
+    "uiClass": "PositionableRollerShutter",
+    "controllableName": "io:RollerShutterGenericIOComponent",
+    "available": true,
+    "enabled": true,
+    "states": [
+      { "name": "core:ClosureState", "type": 1, "value": 0 },
+      { "name": "core:OpenClosedState", "type": 3, "value": "open" }
+    ],
+    "definition": {
+      "uiClass": "PositionableRollerShutter",
+      "commands": [
+        { "commandName": "open", "nparams": 0 },
+        { "commandName": "close", "nparams": 0 },
+        { "commandName": "stop", "nparams": 0 },
+        { "commandName": "setClosure", "nparams": 1 }
+      ]
+    }
+  },
+  {
+    "deviceURL": "rts://1234-5678-1234/34567890",
+    "label": "Volet chambre",
+    "uiClass": "RollerShutter",
+    "controllableName": "rts:RollerShutterRTSComponent",
+    "available": true,
+    "enabled": true,
+    "states": [],
+    "definition": {
+      "uiClass": "RollerShutter",
+      "commands": [
+        { "commandName": "open", "nparams": 0 },
+        { "commandName": "close", "nparams": 0 },
+        { "commandName": "stop", "nparams": 0 }
+      ]
+    }
+  },
+  {
+    "deviceURL": "io://1234-5678-1234/45678901",
+    "label": "Store terrasse",
+    "uiClass": "Awning",
+    "controllableName": "io:AwningValanceIOComponent",
+    "available": true,
+    "enabled": true,
+    "states": [
+      { "name": "core:DeploymentState", "type": 1, "value": 40 },
+      { "name": "core:OpenClosedState", "type": 3, "value": "partial" }
+    ],
+    "definition": {
+      "uiClass": "Awning",
+      "commands": [
+        { "commandName": "open", "nparams": 0 },
+        { "commandName": "close", "nparams": 0 },
+        { "commandName": "stop", "nparams": 0 },
+        { "commandName": "setDeployment", "nparams": 1 }
+      ]
+    }
+  },
+  {
+    "deviceURL": "io://1234-5678-1234/56789012",
+    "label": "Lampe hall",
+    "uiClass": "Light",
+    "controllableName": "io:LightMicroModuleSomfyIOComponent",
+    "available": true,
+    "enabled": true,
+    "states": [],
+    "definition": {
+      "uiClass": "Light",
+      "commands": []
+    }
+  }
+]

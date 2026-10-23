@@ -943,6 +943,7 @@ const KINDS: &[&str] = &[
     "hue",
     "dirigera",
     "homeassistant",
+    "tahoma",
     "igd",
     "tapo",
     "shelly",
@@ -1108,6 +1109,9 @@ fn build_driver(
         )),
         "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "tahoma" => Arc::new(moli_tahoma::Tahoma::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(
