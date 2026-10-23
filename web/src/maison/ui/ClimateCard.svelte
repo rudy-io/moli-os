@@ -18,11 +18,19 @@
   // A pilot-wire heater's wiring (Tuya's `device_mode_type`) says the orders
   // it takes; on four or six orders it has no setpoint of its own.
   const WIRING = {
-    four: { modes: ['comfort', 'eco', 'hors', 'off', 'program'], setpoint: false },
-    six: { modes: ['comfort', 'comfort_1', 'comfort_2', 'eco', 'hors', 'off', 'program'], setpoint: false },
-    switch: { modes: ['manual', 'program', 'eco', 'hors', 'holiday'], setpoint: true },
+    four: { label: 'commun.clim.cablage_4', modes: ['comfort', 'eco', 'hors', 'off', 'program'], setpoint: false },
+    six: { label: 'commun.clim.cablage_6', modes: ['comfort', 'comfort_1', 'comfort_2', 'eco', 'hors', 'off', 'program'], setpoint: false },
+    switch: { label: 'commun.clim.cablage_interrupteur', modes: ['manual', 'program', 'eco', 'hors', 'holiday'], setpoint: true },
   };
   const wiring = $derived(WIRING[value(id, 'device_mode_type')]);
+  // The wiring is set here too (the module then takes other orders); only
+  // the choices the module declares.
+  const wirings = $derived.by(() => {
+    const point = d?.points.find((p) => p.key === 'device_mode_type');
+    return point?.access?.write ? Object.keys(WIRING).filter((key) => point.kind.values?.includes(key)) : [];
+  });
+  const setWiring = (key) =>
+    act(`${id}/device_mode_type`, key, t('commun.action', { label: name, action: t(WIRING[key].label).toLowerCase() }));
   const target = $derived(wiring?.setpoint === false ? null : value(id, 'target_temperature'));
   const mode = $derived(value(id, 'mode'));
   const outdoor = $derived(value(id, 'outdoor_temperature'));
@@ -215,6 +223,16 @@
   </div>
   <div class="facts">
     <h3>{name}</h3>
+    {#if wirings.length}
+      <label class="wiring">
+        <span>{t('commun.clim.cablage')}</span>
+        <select value={value(id, 'device_mode_type')} onchange={(e) => setWiring(e.currentTarget.value)} disabled={!reachable(id)}>
+          {#each wirings as key (key)}
+            <option value={key}>{t(WIRING[key].label)}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
     {#if controllable}
       <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
         <Icon name="power" size={16} />{on ? m.label : t('commun.clim.eteinte')}
@@ -238,14 +256,17 @@
     {:else}
       <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
     {/if}
-    <p class="muted">
-      {t('commun.clim.dehors', { temp: num(outdoor, 0) })}
-      {#if draw != null && draw >= 5}
-        <span class="draw num" title={t('commun.clim.mesure_tableau', { name: feeder.name })}>
-          · {watts(draw)}{#if shared}<small> {t('commun.clim.circuit_partage_paren')}</small>{/if}
-        </span>
-      {/if}
-    </p>
+    <!-- Outside, only from a unit that measures it (a heat pump's outdoor unit). -->
+    {#if typeof outdoor === 'number' || (draw != null && draw >= 5)}
+      <p class="muted">
+        {#if typeof outdoor === 'number'}{t('commun.clim.dehors', { temp: num(outdoor, 0) })}{/if}
+        {#if draw != null && draw >= 5}
+          <span class="draw num" title={t('commun.clim.mesure_tableau', { name: feeder.name })}>
+            {typeof outdoor === 'number' ? '· ' : ''}{watts(draw)}{#if shared}<small> {t('commun.clim.circuit_partage_paren')}</small>{/if}
+          </span>
+        {/if}
+      </p>
+    {/if}
     {#if energy.summary}
       <p class="costs">
         {#if feeder}
@@ -411,6 +432,25 @@
   h3 {
     font-size: 18px;
     font-weight: 700;
+  }
+
+  .wiring {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--ink-3);
+  }
+
+  .wiring select {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   button.chip {
