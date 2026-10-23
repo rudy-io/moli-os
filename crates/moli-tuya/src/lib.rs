@@ -103,6 +103,7 @@ fn parse_key(key: &str) -> Option<[u8; 16]> {
     <[u8; 16]>::try_from(key.as_bytes()).ok()
 }
 
+#[allow(clippy::too_many_lines)] // one pass over the device file, each device to what reads it
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let file: DeviceFile = match tokio::fs::read(&config.devices_file).await {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -128,18 +129,43 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let keys = cloud_keys(config, ctx).await;
     let mut silent_seen = false;
     let mut watched = cloud::Watched::new();
+    let cloud = keys.is_some();
+    // Gateways in the file: their links read the sub-devices that name them.
+    let gateways: HashSet<String> = file
+        .devices
+        .iter()
+        .filter(|d| d.gateway.is_none())
+        .map(|d| d.id.clone())
+        .collect();
+    let mut children: HashMap<String, Vec<device::Child>> = HashMap::new();
+    let mut links = Vec::new();
     for dev in file.devices {
         // Never on the LAN: a battery sensor without an address, a device
-        // behind a gateway. The cloud speaks for them, when it can.
+        // behind a gateway. Its gateway's link, or the cloud, speaks for it.
         let silent = dev.gateway.is_some()
             || (dev.ip.is_none() && cloud::SLEEPY.contains(&dev.category.as_str()));
         silent_seen |= silent;
-        if silent && keys.is_some() {
+        let behind = dev
+            .gateway
+            .clone()
+            .filter(|gateway| gateways.contains(gateway))
+            .zip(dev.cid.clone());
+        if silent && (cloud || behind.is_some()) {
             let device = dev.device(ctx.instance());
             let id = device.id.clone();
             ctx.upsert_device(device);
             let dev = Arc::new(dev);
-            watched.insert(dev.id.clone(), (devices.len(), Arc::clone(&dev)));
+            let index = devices.len();
+            if cloud {
+                watched.insert(dev.id.clone(), (index, Arc::clone(&dev)));
+            }
+            if let Some((gateway, cid)) = behind {
+                let device = Arc::clone(&dev);
+                children
+                    .entry(gateway)
+                    .or_default()
+                    .push(device::Child { index, cid, device });
+            }
             devices.push((id, dev));
             continue;
         }
@@ -169,19 +195,30 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         addresses.insert(dev.id.clone(), local);
         orders.insert(id.clone(), (index, order_tx));
         devices.push((id, Arc::clone(&dev)));
-        tasks.spawn(
-            Link {
-                index,
-                device: dev,
-                key,
-                address: addr_rx,
-                reachability,
-                connections: Arc::clone(&connections),
-                orders: order_rx,
-                up: up_tx.clone(),
-            }
-            .run(),
-        );
+        links.push(Link {
+            index,
+            device: dev,
+            key,
+            address: addr_rx,
+            reachability,
+            connections: Arc::clone(&connections),
+            orders: order_rx,
+            up: up_tx.clone(),
+            children: Vec::new(),
+            cloud_watches_children: cloud,
+        });
+    }
+    // A gateway may come after its sub-devices in the file.
+    for mut link in links {
+        link.children = children.remove(&link.device.id).unwrap_or_default();
+        if !link.children.is_empty() {
+            tracing::info!(
+                gateway = link.device.name,
+                sub_devices = link.children.len(),
+                "tuya gateway reads its sub-devices locally"
+            );
+        }
+        tasks.spawn(link.run());
     }
     // Keys given later in the dashboard: a restart takes them.
     let await_keys = keys.is_none() && silent_seen;

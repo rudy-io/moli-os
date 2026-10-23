@@ -25,6 +25,9 @@ const BACKOFF_MAX: Duration = Duration::from_secs(300);
 /// Plugs only report power when asked (or when it changes a lot).
 const REFRESH_POWER: Duration = Duration::from_secs(30);
 const POWER_DPS: [u32; 3] = [18, 19, 20];
+/// A gateway's sub-devices are asked their state this often (they also
+/// push changes).
+const REFRESH_CHILDREN: Duration = Duration::from_secs(60);
 
 /// Where the device is, from the device file or discovery.
 pub type Address = Option<(String, Version)>;
@@ -77,6 +80,19 @@ pub struct Link {
     pub connections: Arc<Connections>,
     pub orders: mpsc::Receiver<Order>,
     pub up: mpsc::Sender<Up>,
+    /// A gateway's sub-devices it reads for them (3.3, read only).
+    pub children: Vec<Child>,
+    /// The cloud also follows the sub-devices: their availability is its
+    /// to say when the gateway is away.
+    pub cloud_watches_children: bool,
+}
+
+/// A sub-device behind this link's gateway, named in its frames by `cid`.
+#[derive(Debug)]
+pub struct Child {
+    pub index: usize,
+    pub cid: String,
+    pub device: Arc<TuyaDevice>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -154,7 +170,7 @@ impl Link {
             let Some((ip, announced)) = self.address.borrow().clone() else {
                 if online.is_none() {
                     online = Some(false);
-                    let _ = self.up.send(Up::Online(self.index, false)).await;
+                    self.offline().await;
                 }
                 if matches!(self.idle(None, &mut watching).await, Wake::Stopped) {
                     return;
@@ -170,7 +186,7 @@ impl Link {
             }
             if online != Some(false) {
                 online = Some(false);
-                let _ = self.up.send(Up::Online(self.index, false)).await;
+                self.offline().await;
             }
             if let Err(e) = result {
                 tracing::debug!(device = self.device.name, ip, error = %e, "tuya link down");
@@ -183,6 +199,17 @@ impl Link {
                 Wake::Stopped => return,
                 Wake::Address => backoff = Duration::from_secs(2),
                 Wake::Retry => backoff = (backoff * 2).min(BACKOFF_MAX),
+            }
+        }
+    }
+
+    /// The device is away, and with a gateway its sub-devices, unless the
+    /// cloud still sees them.
+    async fn offline(&self) {
+        let _ = self.up.send(Up::Online(self.index, false)).await;
+        if !self.cloud_watches_children {
+            for child in &self.children {
+                let _ = self.up.send(Up::Online(child.index, false)).await;
             }
         }
     }
@@ -233,33 +260,36 @@ impl Link {
         let mut codec = Codec::new(version, self.key);
         let mut buf = Vec::with_capacity(1024);
 
-        let id = self.device.id.as_str();
+        let device = Arc::clone(&self.device);
+        let id = device.id.as_str();
+        // A gateway keeps its own state to itself: a sub-device's, sealed
+        // with the gateway's key, proves it.
+        let speaks_for_children = version == Version::V33 && !self.children.is_empty();
+        let probe = self
+            .children
+            .first()
+            .filter(|_| speaks_for_children)
+            .map(|c| c.cid.as_str());
         // Bound the entire proof, including a peer that sends heartbeats
         // forever instead of completing its handshake or encrypted status.
         let first = timeout(
             REPLY,
-            authenticate(&mut codec, &mut reader, &mut writer, &mut buf, id),
+            authenticate(&mut codec, &mut reader, &mut writer, &mut buf, id, probe),
         )
         .await
         .map_err(|_| LinkError::Timeout)??;
         floor.proved(version);
-        // Orders received before identity was established are not replayed
-        // after recovery, even if their caller has not timed out yet.
-        while let Ok(order) = self.orders.try_recv() {
-            order.refuse(moli_i18n::tr!(
-                "pilotes.tuya.injoignable",
-                name = self.device.name.trim()
-            ));
-        }
-        self.reachability.send_modify(|state| {
-            state.online = true;
-            state.connected_ip = connected_ip;
-            state.version = state.version.max(Some(version));
-        });
+        self.proved(version, connected_ip).await;
         *online = Some(true);
-        let _ = self.up.send(Up::Online(self.index, true)).await;
+        // Sub-devices heard from on this connection.
+        let mut heard_children = Vec::new();
         if let Some(frame) = first {
-            self.report(&codec, &frame).await;
+            self.report(&codec, &frame, &mut heard_children).await;
+        }
+        // Read with the proof, already here: a gateway answers for several
+        // sub-devices in one packet.
+        while let Some(frame) = codec.decode(&mut buf)? {
+            self.report(&codec, &frame, &mut heard_children).await;
         }
 
         let wants_power = self.device.dps.iter().any(|d| POWER_DPS.contains(&d.id));
@@ -267,6 +297,9 @@ impl Link {
         heartbeat.tick().await;
         let mut refresh = tokio::time::interval(REFRESH_POWER);
         refresh.tick().await;
+        // First tick at once: every sub-device is asked as soon as the
+        // gateway is proved.
+        let mut refresh_children = tokio::time::interval(REFRESH_CHILDREN);
         let mut heard = Instant::now();
         // Orders sent, waiting for the device's acknowledgement.
         let mut pending: Vec<(Instant, oneshot::Sender<Result<(), String>>)> = Vec::new();
@@ -291,7 +324,7 @@ impl Link {
                                 let _ = done.send(outcome.clone());
                             }
                         }
-                        self.report(&codec, &frame).await;
+                        self.report(&codec, &frame, &mut heard_children).await;
                     }
                 }
                 _ = heartbeat.tick() => {
@@ -303,6 +336,11 @@ impl Link {
                 }
                 _ = refresh.tick(), if wants_power => {
                     writer.write_all(&codec.encode(cmd::UPDATEDPS, br#"{"dpId":[18,19,20]}"#)).await?;
+                }
+                _ = refresh_children.tick(), if speaks_for_children => {
+                    for child in &self.children {
+                        writer.write_all(&child_query(&mut codec, &child.cid)).await?;
+                    }
                 }
                 () = tokio::time::sleep_until(pending.first().map_or_else(Instant::now, |(t, _)| *t + REPLY)), if !pending.is_empty() => {
                     let (_, done) = pending.remove(0);
@@ -321,20 +359,75 @@ impl Link {
         }
     }
 
-    async fn report(&self, codec: &Codec, frame: &Frame) {
-        let dps = match status_dps(codec, frame) {
-            Ok(Some(dps)) => dps,
+    /// The key is proved: the device is online, on this socket.
+    async fn proved(&mut self, version: Version, connected_ip: Option<std::net::Ipv4Addr>) {
+        // Orders received before identity was established are not replayed
+        // after recovery, even if their caller has not timed out yet.
+        while let Ok(order) = self.orders.try_recv() {
+            order.refuse(moli_i18n::tr!(
+                "pilotes.tuya.injoignable",
+                name = self.device.name.trim()
+            ));
+        }
+        self.reachability.send_modify(|state| {
+            state.online = true;
+            state.connected_ip = connected_ip;
+            state.version = state.version.max(Some(version));
+        });
+        let _ = self.up.send(Up::Online(self.index, true)).await;
+    }
+
+    /// A state to the hub: the device's own, or, when a `cid` names one, a
+    /// sub-device's (unknown ones are ignored). A sub-device is online once
+    /// heard from on this connection.
+    async fn report(&self, codec: &Codec, frame: &Frame, heard_children: &mut Vec<usize>) {
+        let json = match status_json(codec, frame) {
+            Ok(Some(json)) => json,
             Ok(None) => return,
             Err(e) => {
                 tracing::debug!(device = self.device.name, error = %e, "unreadable tuya payload");
                 return;
             }
         };
-        let values = self.device.decode_dps(&dps);
-        if !values.is_empty() {
-            let _ = self.up.send(Up::State(self.index, values)).await;
+        let Some(dps) = dps_of(&json) else { return };
+        let (index, device) = match cid_of(&json) {
+            Some(cid) => match self.children.iter().find(|c| c.cid == cid) {
+                Some(child) => (child.index, &child.device),
+                None => return,
+            },
+            None => (self.index, &self.device),
+        };
+        let values = device.decode_dps(dps);
+        if values.is_empty() {
+            return;
         }
+        if index != self.index && !heard_children.contains(&index) {
+            heard_children.push(index);
+            let _ = self.up.send(Up::Online(index, true)).await;
+        }
+        let _ = self.up.send(Up::State(index, values)).await;
     }
+}
+
+/// A sub-device's state, asked of its gateway (3.3, as tinytuya does).
+fn child_query(codec: &mut Codec, cid: &str) -> Vec<u8> {
+    codec.encode(
+        cmd::DP_QUERY,
+        json!({"cid": cid, "t": now()}).to_string().as_bytes(),
+    )
+}
+
+/// The sub-device a gateway's frame speaks for.
+fn cid_of(json: &Json) -> Option<&str> {
+    json.get("cid")
+        .or_else(|| json.get("data").and_then(|data| data.get("cid")))
+        .and_then(Json::as_str)
+}
+
+fn dps_of(json: &Json) -> Option<&Map<String, Json>> {
+    json.get("dps")
+        .or_else(|| json.get("data").and_then(|data| data.get("dps")))
+        .and_then(Json::as_object)
 }
 
 /// A successful, decrypted state is the only key proof available in 3.3.
@@ -343,6 +436,17 @@ pub(crate) fn status_dps(
     codec: &Codec,
     frame: &Frame,
 ) -> Result<Option<Map<String, Json>>, crate::protocol::ProtocolError> {
+    Ok(status_json(codec, frame)?
+        .as_ref()
+        .and_then(dps_of)
+        .cloned())
+}
+
+/// A state frame's decrypted JSON; `None` for anything else.
+fn status_json(
+    codec: &Codec,
+    frame: &Frame,
+) -> Result<Option<Json>, crate::protocol::ProtocolError> {
     if frame.retcode.is_some_and(|code| code != 0)
         || !matches!(
             frame.cmd,
@@ -356,14 +460,7 @@ pub(crate) fn status_dps(
     {
         return Ok(None);
     }
-    let Some(json) = codec.open_json(&frame.payload)? else {
-        return Ok(None);
-    };
-    Ok(json
-        .get("dps")
-        .or_else(|| json.get("data").and_then(|data| data.get("dps")))
-        .and_then(Json::as_object)
-        .cloned())
+    codec.open_json(&frame.payload)
 }
 
 async fn authenticate(
@@ -372,6 +469,7 @@ async fn authenticate(
     writer: &mut OwnedWriteHalf,
     buf: &mut Vec<u8>,
     id: &str,
+    child: Option<&str>,
 ) -> Result<Option<Frame>, LinkError> {
     if codec.version.negotiates() {
         let (start, local) = codec.session_start();
@@ -396,6 +494,9 @@ async fn authenticate(
         codec.encode(cmd::DP_QUERY_NEW, b"{}")
     };
     writer.write_all(&query).await?;
+    if let Some(cid) = child {
+        writer.write_all(&child_query(codec, cid)).await?;
+    }
     if codec.version.negotiates() {
         return Ok(None);
     }
@@ -463,8 +564,18 @@ mod tests {
     use tokio::net::TcpStream;
 
     fn response(version: Version, key: [u8; 16], command: u32, payload: &[u8]) -> Vec<u8> {
+        response_with(version, key, command, payload, 0)
+    }
+
+    fn response_with(
+        version: Version,
+        key: [u8; 16],
+        command: u32,
+        payload: &[u8],
+        retcode: u32,
+    ) -> Vec<u8> {
         let mut frame = Codec::new(version, key).encode(command, payload);
-        frame.splice(16..16, [0, 0, 0, 0]);
+        frame.splice(16..16, retcode.to_be_bytes());
         let total = frame.len();
         let trailer = if version == Version::V33 { 8 } else { 36 };
         frame[12..16].copy_from_slice(&u32::try_from(total - 16).unwrap().to_be_bytes());
@@ -724,6 +835,86 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_gateway_reads_its_sub_devices_for_them() {
+        let key = *b"0123456789abcdef";
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", PORT))
+            .await
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let codec = Codec::new(Version::V33, key);
+            // The gateway's own state, then the first sub-device's.
+            let (command, _) = request(&mut stream).await;
+            assert_eq!(command, cmd::DP_QUERY);
+            let (command, body) = request(&mut stream).await;
+            assert_eq!(command, cmd::DP_QUERY);
+            let asked = codec.open_json(&body).unwrap().unwrap();
+            assert_eq!(asked["cid"], "node-a");
+            // Like a real one: nothing of its own (code 1), then the child's.
+            stream
+                .write_all(&response_with(Version::V33, key, cmd::DP_QUERY, b"", 1))
+                .await
+                .unwrap();
+            for cid in ["node-z", "node-a"] {
+                let state = json!({"cid": cid, "dps": {"1": true, "24": 195}}).to_string();
+                stream
+                    .write_all(&response(
+                        Version::V33,
+                        key,
+                        cmd::DP_QUERY,
+                        state.as_bytes(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            std::future::pending::<()>().await;
+        });
+        let (up, mut events) = mpsc::channel(8);
+        let (mut link, _orders) = test_link(up);
+        link.children = vec![Child {
+            index: 1,
+            cid: "node-a".into(),
+            device: Arc::new(
+                serde_json::from_value(json!({
+                    "id": "test-heater", "name": "Test heater", "category": "wk",
+                    "gateway": "test-device", "cid": "node-a",
+                    "dps": [
+                        {"id": 1, "code": "switch", "type": "Boolean", "writable": true},
+                        {"id": 24, "code": "temp_current", "type": "Integer", "unit": "℃", "scale": 1}
+                    ]
+                }))
+                .unwrap(),
+            ),
+        }];
+        let session = tokio::spawn(async move {
+            link.session(
+                "127.0.0.1",
+                Version::V33,
+                &mut Some(false),
+                &mut Floor::new(None),
+            )
+            .await
+        });
+        assert!(matches!(events.recv().await, Some(Up::Online(0, true))));
+        assert!(matches!(events.recv().await, Some(Up::Online(1, true))));
+        assert!(
+            matches!(events.recv().await, Some(Up::State(1, values)) if values == vec![
+                ("on".into(), Value::Bool(true)),
+                ("temperature".into(), Value::Float(19.5)),
+            ]),
+            "the sub-device's state lands on the sub-device, in Moli's words"
+        );
+        assert!(
+            timeout(Duration::from_millis(200), events.recv())
+                .await
+                .is_err(),
+            "an unknown cid is nobody's state"
+        );
+        server.abort();
+        session.abort();
+    }
+
     fn test_link(up: mpsc::Sender<Up>) -> (Link, mpsc::Sender<Order>) {
         let (_, address) = watch::channel(None);
         let (sender, orders) = mpsc::channel(1);
@@ -743,6 +934,8 @@ mod tests {
                 connections: Arc::new(Connections::default()),
                 orders,
                 up,
+                children: Vec::new(),
+                cloud_watches_children: false,
             },
             sender,
         )

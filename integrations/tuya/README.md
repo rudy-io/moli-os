@@ -6,5 +6,7 @@
 - Pas de fixture d'appareil : les tests (`src/protocol.rs`) utilisent des trames produites
   par ces implémentations (vecteurs d'interopérabilité), pas des captures.
 - Vérifié en vrai : import depuis HA, lecture et écriture locales sur des prises Tuya.
-- Reste : la version 3.1 n'est pas gérée ; les sous-appareils derrière une passerelle sont
-  ignorés ; l'import dépend encore de HA.
+- Sous-appareils d'une passerelle : lus en local par elle (protocole 3.3, demande `{"cid", "t"}`
+  comme tinytuya), quand le fichier donne leur `cid` et l'identifiant de la passerelle.
+- Reste : la version 3.1 n'est pas gérée ; les sous-appareils d'une passerelle ne sont pas
+  encore commandés (ni en 3.4+, ni lus sans `cid`) ; l'import dépend encore de HA.
