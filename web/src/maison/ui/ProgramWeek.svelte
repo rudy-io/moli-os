@@ -24,7 +24,8 @@
   const spans = (runs) =>
     (runs ?? []).map((run, i) => {
       const end = runs[i + 1]?.at ?? SLOTS;
-      const what = bySetpoint ? `${run.celsius}°` : modeLabel(order(run.order));
+      // A part kept on four or six orders has no setpoint: its order then.
+      const what = bySetpoint && run.celsius != null ? `${run.celsius}°` : modeLabel(order(run.order));
       return { ...run, end, what, order: order(run.order) };
     });
   // 2024-01-01 was a Monday: the days' short names in the house's language.
@@ -57,7 +58,7 @@
             {#if runs}
               {#each spans(runs) as s (s.at)}
                 <i
-                  class={bySetpoint ? warmth(s.celsius) : s.order ?? 'unknown'}
+                  class={bySetpoint && s.celsius != null ? warmth(s.celsius) : (s.order ?? 'unknown')}
                   style="width:{((s.end - s.at) / SLOTS) * 100}%"
                   title="{hhmm(s.at)}–{hhmm(s.end)} · {s.what}"
                   role="cell"></i>

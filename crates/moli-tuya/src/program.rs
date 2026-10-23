@@ -1,18 +1,18 @@
 //! A pilot-wire heater's week program, as Tuya FP modules keep it: for each
-//! day (1 = Monday … 7 = Sunday), four raw DPs `week_program_18_<day>_<part>`
-//! of 36 bytes, a quarter of the day each (part 1 = 0 h – 6 h … part 4 =
-//! 18 h – 24 h), in 24 slots of 15 minutes.
+//! day (1 = Monday … 7 = Sunday), four raw DPs `week_program_18_<day>_<part>`,
+//! a quarter of the day each (part 1 = 0 h – 6 h … part 4 = 18 h – 24 h), in
+//! 24 slots of 15 minutes.
 //!
-//! Each part holds both programs: 12 bytes of orders for four- or six-order
-//! wiring, a nibble per slot, high nibble first; then 24 bytes of setpoints
-//! for switch wiring, a byte per slot, in half degrees. On four orders the
-//! module shows comfort −1 and −2 as comfort: the stored program is one.
+//! A part starts with 12 bytes of orders for four- or six-order wiring, a
+//! nibble per slot, high nibble first. On switch wiring 24 bytes of
+//! setpoints follow, a byte per slot, in half degrees (36 bytes); on four or
+//! six orders the part stops there (12 bytes). On four orders the module
+//! shows comfort −1 and −2 as comfort: the stored program is one.
 
 /// Slots in a part, and parts in a day.
 pub const SLOTS: usize = 24;
 pub const PARTS: u8 = 4;
 const ORDERS: usize = SLOTS / 2;
-const LEN: usize = ORDERS + SLOTS;
 
 /// A part's code, for `day` (1–7) and `part` (1–4).
 #[must_use]
@@ -21,11 +21,12 @@ pub fn part_code(day: u8, part: u8) -> String {
 }
 
 /// One quarter of an hour: the order (as the module's `mode` says it, for
-/// four- and six-order wiring) and the setpoint (switch wiring).
+/// four- and six-order wiring) and the setpoint (switch wiring; none in a
+/// part kept on four or six orders).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Slot {
     pub order: Option<&'static str>,
-    pub celsius: f64,
+    pub celsius: Option<f64>,
 }
 
 /// A pilot wire's order, from its nibble; `None` for an unknown one.
@@ -84,20 +85,21 @@ fn runs(slots: &[Slot]) -> serde_json::Value {
     serde_json::Value::Array(out)
 }
 
-/// A part's 24 slots; `None` unless it is 36 bytes.
+/// A part's 24 slots; `None` unless it is 12 bytes (orders) or 36 (orders
+/// and setpoints).
 #[must_use]
 pub fn decode_part(raw: &[u8]) -> Option<Vec<Slot>> {
-    if raw.len() != LEN {
+    if raw.len() != ORDERS && raw.len() != ORDERS + SLOTS {
         return None;
     }
     let (orders, setpoints) = raw.split_at(ORDERS);
     let nibbles = orders.iter().flat_map(|b| [b >> 4, b & 0x0F]);
     Some(
         nibbles
-            .zip(setpoints)
-            .map(|(nibble, half)| Slot {
+            .enumerate()
+            .map(|(i, nibble)| Slot {
                 order: order(nibble),
-                celsius: f64::from(*half) / 2.0,
+                celsius: setpoints.get(i).map(|half| f64::from(*half) / 2.0),
             })
             .collect(),
     )
@@ -128,7 +130,7 @@ mod tests {
         let slots = decode_part(&part).unwrap();
         assert_eq!(slots.len(), SLOTS);
         assert!(slots.iter().all(|s| s.order == Some("comfort")));
-        let at = |h: usize, m: usize| slots[h * 4 + m / 15].celsius;
+        let at = |h: usize, m: usize| slots[h * 4 + m / 15].celsius.unwrap();
         assert!((at(1, 15) - 17.0).abs() < f64::EPSILON);
         assert!((at(1, 30) - 15.5).abs() < f64::EPSILON);
         assert!((at(1, 45) - 15.5).abs() < f64::EPSILON);
@@ -206,6 +208,19 @@ mod tests {
         };
         assert!(kept_by(&[dp("switch"), dp("week_program_18_1_1")]));
         assert!(!kept_by(&[dp("switch")]));
+    }
+
+    #[test]
+    fn on_six_orders_a_part_keeps_its_orders_only() {
+        // Sunday, 18 h – 24 h, as a module wired on six orders keeps it.
+        let slots = decode_part(&hex("33 33 33 22 33 44 55 33 33 33 33 33")).unwrap();
+        assert_eq!(slots.len(), SLOTS);
+        assert_eq!(slots[6].order, Some("comfort_1"), "19:30");
+        assert_eq!(slots[10].order, Some("hors"), "20:30");
+        assert!(
+            slots.iter().all(|s| s.celsius.is_none()),
+            "no setpoint on six orders"
+        );
     }
 
     #[test]
