@@ -315,15 +315,54 @@ async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
     let shadow = api
         .call(&format!("/v2.0/cloud/thing/{id}/shadow/properties"))
         .await?;
+    let week = shadow_week(&shadow);
+    if week["days"]
+        .as_array()
+        .is_some_and(|days| days.iter().any(Json::is_null))
+    {
+        // What the cloud gave for the parts: count, decoded sizes, a sample.
+        let parts: Vec<&Json> = shadow["properties"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| {
+                p["code"]
+                    .as_str()
+                    .is_some_and(|c| c.starts_with("week_program_18_"))
+            })
+            .collect();
+        let sizes: Vec<Option<usize>> = parts
+            .iter()
+            .map(|p| p["value"].as_str().and_then(base64).map(|b| b.len()))
+            .collect();
+        let sample = parts.first().map(|p| {
+            let value = p["value"].to_string();
+            format!(
+                "{}: {}",
+                p["code"],
+                value.chars().take(24).collect::<String>()
+            )
+        });
+        tracing::warn!(
+            device = id,
+            parts = parts.len(),
+            ?sizes,
+            ?sample,
+            "tuya cloud: week program incomplete"
+        );
+    }
+    Ok(Value::Text(week.to_string().into()))
+}
+
+/// The week in a device's shadow (its raw parts in base64).
+fn shadow_week(shadow: &Json) -> Json {
     let parts: HashMap<&str, Vec<u8>> = shadow["properties"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|p| Some((p["code"].as_str()?, base64(p["value"].as_str()?)?)))
         .collect();
-    let week =
-        program::week(|day, part| parts.get(program::part_code(day, part).as_str()).cloned());
-    Ok(Value::Text(week.to_string().into()))
+    program::week(|day, part| parts.get(program::part_code(day, part).as_str()).cloned())
 }
 
 /// The week programs of the devices that keep one (`only`: of those).
@@ -551,6 +590,23 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
 mod tests {
     use super::*;
     use crate::protocol::{ecb_encrypt, gcm_seal};
+
+    #[test]
+    fn a_shadow_gives_the_week() {
+        // As the cloud answers: each part's raw bytes in base64.
+        let part = "ERERERERERERERERIiIiIiIiHx8iIiIiIiIiIiIiIiIiIiIi";
+        let properties: Vec<Json> = (1..=7)
+            .flat_map(|day| (1..=4).map(move |p| (day, p)))
+            .map(|(day, p)| {
+                serde_json::json!({ "code": program::part_code(day, p), "dp_id": 100, "type": "raw", "value": part })
+            })
+            .collect();
+        let week = shadow_week(&serde_json::json!({ "properties": properties }));
+        assert_eq!(
+            week["days"][0][1],
+            serde_json::json!({ "at": 6, "order": "comfort", "celsius": 15.5 })
+        );
+    }
 
     #[test]
     fn an_edited_program_part_is_news() {
