@@ -15,6 +15,7 @@ pub mod cloud;
 mod connections;
 mod device;
 pub mod model;
+pub mod program;
 pub mod protocol;
 mod seek;
 
