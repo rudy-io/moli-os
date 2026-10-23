@@ -179,15 +179,26 @@ fn round(v: f64, decimals: u32) -> f64 {
     (v * p).round() / p
 }
 
-/// Thermostats and heaters (`wk` thermostat, `wkf` radiator valve, `qn`
-/// heater): their codes in Moli's climate words, so that the dashboard and
-/// Moli see a heating device, not a light.
-const CLIMATE_CATEGORIES: [&str; 3] = ["wk", "wkf", "qn"];
-const CLIMATE_KEYS: [(&str, &str); 3] = [
-    ("switch", "on"),
-    ("temp_set", "target_temperature"),
-    ("temp_current", "temperature"),
-];
+/// Tuya codes in Moli's own words, per category, where the dashboard and
+/// Moli look for those words: thermostats and heaters (`wk` thermostat,
+/// `wkf` radiator valve, `qn` heater) are heating devices, not lights; a
+/// temperature and humidity sensor (`wsdcg`) gives the room its readings.
+fn moli_words(category: &str) -> &'static [(&'static str, &'static str)] {
+    match category {
+        "wk" | "wkf" | "qn" => &[
+            ("switch", "on"),
+            ("temp_set", "target_temperature"),
+            ("temp_current", "temperature"),
+        ],
+        "wsdcg" => &[
+            ("va_temperature", "temperature"),
+            ("temp_current", "temperature"),
+            ("va_humidity", "humidity"),
+            ("humidity_value", "humidity"),
+        ],
+        _ => &[],
+    }
+}
 
 /// What Tuya's standard codes mean, where the name alone does not say it.
 /// `doorcontact_state` stays `Other`: it is true when the door is *open*,
@@ -281,17 +292,29 @@ impl TuyaDevice {
         }
     }
 
-    /// The Moli point key of a DP: its code, or the climate word for a
-    /// thermostat's (unless another DP already has that code).
+    /// The Moli point key of a DP: its code, or Moli's word for it in its
+    /// category (unless another DP already has that code, or an earlier DP
+    /// already took that word).
     #[must_use]
     pub fn key<'a>(&self, dp: &'a Dp) -> &'a str {
-        if !CLIMATE_CATEGORIES.contains(&self.category.as_str()) {
-            return &dp.code;
+        let word = |dp: &Dp| {
+            moli_words(&self.category)
+                .iter()
+                .find(|(code, word)| dp.code == *code && self.dp_by_code(word).is_none())
+                .map(|(_, word)| *word)
+        };
+        match word(dp) {
+            Some(w)
+                if !self
+                    .dps
+                    .iter()
+                    .take_while(|d| !std::ptr::eq(*d, dp))
+                    .any(|d| word(d) == Some(w)) =>
+            {
+                w
+            }
+            _ => &dp.code,
         }
-        CLIMATE_KEYS
-            .iter()
-            .find(|(code, key)| dp.code == *code && self.dp_by_code(key).is_none())
-            .map_or(dp.code.as_str(), |(_, key)| key)
     }
 
     #[must_use]
@@ -503,6 +526,54 @@ mod tests {
         assert_eq!(set.encode(&Value::Float(17.0)), Some(Json::from(170)));
         assert!(dev.dp_by_key("temp_set").is_none());
         assert_eq!(dev.dp_by_key("child_lock").unwrap().id, 40);
+    }
+
+    #[test]
+    fn a_temperature_sensor_gives_the_room_its_readings() {
+        let mut dev: TuyaDevice = serde_json::from_value(serde_json::json!({
+            "id": "bf77", "name": "Capteur", "category": "wsdcg", "gateway": "tuya",
+            "dps": [
+                { "id": 101, "code": "va_humidity", "type": "Integer", "unit": "%", "min": 0, "max": 100 },
+                { "id": 102, "code": "va_battery", "type": "Integer", "min": 0, "max": 500 },
+                { "id": 103, "code": "va_temperature", "type": "Integer", "unit": "℃", "min": -20, "max": 60 },
+            ]
+        }))
+        .unwrap();
+        let d = dev.device(&InstanceId::from("tuya"));
+        let keys: Vec<&str> = d.points.iter().map(|p| &*p.key).collect();
+        assert_eq!(keys, ["humidity", "va_battery", "temperature"]);
+        assert_eq!(
+            d.point("temperature").unwrap().semantic,
+            Semantic::Temperature
+        );
+        assert_eq!(d.point("humidity").unwrap().semantic, Semantic::Humidity);
+
+        // The cloud reports by code: the readings land under the same words.
+        let raw = serde_json::json!({ "101": 47, "103": 19 });
+        assert_eq!(
+            dev.decode_dps(raw.as_object().unwrap()),
+            vec![
+                ("humidity".into(), Value::Int(47)),
+                ("temperature".into(), Value::Int(19)),
+            ]
+        );
+
+        // Two temperatures on one device: the first keeps the word, never both.
+        dev.dps.push(Dp {
+            id: 104,
+            code: "temp_current".into(),
+            kind: DpKind::Integer,
+            writable: false,
+            unit: None,
+            scale: 0,
+            min: None,
+            max: None,
+            step: None,
+            range: Vec::new(),
+        });
+        let d = dev.device(&InstanceId::from("tuya"));
+        assert!(d.point("temp_current").is_some());
+        assert_eq!(dev.dp_by_key("temperature").unwrap().id, 103);
     }
 
     #[test]
