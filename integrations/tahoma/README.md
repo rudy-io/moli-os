@@ -26,5 +26,12 @@
 - Reste : éclairages et prises Somfy io (le même `exec/apply` les commande), lames
   orientables (`setOrientation`), scènes et tableaux de bord de la passerelle, écoute des
   événements (`/events/register`) au lieu du relevé périodique.
-- **Pas encore vu en vrai sur cette installation** : commandes envoyées à un volet, coupure
-  et retour de la passerelle. Le relevé et le mapping sont testés sur la fixture.
+- **Vérifié sur du vrai matériel** (23 octobre 2026) : une passerelle TaHoma `2030`
+  (`apiVersion` 2026.4.5-7) et deux volets roulants io
+  (`io:RollerShutterWithLowSpeedManagementIOComponent`). Épinglage du certificat au premier
+  contact, relevé des positions, boutons ouvrir/stop/fermer depuis le tableau de bord, et la
+  position qui suit après le mouvement. Les libellés envoyés par la passerelle sont rognés
+  (`"Volet "` garde ses mots, pas ses espaces).
+- **Pas encore vérifié** : coupure et retour de la passerelle en cours de journée, jeton
+  régénéré ou refusé, changement de certificat, volets RTS et stores bannes sur du matériel
+  réel (leur mapping n'est couvert que par la fixture).
