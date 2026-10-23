@@ -28,6 +28,9 @@ const POWER_DPS: [u32; 3] = [18, 19, 20];
 /// A gateway's sub-devices are asked their state this often (they also
 /// push changes).
 const REFRESH_CHILDREN: Duration = Duration::from_secs(60);
+/// One question at a time: a gateway relays them over Zigbee and drops
+/// some of a burst.
+const PACE_CHILDREN: Duration = Duration::from_millis(500);
 
 /// Where the device is, from the device file or discovery.
 pub type Address = Option<(String, Version)>;
@@ -241,6 +244,7 @@ impl Link {
     }
 
     /// One connection, until it fails.
+    #[allow(clippy::too_many_lines)] // the session loop, one arm per source of news
     async fn session(
         &mut self,
         ip: &str,
@@ -298,8 +302,11 @@ impl Link {
         let mut refresh = tokio::time::interval(REFRESH_POWER);
         refresh.tick().await;
         // First tick at once: every sub-device is asked as soon as the
-        // gateway is proved.
+        // gateway is proved, one after the other.
         let mut refresh_children = tokio::time::interval(REFRESH_CHILDREN);
+        let mut pace = tokio::time::interval(PACE_CHILDREN);
+        pace.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut next_child = self.children.len();
         let mut heard = Instant::now();
         // Orders sent, waiting for the device's acknowledgement.
         let mut pending: Vec<(Instant, oneshot::Sender<Result<(), String>>)> = Vec::new();
@@ -337,10 +344,10 @@ impl Link {
                 _ = refresh.tick(), if wants_power => {
                     writer.write_all(&codec.encode(cmd::UPDATEDPS, br#"{"dpId":[18,19,20]}"#)).await?;
                 }
-                _ = refresh_children.tick(), if speaks_for_children => {
-                    for child in &self.children {
-                        writer.write_all(&child_query(&mut codec, &child.cid)).await?;
-                    }
+                _ = refresh_children.tick(), if speaks_for_children => next_child = 0,
+                _ = pace.tick(), if speaks_for_children && next_child < self.children.len() => {
+                    writer.write_all(&child_query(&mut codec, &self.children[next_child].cid)).await?;
+                    next_child += 1;
                 }
                 () = tokio::time::sleep_until(pending.first().map_or_else(Instant::now, |(t, _)| *t + REPLY)), if !pending.is_empty() => {
                     let (_, done) = pending.remove(0);
@@ -868,17 +875,29 @@ mod tests {
                     .await
                     .unwrap();
             }
-            std::future::pending::<()>().await;
+            // Then every sub-device is asked, one at a time.
+            let mut asked = Vec::new();
+            while asked.len() < 2 {
+                let (command, body) = request(&mut stream).await;
+                if command == cmd::DP_QUERY {
+                    let json = codec.open_json(&body).unwrap().unwrap();
+                    asked.push((json["cid"].as_str().unwrap().to_owned(), Instant::now()));
+                }
+            }
+            assert_eq!(asked[0].0, "node-a");
+            assert_eq!(asked[1].0, "node-b");
+            asked[1].1 - asked[0].1
         });
         let (up, mut events) = mpsc::channel(8);
         let (mut link, _orders) = test_link(up);
-        link.children = vec![Child {
-            index: 1,
-            cid: "node-a".into(),
+        let heater = |index, cid: &str| {
+            Child {
+            index,
+            cid: cid.into(),
             device: Arc::new(
                 serde_json::from_value(json!({
-                    "id": "test-heater", "name": "Test heater", "category": "wk",
-                    "gateway": "test-device", "cid": "node-a",
+                    "id": format!("test-heater-{cid}"), "name": "Test heater", "category": "wk",
+                    "gateway": "test-device", "cid": cid,
                     "dps": [
                         {"id": 1, "code": "switch", "type": "Boolean", "writable": true},
                         {"id": 24, "code": "temp_current", "type": "Integer", "unit": "℃", "scale": 1}
@@ -886,7 +905,9 @@ mod tests {
                 }))
                 .unwrap(),
             ),
-        }];
+        }
+        };
+        link.children = vec![heater(1, "node-a"), heater(2, "node-b")];
         let session = tokio::spawn(async move {
             link.session(
                 "127.0.0.1",
@@ -911,7 +932,14 @@ mod tests {
                 .is_err(),
             "an unknown cid is nobody's state"
         );
-        server.abort();
+        let gap = timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            gap >= Duration::from_millis(400),
+            "a burst loses answers: sub-devices are asked apart ({gap:?})"
+        );
         session.abort();
     }
 
