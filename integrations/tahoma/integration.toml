@@ -1,0 +1,29 @@
+[integration]
+id = "tahoma"
+name = "Somfy TaHoma (passerelle, API locale)"
+brands = ["Somfy"]
+models = ["TaHoma", "TaHoma Switch", "Connexoon"]
+transport = "https"
+driver = "tahoma"
+crate = "moli-tahoma"
+
+[discovery]
+# The gateway announces itself in developer mode; the instance gives its
+# address (a reserved DHCP lease is enough, as for Hue and Dirigera).
+mdns = ["_kizboxdev._tcp"]
+ssdp = []
+ports = [8443]
+
+[needs]
+# The token is generated in the Somfy app (developer mode) and stored in the
+# vault; cert_sha256 is pinned by the driver itself on first contact.
+secrets = ["token"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code repris : API locale Overkiz relue dans la spécification Somfy (openapi.yaml) et le client python-overkiz-api, appels vérifiés contre une vraie passerelle"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/devices.json"

@@ -1494,6 +1494,7 @@ dependencies = [
  "moli-reolink",
  "moli-runtime",
  "moli-sonos",
+ "moli-tahoma",
  "moli-tapo",
  "moli-telegram",
  "moli-tuya",
@@ -1624,6 +1625,23 @@ name = "moli-sonos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-tahoma"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "hyper",
  "moli-core",
  "moli-i18n",
  "moli-net",
