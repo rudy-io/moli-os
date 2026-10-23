@@ -4,6 +4,7 @@
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import ProgramWeek from './ProgramWeek.svelte';
 
   let { id, name } = $props();
 
@@ -252,6 +253,9 @@
             </button>
           {/each}
         </div>
+        {#if mode === 'program'}
+          <ProgramWeek {id} wiring={value(id, 'device_mode_type')} {modeLabel} />
+        {/if}
       {/if}
     {:else}
       <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>

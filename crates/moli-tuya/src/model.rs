@@ -292,6 +292,17 @@ impl TuyaDevice {
                 .dps
                 .iter()
                 .filter_map(|dp| dp.point(self.key(dp)))
+                .chain(crate::program::kept_by(&self.dps).then(|| PointSpec {
+                    key: crate::program::POINT.into(),
+                    label: moli_i18n::tr("pilotes.tuya.programme").into(),
+                    kind: Kind::Text,
+                    access: Access {
+                        read: true,
+                        write: false,
+                    },
+                    unit: None,
+                    semantic: Semantic::Other,
+                }))
                 .collect(),
         }
     }
@@ -578,6 +589,39 @@ mod tests {
         let d = dev.device(&InstanceId::from("tuya"));
         assert!(d.point("temp_current").is_some());
         assert_eq!(dev.dp_by_key("temperature").unwrap().id, 103);
+    }
+
+    #[test]
+    fn a_heater_that_keeps_a_program_shows_it() {
+        let mut dev = thermostat("wk");
+        assert!(
+            dev.device(&InstanceId::from("tuya"))
+                .point("week_program")
+                .is_none()
+        );
+        dev.dps.push(Dp {
+            id: 125,
+            code: "week_program_18_1_1".into(),
+            kind: DpKind::Raw,
+            writable: true,
+            unit: None,
+            scale: 0,
+            min: None,
+            max: None,
+            step: None,
+            range: Vec::new(),
+        });
+        let d = dev.device(&InstanceId::from("tuya"));
+        let program = d.point("week_program").unwrap();
+        assert_eq!(program.kind, Kind::Text);
+        assert!(
+            !program.access.write,
+            "read only: a program is not set from here yet"
+        );
+        assert!(
+            d.point("week_program_18_1_1").is_none(),
+            "its raw parts are not points"
+        );
     }
 
     #[test]

@@ -198,6 +198,7 @@
   "commun.clim.cablage_4": "4 ordres",
   "commun.clim.cablage_6": "6 ordres",
   "commun.clim.cablage_interrupteur": "Interrupteur",
+  "commun.clim.programme_maintenant": "{what} jusqu'à {until}",
   "commun.clim.mesure_tableau": "Mesuré au tableau, circuit « {name} »",
   "commun.clim.circuit_partage_paren": "(circuit partagé)",
   "commun.clim.circuit_partage": "circuit partagé",

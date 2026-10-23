@@ -5,10 +5,12 @@
 //! The household's own cloud project (Access ID and Secret, from the vault
 //! through `/run/secrets/tuya-cloud`): states from the signed OpenAPI at
 //! start and every half hour, changes as they happen from the project's
-//! message service (Pulsar over a websocket). Nothing is sent to the cloud
-//! but these reads.
+//! message service (Pulsar over a websocket). A pilot-wire heater's week
+//! program, which no gateway gives on the LAN, is read from the cloud's copy
+//! of its raw DPs: at start, every six hours, and soon after a part of it
+//! changes. Nothing is sent to the cloud but these reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,12 +28,17 @@ use tokio::time::Instant;
 
 use crate::device::Up;
 use crate::model::TuyaDevice;
+use crate::program;
 use crate::protocol::{ecb_decrypt, gcm_open, hmac_sha256, random};
 
 /// Categories that sleep on battery: the cloud is their only voice.
 pub const SLEEPY: [&str; 8] = ["mcs", "sj", "ywbj", "pir", "wsdcg", "rqbj", "cobj", "sos"];
 
 const RESYNC: Duration = Duration::from_secs(30 * 60);
+/// Week programs are read this often, and this long after a part of one
+/// changes (a person edits several in a row).
+const PROGRAMS: Duration = Duration::from_secs(6 * 60 * 60);
+const PROGRAM_SETTLE: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(60);
 const BATCH: usize = 20;
 
@@ -303,6 +310,55 @@ fn base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// A device's week program, from the cloud's copy of its raw DPs.
+async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
+    let shadow = api
+        .call(&format!("/v2.0/cloud/thing/{id}/shadow/properties"))
+        .await?;
+    let parts: HashMap<&str, Vec<u8>> = shadow["properties"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p["code"].as_str()?, base64(p["value"].as_str()?)?)))
+        .collect();
+    let week =
+        program::week(|day, part| parts.get(program::part_code(day, part).as_str()).cloned());
+    Ok(Value::Text(week.to_string().into()))
+}
+
+/// The week programs of the devices that keep one (`only`: of those).
+async fn programs(
+    api: &mut Api,
+    devices: &Watched,
+    only: Option<&HashSet<String>>,
+    up: &mpsc::Sender<Up>,
+) -> anyhow::Result<()> {
+    for (id, (index, device)) in devices {
+        if !program::kept_by(&device.dps) || only.is_some_and(|only| !only.contains(id)) {
+            continue;
+        }
+        match read_program(api, id).await {
+            Ok(week) => {
+                up.send(Up::State(*index, vec![(program::POINT.into(), week)]))
+                    .await?;
+            }
+            Err(e) => {
+                tracing::debug!(device = device.name, error = %e, "tuya cloud: no week program");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a status message touches a week program.
+fn program_news(status: &Json) -> bool {
+    status.as_array().into_iter().flatten().any(|s| {
+        s["code"]
+            .as_str()
+            .is_some_and(|code| code.starts_with("week_program_"))
+    })
+}
+
 /// The devices the cloud speaks for, by Tuya id: (index in the driver, device).
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
@@ -396,6 +452,7 @@ fn online_flags(info: &Json) -> Vec<(&str, bool)> {
 async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyhow::Result<()> {
     sync(api, devices, up).await?;
     tracing::info!(devices = devices.len(), "tuya cloud: states read");
+    programs(api, devices, None, up).await?;
     let keys = api.keys.clone();
     let path = format!(
         "/ws/v2/consumer/persistent/{0}/out/event/{0}-sub?ackTimeoutMillis=3000&subscriptionType=Failover",
@@ -415,10 +472,21 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
     .context("message service")?;
     tracing::info!("tuya cloud: listening to the message service");
     let mut resync = Instant::now() + RESYNC;
+    let mut reprogram = Instant::now() + PROGRAMS;
+    // Programs a message said changed, read once they settle.
+    let mut edited: (HashSet<String>, Option<Instant>) = (HashSet::new(), None);
     loop {
         if Instant::now() >= resync {
             sync(api, devices, up).await?;
             resync = Instant::now() + RESYNC;
+        }
+        if Instant::now() >= reprogram {
+            programs(api, devices, None, up).await?;
+            reprogram = Instant::now() + PROGRAMS;
+        }
+        if edited.1.is_some_and(|at| Instant::now() >= at) {
+            programs(api, devices, Some(&edited.0), up).await?;
+            edited = (HashSet::new(), None);
         }
         let text = match ws.recv_text(QUIET).await {
             Ok(text) => text,
@@ -463,6 +531,10 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
                         if !values.is_empty() {
                             up.send(Up::State(*index, values)).await?;
                         }
+                        if program_news(&status) {
+                            edited.1.get_or_insert(Instant::now() + PROGRAM_SETTLE);
+                            edited.0.insert(device);
+                        }
                     }
                 }
                 Event::Online { device, online } => {
@@ -479,6 +551,14 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
 mod tests {
     use super::*;
     use crate::protocol::{ecb_encrypt, gcm_seal};
+
+    #[test]
+    fn an_edited_program_part_is_news() {
+        let edit = serde_json::json!([{ "code": "week_program_18_3_1", "value": "ERERERER" }]);
+        assert!(program_news(&edit));
+        let setpoint = serde_json::json!([{ "code": "temp_set", "value": 170 }]);
+        assert!(!program_news(&setpoint));
+    }
 
     #[test]
     fn online_flags_read_both_answer_shapes() {

@@ -287,6 +287,7 @@
   "pilotes.tuya.mouvement": "Motion",
   "pilotes.tuya.temperature": "Temperature",
   "pilotes.tuya.consigne": "Setpoint",
+  "pilotes.tuya.programme": "Week program",
   "pilotes.tuya.humidite": "Humidity",
   "pilotes.tuya.co2": "CO₂",
   "pilotes.tuya.cov": "VOC",

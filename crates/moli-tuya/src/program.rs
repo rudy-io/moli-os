@@ -40,6 +40,50 @@ fn order(nibble: u8) -> Option<&'static str> {
     })
 }
 
+/// Days in a week, slots in a day.
+pub const DAYS: u8 = 7;
+pub const DAY_SLOTS: usize = SLOTS * PARTS as usize;
+
+/// The point a device with a week program shows it under.
+pub const POINT: &str = "week_program";
+
+/// Whether a device keeps a week program (its parts are among its DPs).
+#[must_use]
+pub fn kept_by(dps: &[crate::Dp]) -> bool {
+    let first = part_code(1, 1);
+    dps.iter().any(|d| d.code == first)
+}
+
+/// The week as the point shows it: for each day (Monday first), its runs —
+/// from which quarter of an hour (0–95), which order and which setpoint —
+/// a new run wherever either changes. A day with a part missing or
+/// unreadable is `null`.
+#[must_use]
+pub fn week(part: impl Fn(u8, u8) -> Option<Vec<u8>>) -> serde_json::Value {
+    let days = (1..=DAYS)
+        .map(|day| {
+            let slots: Option<Vec<Slot>> = (1..=PARTS)
+                .map(|p| part(day, p).as_deref().and_then(decode_part))
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.concat());
+            slots.map_or(serde_json::Value::Null, |slots| runs(&slots))
+        })
+        .collect();
+    serde_json::json!({ "days": serde_json::Value::Array(days) })
+}
+
+fn runs(slots: &[Slot]) -> serde_json::Value {
+    let mut out = Vec::new();
+    let mut last: Option<&Slot> = None;
+    for (at, slot) in slots.iter().enumerate() {
+        if last != Some(slot) {
+            out.push(serde_json::json!({ "at": at, "order": slot.order, "celsius": slot.celsius }));
+            last = Some(slot);
+        }
+    }
+    serde_json::Value::Array(out)
+}
+
 /// A part's 24 slots; `None` unless it is 36 bytes.
 #[must_use]
 pub fn decode_part(raw: &[u8]) -> Option<Vec<Slot>> {
@@ -111,6 +155,57 @@ mod tests {
         assert_eq!(at(21, 0), "eco");
         assert_eq!(at(21, 30), "comfort_2");
         assert_eq!(at(23, 45), "comfort_2");
+    }
+
+    #[test]
+    fn a_week_is_told_in_runs() {
+        // Comfort at 17 °C all week, but Wednesday's 15.5 °C from 1:30 to
+        // 2:00; Sunday's parts are missing.
+        let plain = "11 11 11 11 11 11 11 11 11 11 11 11 \
+                     22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22";
+        let dip = "11 11 11 11 11 11 11 11 11 11 11 11 \
+                   22 22 22 22 22 22 1f 1f 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22";
+        let week = week(|day, part| match (day, part) {
+            (7, _) => None,
+            (3, 1) => Some(hex(dip)),
+            _ => Some(hex(plain)),
+        });
+        let days = week["days"].as_array().unwrap();
+        assert_eq!(days.len(), 7);
+        assert_eq!(
+            days[0],
+            serde_json::json!([{ "at": 0, "order": "comfort", "celsius": 17.0 }])
+        );
+        assert_eq!(
+            days[2],
+            serde_json::json!([
+                { "at": 0, "order": "comfort", "celsius": 17.0 },
+                { "at": 6, "order": "comfort", "celsius": 15.5 },
+                { "at": 8, "order": "comfort", "celsius": 17.0 },
+            ])
+        );
+        assert!(
+            days[6].is_null(),
+            "a day with a part missing is not made up"
+        );
+    }
+
+    #[test]
+    fn a_device_keeps_a_program_when_it_has_the_parts() {
+        let dp = |code: &str| crate::Dp {
+            id: 125,
+            code: code.into(),
+            kind: crate::DpKind::Raw,
+            writable: true,
+            unit: None,
+            scale: 0,
+            min: None,
+            max: None,
+            step: None,
+            range: Vec::new(),
+        };
+        assert!(kept_by(&[dp("switch"), dp("week_program_18_1_1")]));
+        assert!(!kept_by(&[dp("switch")]));
     }
 
     #[test]
