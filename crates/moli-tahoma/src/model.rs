@@ -16,6 +16,30 @@ const FULLY_CLOSED: f64 = 100.0;
 /// 108 is « my » (a stored favourite), 124 is unknown.
 const NOT_A_POSITION: [i64; 2] = [108, 124];
 
+/// The classes this driver treats as covers (the ones Overkiz reports as
+/// `uiClass`, awning included: see [`RawDevice::family`] for the split).
+const COVER_CLASSES: [&str; 19] = [
+    "AdjustableSlatsRollerShutter",
+    "Awning",
+    "Curtain",
+    "ExteriorScreen",
+    "ExteriorVenetianBlind",
+    "Pergola",
+    "PergolaHorizontalAwning",
+    "PositionableHorizontalAwning",
+    "PositionableRollerShutter",
+    "PositionableScreen",
+    "RollerShutter",
+    "Screen",
+    "Shutter",
+    "SwingingShutter",
+    "UpDownHorizontalAwning",
+    "UpDownRollerShutter",
+    "UpDownScreen",
+    "VenetianBlind",
+    "Window",
+];
+
 /// How a device is driven: a closure counts closed, an awning counts
 /// deployed. Both end up as Moli's opening percentage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,40 +120,21 @@ impl RawDevice {
             .collect()
     }
 
+    /// Whether this is a cover at all, and how its gateway counts it: an
+    /// awning counts deployment, a shutter counts closure. Read from what the
+    /// device exposes rather than from a table of classes, so a class the
+    /// driver never saw still lands on the right side.
     fn family(&self) -> Option<Family> {
-        let class = self.class();
-        let deployment = matches!(
-            class,
-            "Awning"
-                | "PositionableHorizontalAwning"
-                | "UpDownHorizontalAwning"
-                | "Pergola"
-                | "PergolaHorizontalAwning"
-        );
-        let closure = matches!(
-            class,
-            "RollerShutter"
-                | "PositionableRollerShutter"
-                | "UpDownRollerShutter"
-                | "AdjustableSlatsRollerShutter"
-                | "Shutter"
-                | "SwingingShutter"
-                | "Screen"
-                | "ExteriorScreen"
-                | "PositionableScreen"
-                | "UpDownScreen"
-                | "ExteriorVenetianBlind"
-                | "VenetianBlind"
-                | "Curtain"
-                | "Window"
-        );
-        if deployment {
-            Some(Family::Deployment)
-        } else if closure {
-            Some(Family::Closure)
-        } else {
-            None
+        if !COVER_CLASSES.contains(&self.class()) {
+            return None;
         }
+        let deployed = self.states.iter().any(|s| s.name == "core:DeploymentState")
+            || self.commands().contains("setDeployment");
+        Some(if deployed {
+            Family::Deployment
+        } else {
+            Family::Closure
+        })
     }
 }
 
@@ -482,6 +487,31 @@ mod tests {
             state(&load, &fixture(), shutter, "percent_control"),
             Some(Value::Int(100))
         );
+    }
+
+    #[test]
+    fn the_family_follows_the_states_and_commands_not_the_class() {
+        let mut raw = fixture();
+        for device in &mut raw {
+            if device.label == "Volet atelier" {
+                // A shutter the gateway drives by deployment (a pergola, say).
+                device.states.push(State {
+                    name: "core:DeploymentState".to_owned(),
+                    value: Json::from(0),
+                });
+                device.definition.commands.push(Command {
+                    name: "setDeployment".to_owned(),
+                });
+            }
+        }
+        let load = Load::new(&instance(), &raw);
+        let shutter = named(&load, "Volet atelier");
+        let (_, commands) = load
+            .index
+            .encode(&shutter.id, "percent_control", &Value::Int(30))
+            .expect("command");
+        assert_eq!(commands[0]["name"], "setDeployment");
+        assert_eq!(commands[0]["parameters"][0], 30);
     }
 
     #[test]

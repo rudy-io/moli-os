@@ -214,6 +214,11 @@ fn spawn_command(gateway: &Arc<Gateway>, index: &Index, command: CommandRequest)
     let gateway = Arc::clone(gateway);
     let label = format!("moli {}", command.key);
     tokio::spawn(async move {
+        // The hub already drops stale orders; this closes the gap between
+        // that check and the moment the order would leave.
+        if command.abandoned() {
+            return;
+        }
         let result = tokio::time::timeout(COMMAND_BUDGET, gateway.apply(&label, actions))
             .await
             .unwrap_or_else(|_| {
