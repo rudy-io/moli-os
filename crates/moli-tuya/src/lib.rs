@@ -218,6 +218,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 "tuya gateway reads its sub-devices locally"
             );
         }
+        // A sub-device's orders go through its gateway's link.
+        if let Some((_, sender)) = orders.get(&devices[link.index].0).cloned() {
+            for child in &link.children {
+                orders.insert(
+                    devices[child.index].0.clone(),
+                    (child.index, sender.clone()),
+                );
+            }
+        }
         tasks.spawn(link.run());
     }
     // Keys given later in the dashboard: a restart takes them.
@@ -393,6 +402,7 @@ fn dispatch(
     dps.insert(dp.to_string(), raw);
     let order = Order {
         dps,
+        cid: devices[*index].1.cid.clone(),
         done,
         at: tokio::time::Instant::now(),
     };

@@ -56,6 +56,8 @@ pub enum Up {
 #[derive(Debug)]
 pub struct Order {
     pub dps: Map<String, Json>,
+    /// For a gateway's sub-device: which one (its frames' `cid`).
+    pub cid: Option<String>,
     pub done: oneshot::Sender<Result<(), String>>,
     pub at: Instant,
 }
@@ -359,7 +361,12 @@ impl Link {
                         order.refuse(moli_i18n::tr!("pilotes.tuya.expire"));
                         continue;
                     }
-                    send_order(&mut codec, &mut writer, id, &order.dps).await?;
+                    // A sub-device is only spoken to through a 3.3 gateway.
+                    if order.cid.is_some() && !speaks_for_children {
+                        order.refuse(moli_i18n::tr!("pilotes.tuya.lecture_seule_cloud"));
+                        continue;
+                    }
+                    send_order(&mut codec, &mut writer, id, order.cid.as_deref(), &order.dps).await?;
                     pending.push((Instant::now(), order.done));
                 }
             }
@@ -519,9 +526,18 @@ async fn send_order(
     codec: &mut Codec,
     writer: &mut OwnedWriteHalf,
     id: &str,
+    cid: Option<&str>,
     dps: &Map<String, Json>,
 ) -> Result<(), LinkError> {
-    let frame = if codec.version == Version::V33 {
+    let frame = if let Some(cid) = cid {
+        // Through a gateway, as tinytuya does.
+        codec.encode(
+            cmd::CONTROL,
+            json!({"cid": cid, "t": now(), "dps": dps})
+                .to_string()
+                .as_bytes(),
+        )
+    } else if codec.version == Version::V33 {
         codec.encode(
             cmd::CONTROL,
             json!({"devId": id, "uid": id, "t": now(), "dps": dps})
@@ -602,6 +618,7 @@ mod tests {
         (
             Order {
                 dps: serde_json::from_value(json!({"1": value})).unwrap(),
+                cid: None,
                 done,
                 at: Instant::now(),
             },
@@ -875,13 +892,23 @@ mod tests {
                     .await
                     .unwrap();
             }
-            // Then every sub-device is asked, one at a time.
+            // Then every sub-device is asked, one at a time; an order for
+            // one names it, and is acknowledged.
             let mut asked = Vec::new();
-            while asked.len() < 2 {
+            let mut ordered = false;
+            while asked.len() < 2 || !ordered {
                 let (command, body) = request(&mut stream).await;
+                let json = codec.open_json(&body).unwrap().unwrap_or_default();
                 if command == cmd::DP_QUERY {
-                    let json = codec.open_json(&body).unwrap().unwrap();
                     asked.push((json["cid"].as_str().unwrap().to_owned(), Instant::now()));
+                } else if command == cmd::CONTROL {
+                    assert_eq!(json["cid"], "node-b");
+                    assert_eq!(json["dps"], json!({"1": false}));
+                    stream
+                        .write_all(&response(Version::V33, key, cmd::CONTROL, b""))
+                        .await
+                        .unwrap();
+                    ordered = true;
                 }
             }
             assert_eq!(asked[0].0, "node-a");
@@ -889,25 +916,8 @@ mod tests {
             asked[1].1 - asked[0].1
         });
         let (up, mut events) = mpsc::channel(8);
-        let (mut link, _orders) = test_link(up);
-        let heater = |index, cid: &str| {
-            Child {
-            index,
-            cid: cid.into(),
-            device: Arc::new(
-                serde_json::from_value(json!({
-                    "id": format!("test-heater-{cid}"), "name": "Test heater", "category": "wk",
-                    "gateway": "test-device", "cid": cid,
-                    "dps": [
-                        {"id": 1, "code": "switch", "type": "Boolean", "writable": true},
-                        {"id": 24, "code": "temp_current", "type": "Integer", "unit": "℃", "scale": 1}
-                    ]
-                }))
-                .unwrap(),
-            ),
-        }
-        };
-        link.children = vec![heater(1, "node-a"), heater(2, "node-b")];
+        let (mut link, orders) = test_link(up);
+        link.children = vec![test_heater(1, "node-a"), test_heater(2, "node-b")];
         let session = tokio::spawn(async move {
             link.session(
                 "127.0.0.1",
@@ -932,6 +942,10 @@ mod tests {
                 .is_err(),
             "an unknown cid is nobody's state"
         );
+        let (mut off, done) = order(false);
+        off.cid = Some("node-b".into());
+        orders.send(off).await.unwrap();
+        assert!(done.await.unwrap().is_ok(), "the gateway took the order");
         let gap = timeout(Duration::from_secs(3), server)
             .await
             .unwrap()
@@ -941,6 +955,25 @@ mod tests {
             "a burst loses answers: sub-devices are asked apart ({gap:?})"
         );
         session.abort();
+    }
+
+    /// A heater behind the test gateway, at `cid`.
+    fn test_heater(index: usize, cid: &str) -> Child {
+        Child {
+            index,
+            cid: cid.into(),
+            device: Arc::new(
+                serde_json::from_value(json!({
+                    "id": format!("test-heater-{cid}"), "name": "Test heater", "category": "wk",
+                    "gateway": "test-device", "cid": cid,
+                    "dps": [
+                        {"id": 1, "code": "switch", "type": "Boolean", "writable": true},
+                        {"id": 24, "code": "temp_current", "type": "Integer", "unit": "℃", "scale": 1}
+                    ]
+                }))
+                .unwrap(),
+            ),
+        }
     }
 
     fn test_link(up: mpsc::Sender<Up>) -> (Link, mpsc::Sender<Order>) {
