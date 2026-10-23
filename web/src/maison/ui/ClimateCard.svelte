@@ -15,7 +15,15 @@
   const MAX = $derived(Math.min(30, targetPoint?.kind.max ?? 30));
   const on = $derived(value(id, 'on') === true);
   const temp = $derived(value(id, 'temperature'));
-  const target = $derived(value(id, 'target_temperature'));
+  // A pilot-wire heater's wiring (Tuya's `device_mode_type`) says the orders
+  // it takes; on four or six orders it has no setpoint of its own.
+  const WIRING = {
+    four: { modes: ['comfort', 'eco', 'hors', 'off', 'program'], setpoint: false },
+    six: { modes: ['comfort', 'comfort_1', 'comfort_2', 'eco', 'hors', 'off', 'program'], setpoint: false },
+    switch: { modes: ['manual', 'program', 'eco', 'hors', 'holiday'], setpoint: true },
+  };
+  const wiring = $derived(WIRING[value(id, 'device_mode_type')]);
+  const target = $derived(wiring?.setpoint === false ? null : value(id, 'target_temperature'));
   const mode = $derived(value(id, 'mode'));
   const outdoor = $derived(value(id, 'outdoor_temperature'));
 
@@ -35,7 +43,9 @@
   const monthCost = $derived(costOf('month'));
   // The circuit feeds something else too (« PAC salon + pompe piscine »).
   const shared = $derived(!!feeder && (feeder.feeds.length > 1 || feeder.name.includes('+')));
-  const writable = $derived(d?.points.some((p) => p.key === 'target_temperature' && p.access?.write));
+  const writable = $derived(wiring?.setpoint !== false && d?.points.some((p) => p.key === 'target_temperature' && p.access?.write));
+  // Switched or set to a mode, even without a setpoint (a pilot wire on four orders).
+  const controllable = $derived(writable || d?.points.some((p) => ['on', 'mode'].includes(p.key) && p.access?.write));
   const STEP = 0.5;
 
   // Taps on − / + and drags on the dial add up; one order leaves once the
@@ -147,7 +157,8 @@
   const offered = $derived.by(() => {
     const declared = d?.points.find((p) => p.key === 'mode')?.kind.values;
     if (!declared?.length) return AIR_CONDITIONER;
-    return [...Object.keys(MODES).filter((key) => declared.includes(key)), ...declared.filter((key) => !MODES[key])];
+    const allowed = declared.filter((key) => !wiring || wiring.modes.includes(key));
+    return [...Object.keys(MODES).filter((key) => allowed.includes(key)), ...allowed.filter((key) => !MODES[key])];
   });
   const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: 'air-conditioner', tone: 'good' });
 
@@ -204,16 +215,18 @@
   </div>
   <div class="facts">
     <h3>{name}</h3>
-    {#if writable}
+    {#if controllable}
       <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
         <Icon name="power" size={16} />{on ? m.label : t('commun.clim.eteinte')}
       </button>
       {#if on}
-        <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
-          <button onclick={() => nudge(-STEP)} aria-label={t('commun.clim.moins_chaud')} disabled={shownTarget <= MIN}>−</button>
-          <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
-          <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
-        </div>
+        {#if writable}
+          <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
+            <button onclick={() => nudge(-STEP)} aria-label={t('commun.clim.moins_chaud')} disabled={shownTarget <= MIN}>−</button>
+            <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
+            <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
+          </div>
+        {/if}
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
           {#each offered as key (key)}
             <button class:active={mode === key} onclick={() => setMode(key)} title={modeLabel(key)} aria-label={modeLabel(key)} aria-pressed={mode === key}>

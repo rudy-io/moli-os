@@ -38,11 +38,13 @@
     const open = doorOpen(d.id);
     if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
     else if (open === false) out.push({ tone: '', icon: 'door-closed', text: t('commun.piece.fermee', { name: nameOf(d.id) }) });
-    // A sensor's own temperature (the head says the room's).
+    // A sensor's own temperature (the head says the room's), coloured as the
+    // head's gauge; its humidity, dry, comfortable or damp.
     const deg = v('temperature') ?? v('temp_current');
-    if (typeof deg === 'number') out.push({ tone: '', icon: 'thermometer', text: `${num(deg, 1)}°` });
+    if (typeof deg === 'number') out.push({ tone: CHIP_TONE[tone(deg)], icon: 'thermometer', text: `${num(deg, 1)}°` });
     const hum = v('humidity') ?? v('humidity_value');
-    if (typeof hum === 'number') out.push({ tone: '', icon: 'humidity', text: t('commun.pourcent', { n: num(hum) }) });
+    if (typeof hum === 'number')
+      out.push({ tone: hum < 35 ? 'warm' : hum <= 65 ? 'good' : 'cool', icon: 'humidity', text: t('commun.pourcent', { n: num(hum) }) });
     const co2 = v('co2_value') ?? v('co2');
     if (typeof co2 === 'number') out.push({ tone: co2 > 1200 ? 'warm' : '', icon: 'leaf', text: `CO₂ ${num(co2)} ppm` });
     if (motion(d.id)) out.push({ tone: 'warm', icon: 'motion', text: t('commun.piece.presence') });
@@ -82,6 +84,8 @@
     return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
   });
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
+  // The gauge's tones as a chip's background.
+  const CHIP_TONE = { cold: 'cool', cool: 'cool', good: 'good', warm: 'warm', hot: 'alert' };
   const gaugeAt = (deg) => Math.min(100, Math.max(0, ((deg - 14) / 16) * 100));
 
   // ---- the room's switch: its lights, never its TV or plugs (D12) -----------------------
