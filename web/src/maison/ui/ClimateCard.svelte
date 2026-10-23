@@ -7,9 +7,12 @@
 
   let { id, name } = $props();
 
-  const MIN = 16;
-  const MAX = 30;
   const d = $derived(device(id));
+  // The dial spans what the unit accepts (a heater goes down to frost guard),
+  // within what a room is ever set to.
+  const targetPoint = $derived(d?.points.find((p) => p.key === 'target_temperature'));
+  const MIN = $derived(Math.max(5, targetPoint?.kind.min ?? 16));
+  const MAX = $derived(Math.min(30, targetPoint?.kind.max ?? 30));
   const on = $derived(value(id, 'on') === true);
   const temp = $derived(value(id, 'temperature'));
   const target = $derived(value(id, 'target_temperature'));
@@ -117,16 +120,35 @@
   }
   const setMode = (key) => act(`${id}/mode`, key, t('commun.action', { label: name, action: modeLabel(key).toLowerCase() }));
 
-  // The keys are the unit's modes (sent as they are); `label` is a catalogue key.
+  // The keys are the unit's modes (sent as they are); `label` is a catalogue key;
+  // `ac`: an air conditioner's, offered to a unit that declares none.
   const MODES = {
-    froid: { label: 'commun.clim.mode.froid', icon: 'snowflake', tone: 'cool' },
-    chaud: { label: 'commun.clim.mode.chaud', icon: 'fire', tone: 'warm' },
-    auto: { label: 'commun.clim.mode.auto', icon: 'air-conditioner', tone: 'good' },
-    déshumidification: { label: 'commun.clim.mode.deshumidification', icon: 'humidity', tone: 'cool' },
-    ventilation: { label: 'commun.clim.mode.ventilation', icon: 'fan', tone: 'good' },
+    froid: { label: 'commun.clim.mode.froid', icon: 'snowflake', tone: 'cool', ac: true },
+    chaud: { label: 'commun.clim.mode.chaud', icon: 'fire', tone: 'warm', ac: true },
+    auto: { label: 'commun.clim.mode.auto', icon: 'air-conditioner', tone: 'good', ac: true },
+    déshumidification: { label: 'commun.clim.mode.deshumidification', icon: 'humidity', tone: 'cool', ac: true },
+    ventilation: { label: 'commun.clim.mode.ventilation', icon: 'fan', tone: 'good', ac: true },
+    // A heater on a pilot wire (Tuya).
+    comfort: { label: 'commun.piece.mode.confort', icon: 'fire', tone: 'warm' },
+    eco: { label: 'commun.piece.mode.eco', icon: 'leaf', tone: 'good' },
+    hors: { label: 'commun.piece.mode.hors_gel', icon: 'snowflake', tone: 'cool' },
+    manual: { label: 'commun.piece.mode.manuel', icon: 'hand', tone: 'warm' },
+    program: { label: 'commun.piece.mode.programme', icon: 'clock', tone: 'good' },
+    holiday: { label: 'commun.piece.mode.vacances', icon: 'palm', tone: 'cool' },
+    comfort_1: { label: 'commun.piece.mode.confort_1', icon: 'thermometer', tone: 'warm' },
+    comfort_2: { label: 'commun.piece.mode.confort_2', icon: 'thermometer', tone: 'warm' },
+    off: { label: 'commun.piece.mode.arret', icon: 'power', tone: 'cool' },
   };
+  const AIR_CONDITIONER = Object.keys(MODES).filter((key) => MODES[key].ac);
   /** A mode said in the house's language (an unknown one: as the unit says it). */
   const modeLabel = (key) => (MODES[key] ? t(MODES[key].label) : (key ?? '—'));
+  // The buttons are the modes the unit declares, in this card's order, then
+  // any it alone knows; a unit that says none gets an air conditioner's.
+  const offered = $derived.by(() => {
+    const declared = d?.points.find((p) => p.key === 'mode')?.kind.values;
+    if (!declared?.length) return AIR_CONDITIONER;
+    return [...Object.keys(MODES).filter((key) => declared.includes(key)), ...declared.filter((key) => !MODES[key])];
+  });
   const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: 'air-conditioner', tone: 'good' });
 
   // A 270° ring: the target as a bead, the room temperature in the middle.
@@ -193,9 +215,9 @@
           <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
         </div>
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
-          {#each Object.entries(MODES) as [key, it] (key)}
-            <button class:active={mode === key} onclick={() => setMode(key)} title={t(it.label)} aria-label={t(it.label)} aria-pressed={mode === key}>
-              <Icon name={it.icon} size={16} />
+          {#each offered as key (key)}
+            <button class:active={mode === key} onclick={() => setMode(key)} title={modeLabel(key)} aria-label={modeLabel(key)} aria-pressed={mode === key}>
+              <Icon name={MODES[key]?.icon ?? 'tune'} size={16} />
             </button>
           {/each}
         </div>
