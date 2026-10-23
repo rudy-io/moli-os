@@ -167,6 +167,22 @@
     auto: 'commun.piece.mode.auto',
     déshumidification: 'commun.piece.mode.deshumidification',
     ventilation: 'commun.piece.mode.ventilation',
+    // A heater on a pilot wire (Tuya).
+    comfort: 'commun.piece.mode.confort',
+    comfort_1: 'commun.piece.mode.confort_1',
+    comfort_2: 'commun.piece.mode.confort_2',
+    eco: 'commun.piece.mode.eco',
+    hors: 'commun.piece.mode.hors_gel',
+    off: 'commun.piece.mode.arret',
+    holiday: 'commun.piece.mode.vacances',
+    program: 'commun.piece.mode.programme',
+    manual: 'commun.piece.mode.manuel',
+  };
+  // A room without lights says what its only heating or cooling unit does.
+  const climateState = (d) => {
+    if (!isOn(d.id)) return t('commun.piece.mode.arret');
+    const mode = MODES[value(d.id, 'mode')];
+    return mode ? t(mode) : t('commun.piece.en_marche');
   };
   let openClim = $state(null);
 </script>
@@ -176,7 +192,11 @@
     <span class="room-icon" class:lit={room.lit}><Icon name={room.icon} size={22} /></span>
     <div class="title">
       <h2>{room.name}{#if locked}<span class="lock" title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}</h2>
-      <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
+      {#if room.lights.length}
+        <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
+      {:else if room.climates.length === 1}
+        <span class="muted">{climateState(room.climates[0])}</span>
+      {/if}
     </div>
     {#if temp != null}
       <span class="temp {tone(temp)}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}°</b><i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i></span>
