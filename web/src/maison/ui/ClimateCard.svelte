@@ -17,11 +17,12 @@
   const on = $derived(value(id, 'on') === true);
   const temp = $derived(value(id, 'temperature'));
   // A pilot-wire heater's wiring (Tuya's `device_mode_type`) says the orders
-  // it takes; on four or six orders it has no setpoint of its own.
+  // it takes, warmest first, then its program and off; on four or six orders
+  // it has no setpoint of its own.
   const WIRING = {
-    four: { label: 'commun.clim.cablage_4', modes: ['comfort', 'eco', 'hors', 'off', 'program'], setpoint: false },
-    six: { label: 'commun.clim.cablage_6', modes: ['comfort', 'comfort_1', 'comfort_2', 'eco', 'hors', 'off', 'program'], setpoint: false },
-    switch: { label: 'commun.clim.cablage_interrupteur', modes: ['manual', 'program', 'eco', 'hors', 'holiday'], setpoint: true },
+    four: { label: 'commun.clim.cablage_4', modes: ['comfort', 'eco', 'hors', 'program', 'off'], setpoint: false },
+    six: { label: 'commun.clim.cablage_6', modes: ['comfort', 'comfort_1', 'comfort_2', 'eco', 'hors', 'program', 'off'], setpoint: false },
+    switch: { label: 'commun.clim.cablage_interrupteur', modes: ['manual', 'eco', 'hors', 'holiday', 'program', 'off'], setpoint: true },
   };
   const wiring = $derived(WIRING[value(id, 'device_mode_type')]);
   // The wiring is set here too (the module then takes other orders); only
@@ -137,7 +138,15 @@
     if (!on && wanted != null) await flush();
     act(`${id}/on`, !on, t(on ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name }));
   }
-  const setMode = (key) => act(`${id}/mode`, key, t('commun.action', { label: name, action: modeLabel(key).toLowerCase() }));
+  // A pilot-wire module takes `mode = off` and stays as it was: it stops on
+  // its switch. Off, an order switches it on first.
+  const switched = $derived(!!wiring && d?.points.some((p) => p.key === 'on' && p.access?.write));
+  async function setMode(key) {
+    if (switched && key === 'off') return on && power();
+    if (switched && !on && (await act(`${id}/on`, true, t('commun.clim.label_marche', { name }))) !== 'ok') return;
+    act(`${id}/mode`, key, t('commun.action', { label: name, action: modeLabel(key).toLowerCase() }));
+  }
+  const active = (key) => (switched ? (key === 'off' ? !on : on && mode === key) : mode === key);
 
   // The keys are the unit's modes (sent as they are); `label` is a catalogue key;
   // `ac`: an air conditioner's, offered to a unit that declares none.
@@ -154,8 +163,9 @@
     manual: { label: 'commun.piece.mode.manuel', icon: 'hand', tone: 'warm' },
     program: { label: 'commun.piece.mode.programme', icon: 'clock', tone: 'good' },
     holiday: { label: 'commun.piece.mode.vacances', icon: 'palm', tone: 'cool' },
-    comfort_1: { label: 'commun.piece.mode.confort_1', icon: 'thermometer', tone: 'warm' },
-    comfort_2: { label: 'commun.piece.mode.confort_2', icon: 'thermometer', tone: 'warm' },
+    // Comfort less one or two degrees: said, not drawn.
+    comfort_1: { label: 'commun.piece.mode.confort_1', text: '−1', tone: 'warm' },
+    comfort_2: { label: 'commun.piece.mode.confort_2', text: '−2', tone: 'warm' },
     off: { label: 'commun.piece.mode.arret', icon: 'power', tone: 'cool' },
     // A pellet stove's states (Micronova), shown, never sent.
     ignition: { label: 'commun.poele.allumage', icon: 'fire', tone: 'warm' },
@@ -171,13 +181,14 @@
   const AIR_CONDITIONER = Object.keys(MODES).filter((key) => MODES[key].ac);
   /** A mode said in the house's language (an unknown one: as the unit says it). */
   const modeLabel = (key) => (MODES[key] ? t(MODES[key].label) : (key ?? '—'));
-  // The buttons are the modes the unit declares, in this card's order, then
-  // any it alone knows; a unit that says none gets an air conditioner's.
+  // The buttons are the modes the unit declares, in this card's order (a
+  // heater's wiring's), then any it alone knows; a unit that says none gets
+  // an air conditioner's.
   const offered = $derived.by(() => {
     const declared = d?.points.find((p) => p.key === 'mode')?.kind.values;
+    if (wiring) return wiring.modes.filter((key) => declared?.includes(key) || (key === 'off' && switched));
     if (!declared?.length) return AIR_CONDITIONER;
-    const allowed = declared.filter((key) => !wiring || wiring.modes.includes(key));
-    return [...Object.keys(MODES).filter((key) => allowed.includes(key)), ...allowed.filter((key) => !MODES[key])];
+    return [...Object.keys(MODES).filter((key) => declared.includes(key)), ...declared.filter((key) => !MODES[key])];
   });
   const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: 'air-conditioner', tone: 'good' });
 
@@ -247,27 +258,32 @@
       </label>
     {/if}
     {#if controllable}
-      <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
-        <Icon name="power" size={16} />{on ? m.label : t('commun.clim.eteinte')}
-      </button>
-      {#if on}
-        {#if writable}
-          <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
-            <button onclick={() => nudge(-STEP)} aria-label={t('commun.clim.moins_chaud')} disabled={shownTarget <= MIN}>−</button>
-            <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
-            <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
-          </div>
-        {/if}
+      <!-- A heater on a pilot wire is switched off from its modes: its chip only says. -->
+      {#if switched}
+        <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
+      {:else}
+        <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
+          <Icon name="power" size={16} />{on ? m.label : t('commun.clim.eteinte')}
+        </button>
+      {/if}
+      {#if on && writable}
+        <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
+          <button onclick={() => nudge(-STEP)} aria-label={t('commun.clim.moins_chaud')} disabled={shownTarget <= MIN}>−</button>
+          <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
+          <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
+        </div>
+      {/if}
+      {#if on || switched}
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
           {#each offered as key (key)}
-            <button class:active={mode === key} onclick={() => setMode(key)} title={modeLabel(key)} aria-label={modeLabel(key)} aria-pressed={mode === key}>
-              <Icon name={MODES[key]?.icon ?? 'tune'} size={16} />
+            <button class:active={active(key)} class:off={key === 'off'} onclick={() => setMode(key)} title={modeLabel(key)} aria-label={modeLabel(key)} aria-pressed={active(key)}>
+              {#if MODES[key]?.text}<span class="num">{MODES[key].text}</span>{:else}<Icon name={MODES[key]?.icon ?? 'tune'} size={16} />{/if}
             </button>
           {/each}
         </div>
-        {#if mode === 'program'}
-          <ProgramWeek {id} wiring={value(id, 'device_mode_type')} {modeLabel} />
-        {/if}
+      {/if}
+      {#if wiring}
+        <ProgramWeek {id} wiring={value(id, 'device_mode_type')} {name} {modeLabel} modes={MODES} compact={!on || mode !== 'program'} />
       {/if}
     {:else}
       <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
@@ -542,6 +558,19 @@
   .modes button.active {
     background: var(--tone);
     color: #fff;
+  }
+
+  /* Off, the heater is no colour. */
+  .modes button.off.active {
+    background: var(--ink-2);
+    color: var(--surface);
+  }
+
+  /* « −1 », « −2 »: as large as the icons beside them. */
+  .modes button span {
+    font-size: 14px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
   }
 
   .unreachable {

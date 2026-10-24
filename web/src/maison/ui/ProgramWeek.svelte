@@ -1,35 +1,20 @@
 <script>
   import { value } from '../lib/home.svelte.js';
+  import { parseWeek, spans as spansOf, hhmm, warmth, nowIn, dayName, SLOTS } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
+  import Icon from './Icon.svelte';
+  import ProgramDetail from './ProgramDetail.svelte';
 
-  // A heater's week program (`week_program`: for each day, Monday first, its
-  // runs from a quarter of an hour on: an order and a setpoint). On four or
-  // six orders the runs are orders; on switch wiring, setpoints.
-  let { id, wiring, modeLabel } = $props();
+  // A heater's week program, as a strip under its modes, or only a link to
+  // it (`compact`: the heater runs another mode); the magnifier opens it in
+  // full (`modes`: the card's, for their names and glyphs).
+  let { id, name, wiring, modeLabel, modes, compact = false } = $props();
 
-  const SLOTS = 96;
-  const week = $derived.by(() => {
-    try {
-      return JSON.parse(value(id, 'week_program') ?? 'null')?.days ?? null;
-    } catch {
-      return null;
-    }
-  });
+  const week = $derived(parseWeek(value(id, 'week_program')));
   const bySetpoint = $derived(wiring === 'switch');
-  // On four orders the module shows comfort −1 and −2 as comfort.
-  const order = (o) => (wiring === 'four' && o?.startsWith('comfort') ? 'comfort' : o);
-
-  const hhmm = (slot) => `${String(Math.floor(slot / 4)).padStart(2, '0')}:${String((slot % 4) * 15).padStart(2, '0')}`;
-  // A day's runs with their end, and what each says.
   const spans = (runs) =>
-    (runs ?? []).map((run, i) => {
-      const end = runs[i + 1]?.at ?? SLOTS;
-      // A part kept on four or six orders has no setpoint: its order then.
-      const what = bySetpoint && run.celsius != null ? `${run.celsius}°` : modeLabel(order(run.order));
-      return { ...run, end, what, order: order(run.order) };
-    });
-  // 2024-01-01 was a Monday: the days' short names in the house's language.
-  const dayName = (i) => new Date(2024, 0, 1 + i).toLocaleDateString(locale(), { weekday: 'short' });
+    spansOf(runs, wiring).map((s) => ({ ...s, what: s.celsius != null ? `${s.celsius}°` : modeLabel(s.order) }));
+  let open = $state(false);
 
   // Now: which day row (Monday first), which quarter of an hour; ticks each minute.
   let now = $state(new Date());
@@ -37,23 +22,29 @@
     const tick = setInterval(() => (now = new Date()), 60_000);
     return () => clearInterval(tick);
   });
-  const today = $derived((now.getDay() + 6) % 7);
-  const slot = $derived(now.getHours() * 4 + Math.floor(now.getMinutes() / 15));
+  const today = $derived(nowIn(now).day);
+  const slot = $derived(nowIn(now).slot);
   const current = $derived(spans(week?.[today]).find((s) => s.at <= slot && slot < s.end));
-
-  // Setpoints coloured as the room gauge: blue when cool, red when hot.
-  const warmth = (c) => (c < 12 ? 'frost' : c < 18 ? 'cold' : c < 20 ? 'cool' : c <= 24 ? 'good' : c <= 27 ? 'warm' : 'hot');
 </script>
 
-{#if week}
+{#if week && compact}
+  <button class="link" onclick={() => (open = true)}>
+    <Icon name="magnify" size={16} />{t('commun.programme.titre')}
+  </button>
+{:else if week}
   <div class="program">
-    {#if current}
-      <p class="now">{t('commun.clim.programme_maintenant', { what: current.what, until: hhmm(current.end) })}</p>
-    {/if}
+    <div class="head">
+      {#if current}
+        <p class="now">{t('commun.clim.programme_maintenant', { what: current.what, until: hhmm(current.end) })}</p>
+      {/if}
+      <button class="zoom" onclick={() => (open = true)} title={t('commun.programme.detail')} aria-label={t('commun.programme.detail')}>
+        <Icon name="magnify" size={18} />
+      </button>
+    </div>
     <div class="grid" role="table" aria-label={t('commun.piece.mode.programme')}>
       {#each week as runs, day (day)}
         <div class="row" role="row">
-          <span class="day" class:today={day === today} role="rowheader">{dayName(day)}</span>
+          <span class="day" class:today={day === today} role="rowheader">{dayName(day, locale())}</span>
           <div class="bar">
             {#if runs}
               {#each spans(runs) as s (s.at)}
@@ -79,12 +70,51 @@
     </div>
   </div>
 {/if}
+{#if week && open}
+  <ProgramDetail {id} {name} {wiring} {modeLabel} {modes} onclose={() => (open = false)} />
+{/if}
 
 <style>
   .program {
     display: grid;
     gap: 6px;
     width: 100%;
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px 5px 9px;
+    border: none;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .zoom {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    margin-left: auto;
+    border: none;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    cursor: pointer;
   }
 
   .now {
