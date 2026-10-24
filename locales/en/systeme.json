@@ -164,6 +164,7 @@
   "systeme.hub.commande_refusee": "Command refused: {message}",
   "systeme.hub.decision_non_appliquee": "Decision not applied: {message}",
   "systeme.hub.etiquette_non_enregistree": "Label not saved: {message}",
+  "systeme.hub.ranger": "Move the device to its room",
   "systeme.format.binaire.contact.on": "Closed",
   "systeme.format.binaire.contact.off": "Open",
   "systeme.format.binaire.occupancy.on": "Someone here",

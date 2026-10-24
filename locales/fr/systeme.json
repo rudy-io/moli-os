@@ -164,6 +164,7 @@
   "systeme.hub.commande_refusee": "Commande refusée : {message}",
   "systeme.hub.decision_non_appliquee": "Décision non appliquée : {message}",
   "systeme.hub.etiquette_non_enregistree": "Étiquette non enregistrée : {message}",
+  "systeme.hub.ranger": "Ranger l'appareil dans sa pièce",
   "systeme.format.binaire.contact.on": "Fermé",
   "systeme.format.binaire.contact.off": "Ouvert",
   "systeme.format.binaire.occupancy.on": "Présence",

@@ -288,14 +288,28 @@ export async function logout() {
   await refreshSession();
 }
 
-export async function setLabel(id, label) {
+// Who asks a person for the house's code (the dashboard's sheet), if any.
+let askCode = null;
+export function onCodeNeeded(ask) {
+  askCode = ask;
+}
+
+export async function setLabel(id, label, again = false) {
   try {
     const res = await fetch(`/api/labels/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(label),
     });
-    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    if (!res.ok) {
+      const error = (await res.json().catch(() => ({}))).error ?? res.statusText;
+      // Guarded: only a person may, once the code is typed; asked once.
+      if (res.status === 403 && askCode && !again) {
+        askCode(t('systeme.hub.ranger'), error, () => setLabel(id, label, true));
+        return;
+      }
+      throw new Error(error);
+    }
   } catch (err) {
     toast(t('systeme.hub.etiquette_non_enregistree', { message: err.message }));
   }

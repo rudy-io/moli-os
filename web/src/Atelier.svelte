@@ -12,6 +12,8 @@
   import EnergyStrip from './components/EnergyStrip.svelte';
   import EnergyPanel from './components/EnergyPanel.svelte';
 
+  // Inside the dashboard (its rail, its code sheet), or on its own.
+  let { embedded = false } = $props();
   let energyOpen = $state(false);
 
   // Same rule as the server: case, spaces and accents don't count.
@@ -42,7 +44,7 @@
   });
 </script>
 
-<Header />
+{#if !embedded}<Header />{/if}
 <Approvals />
 
 {#each hub.guard?.unmatched_protected_rooms ?? [] as room (room)}
@@ -55,7 +57,7 @@
   <p class="waiting" role="alert"><strong>{d.instance}</strong> {d.status.reason}</p>
 {/each}
 
-<main>
+<main class:embedded>
   <section class="home" aria-label={t('commun.atelier.maison')}>
     <EnergyStrip onopen={() => (energyOpen = true)} />
     {#if !hub.connected && rooms.length === 0}
@@ -110,6 +112,12 @@
       grid-template-columns: minmax(0, 1fr);
       padding: 16px 16px 48px;
     }
+  }
+  /* The dashboard's page already has its margins. */
+  main.embedded {
+    padding: 0;
+  }
+  @media (max-width: 1000px) {
   }
   .room + .room {
     margin-top: 32px;

@@ -23,6 +23,8 @@
   import Parler from './pages/Parler.svelte';
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
+  import { onCodeNeeded } from '../lib/hub.svelte.js';
+  import Atelier from '../Atelier.svelte';
 
   let { route } = $props();
 
@@ -59,6 +61,9 @@
 
   onMount(() => {
     start();
+    // What only a person may do (the Atelier moving a device out of a
+    // guarded room): the code first, then the same request once more.
+    onCodeNeeded((label, reason, retry) => (home.held = { label, reason, custom: retry }));
     const media = matchMedia('(prefers-color-scheme: dark)');
     prefersDark = media.matches;
     const update = (e) => (prefersDark = e.matches);
@@ -135,7 +140,7 @@
         <Icon name="branch" size={20} />
         <span class="label">{t('commun.nav.systeme')}</span>
       </a>
-      <a class="atelier" href="#/atelier" title={t('commun.nav.atelier_titre')}>
+      <a class="atelier" class:active={page === 'atelier'} href="#/atelier" title={t('commun.nav.atelier_titre')}>
         <Icon name="atelier" size={20} />
         <span class="label">{t('commun.nav.atelier')}</span>
       </a>
@@ -171,6 +176,8 @@
       <Automatismes {route} />
     {:else if page === 'systeme'}
       <Systeme />
+    {:else if page === 'atelier'}
+      <Atelier embedded />
     {:else if page === 'infra'}
       <!-- The house's machines: loaded only when visited. -->
       {#await import('./pages/Infra.svelte') then { default: Infra }}<Infra />{/await}

@@ -71,6 +71,8 @@
       .filter((s) => s.rooms.length),
   );
   const litIn = (list) => list.reduce((n, r) => n + r.lit, 0);
+  // Names or icons on the lights' pads: no light, no choice to make.
+  const hasLights = $derived(all.some((r) => r.group || r.lights.length));
 </script>
 
 <div class="pieces">
@@ -81,10 +83,10 @@
 
   <div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
-    <div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
+    {#if hasLights}<div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
       <button role="radio" aria-checked={look === 'text'} class:active={look === 'text'} onclick={() => choose('text')} title={t('maison.pieces.avec_noms')}>Aa</button>
       <button role="radio" aria-checked={look === 'icons'} class:active={look === 'icons'} onclick={() => choose('icons')} title={t('maison.pieces.icones')}><Icon name="light" size={15} /></button>
-    </div>
+    </div>{/if}
   </div>
 
   {#each floors as floor (floor.id)}
@@ -108,6 +110,9 @@
 <style>
   .pieces {
     display: grid;
+    /* minmax(0, …): the filter chips, which never wrap, would widen the
+       page past a phone's edge. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 22px;
   }
 
