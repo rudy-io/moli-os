@@ -5,6 +5,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import ProgramWeek from './ProgramWeek.svelte';
+  import StoveDetail from './StoveDetail.svelte';
 
   let { id, name } = $props();
 
@@ -292,6 +293,9 @@
       {/if}
     {:else}
       <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
+    {/if}
+    {#if climateIcon(d) === 'stove'}
+      <StoveDetail {id} />
     {/if}
     <!-- Outside, only from a unit that measures it (a heat pump's outdoor unit). -->
     {#if typeof outdoor === 'number' || (draw != null && draw >= 5)}

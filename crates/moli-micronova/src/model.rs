@@ -5,6 +5,11 @@
 //! A value is the raw one ANDed with its mask, then put through its formula,
 //! where `#` stands for it. Formulas are plain arithmetic (`#/2`, `#+30`,
 //! `int(#/4) +1`): evaluated here, never run.
+//!
+//! Besides its numbers, a board keeps a clock (in binary-coded decimal,
+//! which its map does not say: 0x24 is the 24th) and up to six programs,
+//! each switching the stove on then off at times in steps of ten minutes,
+//! on the days ticked.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,6 +32,18 @@ pub struct Register {
     pub set_max: Option<f64>,
     #[serde(default, deserialize_with = "nullable")]
     pub enc_val: Vec<Word>,
+}
+
+impl Register {
+    /// A value as the board says it: its word (`off`, `auto`), else the number.
+    fn step(&self, v: i64) -> String {
+        #[allow(clippy::cast_precision_loss)]
+        let word = self
+            .enc_val
+            .iter()
+            .find(|w| w.lang == "ENG" && w.value.as_f64() == Some(v as f64));
+        word.map_or_else(|| v.to_string(), |w| slug(&w.description))
+    }
 }
 
 fn all_bits() -> u32 {
@@ -127,9 +144,9 @@ impl Map {
                 Semantic::Other,
             ));
         }
-        for (key, register, label, semantic) in NUMBERS {
+        for (key, register, label, semantic) in self.numbers() {
             if let Some(r) = self.get(register) {
-                let unit = CELSIUS.contains(key).then_some(Unit::Celsius);
+                let unit = unit_of(key);
                 let kind = Kind::Numeric {
                     min: r.set_min,
                     max: r.set_max,
@@ -156,7 +173,119 @@ impl Map {
                 Semantic::Other,
             ));
         }
+        if self.get(FAN).is_some() {
+            let values = self
+                .steps(FAN)
+                .iter()
+                .map(|s| Arc::from(s.as_str()))
+                .collect();
+            out.push(spec(
+                "fan",
+                "pilotes.micronova.ventilation",
+                Kind::Enum { values },
+                None,
+                Semantic::Other,
+            ));
+        }
+        if self.get(&chrono(1, "enable_set")).is_some() {
+            out.push(spec(
+                PROGRAMS,
+                "pilotes.micronova.programmes",
+                Kind::Text,
+                None,
+                Semantic::Other,
+            ));
+        }
+        if CLOCK_KEYS.iter().all(|k| self.get(k).is_some()) {
+            out.push(spec(
+                CLOCK,
+                "pilotes.micronova.horloge",
+                Kind::Text,
+                None,
+                Semantic::Other,
+            ));
+        }
         out
+    }
+
+    /// The numbers a stove reads, a register once: another name for one
+    /// already read (the front fan, on a stove with one fan) is left out.
+    fn numbers(
+        &self,
+    ) -> impl Iterator<Item = &(&'static str, &'static str, &'static str, Semantic)> {
+        NUMBERS.iter().enumerate().filter_map(|(i, n)| {
+            let at = |register: &str| self.get(register).map(|r| (r.offset, r.mask));
+            let earlier = std::iter::once(FAN)
+                .chain(NUMBERS[..i].iter().map(|e| e.1))
+                .any(|register| at(register).is_some() && at(register) == at(n.1));
+            (!earlier).then_some(n)
+        })
+    }
+
+    /// A register's raw value, masked.
+    fn raw(&self, key: &str, reading: &Reading) -> Option<i64> {
+        let r = self.get(key)?;
+        Some(reading.get(&r.offset)? & i64::from(r.mask))
+    }
+
+    /// Each value a register takes, from its least to its greatest: its
+    /// word when it has one (`off`, `auto`), else the number.
+    fn steps(&self, key: &str) -> Vec<String> {
+        let Some(r) = self.get(key) else {
+            return Vec::new();
+        };
+        #[allow(clippy::cast_possible_truncation)]
+        let (min, max) = (
+            r.set_min.unwrap_or(0.0) as i64,
+            r.set_max.unwrap_or(0.0) as i64,
+        );
+        (min..=max.min(min + 32)).map(|v| r.step(v)).collect()
+    }
+
+    /// The programs: for each, whether it is on, its start and stop in
+    /// minutes from midnight, and its days (1 = Monday … 7 = Sunday), as
+    /// JSON: `[{"on":true,"start":420,"stop":1350,"days":[1,2,3,4,5]}, …]`.
+    #[must_use]
+    pub fn programs(&self, reading: &Reading) -> Option<String> {
+        let mut out = Vec::new();
+        for n in 1..=MAX_PROGRAMS {
+            if self.get(&chrono(n, "enable_set")).is_none() {
+                break;
+            }
+            let read = |part: &str| self.value(&chrono(n, part), reading);
+            #[allow(clippy::cast_possible_truncation)]
+            let minutes = |part: &str| read(part).map(|slot| (slot * 10.0) as i64);
+            let days: Vec<usize> = (1..=7)
+                .filter(|&d| read(&format!("day_{}_set", DAYS[d - 1])) == Some(1.0))
+                .collect();
+            out.push(serde_json::json!({
+                "on": read("enable_set")? != 0.0,
+                "start": minutes("start_set")?,
+                "stop": minutes("stop_set")?,
+                "days": days,
+            }));
+        }
+        (!out.is_empty()).then(|| Json::Array(out).to_string())
+    }
+
+    /// The stove's clock, as it keeps it: `2026-10-24T01:58` (its own time,
+    /// the one its programs follow), or `None` if it makes no sense.
+    #[must_use]
+    pub fn clock(&self, reading: &Reading) -> Option<String> {
+        let mut parts = [0i64; 5];
+        for (part, key) in parts.iter_mut().zip(CLOCK_KEYS) {
+            let raw = bcd(self.raw(key, reading)?)?;
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+            let value = calc(self.get(key)?.formula.as_deref().unwrap_or("#"), raw as f64)? as i64;
+            *part = value;
+        }
+        let [year, month, day, hour, minute] = parts;
+        let sane = (2000..2100).contains(&year)
+            && (1..=12).contains(&month)
+            && (1..=31).contains(&day)
+            && (0..24).contains(&hour)
+            && (0..60).contains(&minute);
+        sane.then(|| format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}"))
     }
 
     /// The points' values for a reading (those it can say).
@@ -168,7 +297,7 @@ impl Map {
             out.push(("on".into(), Value::Bool(!OFF.contains(&state.as_str()))));
             out.push(("mode".into(), Value::Text(state.into())));
         }
-        for (key, register, _, _) in NUMBERS {
+        for (key, register, _, _) in self.numbers() {
             if let Some(v) = self.value(register, reading) {
                 out.push(((*key).into(), Value::Float(v)));
             }
@@ -184,13 +313,65 @@ impl Map {
         if let Some(v) = self.value(ECO_STOP, reading) {
             out.push(("eco_stop".into(), Value::Bool(v != 0.0)));
         }
+        if let (Some(r), Some(v)) = (self.get(FAN), self.value(FAN, reading)) {
+            #[allow(clippy::cast_possible_truncation)]
+            out.push(("fan".into(), Value::Text(r.step(v as i64).into())));
+        }
+        if let Some(programs) = self.programs(reading) {
+            out.push((PROGRAMS.into(), Value::Text(programs.into())));
+        }
+        if let Some(clock) = self.clock(reading) {
+            out.push((CLOCK.into(), Value::Text(clock.into())));
+        }
         out
     }
+}
+
+/// `0x24` → 24; `None` for a nibble above 9.
+fn bcd(raw: i64) -> Option<i64> {
+    let (mut value, mut scale, mut rest) = (0, 1, raw);
+    while rest > 0 {
+        let digit = rest & 0xF;
+        if digit > 9 {
+            return None;
+        }
+        value += digit * scale;
+        scale *= 10;
+        rest >>= 4;
+    }
+    Some(value)
+}
+
+/// A program's register: `chrono_p1_enable_set`, `chrono_p3_day_monday_set`.
+fn chrono(n: u8, part: &str) -> String {
+    format!("chrono_p{n}_{part}")
 }
 
 const STATE: &str = "status_get";
 const ALARM: &str = "alarms_get";
 const ECO_STOP: &str = "eco_stop_set";
+const FAN: &str = "vent_main_set";
+/// The points of the programs and of the clock.
+pub const PROGRAMS: &str = "programs";
+pub const CLOCK: &str = "clock";
+const MAX_PROGRAMS: u8 = 6;
+const DAYS: [&str; 7] = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+];
+/// The clock's registers: year, month, day, hour, minute.
+const CLOCK_KEYS: [&str; 5] = [
+    "calendar_year_set",
+    "calendar_month_set",
+    "calendar_day_set",
+    "clock_hour_set",
+    "clock_minute_set",
+];
 /// States in which the stove is not burning.
 const OFF: [&str; 4] = ["off", "shut_off", "alarm", "mem_alarm"];
 /// Point, register, label, semantic: what a stove reads in numbers.
@@ -226,19 +407,29 @@ const NUMBERS: &[(&str, &str, &str, Semantic)] = &[
         Semantic::Other,
     ),
     (
-        "fan_main",
-        "vent_main_set",
-        "pilotes.micronova.ventilateur",
-        Semantic::Other,
-    ),
-    (
         "fan_front",
         "vent_front_set",
         "pilotes.micronova.ventilateur_avant",
         Semantic::Other,
     ),
+    (
+        "eco_stop_delay",
+        "eco_temp_stop",
+        "pilotes.micronova.eco_stop_delai",
+        Semantic::Other,
+    ),
 ];
 const CELSIUS: [&str; 3] = ["temperature", "target_temperature", "flue_temperature"];
+
+fn unit_of(key: &str) -> Option<Unit> {
+    if CELSIUS.contains(&key) {
+        Some(Unit::Celsius)
+    } else if key == "eco_stop_delay" {
+        Some(Unit::Minute)
+    } else {
+        None
+    }
+}
 
 fn spec(key: &str, label: &str, kind: Kind, unit: Option<Unit>, semantic: Semantic) -> PointSpec {
     PointSpec {
@@ -391,9 +582,48 @@ mod tests {
         assert_eq!(values["flue_temperature"], Value::Float(30.0));
         assert_eq!(values["power_level"], Value::Float(3.0));
         assert_eq!(values["real_power"], Value::Float(1.0));
-        assert_eq!(values["fan_main"], Value::Float(6.0));
+        assert_eq!(values["fan"], Value::Text("auto".into()));
+        assert!(!values.contains_key("fan_front"), "the same fan, once");
         assert_eq!(values["alarm"], Value::Text("OK".into()));
         assert_eq!(values["eco_stop"], Value::Bool(true));
+        assert_eq!(values["eco_stop_delay"], Value::Float(30.0));
+        assert_eq!(values["clock"], Value::Text("2026-10-24T01:58".into()));
+    }
+
+    #[test]
+    fn the_six_programs_read_as_the_stove_keeps_them() {
+        let (map, reading) = camelia();
+        let programs: Json = serde_json::from_str(&map.programs(&reading).unwrap()).unwrap();
+        let programs = programs.as_array().unwrap();
+        assert_eq!(programs.len(), 6);
+        assert_eq!(
+            programs[0],
+            serde_json::json!({ "on": true, "start": 420, "stop": 1350, "days": [1, 2, 3, 4, 5] })
+        );
+        assert_eq!(
+            programs[1],
+            serde_json::json!({ "on": true, "start": 510, "stop": 1350, "days": [6, 7] })
+        );
+        assert_eq!(
+            programs[2],
+            serde_json::json!({ "on": false, "start": 720, "stop": 1310, "days": [6] })
+        );
+        assert_eq!(
+            programs[5],
+            serde_json::json!({ "on": false, "start": 0, "stop": 0, "days": [] })
+        );
+    }
+
+    #[test]
+    fn the_clock_is_in_binary_coded_decimal() {
+        assert_eq!(bcd(0x24), Some(24));
+        assert_eq!(bcd(0x58), Some(58));
+        assert_eq!(bcd(0), Some(0));
+        assert_eq!(bcd(0x1A), None, "not a digit");
+        let (map, mut reading) = camelia();
+        // A minute register that is no clock: no time rather than a wrong one.
+        reading.insert(33018, 0x75);
+        assert_eq!(map.clock(&reading), None);
     }
 
     #[test]
@@ -433,6 +663,17 @@ mod tests {
                 step: None
             }
         );
+        let fan = points.iter().find(|p| &*p.key == "fan").unwrap();
+        let Kind::Enum { values } = &fan.kind else {
+            panic!("the fan is an enum")
+        };
+        let steps: Vec<&str> = values.iter().map(|v| &**v).collect();
+        assert_eq!(steps, ["off", "1", "2", "3", "4", "5", "auto"]);
+        let delay = points.iter().find(|p| &*p.key == "eco_stop_delay").unwrap();
+        assert_eq!(delay.unit, Some(Unit::Minute));
+        assert!(points.iter().any(|p| &*p.key == "programs"));
+        assert!(points.iter().any(|p| &*p.key == "clock"));
+        assert!(points.iter().all(|p| &*p.key != "fan_front"));
         assert!(points.iter().all(|p| !p.access.write), "read only for now");
     }
 
