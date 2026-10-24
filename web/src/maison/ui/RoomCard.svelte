@@ -199,6 +199,13 @@
     return mode ? t(mode) : t('commun.piece.en_marche');
   };
   let openClim = $state(null);
+
+  // A stove Moli switches has its button on its line too, as on its card:
+  // lit from off only, put out unless already going out (its driver says why).
+  const stoveSwitch = (d) => climateIcon(d) === 'stove' && d.points.some((p) => p.key === 'on' && p.access?.write);
+  const stoveLit = (d) => value(d.id, 'on') === true;
+  const stoveReady = (d) => (stoveLit(d) ? !['shut_off', 'cleaning'].includes(value(d.id, 'mode')) : value(d.id, 'mode') === 'off');
+  const stovePower = (d) => act(`${d.id}/on`, !stoveLit(d), t(stoveLit(d) ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name: nameOf(d.id) }));
 </script>
 
 <section class="card room">
@@ -268,13 +275,21 @@
   {#each room.climates as d (d.id)}
     {@const on = climateOn(d)}
     {@const setpoint = setpointOf(d.id)}
-    <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
-      <Icon name={climateIcon(d)} size={18} />
-      <b>{nameOf(d.id)}</b>
-      <!-- A pilot wire on four or six orders has no setpoint of its own. -->
-      <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
-      <span class="state">{climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? (MODES[value(d.id, 'mode')] ? t(MODES[value(d.id, 'mode')]) : t('commun.piece.en_marche')) : t(climateOffLabel(d))}</span>
-    </button>
+    <div class="clim-row">
+      <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
+        <Icon name={climateIcon(d)} size={18} />
+        <b>{nameOf(d.id)}</b>
+        <!-- A pilot wire on four or six orders has no setpoint of its own. -->
+        <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
+        <span class="state">{climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? (MODES[value(d.id, 'mode')] ? t(MODES[value(d.id, 'mode')]) : t('commun.piece.en_marche')) : t(climateOffLabel(d))}</span>
+      </button>
+      {#if stoveSwitch(d)}
+        {@const lit = stoveLit(d)}
+        <button class="round power" class:lit onclick={() => stovePower(d)} disabled={!stoveReady(d)} aria-pressed={lit} title={t(lit ? 'commun.poele.eteindre' : 'commun.poele.allumer')} aria-label={t(lit ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name: nameOf(d.id) })}>
+          <Icon name="power" size={17} />
+        </button>
+      {/if}
+    </div>
     {#if openClim === d.id}
       <ClimateCard id={d.id} name={nameOf(d.id)} />
     {/if}
@@ -569,7 +584,33 @@
     color: #fff;
   }
 
-  /* A clim, on one line. */
+  /* A clim, on one line; a stove's button at its end. */
+  .clim-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .clim-row .clim {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .round.power {
+    width: 40px;
+    height: 40px;
+  }
+
+  .round.power.lit {
+    background: var(--warm);
+    color: #fff;
+  }
+
+  .round.power:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
   .clim {
     display: flex;
     align-items: center;
