@@ -164,8 +164,8 @@
     program: { label: 'commun.piece.mode.programme', icon: 'clock', tone: 'good' },
     holiday: { label: 'commun.piece.mode.vacances', icon: 'palm', tone: 'cool' },
     // Comfort less one or two degrees: said, not drawn.
-    comfort_1: { label: 'commun.piece.mode.confort_1', text: '−1', tone: 'warm' },
-    comfort_2: { label: 'commun.piece.mode.confort_2', text: '−2', tone: 'warm' },
+    comfort_1: { label: 'commun.piece.mode.confort_1', text: '−1°', tone: 'warm' },
+    comfort_2: { label: 'commun.piece.mode.confort_2', text: '−2°', tone: 'warm' },
     off: { label: 'commun.piece.mode.arret', icon: 'power', tone: 'cool' },
     // A pellet stove's states (Micronova), shown, never sent.
     ignition: { label: 'commun.poele.allumage', icon: 'fire', tone: 'warm' },
