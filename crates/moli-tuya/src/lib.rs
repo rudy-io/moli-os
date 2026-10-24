@@ -418,6 +418,7 @@ fn write_program(
         device: devices[index].1.id.clone(),
         index,
         week,
+        deadline: command.deadline,
         done,
     };
     if programs.try_send(write).is_err() {

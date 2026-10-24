@@ -6,7 +6,7 @@
   // range, a day copied to others, the week sent to other heaters of the
   // same wiring too; nothing leaves before « Save ».
   import { onMount } from 'svelte';
-  import { value, num, act, hub, nameOf, note } from '../lib/home.svelte.js';
+  import { value, num, act, hub, nameOf } from '../lib/home.svelte.js';
   import { parseWeek, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -23,10 +23,10 @@
   let sent = $state(null);
   const editing = $derived(draft != null);
   const week = $derived(draft ? draft.map((d) => d && runsOf(d)) : (sent ?? read));
+  // Compared quarter by quarter: the same week, however its runs are written.
+  const same = (a, b) => JSON.stringify(a?.map(slotsOf)) === JSON.stringify(b?.map(slotsOf));
   $effect(() => {
     if (!sent) return;
-    // Compared quarter by quarter: the same week, however its runs are written.
-    const same = (a, b) => JSON.stringify(a?.map(slotsOf)) === JSON.stringify(b?.map(slotsOf));
     if (same(read, sent)) sent = null;
     const late = setTimeout(() => (sent = null), 30_000);
     return () => clearTimeout(late);
@@ -71,12 +71,17 @@
 
   // ---- editing ----
   let asking = $state(false);
+  // What this heater holds as far as the editor knows: the program read,
+  // then what was saved. Only what differs from it can be saved.
+  let base = $state(null);
   function edit() {
     asking = false;
     draft = read.map((runs) => slotsOf(runs));
+    base = read.map((runs) => slotsOf(runs));
   }
   function stop() {
     draft = null;
+    status = null;
     targets = [];
     alsoTo = [];
   }
@@ -161,8 +166,31 @@
   const toggleOther = (other) => (alsoTo = alsoTo.includes(other) ? alsoTo.filter((x) => x !== other) : [...alsoTo, other]);
 
   // The days that changed: only those are sent to this heater.
-  const changed = $derived(draft ? draft.map((d, i) => !!d && JSON.stringify(d) !== JSON.stringify(slotsOf(read?.[i]))) : []);
+  const changed = $derived(draft ? draft.map((d, i) => !!d && JSON.stringify(d) !== JSON.stringify(base?.[i])) : []);
+  const dirty = $derived(changed.some(Boolean) || alsoTo.length > 0);
   let busy = $state(false);
+  // After « Save »: `waiting` for the heater to say back `expect`, `taken`,
+  // or `late` (not said within 30 s); `others`: how many other heaters it
+  // went to.
+  let status = $state(null);
+  $effect(() => {
+    if (status?.state !== 'waiting') return;
+    if (same(read, status.expect)) status = { ...status, state: 'taken' };
+    const late = setTimeout(() => status?.state === 'waiting' && (status = { ...status, state: 'late' }), 30_000);
+    return () => clearTimeout(late);
+  });
+  // A new change: the last outcome is no longer news.
+  $effect(() => {
+    if (dirty) status = null;
+  });
+  const statusText = $derived.by(() => {
+    if (!status) return null;
+    const others = status.others ? ' ' + t('commun.programme.et_autres', { count: status.others }) : '';
+    if (status.state === 'waiting') return t('commun.programme.attente') + others;
+    if (status.state === 'taken') return t('commun.programme.pris') + others;
+    if (status.state === 'late') return t('commun.programme.pas_confirme') + others;
+    return t('commun.programme.envoye_autres', { count: status.others });
+  });
   async function save() {
     busy = true;
     const days = (keep) => JSON.stringify({ days: draft.map((d, i) => (d && keep(i) ? sentRuns(d, wiring) : null)) });
@@ -176,9 +204,14 @@
     }
     busy = false;
     if (results.includes('error')) return;
-    if (changed.some(Boolean)) sent = draft.map((d, i) => (d ? runsOf(d) : read?.[i]));
-    if (results.includes('ok')) note(t('commun.programme.envoye'));
-    stop();
+    const own = changed.some(Boolean);
+    if (own) sent = draft.map((d, i) => (d ? runsOf(d) : read?.[i]));
+    base = draft.map((d) => d && d.map((s) => ({ ...s })));
+    const others = alsoTo.length;
+    alsoTo = [];
+    // Held for a code: the guard says the rest.
+    if (results.includes('held')) return;
+    status = { state: own ? 'waiting' : 'others', others, expect: sent };
   }
 
   // Closing while editing gives the edits up first.
@@ -390,8 +423,13 @@
       </section>
 
       <footer>
-        <button class="soft" onclick={stop}>{t('commun.annuler')}</button>
-        <button class="primary" disabled={busy || (!changed.some(Boolean) && !alsoTo.length)} onclick={save}>
+        <p class="status {status?.state ?? ''}" aria-live="polite">
+          {#if statusText}
+            <Icon name={status.state === 'waiting' ? 'timer' : status.state === 'late' ? 'warning' : 'ok'} size={18} />{statusText}
+          {/if}
+        </p>
+        <button class="soft" onclick={stop}>{t(dirty ? 'commun.annuler' : 'commun.programme.terminer')}</button>
+        <button class="primary" disabled={busy || !dirty} onclick={save}>
           {busy ? t('commun.programme.envoi') : t('commun.programme.enregistrer')}
         </button>
       </footer>
@@ -745,6 +783,8 @@
   }
 
   footer {
+    flex-wrap: wrap;
+    align-items: center;
     position: sticky;
     bottom: -18px;
     margin: 18px -18px -18px;
@@ -939,6 +979,30 @@
     align-items: center;
     gap: 8px;
     font-size: 14px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 100%;
+    min-height: 0;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--ink-2);
+  }
+
+  .status:empty {
+    display: none;
+  }
+
+  .status.taken,
+  .status.others {
+    color: var(--good);
+  }
+
+  .status.late {
+    color: var(--warm-ink);
   }
 
   .now small {

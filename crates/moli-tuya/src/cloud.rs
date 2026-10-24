@@ -437,17 +437,29 @@ pub struct ProgramWrite {
     pub device: String,
     pub index: usize,
     pub week: Arc<str>,
+    /// When the hub stops waiting: a write past it never leaves.
+    pub deadline: std::time::Instant,
     pub done: tokio::sync::oneshot::Sender<Result<(), String>>,
 }
 
 /// After a write, the cloud's copy is read again this long after (the
-/// module answers in about 5 s), twice at most.
-const PROGRAM_CONFIRM: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(15)];
+/// module answers in about 5 s), then once more this much later.
+const PROGRAM_CONFIRM: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(10)];
 
-/// Writes the programs people edit, one at a time: reads the module's parts
-/// from the cloud, sends those that change in one call, answers, then reads
-/// the program back so that Moli shows what the module took. Its own API
-/// session: the message service is never kept waiting.
+/// A written program to read back: which parts, and when.
+struct Check {
+    device: String,
+    index: usize,
+    wanted: Vec<(String, Vec<u8>)>,
+    at: Instant,
+    tries: usize,
+}
+
+/// Writes the programs people edit: reads the module's parts from the
+/// cloud, sends those that change in one call and answers; reads the
+/// program back later, so that Moli shows what the module took. A write
+/// never waits behind a read-back (the hub waits 5 s for its answer). Its
+/// own API session: the message service is never kept waiting.
 pub async fn write_programs(
     keys: Keys,
     region: Region,
@@ -459,59 +471,101 @@ pub async fn write_programs(
         region,
         token: None,
     };
-    while let Some(write) = writes.recv().await {
-        // Nobody waits any more (the hub gave up): never sent late.
-        if write.done.is_closed() {
-            continue;
+    let mut checks: Vec<Check> = Vec::new();
+    loop {
+        let next = checks.iter().map(|c| c.at).min();
+        tokio::select! {
+            biased;
+            write = writes.recv() => {
+                let Some(write) = write else { return };
+                if let Some(check) = write_program(&mut api, write).await {
+                    checks.push(check);
+                }
+            }
+            () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
+                let now = Instant::now();
+                let (due, later): (Vec<Check>, Vec<Check>) = checks.drain(..).partition(|c| c.at <= now);
+                checks = later;
+                for check in due {
+                    if let Some(again) = read_back(&mut api, check, &up).await {
+                        checks.push(again);
+                    }
+                }
+            }
         }
-        let sent = issue_program(&mut api, &write.device, &write.week).await;
-        let wanted = match sent {
-            Ok(wanted) => {
-                let _ = write.done.send(Ok(()));
-                wanted
-            }
-            Err(e) => {
-                tracing::warn!(device = write.device, error = %e, "tuya cloud: week program not written");
-                let _ = write.done.send(Err(moli_i18n::tr!(
-                    "pilotes.tuya.programme_refuse",
-                    detail = e.to_string()
-                )));
-                continue;
-            }
-        };
-        for wait in PROGRAM_CONFIRM {
-            tokio::time::sleep(wait).await;
-            let Ok(shadow) = api
-                .call(&format!(
-                    "/v2.0/cloud/thing/{}/shadow/properties",
-                    write.device
-                ))
-                .await
-            else {
-                continue;
-            };
+    }
+}
+
+/// One write, answered; what to read back after it.
+async fn write_program(api: &mut Api, write: ProgramWrite) -> Option<Check> {
+    // Nobody waits any more (the hub gave up): never sent late.
+    if write.done.is_closed() || std::time::Instant::now() >= write.deadline {
+        return None;
+    }
+    match issue_program(api, &write.device, &write.week).await {
+        Ok(wanted) => {
+            let _ = write.done.send(Ok(()));
+            Some(Check {
+                device: write.device,
+                index: write.index,
+                wanted,
+                at: Instant::now() + PROGRAM_CONFIRM[0],
+                tries: 0,
+            })
+        }
+        Err(e) => {
+            tracing::warn!(device = write.device, error = %e, "tuya cloud: week program not written");
+            let _ = write.done.send(Err(moli_i18n::tr!(
+                "pilotes.tuya.programme_refuse",
+                detail = e.to_string()
+            )));
+            None
+        }
+    }
+}
+
+/// Reads a written program back and shows it; once more later if the
+/// module has not taken it yet.
+async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option<Check> {
+    let path = format!("/v2.0/cloud/thing/{}/shadow/properties", check.device);
+    let taken = match api.call(&path).await {
+        Ok(shadow) => {
             let parts = shadow_parts(&shadow);
             let week = Value::Text(shadow_week(&shadow).to_string().into());
             let _ = up
-                .send(Up::State(write.index, vec![(program::POINT.into(), week)]))
+                .send(Up::State(check.index, vec![(program::POINT.into(), week)]))
                 .await;
-            if wanted
+            check
+                .wanted
                 .iter()
                 .all(|(code, bytes)| parts.get(code.as_str()) == Some(bytes))
-            {
-                tracing::info!(
-                    device = write.device,
-                    parts = wanted.len(),
-                    "tuya cloud: week program written"
-                );
-                break;
-            }
-            tracing::warn!(
-                device = write.device,
-                "tuya cloud: the module has not taken its week program yet"
-            );
         }
+        Err(e) => {
+            tracing::debug!(device = check.device, error = %e, "tuya cloud: program not read back");
+            false
+        }
+    };
+    if taken {
+        tracing::info!(
+            device = check.device,
+            parts = check.wanted.len(),
+            "tuya cloud: week program written"
+        );
+        return None;
     }
+    let tries = check.tries + 1;
+    let Some(wait) = PROGRAM_CONFIRM.get(tries) else {
+        tracing::warn!(
+            device = check.device,
+            "tuya cloud: the module has not taken its week program"
+        );
+        return None;
+    };
+    Some(Check {
+        at: Instant::now() + *wait,
+        tries,
+        ..check
+    })
 }
 
 /// Sends what changes in a device's week; the parts sent (none: nothing changes).
