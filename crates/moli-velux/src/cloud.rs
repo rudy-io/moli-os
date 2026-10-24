@@ -41,21 +41,25 @@ impl Cloud {
     }
 
     async fn post(&self, path: &str, form: &[(&str, &str)]) -> anyhow::Result<(StatusCode, Json)> {
+        let body = encode(form);
+        // Said even when 0 (an empty form): without it the server answers 411.
         let mut request = Request::builder()
             .method(Method::POST)
             .uri(path)
             .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Content-Length", body.len())
             .header("Accept", "application/json");
         if let Some((token, _)) = &self.token {
             request = request.header("Authorization", format!("Bearer {token}"));
         }
-        let request = request.body(Full::new(moli_net::Body::from(encode(form))))?;
+        let request = request.body(Full::new(moli_net::Body::from(body)))?;
         let (status, bytes) =
             moli_net::web(&self.host, 443, true, request, TIMEOUT, MAX_BODY).await?;
         let answer = if bytes.is_empty() {
             Json::Null
         } else {
-            serde_json::from_slice(&bytes).context("VELUX: not JSON")?
+            serde_json::from_slice(&bytes)
+                .with_context(|| format!("VELUX {path}: HTTP {status}, not JSON"))?
         };
         Ok((status, answer))
     }
