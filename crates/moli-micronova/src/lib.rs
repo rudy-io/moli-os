@@ -48,6 +48,12 @@ fn default_every() -> u64 {
 /// Credentials not given yet: looked for again this often.
 const LOOK_AGAIN: Duration = Duration::from_secs(30);
 
+/// After a confirmed order the stove is read again this often, this many
+/// times: it takes its new state a few seconds after the cloud's « done »
+/// (from eco-stop to off in about 12 s), and the house waits to see it.
+const SOON: Duration = Duration::from_secs(3);
+const SOON_READS: u8 = 5;
+
 #[derive(Debug)]
 pub struct Micronova {
     config: Config,
@@ -129,6 +135,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 
     let every = Duration::from_secs(config.every.max(30));
     let mut next = tokio::time::Instant::now();
+    let mut soon = 0;
     loop {
         tokio::select! {
             command = ctx.next_command() => {
@@ -156,8 +163,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 command.reply(answer);
             }
             Some(_) = written.recv() => {
-                // Confirmed (or given up): read it again now.
+                // Confirmed (or given up): read it again now, then every few seconds.
                 next = tokio::time::Instant::now();
+                soon = SOON_READS;
             }
             () = tokio::time::sleep_until(next) => {
                 for (i, (stove, map)) in stoves.iter().enumerate() {
@@ -179,7 +187,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         }
                     }
                 }
-                next = tokio::time::Instant::now() + every;
+                next = tokio::time::Instant::now() + if soon > 0 { soon -= 1; SOON } else { every };
             }
         }
     }
