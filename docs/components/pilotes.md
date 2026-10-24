@@ -301,6 +301,25 @@ kind = "micronova"
 - **Secrets** : `email` et `password` du compte Easy Connect, rangés par la personne (`moli-os secrets set micronova email`, puis `password`) ; absents, le pilote attend et regarde toutes les 30 s.
 - **Tests** : `src/model.rs` sur la carte et une lecture réelles d'un Camelia Metal Air (`integrations/micronova/fixtures/camelia-metal-air.json`), formules (dont du code refusé et la division par zéro), mots en clés ; `src/cloud.rs` (réponse d'une tâche, identifiants nombres ou textes).
 
+## `velux` : VELUX ACTIVE with NETATMO (`crates/moli-velux`)
+
+- **Couvre** : la passerelle KIX 300 de VELUX ACTIVE et ce qui lui est relié. Chaque module est un appareil, dans la pièce de l'application VELUX (`native_room`, qui compte pour la garde, comme toute pièce d'origine). **Fenêtre de toit**, **store** ou **volet** (`NXO`) : `percent_control` (0 fermé, 100 ouvert), `moving` (la position visée n'est pas encore atteinte), `battery_low` pour ceux qui ont une pile (fenêtres solaires, stores). **Passerelle** (`NXG`) : `rain`, `departure` (mode départ, qui empêche tout mouvement). **Capteur de climat intérieur** (`NXS`) : les mesures de sa pièce, `temperature`, `humidity`, `co2`, `illuminance`, `air_quality` (indice VELUX), et `battery` (%). **Commande de départ** (`NXD`) : `battery`. Le dashboard voit une fenêtre ou un store comme un volet (ouverture affichée).
+- **Lecture seule** pour l'instant : un ordre est refusé (« les VELUX ne se commandent pas encore depuis Moli »).
+- **Protocole** : le cloud de l'application VELUX ACTIVE (un serveur Netatmo, `src/cloud.rs`), formulaires en entrée, JSON en sortie. `POST /oauth2/token` (`grant_type=password`, l'identifiant client public de l'application, `user_prefix=velux`, `scope=velux_scopes`), puis avec le jeton (`Authorization: Bearer`) `POST /api/homesdata` (les modules, lus au départ ; la maison qui a une passerelle) et `POST /api/homestatus` (`home_id`) chaque minute. Le jeton est renouvelé avant son échéance, et un 401 ou un 403 donne une nouvelle connexion. Un module absent de l'état (passerelle injoignable) ou `reachable: false` passe hors ligne, comme tous si la lecture échoue.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "velux"
+kind = "velux"
+[driver.options]
+# host = "app.velux-active.com"   # défaut : le serveur de l'application
+# every = 60                      # secondes entre deux lectures (30 au moins)
+```
+
+- **Secrets** : `email` et `password` du compte VELUX ACTIVE, rangés par la personne (`moli-os secrets set velux email`, puis `password`) ; absents, le pilote attend et regarde toutes les 30 s.
+- **Tests** : `src/model.rs` sur une maison réelle (`integrations/velux/fixtures/kix300.json` : passerelle, 7 fenêtres, 8 stores, capteur, commande de départ ; identifiants inventés) : rôles, pièces, positions, mouvement, mesures en dixièmes, pile, module injoignable ou absent ; `src/cloud.rs` (formulaire encodé, pas de jeton = déconnecté).
+
 ## `reolink` : caméras Reolink (`crates/moli-reolink`)
 
 - **Couvre** : caméras et sonnette derrière un Home Hub (ou une caméra / un NVR seul). **Lecture seule** + images. Un canal hors ligne est gardé s'il a un nom **ou** l'identifiant d'une caméra (une caméra sur pile endormie) ; seul un emplacement vide est ignoré. Au premier inventaire, chaque canal est décrit dans le journal (`reolink channel` : en ligne, endormi, nommé, caméra), pour expliquer une caméra absente.

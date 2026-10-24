@@ -873,6 +873,7 @@ const KINDS: &[&str] = &[
     "presence",
     "telegram",
     "micronova",
+    "velux",
     "phones",
     "moonraker",
     "ipp",
@@ -1056,6 +1057,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )?),
         "micronova" => Arc::new(moli_micronova::Micronova::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "velux" => Arc::new(moli_velux::Velux::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "helpers" => Arc::new(moli_helpers::Helpers::new(

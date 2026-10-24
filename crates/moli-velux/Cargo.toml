@@ -1,0 +1,24 @@
+[package]
+name = "moli-velux"
+description = "Moli OS VELUX ACTIVE: roof windows, blinds and the indoor climate sensor of a KIX 300 gateway, through the cloud of the VELUX ACTIVE app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

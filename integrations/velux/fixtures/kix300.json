@@ -1,0 +1,600 @@
+{
+ "_": "VELUX ACTIVE (KIX 300) : api/homesdata (une maison) et api/homestatus, lus sur une installation réelle ; identifiants fictifs, noms de pièces changés.",
+ "homesdata": {
+  "id": "0123456789abcdef01234567",
+  "name": "Maison",
+  "timezone": "Europe/Paris",
+  "modules": [
+   {
+    "id": "aa:bb:cc:dd:ee:01",
+    "type": "NXG",
+    "name": "VELUX Gateway",
+    "subtype": "EU",
+    "room_id": "1001",
+    "reachable": true,
+    "modules_bridged": [
+     "aa:bb:cc:dd:ee:02",
+     "aa:bb:cc:dd:ee:03",
+     "aa:bb:cc:dd:ee:04",
+     "aa:bb:cc:dd:ee:05",
+     "aa:bb:cc:dd:ee:06",
+     "aa:bb:cc:dd:ee:07",
+     "aa:bb:cc:dd:ee:08",
+     "aa:bb:cc:dd:ee:09",
+     "aa:bb:cc:dd:ee:0a",
+     "aa:bb:cc:dd:ee:0b",
+     "aa:bb:cc:dd:ee:0c",
+     "aa:bb:cc:dd:ee:0d",
+     "aa:bb:cc:dd:ee:0e",
+     "aa:bb:cc:dd:ee:0f",
+     "aa:bb:cc:dd:ee:10",
+     "aa:bb:cc:dd:ee:11",
+     "aa:bb:cc:dd:ee:12"
+    ],
+    "schedule_limits": [
+     {
+      "nb_zones": 100,
+      "nb_timeslots": 300,
+      "nb_items": 500,
+      "type": "algo"
+     },
+     {
+      "nb_zones": 100,
+      "nb_timeslots": 300,
+      "nb_items": 500,
+      "type": "event"
+     }
+    ],
+    "capabilities": [
+     {
+      "name": "automatism",
+      "available": true
+     }
+    ],
+    "pincode_enabled": true
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:02",
+    "type": "NXD",
+    "name": "Commande de départ",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:03",
+    "type": "NXS",
+    "name": "Capteur de climat intérieur",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:04",
+    "type": "NXO",
+    "name": "Mezzanine - Gauche",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "1"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:05",
+    "type": "NXO",
+    "name": "Store Meezanine Gauche",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "1"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:06",
+    "type": "NXO",
+    "name": "Store Chambre",
+    "room_id": "1002",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "3"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:07",
+    "type": "NXO",
+    "name": "Mezzanine Droite",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "4"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:08",
+    "type": "NXO",
+    "name": "Store Mezzanine Droite",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "4"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:09",
+    "type": "NXO",
+    "name": "Fenetre Chambre Amis",
+    "room_id": "1003",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "5"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0a",
+    "type": "NXO",
+    "name": "Store Chambre Amis",
+    "room_id": "1003",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "5"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0b",
+    "type": "NXO",
+    "name": "Fenêtre grenier",
+    "room_id": "1004",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "2"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0c",
+    "type": "NXO",
+    "name": "Store grenier",
+    "room_id": "1004",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "2"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0d",
+    "type": "NXO",
+    "name": "Salon",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "6"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0e",
+    "type": "NXO",
+    "name": "Chambre Mezzanine",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "7"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:0f",
+    "type": "NXO",
+    "name": "Store Salon",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "6"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:10",
+    "type": "NXO",
+    "name": "Store Chambre Mezanine",
+    "room_id": "1001",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "7"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:11",
+    "type": "NXO",
+    "name": "Store puit de lumiere",
+    "room_id": "1005",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "blind",
+    "group_id": "10"
+   },
+   {
+    "id": "aa:bb:cc:dd:ee:12",
+    "type": "NXO",
+    "name": "Puit de lumiere",
+    "room_id": "1005",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "velux_type": "window",
+    "group_id": "10"
+   }
+  ],
+  "rooms": [
+   {
+    "id": "1001",
+    "name": "Séjour",
+    "type": "custom",
+    "module_ids": [
+     "aa:bb:cc:dd:ee:01",
+     "aa:bb:cc:dd:ee:03",
+     "aa:bb:cc:dd:ee:04",
+     "aa:bb:cc:dd:ee:05",
+     "aa:bb:cc:dd:ee:07",
+     "aa:bb:cc:dd:ee:08",
+     "aa:bb:cc:dd:ee:0d",
+     "aa:bb:cc:dd:ee:0e",
+     "aa:bb:cc:dd:ee:0f",
+     "aa:bb:cc:dd:ee:10"
+    ],
+    "modules": [
+     "aa:bb:cc:dd:ee:01",
+     "aa:bb:cc:dd:ee:03",
+     "aa:bb:cc:dd:ee:04",
+     "aa:bb:cc:dd:ee:05",
+     "aa:bb:cc:dd:ee:07",
+     "aa:bb:cc:dd:ee:08",
+     "aa:bb:cc:dd:ee:0d",
+     "aa:bb:cc:dd:ee:0e",
+     "aa:bb:cc:dd:ee:0f",
+     "aa:bb:cc:dd:ee:10"
+    ]
+   },
+   {
+    "id": "1002",
+    "name": "Chambre",
+    "type": "bedroom",
+    "module_ids": [
+     "aa:bb:cc:dd:ee:06"
+    ],
+    "modules": [
+     "aa:bb:cc:dd:ee:06"
+    ]
+   },
+   {
+    "id": "1003",
+    "name": "Chambre amis",
+    "type": "bedroom",
+    "module_ids": [
+     "aa:bb:cc:dd:ee:09",
+     "aa:bb:cc:dd:ee:0a"
+    ],
+    "modules": [
+     "aa:bb:cc:dd:ee:09",
+     "aa:bb:cc:dd:ee:0a"
+    ]
+   },
+   {
+    "id": "1004",
+    "name": "Grenier",
+    "type": "custom",
+    "module_ids": [
+     "aa:bb:cc:dd:ee:0b",
+     "aa:bb:cc:dd:ee:0c"
+    ],
+    "modules": [
+     "aa:bb:cc:dd:ee:0b",
+     "aa:bb:cc:dd:ee:0c"
+    ]
+   },
+   {
+    "id": "1005",
+    "name": "Puits de lumière",
+    "type": "custom",
+    "module_ids": [
+     "aa:bb:cc:dd:ee:11",
+     "aa:bb:cc:dd:ee:12"
+    ],
+    "modules": [
+     "aa:bb:cc:dd:ee:11",
+     "aa:bb:cc:dd:ee:12"
+    ]
+   }
+  ]
+ },
+ "homestatus": {
+  "id": "0123456789abcdef01234567",
+  "modules": [
+   {
+    "busy": false,
+    "calibrating": false,
+    "firmware_revision_netatmo": 203,
+    "firmware_revision_thirdparty": "0.1.2.0.43.0",
+    "hardware_version": 219,
+    "id": "aa:bb:cc:dd:ee:01",
+    "is_raining": false,
+    "last_reset_type": "button_factory",
+    "last_seen": 1700000000,
+    "locked": false,
+    "locking": false,
+    "pairing": "stop",
+    "secure": false,
+    "type": "NXG",
+    "wifi_strength": 52,
+    "wifi_state": "full"
+   },
+   {
+    "current_position": 0,
+    "firmware_revision": 4,
+    "id": "aa:bb:cc:dd:ee:04",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 20,
+    "id": "aa:bb:cc:dd:ee:05",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 0,
+    "firmware_revision": 24,
+    "id": "aa:bb:cc:dd:ee:06",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "current_position": 61,
+    "firmware_revision": 4,
+    "id": "aa:bb:cc:dd:ee:07",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "target_position": 61,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 20,
+    "id": "aa:bb:cc:dd:ee:08",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "current_position": 0,
+    "firmware_revision": 4,
+    "id": "aa:bb:cc:dd:ee:09",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 17,
+    "id": "aa:bb:cc:dd:ee:0a",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "current_position": 0,
+    "firmware_revision": 54,
+    "id": "aa:bb:cc:dd:ee:0b",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 7,
+    "silent": false,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "current_position": 18,
+    "firmware_revision": 4,
+    "id": "aa:bb:cc:dd:ee:0c",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "silent": false,
+    "target_position": 18,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 0,
+    "firmware_revision": 3,
+    "id": "aa:bb:cc:dd:ee:0d",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "silent": false,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 0,
+    "firmware_revision": 3,
+    "id": "aa:bb:cc:dd:ee:0e",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "silent": false,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 255,
+    "id": "aa:bb:cc:dd:ee:0f",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "silent": false,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 255,
+    "id": "aa:bb:cc:dd:ee:10",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "silent": false,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 100,
+    "firmware_revision": 255,
+    "id": "aa:bb:cc:dd:ee:11",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "reachable": true,
+    "silent": false,
+    "target_position": 100,
+    "type": "NXO",
+    "velux_type": "blind",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_state": "high",
+    "current_position": 0,
+    "firmware_revision": 3,
+    "id": "aa:bb:cc:dd:ee:12",
+    "last_seen": 1700000000,
+    "manufacturer": "Netatmo",
+    "mode": "algo_disabled",
+    "rain_position": 50,
+    "reachable": true,
+    "secure_position": 11,
+    "silent": false,
+    "target_position": 0,
+    "type": "NXO",
+    "velux_type": "window",
+    "bridge": "aa:bb:cc:dd:ee:01"
+   },
+   {
+    "battery_level": 4079,
+    "battery_percent": 76,
+    "firmware_revision": 16,
+    "id": "aa:bb:cc:dd:ee:03",
+    "last_seen": 1700000000,
+    "reachable": true,
+    "rf_strength": 38,
+    "type": "NXS",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "battery_state": "high",
+    "rf_state": "full"
+   },
+   {
+    "battery_level": 2792,
+    "battery_percent": 86,
+    "firmware_revision": 16,
+    "id": "aa:bb:cc:dd:ee:02",
+    "last_seen": 1700000000,
+    "reachable": true,
+    "rf_strength": 80,
+    "type": "NXD",
+    "bridge": "aa:bb:cc:dd:ee:01",
+    "battery_state": "high",
+    "rf_state": "very_low"
+   }
+  ],
+  "rooms": [
+   {
+    "air_quality": 1,
+    "algo_status": 310,
+    "auto_close_ts": 0,
+    "co2": 694,
+    "humidity": 50,
+    "id": "1001",
+    "lux": 0,
+    "max_comfort_co2": 1150,
+    "max_comfort_humidity": 70,
+    "max_comfort_temperature": 230,
+    "min_comfort_humidity": 20,
+    "min_comfort_temperature": 180,
+    "temperature": 191
+   },
+   {
+    "algo_status": 301,
+    "auto_close_ts": 0,
+    "id": "1002"
+   },
+   {
+    "algo_status": 200,
+    "auto_close_ts": 0,
+    "id": "1003"
+   },
+   {
+    "algo_status": 200,
+    "auto_close_ts": 0,
+    "id": "1004"
+   },
+   {
+    "algo_status": 201,
+    "auto_close_ts": 0,
+    "id": "1005"
+   }
+  ]
+ }
+}
