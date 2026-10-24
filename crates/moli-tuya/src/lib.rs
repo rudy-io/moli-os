@@ -131,6 +131,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut silent_seen = false;
     let mut watched = cloud::Watched::new();
     let cloud = keys.is_some();
+    // Week programs are written through the cloud only.
+    let (program_tx, program_rx) = mpsc::channel::<cloud::ProgramWrite>(8);
+    let program_tx = cloud.then_some(program_tx);
     // Gateways in the file: their links read the sub-devices that name them.
     let gateways: HashSet<String> = file
         .devices
@@ -233,7 +236,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // Keys given later in the dashboard: a restart takes them.
     let await_keys = keys.is_none() && silent_seen;
     if let Some(keys) = keys {
-        start_cloud(config, keys, watched, up_tx.clone(), &mut tasks);
+        start_cloud(config, keys, watched, program_rx, up_tx.clone(), &mut tasks);
     }
     drop(up_tx);
     if missing_keys > 0 {
@@ -243,7 +246,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     ctx.ready();
     tracing::info!(instance = %ctx.instance(), devices = devices.len(), "tuya devices loaded");
 
-    let keys_came = serve(ctx, &mut up, &orders, &devices, await_keys).await;
+    let keys_came = serve(
+        ctx,
+        &mut up,
+        &orders,
+        program_tx.as_ref(),
+        &devices,
+        await_keys,
+    )
+    .await;
     tasks.abort_all();
     if keys_came {
         anyhow::bail!(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
@@ -299,6 +310,7 @@ async fn serve(
     ctx: &mut DriverCtx,
     up: &mut mpsc::Receiver<Up>,
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
+    programs: Option<&mpsc::Sender<cloud::ProgramWrite>>,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
     await_keys: bool,
 ) -> bool {
@@ -314,7 +326,11 @@ async fn serve(
             // `None` once the driver is cancelled.
             command = ctx.next_command() => {
                 let Some(command) = command else { break };
-                dispatch(command, orders, devices);
+                if command.key.as_ref() == program::POINT {
+                    write_program(command, programs, devices);
+                } else {
+                    dispatch(command, orders, devices);
+                }
             }
             message = up.recv() => match message {
                 Some(Up::State(index, values)) => {
@@ -336,6 +352,7 @@ fn start_cloud(
     config: &Config,
     keys: cloud::Keys,
     watched: cloud::Watched,
+    programs: mpsc::Receiver<cloud::ProgramWrite>,
     up: mpsc::Sender<Up>,
     tasks: &mut tokio::task::JoinSet<()>,
 ) {
@@ -343,6 +360,12 @@ fn start_cloud(
         return;
     }
     if let Some(region) = cloud::Region::named(&config.cloud_region) {
+        tasks.spawn(cloud::write_programs(
+            keys.clone(),
+            region,
+            programs,
+            up.clone(),
+        ));
         tasks.spawn(cloud::watch(keys, region, watched, up));
     } else {
         tracing::warn!(region = %config.cloud_region, "tuya cloud: unknown region");
@@ -372,6 +395,41 @@ fn locate(
     if config.discovery {
         tasks.spawn(discover(addresses));
     }
+}
+
+/// Hands a week program to the cloud's writer; the reply comes from it.
+fn write_program(
+    command: moli_runtime::CommandRequest,
+    programs: Option<&mpsc::Sender<cloud::ProgramWrite>>,
+    devices: &[(DeviceId, Arc<TuyaDevice>)],
+) {
+    let found = devices.iter().position(|(id, _)| *id == command.device.id);
+    let (Some(programs), Some(index)) = (programs, found) else {
+        command.reply(Err(moli_i18n::tr!("pilotes.tuya.programme_sans_cloud")));
+        return;
+    };
+    let moli_core::Value::Text(week) = command.value.clone() else {
+        let message = moli_i18n::tr!("pilotes.tuya.ne_se_regle_pas", point = command.key);
+        command.reply(Err(message));
+        return;
+    };
+    let (done, outcome) = oneshot::channel();
+    let write = cloud::ProgramWrite {
+        device: devices[index].1.id.clone(),
+        index,
+        week,
+        done,
+    };
+    if programs.try_send(write).is_err() {
+        command.reply(Err(moli_i18n::tr!("pilotes.tuya.occupe")));
+        return;
+    }
+    tokio::spawn(async move {
+        let result = outcome
+            .await
+            .unwrap_or_else(|_| Err(moli_i18n::tr!("pilotes.tuya.connexion_perdue")));
+        command.reply(result);
+    });
 }
 
 /// Hands a command to its device's link; the reply comes from the link.

@@ -296,9 +296,10 @@ impl TuyaDevice {
                     key: crate::program::POINT.into(),
                     label: moli_i18n::tr("pilotes.tuya.programme").into(),
                     kind: Kind::Text,
+                    // Written through the cloud (`cloud::write_programs`).
                     access: Access {
                         read: true,
-                        write: false,
+                        write: true,
                     },
                     unit: None,
                     semantic: Semantic::Other,
@@ -614,10 +615,7 @@ mod tests {
         let d = dev.device(&InstanceId::from("tuya"));
         let program = d.point("week_program").unwrap();
         assert_eq!(program.kind, Kind::Text);
-        assert!(
-            !program.access.write,
-            "read only: a program is not set from here yet"
-        );
+        assert!(program.access.write, "set through the cloud");
         assert!(
             d.point("week_program_18_1_1").is_none(),
             "its raw parts are not points"

@@ -8,7 +8,8 @@
 //! message service (Pulsar over a websocket). A pilot-wire heater's week
 //! program, which no gateway gives on the LAN, is read from the cloud's copy
 //! of its raw DPs: at start, every six hours, and soon after a part of it
-//! changes. Nothing is sent to the cloud but these reads.
+//! changes. Nothing is sent to the cloud but these reads, and a program a
+//! person edits (`write_programs`): the cloud is the only way to it.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -147,7 +148,14 @@ struct Api {
 impl Api {
     async fn call(&mut self, path: &str) -> anyhow::Result<Json> {
         let token = self.token().await?;
-        self.request(path, Some(&token)).await
+        self.request(Method::GET, path, b"", Some(&token)).await
+    }
+
+    async fn post(&mut self, path: &str, body: &Json) -> anyhow::Result<Json> {
+        let token = self.token().await?;
+        let body = body.to_string();
+        self.request(Method::POST, path, body.as_bytes(), Some(&token))
+            .await
     }
 
     async fn token(&mut self) -> anyhow::Result<String> {
@@ -156,7 +164,9 @@ impl Api {
         {
             return Ok(token.clone());
         }
-        let result = self.request("/v1.0/token?grant_type=1", None).await?;
+        let result = self
+            .request(Method::GET, "/v1.0/token?grant_type=1", b"", None)
+            .await?;
         let token = result["access_token"]
             .as_str()
             .context("no access token")?
@@ -170,7 +180,13 @@ impl Api {
         Ok(token)
     }
 
-    async fn request(&self, path: &str, token: Option<&str>) -> anyhow::Result<Json> {
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: &[u8],
+        token: Option<&str>,
+    ) -> anyhow::Result<Json> {
         let t = u64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -182,11 +198,12 @@ impl Api {
             token,
             t,
             &nonce,
-            &string_to_sign("GET", b"", path),
+            &string_to_sign(method.as_str(), body, path),
         );
         let mut builder = Request::builder()
-            .method(Method::GET)
+            .method(method)
             .uri(path)
+            .header("content-type", "application/json")
             .header("client_id", &self.keys.id)
             .header("sign", signature)
             .header("t", t.to_string())
@@ -195,7 +212,7 @@ impl Api {
         if let Some(token) = token {
             builder = builder.header("access_token", token);
         }
-        let request = builder.body(Full::new(moli_net::Body::new()))?;
+        let request = builder.body(Full::new(moli_net::Body::from(body.to_vec())))?;
         let (_, body) = moli_net::web(
             self.region.api,
             443,
@@ -310,6 +327,26 @@ fn base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Standard base64, padded.
+fn base64_of(bytes: &[u8]) -> String {
+    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(table[((n >> (18 - 6 * i)) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// A device's week program, from the cloud's copy of its raw DPs.
 async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
     let shadow = api
@@ -354,14 +391,19 @@ async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
     Ok(Value::Text(week.to_string().into()))
 }
 
-/// The week in a device's shadow (its raw parts in base64).
-fn shadow_week(shadow: &Json) -> Json {
-    let parts: HashMap<&str, Vec<u8>> = shadow["properties"]
+/// A device's shadow's raw parts, by code (base64 in the shadow).
+fn shadow_parts(shadow: &Json) -> HashMap<&str, Vec<u8>> {
+    shadow["properties"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|p| Some((p["code"].as_str()?, base64(p["value"].as_str()?)?)))
-        .collect();
+        .collect()
+}
+
+/// The week in a device's shadow (its raw parts in base64).
+fn shadow_week(shadow: &Json) -> Json {
+    let parts = shadow_parts(shadow);
     program::week(|day, part| parts.get(program::part_code(day, part).as_str()).cloned())
 }
 
@@ -387,6 +429,117 @@ async fn programs(
         }
     }
     Ok(())
+}
+
+/// A week program a person set (the point's words), for one device.
+#[derive(Debug)]
+pub struct ProgramWrite {
+    pub device: String,
+    pub index: usize,
+    pub week: Arc<str>,
+    pub done: tokio::sync::oneshot::Sender<Result<(), String>>,
+}
+
+/// After a write, the cloud's copy is read again this long after (the
+/// module answers in about 5 s), twice at most.
+const PROGRAM_CONFIRM: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(15)];
+
+/// Writes the programs people edit, one at a time: reads the module's parts
+/// from the cloud, sends those that change in one call, answers, then reads
+/// the program back so that Moli shows what the module took. Its own API
+/// session: the message service is never kept waiting.
+pub async fn write_programs(
+    keys: Keys,
+    region: Region,
+    mut writes: mpsc::Receiver<ProgramWrite>,
+    up: mpsc::Sender<Up>,
+) {
+    let mut api = Api {
+        keys,
+        region,
+        token: None,
+    };
+    while let Some(write) = writes.recv().await {
+        // Nobody waits any more (the hub gave up): never sent late.
+        if write.done.is_closed() {
+            continue;
+        }
+        let sent = issue_program(&mut api, &write.device, &write.week).await;
+        let wanted = match sent {
+            Ok(wanted) => {
+                let _ = write.done.send(Ok(()));
+                wanted
+            }
+            Err(e) => {
+                tracing::warn!(device = write.device, error = %e, "tuya cloud: week program not written");
+                let _ = write.done.send(Err(moli_i18n::tr!(
+                    "pilotes.tuya.programme_refuse",
+                    detail = e.to_string()
+                )));
+                continue;
+            }
+        };
+        for wait in PROGRAM_CONFIRM {
+            tokio::time::sleep(wait).await;
+            let Ok(shadow) = api
+                .call(&format!(
+                    "/v2.0/cloud/thing/{}/shadow/properties",
+                    write.device
+                ))
+                .await
+            else {
+                continue;
+            };
+            let parts = shadow_parts(&shadow);
+            let week = Value::Text(shadow_week(&shadow).to_string().into());
+            let _ = up
+                .send(Up::State(write.index, vec![(program::POINT.into(), week)]))
+                .await;
+            if wanted
+                .iter()
+                .all(|(code, bytes)| parts.get(code.as_str()) == Some(bytes))
+            {
+                tracing::info!(
+                    device = write.device,
+                    parts = wanted.len(),
+                    "tuya cloud: week program written"
+                );
+                break;
+            }
+            tracing::warn!(
+                device = write.device,
+                "tuya cloud: the module has not taken its week program yet"
+            );
+        }
+    }
+}
+
+/// Sends what changes in a device's week; the parts sent (none: nothing changes).
+async fn issue_program(
+    api: &mut Api,
+    device: &str,
+    week: &str,
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let shadow = api
+        .call(&format!("/v2.0/cloud/thing/{device}/shadow/properties"))
+        .await?;
+    let parts = shadow_parts(&shadow);
+    let wanted = program::changes(week, |day, part| {
+        parts.get(program::part_code(day, part).as_str()).cloned()
+    })?;
+    if wanted.is_empty() {
+        return Ok(wanted);
+    }
+    let properties: serde_json::Map<String, Json> = wanted
+        .iter()
+        .map(|(code, bytes)| (code.clone(), Json::String(base64_of(bytes))))
+        .collect();
+    api.post(
+        &format!("/v2.0/cloud/thing/{device}/shadow/properties/issue"),
+        &serde_json::json!({ "properties": Json::Object(properties).to_string() }),
+    )
+    .await?;
+    Ok(wanted)
 }
 
 /// Whether a status message touches a week program.
@@ -634,22 +787,7 @@ mod tests {
     }
 
     fn b64(bytes: &[u8]) -> String {
-        let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::new();
-        for chunk in bytes.chunks(3) {
-            let n = chunk
-                .iter()
-                .enumerate()
-                .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-            for i in 0..4 {
-                if i <= chunk.len() {
-                    out.push(char::from(table[((n >> (18 - 6 * i)) & 63) as usize]));
-                } else {
-                    out.push('=');
-                }
-            }
-        }
-        out
+        base64_of(bytes)
     }
 
     #[test]

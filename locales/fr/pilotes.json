@@ -263,6 +263,8 @@
   "pilotes.tuya.lecture_seule_cloud": "lecture seule : cet appareil est vu à travers le cloud Tuya",
   "pilotes.tuya.appareil_inconnu": "appareil inconnu",
   "pilotes.tuya.ne_se_regle_pas": "{point} ne peut pas être réglé",
+  "pilotes.tuya.programme_sans_cloud": "le programme s'écrit par le cloud Tuya : donnez d'abord les clés du projet cloud (Système → Cloud Tuya)",
+  "pilotes.tuya.programme_refuse": "programme non écrit : {detail}",
   "pilotes.tuya.occupe": "appareil occupé",
   "pilotes.tuya.connexion_perdue": "connexion perdue",
   "pilotes.tuya.injoignable": "{name} est injoignable",

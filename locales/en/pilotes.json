@@ -263,6 +263,8 @@
   "pilotes.tuya.lecture_seule_cloud": "read-only: this device is seen through the Tuya cloud",
   "pilotes.tuya.appareil_inconnu": "unknown device",
   "pilotes.tuya.ne_se_regle_pas": "{point} cannot be set",
+  "pilotes.tuya.programme_sans_cloud": "the program is written through the Tuya cloud: give the cloud project's keys first (System → Tuya cloud)",
+  "pilotes.tuya.programme_refuse": "program not written: {detail}",
   "pilotes.tuya.occupe": "device busy",
   "pilotes.tuya.connexion_perdue": "connection lost",
   "pilotes.tuya.injoignable": "{name} is unreachable",

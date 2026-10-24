@@ -41,6 +41,14 @@ fn order(nibble: u8) -> Option<&'static str> {
     })
 }
 
+/// An order's nibble, and the order's own name; `None` for an unknown one.
+fn nibble(name: &str) -> Option<(u8, &'static str)> {
+    (1..=5).find_map(|n| order(n).filter(|o| *o == name).map(|o| (n, o)))
+}
+
+/// Setpoints a module takes, in half degrees (5 °C to 40 °C).
+const HALVES: std::ops::RangeInclusive<u8> = 10..=80;
+
 /// Days in a week, slots in a day.
 pub const DAYS: u8 = 7;
 pub const DAY_SLOTS: usize = SLOTS * PARTS as usize;
@@ -103,6 +111,136 @@ pub fn decode_part(raw: &[u8]) -> Option<Vec<Slot>> {
             })
             .collect(),
     )
+}
+
+/// Why a week sent to the point is not taken.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum Refused {
+    #[error("not a week: {0}")]
+    Shape(String),
+    #[error("day {day}: {why}")]
+    Day { day: u8, why: String },
+    #[error("day {day} part {part}: not read from the module yet")]
+    Unread { day: u8, part: u8 },
+    #[error("day {day} part {part}: this wiring keeps no setpoints")]
+    NoSetpoints { day: u8, part: u8 },
+}
+
+/// A week sent to the point, in its own words (`{"days": [...]}`, Monday
+/// first; a run's `order` and `celsius` may be left out): each day's 96
+/// slots, `None` for a day left as it is (`null`). What a run leaves out is
+/// kept from the module.
+///
+/// # Errors
+/// Not seven days, or a day whose runs do not start at 0 and go forward,
+/// or an order or a setpoint the module does not take.
+pub fn parse_week(text: &str) -> Result<Vec<Option<Vec<Slot>>>, Refused> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| Refused::Shape(e.to_string()))?;
+    let days = json["days"]
+        .as_array()
+        .filter(|days| days.len() == usize::from(DAYS))
+        .ok_or_else(|| Refused::Shape("seven days wanted".into()))?;
+    days.iter()
+        .zip(1..=DAYS)
+        .map(|(runs, day)| {
+            if runs.is_null() {
+                return Ok(None);
+            }
+            day_slots(runs)
+                .map(Some)
+                .map_err(|why| Refused::Day { day, why })
+        })
+        .collect()
+}
+
+fn day_slots(runs: &serde_json::Value) -> Result<Vec<Slot>, String> {
+    let runs = runs.as_array().ok_or("runs wanted")?;
+    let at = |run: &serde_json::Value| run["at"].as_u64().and_then(|at| usize::try_from(at).ok());
+    let mut slots = Vec::with_capacity(DAY_SLOTS);
+    for (i, run) in runs.iter().enumerate() {
+        let start = at(run).ok_or("a run without `at`")?;
+        let end = runs.get(i + 1).map_or(Some(DAY_SLOTS), at);
+        if start != slots.len() || end.is_none_or(|end| end <= start || end > DAY_SLOTS) {
+            return Err(format!("run {i}: runs start at 0 and go forward"));
+        }
+        let order = match run["order"].as_str() {
+            Some(name) => Some(nibble(name).ok_or(format!("unknown order {name}"))?.1),
+            None => None,
+        };
+        let celsius = match run["celsius"].as_f64() {
+            Some(c) if half(c).is_some() => Some(c),
+            Some(c) => return Err(format!("setpoint {c}: 5 to 40 °C, by half degrees")),
+            None => None,
+        };
+        slots.resize(end.unwrap_or(DAY_SLOTS), Slot { order, celsius });
+    }
+    if slots.len() == DAY_SLOTS {
+        Ok(slots)
+    } else {
+        Err("no runs".into())
+    }
+}
+
+/// A setpoint in the module's half degrees, when it takes it.
+fn half(celsius: f64) -> Option<u8> {
+    HALVES
+        .into_iter()
+        .find(|h| (f64::from(*h) - celsius * 2.0).abs() < 1e-9)
+}
+
+/// A part's bytes with `slots` (24) in them, the rest as `current` keeps it
+/// (its size too); `None` when a setpoint is asked of a part that holds
+/// none (four or six orders).
+#[must_use]
+pub fn encode_part(slots: &[Slot], current: &[u8]) -> Option<Vec<u8>> {
+    if slots.len() != SLOTS
+        || (current.len() != ORDERS && current.len() != ORDERS + SLOTS)
+        || (current.len() == ORDERS && slots.iter().any(|s| s.celsius.is_some()))
+    {
+        return None;
+    }
+    let was = current[..ORDERS].iter().flat_map(|b| [b >> 4, b & 0x0F]);
+    let nibbles: Vec<u8> = slots
+        .iter()
+        .zip(was)
+        .map(|(slot, was)| slot.order.and_then(nibble).map_or(was, |(n, _)| n))
+        .collect();
+    let mut out: Vec<u8> = nibbles
+        .chunks(2)
+        .map(|pair| (pair[0] << 4) | pair[1])
+        .collect();
+    out.extend(
+        current[ORDERS..]
+            .iter()
+            .zip(slots)
+            .map(|(was, slot)| slot.celsius.and_then(half).unwrap_or(*was)),
+    );
+    Some(out)
+}
+
+/// The parts to send for `week` (the point's words), against what the
+/// module keeps (`part(day, part)`, its raw bytes): only those that change.
+///
+/// # Errors
+/// The week is not taken (`parse_week`), a part it changes was never read,
+/// or it asks setpoints of a wiring that keeps none.
+pub fn changes(
+    week: &str,
+    part: impl Fn(u8, u8) -> Option<Vec<u8>>,
+) -> Result<Vec<(String, Vec<u8>)>, Refused> {
+    let mut out = Vec::new();
+    for (slots, day) in parse_week(week)?.into_iter().zip(1..=DAYS) {
+        let Some(slots) = slots else { continue };
+        for (p, wanted) in (1..=PARTS).zip(slots.chunks(SLOTS)) {
+            let current = part(day, p).ok_or(Refused::Unread { day, part: p })?;
+            let new = encode_part(wanted, &current).ok_or(Refused::NoSetpoints { day, part: p })?;
+            if new != current {
+                out.push((part_code(day, p), new));
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -231,6 +369,137 @@ mod tests {
         assert_eq!(
             unknown[0].order, None,
             "an order it does not know stays unnamed"
+        );
+    }
+
+    /// A week of seven days, `day` given, the others left as they are.
+    fn only(day: usize, runs: &serde_json::Value) -> String {
+        let mut days = vec![serde_json::Value::Null; 7];
+        days[day] = runs.clone();
+        serde_json::json!({ "days": days }).to_string()
+    }
+
+    #[test]
+    fn monday_night_in_eco_is_what_the_module_took() {
+        // Six orders, comfort all Monday; eco from 0 h to 3 h, as the real
+        // module took it through the cloud (and gave it back).
+        let comfort = hex("11 11 11 11 11 11 11 11 11 11 11 11");
+        let week = only(
+            0,
+            &serde_json::json!([{ "at": 0, "order": "eco" }, { "at": 12, "order": "comfort" }]),
+        );
+        let sent = changes(&week, |_, _| Some(comfort.clone())).unwrap();
+        assert_eq!(
+            sent,
+            vec![(
+                "week_program_18_1_1".to_owned(),
+                hex("55 55 55 55 55 55 11 11 11 11 11 11")
+            )],
+            "only the part that changes leaves"
+        );
+    }
+
+    #[test]
+    fn a_part_reads_back_as_it_was_written() {
+        for raw in [
+            "33 33 33 22 33 44 55 33 33 33 33 33",
+            "11 11 11 11 11 11 11 11 11 11 11 11 \
+             22 22 22 22 22 22 1f 1f 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22",
+        ] {
+            let raw = hex(raw);
+            let slots = decode_part(&raw).unwrap();
+            assert_eq!(encode_part(&slots, &raw).unwrap(), raw);
+        }
+    }
+
+    #[test]
+    fn a_switch_morning_at_19_5_keeps_its_orders() {
+        // Switch wiring, 17 °C all along; 19.5 °C from 6:00 to 8:00 (the
+        // second part, 6 h - 12 h: its first eight slots).
+        let plain = hex("11 11 11 11 11 11 11 11 11 11 11 11 \
+             22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22");
+        let week = only(
+            2,
+            &serde_json::json!([
+                { "at": 0, "celsius": 17.0 },
+                { "at": 24, "celsius": 19.5 },
+                { "at": 32, "celsius": 17.0 },
+            ]),
+        );
+        let sent = changes(&week, |_, _| Some(plain.clone())).unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "week_program_18_3_2");
+        assert_eq!(
+            sent[0].1,
+            hex("11 11 11 11 11 11 11 11 11 11 11 11 \
+                 27 27 27 27 27 27 27 27 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22 22")
+        );
+    }
+
+    #[test]
+    fn a_week_it_cannot_hold_is_refused() {
+        let six = hex("11 11 11 11 11 11 11 11 11 11 11 11");
+        let part = |_, _| Some(six.clone());
+        let day = |runs: serde_json::Value| changes(&only(0, &runs), part);
+        assert!(
+            matches!(
+                day(serde_json::json!([{ "at": 0, "celsius": 19.0 }])),
+                Err(Refused::NoSetpoints { day: 1, part: 1 })
+            ),
+            "no setpoints on six orders"
+        );
+        assert!(
+            matches!(
+                day(serde_json::json!([{ "at": 4, "order": "eco" }])),
+                Err(Refused::Day { day: 1, .. })
+            ),
+            "from midnight"
+        );
+        assert!(
+            matches!(
+                day(
+                    serde_json::json!([{ "at": 0, "order": "eco" }, { "at": 0, "order": "comfort" }])
+                ),
+                Err(Refused::Day { .. })
+            ),
+            "forward only"
+        );
+        assert!(matches!(
+            day(serde_json::json!([{ "at": 0, "order": "turbo" }])),
+            Err(Refused::Day { .. })
+        ));
+        assert!(
+            matches!(
+                changes(
+                    &only(0, &serde_json::json!([{ "at": 0, "celsius": 19.2 }])),
+                    |_, _| None
+                ),
+                Err(Refused::Day { .. })
+            ),
+            "half degrees only"
+        );
+        assert!(matches!(
+            changes(r#"{"days": [null]}"#, part),
+            Err(Refused::Shape(_))
+        ));
+        assert!(
+            matches!(
+                day(serde_json::json!([{ "at": 0, "order": "eco" }])).and(changes(
+                    &only(0, &serde_json::json!([{ "at": 0, "order": "eco" }])),
+                    |_, _| None
+                )),
+                Err(Refused::Unread { day: 1, part: 1 })
+            ),
+            "a part never read is not guessed"
+        );
+        assert_eq!(
+            changes(
+                &only(0, &serde_json::json!([{ "at": 0, "order": "comfort" }])),
+                part
+            )
+            .unwrap(),
+            Vec::new(),
+            "nothing changes, nothing leaves"
         );
     }
 }

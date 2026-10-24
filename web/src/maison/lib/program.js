@@ -39,3 +39,36 @@ export const nowIn = (date) => ({ day: (date.getDay() + 6) % 7, slot: date.getHo
 
 /** A day's short or long name in the house's language (2024-01-01 was a Monday). */
 export const dayName = (i, locale, weekday = 'short') => new Date(2024, 0, 1 + i).toLocaleDateString(locale, { weekday });
+
+/** A day's 96 quarters of an hour from its runs (its raw orders and
+ *  setpoints), or null when it does not cover the day. */
+export function slotsOf(runs) {
+  const out = [];
+  (runs ?? []).forEach((run, i) => {
+    const end = runs[i + 1]?.at ?? SLOTS;
+    for (let s = run.at; s < end; s++) out.push({ order: run.order ?? null, celsius: run.celsius ?? null });
+  });
+  return out.length === SLOTS ? out : null;
+}
+
+/** A day's runs again from its quarters, a new run wherever the order or
+ *  the setpoint changes (as the point gives them). */
+export function runsOf(slots) {
+  const runs = [];
+  slots.forEach((s, at) => {
+    const last = runs.at(-1);
+    if (!last || last.order !== s.order || last.celsius !== s.celsius) runs.push({ at, order: s.order, celsius: s.celsius });
+  });
+  return runs;
+}
+
+/** The same, in the words a module is sent: only what its wiring sets (an
+ *  order on four or six orders, a setpoint on switch), the rest kept. */
+export function sentRuns(slots, wiring) {
+  const key = wiring === 'switch' ? 'celsius' : 'order';
+  const runs = [];
+  slots.forEach((s, at) => {
+    if (!runs.length || runs.at(-1)[key] !== s[key]) runs.push({ at, [key]: s[key] });
+  });
+  return runs;
+}
