@@ -194,6 +194,8 @@
   const here = $derived(typeof temp === 'number' ? at(temp) : null);
 </script>
 
+<!-- Its own width decides the layout: side by side, or stacked when narrow (a phone, a column). -->
+<div class="frame">
 <div class="clim" class:on data-tone={m.tone} class:unreachable={!reachable(id)}>
   <div
     class="dial"
@@ -294,6 +296,7 @@
     {/if}
   </div>
 </div>
+</div>
 
 <style>
   .costs {
@@ -323,12 +326,29 @@
     color: var(--ink-3);
   }
 
+  .frame {
+    container-type: inline-size;
+  }
+
   .clim {
     display: grid;
-    grid-template-columns: 148px 1fr;
+    grid-template-columns: 148px minmax(0, 1fr);
     align-items: center;
     gap: 14px;
     padding: 6px 4px;
+  }
+
+  /* Narrow: the dial above, the rest below, full width. */
+  @container (max-width: 420px) {
+    .clim {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+    }
+
+    .facts {
+      justify-items: center;
+      width: 100%;
+    }
   }
 
   .dial {
@@ -441,6 +461,7 @@
     display: grid;
     gap: 8px;
     justify-items: start;
+    min-width: 0;
   }
 
   h3 {

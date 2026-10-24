@@ -592,9 +592,19 @@
     cursor: pointer;
   }
 
+  /* A long name gives way, the temperature and the state stay. */
   .clim b {
     flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-weight: 650;
+  }
+
+  .clim .num,
+  .clim .state {
+    flex: none;
   }
 
   .clim .state {
@@ -611,6 +621,12 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+
+  /* A chip wider than the card wraps instead of spilling out. */
+  .chips :global(.chip) {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .chips a {
