@@ -4,7 +4,8 @@
   // (its glyph, as on the card's buttons) or their setpoint, and a day's runs
   // written out. The cog edits it: a brush painted along a day, a precise
   // range, a day copied to others, the week sent to other heaters of the
-  // same wiring too; nothing leaves before « Save ».
+  // same wiring too; the range and the brush are chosen in either order;
+  // nothing leaves before « Save ».
   import { onMount } from 'svelte';
   import { value, num, act, hub, nameOf } from '../lib/home.svelte.js';
   import { parseWeek, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns } from '../lib/program.js';
@@ -81,17 +82,35 @@
   }
   function stop() {
     draft = null;
+    range = null;
     status = null;
     targets = [];
     alsoTo = [];
   }
 
   // The brush: an order (four or six) or a setpoint (switch), 5 to 30 °C.
+  // Changed with a range chosen, it paints that range again.
   let order = $state('comfort');
   let celsius = $state(19);
   const brushLabel = $derived(bySetpoint ? `${deg(celsius)} °C` : modeLabel(order));
   const paintWith = (s) => (bySetpoint ? { ...s, celsius } : { ...s, order });
-  const nudge = (delta) => (celsius = Math.min(30, Math.max(5, celsius + delta)));
+  const pickOrder = (key) => ((order = key), paint());
+  const pickCelsius = (c) => ((celsius = c), paint());
+  const nudge = (delta) => pickCelsius(Math.min(30, Math.max(5, celsius + delta)));
+
+  // The range chosen on a day, `hi` the quarter after it: drawn along the
+  // day or typed in « A precise range », which always says it.
+  let range = $state(null);
+  function choose(day, lo, hi) {
+    range = { day, lo, hi };
+    from = hhmm(lo);
+    to = hhmm(hi % SLOTS);
+  }
+  function paint() {
+    if (!range || !draft?.[range.day]) return;
+    const { day, lo, hi } = range;
+    draft[day] = draft[day].map((s, i) => (i >= lo && i < hi ? paintWith(s) : s));
+  }
 
   // A stroke along a day: from where the finger went down to where it is,
   // painted over the day as it was (going back unpaints).
@@ -117,30 +136,35 @@
     const { day, from, to, base } = stroke;
     const lo = Math.min(from, to);
     const hi = Math.max(from, to);
+    choose(day, lo, hi + 1);
     draft[day] = base.map((s, i) => (i >= lo && i <= hi ? paintWith(s) : s));
   }
-  const strokeText = $derived(
-    stroke
-      ? t('commun.programme.trait', {
-          day: dayName(stroke.day, locale()),
-          from: hhmm(Math.min(stroke.from, stroke.to)),
-          to: hhmm(Math.max(stroke.from, stroke.to) + 1),
-          what: brushLabel,
-        })
+  const rangeText = $derived(
+    range
+      ? t('commun.programme.trait', { day: dayName(range.day, locale()), from: hhmm(range.lo), to: hhmm(range.hi), what: brushLabel })
       : null,
   );
 
-  // A precise range on the day shown (an end at or before the start: midnight).
+  // A precise range on the day shown (an end at or before the start:
+  // midnight): typed, it becomes the range chosen; applied, it is painted.
   let from = $state('06:00');
   let to = $state('08:00');
   const quarter = (text) => {
     const [h, m] = (text || '0:0').split(':').map(Number);
     return h * 4 + Math.floor(m / 15);
   };
-  function applyRange() {
+  function typed() {
     const a = quarter(from);
-    const b = quarter(to) > a ? quarter(to) : SLOTS;
-    if (draft?.[shown]) draft[shown] = draft[shown].map((s, i) => (i >= a && i < b ? paintWith(s) : s));
+    range = { day: shown, lo: a, hi: quarter(to) > a ? quarter(to) : SLOTS };
+  }
+  function applyRange() {
+    typed();
+    paint();
+  }
+  // Another day picked: its range is to choose.
+  function pickDay(day) {
+    picked = day;
+    if (range?.day !== day) range = null;
   }
 
   // The day shown, copied to others.
@@ -219,6 +243,11 @@
     if (editing) stop();
     else dialog.close();
   }
+  // « Done », nothing left to save: back to the card.
+  function finish() {
+    stop();
+    dialog.close();
+  }
 </script>
 
 <dialog
@@ -263,13 +292,13 @@
           <b class="num swatch-text {warmth(celsius)}">{deg(celsius)} °C</b>
           <button onclick={() => nudge(0.5)} aria-label={t('commun.clim.plus_chaud')}>+</button>
           {#each setpoints as c (c)}
-            <button class="chip-temp" class:active={c === celsius} onclick={() => (celsius = c)}>{deg(c)}°</button>
+            <button class="chip-temp" class:active={c === celsius} onclick={() => pickCelsius(c)}>{deg(c)}°</button>
           {/each}
         </div>
       {:else}
         <div class="brushes" role="radiogroup" aria-label={t('commun.programme.pinceau')}>
           {#each ORDERS[wiring] ?? [] as key (key)}
-            <button class="brush" class:active={order === key} role="radio" aria-checked={order === key} onclick={() => (order = key)}>
+            <button class="brush" class:active={order === key} role="radio" aria-checked={order === key} onclick={() => pickOrder(key)}>
               <i class="swatch {key}">
                 {#if modes[key]?.text}<span class="num">{modes[key].text}</span>{:else}<Icon name={modes[key]?.icon ?? 'tune'} size={13} />{/if}
               </i>
@@ -278,7 +307,7 @@
           {/each}
         </div>
       {/if}
-      <p class="stroke num" aria-live="polite">{strokeText ?? ' '}</p>
+      <p class="stroke num" aria-live="polite">{rangeText ?? ' '}</p>
     </section>
   {:else if current}
     <p class="now">
@@ -324,6 +353,7 @@
       </i>
     {/each}
     {#if day === today}<b class="here" style="left:{(slot / SLOTS) * 100}%"></b>{/if}
+    {#if editing && range?.day === day}<b class="chosen" style="left:{(range.lo / SLOTS) * 100}%;width:{((range.hi - range.lo) / SLOTS) * 100}%"></b>{/if}
   {/snippet}
   {#snippet dayLabel(day)}
     <span class="day" class:today={day === today}><span class="long">{dayName(day, locale(), 'long')}</span><span class="short">{dayName(day, locale())}</span></span>
@@ -334,7 +364,7 @@
       {#each week as runs, day (day)}
         {#if editing}
           <div class="row" class:picked={day === shown} class:changed={changed[day]}>
-            <button class="pick" onclick={() => (picked = day)} aria-pressed={day === shown}>{@render dayLabel(day)}</button>
+            <button class="pick" onclick={() => pickDay(day)} aria-pressed={day === shown}>{@render dayLabel(day)}</button>
             <span
               class="bar paint"
               role="button"
@@ -384,8 +414,8 @@
       <section class="block">
         <h4>{t('commun.programme.plage')}</h4>
         <div class="range">
-          <label>{t('commun.programme.de')} <input type="time" step="900" bind:value={from} /></label>
-          <label>{t('commun.programme.a')} <input type="time" step="900" bind:value={to} /></label>
+          <label>{t('commun.programme.de')} <input type="time" step="900" bind:value={from} onchange={typed} /></label>
+          <label>{t('commun.programme.a')} <input type="time" step="900" bind:value={to} onchange={typed} /></label>
           <button class="soft" onclick={applyRange}>{t('commun.programme.appliquer', { what: brushLabel })}</button>
         </div>
       </section>
@@ -428,7 +458,7 @@
             <Icon name={status.state === 'waiting' ? 'timer' : status.state === 'late' ? 'warning' : 'ok'} size={18} />{statusText}
           {/if}
         </p>
-        <button class="soft" onclick={stop}>{t(dirty ? 'commun.annuler' : 'commun.programme.terminer')}</button>
+        <button class="soft" onclick={dirty ? stop : finish}>{t(dirty ? 'commun.annuler' : 'commun.programme.terminer')}</button>
         <button class="primary" disabled={busy || !dirty} onclick={save}>
           {busy ? t('commun.programme.envoi') : t('commun.programme.enregistrer')}
         </button>
@@ -666,6 +696,17 @@
     background: var(--ink);
     box-shadow: 0 0 0 1px var(--surface);
     transform: translateX(-50%);
+  }
+
+  /* The range chosen, while editing. */
+  .chosen {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border: 2px dashed var(--ink);
+    border-radius: 6px;
+    background: rgb(255 255 255 / 18%);
+    pointer-events: none;
   }
 
   .ticks {

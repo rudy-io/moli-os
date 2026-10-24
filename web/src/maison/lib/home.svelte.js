@@ -230,6 +230,29 @@ export function deviceKind(d) {
   return 'sensor';
 }
 
+/** A climate device's icon: a pellet stove (it measures its flue), a
+ *  heater (a pilot wire, or a week program of its own), else a clim. */
+export function climateIcon(d) {
+  if (has(d, 'flue_temperature')) return 'stove';
+  if (has(d, 'device_mode_type') || has(d, 'week_program')) return 'radiator';
+  return 'air-conditioner';
+}
+
+// On switch wiring, frost guard, eco and holiday hold the module's own
+// setpoints (set in Tuya), not one chosen here.
+const PRESETS = { hors: 'hors_temp_set', eco: 'eco_temp_set', holiday: 'holiday_temp_set' };
+/** The point holding the setpoint a heater's mode imposes, if any. */
+export function presetOf(id) {
+  const point = PRESETS[value(id, 'mode')];
+  return point && value(id, 'device_mode_type') === 'switch' && typeof value(id, point) === 'number' ? point : null;
+}
+/** The setpoint shown: none on four or six orders (no setpoint of their
+ *  own), a mode's preset, or the unit's. */
+export function setpointOf(id) {
+  if (['four', 'six'].includes(value(id, 'device_mode_type'))) return null;
+  return value(id, presetOf(id) ?? 'target_temperature');
+}
+
 /** Rooms with their devices sorted by kind, the layout's order first. */
 export function roomList() {
   const defs = home.config?.rooms ?? [];

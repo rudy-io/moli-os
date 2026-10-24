@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -274,11 +274,12 @@
 
   {#each room.climates as d (d.id)}
     {@const on = isOn(d.id)}
+    {@const setpoint = setpointOf(d.id)}
     <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
-      <Icon name="air-conditioner" size={18} />
+      <Icon name={climateIcon(d)} size={18} />
       <b>{nameOf(d.id)}</b>
       <!-- A pilot wire on four or six orders has no setpoint of its own. -->
-      <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if !['four', 'six'].includes(value(d.id, 'device_mode_type'))} → {num(value(d.id, 'target_temperature'), 1)}°{/if}</span>
+      <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
       <span class="state">{on ? (MODES[value(d.id, 'mode')] ? t(MODES[value(d.id, 'mode')]) : t('commun.piece.en_marche')) : t('commun.piece.eteinte')}</span>
     </button>
     {#if openClim === d.id}

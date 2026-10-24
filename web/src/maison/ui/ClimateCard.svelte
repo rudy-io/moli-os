@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { device, value, reachable, num, act } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, presetOf, climateIcon } from '../lib/home.svelte.js';
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -33,7 +33,10 @@
   });
   const setWiring = (key) =>
     act(`${id}/device_mode_type`, key, t('commun.action', { label: name, action: t(WIRING[key].label).toLowerCase() }));
-  const target = $derived(wiring?.setpoint === false ? null : value(id, 'target_temperature'));
+  // Frost guard, eco or holiday on switch wiring: the module's own
+  // setpoint for that mode, shown, never chosen here.
+  const preset = $derived(presetOf(id));
+  const target = $derived(wiring?.setpoint === false ? null : value(id, preset ?? 'target_temperature'));
   const mode = $derived(value(id, 'mode'));
   const outdoor = $derived(value(id, 'outdoor_temperature'));
 
@@ -53,7 +56,7 @@
   const monthCost = $derived(costOf('month'));
   // The circuit feeds something else too (« PAC salon + pompe piscine »).
   const shared = $derived(!!feeder && (feeder.feeds.length > 1 || feeder.name.includes('+')));
-  const writable = $derived(wiring?.setpoint !== false && d?.points.some((p) => p.key === 'target_temperature' && p.access?.write));
+  const writable = $derived(wiring?.setpoint !== false && !preset && d?.points.some((p) => p.key === 'target_temperature' && p.access?.write));
   // Switched or set to a mode, even without a setpoint (a pilot wire on four orders).
   const controllable = $derived(writable || d?.points.some((p) => ['on', 'mode'].includes(p.key) && p.access?.write));
   const STEP = 0.5;
@@ -190,7 +193,7 @@
     if (!declared?.length) return AIR_CONDITIONER;
     return [...Object.keys(MODES).filter((key) => declared.includes(key)), ...declared.filter((key) => !MODES[key])];
   });
-  const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: 'air-conditioner', tone: 'good' });
+  const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: climateIcon(d), tone: 'good' });
 
   // A 270° ring: the target as a bead, the room temperature in the middle.
   const R = 62;
@@ -272,6 +275,8 @@
           <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
           <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
         </div>
+      {:else if on && preset && typeof target === 'number'}
+        <p class="muted">{t('commun.clim.consigne_mode', { temp: num(target, target % 1 ? 1 : 0), mode: m.label.toLowerCase() })}</p>
       {/if}
       {#if on || switched}
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
