@@ -4,11 +4,18 @@
 //! open, and where it is heading; the indoor climate sensor (NXS) reads its
 //! room (temperature in tenths of a degree, humidity, CO₂, light, air
 //! quality); the departure switch (NXD) only has a battery.
+//!
+//! Orders go to `syncapi/v1/setstate`, as the app sends them: a blind or a
+//! shutter takes a position (or -1: stop) as it is; a roof window's position
+//! is signed ([`crate::sign`]), and a window is stopped by the gateway
+//! (`stop_movements`), which stops everything moving.
 
 use std::sync::Arc;
 
 use moli_core::{Access, Kind, PointSpec, Semantic, Unit, Value};
-use serde_json::Value as Json;
+use serde_json::{Value as Json, json};
+
+use crate::sign::Signer;
 
 /// What a module is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,14 +37,28 @@ pub struct Module {
     room_id: Option<String>,
     /// `velux_type` (`window`, `blind`, `shutter`…), else the module type.
     pub model: String,
+    /// The gateway it is reached through.
+    pub bridge: Option<String>,
 }
 
 /// The modules of a home, as `homesdata` lists them.
 #[derive(Clone, Debug)]
 pub struct Home {
     pub id: String,
+    pub timezone: String,
     pub modules: Vec<Module>,
 }
+
+/// Where an order sends a window or a blind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// 0 closed to 100 open.
+    Position(i64),
+    Stop,
+}
+
+/// The position the cloud reads as « stop ».
+const STOP: i64 = -1;
 
 impl Home {
     /// The home of one `homesdata` entry, with the modules Moli knows.
@@ -73,12 +94,24 @@ impl Home {
                     room: room_id.as_deref().and_then(room_name),
                     room_id,
                     model: velux.unwrap_or(kind).to_owned(),
+                    bridge: m["bridge"].as_str().map(str::to_owned),
                 })
             })
             .collect();
         Some(Self {
             id: home["id"].as_str()?.to_owned(),
+            timezone: home["timezone"].as_str().unwrap_or("UTC").to_owned(),
             modules,
+        })
+    }
+
+    /// The whole `setstate` body for these module orders, as the app sends it.
+    #[must_use]
+    pub fn setstate(&self, modules: &[Json]) -> Json {
+        json!({
+            "app_type": "app_velux",
+            "app_version": crate::cloud::APP_VERSION,
+            "home": { "id": self.id, "timezone": self.timezone, "modules": modules },
         })
     }
 }
@@ -152,9 +185,21 @@ const MEASURES: [Measure; 5] = [
 ];
 
 impl Module {
-    /// The points this module shows, from what its first state carries.
+    /// Whether Moli can move it: a blind always, a window with the
+    /// gateway's key (`signed`).
     #[must_use]
-    pub fn points(&self, status: &Json) -> Vec<PointSpec> {
+    pub fn movable(&self, signed: bool) -> bool {
+        match self.role {
+            Role::Cover => true,
+            Role::Window => signed,
+            _ => false,
+        }
+    }
+
+    /// The points this module shows, from what its first state carries;
+    /// `signed`: the gateway's key is known (windows can be moved).
+    #[must_use]
+    pub fn points(&self, status: &Json, signed: bool) -> Vec<PointSpec> {
         let own = state(status, &self.id);
         let has = |key: &str| own.is_some_and(|s| !s[key].is_null());
         let mut out = Vec::new();
@@ -176,7 +221,15 @@ impl Module {
                 ));
             }
             Role::Window | Role::Cover => {
-                out.push(spec(
+                let write = self.movable(signed);
+                // Opening a roof window lets the rain and anyone in: an agent
+                // asks a person first, as for a machine.
+                let semantic = if self.role == Role::Window {
+                    Semantic::Control
+                } else {
+                    Semantic::Other
+                };
+                let mut position = spec(
                     "percent_control",
                     "pilotes.velux.ouverture",
                     Kind::Numeric {
@@ -185,8 +238,26 @@ impl Module {
                         step: Some(1.0),
                     },
                     Some(Unit::Percent),
-                    Semantic::Other,
-                ));
+                    semantic,
+                );
+                position.access.write = write;
+                out.push(position);
+                if write {
+                    let mut control = spec(
+                        "control",
+                        "pilotes.velux.commande",
+                        Kind::Enum {
+                            values: ["open", "stop", "close"].map(Arc::from).to_vec(),
+                        },
+                        None,
+                        semantic,
+                    );
+                    control.access = Access {
+                        read: false,
+                        write: true,
+                    };
+                    out.push(control);
+                }
                 out.push(spec(
                     "moving",
                     "pilotes.velux.en_mouvement",
@@ -276,6 +347,67 @@ impl Module {
         // The gateway's own state has no `reachable`: there, it answers.
         let answers = own["reachable"].as_bool().unwrap_or(true);
         Some((answers, out))
+    }
+}
+
+impl Module {
+    /// Where a command on `key` sends this module.
+    pub fn target(&self, key: &str, value: &Value) -> Result<Target, String> {
+        match (key, value) {
+            ("percent_control", v) => v
+                .as_f64()
+                .filter(|p| (0.0..=100.0).contains(p))
+                .map(|p| {
+                    #[allow(clippy::cast_possible_truncation)]
+                    Target::Position(p.round() as i64)
+                })
+                .ok_or_else(|| moli_i18n::tr("pilotes.velux.position_invalide")),
+            ("control", Value::Text(t)) => match &**t {
+                "open" => Ok(Target::Position(100)),
+                "close" => Ok(Target::Position(0)),
+                "stop" => Ok(Target::Stop),
+                _ => Err(moli_i18n::tr("pilotes.velux.position_invalide")),
+            },
+            _ => Err(moli_i18n::tr("pilotes.velux.lecture_seule")),
+        }
+    }
+
+    /// The `setstate` module entry for `target`: the module itself, or the
+    /// gateway for a window to stop. A window's position is signed (`signer`
+    /// at `now`, seconds since 1970); without a signer it is refused.
+    pub fn order(
+        &self,
+        target: Target,
+        signer: Option<&mut Signer>,
+        now: u64,
+    ) -> Result<Json, String> {
+        let bridge = self
+            .bridge
+            .as_deref()
+            .ok_or_else(|| moli_i18n::tr("pilotes.velux.sans_passerelle"))?;
+        match (self.role, target) {
+            (Role::Cover, Target::Position(p)) => {
+                Ok(json!({ "id": self.id, "bridge": bridge, "target_position": p }))
+            }
+            (Role::Cover, Target::Stop) => {
+                Ok(json!({ "id": self.id, "bridge": bridge, "target_position": STOP }))
+            }
+            (Role::Window, Target::Stop) => Ok(json!({ "id": bridge, "stop_movements": "all" })),
+            (Role::Window, Target::Position(p)) => {
+                let signer = signer.ok_or_else(|| moli_i18n::tr("pilotes.velux.sans_cle"))?;
+                let stamp = signer.sign(&self.id, p, now);
+                Ok(json!({
+                    "id": self.id,
+                    "bridge": bridge,
+                    "target_position": p,
+                    "timestamp": stamp.timestamp,
+                    "nonce": stamp.nonce,
+                    "sign_key_id": signer.id,
+                    "hash_target_position": stamp.hash,
+                }))
+            }
+            _ => Err(moli_i18n::tr("pilotes.velux.lecture_seule")),
+        }
     }
 }
 
@@ -396,7 +528,7 @@ mod tests {
             .find(|m| m.role == Role::Sensor)
             .unwrap();
         let keys: Vec<_> = sensor
-            .points(&status)
+            .points(&status, false)
             .iter()
             .map(|p| p.key.to_string())
             .collect();
@@ -438,16 +570,127 @@ mod tests {
         );
     }
 
+    fn writable(m: &Module, status: &Json, signed: bool) -> Vec<String> {
+        m.points(status, signed)
+            .iter()
+            .filter(|p| p.access.write)
+            .map(|p| p.key.to_string())
+            .collect()
+    }
+
     #[test]
-    fn nothing_is_writable_yet() {
+    fn blinds_move_and_windows_need_the_key() {
         let (home, status) = kix300();
         for m in &home.modules {
-            assert!(
-                m.points(&status).iter().all(|p| !p.access.write),
-                "{}",
-                m.name
-            );
+            let (without, with) = (writable(m, &status, false), writable(m, &status, true));
+            match m.role {
+                Role::Cover => {
+                    assert_eq!(without, ["percent_control", "control"], "{}", m.name);
+                    assert_eq!(with, without);
+                }
+                Role::Window => {
+                    assert!(without.is_empty(), "{}", m.name);
+                    assert_eq!(with, ["percent_control", "control"], "{}", m.name);
+                }
+                _ => assert!(with.is_empty(), "{}", m.name),
+            }
         }
+    }
+
+    #[test]
+    fn a_window_is_a_machine_for_agents_a_blind_is_not() {
+        let (home, status) = kix300();
+        let semantic = |name: &str| {
+            module(&home, name)
+                .points(&status, true)
+                .into_iter()
+                .find(|p| &*p.key == "control")
+                .unwrap()
+                .semantic
+        };
+        assert_eq!(semantic("Salon"), Semantic::Control);
+        assert_eq!(semantic("Store Salon"), Semantic::Other);
+    }
+
+    #[test]
+    fn commands_become_targets() {
+        let (home, _) = kix300();
+        let blind = module(&home, "Store grenier");
+        let text = |t: &str| Value::Text(t.into());
+        assert_eq!(
+            blind.target("control", &text("open")),
+            Ok(Target::Position(100))
+        );
+        assert_eq!(
+            blind.target("control", &text("close")),
+            Ok(Target::Position(0))
+        );
+        assert_eq!(blind.target("control", &text("stop")), Ok(Target::Stop));
+        assert_eq!(
+            blind.target("percent_control", &Value::Float(42.4)),
+            Ok(Target::Position(42))
+        );
+        assert!(
+            blind
+                .target("percent_control", &Value::Float(120.0))
+                .is_err()
+        );
+        assert!(blind.target("control", &text("up")).is_err());
+        assert!(blind.target("moving", &Value::Bool(true)).is_err());
+    }
+
+    #[test]
+    fn a_blind_order_is_the_apps() {
+        let (home, _) = kix300();
+        let blind = module(&home, "Store grenier");
+        let one = blind.order(Target::Position(30), None, 0).unwrap();
+        assert_eq!(
+            home.setstate(&[one]),
+            json!({
+                "app_type": "app_velux",
+                "app_version": "791302006",
+                "home": {
+                    "id": "0123456789abcdef01234567",
+                    "timezone": "Europe/Paris",
+                    "modules": [
+                        { "id": blind.id, "bridge": "aa:bb:cc:dd:ee:01", "target_position": 30 }
+                    ],
+                },
+            })
+        );
+        let stop = blind.order(Target::Stop, None, 0).unwrap();
+        assert_eq!(stop["target_position"], -1);
+    }
+
+    #[test]
+    fn a_window_order_is_signed_and_its_stop_goes_to_the_gateway() {
+        let (home, _) = kix300();
+        let window = module(&home, "Mezzanine - Gauche");
+        assert!(
+            window.order(Target::Position(100), None, 0).is_err(),
+            "no key"
+        );
+        let mut signer =
+            Signer::new("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "key-id").unwrap();
+        let open = window
+            .order(Target::Position(100), Some(&mut signer), 1_700_000_000)
+            .unwrap();
+        assert_eq!(
+            open,
+            json!({
+                "id": "aa:bb:cc:dd:ee:04",
+                "bridge": "aa:bb:cc:dd:ee:01",
+                "target_position": 100,
+                "timestamp": 1_700_000_000,
+                "nonce": 0,
+                "sign_key_id": "key-id",
+                "hash_target_position": "jz-e9vYUwvJcmH6GrXdmSSaUwzDNOfKaq2w1X-92RZrAE65KaATH3UFo3d-qJbhaW7yR8_ESTmR-6TbmvmrchQ==",
+            })
+        );
+        assert_eq!(
+            window.order(Target::Stop, None, 0).unwrap(),
+            json!({ "id": "aa:bb:cc:dd:ee:01", "stop_movements": "all" })
+        );
     }
 
     #[test]
@@ -456,14 +699,14 @@ mod tests {
         let mains = module(&home, "Mezzanine Droite");
         assert!(
             mains
-                .points(&status)
+                .points(&status, false)
                 .iter()
                 .all(|p| &*p.key != "battery_low")
         );
         let solar = module(&home, "Salon");
         assert!(
             solar
-                .points(&status)
+                .points(&status, false)
                 .iter()
                 .any(|p| &*p.key == "battery_low")
         );

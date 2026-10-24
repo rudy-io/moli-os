@@ -4,7 +4,8 @@ name = "VELUX ACTIVE with NETATMO (KIX 300)"
 # Roof windows, blinds and shutters on a KIX 300 gateway, and its sensors.
 brands = ["VELUX", "Netatmo"]
 models = ["KIX 300"]
-# Internet: the cloud of the VELUX ACTIVE app (a Netatmo server), forms in, JSON out, over HTTPS.
+# Internet: the cloud of the VELUX ACTIVE app (a Netatmo server), forms or JSON in, JSON out, over HTTPS.
+# The windows' key comes once from the gateway itself, on the home network (TCP 25050).
 transport = "https"
 driver = "velux"
 crate = "moli-velux"
@@ -15,13 +16,14 @@ ssdp = []
 ports = []
 
 [needs]
-# The VELUX ACTIVE account, filed in the vault by the person.
-secrets = ["email", "password"]
+# The VELUX ACTIVE account, filed in the vault by the person; the gateway's
+# key for the roof windows (optional: blinds obey without it).
+secrets = ["email", "password", "hash_sign_key", "sign_key_id"]
 vars = []
 options = ["host", "every"]
 
 [origin]
-reused = "aucun code repris : connexion et lectures du cloud VELUX ACTIVE (api/homesdata, api/homestatus) telles que les décrivent ha-velux-active (IngmarStein, Apache-2.0 ; Niek, MIT), vérifiées par une sonde contre une installation réelle"
+reused = "aucun code repris : connexion, lectures (api/homesdata, api/homestatus) et ordres (syncapi/v1/setstate, signature des fenêtres) du cloud VELUX ACTIVE tels que les décrivent ha-velux-active (IngmarStein, Apache-2.0 ; Niek, MIT), vérifiés par des sondes contre une installation réelle"
 author = "agent"
 
 # Replayed by the crate's tests (crates/moli-velux/src/model.rs): a real

@@ -20,7 +20,7 @@ Mesures sur une installation réelle, à côté de son Home Assistant (détail d
 Ce qui marche aujourd'hui :
 - 24 intégrations : Zigbee (Zigbee2MQTT), Hue, Tuya (local et cloud), Reolink, Sonos (et ses
   annonces vocales), télé Philips, Frigate, Bambu (et son AMS), Klipper, Tapo, box UPnP,
-  imprimante IPP, VELUX ACTIVE (fenêtres de toit et stores, en lecture), l'hôte et les ordinateurs, la présence par Wi-Fi, les aides de la maison,
+  imprimante IPP, VELUX ACTIVE (fenêtres de toit et stores), l'hôte et les ordinateurs, la présence par Wi-Fi, les aides de la maison,
   **Telegram** (votre bot, sans relais), les **téléphones** (appli Moli), et des profils
   déclaratifs (Daikin, Meross, Open-Meteo, Tempo, iopool) ;
 - la garde (pièces protégées, heures calmes), l'historique et l'énergie ;

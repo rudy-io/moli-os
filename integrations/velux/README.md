@@ -18,8 +18,17 @@
   relisent avec leur nouvelle position.
 - Fixture : `homesdata` et `homestatus` de cette installation, identifiants inventés, noms de
   pièces changés, sans adresse ni programme.
-- Pas encore fait : les ordres. Stores et volets : `POST /syncapi/v1/setstate` avec
-  `target_position`. Fenêtres de toit : le même ordre signé (HMAC-SHA512 avec une clé que la
-  passerelle donne une fois, après un appui sur son bouton), selon Niek/ha-velux-active.
+- Ordres (`POST /syncapi/v1/setstate`, JSON, comme l'application) : un store avec
+  `target_position` (−1 = arrêt) ; une fenêtre avec le même ordre signé (HMAC-SHA512, clé que la
+  passerelle donne une fois après un appui sur son bouton), sans `force` ; l'arrêt d'une fenêtre
+  passe par la passerelle (`stop_movements`). Format et signature selon Niek/ha-velux-active ;
+  vérifiés par deux sondes : store de 0 à 50 % et retour (accepté en 1 s, arrivé en ~10 s ; le
+  cloud montre la position visée tout de suite, la position atteinte à l'arrivée), fenêtre de
+  0 à 10 % et retour (~7 s).
+- Clé des fenêtres : `retrieve_key` par le cloud, puis le protocole local de la passerelle
+  (port 25050, X25519 et ChaCha20-Poly1305), fait par une sonde ; Moli ne sait pas encore
+  appairer lui-même (à faire : une commande `moli-os`, la clé allant droit au coffre).
+- Pas encore vérifié en vrai : l'arrêt (−1 accepté par le cloud, mais le store était déjà
+  arrivé) et `stop_movements`.
 - Chemin écarté pour l'instant : HomeKit en local (la passerelle est compatible), parce qu'elle
   n'accepte qu'un seul système HomeKit et qu'elle est souvent déjà dans l'app Maison d'Apple.
