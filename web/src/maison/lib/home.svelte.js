@@ -128,6 +128,30 @@ export function isOn(id, point = null) {
   return key ? truthy(value(id, key)) : false;
 }
 
+/** A heating or cooling unit at work: its switch, or the state it reports
+ *  when Moli does not switch it (a pellet stove says `on` without taking it). */
+export function climateOn(d) {
+  return isOn(d.id, powerKey(d) ?? (d.points.some((p) => p.key === 'on') ? 'on' : null));
+}
+
+// A pellet stove's states (Micronova), as the family reads them: off, its
+// lighting, its flame, eco-stop (on, without a flame, until the room cools),
+// its shutting down.
+const STOVE = {
+  off: 'commun.poele.eteint',
+  ignition: 'commun.poele.allumage',
+  awaiting_flame: 'commun.poele.attente_flamme',
+  starting: 'commun.poele.demarrage',
+  on: 'commun.poele.marche',
+  stand_by: 'commun.poele.eco_stop_actif',
+  cleaning: 'commun.poele.nettoyage',
+  shut_off: 'commun.poele.extinction',
+  alarm: 'commun.poele.alarme',
+  mem_alarm: 'commun.poele.alarme_memorisee',
+};
+/** A stove's state in words (a catalogue key), whatever its switch says; null if unknown. */
+export const stoveState = (id) => STOVE[value(id, 'mode')] ?? null;
+
 /** A light fixture (D12): bulbs and the relay that feeds them as one light. */
 export const isFixture = (d) => d?.model === 'Luminaire';
 /** A Hue room or zone: « toute la pièce », not a lamp. */

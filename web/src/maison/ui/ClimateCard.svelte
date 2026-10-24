@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { device, value, reachable, num, act, presetOf, climateIcon } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState } from '../lib/home.svelte.js';
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -184,7 +184,8 @@
     on: { label: 'commun.poele.marche', icon: 'fire', tone: 'warm' },
     cleaning: { label: 'commun.poele.nettoyage', icon: 'fan', tone: 'good' },
     shut_off: { label: 'commun.poele.extinction', icon: 'power', tone: 'cool' },
-    stand_by: { label: 'commun.poele.veille', icon: 'moon', tone: 'good' },
+    // On, without a flame: the room is warm enough (eco-stop).
+    stand_by: { label: 'commun.poele.eco_stop_actif', icon: 'leaf', tone: 'good' },
     alarm: { label: 'commun.poele.alarme', icon: 'alert', tone: 'warm' },
     mem_alarm: { label: 'commun.poele.alarme_memorisee', icon: 'alert', tone: 'warm' },
   };
@@ -201,6 +202,8 @@
     return [...Object.keys(MODES).filter((key) => declared.includes(key)), ...declared.filter((key) => !MODES[key])];
   });
   const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: climateIcon(d), tone: 'good' });
+  // Not on: a stove says how (off, shutting down, in alarm), a clim is off.
+  const offLabel = $derived(climateIcon(d) === 'stove' && stoveState(id) ? t(stoveState(id)) : t('commun.clim.eteinte'));
 
   // A 270° ring: the target as a bead, the room temperature in the middle.
   const R = 62;
@@ -270,10 +273,10 @@
     {#if controllable}
       <!-- A heater on a pilot wire is switched off from its modes, a stove not from here: its chip only says. -->
       {#if switched || !canSwitch}
-        <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
+        <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : offLabel}</span>
       {:else}
         <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
-          <Icon name="power" size={16} />{on ? m.label : t('commun.clim.eteinte')}
+          <Icon name="power" size={16} />{on ? m.label : offLabel}
         </button>
       {/if}
       {#if on && writable}
@@ -298,7 +301,7 @@
         <ProgramWeek {id} wiring={value(id, 'device_mode_type')} {name} {modeLabel} modes={MODES} compact={!on || mode !== 'program'} />
       {/if}
     {:else}
-      <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
+      <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : offLabel}</span>
     {/if}
     {#if climateIcon(d) === 'stove'}
       <StoveDetail {id} {name} />

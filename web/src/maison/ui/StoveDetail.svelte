@@ -12,10 +12,24 @@
   const d = $derived(device(id));
   const point = (key) => d?.points.find((p) => p.key === key);
   const can = (key) => !!point(key)?.access?.write;
-  const on = $derived(value(id, 'on') === true);
+  // A flame, not only on: eco-stop is on without one.
+  const burning = $derived(value(id, 'mode') === 'on');
   const real = $derived(value(id, 'real_power'));
   const flue = $derived(value(id, 'flue_temperature'));
   const alarm = $derived(value(id, 'alarm'));
+  // What it is doing, said in a sentence: a flame, eco-stop (on, no flame),
+  // lighting, shutting down, or off. An alarm says its code below.
+  const PHASES = {
+    ignition: 'commun.poele.phase_allumage',
+    awaiting_flame: 'commun.poele.phase_allumage',
+    starting: 'commun.poele.phase_allumage',
+    on: 'commun.poele.phase_flamme',
+    stand_by: 'commun.poele.phase_eco',
+    cleaning: 'commun.poele.phase_nettoyage',
+    shut_off: 'commun.poele.phase_extinction',
+    off: 'commun.poele.phase_eteint',
+  };
+  const phase = $derived(PHASES[value(id, 'mode')]);
 
   // A setting sent shows at once and until the stove says it (an order
   // takes a few seconds through the cloud), or for half a minute at most.
@@ -151,6 +165,9 @@
 </script>
 
 <div class="stove">
+  {#if phase}
+    <p class="phase">{t(phase, { temp: num(value(id, 'target_temperature')) })}</p>
+  {/if}
   <dl class="settings">
     {#if typeof power === 'number'}
       <div>
@@ -165,7 +182,7 @@
           {:else}
             <span class="num">{num(power)} / {num(powerMax)}</span>
           {/if}
-          {#if on && typeof real === 'number' && real !== power}<small>{t('commun.poele.brule_a', { n: num(real) })}</small>{/if}
+          {#if burning && typeof real === 'number' && real !== power}<small>{t('commun.poele.brule_a', { n: num(real) })}</small>{/if}
         </dd>
       </div>
     {/if}
@@ -222,7 +239,7 @@
       </div>
     {/if}
   </dl>
-  {#if ecoStop && can('eco_stop')}
+  {#if ecoStop && can('eco_stop') && value(id, 'mode') !== 'stand_by'}
     <p class="muted">{t('commun.poele.eco_stop_aide')}</p>
   {/if}
   {#if alarm && alarm !== 'OK'}
@@ -328,6 +345,12 @@
     display: grid;
     gap: 10px;
     width: 100%;
+  }
+
+  .phase {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
   }
 
   .settings {
