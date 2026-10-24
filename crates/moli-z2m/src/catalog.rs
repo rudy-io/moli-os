@@ -101,7 +101,7 @@ impl Entry {
         let mut codecs = HashMap::new();
         let definition = raw.definition.unwrap_or_default();
         for expose in &definition.exposes {
-            flatten(expose, "", &mut points, &mut codecs);
+            flatten(expose, "", "", &mut points, &mut codecs);
         }
         let device = Device {
             id: DeviceId::new(instance, &raw.ieee_address),
@@ -227,9 +227,37 @@ fn lookup<'a>(payload: &'a Map<String, Json>, key: &str) -> Option<&'a Json> {
     Some(current)
 }
 
-fn flatten(
-    expose: &RawExpose,
+/// The order point of a shutter, blind or curtain: an enum that opens and
+/// closes (`OPEN` / `CLOSE` / `STOP`), whatever the case it is spelled in.
+fn is_shutter_order(kind: &Kind) -> bool {
+    matches!(kind, Kind::Enum { values }
+        if values.iter().any(|v| v.eq_ignore_ascii_case("open"))
+            && values.iter().any(|v| v.eq_ignore_ascii_case("close")))
+}
+
+/// What a shutter's own points are (`group` is the enclosing expose's type).
+fn shutter_semantic(group: &str, property: &str, kind: &Kind) -> Option<Semantic> {
+    if is_shutter_order(kind) {
+        // `state` (OPEN / CLOSE / STOP) is an order, not a switch: read as
+        // one it shows « off » while the shutter is open, and a click on it
+        // would send `ON`. Its opening is `position`.
+        Some(Semantic::Other)
+    } else if group == "cover"
+        && property.starts_with("position")
+        && matches!(kind, Kind::Numeric { .. })
+    {
+        // The opening of a shutter, blind or curtain. Never deduced from the
+        // name alone: a `position` can be a servo or a playback position.
+        Some(Semantic::Position)
+    } else {
+        None
+    }
+}
+
+fn flatten<'a>(
+    expose: &'a RawExpose,
     prefix: &str,
+    group: &'a str,
     points: &mut Vec<PointSpec>,
     codecs: &mut HashMap<Arc<str>, Codec>,
 ) {
@@ -240,8 +268,14 @@ fn flatten(
             ("composite", Some(p)) => format!("{prefix}{p}."),
             _ => prefix.to_owned(),
         };
+        // The enclosing group's type (`cover`, `light`…) says what a plain
+        // member such as `position` is.
+        let group = match &*expose.kind {
+            "composite" => group,
+            kind => kind,
+        };
         for feature in &expose.features {
-            flatten(feature, &prefix, points, codecs);
+            flatten(feature, &prefix, group, points, codecs);
         }
         return;
     }
@@ -308,6 +342,8 @@ fn flatten(
         Semantic::Config
     } else if lock {
         Semantic::Lock
+    } else if let Some(semantic) = shutter_semantic(group, property, &kind) {
+        semantic
     } else {
         Semantic::infer(&key, unit.as_ref())
     };
@@ -427,7 +463,7 @@ mod tests {
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 7, "coordinator excluded, 7 real devices");
+        assert_eq!(catalog.len(), 8, "coordinator excluded, 8 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),
@@ -549,6 +585,56 @@ mod tests {
     }
 
     #[test]
+    fn shutter_is_a_position_not_a_switch() {
+        let catalog = catalog();
+        let shutter = catalog.by_name("0x00124b0000000002").unwrap();
+        let semantic = |key: &str| shutter.device.point(key).unwrap().semantic;
+
+        assert_eq!(semantic("position"), Semantic::Position);
+        // `state` is an order (OPEN / CLOSE / STOP), not an on/off switch.
+        assert_eq!(semantic("state"), Semantic::Other);
+        assert_eq!(semantic("moving"), Semantic::Other);
+        assert!(
+            shutter
+                .device
+                .points
+                .iter()
+                .all(|p| p.semantic != Semantic::OnOff),
+            "nothing on a shutter reads as a switch"
+        );
+
+        let position = shutter.device.point("position").unwrap();
+        assert!(position.access.write);
+        assert_eq!(position.unit, Some(Unit::Percent));
+        let Kind::Numeric { min, max, .. } = &position.kind else {
+            panic!("position is numeric");
+        };
+        assert_eq!((*min, *max), (Some(0.0), Some(100.0)));
+    }
+
+    #[test]
+    fn shutter_state_decodes_and_its_orders_encode() {
+        let catalog = catalog();
+        let shutter = catalog.by_name("0x00124b0000000002").unwrap();
+        let values: HashMap<_, _> = shutter
+            .decode(&state("0x00124b0000000002"))
+            .into_iter()
+            .collect();
+        assert_eq!(values["position"], Value::Int(32));
+        assert_eq!(values["state"], Value::from("OPEN"));
+        assert_eq!(values["moving"], Value::from("STOP"));
+
+        assert_eq!(
+            shutter.encode("position", &Value::Float(50.0)),
+            json!({"position": 50})
+        );
+        assert_eq!(
+            shutter.encode("state", &Value::from("CLOSE")),
+            json!({"state": "CLOSE"})
+        );
+    }
+
+    #[test]
     fn config_category_wins_over_units_and_numeric_enums_round_trip() {
         let expose: RawExpose = serde_json::from_value(json!({
             "type": "climate",
@@ -562,7 +648,7 @@ mod tests {
         .unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         assert_eq!(points[0].semantic, Semantic::Config);
         assert_eq!(points[1].semantic, Semantic::Temperature);
 
@@ -600,7 +686,7 @@ mod tests {
         let expose: RawExpose = serde_json::from_value(expose).unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         Entry {
             ieee: "0x3".into(),
             friendly_name: "bulb".into(),
@@ -683,6 +769,47 @@ mod tests {
         assert_eq!(
             moli_runtime::opener(&["Prise salon"], &plug.device.points),
             moli_runtime::Opener::None
+        );
+    }
+
+    #[test]
+    fn a_position_is_an_opening_only_inside_a_cover() {
+        // A servo's `position` is not a shutter.
+        let servo = entry_of(json!({
+            "type": "numeric", "property": "position", "access": 7,
+            "unit": "%", "value_min": 0, "value_max": 100
+        }));
+        assert_eq!(
+            servo.device.point("position").unwrap().semantic,
+            Semantic::Other
+        );
+        // Inside a `cover` it is.
+        let cover = entry_of(json!({"type": "cover", "features": [
+            {"type": "enum", "property": "state", "access": 7, "values": ["OPEN", "CLOSE", "STOP"]},
+            {"type": "numeric", "property": "position", "access": 7, "unit": "%",
+             "value_min": 0, "value_max": 100}
+        ]}));
+        assert_eq!(
+            cover.device.point("position").unwrap().semantic,
+            Semantic::Position
+        );
+    }
+
+    #[test]
+    fn a_simple_motor_has_an_order_and_no_position() {
+        let motor = entry_of(json!({"type": "cover", "features": [
+            {"type": "enum", "property": "state", "access": 7, "values": ["OPEN", "CLOSE", "STOP"]}
+        ]}));
+        assert_eq!(
+            motor.device.point("state").unwrap().semantic,
+            Semantic::Other
+        );
+        assert!(
+            motor
+                .device
+                .points
+                .iter()
+                .all(|p| p.semantic != Semantic::Position)
         );
     }
 
@@ -790,7 +917,7 @@ mod tests {
         .unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         let keys: Vec<_> = points.iter().map(|p| &*p.key).collect();
         assert_eq!(keys, ["state", "color.x", "color.y"]);
         assert!(points[0].access.write);
