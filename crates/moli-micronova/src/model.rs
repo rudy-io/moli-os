@@ -10,6 +10,11 @@
 //! which its map does not say: 0x24 is the 24th) and up to six programs,
 //! each switching the stove on then off at times in steps of ten minutes,
 //! on the days ticked.
+//!
+//! A command becomes register writes (`Map::writes`): the value through the
+//! register's inverse formula, within its bounds, and only what changes.
+//! Never the stove's on and off (`status_managed_get`): tried later, with
+//! a person in front of it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,6 +31,9 @@ pub struct Register {
     pub mask: u32,
     #[serde(default)]
     pub formula: Option<String>,
+    /// From a value to the raw one (`#*2` for `#/2`).
+    #[serde(default)]
+    pub formula_inverse: Option<String>,
     #[serde(default)]
     pub set_min: Option<f64>,
     #[serde(default)]
@@ -70,6 +78,24 @@ pub struct Map {
 
 /// Offset → raw value, as a reading answers.
 pub type Reading = HashMap<u32, i64>;
+
+/// One register to write: offset, mask, raw value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Write {
+    pub offset: u32,
+    pub mask: u32,
+    pub raw: i64,
+}
+
+/// A program as the `programs` point says it.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct Program {
+    on: bool,
+    start: i64,
+    stop: i64,
+    days: Vec<usize>,
+}
 
 impl Map {
     #[must_use]
@@ -147,10 +173,12 @@ impl Map {
         for (key, register, label, semantic) in self.numbers() {
             if let Some(r) = self.get(register) {
                 let unit = unit_of(key);
+                // Whole numbers only: a register holds no fraction.
+                let step = WRITABLE.contains(key).then_some(1.0);
                 let kind = Kind::Numeric {
                     min: r.set_min,
                     max: r.set_max,
-                    step: None,
+                    step,
                 };
                 out.push(spec(key, label, kind, unit, *semantic));
             }
@@ -240,6 +268,149 @@ impl Map {
             r.set_max.unwrap_or(0.0) as i64,
         );
         (min..=max.min(min + 32)).map(|v| r.step(v)).collect()
+    }
+
+    /// What setting point `key` to `value` asks of the board: the registers
+    /// that change, in the order to write them (none: nothing changes), or
+    /// why it cannot be done, said for a person.
+    ///
+    /// # Errors
+    /// A point Moli does not set, or a value the stove does not take.
+    pub fn writes(
+        &self,
+        key: &str,
+        value: &Value,
+        reading: &Reading,
+    ) -> Result<Vec<Write>, String> {
+        let number = || {
+            let n = value
+                .as_f64()
+                .ok_or_else(|| moli_i18n::tr("pilotes.micronova.nombre_attendu"))?;
+            if n.fract() != 0.0 {
+                return Err(moli_i18n::tr("pilotes.micronova.nombre_entier"));
+            }
+            Ok(n)
+        };
+        let register = match key {
+            "target_temperature" => TARGET,
+            "power_level" => POWER,
+            "eco_stop_delay" => ECO_DELAY,
+            "eco_stop" => ECO_STOP,
+            "fan" => FAN,
+            PROGRAMS => return self.program_writes(value, reading),
+            _ => {
+                return Err(moli_i18n::tr!(
+                    "pilotes.micronova.lecture_seule",
+                    point = key
+                ));
+            }
+        };
+        let wanted = match key {
+            "eco_stop" => match value {
+                Value::Bool(on) => f64::from(u8::from(*on)),
+                _ => return Err(moli_i18n::tr("pilotes.micronova.oui_non_attendu")),
+            },
+            "fan" => {
+                let Value::Text(step) = value else {
+                    return Err(moli_i18n::tr("pilotes.micronova.valeur_refusee"));
+                };
+                let r = self
+                    .get(FAN)
+                    .ok_or_else(|| moli_i18n::tr("pilotes.micronova.reglage_absent"))?;
+                let at = self
+                    .steps(FAN)
+                    .iter()
+                    .position(|s| s.as_str() == &**step)
+                    .ok_or_else(|| moli_i18n::tr("pilotes.micronova.valeur_refusee"))?;
+                #[allow(clippy::cast_precision_loss)]
+                let wanted = r.set_min.unwrap_or(0.0) + at as f64;
+                wanted
+            }
+            _ => number()?,
+        };
+        Ok(self.write(register, wanted, reading)?.into_iter().collect())
+    }
+
+    /// Writing `wanted` to a register: `None` when it holds it already.
+    fn write(&self, key: &str, wanted: f64, reading: &Reading) -> Result<Option<Write>, String> {
+        let r = self
+            .get(key)
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.reglage_absent"))?;
+        let below = r.set_min.is_some_and(|min| wanted < min);
+        let above = r.set_max.is_some_and(|max| wanted > max);
+        if below || above {
+            return Err(moli_i18n::tr("pilotes.micronova.valeur_refusee"));
+        }
+        if self.value(key, reading) == Some(wanted) {
+            return Ok(None);
+        }
+        let raw = calc(r.formula_inverse.as_deref().unwrap_or("#"), wanted)
+            .filter(|raw| raw.fract() == 0.0 && *raw >= 0.0)
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.valeur_refusee"))?;
+        #[allow(clippy::cast_possible_truncation)]
+        let raw = raw as i64;
+        if raw & !i64::from(r.mask) != 0 {
+            return Err(moli_i18n::tr("pilotes.micronova.valeur_refusee"));
+        }
+        Ok(Some(Write {
+            offset: r.offset,
+            mask: r.mask,
+            raw,
+        }))
+    }
+
+    /// The programs as a person set them: each changed register, a program
+    /// switched off first, switched on last (never on with old hours).
+    fn program_writes(&self, value: &Value, reading: &Reading) -> Result<Vec<Write>, String> {
+        let Value::Text(text) = value else {
+            return Err(moli_i18n::tr("pilotes.micronova.programmes_illisibles"));
+        };
+        let programs: Vec<Program> = serde_json::from_str(text)
+            .map_err(|_| moli_i18n::tr("pilotes.micronova.programmes_illisibles"))?;
+        let count = (1..=MAX_PROGRAMS)
+            .take_while(|&n| self.get(&chrono(n, "enable_set")).is_some())
+            .count();
+        if programs.len() != count {
+            return Err(moli_i18n::tr!(
+                "pilotes.micronova.programmes_nombre",
+                count = count
+            ));
+        }
+        let mut out = Vec::new();
+        for (n, p) in (1..=MAX_PROGRAMS).zip(&programs) {
+            let ten = |m: i64| (m % 10 == 0 && (0..=1440).contains(&m)).then_some(m / 10);
+            let (Some(start), Some(stop)) = (ten(p.start), ten(p.stop)) else {
+                return Err(moli_i18n::tr("pilotes.micronova.programmes_heures"));
+            };
+            if p.on && start >= stop {
+                return Err(moli_i18n::tr!("pilotes.micronova.programmes_ordre", n = n));
+            }
+            if p.days.iter().any(|d| !(1..=7).contains(d)) {
+                return Err(moli_i18n::tr("pilotes.micronova.programmes_illisibles"));
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let mut parts = vec![
+                (chrono(n, "start_set"), start as f64),
+                (chrono(n, "stop_set"), stop as f64),
+            ];
+            for (i, day) in DAYS.iter().enumerate() {
+                let ticked = p.days.contains(&(i + 1));
+                parts.push((
+                    chrono(n, &format!("day_{day}_set")),
+                    f64::from(u8::from(ticked)),
+                ));
+            }
+            let enable = (chrono(n, "enable_set"), f64::from(u8::from(p.on)));
+            if p.on {
+                parts.push(enable);
+            } else {
+                parts.insert(0, enable);
+            }
+            for (key, wanted) in parts {
+                out.extend(self.write(&key, wanted, reading)?);
+            }
+        }
+        Ok(out)
     }
 
     /// The programs: for each, whether it is on, its start and stop in
@@ -351,6 +522,9 @@ const STATE: &str = "status_get";
 const ALARM: &str = "alarms_get";
 const ECO_STOP: &str = "eco_stop_set";
 const FAN: &str = "vent_main_set";
+const TARGET: &str = "temp_air_set";
+const POWER: &str = "power_set";
+const ECO_DELAY: &str = "eco_temp_stop";
 /// The points of the programs and of the clock.
 pub const PROGRAMS: &str = "programs";
 pub const CLOCK: &str = "clock";
@@ -420,6 +594,15 @@ const NUMBERS: &[(&str, &str, &str, Semantic)] = &[
     ),
 ];
 const CELSIUS: [&str; 3] = ["temperature", "target_temperature", "flue_temperature"];
+/// What Moli may set: the settings, never on and off (nor the state).
+const WRITABLE: [&str; 6] = [
+    "target_temperature",
+    "power_level",
+    "fan",
+    "eco_stop",
+    "eco_stop_delay",
+    PROGRAMS,
+];
 
 fn unit_of(key: &str) -> Option<Unit> {
     if CELSIUS.contains(&key) {
@@ -436,10 +619,9 @@ fn spec(key: &str, label: &str, kind: Kind, unit: Option<Unit>, semantic: Semant
         key: key.into(),
         label: moli_i18n::tr(label).into(),
         kind,
-        // Read only until orders are tried with a person watching.
         access: Access {
             read: true,
-            write: false,
+            write: WRITABLE.contains(&key),
         },
         unit,
         semantic,
@@ -614,6 +796,120 @@ mod tests {
         );
     }
 
+    fn w(offset: u32, mask: u32, raw: i64) -> Write {
+        Write { offset, mask, raw }
+    }
+
+    #[test]
+    fn a_setting_becomes_its_register() {
+        let (map, reading) = camelia();
+        let set = |key: &str, value: Value| map.writes(key, &value, &reading);
+        assert_eq!(
+            set("target_temperature", Value::Float(18.0)),
+            Ok(vec![w(32893, 0xff, 18)])
+        );
+        assert_eq!(
+            set("target_temperature", Value::Float(19.0)),
+            Ok(vec![]),
+            "already so"
+        );
+        assert!(
+            set("target_temperature", Value::Float(18.5)).is_err(),
+            "whole degrees"
+        );
+        assert!(
+            set("target_temperature", Value::Float(40.0)).is_err(),
+            "within its bounds"
+        );
+        assert_eq!(
+            set("power_level", Value::Float(2.0)),
+            Ok(vec![w(32895, 0xff, 2)])
+        );
+        assert_eq!(
+            set("eco_stop_delay", Value::Float(20.0)),
+            Ok(vec![w(32802, 0xff, 20)])
+        );
+        assert_eq!(
+            set("eco_stop", Value::Bool(false)),
+            Ok(vec![w(32798, 0xffff, 0)])
+        );
+        assert_eq!(
+            set("fan", Value::Text("3".into())),
+            Ok(vec![w(32894, 0xff, 3)])
+        );
+        assert_eq!(
+            set("fan", Value::Text("off".into())),
+            Ok(vec![w(32894, 0xff, 0)])
+        );
+        assert_eq!(set("fan", Value::Text("auto".into())), Ok(vec![]));
+        assert!(set("fan", Value::Text("turbo".into())).is_err());
+        assert!(set("on", Value::Bool(true)).is_err(), "never switched on");
+        assert!(set("mode", Value::Text("off".into())).is_err(), "nor off");
+    }
+
+    /// The fixture's programs with `change` applied to them.
+    fn programs_with(map: &Map, reading: &Reading, change: impl Fn(&mut Vec<Json>)) -> Value {
+        let mut list: Vec<Json> = serde_json::from_str(&map.programs(reading).unwrap()).unwrap();
+        change(&mut list);
+        Value::Text(Json::Array(list).to_string().into())
+    }
+
+    #[test]
+    fn programs_write_only_what_changed_in_a_safe_order() {
+        let (map, reading) = camelia();
+        let set = |value: Value| map.writes("programs", &value, &reading);
+        let same = programs_with(&map, &reading, |_| {});
+        assert_eq!(set(same), Ok(vec![]));
+        // P1 ends at 23:00 instead of 22:30.
+        let later = programs_with(&map, &reading, |l| l[0]["stop"] = 1380.into());
+        assert_eq!(set(later), Ok(vec![w(32827, 0xff, 138)]));
+        // P3 on, from 13:00, and on Sunday too: its hours and days first.
+        let p3 = programs_with(&map, &reading, |l| {
+            l[2]["on"] = true.into();
+            l[2]["start"] = 780.into();
+            l[2]["days"] = serde_json::json!([6, 7]);
+        });
+        assert_eq!(
+            set(p3),
+            Ok(vec![w(32846, 0xff, 78), w(32854, 0x1, 1), w(32845, 0x1, 1)])
+        );
+        // P1 off and its start moved: off first.
+        let p1 = programs_with(&map, &reading, |l| {
+            l[0]["on"] = false.into();
+            l[0]["start"] = 360.into();
+        });
+        assert_eq!(set(p1), Ok(vec![w(32825, 0x1, 0), w(32826, 0xff, 36)]));
+    }
+
+    #[test]
+    fn programs_the_stove_cannot_keep_are_refused() {
+        let (map, reading) = camelia();
+        let set = |value: Value| map.writes("programs", &value, &reading);
+        assert!(
+            set(programs_with(&map, &reading, |l| {
+                l.pop();
+            }))
+            .is_err(),
+            "six"
+        );
+        assert!(
+            set(programs_with(&map, &reading, |l| l[0]["start"] = 425.into())).is_err(),
+            "10 min"
+        );
+        assert!(
+            set(programs_with(&map, &reading, |l| l[0]["stop"] = 1450.into())).is_err(),
+            "24:00"
+        );
+        assert!(
+            set(programs_with(&map, &reading, |l| l[0]["stop"] = 420.into())).is_err(),
+            "ends after"
+        );
+        assert!(
+            set(programs_with(&map, &reading, |l| l[0]["days"] = serde_json::json!([8]))).is_err()
+        );
+        assert!(set(Value::Text("not json".into())).is_err());
+    }
+
     #[test]
     fn the_clock_is_in_binary_coded_decimal() {
         assert_eq!(bcd(0x24), Some(24));
@@ -627,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stove_shows_its_states_and_reads_only() {
+    fn a_stove_shows_its_states_and_what_moli_sets() {
         let (map, _) = camelia();
         let points = map.points();
         let mode = points.iter().find(|p| &*p.key == "mode").unwrap();
@@ -660,7 +956,7 @@ mod tests {
             Kind::Numeric {
                 min: Some(5.0),
                 max: Some(35.0),
-                step: None
+                step: Some(1.0)
             }
         );
         let fan = points.iter().find(|p| &*p.key == "fan").unwrap();
@@ -674,7 +970,23 @@ mod tests {
         assert!(points.iter().any(|p| &*p.key == "programs"));
         assert!(points.iter().any(|p| &*p.key == "clock"));
         assert!(points.iter().all(|p| &*p.key != "fan_front"));
-        assert!(points.iter().all(|p| !p.access.write), "read only for now");
+        let writable: Vec<&str> = points
+            .iter()
+            .filter(|p| p.access.write)
+            .map(|p| &*p.key)
+            .collect();
+        assert_eq!(
+            writable,
+            [
+                "target_temperature",
+                "power_level",
+                "eco_stop_delay",
+                "eco_stop",
+                "fan",
+                "programs"
+            ],
+            "the settings, never on, off or the state"
+        );
     }
 
     #[test]

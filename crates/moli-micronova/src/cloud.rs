@@ -1,7 +1,8 @@
 //! Micronova's cloud (Agua IoT), as the Easy Connect apps speak to it: an
 //! app registers, a person logs in (e-mail and password, from the vault),
 //! then devices, register maps and readings, all JSON over HTTPS. A reading
-//! is a job: asked, then polled until done. Nothing is written here.
+//! is a job: asked, then polled until done; so is a write, one register at
+//! a time, as the apps (and py-agua-iot) send it.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -13,7 +14,7 @@ use http_body_util::Full;
 use ring::rand::{SecureRandom as _, SystemRandom};
 use serde_json::{Value as Json, json};
 
-use crate::model::{Map, Reading, Register};
+use crate::model::{Map, Reading, Register, Write};
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BODY: usize = 1 << 20;
@@ -38,6 +39,7 @@ pub struct Stove {
 #[error("Micronova: not logged in")]
 pub struct LoggedOut;
 
+#[derive(Clone)]
 pub struct Cloud {
     host: String,
     customer_code: String,
@@ -188,13 +190,38 @@ impl Cloud {
             .call(Method::POST, "/deviceGetBufferReading", &body)
             .await?;
         let id = text(&job["idRequest"]).context("Micronova: no reading job")?;
+        Ok(reading(&self.job(&id).await?))
+    }
+
+    /// Writes one register, once the stove confirms it.
+    pub async fn write(&self, stove: &Stove, write: Write) -> anyhow::Result<()> {
+        let mut body = Self::ids(stove);
+        body["Protocol"] = json!("RWMSmaster");
+        body["BitData"] = json!([8]);
+        body["Endianess"] = json!(["L"]);
+        body["Items"] = json!([write.offset]);
+        body["Masks"] = json!([write.mask]);
+        body["Values"] = json!([write.raw]);
+        let job = self
+            .call(Method::POST, "/deviceRequestWriting", &body)
+            .await?;
+        let id = text(&job["idRequest"]).context("Micronova: no writing job")?;
+        let answer = self.job(&id).await?;
+        if answer.get("Cmd").is_none() {
+            bail!("Micronova: the stove did not confirm the write");
+        }
+        Ok(())
+    }
+
+    /// A job's answer, once the stove has given it.
+    async fn job(&self, id: &str) -> anyhow::Result<Json> {
         for _ in 0..JOB_TRIES {
             tokio::time::sleep(JOB_POLL).await;
-            let state = self
+            let mut state = self
                 .call(Method::GET, &format!("/deviceJobStatus/{id}"), &json!({}))
                 .await?;
             if state["jobAnswerStatus"] == "completed" {
-                return Ok(reading(&state["jobAnswerData"]));
+                return Ok(state["jobAnswerData"].take());
             }
         }
         bail!("Micronova: the stove did not answer in time")

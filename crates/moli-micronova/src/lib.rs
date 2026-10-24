@@ -2,7 +2,9 @@
 //! through the cloud their Easy Connect app uses (Agua IoT): the household's
 //! account, e-mail and password from the vault (`moli-os secrets set
 //! <instance> email`, then `password`). Each stove's register map is read
-//! once, its values every minute. Read only for now.
+//! once, its values every minute. Its settings are set from Moli (setpoint,
+//! power, fan, eco-stop, programs), one register at a time by a writer of
+//! its own, the stove read again once it confirms; never switched on or off.
 
 mod cloud;
 pub mod model;
@@ -10,11 +12,12 @@ pub mod model;
 use std::time::Duration;
 
 use moli_core::Device;
-use moli_runtime::{BoxFuture, Driver, DriverCtx};
+use moli_runtime::{BoxFuture, Driver, DriverCtx, MediaPublisher};
 use serde::Deserialize;
+use tokio::sync::mpsc;
 
 use cloud::{Cloud, LoggedOut, Stove};
-use model::Map;
+use model::{Map, Reading, Write};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,17 +114,53 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     ctx.ready();
     tracing::info!(instance = %ctx.instance(), stoves = stoves.len(), "micronova stoves loaded");
 
+    let (orders, queue) = mpsc::unbounded_channel();
+    let (done, mut written) = mpsc::unbounded_channel();
+    let writer = Writer {
+        cloud: cloud.clone(),
+        email: email.clone(),
+        password: password.clone(),
+        stoves: stoves.iter().map(|(s, _)| s.clone()).collect(),
+        publisher: ctx.media_publisher(),
+    };
+    let _writer = Abort(tokio::spawn(writer.run(queue, done)));
+    // Each stove's last reading: what a command is weighed against.
+    let mut last: Vec<Option<Reading>> = vec![None; stoves.len()];
+
     let every = Duration::from_secs(config.every.max(30));
     let mut next = tokio::time::Instant::now();
     loop {
         tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
-                let message = moli_i18n::tr!("pilotes.micronova.lecture_seule", point = command.key);
-                command.reply(Err(message));
+                if command.abandoned() {
+                    continue;
+                }
+                let at = stoves
+                    .iter()
+                    .position(|(s, _)| ctx.device_id(&s.id_device) == command.device.id);
+                let answer = match at.map(|i| (i, last[i].as_ref())) {
+                    Some((i, Some(reading))) => {
+                        match stoves[i].1.writes(&command.key, &command.value, reading) {
+                            Ok(registers) if registers.is_empty() => Ok(()),
+                            Ok(registers) => {
+                                let _ = orders.send((i, registers));
+                                Ok(())
+                            }
+                            Err(why) => Err(why),
+                        }
+                    }
+                    Some((_, None)) => Err(moli_i18n::tr("pilotes.micronova.pas_encore_lu")),
+                    None => Err(moli_i18n::tr("pilotes.micronova.reglage_absent")),
+                };
+                command.reply(answer);
+            }
+            Some(_) = written.recv() => {
+                // Confirmed (or given up): read it again now.
+                next = tokio::time::Instant::now();
             }
             () = tokio::time::sleep_until(next) => {
-                for (stove, map) in &stoves {
+                for (i, (stove, map)) in stoves.iter().enumerate() {
                     let id = ctx.device_id(&stove.id_device);
                     match cloud.read(stove).await {
                         Ok(reading) => {
@@ -129,6 +168,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                                 ctx.set_state(&id, &key, value);
                             }
                             ctx.set_availability(&id, true);
+                            last[i] = Some(reading);
                         }
                         Err(e) if e.is::<LoggedOut>() => {
                             cloud.login(&email, &password).await?;
@@ -142,5 +182,54 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 next = tokio::time::Instant::now() + every;
             }
         }
+    }
+}
+
+/// Writes the commands' registers, one after the other, each once the stove
+/// confirms the one before; tells the house when one is not taken.
+struct Writer {
+    cloud: Cloud,
+    email: String,
+    password: String,
+    stoves: Vec<Stove>,
+    publisher: MediaPublisher,
+}
+
+impl Writer {
+    async fn run(
+        mut self,
+        mut queue: mpsc::UnboundedReceiver<(usize, Vec<Write>)>,
+        done: mpsc::UnboundedSender<usize>,
+    ) {
+        while let Some((i, writes)) = queue.recv().await {
+            let stove = &self.stoves[i];
+            for write in writes {
+                let mut result = self.cloud.write(stove, write).await;
+                if result.as_ref().is_err_and(anyhow::Error::is::<LoggedOut>) {
+                    result = match self.cloud.login(&self.email, &self.password).await {
+                        Ok(()) => self.cloud.write(stove, write).await,
+                        Err(e) => Err(e),
+                    };
+                }
+                if let Err(e) = result {
+                    tracing::warn!(stove = stove.name, error = %e, "micronova: not written");
+                    self.publisher.tell(
+                        &stove.name,
+                        moli_i18n::tr!("pilotes.micronova.pas_pris", name = stove.name),
+                    );
+                    break;
+                }
+            }
+            let _ = done.send(i);
+        }
+    }
+}
+
+/// The writer stops with the driver.
+struct Abort(tokio::task::JoinHandle<()>);
+
+impl Drop for Abort {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }

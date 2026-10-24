@@ -60,7 +60,13 @@
   const writable = $derived(wiring?.setpoint !== false && !preset && d?.points.some((p) => p.key === 'target_temperature' && p.access?.write));
   // Switched or set to a mode, even without a setpoint (a pilot wire on four orders).
   const controllable = $derived(writable || d?.points.some((p) => ['on', 'mode'].includes(p.key) && p.access?.write));
-  const STEP = 0.5;
+  // Switched on and off here, and its modes chosen here (a pellet stove
+  // only shows them); a unit that declares no mode gets a clim's.
+  const canSwitch = $derived(d?.points.some((p) => p.key === 'on' && p.access?.write));
+  const modePoint = $derived(d?.points.find((p) => p.key === 'mode'));
+  const canMode = $derived(!modePoint || modePoint.access?.write);
+  // The unit's own step (a stove: whole degrees), else half degrees.
+  const STEP = $derived(targetPoint?.kind.step ?? 0.5);
 
   // Taps on − / + and drags on the dial add up; one order leaves once the
   // finger rests (each order re-reads the unit and sends all its settings: no
@@ -262,8 +268,8 @@
       </label>
     {/if}
     {#if controllable}
-      <!-- A heater on a pilot wire is switched off from its modes: its chip only says. -->
-      {#if switched}
+      <!-- A heater on a pilot wire is switched off from its modes, a stove not from here: its chip only says. -->
+      {#if switched || !canSwitch}
         <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
       {:else}
         <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
@@ -279,7 +285,7 @@
       {:else if on && preset && typeof target === 'number'}
         <p class="muted">{t('commun.clim.consigne_mode', { temp: num(target, target % 1 ? 1 : 0), mode: m.label.toLowerCase() })}</p>
       {/if}
-      {#if on || switched}
+      {#if (on || switched) && canMode}
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
           {#each offered as key (key)}
             <button class:active={active(key)} class:off={key === 'off'} onclick={() => setMode(key)} title={modeLabel(key)} aria-label={modeLabel(key)} aria-pressed={active(key)}>
@@ -295,7 +301,7 @@
       <span class="chip {on ? m.tone : ''}"><Icon name={on ? m.icon : 'power'} size={16} />{on ? m.label : t('commun.clim.eteinte')}</span>
     {/if}
     {#if climateIcon(d) === 'stove'}
-      <StoveDetail {id} />
+      <StoveDetail {id} {name} />
     {/if}
     <!-- Outside, only from a unit that measures it (a heat pump's outdoor unit). -->
     {#if typeof outdoor === 'number' || (draw != null && draw >= 5)}
