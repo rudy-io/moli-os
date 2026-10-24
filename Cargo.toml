@@ -17,6 +17,7 @@ moli-z2m = { path = "crates/moli-z2m" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-dirigera = { path = "crates/moli-dirigera" }
+moli-tahoma = { path = "crates/moli-tahoma" }
 moli-host = { path = "crates/moli-host" }
 moli-history = { path = "crates/moli-history" }
 moli-profile = { path = "crates/moli-profile" }

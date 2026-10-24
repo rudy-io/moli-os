@@ -72,7 +72,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
+kind = "sonos"          # z2m, hue, dirigera, tahoma, tuya, reolink, sonos, philips, frigate, bambu, tapo, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -237,6 +237,47 @@ host = "192.168.1.x"
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
   inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
+
+## `tahoma` : passerelle Somfy TaHoma (`crates/moli-tahoma`)
+
+- **Couvre** : volets roulants, stores, écrans, stores bannes (ouverture en pourcentage,
+  boutons `open`/`stop`/`close`). Les appareils RTS, qui ne connaissent pas leur position,
+  n'exposent que les boutons. Pas encore : éclairages et prises io, lames orientables,
+  scènes.
+- **Protocole** : API locale Overkiz, HTTPS sur **8443**, `Authorization: Bearer <jeton>`,
+  base `/enduser-mobile-web/1/enduserAPI`. Le certificat est auto-signé (autorité Overkiz) :
+  épinglé au premier contact, **avant** le jeton. Relevé complet `GET /setup/devices` toutes
+  les 5 s ; commandes par `POST /exec/apply` avec les commandes que l'appareil déclare
+  (`open`, `stop`, `close`, `setClosure`, `setDeployment`). Un `execId` accepté vaut
+  acquittement, la position réelle arrive au relevé suivant.
+- **Pas de `/login` en local** : le jeton se génère dans l'appli Somfy (mode développeur :
+  *Configuration → Accéder aux paramètres → toucher le PIN 7 fois*). Il se range dans le
+  coffre, jamais dans la configuration.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "somfy"
+kind = "tahoma"
+[driver.options]
+host = "192.168.1.x"
+# cert_sha256 = "…"   # optionnel : empreinte de la passerelle si le coffre est indisponible
+```
+
+- **Secrets** (instance) : `token` (le jeton du mode développeur, à ranger avec
+  `moli-os secrets set`) et `cert_sha256` (épinglé au premier contact par le pilote). Il faut
+  une clé maître. Jeton refusé (401/403) : statut `waiting` qui demande d'en générer un
+  nouveau ; certificat changé : statut `waiting` avec les deux empreintes et la commande pour
+  oublier l'ancienne.
+- **Points** : `control` (énumération `open`/`stop`/`close`, seulement les commandes que
+  l'appareil déclare) et `percent_control` (0-100 %, **0 = fermé**, 100 = ouvert). Overkiz
+  compte une fermeture depuis l'ouvert (`core:ClosureState`, 108 et 124 = pas de position) :
+  le pilote inverse dans les deux sens. Un store banne compte son déploiement
+  (`core:DeploymentState`), déjà une ouverture.
+- **Vérifié** (23 octobre 2026) : une passerelle TaHoma `2030` et deux volets io — épinglage,
+  relevé des positions, boutons ouvrir/stop/fermer depuis le tableau de bord, position qui
+  suit. Pas encore vu : coupure de la passerelle, jeton régénéré, changement de certificat,
+  et les volets RTS ou stores bannes sur du vrai matériel.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
@@ -573,6 +614,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
+| `tahoma` | `moli-tahoma` | HTTPS 8443, API locale Overkiz, épinglé | oui : positions et boutons des volets et stores | TaHoma `2030` (2026.4.5-7), deux volets io : positions et boutons testés sur le vrai matériel ; volets RTS et stores bannes : mapping sur fixture seulement |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
