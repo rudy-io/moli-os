@@ -1,0 +1,3012 @@
+{
+ "product": "ST.CAMELIA METAL AIR",
+ "registers": [
+  {
+   "reg_key": "alarms_enable",
+   "reg_type": "ENABLE",
+   "offset": 33,
+   "mask": 8,
+   "formula": "(#/8)",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "alarms_get",
+   "reg_type": "GET",
+   "offset": 51,
+   "mask": 32798,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": [
+    {
+     "value": 0,
+     "lang": "BHS",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "CRO",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "CZE",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "DAN",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "DEU",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "ENG",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "FRE",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "ITA",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "NLD",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "POL",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "PRT",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "SPA",
+     "description": "OK"
+    },
+    {
+     "value": 0,
+     "lang": "SRP",
+     "description": "OK"
+    },
+    {
+     "value": 1,
+     "lang": "BHS",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "CRO",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "CZE",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "DAN",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "DEU",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "ENG",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "FRE",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "A09 guasto sonda fumi"
+    },
+    {
+     "value": 1,
+     "lang": "NLD",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "POL",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "PRT",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "SPA",
+     "description": "A09"
+    },
+    {
+     "value": 1,
+     "lang": "SRP",
+     "description": "A09"
+    },
+    {
+     "value": 2,
+     "lang": "BHS",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "CRO",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "CZE",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "DAN",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "DEU",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "ENG",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "FRE",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "ITA",
+     "description": "A04 sovratemperatura fumi"
+    },
+    {
+     "value": 2,
+     "lang": "NLD",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "POL",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "PRT",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "SPA",
+     "description": "A04"
+    },
+    {
+     "value": 2,
+     "lang": "SRP",
+     "description": "A04"
+    },
+    {
+     "value": 4,
+     "lang": "BHS",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "CRO",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "CZE",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "DAN",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "DEU",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "ENG",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "FRE",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "ITA",
+     "description": "A08 guasto aspiratore"
+    },
+    {
+     "value": 4,
+     "lang": "NLD",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "POL",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "PRT",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "SPA",
+     "description": "A08"
+    },
+    {
+     "value": 4,
+     "lang": "SRP",
+     "description": "A08"
+    },
+    {
+     "value": 8,
+     "lang": "BHS",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "CRO",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "CZE",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "DAN",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "DEU",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "ENG",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "FRE",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "ITA",
+     "description": "A01 mancata accensione"
+    },
+    {
+     "value": 8,
+     "lang": "NLD",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "POL",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "PRT",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "SPA",
+     "description": "A01"
+    },
+    {
+     "value": 8,
+     "lang": "SRP",
+     "description": "A01"
+    },
+    {
+     "value": 16,
+     "lang": "BHS",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "CRO",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "CZE",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "DAN",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "DEU",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "ENG",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "FRE",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "ITA",
+     "description": "A02 spegnimento fiamma"
+    },
+    {
+     "value": 16,
+     "lang": "NLD",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "POL",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "PRT",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "SPA",
+     "description": "A02"
+    },
+    {
+     "value": 16,
+     "lang": "SRP",
+     "description": "A02"
+    },
+    {
+     "value": 32,
+     "lang": "BHS",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "CRO",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "CZE",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "DAN",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "DEU",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "ENG",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "FRE",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "ITA",
+     "description": "A03 allarme termostato"
+    },
+    {
+     "value": 32,
+     "lang": "NLD",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "POL",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "PRT",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "SPA",
+     "description": "A03"
+    },
+    {
+     "value": 32,
+     "lang": "SRP",
+     "description": "A03"
+    },
+    {
+     "value": 64,
+     "lang": "BHS",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "CRO",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "CZE",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "DAN",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "DEU",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "ENG",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "FRE",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "ITA",
+     "description": "A05 allarme pressostato"
+    },
+    {
+     "value": 64,
+     "lang": "NLD",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "POL",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "PRT",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "SPA",
+     "description": "A05"
+    },
+    {
+     "value": 64,
+     "lang": "SRP",
+     "description": "A05"
+    }
+   ]
+  },
+  {
+   "reg_key": "calendar_day_set",
+   "reg_type": "SET",
+   "offset": 33019,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 31,
+   "enc_val": null
+  },
+  {
+   "reg_key": "calendar_day_week_set",
+   "reg_type": "SET",
+   "offset": 33016,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 7,
+   "enc_val": [
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "Lun"
+    },
+    {
+     "value": 2,
+     "lang": "ITA",
+     "description": "Mar"
+    },
+    {
+     "value": 3,
+     "lang": "ITA",
+     "description": "Mer"
+    },
+    {
+     "value": 4,
+     "lang": "ITA",
+     "description": "Gio"
+    },
+    {
+     "value": 5,
+     "lang": "ITA",
+     "description": "Ven"
+    },
+    {
+     "value": 6,
+     "lang": "ITA",
+     "description": "Sab"
+    },
+    {
+     "value": 7,
+     "lang": "ITA",
+     "description": "Dom"
+    }
+   ]
+  },
+  {
+   "reg_key": "calendar_month_set",
+   "reg_type": "SET",
+   "offset": 33020,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 12,
+   "enc_val": null
+  },
+  {
+   "reg_key": "calendar_year_set",
+   "reg_type": "SET",
+   "offset": 33021,
+   "mask": 65535,
+   "formula": "#+2000",
+   "formula_inverse": "#-2000",
+   "format_string": "{0}",
+   "set_min": 15,
+   "set_max": 50,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32832,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32828,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32833,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32834,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32831,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32829,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32830,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_enable_set",
+   "reg_type": "SET",
+   "offset": 32825,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_start_set",
+   "reg_type": "SET",
+   "offset": 32826,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p1_stop_set",
+   "reg_type": "SET",
+   "offset": 32827,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32842,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32838,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32843,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32844,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32841,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32839,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32840,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_enable_set",
+   "reg_type": "SET",
+   "offset": 32835,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_start_set",
+   "reg_type": "SET",
+   "offset": 32836,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p2_stop_set",
+   "reg_type": "SET",
+   "offset": 32837,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32852,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32848,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32853,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32854,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32851,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32849,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32850,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_enable_set",
+   "reg_type": "SET",
+   "offset": 32845,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_start_set",
+   "reg_type": "SET",
+   "offset": 32846,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p3_stop_set",
+   "reg_type": "SET",
+   "offset": 32847,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32862,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32858,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32863,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32864,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32861,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32859,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32860,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_enable_set",
+   "reg_type": "SET",
+   "offset": 32855,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_start_set",
+   "reg_type": "SET",
+   "offset": 32856,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p4_stop_set",
+   "reg_type": "SET",
+   "offset": 32857,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32872,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32868,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32873,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32874,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32871,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32869,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32870,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_enable_set",
+   "reg_type": "SET",
+   "offset": 32865,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_start_set",
+   "reg_type": "SET",
+   "offset": 32866,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p5_stop_set",
+   "reg_type": "SET",
+   "offset": 32867,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_friday_set",
+   "reg_type": "SET",
+   "offset": 32882,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_monday_set",
+   "reg_type": "SET",
+   "offset": 32878,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_saturday_set",
+   "reg_type": "SET",
+   "offset": 32883,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_sunday_set",
+   "reg_type": "SET",
+   "offset": 32884,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_thursday_set",
+   "reg_type": "SET",
+   "offset": 32881,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_tuesday_set",
+   "reg_type": "SET",
+   "offset": 32879,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_day_wednesday_set",
+   "reg_type": "SET",
+   "offset": 32880,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_enable_set",
+   "reg_type": "SET",
+   "offset": 32875,
+   "mask": 1,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_start_set",
+   "reg_type": "SET",
+   "offset": 32876,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 143,
+   "enc_val": null
+  },
+  {
+   "reg_key": "chrono_p6_stop_set",
+   "reg_type": "SET",
+   "offset": 32877,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 144,
+   "enc_val": null
+  },
+  {
+   "reg_key": "clock_hour_set",
+   "reg_type": "SET",
+   "offset": 33017,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 23,
+   "enc_val": null
+  },
+  {
+   "reg_key": "clock_minute_set",
+   "reg_type": "SET",
+   "offset": 33018,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 59,
+   "enc_val": null
+  },
+  {
+   "reg_key": "eco_stop_set",
+   "reg_type": "SET",
+   "offset": 32798,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 1,
+   "enc_val": [
+    {
+     "value": 0,
+     "lang": "BHS",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CRO",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CZE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DAN",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DEU",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ENG",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "FRE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ITA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "NLD",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "POL",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "PRT",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SPA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SRP",
+     "description": "Off"
+    },
+    {
+     "value": 1,
+     "lang": "BHS",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "CRO",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "CZE",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "DAN",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "DEU",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "ENG",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "FRE",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "NLD",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "POL",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "PRT",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "SPA",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "SRP",
+     "description": "On"
+    }
+   ]
+  },
+  {
+   "reg_key": "eco_temp_stop",
+   "reg_type": "SET",
+   "offset": 32802,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}'",
+   "set_min": 0,
+   "set_max": 30,
+   "enc_val": null
+  },
+  {
+   "reg_key": "info_system_get",
+   "reg_type": "GET",
+   "offset": 33029,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 25.5,
+   "enc_val": [
+    {
+     "value": 1,
+     "lang": "DAN",
+     "description": "OPDATERING I GANG..."
+    },
+    {
+     "value": 1,
+     "lang": "DEU",
+     "description": "UPDATE LÄUFT..."
+    },
+    {
+     "value": 1,
+     "lang": "ENG",
+     "description": "UPDATE IN PROGRESS..."
+    },
+    {
+     "value": 1,
+     "lang": "FRE",
+     "description": "MISE À JOUR EN COURS..."
+    },
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "AGGIORNAMENTO IN CORSO..."
+    },
+    {
+     "value": 1,
+     "lang": "NLD",
+     "description": "MISE À JOUR EN COURS..."
+    },
+    {
+     "value": 1,
+     "lang": "POL",
+     "description": "AKTUALIZACJA W TRAKCIE..."
+    },
+    {
+     "value": 1,
+     "lang": "PRT",
+     "description": "ATUALIZAÇÃO EM CURSO..."
+    },
+    {
+     "value": 1,
+     "lang": "SPA",
+     "description": "ACTUALIZACIÓN EN CURSO..."
+    },
+    {
+     "value": 2,
+     "lang": "DAN",
+     "description": "OPDATERING LYKKEDES!"
+    },
+    {
+     "value": 2,
+     "lang": "DEU",
+     "description": "UPDATE ERFOLGREICH!"
+    },
+    {
+     "value": 2,
+     "lang": "ENG",
+     "description": "UPDATE SUCCESSFUL!"
+    },
+    {
+     "value": 2,
+     "lang": "FRE",
+     "description": "MISE À JOUR RÉUSSIE !"
+    },
+    {
+     "value": 2,
+     "lang": "ITA",
+     "description": "AGGIORNAMENTO RIUSCITO!"
+    },
+    {
+     "value": 2,
+     "lang": "NLD",
+     "description": "UPDATE VOLTOOID!"
+    },
+    {
+     "value": 2,
+     "lang": "POL",
+     "description": "AKTUALIZACJA UDANA!"
+    },
+    {
+     "value": 2,
+     "lang": "PRT",
+     "description": "ATUALIZAÇÃO CONCLUÍDA!"
+    },
+    {
+     "value": 2,
+     "lang": "SPA",
+     "description": "ACTUALIZACIÓN COMPLETADA!"
+    },
+    {
+     "value": 3,
+     "lang": "DAN",
+     "description": "OPDATERING MISLYKKEDES---"
+    },
+    {
+     "value": 3,
+     "lang": "DEU",
+     "description": "UPDATE FEHLGESCHLAGEN---"
+    },
+    {
+     "value": 3,
+     "lang": "ENG",
+     "description": "UPDATE FAILED---"
+    },
+    {
+     "value": 3,
+     "lang": "FRE",
+     "description": "MISE À JOUR ÉCHOUÉE---"
+    },
+    {
+     "value": 3,
+     "lang": "ITA",
+     "description": "AGGIORNAMENTO FALLITO---"
+    },
+    {
+     "value": 3,
+     "lang": "NLD",
+     "description": "UPDATE MISLUKT---"
+    },
+    {
+     "value": 3,
+     "lang": "POL",
+     "description": "AKTUALIZACJA NIEUDANA---"
+    },
+    {
+     "value": 3,
+     "lang": "PRT",
+     "description": "ATUALIZAÇÃO FALHOU---"
+    },
+    {
+     "value": 3,
+     "lang": "SPA",
+     "description": "ACTUALIZACIÓN FALLIDA---"
+    }
+   ]
+  },
+  {
+   "reg_key": "navel_RevH_get",
+   "reg_type": "GET",
+   "offset": 1807,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 65535,
+   "enc_val": null
+  },
+  {
+   "reg_key": "navel_RevL_get",
+   "reg_type": "GET",
+   "offset": 1808,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "power_set",
+   "reg_type": "SET",
+   "offset": 32895,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 5,
+   "enc_val": null
+  },
+  {
+   "reg_key": "real_power_enable",
+   "reg_type": "ENABLE",
+   "offset": 33,
+   "mask": 4,
+   "formula": "#/4",
+   "formula_inverse": "#*4",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "real_power_get",
+   "reg_type": "GET",
+   "offset": 52,
+   "mask": 255,
+   "formula": "int(#/4) +1",
+   "formula_inverse": "(#-1)*4",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 5,
+   "enc_val": null
+  },
+  {
+   "reg_key": "status_get",
+   "reg_type": "GET",
+   "offset": 33,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": [
+    {
+     "value": 0,
+     "lang": "BHS",
+     "description": "Isključeno"
+    },
+    {
+     "value": 0,
+     "lang": "CRO",
+     "description": "Isključeno"
+    },
+    {
+     "value": 0,
+     "lang": "DAN",
+     "description": "Slukket"
+    },
+    {
+     "value": 0,
+     "lang": "DEU",
+     "description": "Ausgeschaltet"
+    },
+    {
+     "value": 0,
+     "lang": "ENG",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "FRE",
+     "description": "Éteindre"
+    },
+    {
+     "value": 0,
+     "lang": "ITA",
+     "description": "Spenta"
+    },
+    {
+     "value": 0,
+     "lang": "NLD",
+     "description": "Uitgeschakeld"
+    },
+    {
+     "value": 0,
+     "lang": "POL",
+     "description": "Wylaczony"
+    },
+    {
+     "value": 0,
+     "lang": "PRT",
+     "description": "Desligada"
+    },
+    {
+     "value": 0,
+     "lang": "SPA",
+     "description": "Apagada"
+    },
+    {
+     "value": 1,
+     "lang": "BHS",
+     "description": "Uključivanje"
+    },
+    {
+     "value": 1,
+     "lang": "CRO",
+     "description": "Uključivanje"
+    },
+    {
+     "value": 1,
+     "lang": "DAN",
+     "description": "Tænding"
+    },
+    {
+     "value": 1,
+     "lang": "DEU",
+     "description": "Zündung"
+    },
+    {
+     "value": 1,
+     "lang": "ENG",
+     "description": "Ignition"
+    },
+    {
+     "value": 1,
+     "lang": "FRE",
+     "description": "Allumage"
+    },
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "Accensione"
+    },
+    {
+     "value": 1,
+     "lang": "NLD",
+     "description": "Ontsteking"
+    },
+    {
+     "value": 1,
+     "lang": "POL",
+     "description": "Zapłon"
+    },
+    {
+     "value": 1,
+     "lang": "PRT",
+     "description": "Ignição"
+    },
+    {
+     "value": 1,
+     "lang": "SPA",
+     "description": "Ignición"
+    },
+    {
+     "value": 2,
+     "lang": "BHS",
+     "description": "Čeka plamen"
+    },
+    {
+     "value": 2,
+     "lang": "CRO",
+     "description": "Čeka plamen"
+    },
+    {
+     "value": 2,
+     "lang": "DAN",
+     "description": "Afventer flamme"
+    },
+    {
+     "value": 2,
+     "lang": "DEU",
+     "description": "Warten auf Flamme"
+    },
+    {
+     "value": 2,
+     "lang": "ENG",
+     "description": "Awaiting flame"
+    },
+    {
+     "value": 2,
+     "lang": "FRE",
+     "description": "En attente de flamme"
+    },
+    {
+     "value": 2,
+     "lang": "ITA",
+     "description": "Attesa Fiamma"
+    },
+    {
+     "value": 2,
+     "lang": "NLD",
+     "description": "In afwachting van vlam"
+    },
+    {
+     "value": 2,
+     "lang": "POL",
+     "description": "Oczekiwanie na płomień"
+    },
+    {
+     "value": 2,
+     "lang": "PRT",
+     "description": "Aguardando chama"
+    },
+    {
+     "value": 2,
+     "lang": "SPA",
+     "description": "Esperando llama"
+    },
+    {
+     "value": 3,
+     "lang": "BHS",
+     "description": "Početak"
+    },
+    {
+     "value": 3,
+     "lang": "CRO",
+     "description": "Početak"
+    },
+    {
+     "value": 3,
+     "lang": "DAN",
+     "description": "Start op"
+    },
+    {
+     "value": 3,
+     "lang": "DEU",
+     "description": "Anlaufen"
+    },
+    {
+     "value": 3,
+     "lang": "ENG",
+     "description": "Starting"
+    },
+    {
+     "value": 3,
+     "lang": "FRE",
+     "description": "Commencez"
+    },
+    {
+     "value": 3,
+     "lang": "ITA",
+     "description": "Avvio"
+    },
+    {
+     "value": 3,
+     "lang": "NLD",
+     "description": "Opstarten"
+    },
+    {
+     "value": 3,
+     "lang": "POL",
+     "description": "Uruchomienie"
+    },
+    {
+     "value": 3,
+     "lang": "PRT",
+     "description": "Comece"
+    },
+    {
+     "value": 3,
+     "lang": "SPA",
+     "description": "Inicio"
+    },
+    {
+     "value": 4,
+     "lang": "BHS",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "CRO",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "DAN",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "DEU",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "ENG",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "FRE",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "ITA",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "NLD",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "POL",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "PRT",
+     "description": "On"
+    },
+    {
+     "value": 4,
+     "lang": "SPA",
+     "description": "On"
+    },
+    {
+     "value": 5,
+     "lang": "BHS",
+     "description": "Čišćenje"
+    },
+    {
+     "value": 5,
+     "lang": "CRO",
+     "description": "Čišćenje"
+    },
+    {
+     "value": 5,
+     "lang": "DAN",
+     "description": "Rengøring"
+    },
+    {
+     "value": 5,
+     "lang": "DEU",
+     "description": "Reinigung"
+    },
+    {
+     "value": 5,
+     "lang": "ENG",
+     "description": "Cleaning"
+    },
+    {
+     "value": 5,
+     "lang": "FRE",
+     "description": "Nettoyage"
+    },
+    {
+     "value": 5,
+     "lang": "ITA",
+     "description": "Pulizia"
+    },
+    {
+     "value": 5,
+     "lang": "NLD",
+     "description": "Reiniging"
+    },
+    {
+     "value": 5,
+     "lang": "POL",
+     "description": "Czyszczenie"
+    },
+    {
+     "value": 5,
+     "lang": "PRT",
+     "description": "Limpeza"
+    },
+    {
+     "value": 5,
+     "lang": "SPA",
+     "description": "Limpiadura"
+    },
+    {
+     "value": 6,
+     "lang": "BHS",
+     "description": "Ugasiti"
+    },
+    {
+     "value": 6,
+     "lang": "CRO",
+     "description": "Ugasiti"
+    },
+    {
+     "value": 6,
+     "lang": "DAN",
+     "description": "Sluk"
+    },
+    {
+     "value": 6,
+     "lang": "DEU",
+     "description": "Löschen"
+    },
+    {
+     "value": 6,
+     "lang": "ENG",
+     "description": "Shut Off"
+    },
+    {
+     "value": 6,
+     "lang": "FRE",
+     "description": "Extinction"
+    },
+    {
+     "value": 6,
+     "lang": "ITA",
+     "description": "Spegnimento"
+    },
+    {
+     "value": 6,
+     "lang": "NLD",
+     "description": "Blussen"
+    },
+    {
+     "value": 6,
+     "lang": "POL",
+     "description": "Zgasić"
+    },
+    {
+     "value": 6,
+     "lang": "PRT",
+     "description": "Extinção"
+    },
+    {
+     "value": 6,
+     "lang": "SPA",
+     "description": "Extinción"
+    },
+    {
+     "value": 7,
+     "lang": "BHS",
+     "description": "Pričekaj"
+    },
+    {
+     "value": 7,
+     "lang": "CRO",
+     "description": "Pričekaj"
+    },
+    {
+     "value": 7,
+     "lang": "DAN",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "DEU",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "ENG",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "FRE",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "ITA",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "NLD",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "POL",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "PRT",
+     "description": "Stand-by"
+    },
+    {
+     "value": 7,
+     "lang": "SPA",
+     "description": "Stand-by"
+    },
+    {
+     "value": 8,
+     "lang": "BHS",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "CRO",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "CZE",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "DAN",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "DEU",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "ENG",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "FRE",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "ITA",
+     "description": "ALLARME"
+    },
+    {
+     "value": 8,
+     "lang": "NLD",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "POL",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "PRT",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "SPA",
+     "description": "ALARM"
+    },
+    {
+     "value": 8,
+     "lang": "SRP",
+     "description": "ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "BHS",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "CRO",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "CZE",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "DAN",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "DEU",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "ENG",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "FRE",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "ITA",
+     "description": "MEM. ALLARME"
+    },
+    {
+     "value": 9,
+     "lang": "NLD",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "POL",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "PRT",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "SPA",
+     "description": "MEM. ALARM"
+    },
+    {
+     "value": 9,
+     "lang": "SRP",
+     "description": "MEM. ALARM"
+    }
+   ]
+  },
+  {
+   "reg_key": "status_managed_get",
+   "reg_type": "GET",
+   "offset": 232,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": [
+    {
+     "value": 85,
+     "lang": "BHS",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "CRO",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "CZE",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "DAN",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "DEU",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "ENG",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "FRE",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "ITA",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "NLD",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "POL",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "PRT",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "SPA",
+     "description": "ON"
+    },
+    {
+     "value": 85,
+     "lang": "SRP",
+     "description": "ON"
+    },
+    {
+     "value": 170,
+     "lang": "BHS",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "CRO",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "CZE",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "DAN",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "DEU",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "ENG",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "FRE",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "ITA",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "NLD",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "POL",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "PRT",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "SPA",
+     "description": "OFF"
+    },
+    {
+     "value": 170,
+     "lang": "SRP",
+     "description": "OFF"
+    }
+   ]
+  },
+  {
+   "reg_key": "status_managed_off_enable",
+   "reg_type": "ENABLE",
+   "offset": 33,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 65535,
+   "enc_val": null
+  },
+  {
+   "reg_key": "status_managed_on_enable",
+   "reg_type": "ENABLE",
+   "offset": 33,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 65535,
+   "enc_val": null
+  },
+  {
+   "reg_key": "temp_air_get",
+   "reg_type": "GET",
+   "offset": 1,
+   "mask": 65535,
+   "formula": "#/2",
+   "formula_inverse": "#*2",
+   "format_string": "{0}°C",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "temp_air_set",
+   "reg_type": "SET",
+   "offset": 32893,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}°C",
+   "set_min": 5,
+   "set_max": 35,
+   "enc_val": null
+  },
+  {
+   "reg_key": "temp_gas_flue_get",
+   "reg_type": "GET",
+   "offset": 2,
+   "mask": 255,
+   "formula": "#+30",
+   "formula_inverse": "#-30",
+   "format_string": "{0}°C",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "therm_ext_enable",
+   "reg_type": "ENABLE",
+   "offset": 32823,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "therm_ext_get",
+   "reg_type": "GET",
+   "offset": 6,
+   "mask": 16,
+   "formula": "#/16",
+   "formula_inverse": "#*16",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": [
+    {
+     "value": 0,
+     "lang": "BHS",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CRO",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CZE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DAN",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DEU",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ENG",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "FRE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ITA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "NLD",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "POL",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "PRT",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SPA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SRP",
+     "description": "Off"
+    },
+    {
+     "value": 1,
+     "lang": "BHS",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "CRO",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "CZE",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "DAN",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "DEU",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "ENG",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "FRE",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "ITA",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "NLD",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "POL",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "PRT",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "SPA",
+     "description": "On"
+    },
+    {
+     "value": 1,
+     "lang": "SRP",
+     "description": "On"
+    }
+   ]
+  },
+  {
+   "reg_key": "vent_front_enable",
+   "reg_type": "ENABLE",
+   "offset": 32796,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "vent_front_set",
+   "reg_type": "SET",
+   "offset": 32894,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 1,
+   "set_max": 6,
+   "enc_val": [
+    {
+     "value": 6,
+     "lang": "BHS",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "CRO",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "CZE",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "DAN",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "DEU",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "ENG",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "FRE",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "ITA",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "NLD",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "POL",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "PRT",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "SPA",
+     "description": "AUTO"
+    },
+    {
+     "value": 6,
+     "lang": "SRP",
+     "description": "AUTO"
+    }
+   ]
+  },
+  {
+   "reg_key": "vent_main_enable",
+   "reg_type": "ENABLE",
+   "offset": 32796,
+   "mask": 65535,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 255,
+   "enc_val": null
+  },
+  {
+   "reg_key": "vent_main_set",
+   "reg_type": "SET",
+   "offset": 32894,
+   "mask": 255,
+   "formula": "#",
+   "formula_inverse": "#",
+   "format_string": "{0}",
+   "set_min": 0,
+   "set_max": 6,
+   "enc_val": [
+    {
+     "value": 0,
+     "lang": "BHS",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CRO",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "CZE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DAN",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "DEU",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ENG",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "FRE",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "ITA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "NLD",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "POL",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "PRT",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SPA",
+     "description": "Off"
+    },
+    {
+     "value": 0,
+     "lang": "SRP",
+     "description": "Off"
+    },
+    {
+     "value": 6,
+     "lang": "BHS",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "CRO",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "CZE",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "DAN",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "DEU",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "ENG",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "FRE",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "ITA",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "NLD",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "POL",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "PRT",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "SPA",
+     "description": "Auto"
+    },
+    {
+     "value": 6,
+     "lang": "SRP",
+     "description": "Auto"
+    }
+   ]
+  }
+ ],
+ "reading": {
+  "32853": 1,
+  "32860": 0,
+  "32883": 0,
+  "1807": 0,
+  "32850": 0,
+  "32796": 1,
+  "32823": 0,
+  "32859": 0,
+  "32825": 1,
+  "32863": 0,
+  "32876": 0,
+  "32847": 131,
+  "32832": 1,
+  "32880": 0,
+  "32842": 0,
+  "32844": 1,
+  "33": 0,
+  "32858": 0,
+  "32827": 135,
+  "33019": 36,
+  "32861": 0,
+  "33020": 16,
+  "32881": 0,
+  "32865": 0,
+  "32839": 0,
+  "32895": 3,
+  "32836": 51,
+  "32884": 0,
+  "232": 32,
+  "51": 0,
+  "33021": 38,
+  "32833": 0,
+  "32846": 72,
+  "6": 129,
+  "32878": 0,
+  "32849": 0,
+  "32854": 0,
+  "32798": 1,
+  "32848": 0,
+  "32870": 0,
+  "32830": 1,
+  "32894": 6,
+  "32855": 0,
+  "33017": 1,
+  "32857": 0,
+  "33016": 6,
+  "32893": 19,
+  "32867": 0,
+  "32864": 0,
+  "32837": 135,
+  "32840": 0,
+  "32831": 1,
+  "32873": 0,
+  "32869": 0,
+  "1": 36,
+  "32879": 0,
+  "32856": 0,
+  "2": 0,
+  "32834": 0,
+  "32872": 0,
+  "32874": 0,
+  "32838": 0,
+  "32826": 42,
+  "33029": 2,
+  "32868": 0,
+  "32841": 0,
+  "32802": 30,
+  "32862": 0,
+  "32835": 1,
+  "32851": 0,
+  "32877": 0,
+  "32882": 0,
+  "32871": 0,
+  "32875": 0,
+  "32843": 1,
+  "32828": 1,
+  "33018": 88,
+  "32845": 0,
+  "32866": 0,
+  "32852": 0,
+  "1808": 98,
+  "32829": 1,
+  "52": 0
+ }
+}

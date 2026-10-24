@@ -157,6 +157,16 @@
     comfort_1: { label: 'commun.piece.mode.confort_1', icon: 'thermometer', tone: 'warm' },
     comfort_2: { label: 'commun.piece.mode.confort_2', icon: 'thermometer', tone: 'warm' },
     off: { label: 'commun.piece.mode.arret', icon: 'power', tone: 'cool' },
+    // A pellet stove's states (Micronova), shown, never sent.
+    ignition: { label: 'commun.poele.allumage', icon: 'fire', tone: 'warm' },
+    awaiting_flame: { label: 'commun.poele.attente_flamme', icon: 'fire', tone: 'warm' },
+    starting: { label: 'commun.poele.demarrage', icon: 'fire', tone: 'warm' },
+    on: { label: 'commun.poele.marche', icon: 'fire', tone: 'warm' },
+    cleaning: { label: 'commun.poele.nettoyage', icon: 'fan', tone: 'good' },
+    shut_off: { label: 'commun.poele.extinction', icon: 'power', tone: 'cool' },
+    stand_by: { label: 'commun.poele.veille', icon: 'moon', tone: 'good' },
+    alarm: { label: 'commun.poele.alarme', icon: 'alert', tone: 'warm' },
+    mem_alarm: { label: 'commun.poele.alarme_memorisee', icon: 'alert', tone: 'warm' },
   };
   const AIR_CONDITIONER = Object.keys(MODES).filter((key) => MODES[key].ac);
   /** A mode said in the house's language (an unknown one: as the unit says it). */

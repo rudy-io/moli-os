@@ -188,6 +188,16 @@
     holiday: 'commun.piece.mode.vacances',
     program: 'commun.piece.mode.programme',
     manual: 'commun.piece.mode.manuel',
+    // A pellet stove's states (Micronova).
+    ignition: 'commun.poele.allumage',
+    awaiting_flame: 'commun.poele.attente_flamme',
+    starting: 'commun.poele.demarrage',
+    on: 'commun.poele.marche',
+    cleaning: 'commun.poele.nettoyage',
+    shut_off: 'commun.poele.extinction',
+    stand_by: 'commun.poele.veille',
+    alarm: 'commun.poele.alarme',
+    mem_alarm: 'commun.poele.alarme_memorisee',
   };
   // A room without lights says what its only heating or cooling unit does.
   const climateState = (d) => {

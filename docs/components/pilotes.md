@@ -281,6 +281,26 @@ python3 -I tools/tuya-iot/tuya-iot-export.py \
 - **Pièges** : heartbeat toutes les 10 s, connexion jugée morte après 35 s de silence, reconnexion avec attente jusqu'à 5 min. Une adresse retrouvée, même identique, remet l'attente à 2 s avant le nouvel essai : un refus transitoire après la découverte est ainsi retenté rapidement. Seule une minuterie écoulée augmente l'attente. Liens et recherches réservent chaque IP avant d'ouvrir TCP, y compris pendant l'authentification : une ancienne configuration ne doit pas évincer la connexion d'un autre appareil. La réservation est libérée à la fermeture, sur erreur, délai dépassé ou annulation ; les autres IP restent indépendantes. Les prises ne publient la puissance que sur demande : DP 18/19/20 redemandés toutes les 30 s. Un ordre de plus de 5 s n'est jamais envoyé (« un radiateur allumé des heures plus tard est pire qu'un refus ») ; un ordre non acquitté en 5 s est signalé. Appareil sans clé : ignoré avec un avertissement (relancer l'import).
 - **Tests** : `src/protocol.rs` vérifié **octet par octet** contre pytuya (localtuya) pour les trois versions, négociation contre un appareil simulé, trames tronquées ou altérées ; `src/model.rs` (unités, échelle, écriture) ; `src/lib.rs` (fusion d'import sans clé dans le fichier) ; appareils TCP simulés dans `src/device.rs` et `src/seek.rs` (heartbeat ou mauvaise clé refusés, délai de négociation borné, commande après preuve, file de reconnexion rejetée, échange DHCP, nouvel essai après échec, plancher protocole, connexions saines épargnées, passerelle qui lit ses sous-appareils par `cid`).
 
+## `micronova` : poêles à granulés Micronova (`crates/moli-micronova`)
+
+- **Couvre** : les poêles à carte Micronova (MCZ, Red, Extraflame, Ravelli…) dont le kit Wi-Fi passe par une application Easy Connect. **Lecture seule** pour l'instant : état (`mode` : arrêt, allumage, attente flamme, démarrage, en marche, nettoyage, extinction, veille, alarme, alarme mémorisée, d'après les mots de la carte), `on` (brûle ou non), `temperature` (air), `target_temperature` (consigne et ses bornes), `flue_temperature` (fumées), `power_level` et `real_power` (1–5), `fan_main` et `fan_front` (6 = auto), `alarm` (OK, A01…), `eco_stop`. Le dashboard y voit un chauffage (carte Climat, états montrés, rien d'envoyé).
+- **Protocole** : le cloud Agua IoT de Micronova, comme les applications (`src/cloud.rs`) : `POST /appSignup` (une identité d'application, nouvelle à chaque départ), `POST /userLogin` (e-mail, mot de passe ; un jeton), puis avec lui `deviceList`, `deviceGetInfo` et `deviceGetRegistersMap` (la carte des registres, lue une fois), et chaque minute `deviceGetBufferReading` suivi de `GET deviceJobStatus/<id>` jusqu'à `completed` (12 s au plus) : `Items` (positions) et `Values` (bruts). Un 401 : nouvelle connexion. En-têtes `id_brand: 1`, `customer_code`, `local`, `Authorization` (l'identité d'application pour se connecter, le jeton ensuite).
+- **Décodage** (`src/model.rs`) : valeur = brut ET masque, puis la formule de la carte où `#` est la valeur (`#/2`, `#+30`, `int(#/4) +1`), calculée par un évaluateur qui ne connaît que nombres, `#`, `+ - * /`, parenthèses et `int()` : jamais exécutée.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "micronova"
+kind = "micronova"
+[driver.options]
+# host = "remote.mcz.it"     # défaut : le serveur des applications Easy Connect
+# customer_code = "354924"   # défaut : Easy Connect (Poêle : 354925, Plus : 746318)
+# every = 60                 # secondes entre deux lectures (30 au moins)
+```
+
+- **Secrets** : `email` et `password` du compte Easy Connect, rangés par la personne (`moli-os secrets set micronova email`, puis `password`) ; absents, le pilote attend et regarde toutes les 30 s.
+- **Tests** : `src/model.rs` sur la carte et une lecture réelles d'un Camelia Metal Air (`integrations/micronova/fixtures/camelia-metal-air.json`), formules (dont du code refusé et la division par zéro), mots en clés ; `src/cloud.rs` (réponse d'une tâche, identifiants nombres ou textes).
+
 ## `reolink` : caméras Reolink (`crates/moli-reolink`)
 
 - **Couvre** : caméras et sonnette derrière un Home Hub (ou une caméra / un NVR seul). **Lecture seule** + images. Un canal hors ligne est gardé s'il a un nom **ou** l'identifiant d'une caméra (une caméra sur pile endormie) ; seul un emplacement vide est ignoré. Au premier inventaire, chaque canal est décrit dans le journal (`reolink channel` : en ligne, endormi, nommé, caméra), pour expliquer une caméra absente.

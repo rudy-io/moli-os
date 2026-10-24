@@ -1,0 +1,30 @@
+[integration]
+id = "micronova"
+name = "Poêle à granulés Micronova (Easy Connect)"
+# Stoves on a Micronova board, whose Wi-Fi kit uses the Easy Connect apps.
+brands = ["MCZ", "Red", "Micronova"]
+models = ["ST.CAMELIA METAL AIR"]
+# Internet: the cloud of the Easy Connect apps (Agua IoT), JSON over HTTPS.
+transport = "https"
+driver = "micronova"
+crate = "moli-micronova"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# The Easy Connect account, filed in the vault by the person.
+secrets = ["email", "password"]
+vars = []
+options = ["host", "customer_code", "every"]
+
+[origin]
+reused = "aucun code repris : protocole du cloud Agua IoT de Micronova tel que le décrit py-agua-iot (inscription, connexion, carte des registres, lecture par tâche), vérifié contre un poêle réel"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-micronova/src/model.rs): a real
+# Camelia Metal Air's register map and one reading, stove off.
+[[fixture]]
+file = "fixtures/camelia-metal-air.json"

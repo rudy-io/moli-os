@@ -1423,6 +1423,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-micronova"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-moonraker"
 version = "0.1.0"
 dependencies = [
@@ -1485,6 +1504,7 @@ dependencies = [
  "moli-igd",
  "moli-ipp",
  "moli-lights",
+ "moli-micronova",
  "moli-moonraker",
  "moli-net",
  "moli-philips",
