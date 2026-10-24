@@ -115,9 +115,26 @@ export function nameOf(id, fallback) {
   return fallback || d?.label?.name || d?.native_name || t('commun.appareil');
 }
 
+/** How far a shutter is open: the point of the `position` sense (Zigbee2MQTT). */
+export function positionPoint(d) {
+  return d?.points.find((p) => p.semantic === 'position') ?? null;
+}
+
+/** The point that orders a shutter to open, stop or close: a writable enum
+ *  that offers « open » (`OPEN` on Zigbee2MQTT), whatever the case. */
+export function coverOrder(d) {
+  return (
+    d?.points.find(
+      (p) => p.access?.write && p.kind.type === 'enum' && p.kind.values?.some((v) => v.toLowerCase() === 'open'),
+    ) ?? null
+  );
+}
+
 /** The point that switches the device on and off. */
 export function powerKey(d) {
   if (!d) return null;
+  // A shutter is not a switch: its `state` is an order, never « on ».
+  if (positionPoint(d)) return null;
   const writable = d.points.filter((p) => p.access?.write);
   const p =
     writable.find((p) => p.semantic === 'on_off' && p.kind.type === 'binary') ??
@@ -232,7 +249,11 @@ export function deviceKind(d) {
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
+  if (
+    has(d, 'percent_control') ||
+    positionPoint(d) ||
+    (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open'))
+  )
     return 'cover';
   if (powerKey(d)) {
     if (isGroup(d)) return 'group';
