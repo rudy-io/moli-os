@@ -254,6 +254,7 @@
   "commun.clim.consigne_val": "Consigne {temp}°",
   "commun.clim.consigne_mode": "{temp}° en {mode} : la consigne propre à ce mode, réglée dans le module.",
   "commun.clim.eteinte": "Éteinte",
+  "commun.clim.eteint": "Éteint",
   "commun.clim.moins_chaud": "Moins chaud",
   "commun.clim.plus_chaud": "Plus chaud",
   "commun.clim.mode": "Mode",

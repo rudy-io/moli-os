@@ -10,6 +10,6 @@
    check-config`, redémarrer.
 4. Vérifier : le journal dit `micronova stoves loaded`, le poêle apparaît avec son état et
    ses températures. Ranger le poêle dans sa pièce.
-5. Moli règle la consigne, la puissance, la ventilation, l'éco-stop et les programmes ; il
-   n'allume ni n'éteint le poêle. Pour vérifier : baisser la consigne d'un degré, poêle en
+5. Moli règle la consigne, la puissance, la ventilation, l'éco-stop et les programmes, et
+   allume ou éteint le poêle (code de la maison demandé ; l'ordre d'un agent attend un humain). Pour vérifier : baisser la consigne d'un degré, poêle en
    veille, voir l'application Easy Connect la montrer, puis la remettre.

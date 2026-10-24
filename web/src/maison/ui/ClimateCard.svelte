@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState, climateOffLabel } from '../lib/home.svelte.js';
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -203,7 +203,7 @@
   });
   const m = $derived(MODES[mode] ? { ...MODES[mode], label: modeLabel(mode) } : { label: mode ?? '—', icon: climateIcon(d), tone: 'good' });
   // Not on: a stove says how (off, shutting down, in alarm), a clim is off.
-  const offLabel = $derived(climateIcon(d) === 'stove' && stoveState(id) ? t(stoveState(id)) : t('commun.clim.eteinte'));
+  const offLabel = $derived(climateIcon(d) === 'stove' && stoveState(id) ? t(stoveState(id)) : t(climateOffLabel(d)));
 
   // A 270° ring: the target as a bead, the room temperature in the middle.
   const R = 62;

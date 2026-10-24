@@ -255,12 +255,17 @@ export function deviceKind(d) {
 }
 
 /** A climate device's icon: a pellet stove (it measures its flue), a
- *  heater (a pilot wire, or a week program of its own), else a clim. */
+ *  heater (a pilot wire, or a week program of its own; a towel dryer in a
+ *  bathroom), else a clim. */
 export function climateIcon(d) {
   if (has(d, 'flue_temperature')) return 'stove';
-  if (has(d, 'device_mode_type') || has(d, 'week_program')) return 'radiator';
+  if (has(d, 'device_mode_type') || has(d, 'week_program')) return BATHROOM.test(roomOf(d) ?? '') ? 'towel-dryer' : 'radiator';
   return 'air-conditioner';
 }
+const BATHROOM = /salle d.?eau|salle de bains?|\bsdb\b|bathroom|douche/i;
+
+/** « Éteint » for a heater or a stove, « Éteinte » for a clim (in French). */
+export const climateOffLabel = (d) => (climateIcon(d) === 'air-conditioner' ? 'commun.clim.eteinte' : 'commun.clim.eteint');
 
 // On switch wiring, frost guard, eco and holiday hold the module's own
 // setpoints (set in Tuya), not one chosen here.

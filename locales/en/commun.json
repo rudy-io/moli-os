@@ -264,6 +264,7 @@
   "commun.clim.consigne_val": "Target {temp}°",
   "commun.clim.consigne_mode": "{temp}° in {mode}: this mode's own setpoint, set in the module.",
   "commun.clim.eteinte": "Off",
+  "commun.clim.eteint": "Off",
   "commun.clim.moins_chaud": "Cooler",
   "commun.clim.plus_chaud": "Warmer",
   "commun.clim.mode": "Mode",

@@ -5,7 +5,7 @@
   import Icon from './Icon.svelte';
 
   // A pellet stove's settings and programs (Micronova), set from here when
-  // the stove lets Moli (never switched on or off here). A program only
+  // the stove lets Moli (switched on and off from its card). A program only
   // switches the stove on then off: no setpoint of its own.
   let { id, name } = $props();
 

@@ -3,8 +3,8 @@
 //! account, e-mail and password from the vault (`moli-os secrets set
 //! <instance> email`, then `password`). Each stove's register map is read
 //! once, its values every minute. Its settings are set from Moli (setpoint,
-//! power, fan, eco-stop, programs), one register at a time by a writer of
-//! its own, the stove read again once it confirms; never switched on or off.
+//! power, fan, eco-stop, programs, on and off), one register at a time by a
+//! writer of its own, the stove read again once it confirms.
 
 mod cloud;
 pub mod model;

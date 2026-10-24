@@ -13,8 +13,10 @@
 //!
 //! A command becomes register writes (`Map::writes`): the value through the
 //! register's inverse formula, within its bounds, and only what changes.
-//! Never the stove's on and off (`status_managed_get`): tried later, with
-//! a person in front of it.
+//! On and off are a button (`status_managed_get`: ON or OFF written, read
+//! back at rest): lit only from off, never while it shuts down or in
+//! alarm; the point is a machine's (`Semantic::Control`), so an agent's
+//! order waits for a person.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -150,12 +152,13 @@ impl Map {
     pub fn points(&self) -> Vec<PointSpec> {
         let mut out = Vec::new();
         if self.get(STATE).is_some() {
+            // Fire: an agent asking gets a person's approval first.
             out.push(spec(
                 "on",
                 "pilotes.micronova.marche",
                 Kind::Binary,
                 None,
-                Semantic::OnOff,
+                Semantic::Control,
             ));
             let values = self
                 .words(STATE)
@@ -298,6 +301,7 @@ impl Map {
             "eco_stop" => ECO_STOP,
             "fan" => FAN,
             PROGRAMS => return self.program_writes(value, reading),
+            "on" => return self.switch_writes(value, reading),
             _ => {
                 return Err(moli_i18n::tr!(
                     "pilotes.micronova.lecture_seule",
@@ -357,6 +361,46 @@ impl Map {
             mask: r.mask,
             raw,
         }))
+    }
+
+    /// Lighting or putting out: the button's ON from off only, its OFF unless
+    /// already off or going out; nothing in alarm but putting out.
+    fn switch_writes(&self, value: &Value, reading: &Reading) -> Result<Vec<Write>, String> {
+        let Value::Bool(on) = value else {
+            return Err(moli_i18n::tr("pilotes.micronova.oui_non_attendu"));
+        };
+        let state = self.word(STATE, reading).map(|w| slug(&w));
+        let state = state
+            .as_deref()
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.pas_encore_lu"))?;
+        let going_out = ["shut_off", "cleaning"].contains(&state);
+        let wanted = match (on, state) {
+            (true, "off") => "ON",
+            (true, "alarm" | "mem_alarm") => {
+                return Err(moli_i18n::tr("pilotes.micronova.en_alarme"));
+            }
+            (true, _) if going_out => return Err(moli_i18n::tr("pilotes.micronova.en_extinction")),
+            // Already off, going out, or already on: nothing to send.
+            (false, "off") | (true, _) => return Ok(Vec::new()),
+            (false, _) if going_out => return Ok(Vec::new()),
+            (false, _) => "OFF",
+        };
+        let r = self
+            .get(SWITCH)
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.reglage_absent"))?;
+        let raw = r
+            .enc_val
+            .iter()
+            .find(|w| w.lang == "ENG" && w.description == wanted)
+            .and_then(|w| w.value.as_f64())
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.reglage_absent"))?;
+        // A button: it reads back at rest, so it is always written.
+        #[allow(clippy::cast_possible_truncation)]
+        Ok(vec![Write {
+            offset: r.offset,
+            mask: r.mask,
+            raw: raw as i64,
+        }])
     }
 
     /// The programs as a person set them: each changed register, a program
@@ -523,6 +567,8 @@ const ALARM: &str = "alarms_get";
 const ECO_STOP: &str = "eco_stop_set";
 const FAN: &str = "vent_main_set";
 const TARGET: &str = "temp_air_set";
+/// The stove's on and off button.
+const SWITCH: &str = "status_managed_get";
 const POWER: &str = "power_set";
 const ECO_DELAY: &str = "eco_temp_stop";
 /// The points of the programs and of the clock.
@@ -594,8 +640,10 @@ const NUMBERS: &[(&str, &str, &str, Semantic)] = &[
     ),
 ];
 const CELSIUS: [&str; 3] = ["temperature", "target_temperature", "flue_temperature"];
-/// What Moli may set: the settings, never on and off (nor the state).
-const WRITABLE: [&str; 6] = [
+/// What Moli may set: on and off (a person deciding for an agent), the
+/// settings; never the state.
+const WRITABLE: [&str; 7] = [
+    "on",
     "target_temperature",
     "power_level",
     "fan",
@@ -843,8 +891,41 @@ mod tests {
         );
         assert_eq!(set("fan", Value::Text("auto".into())), Ok(vec![]));
         assert!(set("fan", Value::Text("turbo".into())).is_err());
-        assert!(set("on", Value::Bool(true)).is_err(), "never switched on");
-        assert!(set("mode", Value::Text("off".into())).is_err(), "nor off");
+        assert!(
+            set("mode", Value::Text("off".into())).is_err(),
+            "never the state"
+        );
+    }
+
+    #[test]
+    fn the_stove_lights_from_off_only_and_its_switch_is_a_machine() {
+        let (map, mut reading) = camelia();
+        let on = |reading: &Reading, v: bool| map.writes("on", &Value::Bool(v), reading);
+        // Off (the fixture): lit by the button's ON; already off, nothing.
+        assert_eq!(on(&reading, true), Ok(vec![w(232, 0xffff, 85)]));
+        assert_eq!(on(&reading, false), Ok(vec![]));
+        // On, or on without a flame (eco-stop): put out by OFF.
+        for state in [4, 7] {
+            reading.insert(33, state);
+            assert_eq!(on(&reading, false), Ok(vec![w(232, 0xffff, 170)]));
+            assert_eq!(on(&reading, true), Ok(vec![]), "already on");
+        }
+        // Going out: never lit again before it is off.
+        for state in [5, 6] {
+            reading.insert(33, state);
+            assert!(on(&reading, true).is_err());
+            assert_eq!(on(&reading, false), Ok(vec![]));
+        }
+        // In alarm: put out, never lit.
+        reading.insert(33, 8);
+        assert!(on(&reading, true).is_err());
+        assert_eq!(on(&reading, false), Ok(vec![w(232, 0xffff, 170)]));
+        let point = map.points().into_iter().find(|p| &*p.key == "on").unwrap();
+        assert_eq!(
+            point.semantic,
+            Semantic::Control,
+            "an agent waits for a person"
+        );
     }
 
     /// The fixture's programs with `change` applied to them.
@@ -978,6 +1059,7 @@ mod tests {
         assert_eq!(
             writable,
             [
+                "on",
                 "target_temperature",
                 "power_level",
                 "eco_stop_delay",
@@ -985,7 +1067,7 @@ mod tests {
                 "fan",
                 "programs"
             ],
-            "the settings, never on, off or the state"
+            "on, off and the settings, never the state"
         );
     }
 

@@ -18,5 +18,7 @@
   (`Protocol` `RWMSmaster`, `Items`, `Masks`, `Values` calculées par `formula_inverse`), puis
   la tâche suivie jusqu'à `completed`. Essayée d'abord par une sonde sur le poêle réel, un
   réglage à la fois, remis comme avant.
-- Reste : la marche et l'arrêt (`status_managed_get`, ON 85, OFF 170), à essayer avec
-  quelqu'un devant le poêle.
+- Marche et arrêt aussi (`status_managed_get`, un bouton : ON 85, OFF 170, relu 32 au repos),
+  essayés d'abord par une sonde avec quelqu'un devant le poêle (de la veille à éteint en 12 s,
+  puis rallumé) ; seulement depuis éteint, jamais pendant l'extinction ni en alarme ; l'ordre
+  d'un agent attend un humain (point de machine).

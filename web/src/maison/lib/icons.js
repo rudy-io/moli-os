@@ -65,7 +65,6 @@ import {
   mdiTrashCanOutline,
   mdiAirConditioner,
   mdiFireplace,
-  mdiRadiator,
   mdiAlertCircleOutline,
   mdiArrowTopRight,
   mdiBedKingOutline,
@@ -214,7 +213,10 @@ export const icons = {
   map: mdiMapMarkerRadiusOutline,
   phone: mdiCellphone,
   'air-conditioner': mdiAirConditioner,
-  radiator: mdiRadiator,
+  // Drawn here (none in the set): a radiator without heat waves, on or
+  // not; a towel dryer's ladder, for a bathroom.
+  radiator: 'M3 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM7 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM11 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM15 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM19 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM3 6.2h18.6v1.5H3ZM3 16.3h18.6v1.5H3ZM4 19h1.6v2H4ZM19 19h1.6v2H19Z',
+  'towel-dryer': 'M4.5 3.5a1 1 0 0 1 2 0v17a1 1 0 0 1-2 0ZM17.5 3.5a1 1 0 0 1 2 0v17a1 1 0 0 1-2 0ZM4.5 4.8h15v1.5h-15ZM4.5 7.4h15v1.5h-15ZM4.5 10h15v1.5h-15ZM4.5 13.4h15v1.5h-15ZM4.5 16h15v1.5h-15ZM4.5 18.6h15v1.5h-15Z',
   stove: mdiFireplace,
   alert: mdiAlertCircleOutline,
   'arrow-top-right': mdiArrowTopRight,
