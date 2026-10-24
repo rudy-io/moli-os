@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState, climateOffLabel } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState, climateOffLabel, switchStove } from '../lib/home.svelte.js';
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -146,6 +146,7 @@
   async function power() {
     // A setpoint just dragged leaves first: the unit starts on it.
     if (!on && wanted != null) await flush();
+    if (climateIcon(d) === 'stove') return switchStove(id, !on, name);
     act(`${id}/on`, !on, t(on ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name }));
   }
   // A pilot-wire module takes `mode = off` and stays as it was: it stops on
@@ -271,7 +272,7 @@
       </label>
     {/if}
     {#if controllable}
-      <!-- A heater on a pilot wire is switched off from its modes, a stove not from here: its chip only says. -->
+      <!-- A heater on a pilot wire is switched off from its modes; a stove's chip is its switch, said once done. -->
       {#if switched || !canSwitch}
         <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : offLabel}</span>
       {:else}

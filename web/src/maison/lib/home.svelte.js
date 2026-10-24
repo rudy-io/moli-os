@@ -152,6 +152,22 @@ const STOVE = {
 /** A stove's state in words (a catalogue key), whatever its switch says; null if unknown. */
 export const stoveState = (id) => STOVE[value(id, 'mode')] ?? null;
 
+/** A stove lit or put out, and said once it is: its state read back (a few
+ *  seconds through the cloud), or that it did not take the order. An order
+ *  the guard holds is watched longer, while someone says « c'est moi ». */
+export async function switchStove(id, on, name) {
+  const done = await act(`${id}/on`, on, t(on ? 'commun.clim.label_marche' : 'commun.clim.label_arret', { name }));
+  if (done === 'error') return done;
+  const until = Date.now() + (done === 'held' ? 300_000 : 120_000);
+  const tick = setInterval(() => {
+    if (value(id, 'on') === on) note(t(on ? 'commun.poele.note_allume' : 'commun.poele.note_eteint', { name }));
+    else if (Date.now() < until) return;
+    else if (done === 'ok') note(t('commun.poele.note_pas_pris', { name }), 'error');
+    clearInterval(tick);
+  }, 1000);
+  return done;
+}
+
 /** A light fixture (D12): bulbs and the relay that feeds them as one light. */
 export const isFixture = (d) => d?.model === 'Luminaire';
 /** A Hue room or zone: « toute la pièce », not a lamp. */

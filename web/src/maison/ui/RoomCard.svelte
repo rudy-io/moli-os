@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -205,7 +205,7 @@
   const stoveSwitch = (d) => climateIcon(d) === 'stove' && d.points.some((p) => p.key === 'on' && p.access?.write);
   const stoveLit = (d) => value(d.id, 'on') === true;
   const stoveReady = (d) => (stoveLit(d) ? !['shut_off', 'cleaning'].includes(value(d.id, 'mode')) : value(d.id, 'mode') === 'off');
-  const stovePower = (d) => act(`${d.id}/on`, !stoveLit(d), t(stoveLit(d) ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name: nameOf(d.id) }));
+  const stovePower = (d) => switchStove(d.id, !stoveLit(d), nameOf(d.id));
 </script>
 
 <section class="card room">
