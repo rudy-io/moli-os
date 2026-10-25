@@ -97,7 +97,7 @@
   // ---- words ------------------------------------------------------------------
   // Driver kinds: their name and description are in the catalog
   // (systeme.pilotes.<kind>.nom / .desc); a kind not listed shows as it is.
-  const KINDS = ['z2m', 'hue', 'tuya', 'velux', 'micronova', 'people', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'igd', 'presence', 'telegram', 'phones', 'profile'];
+  const KINDS = ['z2m', 'hue', 'tuya', 'velux', 'micronova', 'people', 'energy', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'igd', 'presence', 'telegram', 'phones', 'profile'];
   const kindWord = (kind, part) => (KINDS.includes(kind) ? t(`systeme.pilotes.${kind}.${part}`) : null);
   const driverName = (d) => (d.kind === 'profile' ? d.instance.charAt(0).toUpperCase() + d.instance.slice(1) : (kindWord(d.kind, 'nom') ?? d.kind));
 
@@ -145,6 +145,19 @@
   const ratio = (a, b) => (a && b ? Math.round(a / b) : null);
   const STATES = ['running', 'waiting', 'starting'];
   const statusText = (s) => (STATES.includes(s?.state) ? t(`systeme.page.statut.${s.state}`) : (s?.state ?? '?'));
+
+  /** A driver's devices, as the family names them: what each one is, where, whether it answers. */
+  const devicesOf = (instance) =>
+    Object.values(hub.devices)
+      .filter((d) => d.instance === instance)
+      .map((d) => ({ id: d.id, name: d.label?.name || d.native_name, model: d.model, room: d.label?.room || d.native_room, online: d.online !== false }))
+      .sort((a, b) => (a.room ?? '').localeCompare(b.room ?? '', locale()) || a.name.localeCompare(b.name, locale()));
+  // People are people, not devices: « 1 personne » (the house's own presence is not one).
+  const driverCount = (d) => {
+    if (d.kind !== 'people') return t('systeme.page.appareils_n', { count: d.devices });
+    const people = Object.values(hub.devices).filter((x) => x.instance === d.instance && x.points.some((p) => p.key === 'latitude'));
+    return t('systeme.page.personnes_n', { count: people.length });
+  };
 
   function choose(kind, item) {
     chosen = { kind, item };
@@ -231,7 +244,7 @@
         {#each sys.drivers as d (d.instance)}
           <button class="node driver" class:hot={active[d.instance]} bind:this={cards[`driver:${d.instance}`]} onclick={() => choose('driver', d)}>
             <i class="dot {d.status?.state}"></i>
-            <span><b>{driverName(d)}</b><small>{t('systeme.page.appareils_n', { count: d.devices })}{d.offline ? ` · ${t('systeme.page.injoignables', { count: d.offline })}` : ''}</small></span>
+            <span><b>{driverName(d)}</b><small>{driverCount(d)}{d.offline ? ` · ${t('systeme.page.injoignables', { count: d.offline })}` : ''}</small></span>
           </button>
         {/each}
       </section>
@@ -288,6 +301,15 @@
           <p>{kindWord(d.kind, 'desc') ?? t('systeme.pilotes.defaut')}</p>
           <p class="muted">{d.status?.reason ? t('systeme.page.publie_raison', { points: d.points, devices: d.devices, status: statusText(d.status), reason: d.status.reason }) : t('systeme.page.publie', { points: d.points, devices: d.devices, status: statusText(d.status) })}</p>
           <p class="how">{t('systeme.page.entre_sort')}</p>
+          <ul class="devices">
+            {#each devicesOf(d.instance) as x (x.id)}
+              <li>
+                <i class="dot" class:running={x.online}></i>
+                <b>{x.name}</b>
+                <span class="muted">{[x.model, x.room].filter(Boolean).join(' · ')}{x.online ? '' : ` · ${t('systeme.page.injoignable')}`}</span>
+              </li>
+            {/each}
+          </ul>
         {:else if chosen.kind === 'core'}
           <h3>{t('systeme.page.coeur')}</h3>
           <p>{t('systeme.page.coeur_explique')}</p>
@@ -656,6 +678,33 @@
   .explain .how {
     color: var(--ink-2);
     font-size: 14px;
+  }
+
+  .devices {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+    font-size: 13.5px;
+  }
+
+  .devices li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+
+  .devices .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--alert);
+  }
+
+  .devices .dot.running {
+    background: var(--good);
   }
 
   .x {
