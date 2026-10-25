@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, sensorIcon, climateState, modeWord } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, stoveAsked, sensorIcon, climateState, modeWord } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -261,12 +261,14 @@
         <b>{nameOf(d.id)}</b>
         <!-- A pilot wire on four or six orders has no setpoint of its own. -->
         <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
-        <span class="state">{climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? modeWord(d.id) : t(climateOffLabel(d))}</span>
+        <span class="state">{d.id in stoveAsked ? t('commun.poele.en_cours') : climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? modeWord(d.id) : t(climateOffLabel(d))}</span>
       </button>
       {#if stoveSwitch(d)}
         {@const lit = stoveLit(d)}
-        <button class="round power" class:lit onclick={() => stovePower(d)} disabled={!stoveReady(d)} aria-pressed={lit} title={t(lit ? 'commun.poele.eteindre' : 'commun.poele.allumer')} aria-label={t(lit ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name: nameOf(d.id) })}>
-          <Icon name="power" size={17} />
+        {@const asked = d.id in stoveAsked}
+        <!-- Asked and not yet read back: in progress, not the old state again. -->
+        <button class="round power" class:lit={lit && !asked} class:busy={asked} onclick={() => stovePower(d)} disabled={asked || !stoveReady(d)} aria-busy={asked} aria-pressed={lit} title={t(asked ? (stoveAsked[d.id] ? 'commun.poele.mise_en_marche' : 'commun.poele.mise_a_l_arret') : lit ? 'commun.poele.eteindre' : 'commun.poele.allumer')} aria-label={t(lit ? 'commun.clim.label_arret' : 'commun.clim.label_marche', { name: nameOf(d.id) })}>
+          {#if asked}<span class="busy-ring" aria-hidden="true"></span>{:else}<Icon name="power" size={17} />{/if}
         </button>
       {/if}
     </div>
@@ -601,6 +603,13 @@
   .round.power:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .round.power.busy:disabled {
+    opacity: 1;
+    color: var(--warm-ink);
+    font-size: 17px;
+    cursor: progress;
   }
 
   .clim {

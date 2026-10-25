@@ -11,10 +11,11 @@
 //! gateway, JSON text) and takes them back in the same form: each card
 //! keeps what Moli does not know about it (its icon, its type), a card
 //! spread over several VELUX rooms is split into one per room (the app
-//! lists cards by room), and the zones and timetables are compiled again,
-//! as the app compiles them.
+//! lists cards by room; Moli shows them as one, sent back with their
+//! `ids`, each room on its own card again), and the zones and timetables
+//! are compiled again, as the app compiles them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use moli_core::{DeviceId, InstanceId};
 use serde_json::{Map, Value as Json, json};
@@ -191,18 +192,20 @@ impl Schedule {
             .unwrap_or(-1)
             + 1;
         let mut cards = Vec::new();
+        // A card the cloud has is written once, whatever claims it.
+        let mut taken = BTreeSet::new();
         for card in wanted {
             let card = Card::parse(card, home, instance)?;
-            let base = card
-                .id
+            let bases = card
+                .ids
+                .iter()
                 .map(|id| {
                     existing
                         .iter()
-                        .find(|c| c["card_id"] == id)
-                        .cloned()
+                        .find(|c| c["card_id"] == *id)
                         .ok_or_else(|| moli_i18n::tr("pilotes.velux.planning.carte_inconnue"))
                 })
-                .transpose()?;
+                .collect::<Result<Vec<_>, _>>()?;
             // One card per VELUX room, as the app lists them.
             let mut rooms: Vec<(Option<&str>, Moves)> = Vec::new();
             for &(module, position) in &card.set {
@@ -212,15 +215,38 @@ impl Schedule {
                     None => rooms.push((room, vec![(module, position)])),
                 }
             }
-            for (i, (room, set)) in rooms.into_iter().enumerate() {
-                let mut raw = base.clone().unwrap_or_else(|| json!({}));
-                let id = match card.id {
-                    Some(id) if i == 0 => id,
-                    _ => {
-                        next_id += 1;
-                        next_id - 1
-                    }
+            // Each room keeps its own card (its id, what the app knows of
+            // it), then takes one the card stood for that is left over, else
+            // a new one like the first: the same moment never twice for one
+            // room, and a card no room needs any more goes.
+            let mut free: Vec<&Json> = bases
+                .iter()
+                .copied()
+                .filter(|b| b["card_id"].as_i64().is_some_and(|id| !taken.contains(&id)))
+                .collect();
+            let mut own: Vec<Option<&Json>> = rooms
+                .iter()
+                .map(|(room, _)| {
+                    let i = free
+                        .iter()
+                        .position(|b| room.is_some() && b["room_id"].as_str() == *room)?;
+                    Some(free.remove(i))
+                })
+                .collect();
+            for slot in own.iter_mut().filter(|s| s.is_none()) {
+                if !free.is_empty() {
+                    *slot = Some(free.remove(0));
+                }
+            }
+            for ((room, set), base) in rooms.into_iter().zip(own) {
+                let (mut raw, id) = if let Some(b) = base {
+                    (b.clone(), b["card_id"].as_i64().unwrap_or_default())
+                } else {
+                    next_id += 1;
+                    let like = bases.first().map_or_else(|| json!({}), |b| (*b).clone());
+                    (like, next_id - 1)
                 };
+                taken.insert(id);
                 card.write(&mut raw, id, room, &set);
                 cards.push(raw);
             }
@@ -253,7 +279,9 @@ type Moves<'a> = Vec<(&'a Module, i64)>;
 
 /// A card as a person asked for it, checked.
 struct Card<'a> {
-    id: Option<i64>,
+    /// The cloud's cards it stands for: its `id`, then the `ids` of the
+    /// cards Moli shows with it (the same moment in other VELUX rooms).
+    ids: Vec<i64>,
     name: String,
     days: Vec<i64>,
     at: Ref,
@@ -318,8 +346,15 @@ impl<'a> Card<'a> {
         if set.is_empty() {
             return Err(bad("set"));
         }
+        let mut ids: Vec<i64> = card["id"].as_i64().into_iter().collect();
+        for id in card["ids"].as_array().map_or(&[][..], Vec::as_slice) {
+            let id = id.as_i64().ok_or_else(|| bad("ids"))?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
         Ok(Self {
-            id: card["id"].as_i64(),
+            ids,
             name: name.to_owned(),
             days,
             at,
@@ -600,6 +635,88 @@ mod tests {
     }
 
     #[test]
+    fn a_card_shown_for_several_rooms_keeps_each_rooms_card() {
+        let (_, home, schedule) = fixture();
+        let cards = schedule.cards(&home, &instance());
+        let mut cards = cards.as_array().unwrap().clone();
+        // « Obscurcir la pièce pour la nuit » : cards 3 (Séjour) and 4 (Puits
+        // de lumière), one line in Moli, moved to 45 min after sunset.
+        let mut set = cards.iter().find(|c| c["id"] == 3).unwrap()["set"].clone();
+        let other = cards.iter().find(|c| c["id"] == 4).unwrap()["set"].clone();
+        set.as_object_mut()
+            .unwrap()
+            .extend(other.as_object().unwrap().clone());
+        cards.retain(|c| c["id"] != 3 && c["id"] != 4);
+        cards.push(json!({
+            "id": 4, "ids": [3], "name": "Obscurcir la pièce pour la nuit",
+            "days": [0, 1, 2, 3, 4, 5, 6], "ref": "sunset", "min": 45, "set": set,
+        }));
+        let edited = schedule
+            .edited(&home, &instance(), &Json::Array(cards))
+            .unwrap();
+        let out = edited["metadata"]["cards"].as_array().unwrap();
+        assert_eq!(out.len(), 13);
+        let night: Vec<&Json> = out
+            .iter()
+            .filter(|c| c["card_name"] == "Obscurcir la pièce pour la nuit")
+            .collect();
+        assert_eq!(night.len(), 2);
+        let before = schedule.raw_cards();
+        for card in night {
+            // Each room on its own card, as the app had it.
+            let had = before
+                .iter()
+                .find(|c| c["card_id"] == card["card_id"])
+                .unwrap();
+            assert_eq!(card["room_id"], had["room_id"]);
+            assert_eq!(card["icon"], had["icon"]);
+            assert_eq!(
+                card["modules"].as_array().unwrap().len(),
+                had["modules"].as_array().unwrap().len()
+            );
+            assert_eq!(card["begin_time"], 45);
+        }
+    }
+
+    #[test]
+    fn a_room_twice_in_a_group_is_written_once() {
+        let (_, home, schedule) = fixture();
+        let cards = schedule.cards(&home, &instance());
+        let mut cards = cards.as_array().unwrap().clone();
+        // Cards 0 and 6 both move the guest room's window: shown as one, the
+        // room keeps one card, the other goes.
+        cards.retain(|c| c["id"] != 0 && c["id"] != 6);
+        cards.push(json!({
+            "id": 6, "ids": [0], "name": "Fermer les fenêtres", "days": [0, 1, 2, 3, 4, 5, 6],
+            "ref": "sunset", "min": -30, "set": { "velux:aa:bb:cc:dd:ee:09": 0 },
+        }));
+        let edited = schedule
+            .edited(&home, &instance(), &Json::Array(cards))
+            .unwrap();
+        let out = edited["metadata"]["cards"].as_array().unwrap();
+        assert_eq!(out.len(), 12);
+        assert!(out.iter().any(|c| c["card_id"] == 6));
+        assert!(!out.iter().any(|c| c["card_id"] == 0));
+        // Two cards claiming one: the second is a new card, not the same twice.
+        let twice = schedule.edited(
+            &home,
+            &instance(),
+            &json!([
+                { "id": 9, "name": "a", "days": [0], "ref": "time", "min": 600, "set": { "velux:aa:bb:cc:dd:ee:04": 10 } },
+                { "id": 9, "name": "b", "days": [1], "ref": "time", "min": 600, "set": { "velux:aa:bb:cc:dd:ee:04": 10 } },
+            ]),
+        );
+        let twice = twice.unwrap();
+        let ids: Vec<&Json> = twice["metadata"]["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| &c["card_id"])
+            .collect();
+        assert_eq!(ids, [&json!(9), &json!(13)]);
+    }
+
+    #[test]
     fn a_paused_card_is_kept_but_not_compiled() {
         let (_, home, schedule) = fixture();
         let mut cards = schedule
@@ -643,6 +760,8 @@ mod tests {
             json!({ "set": { "velux:aa:bb:cc:dd:ee:03": 50 } }),
             json!({ "set": { "velux:inconnu": 50 } }),
             json!({ "id": 99 }),
+            json!({ "ids": [99] }),
+            json!({ "ids": ["3"] }),
         ] {
             assert!(card(bad.clone()).is_err(), "{bad}");
         }

@@ -5,7 +5,7 @@
   // other days; a card's editor copies a setting to other windows or blinds.
   import { hub, value, act, nameOf, coverIcon, isBlind, num, note } from '../lib/home.svelte.js';
   import { dayName } from '../lib/program.js';
-  import { POINT, WEEK, parseCards, sorted, on, same, copyDay, hhmm } from '../lib/velux-plans.js';
+  import { POINT, WEEK, parseCards, grouped, toCloud, sorted, on, same, copyDay, hhmm } from '../lib/velux-plans.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import VeluxCardEditor from './VeluxCardEditor.svelte';
@@ -57,19 +57,23 @@
   }
 
   let day = $state(null);
-  const shown = $derived(cards ? sorted(cards.map((c, i) => ({ ...c, at: i }))).filter((c) => day == null || on(c, day)) : []);
+  // One line for the cards VELUX splits by room (same name, same moment).
+  const shown = $derived(cards ? sorted(grouped(cards)).filter((c) => day == null || on(c, day)) : []);
   const letter = (d) => dayName(d, locale(), 'narrow');
 
+  // Always sent as lines: each room's card keeps its id, and a room on two
+  // cards of one line (a copy made before) is written once.
   async function save(next, label) {
-    const done = await act(`${gateway.id}/${POINT}`, JSON.stringify(next.map(({ at, ...c }) => c)), label ?? t('maison.fenetres.auto.label'));
+    const out = grouped(next).map(toCloud);
+    const done = await act(`${gateway.id}/${POINT}`, JSON.stringify(out), label ?? t('maison.fenetres.auto.label'));
     if (done === 'ok') {
-      sent = next.map(({ at, ...c }) => c);
+      sent = out;
       note(t('maison.fenetres.auto.envoye'));
     }
     return done;
   }
 
-  const pause = (card) => save(cards.map((c, i) => (i === card.at ? { ...c, off: !c.off || undefined } : c)));
+  const pause = (line) => save(cards.map((c, i) => (line.at.includes(i) ? { ...c, off: !line.off || undefined } : c)));
 
   // ---- copying a day ----
   let copying = $state(null);
@@ -82,18 +86,22 @@
   // ---- the editor ----
   let editing = $state(null);
   const open = (card) => (editing = { card, at: card?.at ?? null });
+  // A line stands for its cards: edited, it takes the place of the first
+  // and the others go (their ids go with it, for their rooms).
   function saved(card) {
-    const next = editing.at == null ? [...cards, card] : cards.map((c, i) => (i === editing.at ? card : c));
+    const at = editing.at;
+    const line = { ...card, ids: editing.card?.ids ?? [] };
+    const next = at == null ? [...cards, line] : cards.flatMap((c, i) => (i === at[0] ? [line] : at.includes(i) ? [] : [c]));
     editing = null;
     save(next);
   }
   function removed() {
-    const next = cards.filter((_, i) => i !== editing.at);
+    const next = cards.filter((_, i) => !editing.at.includes(i));
     editing = null;
     save(next);
   }
   function duplicated(card) {
-    const { id, ...copy } = card;
+    const { id, ids, ...copy } = card;
     editing = { card: { ...copy, name: t('maison.fenetres.auto.copie_de', { name: card.name }) }, at: null };
   }
 </script>
@@ -139,7 +147,7 @@
       <p class="empty">{t(day == null ? 'maison.fenetres.auto.aucun' : 'maison.fenetres.auto.aucun_jour')}</p>
     {:else}
       <ul>
-        {#each shown as card (card.at)}
+        {#each shown as card (card.at[0])}
           {@const devices = Object.entries(card.set)}
           <li class:off={card.off}>
             <button class="item" onclick={() => open(card)} aria-label={t('maison.fenetres.auto.modifier', { name: card.name })}>

@@ -192,11 +192,34 @@
   margin-top: 4px;
 }
 
+/* An order sent and not yet read back (a stove through its cloud). */
+.maison .busy-ring {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: busy-ring 0.8s linear infinite;
+}
+
+@keyframes busy-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .maison *,
   .maison *::before,
   .maison *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+
+  /* Still: a ring broken at the top says it all the same. */
+  .maison .busy-ring {
+    animation: none;
   }
 }

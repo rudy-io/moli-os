@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState, climateOffLabel, switchStove } from '../lib/home.svelte.js';
+  import { device, value, reachable, num, act, presetOf, climateIcon, stoveState, climateOffLabel, switchStove, stoveAsked } from '../lib/home.svelte.js';
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -276,8 +276,13 @@
       {#if switched || !canSwitch}
         <span class="chip {on ? m.tone : ''}"><Icon name={on ? (m.icon ?? 'fire') : 'power'} size={16} />{on ? m.label : offLabel}</span>
       {:else}
-        <button class="chip power {on ? m.tone : ''}" onclick={power} aria-pressed={on}>
-          <Icon name="power" size={16} />{on ? m.label : offLabel}
+        {@const asked = id in stoveAsked}
+        <button class="chip power {on && !asked ? m.tone : ''}" class:busy={asked} onclick={power} disabled={asked} aria-busy={asked} aria-pressed={on}>
+          {#if asked}
+            <span class="busy-ring" aria-hidden="true"></span>{t(stoveAsked[id] ? 'commun.poele.mise_en_marche' : 'commun.poele.mise_a_l_arret')}
+          {:else}
+            <Icon name="power" size={16} />{on ? m.label : offLabel}
+          {/if}
         </button>
       {/if}
       {#if on && writable}
@@ -527,6 +532,11 @@
     border: none;
     font: inherit;
     cursor: pointer;
+  }
+
+  button.chip.busy {
+    color: var(--warm-ink);
+    cursor: progress;
   }
 
   .setpoint {

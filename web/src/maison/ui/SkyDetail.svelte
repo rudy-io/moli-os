@@ -37,7 +37,9 @@
   const hi = $derived(Math.max(...week.map((d) => d.max).filter(Number.isFinite)));
 
   onMount(() => {
+    // Opened on the dialog itself: no ring on its close button.
     dialog.showModal();
+    dialog.focus();
     // Playing: an hour every second and a half, then back to now.
     const timer = setInterval(() => {
       if (!playing || !times.length) return;
@@ -48,7 +50,7 @@
   });
 </script>
 
-<dialog bind:this={dialog} onclose={onclose} onclick={(e) => e.target === dialog && dialog.close()} aria-label={t('maison.meteo.titre')}>
+<dialog bind:this={dialog} onclose={onclose} onclick={(e) => e.target === dialog && dialog.close()} aria-label={t('maison.meteo.titre')} tabindex="-1">
   <header>
     <h2>{t('maison.meteo.titre')}</h2>
     <button class="close" onclick={() => dialog.close()} aria-label={t('maison.meteo.fermer')}><Icon name="close" size={22} /></button>
@@ -138,6 +140,10 @@
     background: var(--surface);
     color: var(--ink);
     box-shadow: 0 30px 80px rgb(0 0 0 / 40%);
+  }
+
+  dialog:focus {
+    outline: none;
   }
 
   dialog::backdrop {

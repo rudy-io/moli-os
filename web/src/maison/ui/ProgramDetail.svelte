@@ -15,7 +15,12 @@
   let { id, name, wiring, modeLabel, modes, onclose } = $props();
 
   let dialog;
-  onMount(() => dialog.showModal());
+  // Opened on the dialog itself: on a phone its first button (« Modifier »)
+  // would otherwise wear the keyboard's focus ring.
+  onMount(() => {
+    dialog.showModal();
+    dialog.focus();
+  });
 
   const read = $derived(parseWeek(value(id, 'week_program')));
   // Editing: the week being drawn, seven days of 96 quarters (null: a day
@@ -255,7 +260,8 @@
   {onclose}
   oncancel={(e) => editing && (e.preventDefault(), stop())}
   onclick={(e) => e.target === dialog && !editing && dialog.close()}
-  aria-label={t('commun.programme.titre')}>
+  aria-label={t('commun.programme.titre')}
+  tabindex="-1">
   <header>
     <div>
       <h2>{name}</h2>
@@ -478,6 +484,10 @@
     background: var(--surface);
     color: var(--ink);
     box-shadow: 0 30px 80px rgb(0 0 0 / 40%);
+  }
+
+  dialog:focus {
+    outline: none;
   }
 
   dialog::backdrop {

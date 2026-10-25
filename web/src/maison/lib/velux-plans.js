@@ -31,11 +31,42 @@ export const sorted = (cards) => [...cards].sort((a, b) => roughly(a) - roughly(
 /** A card acts on `day`. */
 export const on = (card, day) => card.days.includes(day);
 
-/** Two lists the same, whatever their ids and order (a card the driver
- *  numbered, its devices sorted). */
+/** The cards as Moli lists them: VELUX keeps one card per room of its app,
+ *  so the cards with one name, days, moment, end and pause are one line.
+ *  `at`: their places in the list; `ids`: the cloud's cards it stands for;
+ *  `set`: all their devices (a device on two of them: the first one says,
+ *  as the gateway runs it). */
+export function grouped(cards) {
+  const lines = new Map();
+  cards.forEach((c, i) => {
+    const key = JSON.stringify([String(c.name).trim(), [...c.days].sort((x, y) => x - y), c.ref, c.min, c.end ?? null, !!c.off]);
+    const ids = [c.id, ...(c.ids ?? [])].filter((id) => id != null);
+    const line = lines.get(key);
+    if (!line) lines.set(key, { ...c, at: [i], ids, set: { ...c.set } });
+    else {
+      line.at.push(i);
+      line.ids.push(...ids.filter((id) => !line.ids.includes(id)));
+      for (const [device, pct] of Object.entries(c.set)) if (!(device in line.set)) line.set[device] = pct;
+    }
+  });
+  return [...lines.values()];
+}
+
+/** A line as the driver takes it back: its first card's `id`, the others'
+ *  `ids` (each room gets its own card again, never one twice). */
+export function toCloud(line) {
+  const { at, ids, id, ...card } = line;
+  const all = [...new Set([id, ...(ids ?? [])].filter((x) => x != null))];
+  if (all.length) card.id = all[0];
+  if (all.length > 1) card.ids = all.slice(1);
+  return card;
+}
+
+/** Two lists the same, whatever their ids, order and split by room (a
+ *  card the driver numbered or split, its devices sorted). */
 export function same(a, b) {
   const norm = (cards) =>
-    (cards ?? [])
+    grouped(cards ?? [])
       .map((c) =>
         JSON.stringify([c.name, [...c.days].sort(), c.ref, c.min, c.end ?? null, !!c.off, Object.entries(c.set).sort(([x], [y]) => x.localeCompare(y))]),
       )

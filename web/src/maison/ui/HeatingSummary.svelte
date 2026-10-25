@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { value, num, nameOf, roomList, climateIcon, climateOn, climateState, stoveState, setpointOf, reachable, clock } from '../lib/home.svelte.js';
+  import { value, num, nameOf, roomList, climateIcon, climateOn, climateState, stoveState, stoveAsked, setpointOf, reachable, clock } from '../lib/home.svelte.js';
   import { parseWeek, spans, nowIn, hhmm } from '../lib/program.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -39,6 +39,8 @@
     const temp = value(d.id, 'temperature') ?? value(d.id, 'temp_current');
     const base = { id: d.id, icon: climateIcon(d), name: nameOf(d.id), temp, word: climateState(d), tone: 'off', detail: null };
     if (!reachable(d.id)) return { ...base, word: t('maison.accueil.chauffage.injoignable'), tone: 'alert' };
+    // A stove switched from the dashboard, until its cloud says it took it.
+    if (d.id in stoveAsked) return { ...base, word: t(stoveAsked[d.id] ? 'commun.poele.mise_en_marche' : 'commun.poele.mise_a_l_arret') };
     const stove = climateIcon(d) === 'stove' && stoveState(d.id);
     const mode = value(d.id, 'mode');
     if (!stove && !climateOn(d)) return base;
