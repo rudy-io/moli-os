@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, sensorIcon } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, sensorIcon, climateState, modeWord } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -178,33 +178,6 @@
     act(`${d.id}/${key}`, typeof cur === 'string' ? (isOn(d.id, point) ? 'OFF' : 'ON') : !isOn(d.id, point), nameOf(d.id));
   }
 
-  // The unit's modes (as it says them) → the catalogue key of their short name.
-  const MODES = {
-    froid: 'commun.piece.mode.froid',
-    chaud: 'commun.piece.mode.chaud',
-    auto: 'commun.piece.mode.auto',
-    déshumidification: 'commun.piece.mode.deshumidification',
-    ventilation: 'commun.piece.mode.ventilation',
-    // A heater on a pilot wire (Tuya).
-    comfort: 'commun.piece.mode.confort',
-    comfort_1: 'commun.piece.mode.confort_1',
-    comfort_2: 'commun.piece.mode.confort_2',
-    eco: 'commun.piece.mode.eco',
-    hors: 'commun.piece.mode.hors_gel',
-    off: 'commun.piece.mode.arret',
-    holiday: 'commun.piece.mode.vacances',
-    program: 'commun.piece.mode.programme',
-    manual: 'commun.piece.mode.manuel',
-  };
-  // A room without lights says what its only heating or cooling unit does.
-  // A stove says its own state (off, lighting, eco-stop…), its switch or not.
-  const climateState = (d) => {
-    const stove = climateIcon(d) === 'stove' && stoveState(d.id);
-    if (stove) return t(stove);
-    if (!climateOn(d)) return t('commun.piece.mode.arret');
-    const mode = MODES[value(d.id, 'mode')];
-    return mode ? t(mode) : t('commun.piece.en_marche');
-  };
   let openClim = $state(null);
 
   // A stove Moli switches has its button on its line too, as on its card:
@@ -288,7 +261,7 @@
         <b>{nameOf(d.id)}</b>
         <!-- A pilot wire on four or six orders has no setpoint of its own. -->
         <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
-        <span class="state">{climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? (MODES[value(d.id, 'mode')] ? t(MODES[value(d.id, 'mode')]) : t('commun.piece.en_marche')) : t(climateOffLabel(d))}</span>
+        <span class="state">{climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? modeWord(d.id) : t(climateOffLabel(d))}</span>
       </button>
       {#if stoveSwitch(d)}
         {@const lit = stoveLit(d)}

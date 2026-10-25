@@ -301,6 +301,34 @@ const BATHROOM = /salle d.?eau|salle de bains?|\bsdb\b|bathroom|douche/i;
 /** « Éteint » for a heater or a stove, « Éteinte » for a clim (in French). */
 export const climateOffLabel = (d) => (climateIcon(d) === 'air-conditioner' ? 'commun.clim.eteinte' : 'commun.clim.eteint');
 
+// A heating or cooling unit's modes (as it says them) → the catalogue key of their short name.
+const MODE_WORDS = {
+  froid: 'commun.piece.mode.froid',
+  chaud: 'commun.piece.mode.chaud',
+  auto: 'commun.piece.mode.auto',
+  déshumidification: 'commun.piece.mode.deshumidification',
+  ventilation: 'commun.piece.mode.ventilation',
+  // A heater on a pilot wire (Tuya).
+  comfort: 'commun.piece.mode.confort',
+  comfort_1: 'commun.piece.mode.confort_1',
+  comfort_2: 'commun.piece.mode.confort_2',
+  eco: 'commun.piece.mode.eco',
+  hors: 'commun.piece.mode.hors_gel',
+  off: 'commun.piece.mode.arret',
+  holiday: 'commun.piece.mode.vacances',
+  program: 'commun.piece.mode.programme',
+  manual: 'commun.piece.mode.manuel',
+};
+/** A running unit's mode in a word (« Éco », « Confort -1 »…), « En marche » when it names none. */
+export const modeWord = (id) => t(MODE_WORDS[value(id, 'mode')] ?? 'commun.piece.en_marche');
+/** What a heating or cooling unit does, in a word: a stove its own state
+ *  (off, lighting, eco-stop…), else stopped or its mode. */
+export function climateState(d) {
+  const stove = climateIcon(d) === 'stove' && stoveState(d.id);
+  if (stove) return t(stove);
+  return climateOn(d) ? modeWord(d.id) : t('commun.piece.mode.arret');
+}
+
 // On switch wiring, frost guard, eco and holiday hold the module's own
 // setpoints (set in Tuya), not one chosen here.
 const PRESETS = { hors: 'hors_temp_set', eco: 'eco_temp_set', holiday: 'holiday_temp_set' };

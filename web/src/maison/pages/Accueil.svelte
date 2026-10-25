@@ -11,6 +11,9 @@
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
+  import HeatingSummary from '../ui/HeatingSummary.svelte';
+  import CoversSummary from '../ui/CoversSummary.svelte';
+  import { energy, useEnergy } from '../lib/energy-live.svelte.js';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
@@ -114,6 +117,11 @@
     return list;
   });
 
+  // A card shows only when the house has what it shows.
+  onMount(useEnergy);
+  const climates = $derived(cfg.favorites?.climate ?? []);
+  const outside = $derived(!!(out.weather || out.air || out.pool));
+
   const tv = $derived(cfg.salon?.tv);
   const speaker = $derived(cfg.salon?.speaker);
   const tvOn = $derived(value(tv, 'power') === true);
@@ -175,6 +183,10 @@
   </section>
 
   <div class="grid">
+    <div class="heating"><HeatingSummary /></div>
+    <div class="covers"><CoversSummary /></div>
+
+    {#if lights.length || mood}
     <section class="card lights">
       <div class="card-head">
         <h2><Icon name="light" size={18} />{t('maison.accueil.lumieres')} <span class="count">{litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')}</span></h2>
@@ -199,20 +211,23 @@
         </div>
       {/if}
     </section>
+    {/if}
 
     <div class="side">
-      <EnergyCard />
+      {#if energy.summary}<EnergyCard />{/if}
       <Routines />
     </div>
 
+    {#if climates.length}
     <section class="card climate">
       <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
       <div class="clims">
-        {#each cfg.favorites?.climate ?? [] as c (c.id)}
+        {#each climates as c (c.id)}
           <ClimateCard id={c.id} name={c.name} />
         {/each}
       </div>
     </section>
+    {/if}
 
     {#if bell}
       <section class="card doorbell">
@@ -225,6 +240,7 @@
       </section>
     {/if}
 
+    {#if tv || speaker}
     <a class="card remote" href="#/salon">
       <span class="tv-object" aria-hidden="true">
         <span class="screen" class:lit={tvOn}></span>
@@ -236,7 +252,9 @@
       </span>
       <span class="go"><Icon name="arrow-top-right" size={20} /></span>
     </a>
+    {/if}
 
+    {#if outside}
     <a class="card outside" href="#/dehors">
       <div class="card-head"><h2><Icon name="flower-outline" size={18} />{t('maison.accueil.dehors')}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
       <div class="facts">
@@ -246,6 +264,7 @@
         <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
       </div>
     </a>
+    {/if}
   </div>
 </div>
 
@@ -316,6 +335,18 @@
     grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: 20px;
     align-items: start;
+    /* Cards come and go with the house's devices: no hole left behind. */
+    grid-auto-flow: dense;
+  }
+
+  .heating,
+  .covers {
+    grid-column: span 6;
+  }
+
+  /* A summary with nothing to sum up, energy unmeasured and no routine. */
+  .grid > div:empty {
+    display: none;
   }
 
   .lights {
@@ -510,7 +541,9 @@
 
   @media (max-width: 1180px) {
     .lights,
-    .climate {
+    .climate,
+    .heating,
+    .covers {
       grid-column: span 12;
     }
 

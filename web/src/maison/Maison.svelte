@@ -2,7 +2,10 @@
   import '@fontsource-variable/figtree';
   import './maison.css';
   import { onMount } from 'svelte';
-  import { home, hub, start, value, savePref } from './lib/home.svelte.js';
+  import { home, hub, start, value, savePref, deviceKind } from './lib/home.svelte.js';
+  import { energy, useEnergy } from './lib/energy-live.svelte.js';
+  import { isPrinter } from './lib/printers.js';
+  import { isPaperPrinter } from './lib/paper.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -58,11 +61,33 @@
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
   ];
 
+  // A page with nothing to show for this house stays out of the menu (its
+  // address still answers); it comes back by itself with the first device
+  // that fills it. Pages not listed here always show.
+  const devices = $derived(Object.values(hub.devices));
+  const cfg = $derived(home.config ?? {});
+  const has = (key, write = false) => (d) => d.points.some((p) => p.key === key && (!write || p.access?.write));
+  const filled = $derived({
+    salon: !!(cfg.salon?.tv || cfg.salon?.speaker),
+    chauffage: devices.some((d) => deviceKind(d) === 'climate'),
+    fenetres: devices.some((d) => deviceKind(d) === 'cover'),
+    carte: devices.some((d) => d.id.startsWith('personnes:') && value(d.id, 'latitude') != null),
+    cameras: devices.some((d) => d.camera) || !!cfg.favorites?.cameras?.length,
+    parler: devices.some((d) => has('say', true)(d) || has('announce', true)(d)),
+    energie: !energy.missing,
+    impression: devices.some((d) => isPrinter(d) || isPaperPrinter(d)),
+    dehors: !!(cfg.outdoor?.weather || cfg.outdoor?.air || cfg.outdoor?.pool),
+    infra: devices.some((d) => d.model === 'Serveur de la maison' || d.model === 'Ordinateur' || has('external_ip')(d)),
+  });
+  const nav = $derived(NAV.filter((item) => filled[item.path] ?? true));
+
   let moliOpen = $state(false);
   let prefersDark = $state(false);
 
   onMount(() => {
     start();
+    // Asked once: is energy measured here? (The cards keep it fresh.)
+    useEnergy()();
     // What only a person may do (the Atelier moving a device out of a
     // guarded room): the code first, then the same request once more.
     onCodeNeeded((label, reason, retry) => (home.held = { label, reason, custom: retry }));
@@ -122,7 +147,7 @@
       </svg>
     </a>
     <ul>
-      {#each NAV as item (item.path)}
+      {#each nav as item (item.path)}
         <li>
           <a href="#/{item.path}" class:active={page === item.path} aria-current={page === item.path ? 'page' : undefined}>
             <span class="glyph">
