@@ -189,7 +189,10 @@ pub(crate) async fn post(
 ) -> Response {
     // The dashboard of the house, a person or not; never an agent, nor a guest.
     let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
-    let guest = caller.person.as_ref().is_some_and(crate::people::PersonRef::is_guest);
+    let guest = caller
+        .person
+        .as_ref()
+        .is_some_and(crate::people::PersonRef::is_guest);
     if guest || !matches!(origin, Origin::Ui | Origin::Household) {
         return error(
             StatusCode::FORBIDDEN,
