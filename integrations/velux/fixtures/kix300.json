@@ -282,6 +282,995 @@
      "aa:bb:cc:dd:ee:12"
     ]
    }
+  ],
+  "schedules": [
+   {
+    "timetable": [
+     {
+      "zone_id": 0,
+      "m_offset": 435
+     },
+     {
+      "zone_id": 1,
+      "m_offset": 450
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 510
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 600
+     },
+     {
+      "zone_id": 0,
+      "m_offset": 1875
+     },
+     {
+      "zone_id": 1,
+      "m_offset": 1890
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 1950
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 2040
+     },
+     {
+      "zone_id": 0,
+      "m_offset": 3315
+     },
+     {
+      "zone_id": 1,
+      "m_offset": 3330
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 3390
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 3480
+     },
+     {
+      "zone_id": 0,
+      "m_offset": 4755
+     },
+     {
+      "zone_id": 1,
+      "m_offset": 4770
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 4830
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 4920
+     },
+     {
+      "zone_id": 0,
+      "m_offset": 6195
+     },
+     {
+      "zone_id": 1,
+      "m_offset": 6210
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 6270
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 6360
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 7710
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 7800
+     },
+     {
+      "zone_id": 2,
+      "m_offset": 9150
+     },
+     {
+      "zone_id": 3,
+      "m_offset": 9240
+     }
+    ],
+    "zones": [
+     {
+      "id": 0,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:06",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 25
+       }
+      ]
+     },
+     {
+      "id": 1,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:06",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:11",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:05",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:08",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0f",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:10",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       }
+      ]
+     },
+     {
+      "id": 3,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:04",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 10
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:07",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 10
+       }
+      ]
+     },
+     {
+      "id": 4,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:09",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 70
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:04",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:07",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0d",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0e",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 100
+       }
+      ]
+     },
+     {
+      "id": 5,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:04",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:07",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0d",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0e",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       }
+      ]
+     },
+     {
+      "id": 6,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:09",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       }
+      ]
+     },
+     {
+      "id": 7,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:0b",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 70
+       }
+      ]
+     },
+     {
+      "id": 8,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:0b",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:05",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:08",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0f",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:10",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:11",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       }
+      ]
+     },
+     {
+      "id": 9,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:06",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       }
+      ]
+     },
+     {
+      "id": 10,
+      "modules": [
+       {
+        "id": "aa:bb:cc:dd:ee:05",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:08",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:0f",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:10",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       },
+       {
+        "id": "aa:bb:cc:dd:ee:11",
+        "bridge": "aa:bb:cc:dd:ee:01",
+        "target_position": 0
+       }
+      ]
+     }
+    ],
+    "name": "VELUX event",
+    "default": false,
+    "timetable_sunrise": [],
+    "timetable_sunset": [
+     {
+      "zone_id": 4,
+      "day": 1,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 1,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 1,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 7,
+      "day": 1
+     },
+     {
+      "zone_id": 8,
+      "day": 1,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 1,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 2,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 2,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 2,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 7,
+      "day": 2
+     },
+     {
+      "zone_id": 8,
+      "day": 2,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 2,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 3,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 3,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 3,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 7,
+      "day": 3
+     },
+     {
+      "zone_id": 8,
+      "day": 3,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 3,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 4,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 4,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 4,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 7,
+      "day": 4
+     },
+     {
+      "zone_id": 8,
+      "day": 4,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 4,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 5,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 5,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 5,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 7,
+      "day": 5
+     },
+     {
+      "zone_id": 8,
+      "day": 5,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 5,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 6,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 6,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 6,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 10,
+      "day": 6,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 6,
+      "twilight_offset": 60
+     },
+     {
+      "zone_id": 4,
+      "day": 7,
+      "twilight_offset": -60
+     },
+     {
+      "zone_id": 5,
+      "day": 7,
+      "twilight_offset": -45
+     },
+     {
+      "zone_id": 6,
+      "day": 7,
+      "twilight_offset": -30
+     },
+     {
+      "zone_id": 10,
+      "day": 7,
+      "twilight_offset": 30
+     },
+     {
+      "zone_id": 9,
+      "day": 7,
+      "twilight_offset": 60
+     }
+    ],
+    "metadata": {
+     "cards": [
+      {
+       "begin_time": -60,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 0,
+       "card_name": "Ouvrir les fenêtres",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:09",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 70
+        }
+       ],
+       "room_id": "1003"
+      },
+      {
+       "begin_time": -60,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 1,
+       "card_name": "Ouvrir les fenêtres",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:04",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:07",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0d",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0e",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 100
+        }
+       ],
+       "room_id": "1001"
+      },
+      {
+       "begin_time": -45,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 12,
+       "card_name": "Fermer les fenêtres",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:04",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:07",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0d",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0e",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 0
+        }
+       ],
+       "room_id": "1001"
+      },
+      {
+       "begin_time": 0,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 2,
+       "card_name": "Fenêtres 70% ouvertes",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+       ],
+       "end_time": 30,
+       "end_time_ref": "sunset",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0b",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 70
+        }
+       ],
+       "room_id": "1004"
+      },
+      {
+       "begin_time": 30,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 3,
+       "card_name": "Obscurcir la pièce pour la nuit",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "icon": "velux-shutter-open-32",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:05",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:08",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0f",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:10",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        }
+       ],
+       "room_id": "1001",
+       "target_position": 0,
+       "type": "shutter"
+      },
+      {
+       "begin_time": 30,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 4,
+       "card_name": "Obscurcir la pièce pour la nuit",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "icon": "velux-shutter-open-32",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:11",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        }
+       ],
+       "room_id": "1005",
+       "target_position": 0,
+       "type": "shutter"
+      },
+      {
+       "begin_time": 60,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 5,
+       "card_name": "Fermer les stores",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "sunset",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:06",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 0
+        }
+       ],
+       "room_id": "1002"
+      },
+      {
+       "begin_time": -30,
+       "begin_time_ref": "sunset",
+       "card_enabled": true,
+       "card_id": 6,
+       "card_name": "Fermer les fenêtres",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time": null,
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:09",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 0
+        }
+       ],
+       "room_id": "1003"
+      },
+      {
+       "begin_time": 435,
+       "begin_time_ref": "hourly",
+       "card_enabled": true,
+       "card_id": 7,
+       "card_name": "Stores 75% fermés",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+       ],
+       "end_time_ref": "hourly",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:06",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 25
+        }
+       ],
+       "room_id": "1002"
+      },
+      {
+       "begin_time": 450,
+       "begin_time_ref": "hourly",
+       "card_enabled": true,
+       "card_id": 8,
+       "card_name": "Stores ouvert",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+       ],
+       "end_time_ref": "hourly",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:06",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        }
+       ],
+       "room_id": "1002"
+      },
+      {
+       "begin_time": 510,
+       "begin_time_ref": "hourly",
+       "card_enabled": true,
+       "card_id": 11,
+       "card_name": "Laissez entrer la lumière du jour le matin",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "hourly",
+       "icon": "velux-shutter-closed-32",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:11",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        }
+       ],
+       "room_id": "1005",
+       "target_position": 100,
+       "type": "blindShutter"
+      },
+      {
+       "begin_time": 510,
+       "begin_time_ref": "hourly",
+       "card_enabled": true,
+       "card_id": 10,
+       "card_name": "Laissez entrer la lumière du jour le matin",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "hourly",
+       "icon": "velux-shutter-closed-32",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:05",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:08",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:0f",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:10",
+         "isBlindShutter": true,
+         "isWindow": false,
+         "target_position": 100
+        }
+       ],
+       "room_id": "1001",
+       "target_position": 100,
+       "type": "blindShutter"
+      },
+      {
+       "begin_time": 600,
+       "begin_time_ref": "hourly",
+       "card_enabled": true,
+       "card_id": 9,
+       "card_name": "Fenêtres 10% ouvertes",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "end_time_ref": "hourly",
+       "modules": [
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:04",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 10
+        },
+        {
+         "bridge": "aa:bb:cc:dd:ee:01",
+         "id": "aa:bb:cc:dd:ee:07",
+         "isBlindShutter": false,
+         "isWindow": true,
+         "target_position": 10
+        }
+       ],
+       "room_id": "1001"
+      }
+     ]
+    },
+    "id": "5f0000000000000000000001",
+    "type": "event",
+    "selected": true
+   },
+   {
+    "timetable": [],
+    "zones": [],
+    "name": "VELUX algo",
+    "default": false,
+    "timetable_sunrise": [],
+    "timetable_sunset": [],
+    "metadata": {
+     "cards": []
+    },
+    "id": "5f0000000000000000000002",
+    "type": "algo",
+    "selected": true
+   }
   ]
  },
  "homestatus": {

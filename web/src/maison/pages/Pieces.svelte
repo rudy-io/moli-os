@@ -9,6 +9,8 @@
   import Icon from '../ui/Icon.svelte';
   import RoomCard from '../ui/RoomCard.svelte';
   import FilterChips from '../ui/FilterChips.svelte';
+  import HeatingAway from '../ui/HeatingAway.svelte';
+  import VeluxPlans from '../ui/VeluxPlans.svelte';
   import { categoryOf, loadFilter } from '../lib/filters.js';
   import { floorsOf } from '../lib/floors.js';
   import { t } from '../../lib/i18n.svelte.js';
@@ -104,6 +106,8 @@
     </div>{/if}
   </div>{/if}
 
+  {#if only === 'chauffage'}<HeatingAway />{/if}
+
   {#if empty && !rooms.length}<p class="empty">{t(empty)}</p>{/if}
 
   {#each floors as floor (floor.id)}
@@ -123,6 +127,9 @@
       </div>
     </section>
   {/each}
+
+  <!-- The gateway's automations, after the rooms' windows. -->
+  {#if only === 'fenetres'}<VeluxPlans />{/if}
 </div>
 
 <style>

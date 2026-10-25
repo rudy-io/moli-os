@@ -9,6 +9,7 @@
 
 mod cloud;
 pub mod model;
+pub mod schedule;
 mod sign;
 
 use std::time::{Duration, SystemTime};
@@ -19,6 +20,7 @@ use serde::Deserialize;
 
 use cloud::{Cloud, LoggedOut, Refused};
 use model::{Home, Module, Role};
+use schedule::Schedule;
 use sign::Signer;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -49,6 +51,8 @@ const SOON: Duration = Duration::from_secs(3);
 const SOON_READS: u8 = 40;
 /// Readings in a row where nothing moves before going back to `every`.
 const STILL_READS: u8 = 2;
+/// The automations are read again this often (changed in the app too).
+const PLAN_EVERY: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug)]
 pub struct Velux {
@@ -100,9 +104,20 @@ fn signer(ctx: &DriverCtx) -> Option<Signer> {
     signer
 }
 
-/// Lists the modules, with their points (a window's writable with the key).
-fn publish(ctx: &DriverCtx, home: &Home, status: &serde_json::Value, signed: bool) {
+/// Lists the modules, with their points (a window's writable with the key;
+/// the gateway's automations when the home has them).
+fn publish(
+    ctx: &DriverCtx,
+    home: &Home,
+    status: &serde_json::Value,
+    signed: bool,
+    plan: Option<&Schedule>,
+) {
     for module in &home.modules {
+        let mut points = module.points(status, signed);
+        if module.role == Role::Gateway && plan.is_some() {
+            points.push(schedule::spec());
+        }
         ctx.upsert_device(Device {
             id: ctx.device_id(&module.id),
             instance: ctx.instance().clone(),
@@ -112,9 +127,27 @@ fn publish(ctx: &DriverCtx, home: &Home, status: &serde_json::Value, signed: boo
             description: None,
             native_room: module.room.as_deref().map(Into::into),
             members: Vec::new(),
-            points: module.points(status, signed),
+            points,
         });
     }
+}
+
+/// The automations, shown on the gateway (JSON text, if it fits).
+fn show_plan(ctx: &DriverCtx, home: &Home, plan: Option<&Schedule>) {
+    let (Some(plan), Some(gateway)) = (plan, home.modules.iter().find(|m| m.role == Role::Gateway))
+    else {
+        return;
+    };
+    let cards = plan.cards(home, ctx.instance()).to_string();
+    if cards.chars().count() > moli_core::MAX_TEXT {
+        tracing::warn!(instance = %ctx.instance(), "velux: too many automations to show");
+        return;
+    }
+    ctx.set_state(
+        &ctx.device_id(&gateway.id),
+        schedule::POINT,
+        moli_core::Value::Text(cards.into()),
+    );
 }
 
 /// A read, logging in again once when the token is gone.
@@ -142,7 +175,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // The first state says which points each module has (a battery or not).
     let status = fresh!(cloud, email, password, cloud.status(&home.id))?;
     let mut signer = signer(ctx);
-    publish(ctx, &home, &status, signer.is_some());
+    let mut plan = Schedule::find(&data);
+    publish(ctx, &home, &status, signer.is_some(), plan.as_ref());
+    show_plan(ctx, &home, plan.as_ref());
     ctx.ready();
     tracing::info!(
         instance = %ctx.instance(),
@@ -157,6 +192,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // Departure mode: the gateway lets nothing move.
     let mut departure = false;
     let (mut soon, mut still) = (0u8, 0u8);
+    let mut plan_at = tokio::time::Instant::now() + PLAN_EVERY;
     loop {
         tokio::select! {
             command = ctx.next_command() => {
@@ -170,6 +206,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     .find(|m| ctx.device_id(&m.id) == command.device.id);
                 let answer = match module {
                     None => Err(moli_i18n::tr("pilotes.velux.module_inconnu")),
+                    Some(m) if m.role == Role::Gateway && &*command.key == schedule::POINT => {
+                        let saved = save_plan(&mut cloud, (&email, &password), &home, plan.as_ref(), ctx.instance(), &command).await;
+                        if saved.is_ok() {
+                            // Read back at once: what the cloud kept.
+                            plan_at = tokio::time::Instant::now();
+                        }
+                        command.reply(saved);
+                        continue;
+                    }
                     Some(_) if departure => Err(moli_i18n::tr("pilotes.velux.mode_depart")),
                     Some(module) => {
                         let order = Order { home: &home, module, command: &command };
@@ -188,35 +233,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 } else {
                     fresh!(cloud, email, password, cloud.status(&home.id))
                 };
-                let mut moving = false;
-                match read {
-                    Ok(status) => {
-                        for module in &home.modules {
-                            let id = ctx.device_id(&module.id);
-                            match module.values(&status) {
-                                Some((answers, values)) => {
-                                    for (key, value) in values {
-                                        let on = value == moli_core::Value::Bool(true);
-                                        match key {
-                                            "moving" => moving |= on,
-                                            "departure" => departure = on,
-                                            _ => {}
-                                        }
-                                        ctx.set_state(&id, key, value);
-                                    }
-                                    ctx.set_availability(&id, answers);
-                                }
-                                None => ctx.set_availability(&id, false),
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "velux: no reading");
-                        for module in &home.modules {
-                            ctx.set_availability(&ctx.device_id(&module.id), false);
-                        }
-                    }
-                }
+                let moving = take(ctx, &home, read, &mut departure);
                 if soon > 0 {
                     soon -= 1;
                     still = if moving { 0 } else { still + 1 };
@@ -226,8 +243,105 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 }
                 next = tokio::time::Instant::now() + if soon > 0 { SOON } else { every };
             }
+            () = tokio::time::sleep_until(plan_at) => {
+                plan_at = tokio::time::Instant::now() + PLAN_EVERY;
+                match fresh!(cloud, email, password, cloud.home()) {
+                    Ok(data) => {
+                        let read = Schedule::find(&data);
+                        if read.is_some() != plan.is_some() {
+                            publish(ctx, &home, &serde_json::Value::Null, signer.is_some(), read.as_ref());
+                        }
+                        plan = read;
+                        show_plan(ctx, &home, plan.as_ref());
+                    }
+                    Err(e) => tracing::warn!(error = %e, "velux: automations not read"),
+                }
+            }
         }
     }
+}
+
+/// One reading of the home's state, published; whether something moves.
+/// Unread: every module goes offline.
+fn take(
+    ctx: &DriverCtx,
+    home: &Home,
+    read: anyhow::Result<serde_json::Value>,
+    departure: &mut bool,
+) -> bool {
+    let mut moving = false;
+    match read {
+        Ok(status) => {
+            for module in &home.modules {
+                let id = ctx.device_id(&module.id);
+                match module.values(&status) {
+                    Some((answers, values)) => {
+                        for (key, value) in values {
+                            let on = value == moli_core::Value::Bool(true);
+                            match key {
+                                "moving" => moving |= on,
+                                "departure" => *departure = on,
+                                _ => {}
+                            }
+                            ctx.set_state(&id, key, value);
+                        }
+                        ctx.set_availability(&id, answers);
+                    }
+                    None => ctx.set_availability(&id, false),
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "velux: no reading");
+            for module in &home.modules {
+                ctx.set_availability(&ctx.device_id(&module.id), false);
+            }
+        }
+    }
+    moving
+}
+
+/// The automations a person edited, sent to the cloud (logging in again
+/// once if the token is gone). Taken: `Ok`; else why.
+async fn save_plan(
+    cloud: &mut Cloud,
+    (email, password): (&str, &str),
+    home: &Home,
+    plan: Option<&Schedule>,
+    instance: &moli_core::InstanceId,
+    command: &CommandRequest,
+) -> Result<(), String> {
+    let plan = plan.ok_or_else(|| moli_i18n::tr("pilotes.velux.planning.absent"))?;
+    let wanted: serde_json::Value = match &command.value {
+        moli_core::Value::Text(text) => serde_json::from_str(text).ok(),
+        _ => None,
+    }
+    .ok_or_else(|| moli_i18n::tr("pilotes.velux.planning.illisible"))?;
+    let body = Schedule::body(&plan.edited(home, instance, &wanted)?);
+    for attempt in 0..2 {
+        match cloud
+            .sync_schedule(&home.id, plan.id(), plan.name(), &body)
+            .await
+        {
+            Ok(()) => return Ok(()),
+            Err(e) if e.is::<LoggedOut>() && attempt == 0 => {
+                cloud
+                    .login(email, password)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            Err(e) => {
+                return Err(match e.downcast::<Refused>() {
+                    Ok(Refused(why)) => why,
+                    Err(e) => moli_i18n::tr!("pilotes.velux.pas_de_reponse", why = e),
+                });
+            }
+        }
+    }
+    Err(moli_i18n::tr!(
+        "pilotes.velux.pas_de_reponse",
+        why = "timeout"
+    ))
 }
 
 /// One command, on its way to the cloud.

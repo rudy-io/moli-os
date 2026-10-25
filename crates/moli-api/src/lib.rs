@@ -18,6 +18,7 @@ mod access;
 mod assets;
 mod assistant;
 mod automations;
+mod away;
 mod caller;
 mod guard;
 mod integrations;
@@ -170,6 +171,7 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .route("/api/infra", get(rest::infra))
         .layer(Extension(rest::InfraFile(infra)))
         .route("/api/plan", get(plan::get).put(plan::put))
+        .route("/api/heating/away", get(away::get).post(away::post))
         .route(
             "/api/plan/images",
             upload(post(plan::upload), plan::MAX_IMAGE, humans),

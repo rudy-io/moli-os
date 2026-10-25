@@ -34,7 +34,7 @@ pub struct Module {
     pub role: Role,
     pub name: String,
     pub room: Option<String>,
-    room_id: Option<String>,
+    pub(crate) room_id: Option<String>,
     /// `velux_type` (`window`, `blind`, `shutter`…), else the module type.
     pub model: String,
     /// The gateway it is reached through.

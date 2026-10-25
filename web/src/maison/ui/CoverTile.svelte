@@ -26,14 +26,14 @@
 
   // A blind's bar runs the other way: rolled up (open) on the left, all the
   // way down (closed) on the right. A roof window stops at 10 % to air the
-  // room: 5 % asked is 10 %, and the way down from 10 % goes to closed.
+  // room: anything from 5 to 15 % asked is 10 %.
   const blind = $derived(!!d && isBlind(d));
   const vents = $derived(!!d && coverIcon(d) === 'roof-window');
   const VENT = 10;
+  const VENT_UP_TO = 15;
   /** Where an opening sits on the bar (and back: it is its own inverse). */
   const onBar = (pct) => (blind ? 100 - pct : pct);
-  /** `dir`: which way the opening was going (+1 more open, −1 less). */
-  const settle = (pct, dir) => (vents && pct > 0 && pct < VENT ? (dir < 0 ? 0 : VENT) : pct);
+  const settle = (pct) => (vents && pct > 0 && pct <= VENT_UP_TO ? VENT : pct);
 
   const POINT = $derived(`${id}/percent_control`);
   const STEP = 5;
@@ -41,22 +41,38 @@
   /** The opening under the finger, while it is down. */
   let drag = $state(null);
   const asked = $derived(hub.pending[POINT]);
-  const shown = $derived(drag ?? (typeof asked === 'number' ? asked : pos) ?? 0);
+  // What was asked, held from the cloud's answer until the device says it
+  // is on its way there (or there): the knob stays where the finger left
+  // it, never back to the start for a few seconds.
+  let sent = $state(null);
+  let forget;
+  $effect(() => {
+    if (sent != null && ((moving && target === sent) || (!moving && pos === sent))) sent = null;
+  });
+  // While it moves, where it is heading; else where it is.
+  const heads = $derived(moving && typeof target === 'number' ? target : pos);
+  const shown = $derived(drag ?? (typeof asked === 'number' ? asked : (sent ?? heads)) ?? 0);
 
   function at(e) {
     // The knob's centre runs from one end to the other, half a knob in (the
     // bar is as high as the knob's room).
     const r = bar.getBoundingClientRect();
     const x = Math.min(1, Math.max(0, (e.clientX - r.left - r.height / 2) / (r.width - r.height)));
-    return settle(onBar(Math.round((x * 100) / STEP) * STEP), 1);
+    return settle(onBar(Math.round((x * 100) / STEP) * STEP));
   }
+  // Where the finger went down: a slide along the bar, or a swipe up the page.
+  let from = null;
   function down(e) {
     if (!settable || e.button > 0) return;
     bar.setPointerCapture(e.pointerId);
+    from = { x: e.clientX, y: e.clientY, wide: 0, high: 0 };
     drag = at(e);
   }
   function move(e) {
-    if (drag != null && bar.hasPointerCapture(e.pointerId)) drag = at(e);
+    if (drag == null || !bar.hasPointerCapture(e.pointerId)) return;
+    from.wide = Math.max(from.wide, Math.abs(e.clientX - from.x));
+    from.high = Math.max(from.high, Math.abs(e.clientY - from.y));
+    drag = at(e);
   }
   function up() {
     if (drag == null) return;
@@ -64,18 +80,33 @@
     drag = null;
     send(v);
   }
-  // A vertical swipe scrolls the page: nothing is sent.
-  const cancel = () => (drag = null);
+  // The browser took the finger back: a vertical swipe scrolls the page,
+  // nothing is sent; a slide that ran off the bar or the screen (the
+  // phone's edge, its back gesture) is sent where it was.
+  function cancel() {
+    if (drag == null) return;
+    // (Measured on the moves: a cancel's own coordinates can be zeros.)
+    const slid = from && from.wide > 8 && from.wide >= from.high;
+    if (slid) up();
+    else drag = null;
+  }
   function key(e) {
     const by = { ArrowLeft: -STEP, ArrowDown: -STEP, ArrowRight: STEP, ArrowUp: STEP, Home: -100, End: 100 }[e.key];
     if (by == null) return;
     e.preventDefault();
-    const next = onBar(Math.min(100, Math.max(0, Math.round((onBar(shown) + by) / STEP) * STEP)));
-    send(settle(next, Math.sign(next - shown)));
+    let next = onBar(Math.min(100, Math.max(0, Math.round((onBar(shown) + by) / STEP) * STEP)));
+    // From airing, one step down closes, one step up passes the airing range.
+    if (vents && shown === VENT && next > 0 && next <= VENT_UP_TO) next = next < VENT ? 0 : VENT_UP_TO + STEP;
+    send(settle(next));
   }
-  function send(v) {
+  async function send(v) {
     if (v === pos && !moving) return;
-    act(POINT, v, t('commun.volet.label_niveau', { label, state: openness(v) }));
+    const done = await act(POINT, v, t('commun.volet.label_niveau', { label, state: openness(v) }));
+    if (done !== 'ok') return;
+    sent = v;
+    clearTimeout(forget);
+    // Refused by the gateway (rain, departure) or sent elsewhere: let go.
+    forget = setTimeout(() => (sent = null), 20_000);
   }
 
   /** Closed, open, airing (a roof window at 10 %), or open so much. */
@@ -96,18 +127,20 @@
   const status = $derived(
     drag != null
       ? t('commun.volet.vers', { state: openness(drag) })
-      : moving
-        ? heading(target ?? (typeof asked === 'number' ? asked : pos))
-        : pos != null
-          ? openness(pos)
-          : '',
+      : typeof asked === 'number' || sent != null
+        ? heading(typeof asked === 'number' ? asked : sent)
+        : moving
+          ? heading(target ?? pos)
+          : pos != null
+            ? openness(pos)
+            : '',
   );
 </script>
 
 <div class="cover">
   <div class="top">
     <span class="ico" class:open={pos > 0}><Icon name={d ? coverIcon(d) : 'shutter'} size={18} /></span>
-    <span class="name"><b>{label}</b><small class:live={drag != null || moving}>{status}</small></span>
+    <span class="name"><b>{label}</b><small class:live={drag != null || moving || sent != null}>{status}</small></span>
     {#if offers.length}
       <div class="seg">
         {#each BUTTONS.filter(([cmd]) => offers.includes(cmd)) as [cmd, key, icon] (cmd)}
@@ -135,6 +168,7 @@
       onpointermove={move}
       onpointerup={up}
       onpointercancel={cancel}
+      onlostpointercapture={cancel}
       onkeydown={key}>
       <i class="fill"></i>
       {#if vents}<i class="vent" style:--at={VENT / 100} title={t('commun.volet.ventilation')}></i>{/if}

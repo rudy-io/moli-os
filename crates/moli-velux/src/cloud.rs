@@ -190,6 +190,41 @@ impl Cloud {
             .into()),
         }
     }
+
+    /// Sends the automations back, as `api/synchomeschedule` takes a
+    /// schedule: the home, the schedule and its name in the address, the
+    /// schedule itself in JSON (`schedule`: what [`crate::schedule`] edited).
+    pub async fn sync_schedule(
+        &self,
+        home: &str,
+        id: &str,
+        name: &str,
+        schedule: &Json,
+    ) -> anyhow::Result<()> {
+        if !self.logged_in() {
+            return Err(LoggedOut.into());
+        }
+        let ids = [("home_id", home), ("schedule_id", id), ("name", name)];
+        let mut body = schedule.clone();
+        for (key, value) in ids {
+            body[key] = Json::from(value);
+        }
+        let path = format!("/api/synchomeschedule?{}", encode(&ids));
+        let (status, answer) = self
+            .send(&path, "application/json", body.to_string(), TIMEOUT)
+            .await?;
+        match status {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(LoggedOut.into()),
+            StatusCode::OK if answer["status"] == "ok" => Ok(()),
+            other => Err(Refused(moli_i18n::tr!(
+                "pilotes.velux.planning.refuse",
+                why = answer["error"]["message"]
+                    .as_str()
+                    .map_or_else(|| format!("HTTP {}", other.as_u16()), str::to_owned)
+            ))
+            .into()),
+        }
+    }
 }
 
 /// Why a `setstate` answer is a refusal, if it is one: a list of errors in

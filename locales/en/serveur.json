@@ -46,6 +46,7 @@
   "serveur.plan.trop_d_appareils": "at most {max} devices per floor",
   "serveur.plan.etage_sans_taille": "“{name}”: a drawn floor needs a size (size, in cm)",
   "serveur.plan.placement_invalide": "invalid placement for {id}",
+  "serveur.chauffage.humain_part": "only a person (code) sets the house to away or brings it back",
 
   "serveur.code.proprietaire_seul": "only the owner of the house (signed in through Cloudflare Access) can choose the code",
   "serveur.code.actuel_d_abord": "the current code first",
