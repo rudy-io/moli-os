@@ -85,7 +85,8 @@
         .filter((d) => d.online !== false)
         .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current'))
         .filter((x) => typeof x === 'number');
-    const sensed = read(room.sensors);
+    // A filtered room keeps its sensors for this alone (`probes`).
+    const sensed = read(room.probes ?? room.sensors);
     const readings = sensed.length ? sensed : read(room.climates);
     return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
   });

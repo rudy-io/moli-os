@@ -45,6 +45,8 @@
     { path: 'moli', name: 'Moli', orb: true },
     { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
     { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'stove' },
+    { path: 'fenetres', label: 'commun.nav.fenetres', icon: 'roof-window' },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
@@ -152,6 +154,10 @@
       <Salon />
     {:else if page === 'pieces'}
       <Pieces />
+    {:else if page === 'chauffage'}
+      <Pieces only="chauffage" />
+    {:else if page === 'fenetres'}
+      <Pieces only="fenetres" />
     {:else if page === 'plan'}
       <Plan />
     {:else if page === 'carte'}
@@ -264,12 +270,20 @@
     display: block;
   }
 
+  /* A short screen: the list scrolls, the rail's foot stays in view. */
   .rail ul {
     list-style: none;
     margin: 12px 0 0;
     padding: 0;
     display: grid;
     gap: 6px;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .rail ul::-webkit-scrollbar {
+    display: none;
   }
 
   .rail a,

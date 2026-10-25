@@ -1,12 +1,13 @@
 // What kind of thing a device is, to see only some of them (the plan, the
-// rooms): lights, plugs, climate and shutters, sensors, cameras, media.
+// rooms): lights, plugs, heating, windows and blinds, sensors, cameras, media.
 import { deviceKind } from './home.svelte.js';
 
 // `label` is a catalogue key, said with t() where it is shown.
 export const CATEGORIES = [
   { id: 'lumieres', label: 'commun.filtre.lumieres', icon: 'light', kinds: ['light', 'group'] },
   { id: 'prises', label: 'commun.filtre.prises', icon: 'power', kinds: ['plug'] },
-  { id: 'climat', label: 'commun.filtre.climat', icon: 'air-conditioner', kinds: ['climate', 'cover'] },
+  { id: 'chauffage', label: 'commun.filtre.chauffage', icon: 'stove', kinds: ['climate'] },
+  { id: 'fenetres', label: 'commun.filtre.fenetres', icon: 'roof-window', kinds: ['cover'] },
   { id: 'capteurs', label: 'commun.filtre.capteurs', icon: 'thermometer', kinds: ['sensor'] },
   { id: 'cameras', label: 'commun.filtre.cameras', icon: 'cctv', kinds: ['camera'] },
   { id: 'medias', label: 'commun.filtre.medias', icon: 'tv', kinds: ['tv', 'speaker'] },

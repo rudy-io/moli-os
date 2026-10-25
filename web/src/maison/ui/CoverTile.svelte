@@ -1,5 +1,5 @@
 <script>
-  import { hub, device, value, act, nameOf, num, coverIcon } from '../lib/home.svelte.js';
+  import { hub, device, value, act, nameOf, num, coverIcon, isBlind } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -24,10 +24,21 @@
 
   // ---- the bar: a tap or a slide, sent when the finger lifts -----------------------------
 
+  // A blind's bar runs the other way: rolled up (open) on the left, all the
+  // way down (closed) on the right. A roof window stops at 10 % to air the
+  // room: 5 % asked is 10 %, and the way down from 10 % goes to closed.
+  const blind = $derived(!!d && isBlind(d));
+  const vents = $derived(!!d && coverIcon(d) === 'roof-window');
+  const VENT = 10;
+  /** Where an opening sits on the bar (and back: it is its own inverse). */
+  const onBar = (pct) => (blind ? 100 - pct : pct);
+  /** `dir`: which way the opening was going (+1 more open, −1 less). */
+  const settle = (pct, dir) => (vents && pct > 0 && pct < VENT ? (dir < 0 ? 0 : VENT) : pct);
+
   const POINT = $derived(`${id}/percent_control`);
   const STEP = 5;
   let bar = $state(null);
-  /** The level under the finger, while it is down. */
+  /** The opening under the finger, while it is down. */
   let drag = $state(null);
   const asked = $derived(hub.pending[POINT]);
   const shown = $derived(drag ?? (typeof asked === 'number' ? asked : pos) ?? 0);
@@ -37,7 +48,7 @@
     // bar is as high as the knob's room).
     const r = bar.getBoundingClientRect();
     const x = Math.min(1, Math.max(0, (e.clientX - r.left - r.height / 2) / (r.width - r.height)));
-    return Math.round((x * 100) / STEP) * STEP;
+    return settle(onBar(Math.round((x * 100) / STEP) * STEP), 1);
   }
   function down(e) {
     if (!settable || e.button > 0) return;
@@ -59,20 +70,34 @@
     const by = { ArrowLeft: -STEP, ArrowDown: -STEP, ArrowRight: STEP, ArrowUp: STEP, Home: -100, End: 100 }[e.key];
     if (by == null) return;
     e.preventDefault();
-    send(Math.min(100, Math.max(0, Math.round((shown + by) / STEP) * STEP)));
+    const next = onBar(Math.min(100, Math.max(0, Math.round((onBar(shown) + by) / STEP) * STEP)));
+    send(settle(next, Math.sign(next - shown)));
   }
   function send(v) {
     if (v === pos && !moving) return;
-    act(POINT, v, t('commun.volet.label_niveau', { label, pct: v }));
+    act(POINT, v, t('commun.volet.label_niveau', { label, state: openness(v) }));
   }
 
-  /** Closed, or open so much. */
-  const openness = (pct) => (pct === 0 ? t('commun.volet.ferme') : t('commun.volet.ouvert_a', { pct: num(pct) }));
+  /** Closed, open, airing (a roof window at 10 %), or open so much. */
+  const openness = (pct) =>
+    pct === 0
+      ? t('commun.volet.ferme')
+      : pct === 100
+        ? t('commun.volet.ouvert')
+        : vents && pct === VENT
+          ? t('commun.volet.ventilation')
+          : t('commun.volet.ouvert_a', { pct: num(pct) });
+  /** On its way: opening or closing all the way, or heading somewhere. */
+  function heading(goal) {
+    if (goal === 100) return t('commun.volet.ouverture_en_cours');
+    if (goal === 0) return t('commun.volet.fermeture_en_cours');
+    return t('commun.volet.en_mouvement', { state: openness(goal) });
+  }
   const status = $derived(
     drag != null
-      ? t('commun.volet.vers', { pct: drag })
+      ? t('commun.volet.vers', { state: openness(drag) })
       : moving
-        ? t('commun.volet.en_mouvement', { pct: num(target ?? (typeof asked === 'number' ? asked : pos)) })
+        ? heading(target ?? (typeof asked === 'number' ? asked : pos))
         : pos != null
           ? openness(pos)
           : '',
@@ -98,13 +123,13 @@
       class="bar"
       class:held={drag != null}
       bind:this={bar}
-      style:--at={shown / 100}
+      style:--at={onBar(shown) / 100}
       role="slider"
       tabindex="0"
       aria-label={t('commun.volet.niveau', { label })}
       aria-valuemin="0"
       aria-valuemax="100"
-      aria-valuenow={shown}
+      aria-valuenow={onBar(shown)}
       aria-valuetext={openness(shown)}
       onpointerdown={down}
       onpointermove={move}
@@ -112,9 +137,12 @@
       onpointercancel={cancel}
       onkeydown={key}>
       <i class="fill"></i>
+      {#if vents}<i class="vent" style:--at={VENT / 100} title={t('commun.volet.ventilation')}></i>{/if}
       <i class="knob"></i>
     </div>
-    <div class="ends" aria-hidden="true"><span>{t('commun.volet.ferme')}</span><span>{t('commun.volet.ouvert')}</span></div>
+    <div class="ends" aria-hidden="true">
+      <span>{t(blind ? 'commun.volet.ouvert' : 'commun.volet.ferme')}</span><span>{t(blind ? 'commun.volet.ferme' : 'commun.volet.ouvert')}</span>
+    </div>
   {/if}
 </div>
 
@@ -214,7 +242,8 @@
     color: var(--cool);
   }
 
-  /* The bar: closed on the left, open on the right. As high as the knob's
+  /* The bar: closed on the left, open on the right (a blind the other
+     way: rolled up on the left, down on the right). As high as the knob's
      room (--room): a thick rail for a finger, a fine one under a mouse. */
   .bar {
     --rail: 30px;
@@ -267,6 +296,19 @@
     box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
     transform: translateY(-50%);
     transition: left 0.25s var(--ease);
+  }
+
+  /* A roof window's airing stop, 10 % along: a notch across the rail. */
+  .vent {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--room) / 2 - 1px + (100% - var(--room)) * var(--at));
+    width: 2px;
+    height: max(12px, var(--rail) * 0.6);
+    border-radius: 1px;
+    background: var(--ink-3);
+    opacity: 0.6;
+    transform: translateY(-50%);
   }
 
   /* A mouse: a fine rail, the knob standing out of it. */

@@ -274,6 +274,10 @@ export function deviceKind(d) {
  *  approves, rain and all), else a blind or a shutter. */
 export const coverIcon = (d) => (d.points.find((p) => p.key === 'percent_control')?.semantic === 'control' ? 'roof-window' : 'shutter');
 
+/** A blind (VELUX names its model so): open is rolled up, closed is all
+ *  the way down. Not a window, whatever its name. */
+export const isBlind = (d) => coverIcon(d) === 'shutter' && /\bstore\b|\bblind\b/i.test(d.model || d.label?.name || d.native_name || '');
+
 /** A sensor's icon, from what it senses. */
 export function sensorIcon(d) {
   if (has(d, 'smoke')) return 'fire';

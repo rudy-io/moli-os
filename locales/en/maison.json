@@ -104,6 +104,12 @@
   "maison.pieces.affichage": "Button display",
   "maison.pieces.avec_noms": "With names",
   "maison.pieces.icones": "Icons only",
+  "maison.chauffage.titre": "Heating",
+  "maison.chauffage.sous_titre": "Everything that heats, room by room.",
+  "maison.chauffage.vide": "Moli knows no heating yet.",
+  "maison.fenetres.titre": "Windows",
+  "maison.fenetres.sous_titre": "Roof windows and blinds, room by room.",
+  "maison.fenetres.vide": "Moli knows no window or blind yet.",
   "maison.pieces.allumees_one": "{count} light on",
   "maison.pieces.allumees_other": "{count} lights on",
 

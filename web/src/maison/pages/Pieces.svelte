@@ -13,6 +13,18 @@
   import { floorsOf } from '../lib/floors.js';
   import { t } from '../../lib/i18n.svelte.js';
 
+  /** `only`: one kind of device, the page then shows it alone, room by room
+   *  (the Heating and Windows pages), with no chips to choose. */
+  let { only = null } = $props();
+
+  // [title, subtitle, nothing to show] for each page.
+  const TEXTS = {
+    pieces: ['maison.pieces.titre', 'maison.pieces.sous_titre', null],
+    chauffage: ['maison.chauffage.titre', 'maison.chauffage.sous_titre', 'maison.chauffage.vide'],
+    fenetres: ['maison.fenetres.titre', 'maison.fenetres.sous_titre', 'maison.fenetres.vide'],
+  };
+  const [title, subtitle, empty] = $derived(TEXTS[only ?? 'pieces']);
+
   let plan = $state(cachedPlan);
   onMount(async () => {
     try {
@@ -25,6 +37,7 @@
 
   /** Which kinds of devices show (none chosen: all). */
   let filter = $state(loadFilter('pieces-filter'));
+  const kept = $derived(only ? [only] : filter);
   /** Pads with their names or icons only: this device's choice. */
   let look = $state((() => {
     try {
@@ -43,17 +56,19 @@
     all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.climates, ...r.media, ...r.sensors].filter(Boolean)),
   );
 
-  /** A room with only what the filter keeps; null when nothing is left. */
-  function only(r) {
-    if (!filter.length) return r;
-    const on = (id) => filter.includes(id);
+  /** A room with only what the filter keeps; null when nothing is left.
+   *  Its sensors still give its temperature (`probes`). */
+  function trim(r) {
+    if (!kept.length) return r;
+    const on = (id) => kept.includes(id);
     const f = {
       ...r,
+      probes: r.sensors,
       group: on('lumieres') ? r.group : null,
       lights: on('lumieres') ? r.lights : [],
       plugs: on('prises') ? r.plugs : [],
-      covers: on('climat') ? r.covers : [],
-      climates: on('climat') ? r.climates : [],
+      covers: on('fenetres') ? r.covers : [],
+      climates: on('chauffage') ? r.climates : [],
       media: on('medias') ? r.media : [],
       sensors: r.sensors.filter((d) => on(categoryOf(d))),
     };
@@ -61,7 +76,7 @@
     return any ? f : null;
   }
 
-  const rooms = $derived(all.map(only).filter(Boolean));
+  const rooms = $derived(all.map(trim).filter(Boolean));
 
   // Floor by floor (from all the rooms: a filter does not move one).
   const placed = $derived(floorsOf(all, plan, roomNamed));
@@ -77,22 +92,25 @@
 
 <div class="pieces">
   <header>
-    <h1 class="page-title">{t('maison.pieces.titre')}</h1>
-    <p class="page-sub">{t('maison.pieces.sous_titre')}</p>
+    <h1 class="page-title">{t(title)}</h1>
+    <p class="page-sub">{t(subtitle)}</p>
   </header>
 
-  <div class="bar">
+  {#if !only}<div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
     {#if hasLights}<div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
       <button role="radio" aria-checked={look === 'text'} class:active={look === 'text'} onclick={() => choose('text')} title={t('maison.pieces.avec_noms')}>Aa</button>
       <button role="radio" aria-checked={look === 'icons'} class:active={look === 'icons'} onclick={() => choose('icons')} title={t('maison.pieces.icones')}><Icon name="light" size={15} /></button>
     </div>{/if}
-  </div>
+  </div>{/if}
+
+  {#if empty && !rooms.length}<p class="empty">{t(empty)}</p>{/if}
 
   {#each floors as floor (floor.id)}
     <section class="floor" aria-label={floor.name ?? t('maison.pieces.titre')}>
       {#if floors.length > 1 && floor.name}
-        {@const lit = litIn(floor.rooms)}
+        <!-- Lights on, counted only where lights show. -->
+        {@const lit = only ? 0 : litIn(floor.rooms)}
         <h2 class="floor-title">
           <span>{floor.name}</span>
           {#if lit}<small>{t('maison.pieces.allumees', { count: lit })}</small>{/if}
@@ -100,7 +118,7 @@
       {/if}
       <div class="rooms">
         {#each floor.rooms as room (room.name)}
-          <div class="slot"><RoomCard {room} every={filter.includes('capteurs')} icons={look === 'icons'} /></div>
+          <div class="slot"><RoomCard {room} every={kept.includes('capteurs')} icons={look === 'icons'} /></div>
         {/each}
       </div>
     </section>
@@ -126,6 +144,11 @@
   .bar > :global(:first-child) {
     flex: 1;
     min-width: 0;
+  }
+
+  .empty {
+    margin: 0;
+    color: var(--ink-3);
   }
 
   .look {

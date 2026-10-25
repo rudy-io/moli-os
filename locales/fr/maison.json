@@ -104,6 +104,12 @@
   "maison.pieces.affichage": "Affichage des boutons",
   "maison.pieces.avec_noms": "Avec les noms",
   "maison.pieces.icones": "Icônes seules",
+  "maison.chauffage.titre": "Chauffage",
+  "maison.chauffage.sous_titre": "Tout ce qui chauffe, pièce par pièce.",
+  "maison.chauffage.vide": "Aucun chauffage connu de Moli pour l’instant.",
+  "maison.fenetres.titre": "Fenêtres",
+  "maison.fenetres.sous_titre": "Les fenêtres de toit et les stores, pièce par pièce.",
+  "maison.fenetres.vide": "Aucune fenêtre ni aucun store connu de Moli pour l’instant.",
   "maison.pieces.allumees_one": "{count} lumière allumée",
   "maison.pieces.allumees_other": "{count} lumières allumées",
 
