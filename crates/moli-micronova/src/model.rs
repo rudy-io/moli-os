@@ -7,9 +7,11 @@
 //! `int(#/4) +1`): evaluated here, never run.
 //!
 //! Besides its numbers, a board keeps a clock (in binary-coded decimal,
-//! which its map does not say: 0x24 is the 24th) and up to six programs,
-//! each switching the stove on then off at times in steps of ten minutes,
-//! on the days ticked.
+//! its map's `is_hex`: 0x24 is the 24th; the weekday plainly, 1 = Monday)
+//! and up to six programs, each switching the stove on then off at times
+//! in steps of ten minutes, on the days ticked. Moli sets the clock right
+//! (`Map::clock_writes`): it neither follows daylight saving nor keeps
+//! time well, and the programs follow it.
 //!
 //! A command becomes register writes (`Map::writes`): the value through the
 //! register's inverse formula, within its bounds, and only what changes.
@@ -21,6 +23,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use jiff::civil::DateTime;
 use moli_core::{Access, Kind, PointSpec, Semantic, Unit, Value};
 use serde::Deserialize;
 use serde_json::Value as Json;
@@ -487,6 +490,17 @@ impl Map {
     /// the one its programs follow), or `None` if it makes no sense.
     #[must_use]
     pub fn clock(&self, reading: &Reading) -> Option<String> {
+        let [year, month, day, hour, minute] = self.clock_parts(reading)?;
+        let sane = (2000..2100).contains(&year)
+            && (1..=12).contains(&month)
+            && (1..=31).contains(&day)
+            && (0..24).contains(&hour)
+            && (0..60).contains(&minute);
+        sane.then(|| format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}"))
+    }
+
+    /// Year, month, day, hour, minute, as the registers say them.
+    fn clock_parts(&self, reading: &Reading) -> Option<[i64; 5]> {
         let mut parts = [0i64; 5];
         for (part, key) in parts.iter_mut().zip(CLOCK_KEYS) {
             let raw = bcd(self.raw(key, reading)?)?;
@@ -494,13 +508,110 @@ impl Map {
             let value = calc(self.get(key)?.formula.as_deref().unwrap_or("#"), raw as f64)? as i64;
             *part = value;
         }
-        let [year, month, day, hour, minute] = parts;
-        let sane = (2000..2100).contains(&year)
-            && (1..=12).contains(&month)
-            && (1..=31).contains(&day)
-            && (0..24).contains(&hour)
-            && (0..60).contains(&minute);
-        sane.then(|| format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}"))
+        Some(parts)
+    }
+
+    /// How many minutes the stove's clock is from `now` (the house's time),
+    /// either way; a clock that makes no sense is as far as can be; `None`
+    /// when the board has no clock or the reading does not carry it.
+    #[must_use]
+    pub fn clock_off(&self, now: DateTime, reading: &Reading) -> Option<i64> {
+        if !CLOCK_KEYS.iter().all(|k| self.raw(k, reading).is_some()) {
+            return None;
+        }
+        let stove = self.clock_parts(reading).and_then(|[y, mo, d, h, mi]| {
+            let part = |v: i64| i8::try_from(v).ok();
+            DateTime::new(
+                i16::try_from(y).ok()?,
+                part(mo)?,
+                part(d)?,
+                part(h)?,
+                part(mi)?,
+                0,
+                0,
+            )
+            .ok()
+        });
+        let Some(stove) = stove else {
+            return Some(i64::MAX);
+        };
+        let now = DateTime::new(
+            now.year(),
+            now.month(),
+            now.day(),
+            now.hour(),
+            now.minute(),
+            0,
+            0,
+        )
+        .ok()?;
+        Some((stove.duration_since(now).as_secs() / 60).abs())
+    }
+
+    /// Setting the stove's clock to `now` (the house's time, to the minute):
+    /// the registers that are wrong, the hour and the minute first, then the
+    /// date and the weekday.
+    ///
+    /// # Errors
+    /// A board without a clock, or a time it does not take.
+    pub fn clock_writes(&self, now: DateTime, reading: &Reading) -> Result<Vec<Write>, String> {
+        let [hour, minute, day, month, year] = CLOCK_SET;
+        let mut out = Vec::new();
+        for (key, value) in [
+            (hour, i64::from(now.hour())),
+            (minute, i64::from(now.minute())),
+            (day, i64::from(now.day())),
+            (month, i64::from(now.month())),
+            (year, i64::from(now.year())),
+        ] {
+            out.extend(self.clock_write(key, value, true, reading)?);
+        }
+        if self.get(WEEKDAY).is_some() {
+            let weekday = i64::from(now.weekday().to_monday_one_offset());
+            out.extend(self.clock_write(WEEKDAY, weekday, false, reading)?);
+        }
+        Ok(out)
+    }
+
+    /// One clock register: the value through its inverse formula, within
+    /// its bounds (which hold before the formula: 26 for 2026), in
+    /// binary-coded decimal if `bcd`; `None` when it holds it already.
+    fn clock_write(
+        &self,
+        key: &str,
+        value: i64,
+        bcd: bool,
+        reading: &Reading,
+    ) -> Result<Option<Write>, String> {
+        let refused = || moli_i18n::tr("pilotes.micronova.valeur_refusee");
+        let r = self
+            .get(key)
+            .ok_or_else(|| moli_i18n::tr("pilotes.micronova.reglage_absent"))?;
+        #[allow(clippy::cast_precision_loss)]
+        let v = calc(r.formula_inverse.as_deref().unwrap_or("#"), value as f64)
+            .filter(|v| v.fract() == 0.0)
+            .ok_or_else(refused)?;
+        if r.set_min.is_some_and(|min| v < min) || r.set_max.is_some_and(|max| v > max) {
+            return Err(refused());
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let v = v as i64;
+        let raw = if bcd {
+            to_bcd(v).ok_or_else(refused)?
+        } else {
+            v
+        };
+        if raw & !i64::from(r.mask) != 0 {
+            return Err(refused());
+        }
+        if self.raw(key, reading) == Some(raw) {
+            return Ok(None);
+        }
+        Ok(Some(Write {
+            offset: r.offset,
+            mask: r.mask,
+            raw,
+        }))
     }
 
     /// The points' values for a reading (those it can say).
@@ -557,6 +668,22 @@ fn bcd(raw: i64) -> Option<i64> {
     Some(value)
 }
 
+/// 24 → `0x24`; `None` below zero.
+fn to_bcd(value: i64) -> Option<i64> {
+    if value < 0 {
+        return None;
+    }
+    let (mut raw, mut shift, mut rest) = (0, 0, value);
+    loop {
+        raw |= (rest % 10) << shift;
+        rest /= 10;
+        shift += 4;
+        if rest == 0 {
+            return Some(raw);
+        }
+    }
+}
+
 /// A program's register: `chrono_p1_enable_set`, `chrono_p3_day_monday_set`.
 fn chrono(n: u8, part: &str) -> String {
     format!("chrono_p{n}_{part}")
@@ -592,6 +719,16 @@ const CLOCK_KEYS: [&str; 5] = [
     "clock_hour_set",
     "clock_minute_set",
 ];
+/// The same, in the order they are set: hour, minute, day, month, year.
+const CLOCK_SET: [&str; 5] = [
+    "clock_hour_set",
+    "clock_minute_set",
+    "calendar_day_set",
+    "calendar_month_set",
+    "calendar_year_set",
+];
+/// The weekday the programs follow, 1 = Monday (not in decimal-coded binary).
+const WEEKDAY: &str = "calendar_day_week_set";
 /// States in which the stove is not burning.
 const OFF: [&str; 4] = ["off", "shut_off", "alarm", "mem_alarm"];
 /// Point, register, label, semantic: what a stove reads in numbers.
@@ -989,6 +1126,96 @@ mod tests {
             set(programs_with(&map, &reading, |l| l[0]["days"] = serde_json::json!([8]))).is_err()
         );
         assert!(set(Value::Text("not json".into())).is_err());
+    }
+
+    /// The house's time, to the minute.
+    fn at(y: i16, mo: i8, d: i8, h: i8, mi: i8) -> DateTime {
+        DateTime::new(y, mo, d, h, mi, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn the_clock_s_drift_is_measured_in_minutes() {
+        // The fixture's stove says Saturday 24 October 2026, 01:58.
+        let (map, reading) = camelia();
+        assert_eq!(map.clock_off(at(2026, 10, 24, 1, 58), &reading), Some(0));
+        assert_eq!(map.clock_off(at(2026, 10, 24, 1, 59), &reading), Some(1));
+        assert_eq!(map.clock_off(at(2026, 10, 24, 1, 55), &reading), Some(3));
+        // An hour behind across midnight: daylight saving, the night before.
+        assert_eq!(map.clock_off(at(2026, 10, 24, 0, 58), &reading), Some(60));
+        let seconds = DateTime::new(2026, 10, 24, 1, 58, 59, 0).unwrap();
+        assert_eq!(
+            map.clock_off(seconds, &reading),
+            Some(0),
+            "the stove counts minutes"
+        );
+        let mut nonsense = reading.clone();
+        nonsense.insert(map.get("calendar_month_set").unwrap().offset, 0x13);
+        assert_eq!(
+            map.clock_off(at(2026, 10, 24, 1, 58), &nonsense),
+            Some(i64::MAX)
+        );
+        assert_eq!(
+            Map::default().clock_off(at(2026, 10, 24, 1, 58), &reading),
+            None
+        );
+    }
+
+    #[test]
+    fn the_clock_is_set_in_binary_coded_decimal_the_wrong_registers_only() {
+        let (map, reading) = camelia();
+        let offset = |key: &str| map.get(key).unwrap().offset;
+        // Right already: nothing to write.
+        assert_eq!(
+            map.clock_writes(at(2026, 10, 24, 1, 58), &reading),
+            Ok(vec![])
+        );
+        // The minute only.
+        let writes = map.clock_writes(at(2026, 10, 24, 1, 36), &reading).unwrap();
+        assert_eq!(
+            writes,
+            vec![Write {
+                offset: offset("clock_minute_set"),
+                mask: 0xFFFF,
+                raw: 0x36
+            }]
+        );
+        // Hour and minute first, then day, month, year and weekday:
+        // Thursday 31 December 2026, 23:45.
+        let writes = map
+            .clock_writes(at(2026, 12, 31, 23, 45), &reading)
+            .unwrap();
+        let got: Vec<(u32, i64)> = writes.iter().map(|w| (w.offset, w.raw)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (offset("clock_hour_set"), 0x23),
+                (offset("clock_minute_set"), 0x45),
+                (offset("calendar_day_set"), 0x31),
+                (offset("calendar_month_set"), 0x12),
+                (offset("calendar_day_week_set"), 4),
+            ],
+            "the year holds 2026 already (0x26, its bounds before +2000)"
+        );
+        let year = map.clock_writes(at(2027, 10, 24, 1, 58), &reading).unwrap();
+        assert_eq!(year[0].raw, 0x27);
+        assert_eq!(
+            map.clock_writes(at(2051, 10, 24, 1, 58), &reading)
+                .map(|_| ()),
+            Err(moli_i18n::tr("pilotes.micronova.valeur_refusee")),
+            "beyond its bounds"
+        );
+    }
+
+    #[test]
+    fn decimal_coded_binary_both_ways() {
+        assert_eq!(to_bcd(0), Some(0));
+        assert_eq!(to_bcd(9), Some(9));
+        assert_eq!(to_bcd(24), Some(0x24));
+        assert_eq!(to_bcd(59), Some(0x59));
+        assert_eq!(to_bcd(-1), None);
+        for v in 0..100 {
+            assert_eq!(bcd(to_bcd(v).unwrap()), Some(v));
+        }
     }
 
     #[test]

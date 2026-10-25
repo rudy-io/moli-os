@@ -14,6 +14,7 @@ http-body-util.workspace = true
 moli-core.workspace = true
 moli-net.workspace = true
 moli-runtime.workspace = true
+jiff.workspace = true
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
