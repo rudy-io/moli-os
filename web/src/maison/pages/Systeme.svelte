@@ -7,6 +7,7 @@
   import AlexaAccount from '../ui/AlexaAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
+  import PagesCard from '../ui/PagesCard.svelte';
   import { hub, home } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
@@ -306,6 +307,8 @@
   {:else if !error}
     <p class="muted">{t('systeme.chargement')}</p>
   {/if}
+
+  <PagesCard />
 </div>
 
 <style>

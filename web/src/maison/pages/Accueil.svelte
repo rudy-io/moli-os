@@ -74,6 +74,13 @@
       if (value(d.id, 'smoke') === true) list.push({ tone: 'alert', icon: 'fire', text: t('maison.accueil.fumee', { name: nameOf(d.id) }), href: '#/pieces' });
       if (leak(d.id)) list.push({ tone: 'alert', icon: 'water', text: t('maison.accueil.fuite', { name: nameOf(d.id) }), href: '#/pieces' });
     }
+    // A pellet stove in alarm, with its code when it says one (« OK » is none).
+    for (const d of all.filter((d) => d.points.some((p) => p.key === 'flue_temperature'))) {
+      const code = value(d.id, 'alarm');
+      const alarmed = ['alarm', 'mem_alarm'].includes(value(d.id, 'mode'));
+      if ((code && code !== 'OK') || alarmed)
+        list.push({ tone: 'alert', icon: 'stove', text: code && code !== 'OK' ? t('maison.accueil.poele_alarme', { name: nameOf(d.id), code }) : t('maison.accueil.poele_en_alarme', { name: nameOf(d.id) }), href: '#/chauffage' });
+    }
     if (hub.approvals?.length) list.push({ tone: 'cool', icon: 'lock', text: t('maison.accueil.demandes', { count: hub.approvals.length }), href: '#/atelier' });
     for (const door of cfg.doors ?? []) {
       const d = device(door.id);

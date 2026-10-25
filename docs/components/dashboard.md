@@ -33,7 +33,10 @@ Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied
 Système, Atelier. Une page sans rien à montrer pour cette maison sort du menu (`filled` dans
 `Maison.svelte` : Salon, Chauffage, Fenêtres, Carte (une position connue), Caméras, Parler,
 Énergie, Impression, Dehors, Infra) et y revient seule avec le premier appareil qui la remplit ;
-son adresse répond toujours. Accueil, Moli, Pièces, Plan et Automatismes restent. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
+son adresse répond toujours. Accueil, Moli, Pièces, Plan et Automatismes restent. La liste et
+la règle vivent dans `lib/pages.svelte.js` ; « Comment ça marche » montre toutes les pages
+(`ui/PagesCard.svelte` : à quoi chacune sert, dans le menu ou masquée, et ce qui la ferait
+apparaître). L'Accueil signale aussi un poêle en alarme, avec son code (point `alarm`). Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 
 ## La mise en page de la maison : `data/home.json`
 

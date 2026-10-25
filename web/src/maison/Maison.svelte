@@ -2,10 +2,9 @@
   import '@fontsource-variable/figtree';
   import './maison.css';
   import { onMount } from 'svelte';
-  import { home, hub, start, value, savePref, deviceKind } from './lib/home.svelte.js';
-  import { energy, useEnergy } from './lib/energy-live.svelte.js';
-  import { isPrinter } from './lib/printers.js';
-  import { isPaperPrinter } from './lib/paper.js';
+  import { home, hub, start, value, savePref } from './lib/home.svelte.js';
+  import { useEnergy } from './lib/energy-live.svelte.js';
+  import { NAV, filledPages } from './lib/pages.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -42,43 +41,7 @@
     return () => clearTimeout(timer);
   });
 
-  // `label` is a catalogue key, said where it is shown; Moli is a name.
-  const NAV = [
-    { path: '', label: 'commun.nav.accueil', icon: 'home' },
-    { path: 'moli', name: 'Moli', orb: true },
-    { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
-    { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
-    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'stove' },
-    { path: 'fenetres', label: 'commun.nav.fenetres', icon: 'roof-window' },
-    { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
-    { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
-    { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
-    { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
-    { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
-    { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
-    { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
-    { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
-  ];
-
-  // A page with nothing to show for this house stays out of the menu (its
-  // address still answers); it comes back by itself with the first device
-  // that fills it. Pages not listed here always show.
-  const devices = $derived(Object.values(hub.devices));
-  const cfg = $derived(home.config ?? {});
-  const has = (key, write = false) => (d) => d.points.some((p) => p.key === key && (!write || p.access?.write));
-  const filled = $derived({
-    salon: !!(cfg.salon?.tv || cfg.salon?.speaker),
-    chauffage: devices.some((d) => deviceKind(d) === 'climate'),
-    fenetres: devices.some((d) => deviceKind(d) === 'cover'),
-    carte: devices.some((d) => d.id.startsWith('personnes:') && value(d.id, 'latitude') != null),
-    cameras: devices.some((d) => d.camera) || !!cfg.favorites?.cameras?.length,
-    parler: devices.some((d) => has('say', true)(d) || has('announce', true)(d)),
-    energie: !energy.missing,
-    impression: devices.some((d) => isPrinter(d) || isPaperPrinter(d)),
-    dehors: !!(cfg.outdoor?.weather || cfg.outdoor?.air || cfg.outdoor?.pool),
-    infra: devices.some((d) => d.model === 'Serveur de la maison' || d.model === 'Ordinateur' || has('external_ip')(d)),
-  });
+  const filled = $derived(filledPages());
   const nav = $derived(NAV.filter((item) => filled[item.path] ?? true));
 
   let moliOpen = $state(false);

@@ -3,7 +3,7 @@
 web/src/maison/ui/Setup.svelte  const NAMES = \{ fr: 'Français'
 # Identifiants que le serveur pose et que l'interface compare (jamais affichés, jamais traduits).
 web/src/maison/pages/Infra.svelte  'Serveur de la maison'
-web/src/maison/Maison.svelte  'Serveur de la maison'
+web/src/maison/lib/pages.svelte.js  'Serveur de la maison'
 web/src/maison/pages/Systeme.svelte  'Aide'
 # La pièce de l'alarme dans le plan de la maison de référence (à remplacer par un rôle : voir la spec).
 web/src/maison/ui/SecurityPanel.svelte  roomOf\(d\) === 'Sécurité'
