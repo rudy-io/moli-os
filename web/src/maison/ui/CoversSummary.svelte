@@ -65,7 +65,8 @@
             {#each g.lines as l (l.id)}
               <li class:open={l.open}>
                 <b>{l.name}</b>
-                <span class="gauge" aria-hidden="true"><i class:moving={l.moving} style="width:{l.pct}%"></i></span>
+                <!-- A window fills as it opens; a blind as it closes (drawn down). -->
+                <span class="gauge" class:blind={l.blind} aria-hidden="true"><i class:moving={l.moving} style="width:{l.blind ? 100 - l.pct : l.pct}%"></i></span>
                 <span class="word">{l.word}</span>
               </li>
             {/each}
@@ -167,6 +168,10 @@
     height: 100%;
     border-radius: inherit;
     background: var(--cool);
+  }
+
+  .gauge.blind i {
+    background: var(--ink-2);
   }
 
   .gauge i.moving {

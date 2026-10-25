@@ -12,6 +12,7 @@ pub mod meter;
 pub mod points;
 pub mod report;
 mod store;
+pub mod tariff;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -30,6 +31,7 @@ use meter::{Integral, Outcome, Reading, Tracker};
 pub use report::{Amount, Bucket, Period, Step};
 pub use store::EnergyError;
 use store::{HourRow, Store};
+use tariff::Contracts;
 
 /// Cheap handle for the surfaces.
 #[derive(Clone, Debug)]
@@ -41,6 +43,7 @@ pub struct Energy {
 struct Inner {
     store: Arc<Store>,
     config: Config,
+    contracts: Contracts,
     tz: TimeZone,
     hub: Hub,
 }
@@ -102,6 +105,9 @@ pub struct Summary {
     /// The point holding the period (its history tells the off-peak hours).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub period_point: Option<String>,
+    /// Today's off-peak hours, when dated contracts say them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub offpeak: Vec<tariff::Window>,
     pub meters: Vec<MeterInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<LiveInfo>,
@@ -152,6 +158,7 @@ impl Energy {
         let energy = Self {
             inner: Arc::new(Inner {
                 store,
+                contracts: Contracts::new(&config.contracts, tz.clone()),
                 config,
                 tz,
                 hub: hub.clone(),
@@ -218,6 +225,32 @@ impl Energy {
         })
     }
 
+    /// Rows priced by the dated contracts, when there are some: each hour
+    /// at the contract of its day (a meter with its own price keeps it).
+    fn priced(&self, mut rows: Vec<HourRow>) -> Vec<HourRow> {
+        let contracts = &self.inner.contracts;
+        if contracts.is_empty() {
+            return rows;
+        }
+        let fixed: Vec<&str> = self
+            .inner
+            .config
+            .meters
+            .iter()
+            .filter(|m| m.price.is_some())
+            .map(|m| m.id.as_str())
+            .collect();
+        for row in rows
+            .iter_mut()
+            .filter(|r| !fixed.contains(&r.meter.as_str()))
+        {
+            row.cost = contracts
+                .price(row.hour, row.hour + meter::HOUR_MS)
+                .map(|p| p * row.kwh);
+        }
+        rows
+    }
+
     fn period_now(&self) -> Option<String> {
         let tariff = self.inner.config.tariff.as_ref()?;
         match self
@@ -243,24 +276,32 @@ impl Energy {
         let store = Arc::clone(&self.inner.store);
         let (rows, since) =
             blocking(move || Ok((store.hours(from, tomorrow)?, store.first_hour()?))).await?;
-        let config = &self.inner.config;
-        let month_period = Period::of(config, &rows, month, month_end);
-        let period = self.period_now();
+        let rows = self.priced(rows);
+        let (config, contracts) = (&self.inner.config, &self.inner.contracts);
+        let month_period = Period::of(config, contracts, &rows, month, month_end);
+        // The tariff point's period, else the contract's.
+        let (period, price_now) = match self.period_now() {
+            Some(p) => (Some(p.clone()), config.period_price(&p)),
+            None => contracts
+                .now(now)
+                .map_or((None, None), |(p, price)| (Some(p.to_owned()), price)),
+        };
         Ok(Summary {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
             since,
-            price_now: period.as_deref().and_then(|p| config.period_price(p)),
+            price_now,
             period_point: config.tariff.as_ref().map(|t| t.period.clone()),
             period,
+            offpeak: contracts.offpeak(now),
             meters: self.meters(),
             live: self.live(),
-            today: Period::of(config, &rows, today, tomorrow),
-            yesterday: Period::of(config, &rows, yesterday, today),
+            today: Period::of(config, contracts, &rows, today, tomorrow),
+            yesterday: Period::of(config, contracts, &rows, yesterday, today),
             month_projection: report::projection(&month_period, now, month_end),
             month: month_period,
-            last_month: Period::of(config, &rows, last_month, month),
-            monthly_fee: config.monthly_fee,
+            last_month: Period::of(config, contracts, &rows, last_month, month),
+            monthly_fee: config.monthly_fee.or_else(|| contracts.monthly_fee(now)),
             budget_point: config.budget.clone(),
         })
     }
@@ -286,7 +327,7 @@ impl Energy {
             return Err(EnergyError::Invalid("`to` must be after `from`".into()));
         }
         let store = Arc::clone(&self.inner.store);
-        let rows = blocking(move || store.hours(from, to)).await?;
+        let rows = self.priced(blocking(move || store.hours(from, to)).await?);
         let config = &self.inner.config;
         Ok(Report {
             step,
@@ -295,7 +336,15 @@ impl Energy {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
             meters: self.meters(),
-            buckets: report::buckets(&rows, from, to, step, &self.inner.tz)?,
+            buckets: report::buckets(
+                config,
+                &self.inner.contracts,
+                &rows,
+                from,
+                to,
+                step,
+                &self.inner.tz,
+            )?,
         })
     }
 }

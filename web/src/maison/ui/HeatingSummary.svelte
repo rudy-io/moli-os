@@ -143,7 +143,8 @@
 
   li {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    /* Fixed columns: temperatures and modes line up whatever the words. */
+    grid-template-columns: auto minmax(0, 1fr) 3.4em 7.5em;
     align-items: center;
     gap: 10px;
     padding: 6px 0;
@@ -209,13 +210,22 @@
   .temp {
     font-size: 14px;
     font-weight: 650;
+    text-align: right;
   }
 
   .chip {
-    padding: 4px 10px;
+    padding: 4px 8px;
     font-size: 12.5px;
-    min-width: 64px;
     justify-content: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (max-width: 760px) {
+    li {
+      grid-template-columns: auto minmax(0, 1fr) 3.2em 6.2em;
+      gap: 8px;
+    }
   }
 
   .tally {

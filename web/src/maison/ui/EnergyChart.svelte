@@ -41,8 +41,25 @@
   const byCircuit = $derived(range === 'hour' || !grid.length);
   const parts = $derived(deviceSeries(meters));
 
+  // Off-peak and peak as the dated contracts split them, bucket by bucket.
+  const periods = $derived((report?.buckets ?? []).some((b) => b.by_period && Object.keys(b.by_period).length));
+  const PERIODS = [
+    { id: 'HC', name: 'energie.hc', color: 'var(--cool)' },
+    { id: 'HP', name: 'energie.hp', color: 'var(--warm)' },
+    { id: 'Base', name: 'energie.base', color: 'var(--warm)' },
+  ];
+
   const series = $derived.by(() => {
     if (by === 'devices' && parts.length) return parts;
+    if (by !== 'devices' && periods) {
+      return PERIODS.map((p) => ({
+        id: p.id,
+        name: t(p.name),
+        color: p.color,
+        kwh: (b) => b.by_period?.[p.id]?.kwh ?? 0,
+        cost: (b) => b.by_period?.[p.id]?.cost ?? null,
+      }));
+    }
     if (byCircuit && circuits.length) {
       const parts = circuits.map((m, i) => ({ id: m.id, name: m.name, color: PALETTE[i % PALETTE.length] }));
       return whole ? [...parts, { id: '__rest', name: t('energie.reste'), color: 'var(--surface-3)', rest: true }] : parts;

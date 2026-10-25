@@ -20,6 +20,9 @@ export function deviceSeries(meters) {
   const k = (b, id) => b.meters[id]?.kwh ?? 0;
   const top = whole ? (b) => k(b, whole.id) : grid.length ? (b) => grid.reduce((t, g) => t + k(b, g.id), 0) : null;
   const paid = whole ? (b) => b.meters[whole.id]?.cost : grid.length ? (b) => grid.reduce((t, g) => t + (b.meters[g.id]?.cost ?? 0), 0) : null;
+  // Without a whole-house meter, the house is its circuits: their price.
+  const drawn = top ?? ((b) => circuits.reduce((t, m) => t + k(b, m.id), 0));
+  const spent = paid ?? ((b) => (circuits.some((m) => b.meters[m.id]?.cost != null) ? circuits.reduce((t, m) => t + (b.meters[m.id]?.cost ?? 0), 0) : null));
 
   const parts = [];
   let n = 0;
@@ -35,8 +38,8 @@ export function deviceSeries(meters) {
   }
   // Each part at that bucket's price (what the house paid per kWh then).
   const price = (b) => {
-    const t = top?.(b);
-    const c = paid?.(b);
+    const t = drawn(b);
+    const c = spent(b);
     return t > 0 && c != null ? c / t : null;
   };
   for (const p of parts) {

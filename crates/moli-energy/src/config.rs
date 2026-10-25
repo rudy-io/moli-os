@@ -29,6 +29,10 @@ pub struct Config {
     /// Price by tariff period, for meters without their own price.
     #[serde(default)]
     pub tariff: Option<Tariff>,
+    /// Dated contracts: off-peak hours, prices and subscription, each from
+    /// its own day on (for a home whose meter says no tariff period).
+    #[serde(default, rename = "contract")]
+    pub contracts: Vec<crate::tariff::Contract>,
     /// What the supplier's meter draws right now, for the live gauge.
     #[serde(default)]
     pub live: Option<Live>,
@@ -228,6 +232,12 @@ impl Config {
         }
         if let Some(budget) = &self.budget {
             check_point(budget).map_err(|e| format!("budget: {e}"))?;
+        }
+        for contract in &self.contracts {
+            contract.check()?;
+        }
+        if self.tariff.is_some() && !self.contracts.is_empty() {
+            return Err("[energy.tariff] or [[energy.contract]], not both".into());
         }
         if let Some(t) = &self.tariff {
             check_point(&t.period).map_err(|e| format!("[energy.tariff] {e}"))?;

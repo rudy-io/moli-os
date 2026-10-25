@@ -3,7 +3,7 @@
 ## Historique (`crates/moli-history`)
 
 - SQLite `data/history.db`, enregistrement **au changement** (le hub n'émet que les
-  changements), 30 jours (`retention_days`), la dernière valeur de chaque point jamais
+  changements), 30 jours (`[server] history_days` ; `36500` pour tout garder), la dernière valeur de chaque point jamais
   purgée (une valeur stable a toujours une valeur « avant la fenêtre »).
 - Lecture : `series(point, from, to, max_points)` → valeurs brutes, ou seaux (moyenne, min,
   max, nombre) quand il y en a trop.
@@ -46,6 +46,18 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     exemple 9 000 pour un abonnement de 9 kVA), `warn` = à partir d'où la conso est
     « soutenue » (par exemple 2 000 ; défaut un quart de `max`) : la jauge vire à l'orange,
     puis au rouge au double. Sert la jauge « en direct » et la ligne du prompt de Moli.
+  - `[[energy.contract]]` (pour une maison dont le compteur ne dit pas la période, sans
+    `[energy.tariff]`) : des **contrats datés**, chacun en vigueur à partir de son jour
+    (`from = "2026-01-01"`) : `offpeak = ["01:38-07:08", "14:38-17:08"]` (heures creuses de
+    chaque jour, une fin avant le début passe minuit ; absent = tarif unique `Base`),
+    `prices = { HP = 0.2210, HC = 0.1747 }` (ou `{ Base = … }`), `monthly_fee`. Les prix
+    sont appliqués **au moment du calcul** (`tariff.rs`), heure par heure, au contrat de son
+    jour, à la minute près (01:00–02:00 = 22 min creuses, 38 pleines) : un contrat ajouté plus
+    tard recalcule aussi le passé ; un compteur avec son propre `price` le garde. Les totaux
+    (aujourd'hui, mois…) et chaque seau des séries portent `by_period` (`HC`, `HP` : kWh et €,
+    pour la maison : compteur général, sinon facturés, sinon circuits) ; le résumé dit la
+    période, son prix, l'abonnement et les heures creuses du jour (`offpeak`), que la page
+    Énergie prend au lieu de les apprendre du compteur.
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple

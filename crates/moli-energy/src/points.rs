@@ -48,7 +48,7 @@ impl Points {
     async fn refresh(&self, ctx: &DriverCtx, id: &DeviceId) {
         match self.energy.summary().await {
             Ok(summary) => {
-                let fee = self.energy.inner.config.monthly_fee;
+                let fee = summary.monthly_fee;
                 for (key, value) in readings(&summary, fee, self.budget(), now_ms()) {
                     ctx.set_state(id, key, value);
                 }
@@ -254,6 +254,7 @@ mod tests {
             total: Amount { kwh, cost },
             meters: std::collections::BTreeMap::new(),
             unmeasured: None,
+            by_period: std::collections::BTreeMap::new(),
         }
     }
 
@@ -265,6 +266,7 @@ mod tests {
             period: None,
             price_now: None,
             period_point: None,
+            offpeak: Vec::new(),
             meters: Vec::new(),
             live: None,
             today: period(month_from, 9.876, Some(1.5)),

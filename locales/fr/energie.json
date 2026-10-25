@@ -68,6 +68,7 @@
   "energie.chargement": "Chargement…",
   "energie.hc": "Heures creuses",
   "energie.hp": "Heures pleines",
+  "energie.base": "Tarif unique",
   "energie.periode": "Période",
   "energie.span.today": "Aujourd’hui",
   "energie.span.yesterday": "Hier",

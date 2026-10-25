@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{Config, Role};
 use crate::meter::HOUR_MS;
 use crate::store::{EnergyError, HourRow};
+use crate::tariff::Contracts;
 
 /// At most this many buckets per report (a year of hours fits).
 pub const MAX_BUCKETS: usize = 9_000;
@@ -60,6 +61,37 @@ pub struct Bucket {
     /// Start, ms since epoch (local midnight for days and months).
     pub start: u64,
     pub meters: BTreeMap<String, Amount>,
+    /// The house's consumption by tariff period (« HC », « HP »), when
+    /// dated contracts say the periods.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_period: BTreeMap<String, Amount>,
+}
+
+/// The meters that make the house's figure, for the split by period: the
+/// whole-home measure, else the billed meters, else the circuits.
+fn headline(config: &Config) -> Vec<&str> {
+    [Role::Total, Role::Grid, Role::Circuit]
+        .into_iter()
+        .map(|role| {
+            config
+                .meters
+                .iter()
+                .filter(|m| m.role == role)
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>()
+        })
+        .find(|ids| !ids.is_empty())
+        .unwrap_or_default()
+}
+
+/// Adds a row to the split by period, priced period by period.
+fn split_into(by: &mut BTreeMap<String, Amount>, row: &HourRow, contracts: &Contracts) {
+    for share in contracts.shares(row.hour, row.hour + HOUR_MS) {
+        let kwh = row.kwh * share.part;
+        by.entry(share.period.to_owned())
+            .or_default()
+            .add(kwh, share.price.map(|p| p * kwh));
+    }
 }
 
 fn zoned(ms: u64, tz: &TimeZone) -> Result<Zoned, EnergyError> {
@@ -117,12 +149,15 @@ pub fn max_count(step: Step) -> usize {
 
 /// Buckets covering `[from, to)`, every one present (zeros included).
 pub fn buckets(
+    config: &Config,
+    contracts: &Contracts,
     rows: &[HourRow],
     from: u64,
     to: u64,
     step: Step,
     tz: &TimeZone,
 ) -> Result<Vec<Bucket>, EnergyError> {
+    let house = headline(config);
     let mut starts = Vec::new();
     let mut start = floor(from, step, tz)?;
     while start < to {
@@ -139,6 +174,7 @@ pub fn buckets(
         .map(|&start| Bucket {
             start,
             meters: BTreeMap::new(),
+            by_period: BTreeMap::new(),
         })
         .collect();
     for row in rows {
@@ -150,10 +186,17 @@ pub fn buckets(
                 .entry(row.meter.clone())
                 .or_default()
                 .add(row.kwh, row.cost);
+            if house.contains(&row.meter.as_str()) {
+                split_into(&mut bucket.by_period, row, contracts);
+            }
         }
     }
     for bucket in &mut out {
-        for amount in bucket.meters.values_mut() {
+        for amount in bucket
+            .meters
+            .values_mut()
+            .chain(bucket.by_period.values_mut())
+        {
             *amount = amount.rounded();
         }
     }
@@ -172,12 +215,27 @@ pub struct Period {
     /// Whole-home measure minus the circuits: what no circuit explains.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unmeasured: Option<Amount>,
+    /// The house's consumption by tariff period (« HC », « HP »), when
+    /// dated contracts say the periods.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_period: BTreeMap<String, Amount>,
 }
 
 impl Period {
-    pub(crate) fn of(config: &Config, rows: &[HourRow], from: u64, to: u64) -> Self {
+    pub(crate) fn of(
+        config: &Config,
+        contracts: &Contracts,
+        rows: &[HourRow],
+        from: u64,
+        to: u64,
+    ) -> Self {
+        let house = headline(config);
+        let mut by_period = BTreeMap::new();
         let mut meters: BTreeMap<String, Amount> = BTreeMap::new();
         for row in rows.iter().filter(|r| from <= r.hour && r.hour < to) {
+            if house.contains(&row.meter.as_str()) {
+                split_into(&mut by_period, row, contracts);
+            }
             meters
                 .entry(row.meter.clone())
                 .or_default()
@@ -224,6 +282,10 @@ impl Period {
             total: total.rounded(),
             meters: meters.into_iter().map(|(k, a)| (k, a.rounded())).collect(),
             unmeasured: unmeasured.map(|a| a.rounded()),
+            by_period: by_period
+                .into_iter()
+                .map(|(k, a)| (k, a.rounded()))
+                .collect(),
         }
     }
 }
@@ -258,6 +320,58 @@ mod tests {
         millis(&z)
     }
 
+    fn empty() -> Config {
+        toml::from_str("").unwrap()
+    }
+
+    fn no_contracts() -> Contracts {
+        Contracts::new(&[], paris())
+    }
+
+    #[test]
+    fn contracts_split_the_house_by_period() {
+        let config: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "salon"
+            name = "Radiateur"
+            point = "tuya:r/energy_all"
+            role = "circuit"
+            [[contract]]
+            from = "2026-01-01"
+            offpeak = ["01:38-07:08"]
+            prices = { HP = 0.2, HC = 0.1 }
+            "#,
+        )
+        .unwrap();
+        let contracts = Contracts::new(&config.contracts, paris());
+        let d = at("2026-10-01T00:00[Europe/Paris]");
+        let row = |h: u64| HourRow {
+            meter: "salon".into(),
+            hour: d + h * HOUR_MS,
+            kwh: 1.0,
+            cost: None,
+        };
+        // 01:00 (22 min off-peak), 03:00 (off-peak), 12:00 (peak).
+        let rows = [row(1), row(3), row(12)];
+        let p = Period::of(&config, &contracts, &rows, d, d + 24 * HOUR_MS);
+        let (hc, hp) = (&p.by_period["HC"], &p.by_period["HP"]);
+        assert!((hc.kwh - (1.0 + 22.0 / 60.0)).abs() < 1e-3);
+        assert!((hp.kwh - (1.0 + 38.0 / 60.0)).abs() < 1e-3);
+        assert!((hc.cost.unwrap() - hc.kwh * 0.1).abs() < 1e-3);
+        let b = buckets(
+            &config,
+            &contracts,
+            &rows,
+            d,
+            d + 24 * HOUR_MS,
+            Step::Day,
+            &paris(),
+        )
+        .unwrap();
+        assert_eq!(b[0].by_period["HC"].kwh, hc.kwh);
+    }
+
     #[test]
     fn days_follow_local_midnight_across_dst() {
         let tz = paris();
@@ -289,13 +403,33 @@ mod tests {
             row(d1 + 2 * HOUR_MS, 0.5),
             row(d1 + 49 * HOUR_MS, 2.0),
         ];
-        let b = buckets(&rows, d1, d1 + 72 * HOUR_MS, Step::Day, &tz).unwrap();
+        let b = buckets(
+            &empty(),
+            &no_contracts(),
+            &rows,
+            d1,
+            d1 + 72 * HOUR_MS,
+            Step::Day,
+            &tz,
+        )
+        .unwrap();
         assert_eq!(b.len(), 3);
         assert_eq!(b[0].meters["hp"].kwh, 1.5);
         assert_eq!(b[0].meters["hp"].cost, Some(0.3));
         assert!(b[1].meters.is_empty());
         assert_eq!(b[2].meters["hp"].kwh, 2.0);
-        assert!(buckets(&rows, 0, u64::MAX / 4, Step::Hour, &tz).is_err());
+        assert!(
+            buckets(
+                &empty(),
+                &no_contracts(),
+                &rows,
+                0,
+                u64::MAX / 4,
+                Step::Hour,
+                &tz
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -337,7 +471,7 @@ mod tests {
             row("general", 9.5, Some(1.4)),
             row("ce", 3.0, Some(0.4)),
         ];
-        let p = Period::of(&config, &rows, 0, HOUR_MS);
+        let p = Period::of(&config, &no_contracts(), &rows, 0, HOUR_MS);
         assert_eq!(
             p.total,
             Amount {
@@ -355,7 +489,7 @@ mod tests {
         assert_eq!(p.meters.len(), 4);
         // The Linky lagging behind the clamp: the clamp wins.
         let lagging = [row("hc", 1.0, Some(0.1)), row("general", 2.5, Some(0.4))];
-        let p = Period::of(&config, &lagging, 0, HOUR_MS);
+        let p = Period::of(&config, &no_contracts(), &lagging, 0, HOUR_MS);
         assert_eq!(
             p.total,
             Amount {
@@ -364,7 +498,7 @@ mod tests {
             }
         );
 
-        let month = Period::of(&config, &rows, 0, 2 * 24 * HOUR_MS);
+        let month = Period::of(&config, &no_contracts(), &rows, 0, 2 * 24 * HOUR_MS);
         assert_eq!(projection(&month, HOUR_MS, 30 * 24 * HOUR_MS), None);
         let pace = projection(&month, 2 * 24 * HOUR_MS, 30 * 24 * HOUR_MS).unwrap();
         assert_eq!(pace.kwh, 150.0);

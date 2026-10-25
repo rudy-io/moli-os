@@ -136,6 +136,11 @@
   const partsTotal = $derived(parts.reduce((t, p) => t + p.kwh, 0));
   // This month, the share billed off-peak.
   const offShare = $derived.by(() => {
+    const split = s?.month.by_period;
+    if (split?.HC) {
+      const all = Object.values(split).reduce((t, a) => t + a.kwh, 0);
+      return all > 1 ? Math.round((split.HC.kwh / all) * 100) : null;
+    }
     const grid = (s?.meters ?? []).filter((m) => m.role === 'grid');
     const of = (re) => grid.filter((m) => re.test(m.id + m.name)).reduce((t, m) => t + (s.month.meters[m.id]?.kwh ?? 0), 0);
     const off = of(/hc|creuse/i);
@@ -172,7 +177,8 @@
     }
   });
 
-  const windows = $derived(offPeak(tariff, home.now));
+  // Off-peak hours: the contract's when it says them, else learnt off the meter.
+  const windows = $derived(s?.offpeak?.length ? s.offpeak : offPeak(tariff, home.now));
   const change = $derived(nextChange(windows, home.now));
   const profile = $derived(typicalDay(week));
   const todayHours = $derived(todayByHour(week, home.now));

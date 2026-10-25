@@ -68,6 +68,7 @@
   "energie.chargement": "Loading…",
   "energie.hc": "Off-peak hours",
   "energie.hp": "Peak hours",
+  "energie.base": "Single rate",
   "energie.periode": "Period",
   "energie.span.today": "Today",
   "energie.span.yesterday": "Yesterday",
