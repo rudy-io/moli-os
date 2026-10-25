@@ -23,7 +23,9 @@ Ce qui marche aujourd'hui :
   imprimante IPP, VELUX ACTIVE (fenêtres de toit et stores), l'hôte et les ordinateurs, la présence par Wi-Fi, les aides de la maison,
   **Telegram** (votre bot, sans relais), les **téléphones** (appli Moli), et des profils
   déclaratifs (Daikin, Meross, Open-Meteo, Tempo, iopool) ;
-- la garde (pièces protégées, heures calmes), l'historique et l'énergie ;
+- la garde (pièces protégées, heures calmes), l'historique et l'énergie (contrats
+  d'électricité datés, modifiables depuis le dashboard ; heures creuses et pleines par
+  appareil), les **températures pièce par pièce** ;
 - le dashboard « Maison », avec des **filtres par type** et le **plan vivant** : la maison
   redessinée en données, en 2D zoomable à 4 habillages et en **3D** ;
 - Moli, l'assistant ; les automatismes (graphe, validation humaine), avec les canaux
