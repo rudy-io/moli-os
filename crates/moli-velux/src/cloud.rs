@@ -215,7 +215,19 @@ impl Cloud {
             .await?;
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(LoggedOut.into()),
-            StatusCode::OK if answer["status"] == "ok" => Ok(()),
+            // « ok » can come with an error inside (a schedule taken for
+            // a heating one: « Missing rooms temperature »): nothing written.
+            StatusCode::OK if answer["status"] == "ok" && answer["body"]["error"].is_null() => {
+                Ok(())
+            }
+            StatusCode::OK => Err(Refused(moli_i18n::tr!(
+                "pilotes.velux.planning.refuse",
+                why = answer["body"]["error"]["message"]
+                    .as_str()
+                    .or_else(|| answer["error"]["message"].as_str())
+                    .unwrap_or("?")
+            ))
+            .into()),
             other => Err(Refused(moli_i18n::tr!(
                 "pilotes.velux.planning.refuse",
                 why = answer["error"]["message"]
