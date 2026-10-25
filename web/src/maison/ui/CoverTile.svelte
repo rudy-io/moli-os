@@ -11,6 +11,8 @@
   const label = $derived(nameOf(id, name));
   const pos = $derived(value(id, 'percent_control'));
   const moving = $derived(value(id, 'moving') === true);
+  // Where it is heading, as the device says it (whoever asked).
+  const target = $derived(value(id, 'target_position'));
   const offers = $derived(d?.points.find((p) => p.key === 'control')?.kind.values ?? []);
   const settable = $derived(!!d?.points.some((p) => p.key === 'percent_control' && p.access?.write));
   // [command sent to the device, catalogue key of its button, its icon on a phone]
@@ -24,8 +26,6 @@
 
   const POINT = $derived(`${id}/percent_control`);
   const STEP = 5;
-  /** The knob's room in the bar, in pixels (as in the style). */
-  const KNOB = 30;
   let bar = $state(null);
   /** The level under the finger, while it is down. */
   let drag = $state(null);
@@ -33,9 +33,10 @@
   const shown = $derived(drag ?? (typeof asked === 'number' ? asked : pos) ?? 0);
 
   function at(e) {
-    // The knob's centre runs from one end to the other, half a knob in.
+    // The knob's centre runs from one end to the other, half a knob in (the
+    // bar is as high as the knob's room).
     const r = bar.getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (e.clientX - r.left - KNOB / 2) / (r.width - KNOB)));
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left - r.height / 2) / (r.width - r.height)));
     return Math.round((x * 100) / STEP) * STEP;
   }
   function down(e) {
@@ -65,13 +66,15 @@
     act(POINT, v, t('commun.volet.label_niveau', { label, pct: v }));
   }
 
+  /** Closed, or open so much. */
+  const openness = (pct) => (pct === 0 ? t('commun.volet.ferme') : t('commun.volet.ouvert_a', { pct: num(pct) }));
   const status = $derived(
     drag != null
       ? t('commun.volet.vers', { pct: drag })
-      : moving && pos != null
-        ? t('commun.volet.en_mouvement', { pct: num(pos) })
+      : moving
+        ? t('commun.volet.en_mouvement', { pct: num(target ?? (typeof asked === 'number' ? asked : pos)) })
         : pos != null
-          ? t('commun.volet.ouvert_a', { pct: num(pos) })
+          ? openness(pos)
           : '',
   );
 </script>
@@ -102,7 +105,7 @@
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow={shown}
-      aria-valuetext={t('commun.volet.ouvert_a', { pct: shown })}
+      aria-valuetext={openness(shown)}
       onpointerdown={down}
       onpointermove={move}
       onpointerup={up}
@@ -211,42 +214,72 @@
     color: var(--cool);
   }
 
-  /* The bar: closed on the left, open on the right. */
+  /* The bar: closed on the left, open on the right. As high as the knob's
+     room (--room): a thick rail for a finger, a fine one under a mouse. */
   .bar {
+    --rail: 30px;
+    --knob: 24px;
+    --room: max(var(--rail), var(--knob));
     position: relative;
-    height: 30px;
-    border-radius: 999px;
-    background: var(--surface-3);
+    height: var(--room);
     cursor: pointer;
     touch-action: pan-y;
     user-select: none;
     -webkit-user-select: none;
   }
 
+  .bar::before,
+  .fill {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: var(--rail);
+    border-radius: 999px;
+    transform: translateY(-50%);
+  }
+
+  .bar::before {
+    content: '';
+    right: 0;
+    background: var(--surface-3);
+  }
+
   .bar:focus-visible {
     outline: 2px solid var(--cool);
     outline-offset: 2px;
+    border-radius: 999px;
   }
 
   .fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: calc(30px + (100% - 30px) * var(--at));
-    border-radius: 999px;
+    width: calc(var(--room) + (100% - var(--room)) * var(--at));
     background: color-mix(in srgb, var(--cool) 30%, var(--surface));
     transition: width 0.25s var(--ease);
   }
 
   .knob {
     position: absolute;
-    top: 3px;
-    left: calc(3px + (100% - 30px) * var(--at));
-    width: 24px;
-    height: 24px;
+    top: 50%;
+    left: calc((var(--room) - var(--knob)) / 2 + (100% - var(--room)) * var(--at));
+    width: var(--knob);
+    height: var(--knob);
     border-radius: 50%;
     background: var(--surface);
     box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+    transform: translateY(-50%);
     transition: left 0.25s var(--ease);
+  }
+
+  /* A mouse: a fine rail, the knob standing out of it. */
+  @media (hover: hover) and (pointer: fine) {
+    .bar {
+      --rail: 8px;
+      --knob: 18px;
+    }
+
+    .fill {
+      background: var(--cool);
+      opacity: 0.55;
+    }
   }
 
   /* Under the finger, no lag. */

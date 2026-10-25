@@ -325,6 +325,7 @@
   "pilotes.velux.pluie": "Rain",
   "pilotes.velux.depart": "Departure mode",
   "pilotes.velux.ouverture": "Opening",
+  "pilotes.velux.cible": "Target position",
   "pilotes.velux.en_mouvement": "Moving",
   "pilotes.velux.pile_faible": "Low battery",
   "pilotes.velux.pile": "Battery",

@@ -229,19 +229,15 @@ impl Module {
                 } else {
                     Semantic::Other
                 };
-                let mut position = spec(
-                    "percent_control",
-                    "pilotes.velux.ouverture",
-                    Kind::Numeric {
-                        min: Some(0.0),
-                        max: Some(100.0),
-                        step: Some(1.0),
-                    },
-                    Some(Unit::Percent),
-                    semantic,
-                );
+                let mut position = percent("percent_control", "pilotes.velux.ouverture", semantic);
                 position.access.write = write;
                 out.push(position);
+                // Where it is heading (its position is where it is now).
+                out.push(percent(
+                    "target_position",
+                    "pilotes.velux.cible",
+                    Semantic::Other,
+                ));
                 if write {
                     let mut control = spec(
                         "control",
@@ -311,11 +307,15 @@ impl Module {
             }
             Role::Window | Role::Cover => {
                 let now = own["current_position"].as_i64();
-                let target = own["target_position"].as_i64();
+                // −1 after a stop: no target then, and nothing moving.
+                let target = own["target_position"]
+                    .as_i64()
+                    .filter(|t| (0..=100).contains(t));
                 out.extend(now.map(|p| ("percent_control", Value::from(p))));
-                if let (Some(now), Some(target)) = (now, target) {
-                    out.push(("moving", Value::from(now != target)));
+                if let Some(now) = now {
+                    out.push(("moving", Value::from(target.is_some_and(|t| t != now))));
                 }
+                out.extend(target.map(|t| ("target_position", Value::from(t))));
                 if let Some(battery) = own["battery_state"].as_str() {
                     let low = matches!(battery, "low" | "very_low");
                     out.push(("battery_low", Value::from(low)));
@@ -419,6 +419,16 @@ fn number() -> Kind {
     }
 }
 
+/// A position, 0 (closed) to 100 (open).
+fn percent(key: &str, label: &str, semantic: Semantic) -> PointSpec {
+    let kind = Kind::Numeric {
+        min: Some(0.0),
+        max: Some(100.0),
+        step: Some(1.0),
+    };
+    spec(key, label, kind, Some(Unit::Percent), semantic)
+}
+
 fn spec(key: &str, label: &str, kind: Kind, unit: Option<Unit>, semantic: Semantic) -> PointSpec {
     PointSpec {
         key: Arc::from(key),
@@ -517,6 +527,25 @@ mod tests {
             }
         }
         assert_eq!(value(blind, &status, "moving"), Some(Value::Bool(true)));
+        assert_eq!(
+            value(blind, &status, "target_position"),
+            Some(Value::Int(100))
+        );
+        for m in status["modules"].as_array_mut().unwrap() {
+            if m["id"] == blind.id.as_str() {
+                m["target_position"] = (-1).into();
+            }
+        }
+        assert_eq!(
+            value(blind, &status, "target_position"),
+            None,
+            "stopped: no target"
+        );
+        assert_eq!(
+            value(blind, &status, "moving"),
+            Some(Value::Bool(false)),
+            "stopped"
+        );
     }
 
     #[test]
