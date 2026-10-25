@@ -191,9 +191,11 @@ impl Cloud {
         }
     }
 
-    /// Sends the automations back, as `api/synchomeschedule` takes a
-    /// schedule: the home, the schedule and its name in the address, the
-    /// schedule itself in JSON (`schedule`: what [`crate::schedule`] edited).
+    /// Sends the automations back to `api/synchomeschedule`: the home, the
+    /// schedule, its name and its type (`event`) in the address and in the
+    /// JSON with the schedule (`schedule`: what [`crate::schedule`] edited).
+    /// Without the type in the address, the cloud takes it for a heating
+    /// schedule and writes nothing (tried on a real gateway, 25 Oct 2026).
     pub async fn sync_schedule(
         &self,
         home: &str,
@@ -204,7 +206,13 @@ impl Cloud {
         if !self.logged_in() {
             return Err(LoggedOut.into());
         }
-        let ids = [("home_id", home), ("schedule_id", id), ("name", name)];
+        let ids = [
+            ("home_id", home),
+            ("schedule_id", id),
+            ("name", name),
+            ("schedule_type", "event"),
+            ("type", "event"),
+        ];
         let mut body = schedule.clone();
         for (key, value) in ids {
             body[key] = Json::from(value);
