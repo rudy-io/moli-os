@@ -15,7 +15,6 @@
   "maison.accueil.calme": "All quiet at home",
   "maison.accueil.fumee": "Smoke: {name}",
   "maison.accueil.fuite": "Water leak: {name}",
-  "maison.accueil.poele_alarme": "{name}: alarm {code}",
   "maison.accueil.poele_en_alarme": "{name} in alarm",
   "maison.accueil.demandes_one": "{count} request to approve",
   "maison.accueil.demandes_other": "{count} requests to approve",

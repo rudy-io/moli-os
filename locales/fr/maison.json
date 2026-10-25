@@ -15,7 +15,6 @@
   "maison.accueil.calme": "Tout est calme à la maison",
   "maison.accueil.fumee": "Fumée : {name}",
   "maison.accueil.fuite": "Fuite d’eau : {name}",
-  "maison.accueil.poele_alarme": "{name} : alarme {code}",
   "maison.accueil.poele_en_alarme": "{name} en alarme",
   "maison.accueil.demandes_one": "{count} demande à valider",
   "maison.accueil.demandes_other": "{count} demandes à valider",

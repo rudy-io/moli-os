@@ -55,12 +55,10 @@
         detail: run ? t('maison.accueil.chauffage.programme_jusqua', { time: hhmm(run.end) }) : t('commun.piece.mode.programme'),
       };
     }
-    // In alarm: the short word in the chip (its column is fixed), the rest and the code below.
-    if (mode === 'alarm' || mode === 'mem_alarm') {
-      const code = value(d.id, 'alarm');
-      const what = [mode === 'mem_alarm' ? t('commun.poele.alarme_memorisee') : null, code && code !== 'OK' ? code : null].filter(Boolean);
-      return { ...base, word: t('commun.poele.alarme'), tone: 'alert', detail: what.join(' · ') || target };
-    }
+    // In alarm: the short word in the chip (its column is fixed), « stored »
+    // below; the code and what it means are on the stove's card.
+    if (mode === 'alarm' || mode === 'mem_alarm')
+      return { ...base, word: t('commun.poele.alarme'), tone: 'alert', detail: mode === 'mem_alarm' ? t('commun.poele.alarme_memorisee') : target };
     return { ...base, tone: toneOf(mode), detail: target };
   }
   const toneOf = (mode) => (mode === 'eco' || mode === 'stand_by' ? 'good' : WARM.includes(mode) ? 'warm' : COOL.includes(mode) ? 'cool' : 'off');
