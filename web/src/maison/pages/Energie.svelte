@@ -8,6 +8,8 @@
   import EnergyChart from '../ui/EnergyChart.svelte';
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
+  import DayStrip from '../ui/DayStrip.svelte';
+  import { meterSplit, addSplits } from '../lib/tariff-split.js';
 
   onMount(useEnergy);
 
@@ -132,6 +134,25 @@
           .sort((a, b) => b.kwh - a.kwh),
       }));
   });
+  // Each line's off-peak share, when the contract split its hours.
+  const splits = $derived.by(() => {
+    const period = s?.[span];
+    if (!period?.meter_periods) return new Map();
+    const sp = (id) => meterSplit(period, id);
+    const circuitIds = (s.meters ?? []).filter((m) => m.role === 'circuit').map((m) => m.id);
+    const whole = (s.meters ?? []).find((m) => m.role === 'total');
+    const map = new Map();
+    for (const id of circuitIds) map.set(id, sp(id));
+    for (const a of appliances) map.set(a.id, sp(a.id));
+    map.set('__lights', addSplits(lights.map((a) => sp(a.id))));
+    if (whole) map.set('__rest', addSplits([sp(whole.id), ...circuitIds.map(sp), ...lights.map((a) => sp(a.id))], -1));
+    return map;
+  });
+  const offPart = (id) => {
+    const x = splits.get(id);
+    return x && x.hc + x.hp > 0 ? x.hc / (x.hc + x.hp) : null;
+  };
+  const anySplit = $derived(parts.some((p) => offPart(p.id) != null));
   const partsMax = $derived(Math.max(0.01, ...parts.map((p) => p.kwh)));
   const partsTotal = $derived(parts.reduce((t, p) => t + p.kwh, 0));
   // This month, the share billed off-peak.
@@ -184,6 +205,23 @@
   const todayHours = $derived(todayByHour(week, home.now));
   const base = $derived(baseload(week));
   const price = $derived(prices(s));
+  // The minute of the day it is, for the strip of the day.
+  const nowMin = $derived(new Date(home.now).getHours() * 60 + new Date(home.now).getMinutes());
+
+  // The contracts (off-peak hours, prices), edited behind the cog.
+  let contracts = $state(null);
+  let editing = $state(false);
+  // Saved contracts reprice the past: the charts read their series again.
+  let version = $state(0);
+  async function loadContracts() {
+    try {
+      const r = await fetch('/api/energy/contracts');
+      contracts = r.ok ? await r.json() : null;
+    } catch {
+      contracts = null;
+    }
+  }
+  onMount(loadContracts);
 
   const climates = $derived(
     Object.values(hub.devices)
@@ -244,6 +282,9 @@
   {:else}
     <div class="heads">
       <section class="card now" class:hued={look.hue != null} style:--h={look.hue}>
+        {#if contracts?.editable}
+          <button class="cog" onclick={() => (editing = true)} title={t('energie.contrat.ouvrir')} aria-label={t('energie.contrat.ouvrir')}><Icon name="cog" size={18} /></button>
+        {/if}
         <span class="eyebrow">{t('energie.now.titre')}</span>
         {#if s.live}
           <strong class="big num">{power(meterNow, s.live.unit)}</strong>
@@ -259,6 +300,9 @@
           {#if s.period}<span class="chip {isHc ? 'cool' : 'warm'}">{isHc ? t('energie.hc') : t('energie.hp')}</span>{/if}
           {#if change}<span class="muted small">{t(change.off ? 'energie.now.pleines' : 'energie.now.creuses', { at: clockText(change.at), delay: minutesText(change.minutes) })}</span>{/if}
         </div>
+        {#if windows.length}
+          <div class="day"><DayStrip {windows} now={nowMin} /></div>
+        {/if}
       </section>
 
       <section class="card">
@@ -364,31 +408,38 @@
           </div>
         </div>
         {#if parts.length}
-          <ul class="bars">
+          <ul class="bars where">
             {#each parts as p (p.id)}
+              {@const off = offPart(p.id)}
               <li class:rest={p.rest}>
                 <span class="name">{p.name} <small class="muted">{t('energie.pct', { n: Math.round((p.kwh / partsTotal) * 100) })}{p.estimated ? ' ≈' : ''}</small></span>
-                <span class="track"><i style="width:{(p.kwh / partsMax) * 100}%"></i></span>
+                <span class="track" title={off != null ? t('energie.repartition.part_creuses', { n: Math.round(off * 100) }) : null}>
+                  <i class:split={off != null} style:width="{(p.kwh / partsMax) * 100}%" style:--off="{(off ?? 0) * 100}%"></i>
+                </span>
                 <b class="num">{kwh(p.kwh)} kWh</b>
-                {#if p.cost != null}<small class="muted num cost">{euros(p.cost, cur)}</small>{/if}
+                <small class="muted num cost">{p.cost != null ? euros(p.cost, cur) : ''}</small>
               </li>
               {#each p.subs as a (a.id)}
+                {@const aoff = offPart(a.id)}
                 <li class="sub">
                   <span class="name">{t('energie.dont', { name: a.name })}{#if a.estimated} <small class="muted" title={t('energie.estime_ampoule')}>{t('energie.estime')}</small>{/if}</span>
-                  <span class="track"><i style="width:{(a.kwh / partsMax) * 100}%"></i></span>
+                  <span class="track"><i class:split={aoff != null} style:width="{(a.kwh / partsMax) * 100}%" style:--off="{(aoff ?? 0) * 100}%"></i></span>
                   <b class="num">{kwh(a.kwh)} kWh</b>
-                  {#if a.cost != null}<small class="muted num cost">{euros(a.cost, cur)}</small>{/if}
+                  <small class="muted num cost">{a.cost != null ? euros(a.cost, cur) : ''}</small>
                 </li>
               {/each}
             {/each}
           </ul>
+          {#if anySplit}
+            <p class="key muted"><i class="tag cool"></i>{t('energie.chart.creuses')}<i class="tag warm"></i>{t('energie.chart.pleines')}</p>
+          {/if}
         {:else}
           <p class="muted">{t('energie.repartition.vide')}</p>
         {/if}
       </section>
     </div>
 
-    <TariffPie {windows} />
+    {#key version}<TariffPie {windows} />{/key}
 
     {#if profile}
       <section class="card">
@@ -413,7 +464,7 @@
           {/each}
         </div>
       </div>
-      <EnergyChart {range} {by} />
+      {#key version}<EnergyChart {range} {by} />{/key}
       <p class="foot muted">
         {by === 'devices' ? t('energie.histo.note_appareils') : t('energie.histo.note_tarif')}
         {t('energie.histo.avant_moli')}
@@ -421,6 +472,13 @@
     </section>
   {/if}
 </div>
+
+{#if editing && contracts}
+  <!-- The contracts' editor: loaded only when the cog is touched. -->
+  {#await import('../ui/ContractEditor.svelte') then { default: ContractEditor }}
+    <ContractEditor contracts={contracts.contracts} currency={cur} now={home.now} onsaved={(list) => ((contracts = list), version++)} onclose={() => (editing = false)} />
+  {/await}
+{/if}
 
 <style>
   .energie {
@@ -482,8 +540,32 @@
     color: var(--ink-3);
   }
 
+  .now {
+    position: relative;
+  }
+
   .now .big {
     font-weight: 600;
+  }
+
+  /* The contracts' cog, in the card's corner. */
+  .cog {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+
+  .day {
+    margin-top: 14px;
   }
 
   .now.hued .big {
@@ -667,7 +749,7 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 14px;
+    gap: 9px;
   }
 
   .bars li {
@@ -677,11 +759,45 @@
     gap: 4px 14px;
   }
 
+  /* Where it went: name, bar, kWh and euros on one line. */
+  .where li {
+    grid-template-columns: minmax(110px, 1.1fr) 2fr auto 62px;
+    gap: 4px 12px;
+  }
+
   .bars .cost {
-    grid-column: 3;
     justify-self: end;
+    font-size: 12.5px;
+  }
+
+  /* Off-peak (blue) then peak (orange), as the contract split its hours. */
+  .bars .track i.split {
+    background: linear-gradient(90deg, var(--cool) 0 var(--off), var(--warm) var(--off) 100%);
+  }
+
+  .key {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    margin: 12px 0 0;
     font-size: 12px;
-    margin-top: -4px;
+  }
+
+  .tag {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+
+  .tag.warm {
+    margin-left: 8px;
+    background: var(--warm);
+  }
+
+  .tag.cool {
+    background: var(--cool);
   }
 
   .name {
@@ -695,7 +811,7 @@
   }
 
   .track {
-    height: 10px;
+    height: 8px;
     border-radius: 999px;
     background: var(--surface-2);
     overflow: hidden;
@@ -719,7 +835,7 @@
 
   /* An appliance inside the row above: indented, finer, cool. */
   .bars li.sub {
-    margin-top: -6px;
+    margin-top: -3px;
   }
 
   .sub .name {
@@ -835,10 +951,25 @@
       grid-row: 2;
     }
 
-    .bars .cost {
+    .where li {
+      grid-template-columns: minmax(0, 1fr) auto 56px;
+      gap: 3px 10px;
+    }
+
+    /* Each in its column: name, kWh, euros, then the bar under them. */
+    .where .name {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .where b {
       grid-column: 2;
       grid-row: 1;
-      display: none;
+    }
+
+    .where .cost {
+      grid-column: 3;
+      grid-row: 1;
     }
   }
 </style>

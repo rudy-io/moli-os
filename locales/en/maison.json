@@ -294,5 +294,22 @@
   "maison.meteo.legende_pluie": "Rain",
   "maison.meteo.legende_nuages": "Clouds",
   "maison.meteo.legende_vent": "Wind (light → strong)",
-  "maison.meteo.credit": "Forecast by Open-Meteo. The orange dot is the house."
+  "maison.meteo.credit": "Forecast by Open-Meteo. The orange dot is the house.",
+
+  "maison.temperatures.titre": "Temperatures",
+  "maison.temperatures.sous_titre": "Room by room, over time",
+  "maison.temperatures.periode": "Period",
+  "maison.temperatures.jour": "24 h",
+  "maison.temperatures.semaine": "7 days",
+  "maison.temperatures.mois": "30 days",
+  "maison.temperatures.comparer_dehors": "Compare with outside",
+  "maison.temperatures.vide": "No room measures its temperature yet.",
+  "maison.temperatures.chargement": "Loading temperatures…",
+  "maison.temperatures.heure": "{h}:00",
+  "maison.temperatures.min_max": "Between {min} and {max}",
+  "maison.temperatures.dehors_alors": "outside {v}",
+  "maison.temperatures.courbe": "{name}'s temperature over time",
+  "maison.temperatures.pas_de_mesure": "No reading over this period.",
+  "maison.temperatures.dehors": "Outside",
+  "maison.temperatures.mesure_par": "Measured by {name}"
 }

@@ -6,7 +6,8 @@ export const energy = $state({ summary: null, missing: false });
 let timer = null;
 let users = 0;
 
-async function refresh() {
+/** Reads the summary again now (after the contracts changed). */
+export async function refresh() {
   try {
     const res = await fetch('/api/energy');
     if (res.status === 404) {

@@ -5,11 +5,11 @@
 // total (its main clamp, else the Linky): nothing counted twice.
 
 import { t } from '../../lib/i18n.svelte.js';
+import { meterSplit, addSplits } from './tariff-split.js';
 
-const PALETTE = ['#e9a23b', '#5b8def', '#3fae7c', '#c46ad8', '#e0705a', '#2fb3b8', '#8c7ae6', '#d4a373'];
-const LIGHTS = '#f2c94c';
-
-/** The parts, each with `kwh(bucket)` and `cost(bucket)` (that hour's price). */
+/** The parts, each with `kwh(bucket)`, `cost(bucket)` (that hour's price)
+ *  and `split(bucket)` (its off-peak and peak as the contract split them,
+ *  null without one). Colours are the chart's to give. */
 export function deviceSeries(meters) {
   const whole = meters.find((m) => m.role === 'total');
   const grid = meters.filter((m) => m.role === 'grid');
@@ -24,17 +24,38 @@ export function deviceSeries(meters) {
   const drawn = top ?? ((b) => circuits.reduce((t, m) => t + k(b, m.id), 0));
   const spent = paid ?? ((b) => (circuits.some((m) => b.meters[m.id]?.cost != null) ? circuits.reduce((t, m) => t + (b.meters[m.id]?.cost ?? 0), 0) : null));
 
+  const sp = (b, id) => meterSplit(b, id);
+  const houseSplit = whole ? (b) => sp(b, whole.id) : grid.length ? (b) => addSplits(grid.map((g) => sp(b, g.id))) : null;
+
   const parts = [];
-  let n = 0;
   for (const m of circuits) {
     const inner = appliances.filter((a) => a.within === m.id);
-    parts.push({ id: m.id, name: m.name, color: PALETTE[n++ % PALETTE.length], kwh: (b) => Math.max(0, k(b, m.id) - inner.reduce((t, a) => t + k(b, a.id), 0)) });
+    parts.push({
+      id: m.id,
+      name: m.name,
+      kwh: (b) => Math.max(0, k(b, m.id) - inner.reduce((t, a) => t + k(b, a.id), 0)),
+      split: (b) => addSplits([sp(b, m.id), ...inner.map((a) => sp(b, a.id))], -1),
+    });
   }
-  for (const a of measured) parts.push({ id: a.id, name: a.name, color: PALETTE[n++ % PALETTE.length], kwh: (b) => k(b, a.id) });
-  if (lights.length) parts.push({ id: '__lights', name: t('energie.lumieres'), estimated: true, color: LIGHTS, kwh: (b) => lights.reduce((t, a) => t + k(b, a.id), 0) });
+  for (const a of measured) parts.push({ id: a.id, name: a.name, kwh: (b) => k(b, a.id), split: (b) => sp(b, a.id) });
+  if (lights.length) {
+    parts.push({
+      id: '__lights',
+      name: t('energie.lumieres'),
+      estimated: true,
+      kwh: (b) => lights.reduce((t, a) => t + k(b, a.id), 0),
+      split: (b) => addSplits(lights.map((a) => sp(b, a.id))),
+    });
+  }
   if (top) {
     const others = [...parts];
-    parts.push({ id: '__rest', name: t('energie.reste'), rest: true, color: 'var(--surface-3)', kwh: (b) => Math.max(0, top(b) - others.reduce((t, p) => t + p.kwh(b), 0)) });
+    parts.push({
+      id: '__rest',
+      name: t('energie.reste'),
+      rest: true,
+      kwh: (b) => Math.max(0, top(b) - others.reduce((t, p) => t + p.kwh(b), 0)),
+      split: (b) => addSplits([houseSplit(b), ...others.map((p) => p.split(b))], -1),
+    });
   }
   // Each part at that bucket's price (what the house paid per kWh then).
   const price = (b) => {

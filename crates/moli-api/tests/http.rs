@@ -457,6 +457,63 @@ async fn pin_session(addr: &str, pin: &str) -> String {
     format!("Cookie: {}\r\n", cookie.unwrap())
 }
 
+/// The electricity contracts: read by the household, changed by a person
+/// (the code) only, refused when they do not hold together.
+#[tokio::test]
+async fn only_a_person_changes_the_electricity_contracts() {
+    let dir = std::env::temp_dir().join(format!("moli-http-contracts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let hub = lamp_hub().await;
+    let config: moli_energy::Config = serde_json::from_value(json!({
+        "meter": [{ "id": "salon", "name": "Radiateur", "point": "fake:lamp/state", "role": "circuit" }],
+        "contract": [{ "from": "2026-01-01", "offpeak": ["01:38-07:08"], "prices": { "HP": 0.2, "HC": 0.1 } }],
+    }))
+    .unwrap();
+    let (energy, _task) = moli_energy::Energy::start(
+        &hub,
+        &dir.join("energy.db"),
+        config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        energy: Some(energy),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let (status, body) = request_with(&addr, "GET", "/api/energy/contracts", None, ui).await;
+    assert_eq!(status, 200, "{body}");
+    let list: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(list["editable"], true);
+    assert_eq!(list["contracts"][0]["offpeak"][0], "01:38-07:08");
+
+    let new = json!({ "contracts": [
+        { "from": "2026-01-01", "offpeak": ["01:38-07:08"], "prices": { "HP": 0.2, "HC": 0.1 } },
+        { "from": "2026-11-01", "offpeak": ["22:00-06:00"], "prices": { "HP": 0.25, "HC": 0.15 }, "monthly_fee": 18.5 },
+    ]});
+    let (status, body) = request_with(&addr, "PUT", "/api/energy/contracts", Some(&new), ui).await;
+    assert_eq!(status, 403, "{body}");
+
+    let pin = pin_session(&addr, "482915").await;
+    let overlap = json!({ "contracts": [
+        { "from": "2026-01-01", "offpeak": ["01:00-03:00", "02:00-04:00"], "prices": { "HP": 0.2, "HC": 0.1 } },
+    ]});
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/contracts", Some(&overlap), &pin).await;
+    assert_eq!(status, 422, "{body}");
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/contracts", Some(&new), &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let (_, body) = request_with(&addr, "GET", "/api/energy/contracts", None, ui).await;
+    let list: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(list["saved"], true);
+    assert_eq!(list["contracts"][1]["monthly_fee"], 18.5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// What the satellites heard: switched on and listened to by a person only,
 /// never by any device of the house.
 #[tokio::test]

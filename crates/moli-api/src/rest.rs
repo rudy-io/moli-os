@@ -851,6 +851,49 @@ pub(crate) async fn energy(Extension(Metered(energy)): Extension<Metered>) -> Re
     }
 }
 
+/// `GET /api/energy/contracts`: the dated contracts (off-peak hours, prices,
+/// subscription), for the dashboard to edit.
+pub(crate) async fn energy_contracts(Extension(Metered(energy)): Extension<Metered>) -> Response {
+    let Some(energy) = energy else {
+        return error(StatusCode::NOT_FOUND, "no [energy] meters configured");
+    };
+    Json(energy.contract_list()).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ContractsBody {
+    contracts: Vec<moli_energy::tariff::Contract>,
+}
+
+/// `PUT /api/energy/contracts`: a person (code) replaces the whole list; in
+/// force at once, the past repriced with it.
+pub(crate) async fn set_energy_contracts(
+    Extension(Metered(energy)): Extension<Metered>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(body): Json<ContractsBody>,
+) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.energie.contrats_humain"),
+        );
+    }
+    let Some(energy) = energy else {
+        return error(StatusCode::NOT_FOUND, "no [energy] meters configured");
+    };
+    match energy.set_contracts(body.contracts).await {
+        Ok(list) => Json(list).into_response(),
+        Err(moli_energy::EnergyError::Invalid(why)) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!("serveur.energie.contrats_refuses", raison = why),
+        ),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct SeriesQuery {
     step: moli_energy::Step,

@@ -112,6 +112,8 @@
   "serveur.config.depart_non_ecrite": "configuration de départ non écrite : réglages par défaut, en mémoire",
 
   "serveur.energie.lecture_seule": "lecture seule",
+  "serveur.energie.contrats_humain": "seule une personne (code) change le contrat d'électricité",
+  "serveur.energie.contrats_refuses": "contrat refusé : {raison}",
   "serveur.energie.appareil": "Énergie",
   "serveur.energie.modele": "Compteurs",
   "serveur.energie.point.today_kwh": "Conso aujourd'hui",

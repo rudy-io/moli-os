@@ -160,6 +160,9 @@
       {#await import('./pages/Solaire.svelte') then { default: Solaire }}<Solaire />{/await}
     {:else if page === 'energie'}
       <Energie />
+    {:else if page === 'temperatures'}
+      <!-- Room by room over time: loaded only when visited. -->
+      {#await import('./pages/Temperatures.svelte') then { default: Temperatures }}<Temperatures />{/await}
     {:else if page === 'impression'}
       <Impression />
     {:else if page === 'dehors'}

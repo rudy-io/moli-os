@@ -304,6 +304,10 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
         .route("/api/energy/series", get(rest::energy_series))
+        .route(
+            "/api/energy/contracts",
+            get(rest::energy_contracts).put(rest::set_energy_contracts),
+        )
         .merge(assistant_routes())
         .route(
             "/api/automations",

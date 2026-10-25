@@ -159,3 +159,61 @@ async fn readings_become_priced_hours_that_survive_restarts() {
     drivers.cancel();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn contracts_saved_from_the_dashboard_win_and_survive_restarts() {
+    let dir = std::env::temp_dir().join(format!("moli-energy-contracts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("energy.db");
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let config: Config = toml::from_str(
+        r#"
+        [[meter]]
+        id = "salon"
+        name = "Radiateur"
+        point = "fake:m/e"
+        role = "circuit"
+        [[contract]]
+        from = "2026-01-01"
+        offpeak = ["01:38-07:08"]
+        prices = { HP = 0.2, HC = 0.1 }
+        "#,
+    )
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let (energy, _task) = Energy::start(&hub, &db, config.clone(), cancel.clone()).unwrap();
+    let list = energy.contract_list();
+    assert!(list.editable && !list.saved);
+    assert_eq!(list.contracts, config.contracts);
+
+    // A bad list is refused, nothing written.
+    let mut bad = config.contracts.clone();
+    bad[0].offpeak = vec!["01:00-03:00".into(), "02:00-04:00".into()];
+    assert!(energy.set_contracts(bad).await.is_err());
+    assert!(!dir.join("contracts.json").exists());
+
+    // Two contracts, the newer first: kept oldest first, in force at once.
+    let mut new = config.contracts[0].clone();
+    new.from = "2000-01-01".into();
+    new.offpeak = vec!["22:00-06:00".into()];
+    let mut later = new.clone();
+    later.from = "2099-01-01".into();
+    let saved = energy.set_contracts(vec![later, new]).await.unwrap();
+    assert!(saved.saved);
+    assert_eq!(saved.contracts[0].from, "2000-01-01");
+    assert!(dir.join("contracts.json").exists());
+    let offpeak = energy.summary().await.unwrap().offpeak;
+    assert_eq!(offpeak.len(), 1);
+    assert!((offpeak[0].from - 1320.0).abs() < 1e-9);
+
+    // After a restart, the dashboard's contracts, not moli.toml's.
+    cancel.cancel();
+    let cancel = CancellationToken::new();
+    let (energy, _task) = Energy::start(&hub, &db, config, cancel.clone()).unwrap();
+    let list = energy.contract_list();
+    assert!(list.saved);
+    assert_eq!(list.contracts.len(), 2);
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(dir);
+}

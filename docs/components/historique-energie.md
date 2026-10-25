@@ -57,7 +57,15 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     (aujourd'hui, mois…) et chaque seau des séries portent `by_period` (`HC`, `HP` : kWh et €,
     pour la maison : compteur général, sinon facturés, sinon circuits) ; le résumé dit la
     période, son prix, l'abonnement et les heures creuses du jour (`offpeak`), que la page
-    Énergie prend au lieu de les apprendre du compteur.
+    Énergie prend au lieu de les apprendre du compteur. Chaque compteur a aussi son propre
+    découpage (`meter_periods`) : les kWh creux et pleins d'un radiateur, pas ceux de la maison.
+  - **Modifiables depuis le tableau de bord** (roue crantée de la carte « En ce moment » de la
+    page Énergie, code de la maison demandé, `PUT /api/energy/contracts`) : la liste entière
+    est vérifiée (dates distinctes, plages sans chevauchement), écrite dans
+    `data/contracts.json` (à côté de `energy.db`) et appliquée tout de suite. Dès que ce
+    fichier existe, il **remplace** les `[[energy.contract]]` de `moli.toml` (un fichier
+    illisible ou incohérent est ignoré, avec un avertissement, et `moli.toml` reprend la
+    main). Impossible avec `[energy.tariff]` (la période vient alors du compteur).
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple

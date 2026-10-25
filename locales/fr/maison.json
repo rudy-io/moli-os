@@ -294,5 +294,22 @@
   "maison.meteo.legende_pluie": "Pluie",
   "maison.meteo.legende_nuages": "Nuages",
   "maison.meteo.legende_vent": "Vent (faible → fort)",
-  "maison.meteo.credit": "Prévisions Open-Meteo. Le point orange, c’est la maison."
+  "maison.meteo.credit": "Prévisions Open-Meteo. Le point orange, c’est la maison.",
+
+  "maison.temperatures.titre": "Températures",
+  "maison.temperatures.sous_titre": "Pièce par pièce, au fil du temps",
+  "maison.temperatures.periode": "Période",
+  "maison.temperatures.jour": "24 h",
+  "maison.temperatures.semaine": "7 jours",
+  "maison.temperatures.mois": "30 jours",
+  "maison.temperatures.comparer_dehors": "Comparer avec dehors",
+  "maison.temperatures.vide": "Aucune pièce ne mesure encore sa température.",
+  "maison.temperatures.chargement": "Chargement des températures…",
+  "maison.temperatures.heure": "{h} h",
+  "maison.temperatures.min_max": "Entre {min} et {max}",
+  "maison.temperatures.dehors_alors": "dehors {v}",
+  "maison.temperatures.courbe": "La température de {name} au fil du temps",
+  "maison.temperatures.pas_de_mesure": "Pas de mesure sur cette période.",
+  "maison.temperatures.dehors": "Dehors",
+  "maison.temperatures.mesure_par": "Mesurée par {name}"
 }

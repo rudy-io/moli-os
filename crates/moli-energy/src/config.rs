@@ -1,5 +1,6 @@
 //! `[energy]` in `moli.toml`: which points are energy meters, what a kWh
-//! costs. Edited by humans; no surface changes it.
+//! costs. Edited by humans; only the dated contracts can also be set from
+//! the dashboard (`contracts.json`, see `tariff.rs`).
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -233,9 +234,7 @@ impl Config {
         if let Some(budget) = &self.budget {
             check_point(budget).map_err(|e| format!("budget: {e}"))?;
         }
-        for contract in &self.contracts {
-            contract.check()?;
-        }
+        crate::tariff::check_list(&self.contracts)?;
         if self.tariff.is_some() && !self.contracts.is_empty() {
             return Err("[energy.tariff] or [[energy.contract]], not both".into());
         }

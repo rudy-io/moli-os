@@ -112,6 +112,8 @@
   "serveur.config.depart_non_ecrite": "starter configuration not written: default settings, in memory",
 
   "serveur.energie.lecture_seule": "read-only",
+  "serveur.energie.contrats_humain": "only a person (with the code) can change the electricity contract",
+  "serveur.energie.contrats_refuses": "contract refused: {raison}",
   "serveur.energie.appareil": "Energy",
   "serveur.energie.modele": "Meters",
   "serveur.energie.point.today_kwh": "Usage today",

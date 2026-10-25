@@ -3,7 +3,8 @@
 //! own day on (a new price, new off-peak hours). What an hour cost is read
 //! from the contract of its day when a report is made, so a contract filed
 //! later prices the past too. For a home without a tariff point (a Linky
-//! that says « HP.. » / « HC.. »).
+//! that says « HP.. » / « HC.. »). Written in `moli.toml`, or from the
+//! dashboard (`contracts.json`, next to `energy.db`, which then wins).
 
 use std::collections::BTreeMap;
 
@@ -22,18 +23,22 @@ pub const BASE: &str = "Base";
 
 const DAY_MIN: f64 = 1440.0;
 
-/// A contract as written in `moli.toml`.
-#[derive(Clone, Debug, Deserialize)]
+/// At most this many contracts, and off-peak windows in one.
+const MAX_CONTRACTS: usize = 60;
+const MAX_WINDOWS: usize = 12;
+
+/// A contract as written in `moli.toml` (or `contracts.json`).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Contract {
     /// First day it applies, local (« 2026-01-01 »).
     pub from: String,
     /// The subscription per month, taxes included.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monthly_fee: Option<f64>,
     /// Off-peak hours of each day, « 01:38-07:08 » (an end before its start
     /// runs past midnight). None: one price all day (`Base`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub offpeak: Vec<String>,
     /// Price of a kWh by period: « HC » and « HP », or « Base ».
     pub prices: BTreeMap<String, f64>,
@@ -73,12 +78,56 @@ impl Contract {
                 ));
             }
         }
+        if self.offpeak.len() > MAX_WINDOWS {
+            return Err(format!(
+                "{}: more than {MAX_WINDOWS} off-peak windows",
+                at()
+            ));
+        }
+        // A minute of the day off-peak twice: two windows overlap.
+        let mut seen = [false; 1440];
+        for range in &self.offpeak {
+            let Some((a, b)) = minutes_of(range) else {
+                continue;
+            };
+            let (a, b) = (usize::from(a), usize::from(b));
+            let minutes: Vec<usize> = if a < b {
+                (a..b).collect()
+            } else {
+                (a..1440).chain(0..b).collect()
+            };
+            for m in minutes {
+                if std::mem::replace(&mut seen[m], true) {
+                    return Err(format!("{}: off-peak {range:?} overlaps another", at()));
+                }
+            }
+        }
         Ok(())
     }
 }
 
+/// Why a whole list cannot be used, if it cannot: each contract, and
+/// never two from the same day.
+pub(crate) fn check_list(contracts: &[Contract]) -> Result<(), String> {
+    if contracts.len() > MAX_CONTRACTS {
+        return Err(format!("more than {MAX_CONTRACTS} contracts"));
+    }
+    let mut days = std::collections::BTreeSet::new();
+    for contract in contracts {
+        contract.check()?;
+        if !days.insert(contract.from.parse::<Date>().ok()) {
+            return Err(format!("two [[energy.contract]] from {:?}", contract.from));
+        }
+    }
+    Ok(())
+}
+
 /// « 01:38-07:08 » → minutes of the day (01:38 = 98).
 fn window(range: &str) -> Option<(f64, f64)> {
+    minutes_of(range).map(|(a, b)| (f64::from(a), f64::from(b)))
+}
+
+fn minutes_of(range: &str) -> Option<(u16, u16)> {
     let minutes = |hhmm: &str| -> Option<u16> {
         let (h, m) = hhmm.trim().split_once(':')?;
         let (h, m): (u16, u16) = (h.parse().ok()?, m.parse().ok()?);
@@ -86,7 +135,7 @@ fn window(range: &str) -> Option<(f64, f64)> {
     };
     let (a, b) = range.split_once('-')?;
     let (a, b) = (minutes(a)?, minutes(b)?);
-    (a != b).then_some((f64::from(a), f64::from(b)))
+    (a != b).then_some((a, b))
 }
 
 fn price_in(prices: &BTreeMap<String, f64>, period: &str) -> Option<f64> {
@@ -371,6 +420,45 @@ mod tests {
                 .check()
                 .is_err(),
             "price"
+        );
+    }
+
+    #[test]
+    fn a_list_has_no_overlap_nor_twice_the_same_day() {
+        let ok = contract(
+            "2026-01-01",
+            &["22:00-02:00", "02:00-06:00", "14:00-16:00"],
+            0.2,
+            0.1,
+        );
+        assert!(
+            check_list(std::slice::from_ref(&ok)).is_ok(),
+            "end to end is no overlap"
+        );
+        let crossed = contract("2026-01-01", &["22:00-02:00", "01:00-06:00"], 0.2, 0.1);
+        assert!(check_list(&[crossed]).is_err(), "past midnight overlaps");
+        let twice = contract("2026-01-01", &["01:00-03:00", "02:00-04:00"], 0.2, 0.1);
+        assert!(check_list(&[twice]).is_err());
+        let mut later = ok.clone();
+        later.from = "2027-01-01".into();
+        assert!(check_list(&[ok.clone(), later]).is_ok());
+        assert!(check_list(&[ok.clone(), ok]).is_err(), "same day twice");
+    }
+
+    #[test]
+    fn a_contract_reads_back_as_written() {
+        let c = contract("2026-01-01", &["01:38-07:08"], 0.2210, 0.1747);
+        let text = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Contract>(&text).unwrap(), c);
+        let base = Contract {
+            from: "2026-01-01".into(),
+            monthly_fee: None,
+            offpeak: Vec::new(),
+            prices: BTreeMap::from([("Base".into(), 0.19)]),
+        };
+        assert_eq!(
+            serde_json::to_string(&base).unwrap(),
+            r#"{"from":"2026-01-01","prices":{"Base":0.19}}"#
         );
     }
 }

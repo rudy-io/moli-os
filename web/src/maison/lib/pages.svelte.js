@@ -2,7 +2,8 @@
 // has anything for each: a page with nothing to show stays out of the menu
 // (its address still answers) and comes back by itself with the first
 // device that fills it. The menu and « Comment ça marche » share it.
-import { hub, home, value, deviceKind } from './home.svelte.js';
+import { hub, home, value, deviceKind, roomOf } from './home.svelte.js';
+import { tempKey } from './temperatures.js';
 import { energy } from './energy-live.svelte.js';
 import { isPrinter } from './printers.js';
 import { isPaperPrinter } from './paper.js';
@@ -20,6 +21,7 @@ export const NAV = [
   { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
   { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
   { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
+  { path: 'temperatures', label: 'commun.nav.temperatures', icon: 'thermometer' },
   { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
   { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
   { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
@@ -41,6 +43,7 @@ export function filledPages() {
     cameras: devices.some((d) => d.camera) || !!cfg.favorites?.cameras?.length,
     parler: devices.some((d) => has(d, 'say', true) || has(d, 'announce', true)),
     energie: !energy.missing,
+    temperatures: devices.some((d) => tempKey(d) && roomOf(d)),
     impression: devices.some((d) => isPrinter(d) || isPaperPrinter(d)),
     dehors: !!(cfg.outdoor?.weather || cfg.outdoor?.air || cfg.outdoor?.pool),
     infra: devices.some((d) => d.model === 'Serveur de la maison' || d.model === 'Ordinateur' || has(d, 'external_ip')),

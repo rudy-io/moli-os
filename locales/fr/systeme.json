@@ -388,5 +388,8 @@
   "systeme.alexa.connecter": "Connecter",
   "systeme.alexa.verification": "Connexion…",
   "systeme.alexa.aide": "Moli ne voit jamais ton mot de passe : il apparaîtra comme un appareil « Moli » de ton compte Amazon, et garde un jeton chiffré dans son coffre.",
-  "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir."
+  "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir.",
+
+  "systeme.pages.role.temperatures": "L’historique de la température de chaque pièce, sur un jour, une semaine ou un mois, comparé à dehors.",
+  "systeme.pages.quand.temperatures": "Apparaît avec un capteur, un radiateur ou une clim qui mesure la température d’une pièce."
 }

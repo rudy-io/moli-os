@@ -388,5 +388,8 @@
   "systeme.alexa.connecter": "Connect",
   "systeme.alexa.verification": "Connecting…",
   "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
-  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice."
+  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice.",
+
+  "systeme.pages.role.temperatures": "Each room's temperature over a day, a week or a month, compared with outside.",
+  "systeme.pages.quand.temperatures": "Appears with a sensor, a radiator or an air conditioner that measures a room's temperature."
 }

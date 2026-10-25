@@ -2845,6 +2845,7 @@ mod tests {
             meters: std::collections::BTreeMap::new(),
             unmeasured: None,
             by_period: std::collections::BTreeMap::new(),
+            meter_periods: std::collections::BTreeMap::new(),
         };
         let mut summary = moli_energy::Summary {
             currency: "€".into(),

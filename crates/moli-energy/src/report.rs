@@ -65,6 +65,10 @@ pub struct Bucket {
     /// dated contracts say the periods.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub by_period: BTreeMap<String, Amount>,
+    /// Each meter's consumption by tariff period, when dated contracts say
+    /// the periods (a radiator's off-peak and peak kWh).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub meter_periods: BTreeMap<String, BTreeMap<String, Amount>>,
 }
 
 /// The meters that make the house's figure, for the split by period: the
@@ -175,6 +179,7 @@ pub fn buckets(
             start,
             meters: BTreeMap::new(),
             by_period: BTreeMap::new(),
+            meter_periods: BTreeMap::new(),
         })
         .collect();
     for row in rows {
@@ -189,13 +194,25 @@ pub fn buckets(
             if house.contains(&row.meter.as_str()) {
                 split_into(&mut bucket.by_period, row, contracts);
             }
+            split_into(
+                bucket.meter_periods.entry(row.meter.clone()).or_default(),
+                row,
+                contracts,
+            );
         }
     }
     for bucket in &mut out {
+        bucket.meter_periods.retain(|_, by| !by.is_empty());
         for amount in bucket
             .meters
             .values_mut()
             .chain(bucket.by_period.values_mut())
+            .chain(
+                bucket
+                    .meter_periods
+                    .values_mut()
+                    .flat_map(BTreeMap::values_mut),
+            )
         {
             *amount = amount.rounded();
         }
@@ -219,6 +236,10 @@ pub struct Period {
     /// dated contracts say the periods.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub by_period: BTreeMap<String, Amount>,
+    /// Each meter's consumption by tariff period, when dated contracts say
+    /// the periods.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub meter_periods: BTreeMap<String, BTreeMap<String, Amount>>,
 }
 
 impl Period {
@@ -232,10 +253,16 @@ impl Period {
         let house = headline(config);
         let mut by_period = BTreeMap::new();
         let mut meters: BTreeMap<String, Amount> = BTreeMap::new();
+        let mut meter_periods: BTreeMap<String, BTreeMap<String, Amount>> = BTreeMap::new();
         for row in rows.iter().filter(|r| from <= r.hour && r.hour < to) {
             if house.contains(&row.meter.as_str()) {
                 split_into(&mut by_period, row, contracts);
             }
+            split_into(
+                meter_periods.entry(row.meter.clone()).or_default(),
+                row,
+                contracts,
+            );
             meters
                 .entry(row.meter.clone())
                 .or_default()
@@ -285,6 +312,14 @@ impl Period {
             by_period: by_period
                 .into_iter()
                 .map(|(k, a)| (k, a.rounded()))
+                .collect(),
+            meter_periods: meter_periods
+                .into_iter()
+                .filter(|(_, by)| !by.is_empty())
+                .map(|(meter, by)| {
+                    let by = by.into_iter().map(|(k, a)| (k, a.rounded())).collect();
+                    (meter, by)
+                })
                 .collect(),
         }
     }
@@ -337,6 +372,11 @@ mod tests {
             name = "Radiateur"
             point = "tuya:r/energy_all"
             role = "circuit"
+            [[meter]]
+            id = "chambre"
+            name = "Chambre"
+            point = "tuya:c/energy_all"
+            role = "circuit"
             [[contract]]
             from = "2026-01-01"
             offpeak = ["01:38-07:08"]
@@ -352,12 +392,25 @@ mod tests {
             kwh: 1.0,
             cost: None,
         };
-        // 01:00 (22 min off-peak), 03:00 (off-peak), 12:00 (peak).
-        let rows = [row(1), row(3), row(12)];
+        // 01:00 (22 min off-peak), 03:00 (off-peak), 12:00 (peak); the
+        // bedroom at 04:00 (off-peak) only.
+        let night = HourRow {
+            meter: "chambre".into(),
+            hour: d + 4 * HOUR_MS,
+            kwh: 2.0,
+            cost: None,
+        };
+        let rows = [row(1), row(3), night, row(12)];
         let p = Period::of(&config, &contracts, &rows, d, d + 24 * HOUR_MS);
         let (hc, hp) = (&p.by_period["HC"], &p.by_period["HP"]);
-        assert!((hc.kwh - (1.0 + 22.0 / 60.0)).abs() < 1e-3);
+        assert!((hc.kwh - (3.0 + 22.0 / 60.0)).abs() < 1e-3);
         assert!((hp.kwh - (1.0 + 38.0 / 60.0)).abs() < 1e-3);
+        // Each meter its own split: the bedroom all off-peak.
+        let salon = &p.meter_periods["salon"];
+        assert!((salon["HC"].kwh - (1.0 + 22.0 / 60.0)).abs() < 1e-3);
+        assert!((salon["HP"].kwh - (1.0 + 38.0 / 60.0)).abs() < 1e-3);
+        assert_eq!(p.meter_periods["chambre"]["HC"].kwh, 2.0);
+        assert!(!p.meter_periods["chambre"].contains_key("HP"));
         assert!((hc.cost.unwrap() - hc.kwh * 0.1).abs() < 1e-3);
         let b = buckets(
             &config,
@@ -370,6 +423,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(b[0].by_period["HC"].kwh, hc.kwh);
+        assert_eq!(b[0].meter_periods["salon"], p.meter_periods["salon"]);
+        assert!((b[0].meter_periods["chambre"]["HC"].cost.unwrap() - 0.2).abs() < 1e-9);
     }
 
     #[test]

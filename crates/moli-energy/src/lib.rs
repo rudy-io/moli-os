@@ -15,8 +15,8 @@ mod store;
 pub mod tariff;
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use jiff::tz::TimeZone;
 use moli_core::{Event, PointId, Unit, Value, now_ms};
@@ -31,7 +31,7 @@ use meter::{Integral, Outcome, Reading, Tracker};
 pub use report::{Amount, Bucket, Period, Step};
 pub use store::EnergyError;
 use store::{HourRow, Store};
-use tariff::Contracts;
+use tariff::{Contract, Contracts};
 
 /// Cheap handle for the surfaces.
 #[derive(Clone, Debug)]
@@ -43,9 +43,55 @@ pub struct Energy {
 struct Inner {
     store: Arc<Store>,
     config: Config,
-    contracts: Contracts,
+    /// The contracts in force: `moli.toml`'s, or the dashboard's once it
+    /// has saved some (`contracts.json`).
+    contracts: RwLock<Dated>,
+    /// Where the dashboard's contracts are kept.
+    contracts_file: PathBuf,
     tz: TimeZone,
     hub: Hub,
+}
+
+#[derive(Debug)]
+struct Dated {
+    list: Vec<Contract>,
+    contracts: Contracts,
+    saved: bool,
+}
+
+/// The dated contracts as the dashboard edits them.
+#[derive(Clone, Debug, Serialize)]
+pub struct ContractList {
+    /// Oldest first.
+    pub contracts: Vec<Contract>,
+    /// False when the tariff comes from a point (`[energy.tariff]`).
+    pub editable: bool,
+    /// Saved from the dashboard (`contracts.json`), not `moli.toml`'s.
+    pub saved: bool,
+}
+
+/// The file the dashboard's contracts live in, next to `energy.db`.
+const CONTRACTS_FILE: &str = "contracts.json";
+
+/// The dashboard's contracts when it saved some (and they still hold), else
+/// `moli.toml`'s.
+fn load_contracts(file: &Path, config: &Config) -> (Vec<Contract>, bool) {
+    let saved = std::fs::read_to_string(file).ok().and_then(|text| {
+        let list = serde_json::from_str::<Vec<Contract>>(&text)
+            .map_err(|e| e.to_string())
+            .and_then(|list| tariff::check_list(&list).map(|()| list));
+        match list {
+            Ok(list) => Some(list),
+            Err(e) => {
+                tracing::warn!(file = %file.display(), error = %e, "dashboard contracts ignored, moli.toml's used");
+                None
+            }
+        }
+    });
+    if config.tariff.is_some() {
+        return (Vec::new(), false);
+    }
+    saved.map_or_else(|| (config.contracts.clone(), false), |list| (list, true))
 }
 
 /// A meter as the surfaces show it, with its live power if known.
@@ -155,10 +201,17 @@ impl Energy {
         let last = store.last_readings()?;
         let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store));
         let task = tokio::spawn(recorder.run(events, cancel));
+        let contracts_file = path.with_file_name(CONTRACTS_FILE);
+        let (dated, saved) = load_contracts(&contracts_file, &config);
         let energy = Self {
             inner: Arc::new(Inner {
                 store,
-                contracts: Contracts::new(&config.contracts, tz.clone()),
+                contracts: RwLock::new(Dated {
+                    contracts: Contracts::new(&dated, tz.clone()),
+                    list: dated,
+                    saved,
+                }),
+                contracts_file,
                 config,
                 tz,
                 hub: hub.clone(),
@@ -170,6 +223,75 @@ impl Energy {
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.inner.config
+    }
+
+    /// The contracts in force now (a copy: a save swaps them).
+    fn contracts(&self) -> Contracts {
+        self.inner
+            .contracts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contracts
+            .clone()
+    }
+
+    /// The dated contracts, for the dashboard to edit.
+    #[must_use]
+    pub fn contract_list(&self) -> ContractList {
+        let dated = self
+            .inner
+            .contracts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut contracts = dated.list.clone();
+        contracts.sort_by(|a, b| a.from.cmp(&b.from));
+        ContractList {
+            contracts,
+            editable: self.inner.config.tariff.is_none(),
+            saved: dated.saved,
+        }
+    }
+
+    /// Replaces every dated contract (the dashboard sends the whole list):
+    /// checked, written to `contracts.json`, in force at once, the past
+    /// repriced with them (prices are applied when a report is made).
+    pub async fn set_contracts(
+        &self,
+        mut list: Vec<Contract>,
+    ) -> Result<ContractList, EnergyError> {
+        if self.inner.config.tariff.is_some() {
+            return Err(EnergyError::Invalid(
+                "the tariff comes from [energy.tariff]: no contracts".into(),
+            ));
+        }
+        tariff::check_list(&list).map_err(EnergyError::Invalid)?;
+        list.sort_by(|a, b| a.from.cmp(&b.from));
+        let text = serde_json::to_string_pretty(&list)
+            .map_err(|e| EnergyError::Internal(e.to_string()))?
+            + "\n";
+        let file = self.inner.contracts_file.clone();
+        blocking(move || {
+            // Written aside, then renamed: never half a file.
+            let tmp = file.with_extension("json.tmp");
+            std::fs::write(&tmp, text)
+                .and_then(|()| std::fs::rename(&tmp, &file))
+                .map_err(|e| EnergyError::Internal(e.to_string()))
+        })
+        .await?;
+        {
+            let mut dated = self
+                .inner
+                .contracts
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *dated = Dated {
+                contracts: Contracts::new(&list, self.inner.tz.clone()),
+                list,
+                saved: true,
+            };
+        }
+        tracing::info!("dated contracts saved from the dashboard");
+        Ok(self.contract_list())
     }
 
     fn meters(&self) -> Vec<MeterInfo> {
@@ -227,8 +349,7 @@ impl Energy {
 
     /// Rows priced by the dated contracts, when there are some: each hour
     /// at the contract of its day (a meter with its own price keeps it).
-    fn priced(&self, mut rows: Vec<HourRow>) -> Vec<HourRow> {
-        let contracts = &self.inner.contracts;
+    fn priced(&self, contracts: &Contracts, mut rows: Vec<HourRow>) -> Vec<HourRow> {
         if contracts.is_empty() {
             return rows;
         }
@@ -276,8 +397,9 @@ impl Energy {
         let store = Arc::clone(&self.inner.store);
         let (rows, since) =
             blocking(move || Ok((store.hours(from, tomorrow)?, store.first_hour()?))).await?;
-        let rows = self.priced(rows);
-        let (config, contracts) = (&self.inner.config, &self.inner.contracts);
+        let contracts = &self.contracts();
+        let rows = self.priced(contracts, rows);
+        let config = &self.inner.config;
         let month_period = Period::of(config, contracts, &rows, month, month_end);
         // The tariff point's period, else the contract's.
         let (period, price_now) = match self.period_now() {
@@ -327,7 +449,8 @@ impl Energy {
             return Err(EnergyError::Invalid("`to` must be after `from`".into()));
         }
         let store = Arc::clone(&self.inner.store);
-        let rows = self.priced(blocking(move || store.hours(from, to)).await?);
+        let contracts = self.contracts();
+        let rows = self.priced(&contracts, blocking(move || store.hours(from, to)).await?);
         let config = &self.inner.config;
         Ok(Report {
             step,
@@ -336,15 +459,7 @@ impl Energy {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
             meters: self.meters(),
-            buckets: report::buckets(
-                config,
-                &self.inner.contracts,
-                &rows,
-                from,
-                to,
-                step,
-                &self.inner.tz,
-            )?,
+            buckets: report::buckets(config, &contracts, &rows, from, to, step, &self.inner.tz)?,
         })
     }
 }
