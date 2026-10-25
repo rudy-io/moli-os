@@ -22,3 +22,10 @@
   essayés d'abord par une sonde avec quelqu'un devant le poêle (de la veille à éteint en 12 s,
   puis rallumé) ; seulement depuis éteint, jamais pendant l'extinction ni en alarme ; l'ordre
   d'un agent attend un humain (point de machine).
+- Alarme : `alarms_get` (position 51) a sur la carte du Camelia Metal Air le masque `0x801e`,
+  qui efface trois de ses propres codes (1 = A09, 32 = A03, 64 = A05) ; les cartes MCZ de
+  l'intégration Home Assistant `aguaiot` disent `0xffff` pour les mêmes mots. Moli lit donc le
+  registre avec les bits de ses mots. Vu sur un vrai poêle : état « MEM. ALARM » avec une alarme
+  lue « OK ». Réarmement à distance : rien de connu pour cette carte (l'application ne propose
+  pas Arrêt en alarme d'après `status_managed_off_enable` des cartes MCZ ; py-agua-iot n'en a
+  pas) ; à prouver sur un vrai poêle avant de l'offrir.

@@ -99,6 +99,15 @@
   }
 
   const page = $derived(route.split('/')[0] ?? '');
+  /** The device a route points at (`chauffage/<id>`), or null. */
+  function focusOf(r) {
+    const part = r.split('/')[1];
+    try {
+      return part ? decodeURIComponent(part) : null;
+    } catch {
+      return null;
+    }
+  }
 </script>
 
 <div class="maison" data-theme={theme}>
@@ -143,7 +152,8 @@
     {:else if page === 'pieces'}
       <Pieces />
     {:else if page === 'chauffage'}
-      <Pieces only="chauffage" />
+      <!-- `#/chauffage/<device>`: that unit's card open (a stove's alarm, from the home page). -->
+      <Pieces only="chauffage" focus={focusOf(route)} />
     {:else if page === 'fenetres'}
       <Pieces only="fenetres" />
     {:else if page === 'plan'}

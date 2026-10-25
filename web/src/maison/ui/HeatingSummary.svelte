@@ -55,7 +55,13 @@
         detail: run ? t('maison.accueil.chauffage.programme_jusqua', { time: hhmm(run.end) }) : t('commun.piece.mode.programme'),
       };
     }
-    return { ...base, tone: mode === 'alarm' || mode === 'mem_alarm' ? 'alert' : toneOf(mode), detail: target };
+    // In alarm: the short word in the chip (its column is fixed), the rest and the code below.
+    if (mode === 'alarm' || mode === 'mem_alarm') {
+      const code = value(d.id, 'alarm');
+      const what = [mode === 'mem_alarm' ? t('commun.poele.alarme_memorisee') : null, code && code !== 'OK' ? code : null].filter(Boolean);
+      return { ...base, word: t('commun.poele.alarme'), tone: 'alert', detail: what.join(' · ') || target };
+    }
+    return { ...base, tone: toneOf(mode), detail: target };
   }
   const toneOf = (mode) => (mode === 'eco' || mode === 'stand_by' ? 'good' : WARM.includes(mode) ? 'warm' : COOL.includes(mode) ? 'cool' : 'off');
   // A program's order in the words of the modes (comfort, eco…).
@@ -70,6 +76,9 @@
   const orderWord = (order) => (ORDERS[order] ? t(ORDERS[order]) : order);
 
   const lines = $derived(units.map(line));
+  // A stove in alarm: the card leads to it, at its alarm.
+  const alarmed = $derived(units.find((d) => climateIcon(d) === 'stove' && ['alarm', 'mem_alarm'].includes(value(d.id, 'mode'))));
+  const href = $derived(alarmed ? `#/chauffage/${encodeURIComponent(alarmed.id)}` : '#/chauffage');
   // « 4 en Éco · 3 en Confort »: the house's heating in one sentence.
   const tally = $derived.by(() => {
     const by = new Map();
@@ -82,7 +91,7 @@
 </script>
 
 {#if units.length}
-  <a class="card heating" href="#/chauffage" aria-label={t('maison.accueil.chauffage.detail')}>
+  <a class="card heating" {href} aria-label={t('maison.accueil.chauffage.detail')}>
     <div class="card-head">
       <h2><Icon name="radiator" size={18} />{t('maison.accueil.chauffage.titre')}</h2>
       <span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span>

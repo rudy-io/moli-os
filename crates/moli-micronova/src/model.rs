@@ -486,6 +486,37 @@ impl Map {
         (!out.is_empty()).then(|| Json::Array(out).to_string())
     }
 
+    /// The alarm, as the board names it (`OK`, `A05`), else its number.
+    /// Some maps mask the register so that it hides some of its own codes
+    /// (a Camelia Metal Air's `0x801e` hides A09, A03 and A05: 1, 32, 64;
+    /// other MCZ maps say `0xffff` for the same words): it is read with
+    /// their bits too, then with them alone if the rest names nothing.
+    #[must_use]
+    pub fn alarm(&self, reading: &Reading) -> Option<String> {
+        let r = self.get(ALARM)?;
+        let raw = *reading.get(&r.offset)?;
+        let words = r
+            .enc_val
+            .iter()
+            .filter(|w| w.lang == "ENG")
+            .filter_map(|w| w.value.as_i64())
+            .fold(0, |bits, v| bits | (v & 0xFFFF));
+        let formula = r.formula.as_deref().unwrap_or("#");
+        #[allow(clippy::cast_precision_loss)]
+        let calc = |raw: i64| calc(formula, raw as f64);
+        let word = |raw: i64| {
+            let v = calc(raw)?;
+            r.enc_val
+                .iter()
+                .find(|w| w.lang == "ENG" && w.value.as_f64() == Some(v))
+                .map(|w| w.description.trim().to_owned())
+        };
+        let read = raw & (i64::from(r.mask) | words);
+        word(read)
+            .or_else(|| word(read & words))
+            .or_else(|| calc(read).map(|v| format!("{v}")))
+    }
+
     /// The stove's clock, as it keeps it: `2026-10-24T01:58` (its own time,
     /// the one its programs follow), or `None` if it makes no sense.
     #[must_use]
@@ -628,13 +659,8 @@ impl Map {
                 out.push(((*key).into(), Value::Float(v)));
             }
         }
-        if self.get(ALARM).is_some() {
-            let alarm = self
-                .word(ALARM, reading)
-                .or_else(|| self.value(ALARM, reading).map(|v| format!("{v}")));
-            if let Some(alarm) = alarm {
-                out.push(("alarm".into(), Value::Text(alarm.into())));
-            }
+        if let Some(alarm) = self.alarm(reading) {
+            out.push(("alarm".into(), Value::Text(alarm.into())));
         }
         if let Some(v) = self.value(ECO_STOP, reading) {
             out.push(("eco_stop".into(), Value::Bool(v != 0.0)));
@@ -979,6 +1005,33 @@ mod tests {
             programs[5],
             serde_json::json!({ "on": false, "start": 0, "stop": 0, "days": [] })
         );
+    }
+
+    #[test]
+    fn an_alarm_says_its_code_even_where_the_map_masks_it() {
+        // The map's mask (0x801e) hides 1, 32 and 64, its own A09, A03, A05.
+        let (map, mut reading) = camelia();
+        let alarm = map.get(ALARM).unwrap().offset;
+        for (raw, code) in [
+            (0, "OK"),
+            (1, "A09"),
+            (2, "A04"),
+            (4, "A08"),
+            (8, "A01"),
+            (16, "A02"),
+            (32, "A03"),
+            (64, "A05"),
+            // Its high bit set too (the mask keeps it): the code still.
+            (0x8000 | 64, "A05"),
+        ] {
+            reading.insert(alarm, raw);
+            assert_eq!(map.alarm(&reading).as_deref(), Some(code), "raw {raw}");
+        }
+        // Two at once: no word, the number.
+        reading.insert(alarm, 3);
+        assert_eq!(map.alarm(&reading).as_deref(), Some("3"));
+        reading.remove(&alarm);
+        assert_eq!(map.alarm(&reading), None, "not read: nothing said");
     }
 
     fn w(offset: u32, mask: u32, raw: i64) -> Write {

@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, stoveAsked, sensorIcon, climateState, modeWord } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -14,8 +15,9 @@
    *  what it senses as chips (one line per sensor, chips after its name,
    *  when two or more sensors read something). `icons`: pads show an icon only (names on
    *  hover and for screen readers). `every`: each sensor shows, even
-   *  silent (filtered view). */
-  let { room, every = false, icons = false } = $props();
+   *  silent (filtered view). `focus`: a clim of the room to open and
+   *  scroll to, at its alarm if it has one (the home page's notice). */
+  let { room, every = false, icons = false, focus = null } = $props();
 
   const locked = $derived(protectedRoom(room.name));
 
@@ -179,6 +181,19 @@
   }
 
   let openClim = $state(null);
+  // Once per link: the room's devices are read again at each reading, the
+  // card must not open again (nor the page scroll) every minute.
+  let focused = null;
+  $effect(() => {
+    if (!focus || focused === focus || !room.climates.some((d) => d.id === focus)) return;
+    focused = focus;
+    openClim = focus;
+    // Once open: its alarm block if it shows one, else its line.
+    tick().then(() => {
+      const at = document.getElementById(`alarme-${focus}`) ?? document.getElementById(`clim-${focus}`);
+      at?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
 
   // A stove Moli switches has its button on its line too, as on its card:
   // lit from off only, put out unless already going out (its driver says why).
@@ -255,7 +270,7 @@
   {#each room.climates as d (d.id)}
     {@const on = climateOn(d)}
     {@const setpoint = setpointOf(d.id)}
-    <div class="clim-row">
+    <div class="clim-row" id="clim-{d.id}">
       <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
         <Icon name={climateIcon(d)} size={18} />
         <b>{nameOf(d.id)}</b>

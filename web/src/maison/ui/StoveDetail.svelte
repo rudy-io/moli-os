@@ -3,6 +3,7 @@
   import { dayName } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import StoveAlarm from './StoveAlarm.svelte';
 
   // A pellet stove's settings and programs (Micronova), set from here when
   // the stove lets Moli (switched on and off from its card). A program only
@@ -16,9 +17,8 @@
   const burning = $derived(value(id, 'mode') === 'on');
   const real = $derived(value(id, 'real_power'));
   const flue = $derived(value(id, 'flue_temperature'));
-  const alarm = $derived(value(id, 'alarm'));
   // What it is doing, said in a sentence: a flame, eco-stop (on, no flame),
-  // lighting, shutting down, or off. An alarm says its code below.
+  // lighting, shutting down, or off. An alarm has its own block, first.
   const PHASES = {
     ignition: 'commun.poele.phase_allumage',
     awaiting_flame: 'commun.poele.phase_allumage',
@@ -165,6 +165,7 @@
 </script>
 
 <div class="stove">
+  <StoveAlarm {id} {name} />
   {#if phase}
     <p class="phase">{t(phase, { temp: num(value(id, 'target_temperature')) })}</p>
   {/if}
@@ -241,9 +242,6 @@
   </dl>
   {#if ecoStop && can('eco_stop') && value(id, 'mode') !== 'stand_by'}
     <p class="muted">{t('commun.poele.eco_stop_aide')}</p>
-  {/if}
-  {#if alarm && alarm !== 'OK'}
-    <p class="warn"><Icon name="alert" size={16} />{t('commun.poele.alarme_code', { code: alarm })}</p>
   {/if}
   {#if stoveTime && Math.abs(drift) > 5}
     <p class="warn">

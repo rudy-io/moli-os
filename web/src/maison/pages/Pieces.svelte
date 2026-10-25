@@ -16,8 +16,9 @@
   import { t } from '../../lib/i18n.svelte.js';
 
   /** `only`: one kind of device, the page then shows it alone, room by room
-   *  (the Heating and Windows pages), with no chips to choose. */
-  let { only = null } = $props();
+   *  (the Heating and Windows pages), with no chips to choose. `focus`: a
+   *  device whose card opens, scrolled to (a stove's alarm, from home). */
+  let { only = null, focus = null } = $props();
 
   // [title, subtitle, nothing to show] for each page.
   const TEXTS = {
@@ -122,7 +123,7 @@
       {/if}
       <div class="rooms">
         {#each floor.rooms as room (room.name)}
-          <div class="slot"><RoomCard {room} every={kept.includes('capteurs')} icons={look === 'icons'} /></div>
+          <div class="slot"><RoomCard {room} every={kept.includes('capteurs')} icons={look === 'icons'} {focus} /></div>
         {/each}
       </div>
     </section>
