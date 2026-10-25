@@ -330,11 +330,13 @@
     padding: 8px 0;
   }
 
+  /* Every page the same width at most, centred on a wide screen. */
   .content {
-    padding: 28px 36px 120px 8px;
+    padding: 28px 36px 120px;
     max-width: 1440px;
     width: 100%;
     min-width: 0;
+    margin-inline: auto;
   }
 
   /* Moli, always one tap away. */

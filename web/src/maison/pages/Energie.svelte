@@ -761,13 +761,27 @@
 
   /* Where it went: name, bar, kWh and euros on one line. */
   .where li {
-    grid-template-columns: minmax(110px, 1.1fr) 2fr auto 62px;
+    grid-template-columns: minmax(110px, 1.1fr) 2fr auto 58px;
     gap: 4px 12px;
+  }
+
+  /* A notch smaller than the other lists: long names, four columns. */
+  .where .name {
+    font-size: 13px;
+  }
+
+  .where .name small {
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .where li b {
+    font-size: 13px;
   }
 
   .bars .cost {
     justify-self: end;
-    font-size: 12.5px;
+    font-size: 12px;
   }
 
   /* Off-peak (blue) then peak (orange), as the contract split its hours. */

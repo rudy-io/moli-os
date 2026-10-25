@@ -21,31 +21,36 @@
   const twoRows = $derived(marks.some((m) => m.row));
 </script>
 
-<div class="strip" role="img" aria-label={label || t('energie.journee_tarif.aria')}>
+<!-- Bar, stems and times all placed on the same width, in the same box:
+     a stem falls exactly on the edge of its blue stretch. -->
+<div class="strip" class:two={twoRows} role="img" aria-label={label || t('energie.journee_tarif.aria')}>
   <div class="track">
     {#each pieces as p, i (i)}<i class="off" style:left="{p.left}%" style:width="{p.width}%"></i>{/each}
-    {#each [6, 12, 18] as h (h)}<b class="hour" style:left="{(h / 24) * 100}%"></b>{/each}
-    {#if now != null}<span class="now" style:left="{(now / DAY) * 100}%"></span>{/if}
   </div>
-  <div class="marks" class:two={twoRows}>
-    {#each marks as m (m.text)}
-      <span class="mark num" class:low={m.row} class:start={m.at < 0.04} class:end={m.at > 0.96} style:left="{m.at * 100}%">{m.text}</span>
-    {/each}
-  </div>
+  {#if now != null}<span class="now" style:left="{(now / DAY) * 100}%"></span>{/if}
+  {#each marks as m (m.text)}
+    <b class="stem" class:low={m.row} style:left="{m.at * 100}%"></b>
+    <span class="mark num" class:low={m.row} class:start={m.at < 0.04} class:end={m.at > 0.96} style:left="{m.at * 100}%">{m.text}</span>
+  {/each}
 </div>
 
 <style>
   .strip {
-    display: grid;
-    gap: 3px;
+    position: relative;
+    height: 32px;
+  }
+
+  .strip.two {
+    height: 47px;
   }
 
   .track {
-    position: relative;
+    position: absolute;
+    inset: 0 0 auto;
     height: 10px;
     border-radius: 3px;
     background: var(--warm);
-    overflow: visible;
+    overflow: hidden;
   }
 
   .off {
@@ -55,21 +60,11 @@
     background: var(--cool);
   }
 
-  /* 6 h, noon, 18 h: faint notches to read the day by. */
-  .hour {
-    position: absolute;
-    top: 2px;
-    bottom: 2px;
-    width: 1px;
-    background: var(--surface);
-    opacity: 0.55;
-  }
-
   /* Now: a dark tick across the strip, ringed with the card's colour. */
   .now {
     position: absolute;
     top: -4px;
-    bottom: -4px;
+    height: 18px;
     width: 3px;
     border-radius: 2px;
     background: var(--ink);
@@ -77,59 +72,42 @@
     transform: translateX(-50%);
   }
 
-  .marks {
-    position: relative;
-    height: 15px;
-    font-size: 11px;
-    font-weight: 650;
-    color: var(--ink-2);
+  /* A stem from the edge of the bar down to its time, centred on the
+     change (2 px wide, half each side of it). */
+  .stem {
+    position: absolute;
+    top: 10px;
+    width: 2px;
+    height: 5px;
+    margin-left: -1px;
+    background: var(--ink-3);
   }
 
-  .marks.two {
-    height: 29px;
+  .stem.low {
+    height: 20px;
+    opacity: 0.6;
   }
 
   .mark {
     position: absolute;
-    top: 0;
+    top: 15px;
     transform: translateX(-50%);
     white-space: nowrap;
+    font-size: 11px;
+    font-weight: 650;
     line-height: 15px;
-  }
-
-  /* A thin stem joins a label to its change. */
-  .mark::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -3px;
-    width: 1px;
-    height: 3px;
-    background: var(--ink-3);
+    color: var(--ink-2);
   }
 
   .mark.low {
-    top: 14px;
-  }
-
-  /* On the second row, the change on the strip just above says where. */
-  .mark.low::before {
-    display: none;
+    top: 30px;
   }
 
   .mark.start {
-    transform: none;
-  }
-
-  .mark.start::before {
-    left: 0;
+    transform: translateX(-1px);
   }
 
   .mark.end {
-    transform: translateX(-100%);
-  }
-
-  .mark.end::before {
-    left: 100%;
+    transform: translateX(calc(-100% + 1px));
   }
 </style>
