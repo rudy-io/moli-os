@@ -6,7 +6,10 @@
 - Connexion : `POST /oauth2/token` (`grant_type=password`, l'identifiant client public de
   l'application, `user_prefix=velux`, `scope=velux_scopes`) ; puis, avec le jeton,
   `POST /api/homesdata` (les modules, une fois) et `POST /api/homestatus` (`home_id` ; l'état,
-  chaque minute).
+  chaque minute). Le jeton dure 3 h : il est renouvelé par `grant_type=refresh_token` (le
+  `refresh_token` de la réponse, rangé au coffre sous `refresh_token`, redémarrages compris),
+  comme le fait l'application ; le mot de passe ne sert plus que si le cloud refuse ce jeton.
+  Chaque connexion par mot de passe envoie un e-mail « nouvelle connexion » au compte.
 - Modules : `NXG` passerelle (pluie `is_raining`, mode départ `locked`), `NXO` fenêtre, store ou
   volet (`velux_type` : `window`, `blind`, `shutter`… ; `current_position` et
   `target_position`, 0 fermé à 100 ouvert), `NXS` capteur de climat (ses mesures sont celles de

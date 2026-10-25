@@ -1,7 +1,9 @@
 //! VELUX ACTIVE (KIX 300 gateway): roof windows, blinds and shutters, the
 //! indoor climate sensor and the departure switch, through the cloud the
 //! VELUX ACTIVE app uses: the household's account, e-mail and password from
-//! the vault (`moli-os secrets set <instance> email`, then `password`). The
+//! the vault (`moli-os secrets set <instance> email`, then `password`),
+//! used once: the refresh token the cloud then gives is kept in the vault
+//! (`refresh_token`) and renews the access, restarts included. The
 //! modules are listed once, their state read every minute, and every few
 //! seconds after an order while something moves. Blinds and shutters obey
 //! as they are; roof windows only with the key the gateway gave when its
@@ -150,6 +152,19 @@ fn show_plan(ctx: &DriverCtx, home: &Home, plan: Option<&Schedule>) {
     );
 }
 
+/// Where the vault keeps the refresh token.
+const REFRESH: &str = "refresh_token";
+
+/// A new refresh token, filed in the vault (else the next start logs in
+/// with the password, and the account gets an e-mail).
+async fn keep_refresh(ctx: &DriverCtx, cloud: &mut Cloud) {
+    if let Some(token) = cloud.unsaved_refresh()
+        && let Err(e) = ctx.store_secret(REFRESH, &token).await
+    {
+        tracing::warn!(error = %e, "velux: refresh token not kept");
+    }
+}
+
 /// A read, logging in again once when the token is gone.
 macro_rules! fresh {
     ($cloud:ident, $email:ident, $password:ident, $read:expr) => {{
@@ -168,8 +183,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let Some((email, password)) = credentials(ctx).await else {
         return Ok(());
     };
-    let mut cloud = Cloud::new(&config.host);
+    let mut cloud = Cloud::new(&config.host, ctx.secret(REFRESH));
     cloud.login(&email, &password).await?;
+    keep_refresh(ctx, &mut cloud).await;
     let data = fresh!(cloud, email, password, cloud.home())?;
     let home = Home::parse(&data).ok_or_else(|| anyhow::anyhow!("VELUX: unreadable home"))?;
     // The first state says which points each module has (a battery or not).
@@ -194,6 +210,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let (mut soon, mut still) = (0u8, 0u8);
     let mut plan_at = tokio::time::Instant::now() + PLAN_EVERY;
     loop {
+        keep_refresh(ctx, &mut cloud).await;
         tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };

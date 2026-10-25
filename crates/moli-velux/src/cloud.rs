@@ -1,6 +1,8 @@
 //! The VELUX ACTIVE cloud, as its app speaks to it (a Netatmo server): a
 //! person logs in (e-mail and password, from the vault, with the app's own
-//! public client id), then the home's modules (`api/homesdata`) and their
+//! public client id) once, then the token is renewed with the refresh token
+//! the cloud gave (as the app does: no « new sign-in » e-mail to the
+//! account each time), then the home's modules (`api/homesdata`) and their
 //! state (`api/homestatus`), forms in, JSON out, over HTTPS. Orders go to
 //! `syncapi/v1/setstate`, JSON both ways; a refusal can come with HTTP 200,
 //! as a list of errors in the answer.
@@ -38,15 +40,32 @@ pub struct Refused(pub String);
 pub struct Cloud {
     host: String,
     token: Option<(String, tokio::time::Instant)>,
+    /// What renews the token without the password; kept in the vault
+    /// across restarts.
+    refresh: Option<String>,
+    /// A refresh token the vault does not have yet.
+    unsaved: bool,
 }
 
 impl Cloud {
+    /// `refresh`: the refresh token the vault kept, if any.
     #[must_use]
-    pub fn new(host: &str) -> Self {
+    pub fn new(host: &str, refresh: Option<String>) -> Self {
         Self {
             host: host.to_owned(),
             token: None,
+            refresh,
+            unsaved: false,
         }
+    }
+
+    /// The refresh token, once, when the cloud gave a new one the vault
+    /// should keep.
+    pub fn unsaved_refresh(&mut self) -> Option<String> {
+        if !std::mem::take(&mut self.unsaved) {
+            return None;
+        }
+        self.refresh.clone()
     }
 
     async fn post(&self, path: &str, form: &[(&str, &str)]) -> anyhow::Result<(StatusCode, Json)> {
@@ -108,34 +127,71 @@ impl Cloud {
         }
     }
 
-    /// Logs the person in, as the app does.
+    /// Logs in again: with the refresh token when there is one (no e-mail
+    /// to the account), with the password when there is none or the cloud
+    /// refuses it (password changed, token revoked). A network failure is
+    /// not a refusal: the password is not tried for it.
     pub async fn login(&mut self, email: &str, password: &str) -> anyhow::Result<()> {
-        self.token = None;
-        let (status, answer) = self
-            .post(
-                "/oauth2/token",
-                &[
-                    ("grant_type", "password"),
+        if let Some(refresh) = self.refresh.clone() {
+            let renewed = self
+                .grant(&[
+                    ("grant_type", "refresh_token"),
+                    ("refresh_token", &refresh),
                     ("client_id", CLIENT_ID),
                     ("client_secret", CLIENT_SECRET),
-                    ("app_version", APP_VERSION),
-                    ("username", email),
-                    ("password", password),
-                    ("user_prefix", "velux"),
-                    ("scope", "velux_scopes"),
-                ],
-            )
+                ])
+                .await?;
+            if renewed.is_ok() {
+                return Ok(());
+            }
+            tracing::info!("velux: refresh token refused, logging in with the password");
+            self.refresh = None;
+        }
+        let logged = self
+            .grant(&[
+                ("grant_type", "password"),
+                ("client_id", CLIENT_ID),
+                ("client_secret", CLIENT_SECRET),
+                ("app_version", APP_VERSION),
+                ("username", email),
+                ("password", password),
+                ("user_prefix", "velux"),
+                ("scope", "velux_scopes"),
+            ])
             .await?;
-        if status != StatusCode::OK {
+        if let Err(status) = logged {
             bail!(moli_i18n::tr!(
                 "pilotes.velux.connexion_refusee",
                 status = status.as_u16()
             ));
         }
+        Ok(())
+    }
+
+    /// Asks the cloud for a token; `Err(status)` when it says no.
+    async fn grant(&mut self, form: &[(&str, &str)]) -> anyhow::Result<Result<(), StatusCode>> {
+        self.token = None;
+        let (status, answer) = self.post("/oauth2/token", form).await?;
+        if status != StatusCode::OK {
+            tracing::warn!(status = status.as_u16(), "velux: token refused");
+            return Ok(Err(status));
+        }
+        self.keep(&answer)?;
+        Ok(Ok(()))
+    }
+
+    /// The token the cloud gave, and its refresh token when it changed.
+    fn keep(&mut self, answer: &Json) -> anyhow::Result<()> {
         let token = answer["access_token"].as_str().context("VELUX: no token")?;
         let lasts = Duration::from_secs(answer["expires_in"].as_u64().unwrap_or(10_800));
         let until = tokio::time::Instant::now() + lasts.saturating_sub(MARGIN);
         self.token = Some((token.to_owned(), until));
+        if let Some(refresh) = answer["refresh_token"].as_str()
+            && self.refresh.as_deref() != Some(refresh)
+        {
+            self.refresh = Some(refresh.to_owned());
+            self.unsaved = true;
+        }
         Ok(())
     }
 
@@ -310,7 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_token_is_logged_out() {
-        let cloud = Cloud::new("app.example.com");
+        let cloud = Cloud::new("app.example.com", None);
         let e = cloud.home().await.unwrap_err();
         assert!(e.is::<LoggedOut>());
         let e = cloud
@@ -318,6 +374,21 @@ mod tests {
             .await
             .unwrap_err();
         assert!(e.is::<LoggedOut>(), "no order sent without a token");
+    }
+
+    #[tokio::test]
+    async fn a_new_refresh_token_is_kept_once() {
+        use serde_json::json;
+        let mut cloud = Cloud::new("app.example.com", Some("old".into()));
+        let answer = json!({ "access_token": "a", "refresh_token": "old", "expires_in": 10800 });
+        cloud.keep(&answer).unwrap();
+        assert!(cloud.logged_in());
+        assert_eq!(cloud.unsaved_refresh(), None, "the vault has it already");
+        let answer = json!({ "access_token": "b", "refresh_token": "new", "expires_in": 10800 });
+        cloud.keep(&answer).unwrap();
+        assert_eq!(cloud.unsaved_refresh().as_deref(), Some("new"));
+        assert_eq!(cloud.unsaved_refresh(), None, "said once");
+        assert!(cloud.keep(&json!({ "error": "invalid_grant" })).is_err());
     }
 
     #[test]
