@@ -270,6 +270,20 @@ export function deviceKind(d) {
   return 'sensor';
 }
 
+/** A cover's icon: a roof window (opening it is an order a person
+ *  approves, rain and all), else a blind or a shutter. */
+export const coverIcon = (d) => (d.points.find((p) => p.key === 'percent_control')?.semantic === 'control' ? 'roof-window' : 'shutter');
+
+/** A sensor's icon, from what it senses. */
+export function sensorIcon(d) {
+  if (has(d, 'smoke')) return 'fire';
+  if (has(d, 'water_leak') || has(d, 'watersensor_state')) return 'water';
+  if (has(d, 'contact') || has(d, 'doorcontact_state')) return 'door';
+  if (has(d, 'occupancy') || has(d, 'motion') || has(d, 'pir')) return 'motion';
+  if (has(d, 'temperature') || has(d, 'temp_current')) return 'thermometer';
+  return 'info';
+}
+
 /** A climate device's icon: a pellet stove (it measures its flue), a
  *  heater (a pilot wire, or a week program of its own; a towel dryer in a
  *  bathroom), else a clim. */

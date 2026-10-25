@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove } from '../lib/home.svelte.js';
+  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, sensorIcon } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -11,7 +11,8 @@
   /** One room, compact: its temperature and a switch for its lights in the
    *  head, its lights and plugs as small pads (a ⚙ opens a lamp's dimmer,
    *  colours, fan), its clims as one line each (a tap opens the dial), and
-   *  what it senses as chips. `icons`: pads show an icon only (names on
+   *  what it senses as chips (one line per sensor, chips after its name,
+   *  when two or more sensors read something). `icons`: pads show an icon only (names on
    *  hover and for screen readers). `every`: each sensor shows, even
    *  silent (filtered view). */
   let { room, every = false, icons = false } = $props();
@@ -65,7 +66,12 @@
     return out;
   }
 
-  const sensorChips = $derived(room.sensors.flatMap(chips));
+  // Two sensors or more reading something: each on its line, its name in
+  // front of its readings (a room's two thermometers no longer mix). What
+  // else senses (a plug drawing, a camera, a printer) says its own name.
+  const readers = $derived(room.sensors.filter((d) => deviceKind(d) === 'sensor' && !quiet(d.id) && chips(d).length));
+  const apart = $derived(readers.length >= 2 ? readers : []);
+  const sensorChips = $derived(room.sensors.filter((d) => !apart.includes(d)).flatMap(chips));
   const lamps = $derived(lampsOf(room));
   let showLooks = $state(false);
 
@@ -293,6 +299,18 @@
     {#if openClim === d.id}
       <ClimateCard id={d.id} name={nameOf(d.id)} />
     {/if}
+  {/each}
+
+  {#each apart as d (d.id)}
+    <div class="sensor-row">
+      <span class="bubble"><Icon name={sensorIcon(d)} size={16} /></span>
+      <b>{nameOf(d.id)}</b>
+      <span class="chips">
+        {#each chips(d) as c, i (i)}
+          <span class="chip {c.tone}"><Icon name={c.icon} size={14} />{c.text}</span>
+        {/each}
+      </span>
+    </div>
   {/each}
 
   {#if sensorChips.length}
@@ -666,5 +684,51 @@
 
   .chips a {
     text-decoration: none;
+  }
+
+  /* A sensor's line, as a heater's: its bubble, its name, its readings
+     under the name. */
+  .sensor-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 8px 12px 8px 8px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+
+  .bubble {
+    grid-row: span 2;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface);
+    color: var(--ink-3);
+  }
+
+  .sensor-row b {
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sensor-row .chips {
+    gap: 5px;
+  }
+
+  .sensor-row .chip {
+    padding: 3px 9px;
+    font-size: 12.5px;
+  }
+
+  /* A plain chip on the line's grey stays visible. */
+  .sensor-row .chip:not(.warm, .cool, .alert, .good) {
+    background: var(--surface);
   }
 </style>

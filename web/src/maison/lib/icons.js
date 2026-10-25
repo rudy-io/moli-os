@@ -214,10 +214,12 @@ export const icons = {
   phone: mdiCellphone,
   'air-conditioner': mdiAirConditioner,
   // Drawn here (none in the set): a radiator without heat waves, on or
-  // not; a towel dryer's ladder, for a bathroom.
+  // not; a towel dryer's ladder, for a bathroom; a roof window, its four
+  // panes seen up the slope.
   radiator: 'M3 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM7 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM11 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM15 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM19 5.3a1.3 1.3 0 0 1 2.6 0v13.4a1.3 1.3 0 0 1-2.6 0ZM3 6.2h18.6v1.5H3ZM3 16.3h18.6v1.5H3ZM4 19h1.6v2H4ZM19 19h1.6v2H19Z',
   'towel-dryer': 'M4.5 3.5a1 1 0 0 1 2 0v17a1 1 0 0 1-2 0ZM17.5 3.5a1 1 0 0 1 2 0v17a1 1 0 0 1-2 0ZM4.5 4.8h15v1.5h-15ZM4.5 7.4h15v1.5h-15ZM4.5 10h15v1.5h-15ZM4.5 13.4h15v1.5h-15ZM4.5 16h15v1.5h-15ZM4.5 18.6h15v1.5h-15Z',
   stove: mdiFireplace,
+  'roof-window': 'M6 2.5H18L21.5 21.5H2.5ZM7.9 4.6 5.1 19.4H18.9L16.1 4.6ZM11.25 4.6H12.75V19.4H11.25ZM6.65 11.2H17.35L17.61 12.6H6.39Z',
   alert: mdiAlertCircleOutline,
   'arrow-top-right': mdiArrowTopRight,
   'bed-king-outline': mdiBedKingOutline,
