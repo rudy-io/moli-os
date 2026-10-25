@@ -1,7 +1,8 @@
 <script>
-  // « Je pars »: every heater to eco, whatever it was doing, each one's
-  // setting kept by Moli; « Je suis rentré » puts each back as it was. Kept
-  // on the server: the return works from any phone, after any restart.
+  // « Je pars »: every heater that runs to eco (a stopped one stays
+  // stopped), each one's setting kept by Moli; « De retour » puts each back
+  // as it was. Anyone of the house, without the code; kept on the server:
+  // the return works from any phone, after any restart.
   import { onMount } from 'svelte';
   import { home, note, nameOf, clock } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
@@ -29,7 +30,7 @@
         body: JSON.stringify({ away }),
       });
       const body = await res.json().catch(() => ({}));
-      // The bedrooms' heaters are among them: the house's code, once.
+      // A dashboard that asks for the code everywhere (`dashboard = "pin"`).
       if (res.status === 403) {
         home.held = { label: t(away ? 'commun.depart.label_part' : 'commun.depart.label_rentre'), reason: body.error, custom: () => go(away) };
         return;

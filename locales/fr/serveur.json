@@ -46,7 +46,7 @@
   "serveur.plan.trop_d_appareils": "{max} appareils au plus par étage",
   "serveur.plan.etage_sans_taille": "« {name} » : un étage dessiné a une taille (size, en cm)",
   "serveur.plan.placement_invalide": "placement invalide pour {id}",
-  "serveur.chauffage.humain_part": "seule une personne (code) met la maison en départ ou la fait revenir",
+  "serveur.chauffage.humain_part": "seul le tableau de bord de la maison met la maison en départ ou la fait revenir (pas un agent, pas un invité)",
 
   "serveur.code.proprietaire_seul": "seul le propriétaire de la maison (connecté par Cloudflare Access) choisit le code",
   "serveur.code.actuel_d_abord": "le code actuel d'abord",

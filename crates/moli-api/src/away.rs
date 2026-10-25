@@ -2,15 +2,18 @@
 //! doing, and « Je suis rentré », each one put back as it was.
 //!
 //! - `GET`: `{ "away": bool, "since": ms | null, "heaters": n }`.
-//! - `POST {"away": true}`: a person (PIN session: the bedrooms' heaters are
-//!   among them) leaves. Each heater's switch and mode are kept in
-//!   `<data>/heating-away.json` first, then it is switched on (a stopped one
-//!   too) and set to eco. Leaving again keeps what was kept the first time.
-//! - `POST {"away": false}`: each heater gets its mode back, then its switch;
-//!   one that did not take it stays in the file, for another try.
+//! - `POST {"away": true}`: anyone of the house leaves, from the dashboard,
+//!   without the code. Each heater's switch and mode are kept in
+//!   `<data>/heating-away.json` first, then each one running is set to eco;
+//!   a stopped one is left stopped. Leaving again keeps what was kept the
+//!   first time.
+//! - `POST {"away": false}`: each heater gets its mode back; one that did
+//!   not take it stays in the file, for another try.
 //!
 //! A heater: a pilot-wire module (`device_mode_type`) whose `mode` takes
-//! `eco`. Every order goes through the hub (guard, journal).
+//! `eco`. The orders are Moli's own (`system`): a fixed scene, eco and back,
+//! that the family runs in every room, bedrooms too, without the code; an
+//! agent or a guest may not run it. Each order is journaled with who asked.
 
 use std::path::Path as FsPath;
 use std::sync::Arc;
@@ -79,34 +82,25 @@ fn heaters(devices: &[DeviceView]) -> Vec<Kept> {
         .collect()
 }
 
-/// Leaving: switched on first (a stopped heater takes no mode), then eco.
+/// Leaving: eco, for a heater that runs; a stopped one stays stopped.
 fn leave_orders(now: &Kept) -> Orders {
-    let mut orders = Vec::new();
-    if now.on == Some(false) {
-        orders.push(("on", Value::Bool(true)));
+    if now.on == Some(false) || now.mode.as_deref() == Some(ECO) {
+        return Vec::new();
     }
-    if now.mode.as_deref() != Some(ECO) {
-        orders.push(("mode", Value::Text(ECO.into())));
-    }
-    orders
+    vec![("mode", Value::Text(ECO.into()))]
 }
 
-/// Back: the mode it had, and its switch as it was; switched on before
-/// the mode, switched off after it.
+/// Back: the mode it had. One stopped when the house was left was not
+/// touched, and is not now.
 fn back_orders(was: &Kept, now: &Kept) -> Orders {
-    let mode = was
-        .mode
+    if was.on == Some(false) {
+        return Vec::new();
+    }
+    was.mode
         .as_ref()
         .filter(|m| now.mode.as_ref() != Some(*m))
-        .map(|m| ("mode", Value::Text(m.as_str().into())));
-    let switch = was
-        .on
-        .filter(|on| now.on != Some(*on))
-        .map(|on| ("on", Value::Bool(on)));
-    match switch {
-        Some(on @ (_, Value::Bool(true))) => [Some(on), mode].into_iter().flatten().collect(),
-        _ => [mode, switch].into_iter().flatten().collect(),
-    }
+        .map(|m| vec![("mode", Value::Text(m.as_str().into()))])
+        .unwrap_or_default()
 }
 
 fn read(dir: &FsPath) -> Option<Away> {
@@ -158,7 +152,7 @@ async fn one(
     for (key, value) in orders {
         let point = PointId::new(&device, key);
         if let Err(e) = hub
-            .command(&point, value, Origin::Ui, Some(actor.to_owned()))
+            .command(&point, value, Origin::System, Some(actor.to_owned()))
             .await
         {
             return Some((device, e.to_string()));
@@ -193,7 +187,10 @@ pub(crate) async fn post(
     headers: HeaderMap,
     Json(body): Json<AwayBody>,
 ) -> Response {
-    if !humans.is_human(&headers, &caller.key) {
+    // The dashboard of the house, a person or not; never an agent, nor a guest.
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    let guest = caller.person.as_ref().is_some_and(crate::people::PersonRef::is_guest);
+    if guest || !matches!(origin, Origin::Ui | Origin::Household) {
         return error(
             StatusCode::FORBIDDEN,
             &moli_i18n::tr!("serveur.chauffage.humain_part"),
@@ -341,34 +338,25 @@ mod tests {
     }
 
     #[test]
-    fn leaving_switches_on_then_eco() {
-        assert_eq!(
-            keys(&leave_orders(&kept(Some(false), Some("program")))),
-            ["on=true", "mode=eco"]
-        );
+    fn leaving_sets_running_heaters_to_eco_only() {
         assert_eq!(
             keys(&leave_orders(&kept(Some(true), Some("comfort")))),
             ["mode=eco"]
         );
+        // Stopped: left stopped.
+        assert!(leave_orders(&kept(Some(false), Some("program"))).is_empty());
         assert!(leave_orders(&kept(Some(true), Some("eco"))).is_empty());
     }
 
     #[test]
-    fn coming_back_puts_mode_and_switch_back() {
+    fn coming_back_puts_the_mode_back() {
         let eco = kept(Some(true), Some("eco"));
-        // Stopped before: its mode, then switched off.
         assert_eq!(
-            keys(&back_orders(&kept(Some(false), Some("program")), &eco)),
-            ["mode=program", "on=false"]
+            keys(&back_orders(&kept(Some(true), Some("program")), &eco)),
+            ["mode=program"]
         );
-        // Switched off while away, on before: switched on first.
-        assert_eq!(
-            keys(&back_orders(
-                &kept(Some(true), Some("comfort")),
-                &kept(Some(false), Some("eco"))
-            )),
-            ["on=true", "mode=comfort"]
-        );
+        // Stopped when the house was left: not touched.
+        assert!(back_orders(&kept(Some(false), Some("program")), &eco).is_empty());
         // Eco before: nothing to do.
         assert!(back_orders(&kept(Some(true), Some("eco")), &eco).is_empty());
         // Unknown before: left as it is.

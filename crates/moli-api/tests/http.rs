@@ -1194,3 +1194,38 @@ async fn an_invited_person_reaches_the_house_from_the_internet() {
     assert_eq!(status, 401);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// « Je pars » is the household's, code or not; an agent may not run it.
+#[tokio::test]
+async fn the_household_leaves_and_comes_back_without_the_code() {
+    let dir = std::env::temp_dir().join(format!("moli-away-http-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let leave = json!({ "away": true });
+    let back = json!({ "away": false });
+
+    // An agent (no dashboard): refused, nothing kept.
+    let (status, body) = request(&addr, "POST", "/api/heating/away", Some(&leave)).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(!dir.join("heating-away.json").exists());
+
+    // The dashboard, without the code: away, then back.
+    let (status, body) = request_with(&addr, "POST", "/api/heating/away", Some(&leave), ui).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"away\":true"), "{body}");
+    assert!(dir.join("heating-away.json").exists());
+    let (status, body) = request(&addr, "GET", "/api/heating/away", None).await;
+    assert_eq!(status, 200);
+    assert!(body.contains("\"away\":true"), "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/heating/away", Some(&back), ui).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"away\":false"), "{body}");
+    assert!(!dir.join("heating-away.json").exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
