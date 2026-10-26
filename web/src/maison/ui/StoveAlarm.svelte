@@ -7,7 +7,9 @@
   // A pellet stove's alarm (Micronova), said for the family: in alarm or
   // stored, its code and what it means, what to look at, when it came and
   // what the stove was doing then. Re-armed here only when the driver says
-  // the stove takes it (`alarm_reset`), else on the stove itself.
+  // the stove takes it (`alarm_reset`), else on the stove itself. Shown
+  // while the stove is in alarm only: its board keeps the last code until
+  // the next lighting, reset or not (past alarms: `StoveAlarms`).
   let { id, name } = $props();
 
   const mode = $derived(value(id, 'mode'));
@@ -16,7 +18,6 @@
     return typeof c === 'string' && c !== 'OK' ? c : null;
   });
   const alarmed = $derived(mode === 'alarm' || mode === 'mem_alarm');
-  const shown = $derived(alarmed || !!code);
   // A code the catalogue explains (the Micronova board's A01…A09), else the code alone.
   const known = (key) => t(key) !== key;
   const meaning = $derived(code && known(`commun.poele.code.${code}`) ? t(`commun.poele.code.${code}`) : null);
@@ -68,7 +69,7 @@
   });
 </script>
 
-{#if shown}
+{#if alarmed}
   <section class="alarm" id="alarme-{id}" aria-labelledby="alarme-{id}-titre">
     <h4 id="alarme-{id}-titre">
       <Icon name="alert" size={18} />
@@ -79,19 +80,17 @@
     {#if began}
       <p class="when">{lighting ? t('commun.poele.alarme_pendant_allumage', { ...when(began), start: clock(lighting) }) : t('commun.poele.alarme_le', when(began))}</p>
     {/if}
-    <p>{mode === 'mem_alarm' ? t('commun.poele.alarme_explique_memorisee') : alarmed ? t('commun.poele.alarme_explique') : t('commun.poele.alarme_explique_code')}</p>
+    <p>{mode === 'mem_alarm' ? t('commun.poele.alarme_explique_memorisee') : t('commun.poele.alarme_explique')}</p>
     {#if advice}
       <p class="advice"><b>{t('commun.poele.alarme_a_regarder')}</b> {advice}</p>
     {/if}
-    {#if alarmed}
-      {#if canReset}
-        <p class="muted">{t('commun.poele.rearmer_aide')}</p>
-        <button class="reset" onclick={reset} disabled={asked} aria-busy={asked}>
-          {#if asked}<span class="busy-ring" aria-hidden="true"></span>{t('commun.poele.rearmement')}{:else}<Icon name="power" size={16} />{t('commun.poele.rearmer')}{/if}
-        </button>
-      {:else}
-        <p class="muted">{t('commun.poele.rearmer_sur_poele')}</p>
-      {/if}
+    {#if canReset}
+      <p class="muted">{t('commun.poele.rearmer_aide')}</p>
+      <button class="reset" onclick={reset} disabled={asked} aria-busy={asked}>
+        {#if asked}<span class="busy-ring" aria-hidden="true"></span>{t('commun.poele.rearmement')}{:else}<Icon name="power" size={16} />{t('commun.poele.rearmer')}{/if}
+      </button>
+    {:else}
+      <p class="muted">{t('commun.poele.rearmer_sur_poele')}</p>
     {/if}
     {#if code}<p class="muted small">{t('commun.poele.alarme_notice')}</p>{/if}
   </section>

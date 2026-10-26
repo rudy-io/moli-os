@@ -4,6 +4,7 @@
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import StoveAlarm from './StoveAlarm.svelte';
+  import StoveAlarms from './StoveAlarms.svelte';
 
   // A pellet stove's settings and programs (Micronova), set from here when
   // the stove lets Moli (switched on and off from its card). A program only
@@ -336,6 +337,7 @@
       {/if}
     </section>
   {/if}
+  <StoveAlarms {id} {name} />
 </div>
 
 <style>

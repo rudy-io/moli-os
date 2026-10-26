@@ -254,7 +254,7 @@
         <strong class="num">{num(wanted, wanted % 1 ? 1 : 0)}<small>°</small></strong>
         <span>{t('commun.clim.consigne')}</span>
       {:else}
-        <strong class="num">{num(temp, 0)}<small>°</small></strong>
+        <strong class="num">{num(temp, temp % 1 ? 1 : 0)}<small>°</small></strong>
         {#if shownTarget != null}<span>{t('commun.clim.consigne_val', { temp: num(shownTarget, shownTarget % 1 ? 1 : 0) })}</span>{/if}
       {/if}
     </div>

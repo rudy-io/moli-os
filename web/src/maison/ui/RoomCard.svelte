@@ -97,6 +97,8 @@
     const readings = sensed.length ? sensed : read(room.climates);
     return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
   });
+  // A heater's reading and setpoint: their tenth when they have one (18,5°, 19°).
+  const degrees = (v) => num(v, typeof v === 'number' && v % 1 ? 1 : 0);
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
   // The gauge's tones as a chip's background.
   const CHIP_TONE = { cold: 'cool', cool: 'cool', good: 'good', warm: 'warm', hot: 'alert' };
@@ -280,7 +282,7 @@
         <Icon name={climateIcon(d)} size={18} />
         <b>{nameOf(d.id)}</b>
         <!-- A pilot wire on four or six orders has no setpoint of its own. -->
-        <span class="num">{num(value(d.id, 'temperature'), 0)}°{#if setpoint != null} → {num(setpoint, 1)}°{/if}</span>
+        <span class="num">{degrees(value(d.id, 'temperature'))}°{#if setpoint != null} → {degrees(setpoint)}°{/if}</span>
         <span class="state">{d.id in stoveAsked ? t('commun.poele.en_cours') : climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? modeWord(d.id) : t(climateOffLabel(d))}</span>
       </button>
       {#if stoveSwitch(d)}

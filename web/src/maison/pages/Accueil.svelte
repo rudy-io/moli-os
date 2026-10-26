@@ -74,13 +74,12 @@
       if (value(d.id, 'smoke') === true) list.push({ tone: 'alert', icon: 'fire', text: t('maison.accueil.fumee', { name: nameOf(d.id) }), href: '#/pieces' });
       if (leak(d.id)) list.push({ tone: 'alert', icon: 'water', text: t('maison.accueil.fuite', { name: nameOf(d.id) }), href: '#/pieces' });
     }
-    // A pellet stove in alarm (or saying a code, « OK » is none), said
-    // plainly: a tap opens its card on the Heating page, at the alarm, where
-    // its code and what it means are.
+    // A pellet stove in alarm, said plainly: a tap opens its card on the
+    // Heating page, at the alarm, where its code and what it means are. Its
+    // state says it, not its code: the board keeps the last one until the
+    // next lighting, the stove reset or not.
     for (const d of all.filter((d) => d.points.some((p) => p.key === 'flue_temperature'))) {
-      const code = value(d.id, 'alarm');
-      const alarmed = ['alarm', 'mem_alarm'].includes(value(d.id, 'mode'));
-      if ((code && code !== 'OK') || alarmed)
+      if (['alarm', 'mem_alarm'].includes(value(d.id, 'mode')))
         list.push({ tone: 'alert', icon: 'stove', text: t('maison.accueil.poele_en_alarme', { name: nameOf(d.id) }), href: `#/chauffage/${encodeURIComponent(d.id)}` });
     }
     if (hub.approvals?.length) list.push({ tone: 'cool', icon: 'lock', text: t('maison.accueil.demandes', { count: hub.approvals.length }), href: '#/atelier' });

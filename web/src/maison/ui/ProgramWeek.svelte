@@ -1,5 +1,5 @@
 <script>
-  import { value } from '../lib/home.svelte.js';
+  import { value, num } from '../lib/home.svelte.js';
   import { parseWeek, spans as spansOf, hhmm, warmth, nowIn, dayName, SLOTS } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -13,7 +13,7 @@
   const week = $derived(parseWeek(value(id, 'week_program')));
   const bySetpoint = $derived(wiring === 'switch');
   const spans = (runs) =>
-    spansOf(runs, wiring).map((s) => ({ ...s, what: s.celsius != null ? `${s.celsius}°` : modeLabel(s.order) }));
+    spansOf(runs, wiring).map((s) => ({ ...s, what: s.celsius != null ? `${num(s.celsius, s.celsius % 1 ? 1 : 0)}°` : modeLabel(s.order) }));
   let open = $state(false);
 
   // Now: which day row (Monday first), which quarter of an hour; ticks each minute.

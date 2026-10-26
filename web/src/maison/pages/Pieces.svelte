@@ -10,6 +10,7 @@
   import RoomCard from '../ui/RoomCard.svelte';
   import FilterChips from '../ui/FilterChips.svelte';
   import HeatingAway from '../ui/HeatingAway.svelte';
+  import HeatingNight from '../ui/HeatingNight.svelte';
   import VeluxPlans from '../ui/VeluxPlans.svelte';
   import { categoryOf, loadFilter } from '../lib/filters.js';
   import { floorsOf } from '../lib/floors.js';
@@ -107,7 +108,7 @@
     </div>{/if}
   </div>{/if}
 
-  {#if only === 'chauffage'}<HeatingAway />{/if}
+  {#if only === 'chauffage'}<HeatingAway /><HeatingNight />{/if}
 
   {#if empty && !rooms.length}<p class="empty">{t(empty)}</p>{/if}
 

@@ -21,14 +21,21 @@ export const hhmm = (slot) => `${String(Math.floor(slot / 4)).padStart(2, '0')}:
 /** The order a module runs: on four orders it shows comfort −1 and −2 as comfort. */
 export const orderOn = (wiring, order) => (wiring === 'four' && order?.startsWith('comfort') ? 'comfort' : order);
 
-/** A day's runs with their end; on switch wiring, a run's setpoint (a part
- *  kept on four or six orders has none: its order then). */
+/** A day's runs with their end, as the module plays them: on switch wiring
+ *  a run's setpoint (a part kept on four or six orders has none: its order
+ *  then), else its order. Runs that play the same are one: on switch wiring
+ *  the orders the module keeps beside its setpoints do not cut a run. */
 export function spans(runs, wiring) {
-  return (runs ?? []).map((run, i) => {
-    const order = orderOn(wiring, run.order);
+  const out = [];
+  (runs ?? []).forEach((run, i) => {
     const celsius = wiring === 'switch' ? (run.celsius ?? null) : null;
-    return { at: run.at, end: runs[i + 1]?.at ?? SLOTS, order, celsius };
+    const order = celsius != null ? null : orderOn(wiring, run.order);
+    const end = runs[i + 1]?.at ?? SLOTS;
+    const last = out.at(-1);
+    if (last && last.order === order && last.celsius === celsius) last.end = end;
+    else out.push({ at: run.at, end, order, celsius });
   });
+  return out;
 }
 
 /** Setpoints coloured as the room gauge: blue when cool, red when hot. */
