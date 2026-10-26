@@ -271,6 +271,10 @@ export function roomList() {
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        opened: by('cover').filter((d) => {
+          const pct = value(d.id, 'percent_control');
+          return pct != null && pct >= 50;
+        }).length,
       };
     });
 }
