@@ -1,10 +1,11 @@
 <script>
-  import { device, value, reachable, nameOf, act } from '../lib/home.svelte.js';
+  import { device, value, reachable, nameOf, act, num } from '../lib/home.svelte.js';
   import { printFile, pagesOf, isPdf, parsePages } from '../lib/paper.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
-  /** The paper printer: its state in words, each cartridge, the last print,
+  /** The paper printer: its state in words, each cartridge (or toner and
+   *  drum), the pages it has printed, the last print,
    *  and printing a photo or a PDF from here (pages made in the browser). */
   let { id } = $props();
 
@@ -17,7 +18,7 @@
   const STUCK = /papier|bourrage|capot|vide ou absente|arrêtée|paper|jam|cover|empty or missing|stopped/i;
   const tone = $derived(!ok ? '' : v('state') === 'processing' ? 'cool' : STUCK.test(status) ? 'alert' : v('ink_low') ? 'warm' : 'good');
 
-  // Cartridges: « Encre couleur » gets the three inks, « Encre noire » black.
+  // Cartridges: « Encre couleur » gets the three inks, « Encre noire » and « Toner noir » black.
   const inks = $derived(
     (d?.points ?? [])
       .filter((p) => /^ink_\d+$/.test(p.key))
@@ -26,7 +27,7 @@
   const inkFill = (label) =>
     /couleur|colou?r/i.test(label)
       ? 'linear-gradient(90deg, #39d2e7, #d945dd, #dfd31d)'
-      : /noire|black/i.test(label)
+      : /noir|black/i.test(label)
         ? '#1d2230'
         : /cyan/i.test(label)
           ? '#39d2e7'
@@ -36,6 +37,7 @@
               ? '#dfd31d'
               : 'var(--ink-3)';
 
+  const pages = $derived(v('pages'));
   const job = $derived(v('job'));
   const busy = $derived(/envoi|en attente|en cours|bloquée|interrompue|sending|waiting|in progress|blocked|interrupted/.test(String(job ?? '')));
 
@@ -141,6 +143,9 @@
       <p class="note muted">{t('salon.papier.zero_pour_cent')}</p>
     {/if}
   {/if}
+  {#if typeof pages === 'number'}
+    <p class="note muted">{t('salon.papier.pages_imprimees', { count: pages, n: num(pages, 0) })}</p>
+  {/if}
 
   {#if job}
     <div class="job">
@@ -202,11 +207,14 @@
 <style>
   .paper {
     display: grid;
+    /* Never wider than the screen: a long state wraps instead. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
 
   .head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
   }
@@ -223,7 +231,7 @@
 
   .title {
     display: grid;
-    flex: 1;
+    flex: 1 1 150px;
     min-width: 0;
   }
 

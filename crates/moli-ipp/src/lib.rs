@@ -1,12 +1,15 @@
 //! Network printers that speak IPP (IPP Everywhere, AirPrint: most printers
 //! since 2013): their state in words, each cartridge's level, the queue, and
 //! printing from Moli (a photo, the pages of a PDF the dashboard rendered).
+//! An older printer may speak IPP 1.1 only and say its supplies only over
+//! SNMP (`snmp.rs`): pages printed, toner and drum, alerts.
 //!
 //! Printing goes through [`moli_runtime::media::PrintSink`]: the document is
 //! queued at once, a worker sends it (an inkjet takes it as it prints: a
 //! minute or more), and its progress shows in the `job` point.
 
 mod proto;
+mod snmp;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -26,6 +29,11 @@ use tokio::sync::mpsc;
 const POLL: Duration = Duration::from_secs(30);
 /// While a job prints: its progress.
 const POLL_BUSY: Duration = Duration::from_secs(4);
+/// Supplies, pages and alerts over SNMP: they change slowly.
+const SNMP_EVERY: Duration = Duration::from_secs(5 * 60);
+/// SNMP unanswered this many times in a row while IPP answers: the printer
+/// does not speak it (asked no more until Moli restarts).
+const SNMP_MISSES: u8 = 3;
 /// A question to the printer.
 const ASK: Duration = Duration::from_secs(8);
 /// Sending a document: the printer reads it as it prints (and stops reading
@@ -64,9 +72,17 @@ pub struct Config {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
-    /// Where it answers IPP (`/ipp/print` for IPP Everywhere).
+    /// Where it answers IPP (`/ipp/print` for IPP Everywhere; `/ipp` on
+    /// older Brother printers).
     #[serde(default = "default_path")]
     pub path: String,
+    /// Also read it over SNMP (`public`): pages, toner, drum, alerts.
+    #[serde(default = "default_snmp")]
+    pub snmp: bool,
+}
+
+fn default_snmp() -> bool {
+    true
 }
 
 fn default_port() -> u16 {
@@ -108,6 +124,8 @@ struct Printer {
     path: String,
     uri: String,
     ids: AtomicU32,
+    /// It refused IPP 2.0: spoken to in 1.1 from then on.
+    legacy: AtomicBool,
 }
 
 impl Printer {
@@ -118,14 +136,30 @@ impl Printer {
             path: config.path.clone(),
             uri: format!("ipp://{}:{}{}", config.host, config.port, config.path),
             ids: AtomicU32::new(1),
+            legacy: AtomicBool::new(false),
         }
     }
 
     fn request(&self, op: u16) -> Request {
-        Request::new(op, self.ids.fetch_add(1, Ordering::Relaxed), &self.uri)
+        let request = Request::new(op, self.ids.fetch_add(1, Ordering::Relaxed), &self.uri);
+        if self.legacy.load(Ordering::Relaxed) {
+            request.v1_1()
+        } else {
+            request
+        }
     }
 
     async fn call(
+        &self,
+        request: &Request,
+        document: &[u8],
+        limit: Duration,
+    ) -> anyhow::Result<Response> {
+        checked(self.send(request, document, limit).await?)
+    }
+
+    /// One request and its answer, whatever its status.
+    async fn send(
         &self,
         request: &Request,
         document: &[u8],
@@ -142,26 +176,24 @@ impl Printer {
         if !status.is_success() {
             bail!(moli_i18n::tr!("pilotes.ipp.http", status = status));
         }
-        let answer = proto::parse(&bytes)?;
-        if !answer.ok() {
-            let said = answer
-                .text("status-message")
-                .map(|m| format!(" ({m})"))
-                .unwrap_or_default();
-            bail!(moli_i18n::tr!(
-                "pilotes.ipp.refuse",
-                code = format!("{:#06x}", answer.status),
-                said = said
-            ));
-        }
-        Ok(answer)
+        proto::parse(&bytes)
     }
 
+    /// The printer's state; a printer that refuses IPP 2.0 is asked again
+    /// in 1.1, and spoken to in 1.1 from then on.
     async fn status(&self) -> anyhow::Result<Response> {
-        let request = self
-            .request(proto::GET_PRINTER_ATTRIBUTES)
-            .keywords("requested-attributes", STATUS_ATTRS);
-        self.call(&request, &[], ASK).await
+        let ask = || {
+            self.request(proto::GET_PRINTER_ATTRIBUTES)
+                .keywords("requested-attributes", STATUS_ATTRS)
+        };
+        let answer = self.send(&ask(), &[], ASK).await?;
+        if answer.status == proto::VERSION_NOT_SUPPORTED
+            && !self.legacy.swap(true, Ordering::Relaxed)
+        {
+            tracing::info!(host = %self.host, "printer speaks IPP 1.1, not 2.0");
+            return self.call(&ask(), &[], ASK).await;
+        }
+        checked(answer)
     }
 
     /// Sends one document; the printer's job id.
@@ -219,6 +251,22 @@ impl Printer {
     }
 }
 
+/// An answer the printer refused, said as an error.
+fn checked(answer: Response) -> anyhow::Result<Response> {
+    if !answer.ok() {
+        let said = answer
+            .text("status-message")
+            .map(|m| format!(" ({m})"))
+            .unwrap_or_default();
+        bail!(moli_i18n::tr!(
+            "pilotes.ipp.refuse",
+            code = format!("{:#06x}", answer.status),
+            said = said
+        ));
+    }
+    Ok(answer)
+}
+
 // ---- what the printer says, in words ----------------------------------------------------
 
 /// The printer's state as one sentence, the most pressing first.
@@ -240,8 +288,30 @@ fn status_words(state: Option<i32>, reasons: &[&str]) -> String {
         "pilotes.ipp.arretee"
     } else if has("marker-supply-low") {
         "pilotes.ipp.encre_bientot_vide"
+    } else if has("toner-low") {
+        "pilotes.ipp.toner_bientot_vide"
+    } else if has("drum-end") {
+        "pilotes.ipp.tambour_a_changer"
+    } else if has("drum-near-end") {
+        "pilotes.ipp.tambour_bientot"
     } else {
         "pilotes.ipp.prete"
+    })
+}
+
+/// An SNMP alert (`prtAlertCode`, RFC 3805) as the state reason IPP would
+/// give, or one of Moli's own for a laser (`toner-low`, `drum-…`).
+fn alert_reason(code: i64) -> Option<&'static str> {
+    Some(match code {
+        3 | 5 | 501 => "cover-open",
+        8 => "media-jam",
+        808 => "media-empty",
+        1101 | 1102 | 1115 => "marker-supply-empty",
+        1104 => "toner-low",
+        1105 => "marker-supply-low",
+        1111 => "drum-near-end",
+        1112 => "drum-end",
+        _ => return None,
     })
 }
 
@@ -267,6 +337,27 @@ fn ink_name(name: &str) -> String {
         _ => return moli_i18n::tr!("pilotes.ipp.encre", name = name),
     };
     moli_i18n::tr(known)
+}
+
+/// A supply read over SNMP, as the family names it.
+fn supply_name(s: &snmp::Supply) -> String {
+    let color = s.color.as_deref().unwrap_or_default().to_lowercase();
+    let key = match s.kind {
+        snmp::TONER => match color.as_str() {
+            "black" => "pilotes.ipp.toner_noir",
+            "cyan" => "pilotes.ipp.toner_cyan",
+            "magenta" => "pilotes.ipp.toner_magenta",
+            "yellow" => "pilotes.ipp.toner_jaune",
+            _ => "pilotes.ipp.toner",
+        },
+        snmp::DRUM => "pilotes.ipp.tambour",
+        snmp::WASTE_TONER => "pilotes.ipp.toner_usage",
+        snmp::FUSER => "pilotes.ipp.unite_fusion",
+        snmp::INK | snmp::INK_CARTRIDGE if !color.is_empty() => return ink_name(&color),
+        _ if !s.description.is_empty() => return s.description.clone(),
+        _ => "pilotes.ipp.consommable",
+    };
+    moli_i18n::tr(key)
 }
 
 /// A level in percent; the negative codes mean « unknown ».
@@ -310,7 +401,62 @@ fn spec(
     }
 }
 
-fn device(ctx: &DriverCtx, id: &DeviceId, model: Option<&str>, inks: &[String]) -> Device {
+/// The points a printer has beyond IPP's, from what it says over SNMP.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct More {
+    pages: bool,
+    serial: bool,
+    firmware: bool,
+}
+
+impl More {
+    fn of(report: Option<&snmp::Report>) -> Self {
+        report.map_or_else(Self::default, |r| Self {
+            pages: r.pages.is_some(),
+            serial: r.serial.is_some(),
+            firmware: r.firmware.is_some(),
+        })
+    }
+}
+
+/// The points SNMP adds: pages printed, serial number, firmware.
+fn more_points(more: More) -> Vec<PointSpec> {
+    let text = |key: &str, label: &str| spec(key, label, Kind::Text, false, Semantic::Other, None);
+    let mut points = Vec::new();
+    if more.pages {
+        points.push(spec(
+            "pages",
+            &moli_i18n::tr!("pilotes.ipp.pages"),
+            Kind::Numeric {
+                min: Some(0.0),
+                max: None,
+                step: Some(1.0),
+            },
+            false,
+            Semantic::Other,
+            None,
+        ));
+    }
+    if more.serial {
+        points.push(text("serial", &moli_i18n::tr!("pilotes.ipp.numero_serie")));
+    }
+    if more.firmware {
+        points.push(text(
+            "firmware",
+            &moli_i18n::tr!("pilotes.ipp.micrologiciel"),
+        ));
+    }
+    points
+}
+
+/// The device; `inks`: each cartridge or supply's name, as shown.
+fn device(
+    ctx: &DriverCtx,
+    id: &DeviceId,
+    model: Option<&str>,
+    inks: &[String],
+    more: More,
+) -> Device {
     let (manufacturer, model) = match model.and_then(|m| m.split_once(' ')) {
         Some((brand, rest)) => (Some(brand.into()), Some(rest.into())),
         None => (None, model.map(Into::into)),
@@ -385,10 +531,11 @@ fn device(ctx: &DriverCtx, id: &DeviceId, model: Option<&str>, inks: &[String]) 
             None,
         ),
     ];
+    points.extend(more_points(more));
     for (i, name) in inks.iter().enumerate() {
         points.push(spec(
             &format!("ink_{}", i + 1),
-            &ink_name(name),
+            name,
             percent.clone(),
             false,
             Semantic::Other,
@@ -542,8 +689,16 @@ fn worker(
 #[derive(Default)]
 struct Seen {
     model: Option<String>,
+    /// The cartridges or supplies, as named on the device.
     inks: Vec<String>,
+    more: More,
     online: Option<bool>,
+    /// SNMP: who to ask (none: not asked), when next, unanswered in a
+    /// row, and what it said last.
+    snmp: Option<snmp::Client>,
+    snmp_next: Option<tokio::time::Instant>,
+    snmp_misses: u8,
+    report: Option<snmp::Report>,
 }
 
 /// What prints now: the page being sent, the job the printer has.
@@ -579,7 +734,7 @@ async fn cancel(printer: &Printer, spool: &Spool, printing: &mut Printing) -> Re
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let printer = Arc::new(Printer::new(config));
     let id = ctx.device_id(&config.host);
-    ctx.upsert_device(device(ctx, &id, None, &[]));
+    ctx.upsert_device(device(ctx, &id, None, &[], More::default()));
     let spool = Arc::new(Spool::default());
     let (queue, queued) = mpsc::channel(QUEUE);
     let (news_tx, mut news) = mpsc::channel(16);
@@ -593,7 +748,12 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     );
     ctx.ready();
 
-    let mut seen = Seen::default();
+    let mut seen = Seen {
+        snmp: config
+            .snmp
+            .then(|| snmp::Client::new(&config.host, "public")),
+        ..Seen::default()
+    };
     let mut printing = Printing::default();
     let mut next = tokio::time::Instant::now();
     loop {
@@ -680,6 +840,8 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                             }
                             if state >= 7 {
                                 printing.current = None;
+                                // Its pages are counted now.
+                                seen.snmp_next = None;
                             }
                         }
                         // Gone from the printer's memory: it printed long ago.
@@ -711,20 +873,42 @@ async fn poll(printer: &Printer, ctx: &DriverCtx, id: &DeviceId, seen: &mut Seen
         seen.online = Some(true);
         spool.online.store(true, Ordering::Relaxed);
         ctx.set_availability(id, true);
+        // Back on: what it says over SNMP is read at once.
+        seen.snmp_next = None;
     }
+    read_snmp(ctx, seen).await;
+
     let model = answer
         .text("printer-make-and-model")
         .or_else(|| answer.text("printer-info"))
         .map(str::to_owned);
-    let inks: Vec<String> = answer
-        .texts("marker-names")
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    if model != seen.model || inks != seen.inks {
-        ctx.upsert_device(device(ctx, id, model.as_deref(), &inks));
+    // The cartridges IPP names; else the supplies SNMP says.
+    let names = answer.texts("marker-names");
+    let (inks, levels): (Vec<String>, Vec<Value>) = if names.is_empty() {
+        let supplies = seen.report.as_ref().map_or(&[][..], |r| &r.supplies[..]);
+        (
+            supplies.iter().map(supply_name).collect(),
+            supplies
+                .iter()
+                .map(|s| s.percent.map_or(Value::Null, Value::Int))
+                .collect(),
+        )
+    } else {
+        (
+            names.iter().map(|n| ink_name(n)).collect(),
+            answer
+                .ints("marker-levels")
+                .into_iter()
+                .map(level)
+                .collect(),
+        )
+    };
+    let more = More::of(seen.report.as_ref());
+    if model != seen.model || inks != seen.inks || more != seen.more {
+        ctx.upsert_device(device(ctx, id, model.as_deref(), &inks, more));
         seen.model = model;
         seen.inks = inks;
+        seen.more = more;
     }
     *spool.formats.lock().unwrap_or_else(PoisonError::into_inner) = answer
         .texts("document-format-supported")
@@ -740,7 +924,10 @@ async fn poll(printer: &Printer, ctx: &DriverCtx, id: &DeviceId, seen: &mut Seen
     );
 
     let state = answer.int("printer-state");
-    let reasons = answer.texts("printer-state-reasons");
+    let mut reasons = answer.texts("printer-state-reasons");
+    if let Some(report) = &seen.report {
+        reasons.extend(report.alerts.iter().filter_map(|&code| alert_reason(code)));
+    }
     spool
         .stopped
         .store(waits_for_a_person(state, &reasons), Ordering::Relaxed);
@@ -752,15 +939,62 @@ async fn poll(printer: &Printer, ctx: &DriverCtx, id: &DeviceId, seen: &mut Seen
         "status",
         Value::Text(status_words(state, &reasons).into()),
     );
-    let low = reasons
-        .iter()
-        .any(|r| r.starts_with("marker-supply-low") || r.starts_with("marker-supply-empty"));
+    let low = reasons.iter().any(|r| {
+        r.starts_with("marker-supply-low")
+            || r.starts_with("marker-supply-empty")
+            || *r == "toner-low"
+    });
     ctx.set_state(id, "ink_low", Value::Bool(low));
-    for (i, v) in answer.ints("marker-levels").into_iter().enumerate() {
-        ctx.set_state(id, &format!("ink_{}", i + 1), level(v));
+    for (i, v) in levels.into_iter().enumerate() {
+        ctx.set_state(id, &format!("ink_{}", i + 1), v);
     }
     if let Some(n) = answer.int("queued-job-count") {
         ctx.set_state(id, "jobs", Value::Int(i64::from(n)));
+    }
+    if let Some(report) = &seen.report {
+        show_report(ctx, id, report);
+    }
+}
+
+/// What SNMP says beyond the supplies: pages, serial number, firmware.
+fn show_report(ctx: &DriverCtx, id: &DeviceId, report: &snmp::Report) {
+    if let Some(pages) = report.pages {
+        ctx.set_state(id, "pages", Value::Int(pages));
+    }
+    if let Some(serial) = &report.serial {
+        ctx.set_state(id, "serial", Value::Text(serial.as_str().into()));
+    }
+    if let Some(firmware) = &report.firmware {
+        ctx.set_state(id, "firmware", Value::Text(firmware.as_str().into()));
+    }
+}
+
+/// Asks SNMP when it is time: every `SNMP_EVERY`, at once when the printer
+/// comes back or a print ends; given up after `SNMP_MISSES` in a row.
+async fn read_snmp(ctx: &DriverCtx, seen: &mut Seen) {
+    let now = tokio::time::Instant::now();
+    let Some(client) = seen
+        .snmp
+        .as_ref()
+        .filter(|_| seen.snmp_next.is_none_or(|at| now >= at))
+    else {
+        return;
+    };
+    match snmp::read(client).await {
+        Ok(report) => {
+            seen.snmp_misses = 0;
+            seen.report = Some(report);
+            seen.snmp_next = Some(now + SNMP_EVERY);
+        }
+        Err(e) => {
+            seen.snmp_misses += 1;
+            if seen.snmp_misses >= SNMP_MISSES {
+                tracing::info!(instance = %ctx.instance(), error = %format!("{e:#}"), "printer does not answer SNMP: its supplies from IPP only");
+                seen.snmp = None;
+            } else {
+                seen.snmp_next = Some(now + POLL);
+            }
+        }
     }
 }
 
@@ -798,6 +1032,45 @@ mod tests {
             status_words(Some(5), &["media-jam-error", "door-open"]),
             "Bourrage papier"
         );
+    }
+
+    #[test]
+    fn snmp_alerts_say_what_ipp_does_not() {
+        // A Brother HL-1210W: IPP says « none », SNMP alert 1104 (toner almost empty).
+        let reasons: Vec<&str> = [1104, 0].into_iter().filter_map(alert_reason).collect();
+        assert_eq!(status_words(Some(3), &reasons), "Prête, toner bientôt vide");
+        assert_eq!(
+            status_words(Some(3), &[alert_reason(808).unwrap()]),
+            "Plus de papier"
+        );
+        assert!(waits_for_a_person(Some(3), &[alert_reason(8).unwrap()]));
+        assert_eq!(
+            status_words(Some(3), &[alert_reason(1111).unwrap()]),
+            "Prête, tambour bientôt à changer"
+        );
+    }
+
+    #[test]
+    fn names_the_supplies_snmp_says() {
+        let supply = |kind, color: Option<&str>, description: &str| snmp::Supply {
+            kind,
+            description: description.into(),
+            color: color.map(Into::into),
+            percent: None,
+        };
+        assert_eq!(
+            supply_name(&supply(snmp::TONER, Some("black"), "Black Toner Cartridge")),
+            "Toner noir"
+        );
+        assert_eq!(
+            supply_name(&supply(snmp::DRUM, None, "Drum Unit")),
+            "Tambour"
+        );
+        assert_eq!(
+            supply_name(&supply(snmp::INK_CARTRIDGE, Some("cyan"), "C")),
+            "Encre cyan"
+        );
+        assert_eq!(supply_name(&supply(1, None, "Belt Unit")), "Belt Unit");
     }
 
     #[test]
@@ -862,6 +1135,7 @@ mod tests {
             host: "192.0.2.1".into(),
             port: 631,
             path: "/ipp/print".into(),
+            snmp: false,
         });
         let spool = Spool::default();
         let mut printing = Printing::default();

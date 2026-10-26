@@ -1,4 +1,5 @@
-//! IPP 2.0 messages (RFC 8010), only what a printer driver needs: requests
+//! IPP 2.0 messages (RFC 8010), or 1.1 for a printer that refuses 2.0
+//! (RFC 8011), only what a printer driver needs: requests
 //! with operation and job attributes (and a document after them), and the
 //! attributes of an answer, flattened by name. Collections (`media-col…`)
 //! are skipped whole: nothing here reads them.
@@ -13,6 +14,9 @@ pub const CANCEL_JOB: u16 = 0x0008;
 pub const GET_JOB_ATTRIBUTES: u16 = 0x0009;
 pub const IDENTIFY_PRINTER: u16 = 0x003C;
 
+/// The answer of a printer that does not speak the version asked.
+pub const VERSION_NOT_SUPPORTED: u16 = 0x0503;
+
 const OPERATION: u8 = 0x01;
 const JOB: u8 = 0x02;
 const END: u8 = 0x03;
@@ -21,6 +25,8 @@ const INTEGER: u8 = 0x21;
 const BOOLEAN: u8 = 0x22;
 const ENUM: u8 = 0x23;
 const BEGIN_COLLECTION: u8 = 0x34;
+const TEXT_WITH_LANGUAGE: u8 = 0x35;
+const NAME_WITH_LANGUAGE: u8 = 0x36;
 const END_COLLECTION: u8 = 0x37;
 const NAME: u8 = 0x42;
 const KEYWORD: u8 = 0x44;
@@ -60,6 +66,7 @@ impl Val {
 /// A request: the operation attributes every request carries (charset,
 /// language, printer), then what the caller adds.
 pub struct Request {
+    version: [u8; 2],
     op: u16,
     id: u32,
     operation: Vec<u8>,
@@ -70,6 +77,7 @@ impl Request {
     #[must_use]
     pub fn new(op: u16, id: u32, printer_uri: &str) -> Self {
         let mut r = Self {
+            version: [2, 0],
             op,
             id,
             operation: Vec::new(),
@@ -84,6 +92,13 @@ impl Request {
         );
         attr(&mut r.operation, URI, "printer-uri", printer_uri.as_bytes());
         r
+    }
+
+    /// IPP 1.1, for a printer that refuses 2.0 (attributes unchanged).
+    #[must_use]
+    pub fn v1_1(mut self) -> Self {
+        self.version = [1, 1];
+        self
     }
 
     #[must_use]
@@ -135,7 +150,7 @@ impl Request {
     pub fn encode(&self, document: &[u8]) -> Vec<u8> {
         let mut out =
             Vec::with_capacity(64 + self.operation.len() + self.job.len() + document.len());
-        out.extend_from_slice(&[2, 0]);
+        out.extend_from_slice(&self.version);
         out.extend_from_slice(&self.op.to_be_bytes());
         out.extend_from_slice(&self.id.to_be_bytes());
         out.push(OPERATION);
@@ -204,6 +219,16 @@ impl Response {
 }
 
 /// Reads an answer.
+/// The text of a `textWithLanguage` or `nameWithLanguage` value: its
+/// language then its text, each after its length (RFC 8010 § 3.9). Sent
+/// by a printer that does not speak the language asked (« fr »).
+fn with_language(raw: &[u8]) -> Option<&[u8]> {
+    let n = usize::from(u16::from_be_bytes([*raw.first()?, *raw.get(1)?]));
+    let rest = raw.get(2 + n..)?;
+    let len = usize::from(u16::from_be_bytes([*rest.first()?, *rest.get(1)?]));
+    rest.get(2..2 + len)
+}
+
 pub fn parse(data: &[u8]) -> anyhow::Result<Response> {
     if data.len() < 8 {
         bail!("IPP answer of {} bytes", data.len());
@@ -257,7 +282,10 @@ pub fn parse(data: &[u8]) -> anyhow::Result<Response> {
                 Val::Int(i32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]))
             }
             BOOLEAN if raw.len() == 1 => Val::Bool(raw[0] != 0),
-            0x35 | 0x36 | 0x41..=0x49 => Val::Text(String::from_utf8_lossy(raw).into_owned()),
+            TEXT_WITH_LANGUAGE | NAME_WITH_LANGUAGE => with_language(raw).map_or(Val::Other, |t| {
+                Val::Text(String::from_utf8_lossy(t).into_owned())
+            }),
+            0x41..=0x49 => Val::Text(String::from_utf8_lossy(raw).into_owned()),
             _ => Val::Other,
         };
         if name.is_empty() {
@@ -333,5 +361,28 @@ mod tests {
         );
         assert_eq!(back.int("copies"), Some(2));
         assert_eq!(back.text("sides"), Some("one-sided"));
+        // A text in another language than the one asked (a Brother HL-1210W).
+        let mut answer = vec![1, 0, 0, 0, 0, 0, 0, 1, 0x04];
+        let mut value = vec![0, 5];
+        value.extend_from_slice(b"en-us");
+        value.extend_from_slice(&[0, 23]);
+        value.extend_from_slice(b"Brother HL-1210W series");
+        attr(
+            &mut answer,
+            TEXT_WITH_LANGUAGE,
+            "printer-make-and-model",
+            &value,
+        );
+        answer.push(END);
+        let read = parse(&answer).unwrap();
+        assert_eq!(
+            read.text("printer-make-and-model"),
+            Some("Brother HL-1210W series")
+        );
+        // For a printer that refuses 2.0: only the version changes.
+        let old = Request::new(GET_PRINTER_ATTRIBUTES, 8, "ipp://printer/ipp")
+            .v1_1()
+            .encode(&[]);
+        assert_eq!(&old[..8], &[1, 1, 0, 0x0B, 0, 0, 0, 8]);
     }
 }

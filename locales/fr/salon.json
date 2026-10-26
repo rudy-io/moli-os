@@ -161,6 +161,8 @@
   "salon.papier.clignoter_titre": "Faire clignoter (pour la repérer)",
   "salon.papier.clignoter": "Faire clignoter",
   "salon.papier.zero_pour_cent": "L’imprimante dit 0 % : cartouches vides, ou rechargées (elle ne sait plus les mesurer).",
+  "salon.papier.pages_imprimees_one": "{n} page imprimée depuis sa mise en service",
+  "salon.papier.pages_imprimees_other": "{n} pages imprimées depuis sa mise en service",
   "salon.papier.sur": "Sûr ? Annuler",
   "salon.papier.ne_pas_imprimer": "Ne pas imprimer",
   "salon.papier.couleur": "Couleur",
