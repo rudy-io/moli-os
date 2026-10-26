@@ -134,6 +134,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // Week programs are written through the cloud only.
     let (program_tx, program_rx) = mpsc::channel::<cloud::ProgramWrite>(8);
     let program_tx = cloud.then_some(program_tx);
+    // A module whose wiring changed: its program read again (the cloud's).
+    let (rewired_tx, rewired_rx) = mpsc::channel::<String>(16);
+    let rewired_tx = cloud.then_some(rewired_tx);
     // Gateways in the file: their links read the sub-devices that name them.
     let gateways: HashSet<String> = file
         .devices
@@ -236,7 +239,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // Keys given later in the dashboard: a restart takes them.
     let await_keys = keys.is_none() && silent_seen;
     if let Some(keys) = keys {
-        start_cloud(config, keys, watched, program_rx, up_tx.clone(), &mut tasks);
+        start_cloud(
+            config,
+            keys,
+            watched,
+            (program_rx, rewired_rx),
+            up_tx.clone(),
+            &mut tasks,
+        );
     }
     drop(up_tx);
     if missing_keys > 0 {
@@ -250,7 +260,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         ctx,
         &mut up,
         &orders,
-        program_tx.as_ref(),
+        (program_tx.as_ref(), rewired_tx.as_ref()),
         &devices,
         await_keys,
     )
@@ -305,16 +315,21 @@ fn stored_keys(ctx: &DriverCtx) -> Option<cloud::Keys> {
 }
 
 /// Orders go to the devices, what they say goes to the hub, until the end.
+/// A program keeper whose wiring changes has its program read again.
 /// Returns whether cloud keys arrived meanwhile (then the driver restarts).
 async fn serve(
     ctx: &mut DriverCtx,
     up: &mut mpsc::Receiver<Up>,
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
-    programs: Option<&mpsc::Sender<cloud::ProgramWrite>>,
+    (programs, rewired): (
+        Option<&mpsc::Sender<cloud::ProgramWrite>>,
+        Option<&mpsc::Sender<String>>,
+    ),
     devices: &[(DeviceId, Arc<TuyaDevice>)],
     await_keys: bool,
 ) -> bool {
     let mut look = tokio::time::interval(std::time::Duration::from_secs(20));
+    let mut wirings: HashMap<usize, moli_core::Value> = HashMap::new();
     loop {
         tokio::select! {
             _ = look.tick(), if await_keys => {
@@ -334,8 +349,16 @@ async fn serve(
             }
             message = up.recv() => match message {
                 Some(Up::State(index, values)) => {
-                    let id = &devices[index].0;
+                    let (id, device) = &devices[index];
                     for (key, value) in values {
+                        if key == WIRING
+                            && program::kept_by(&device.dps)
+                            && rewiring(&mut wirings, index, &value)
+                            && let Some(rewired) = rewired
+                        {
+                            tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");
+                            let _ = rewired.try_send(device.id.clone());
+                        }
                         ctx.set_state(id, &key, value);
                     }
                 }
@@ -347,12 +370,27 @@ async fn serve(
     false
 }
 
+/// A pilot-wire module's wiring (four, six orders or switch).
+const WIRING: &str = "device_mode_type";
+
+/// Whether a wiring said by device `index` changes the one known (the first
+/// one heard is no change: Moli just started).
+fn rewiring(
+    known: &mut HashMap<usize, moli_core::Value>,
+    index: usize,
+    wiring: &moli_core::Value,
+) -> bool {
+    known
+        .insert(index, wiring.clone())
+        .is_some_and(|was| was != *wiring)
+}
+
 /// Follows, through the cloud, the devices that never speak on the LAN.
 fn start_cloud(
     config: &Config,
     keys: cloud::Keys,
     watched: cloud::Watched,
-    programs: mpsc::Receiver<cloud::ProgramWrite>,
+    (programs, rewired): (mpsc::Receiver<cloud::ProgramWrite>, mpsc::Receiver<String>),
     up: mpsc::Sender<Up>,
     tasks: &mut tokio::task::JoinSet<()>,
 ) {
@@ -366,7 +404,7 @@ fn start_cloud(
             programs,
             up.clone(),
         ));
-        tasks.spawn(cloud::watch(keys, region, watched, up));
+        tasks.spawn(cloud::watch(keys, region, watched, up, rewired));
     } else {
         tracing::warn!(region = %config.cloud_region, "tuya cloud: unknown region");
     }
@@ -619,6 +657,21 @@ pub fn merge_import(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_wiring_is_a_change_the_first_one_heard_is_not() {
+        let mut known = HashMap::new();
+        let six = moli_core::Value::from("six");
+        let switch = moli_core::Value::from("switch");
+        assert!(!rewiring(&mut known, 3, &six), "Moli just started");
+        assert!(!rewiring(&mut known, 3, &six), "said again");
+        assert!(rewiring(&mut known, 3, &switch), "six orders to switch");
+        assert!(
+            !rewiring(&mut known, 4, &switch),
+            "another module, first heard"
+        );
+        assert!(rewiring(&mut known, 3, &six), "and back");
+    }
 
     #[test]
     fn imports_keep_hand_edits_and_separate_keys() {

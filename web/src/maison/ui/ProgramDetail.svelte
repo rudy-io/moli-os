@@ -8,7 +8,7 @@
   // nothing leaves before « Save ».
   import { onMount } from 'svelte';
   import { value, num, act, hub, nameOf } from '../lib/home.svelte.js';
-  import { parseWeek, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns } from '../lib/program.js';
+  import { parseWeek, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns, unread } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -39,6 +39,9 @@
   });
 
   const bySetpoint = $derived(wiring === 'switch');
+  // On switch wiring, a program read before the module was rewired has no
+  // setpoints yet: said, and not edited until Moli has read it again.
+  const stale = $derived(unread(read, wiring));
   const deg = (c) => num(c, c % 1 ? 1 : 0);
   // What a run says, and the class that colours it.
   const what = (s) => (s.celsius != null ? `${deg(s.celsius)} °C` : modeLabel(s.order));
@@ -268,12 +271,16 @@
       <p class="sub">{t(editing ? 'commun.programme.modifier' : 'commun.programme.titre')}</p>
     </div>
     <div class="actions">
-      {#if read && !editing && !asking}
+      {#if read && !editing && !asking && !stale}
         <button class="round" onclick={() => (asking = true)} title={t('commun.programme.modifier')} aria-label={t('commun.programme.modifier')}><Icon name="cog" size={22} /></button>
       {/if}
       <button class="round" onclick={close} aria-label={editing ? t('commun.annuler') : t('commun.fermer')}><Icon name="close" size={22} /></button>
     </div>
   </header>
+
+  {#if stale && !editing}
+    <p class="stale"><Icon name="timer" size={18} />{t('commun.programme.relecture')}</p>
+  {/if}
 
   {#if asking}
     <section class="confirm" aria-label={t('commun.programme.confirmer_titre')}>
@@ -315,7 +322,7 @@
       {/if}
       <p class="stroke num" aria-live="polite">{rangeText ?? ' '}</p>
     </section>
-  {:else if current}
+  {:else if current && !stale}
     <p class="now">
       <i class="swatch {tint(current)}"></i>
       {t('commun.programme.maintenant', { what: what(current), until: hhmm(current.end) })}
@@ -536,6 +543,18 @@
     border-radius: var(--r-lg);
     background: var(--surface-2);
     font-weight: 650;
+  }
+
+  .stale {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border-radius: var(--r-lg);
+    background: color-mix(in srgb, var(--warm) 14%, var(--surface));
+    font-size: 13.5px;
+    font-weight: 600;
   }
 
   .legend {

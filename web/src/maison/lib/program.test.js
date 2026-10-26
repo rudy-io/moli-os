@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spans, sentRuns, slotsOf } from './program.js';
+import { spans, sentRuns, slotsOf, unread } from './program.js';
 
 // A real switch module's Monday: 17 °C all day, its hidden orders (kept
 // from six-order wiring) changing at 6:00, 7:00 and 8:00.
@@ -22,6 +22,18 @@ test('on switch wiring a day is told by its setpoints alone', () => {
       [32, 96, 17],
     ],
   );
+});
+
+test('on switch wiring a part read without setpoints says no order', () => {
+  // Read while the module was on six orders: its orders only.
+  const stale = [
+    { at: 0, order: 'eco', celsius: null },
+    { at: 24, order: 'comfort', celsius: null },
+  ];
+  assert.deepEqual(spans(stale, 'switch'), [{ at: 0, end: 96, order: null, celsius: null }]);
+  assert.equal(unread([stale], 'switch'), true);
+  assert.equal(unread([monday, null], 'switch'), false);
+  assert.equal(unread([stale], 'six'), false);
 });
 
 test('on six orders the same day is told by its orders', () => {

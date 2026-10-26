@@ -363,6 +363,7 @@
   "commun.clim.programme_maintenant": "{what} jusqu'à {until}",
   "commun.programme.detail": "Voir le programme en grand",
   "commun.programme.titre": "Programme de la semaine",
+  "commun.programme.relecture": "Ce radiateur vient de passer en interrupteur : Moli relit son programme pour avoir ses températures (une à deux minutes). La modification attend.",
   "commun.programme.maintenant": "Maintenant : {what}, jusqu'à {until}",
   "commun.programme.legende": "Ce que veulent dire les couleurs",
   "commun.programme.couleur_temp": "La couleur suit la température demandée :",

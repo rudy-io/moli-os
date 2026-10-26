@@ -22,14 +22,15 @@ export const hhmm = (slot) => `${String(Math.floor(slot / 4)).padStart(2, '0')}:
 export const orderOn = (wiring, order) => (wiring === 'four' && order?.startsWith('comfort') ? 'comfort' : order);
 
 /** A day's runs with their end, as the module plays them: on switch wiring
- *  a run's setpoint (a part kept on four or six orders has none: its order
- *  then), else its order. Runs that play the same are one: on switch wiring
- *  the orders the module keeps beside its setpoints do not cut a run. */
+ *  a run's setpoint only, never an order (a part Moli has read without one,
+ *  the module rewired since, has neither: `unread`), else its order. Runs
+ *  that play the same are one: on switch wiring the orders the module keeps
+ *  beside its setpoints do not cut a run. */
 export function spans(runs, wiring) {
   const out = [];
   (runs ?? []).forEach((run, i) => {
     const celsius = wiring === 'switch' ? (run.celsius ?? null) : null;
-    const order = celsius != null ? null : orderOn(wiring, run.order);
+    const order = wiring === 'switch' ? null : orderOn(wiring, run.order);
     const end = runs[i + 1]?.at ?? SLOTS;
     const last = out.at(-1);
     if (last && last.order === order && last.celsius === celsius) last.end = end;
@@ -37,6 +38,10 @@ export function spans(runs, wiring) {
   });
   return out;
 }
+
+/** On switch wiring, whether the program read lacks setpoints somewhere: read
+ *  before the module was rewired, Moli reads it again. */
+export const unread = (week, wiring) => wiring === 'switch' && (week ?? []).some((runs) => (runs ?? []).some((r) => r.celsius == null));
 
 /** Setpoints coloured as the room gauge: blue when cool, red when hot. */
 export const warmth = (c) => (c < 12 ? 'frost' : c < 18 ? 'cold' : c < 20 ? 'cool' : c <= 24 ? 'good' : c <= 27 ? 'warm' : 'hot');

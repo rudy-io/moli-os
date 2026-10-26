@@ -40,6 +40,10 @@ const RESYNC: Duration = Duration::from_secs(30 * 60);
 /// changes (a person edits several in a row).
 const PROGRAMS: Duration = Duration::from_secs(6 * 60 * 60);
 const PROGRAM_SETTLE: Duration = Duration::from_secs(10);
+/// A module whose wiring changed rewrites its 28 parts (setpoints kept for
+/// switch wiring, dropped for four or six orders): its program is read again
+/// this long after, not six hours later.
+const WIRING_SETTLE: Duration = Duration::from_secs(30);
 const QUIET: Duration = Duration::from_secs(60);
 const BATCH: usize = 20;
 
@@ -609,7 +613,15 @@ fn program_news(status: &Json) -> bool {
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
 /// Reads the states, then follows the changes, for ever (reconnecting).
-pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
+/// `rewired`: devices whose wiring changed (Tuya ids), their program to read
+/// again.
+pub async fn watch(
+    keys: Keys,
+    region: Region,
+    devices: Watched,
+    up: mpsc::Sender<Up>,
+    mut rewired: mpsc::Receiver<String>,
+) {
     let mut api = Api {
         keys,
         region,
@@ -617,7 +629,7 @@ pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sende
     };
     let mut pause = Duration::from_secs(30);
     loop {
-        match follow(&mut api, &devices, &up).await {
+        match follow(&mut api, &devices, &up, &mut rewired).await {
             Ok(()) => return,
             Err(e) => {
                 tracing::warn!(error = %e.root_cause(), "tuya cloud: retrying in {} s", pause.as_secs());
@@ -695,7 +707,24 @@ fn online_flags(info: &Json) -> Vec<(&str, bool)> {
         .collect()
 }
 
-async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyhow::Result<()> {
+/// Modules whose wiring changed: their programs read once they settle.
+fn take_rewired(
+    rewired: &mut mpsc::Receiver<String>,
+    edited: &mut (HashSet<String>, Option<Instant>),
+) {
+    while let Ok(device) = rewired.try_recv() {
+        let at = Instant::now() + WIRING_SETTLE;
+        edited.1 = Some(edited.1.map_or(at, |was| was.max(at)));
+        edited.0.insert(device);
+    }
+}
+
+async fn follow(
+    api: &mut Api,
+    devices: &Watched,
+    up: &mpsc::Sender<Up>,
+    rewired: &mut mpsc::Receiver<String>,
+) -> anyhow::Result<()> {
     sync(api, devices, up).await?;
     tracing::info!(devices = devices.len(), "tuya cloud: states read");
     programs(api, devices, None, up).await?;
@@ -730,6 +759,7 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
             programs(api, devices, None, up).await?;
             reprogram = Instant::now() + PROGRAMS;
         }
+        take_rewired(rewired, &mut edited);
         if edited.1.is_some_and(|at| Instant::now() >= at) {
             programs(api, devices, Some(&edited.0), up).await?;
             edited = (HashSet::new(), None);
