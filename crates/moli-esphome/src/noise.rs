@@ -6,6 +6,7 @@
 //! side keeps one key and a 64-bit counter per direction afterwards.
 
 use anyhow::{Context as _, bail};
+use moli_core::encoding::{base64, from_base64};
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use ring::agreement::{self, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::digest::{self, SHA256};
@@ -23,7 +24,7 @@ pub const MSG1_LEN: usize = DH_LEN + TAG_LEN;
 
 /// The base64 key of an ESPHome API (`api: encryption: key:`): 32 bytes.
 pub fn psk_from_base64(text: &str) -> anyhow::Result<[u8; 32]> {
-    let bytes = base64(text.trim()).context("the API key is not base64")?;
+    let bytes = from_base64(text).context("the API key is not base64")?;
     bytes
         .try_into()
         .map_err(|b: Vec<u8>| anyhow::anyhow!("the API key is {} bytes, not 32", b.len()))
@@ -36,59 +37,7 @@ pub fn new_key_base64() -> anyhow::Result<String> {
     SystemRandom::new()
         .fill(&mut key)
         .map_err(|_| anyhow::anyhow!("no random key"))?;
-    Ok(base64_encode(&key))
-}
-
-/// Standard base64 with padding.
-fn base64_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let word = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[((word >> (18 - 6 * i)) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
-/// Standard base64 with padding (the key's only form).
-fn base64(text: &str) -> Option<Vec<u8>> {
-    fn value(c: u8) -> Option<u32> {
-        Some(u32::from(match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return None,
-        }))
-    }
-    let text = text.as_bytes();
-    if !text.len().is_multiple_of(4) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(text.len() / 4 * 3);
-    for chunk in text.chunks(4) {
-        let pad = chunk.iter().rev().take_while(|c| **c == b'=').count();
-        if pad > 2 {
-            return None;
-        }
-        let mut word = 0u32;
-        for &c in &chunk[..4 - pad] {
-            word = (word << 6) | value(c)?;
-        }
-        word <<= 6 * pad;
-        let bytes = word.to_be_bytes();
-        out.extend_from_slice(&bytes[1..4 - pad]);
-    }
-    Some(out)
+    Ok(base64(&key))
 }
 
 /// HMAC-SHA-256.
@@ -360,12 +309,12 @@ mod tests {
         assert_eq!(key[31], 31);
         assert!(psk_from_base64("AAEC").is_err(), "3 bytes");
         assert!(psk_from_base64("A!==").is_err());
-        assert_eq!(base64("TW9saQ=="), Some(b"Moli".to_vec()));
-        assert_eq!(base64("TW9saSE="), Some(b"Moli!".to_vec()));
+        assert_eq!(from_base64("TW9saQ=="), Some(b"Moli".to_vec()));
+        assert_eq!(from_base64("TW9saSE="), Some(b"Moli!".to_vec()));
         for bytes in [&b"Moli"[..], b"Moli!", b"Moli!!", b""] {
-            assert_eq!(base64(&base64_encode(bytes)), Some(bytes.to_vec()));
+            assert_eq!(from_base64(&base64(bytes)), Some(bytes.to_vec()));
         }
-        assert_eq!(base64_encode(b"Moli"), "TW9saQ==");
+        assert_eq!(base64(b"Moli"), "TW9saQ==");
         let key = new_key_base64().unwrap();
         assert_eq!(psk_from_base64(&key).unwrap().len(), 32);
         assert_ne!(key, new_key_base64().unwrap());

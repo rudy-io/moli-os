@@ -64,5 +64,5 @@ pub(crate) fn load(path: &Path) -> Book {
 
 pub(crate) async fn save(path: &Path, book: &Book) -> io::Result<()> {
     let bytes = serde_json::to_vec_pretty(book).map_err(io::Error::other)?;
-    crate::labels::write_atomic(path, &bytes).await
+    crate::files::save(path, bytes, crate::files::Mode::Shared).await
 }

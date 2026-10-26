@@ -424,18 +424,9 @@ pub(crate) async fn put(
         Ok(text) => text + "\n",
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
-    // A name of its own: two saves at once never write into the same file.
-    let tmp = dir.join(format!(
-        "plan.json.{}.tmp",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
     let path = dir.join("plan.json");
-    let written = async {
-        tokio::fs::write(&tmp, text).await?;
-        tokio::fs::rename(&tmp, &path).await
-    };
+    let written =
+        moli_runtime::files::save(&path, text.into_bytes(), moli_runtime::files::Mode::Shared);
     match written.await {
         Ok(()) => axum::Json(plan).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),

@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
+use moli_core::encoding::from_base64url;
 use ring::signature::{RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents};
 use serde::Deserialize;
 
@@ -173,8 +174,8 @@ async fn fetch(domain: &str) -> anyhow::Result<HashMap<String, Key>> {
             Some((
                 k.kid,
                 Key {
-                    n: b64url(k.n.as_deref()?)?,
-                    e: b64url(k.e.as_deref()?)?,
+                    n: from_base64url(k.n.as_deref()?)?,
+                    e: from_base64url(k.e.as_deref()?)?,
                 },
             ))
         })
@@ -207,7 +208,7 @@ impl Jwt {
         if parts.next().is_some() {
             return None;
         }
-        let parsed: Header = serde_json::from_slice(&b64url(header)?).ok()?;
+        let parsed: Header = serde_json::from_slice(&from_base64url(header)?).ok()?;
         // RS256 only: never let the token choose a weaker (or no) algorithm.
         if parsed.alg != "RS256" {
             return None;
@@ -215,8 +216,8 @@ impl Jwt {
         Some(Self {
             kid: parsed.kid,
             signed: format!("{header}.{claims}").into_bytes(),
-            signature: b64url(signature)?,
-            claims: b64url(claims)?,
+            signature: from_base64url(signature)?,
+            claims: from_base64url(claims)?,
         })
     }
 }
@@ -279,30 +280,6 @@ fn now_s() -> u64 {
     moli_core::now_ms() / 1000
 }
 
-/// Base64url without padding (JWT, JWK).
-pub(crate) fn b64url(s: &str) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    let (mut acc, mut bits) = (0u32, 0u32);
-    for c in s.trim_end_matches('=').bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            _ => return None,
-        };
-        acc = (acc << 6) | u32::from(v);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((acc >> bits) & 0xff).ok()?);
-            acc &= (1 << bits) - 1;
-        }
-    }
-    Some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,21 +289,6 @@ mod tests {
     const ISS: &str = "https://maison.cloudflareaccess.com";
     const AUD: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
     const NOW: u64 = 1_791_060_580;
-
-    fn b64(bytes: &[u8]) -> String {
-        const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let mut out = String::new();
-        for chunk in bytes.chunks(3) {
-            let n = chunk
-                .iter()
-                .enumerate()
-                .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
-            for i in 0..=chunk.len() {
-                out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
-            }
-        }
-        out
-    }
 
     /// A throwaway key, for tests only (tests/data).
     fn signer() -> (RsaKeyPair, Key) {
@@ -341,7 +303,11 @@ mod tests {
     }
 
     fn token(pair: &RsaKeyPair, header: &str, claims: &str) -> String {
-        let signed = format!("{}.{}", b64(header.as_bytes()), b64(claims.as_bytes()));
+        let signed = format!(
+            "{}.{}",
+            moli_core::encoding::base64url(header.as_bytes()),
+            moli_core::encoding::base64url(claims.as_bytes())
+        );
         let mut sig = vec![0; pair.public().modulus_len()];
         pair.sign(
             &RSA_PKCS1_SHA256,
@@ -350,7 +316,7 @@ mod tests {
             &mut sig,
         )
         .unwrap();
-        format!("{signed}.{}", b64(&sig))
+        format!("{signed}.{}", moli_core::encoding::base64url(&sig))
     }
 
     fn claims(aud: &str, iss: &str, exp: u64, email: &str) -> String {
@@ -381,7 +347,9 @@ mod tests {
         // Tampered claims, same signature.
         let t = token(&pair, HEADER, &good);
         let mut parts: Vec<&str> = t.split('.').collect();
-        let evil = b64(claims(AUD, ISS, NOW + 3600, "intrus@example.com").as_bytes());
+        let evil = moli_core::encoding::base64url(
+            claims(AUD, ISS, NOW + 3600, "intrus@example.com").as_bytes(),
+        );
         parts[1] = &evil;
         let forged = parts.join(".");
         assert_eq!(
@@ -418,13 +386,5 @@ mod tests {
         assert!(Jwt::parse(&token(&pair, r#"{"alg":"none","kid":"k1"}"#, &good)).is_none());
         assert!(Jwt::parse("a.b").is_none());
         assert!(Jwt::parse(&"a".repeat(MAX_TOKEN + 1)).is_none());
-    }
-
-    #[test]
-    fn base64url_round_trips() {
-        for sample in [&b""[..], b"f", b"fo", b"foo", b"foob", b"\xff\xfe\x00\x01"] {
-            assert_eq!(b64url(&b64(sample)).unwrap(), sample);
-        }
-        assert!(b64url("a+b/").is_none(), "standard alphabet refused");
     }
 }

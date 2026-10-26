@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail, ensure};
+use moli_core::encoding::base64;
 use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 use rustls::ClientConfig;
@@ -244,28 +245,6 @@ impl WebSocket {
         self.buf.drain(..at + len);
         Ok((b0 & 0x80 != 0, b0 & 0x0f, payload))
     }
-}
-
-/// Standard base64 with padding (handshake keys).
-fn base64(bytes: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(
-                    T[usize::try_from((n >> (18 - 6 * i)) & 63).unwrap_or(0)],
-                ));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

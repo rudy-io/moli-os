@@ -1,50 +1,7 @@
 //! The few encodings Amazon's sign-in needs: base64 (standard, and URL-safe
 //! without padding), hexadecimal, percent-encoding and query parameters.
 
-const STANDARD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-fn base64_with(bytes: &[u8], alphabet: &[u8; 64], pad: bool) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        let chars = chunk.len() + 1;
-        for i in 0..4 {
-            if i < chars {
-                out.push(char::from(alphabet[(n >> (18 - 6 * i)) as usize & 63]));
-            } else if pad {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
-/// Standard base64, with padding.
-pub(crate) fn base64(bytes: &[u8]) -> String {
-    base64_with(bytes, STANDARD, true)
-}
-
-/// URL-safe base64, without padding (PKCE).
-pub(crate) fn base64url(bytes: &[u8]) -> String {
-    base64_with(bytes, URL_SAFE, false)
-}
-
-/// Lowercase hexadecimal.
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            s.push(char::from(b"0123456789abcdef"[usize::from(b >> 4)]));
-            s.push(char::from(b"0123456789abcdef"[usize::from(b & 15)]));
-            s
-        })
-}
+pub(crate) use moli_core::encoding::{base64, base64url, hex};
 
 /// Percent-encoding of everything but the unreserved characters.
 pub(crate) fn percent(text: &str) -> String {

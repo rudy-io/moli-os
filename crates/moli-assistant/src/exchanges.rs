@@ -173,22 +173,16 @@ fn keep(mut all: VecDeque<Exchange>, now_ms: i64) -> VecDeque<Exchange> {
     all
 }
 
-/// The file, whole: written aside, flushed, then renamed over the old one
-/// (never half written).
+/// The file, whole (never half written).
 fn rewrite(path: &Path, kept: &VecDeque<Exchange>) {
     let text: String = kept
         .iter()
         .filter_map(|e| serde_json::to_string(e).ok())
         .map(|line| line + "\n")
         .collect();
-    let aside = path.with_extension("jsonl.tmp");
-    let written = std::fs::File::create(&aside)
-        .and_then(|mut f| {
-            f.write_all(text.as_bytes())?;
-            f.sync_all()
-        })
-        .and_then(|()| std::fs::rename(&aside, path));
-    if let Err(e) = written {
+    if let Err(e) =
+        moli_runtime::files::write_atomic(path, text.as_bytes(), moli_runtime::files::Mode::Shared)
+    {
         tracing::warn!(path = %path.display(), error = %e, "assistant exchanges not saved");
     }
 }
@@ -271,7 +265,11 @@ mod tests {
         }
         assert!(lines() < MAX + PRUNE_EVERY, "{} lines", lines());
         assert_eq!(log.since(0).len(), MAX);
-        assert!(!path.with_extension("jsonl.tmp").exists());
+        let left = std::fs::read_dir(path.parent().unwrap()).unwrap();
+        assert!(
+            left.flatten()
+                .all(|e| !e.path().to_string_lossy().ends_with(".tmp"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

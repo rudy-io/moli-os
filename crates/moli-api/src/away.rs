@@ -116,9 +116,8 @@ fn write(dir: &FsPath, away: Option<&Away>) -> std::io::Result<()> {
             _ => Ok(()),
         };
     };
-    let tmp = dir.join(format!("{FILE}.tmp"));
-    std::fs::write(&tmp, serde_json::to_string_pretty(away)? + "\n")?;
-    std::fs::rename(tmp, path)
+    let text = serde_json::to_string_pretty(away)? + "\n";
+    moli_runtime::files::write_atomic(&path, text.as_bytes(), moli_runtime::files::Mode::Shared)
 }
 
 fn now_ms() -> u64 {

@@ -3,6 +3,7 @@
 //! request, and the verifier itself proves, at the token exchange, that the
 //! code is ours.
 
+use moli_core::encoding::base64url;
 use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 
@@ -22,25 +23,6 @@ pub fn verifier() -> anyhow::Result<String> {
 #[must_use]
 pub fn challenge(verifier: &str) -> String {
     base64url(digest(&SHA256, verifier.as_bytes()).as_ref())
-}
-
-/// Base64 with the URL alphabet (`-`, `_`) and no `=` padding (RFC 4648 § 5).
-#[must_use]
-pub fn base64url(bytes: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
-        for i in 0..=chunk.len() {
-            out.push(char::from(
-                T[usize::try_from((n >> (18 - 6 * i)) & 63).unwrap_or(0)],
-            ));
-        }
-    }
-    out
 }
 
 /// Percent-encodes everything but the unreserved characters (RFC 3986).

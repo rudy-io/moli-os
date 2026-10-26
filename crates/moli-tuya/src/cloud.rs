@@ -12,7 +12,6 @@
 //! person edits (`write_programs`): the cloud is the only way to it.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,6 +20,7 @@ use http::{Method, Request};
 use http_body_util::Full;
 use md5::{Digest as _, Md5};
 use moli_core::Value;
+use moli_core::encoding::{base64, from_base64, hex};
 use moli_net::ws::WebSocket;
 use ring::digest::{SHA256, digest};
 use serde_json::Value as Json;
@@ -123,14 +123,6 @@ impl Region {
         };
         Some(Self { api, mq })
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
 }
 
 /// What Tuya signs: method, body hash, (no) headers, path with sorted query.
@@ -264,8 +256,8 @@ pub enum Event {
 
 /// A message's content, decrypted (`em` = the encryption, from its properties).
 pub fn open(keys: &Keys, payload_b64: &str, em: Option<&str>) -> anyhow::Result<Json> {
-    let outer: Json = serde_json::from_slice(&base64(payload_b64).context("payload")?)?;
-    let data = base64(outer["data"].as_str().context("no data")?).context("data")?;
+    let outer: Json = serde_json::from_slice(&from_base64(payload_b64).context("payload")?)?;
+    let data = from_base64(outer["data"].as_str().context("no data")?).context("data")?;
     let key = keys.message_key().context("secret too short")?;
     let plain = if em == Some("aes_gcm") {
         ensure!(data.len() > 28, "message too short");
@@ -315,45 +307,6 @@ pub fn events(message: &Json) -> Vec<Event> {
     out
 }
 
-/// Standard base64, padding optional.
-fn base64(text: &str) -> Option<Vec<u8>> {
-    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity(text.len() * 3 / 4);
-    let (mut buf, mut bits) = (0u32, 0);
-    for c in text
-        .bytes()
-        .filter(|&c| c != b'=' && !c.is_ascii_whitespace())
-    {
-        buf = (buf << 6) | u32::try_from(table.iter().position(|&t| t == c)?).ok()?;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((buf >> bits) & 0xFF).ok()?);
-        }
-    }
-    Some(out)
-}
-
-/// Standard base64, padded.
-fn base64_of(bytes: &[u8]) -> String {
-    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(table[((n >> (18 - 6 * i)) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
 /// A device's week program, from the cloud's copy of its raw DPs (on
 /// switch wiring, with the setpoints Moli keeps).
 async fn read_program(api: &mut Api, id: &str, kept: &kept::Shared) -> anyhow::Result<Value> {
@@ -378,7 +331,7 @@ async fn read_program(api: &mut Api, id: &str, kept: &kept::Shared) -> anyhow::R
             .collect();
         let sizes: Vec<Option<usize>> = parts
             .iter()
-            .map(|p| p["value"].as_str().and_then(base64).map(|b| b.len()))
+            .map(|p| p["value"].as_str().and_then(from_base64).map(|b| b.len()))
             .collect();
         let sample = parts.first().map(|p| {
             let value = p["value"].to_string();
@@ -434,7 +387,7 @@ fn shadow_parts(shadow: &Json) -> HashMap<&str, Vec<u8>> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|p| Some((p["code"].as_str()?, base64(p["value"].as_str()?)?)))
+        .filter_map(|p| Some((p["code"].as_str()?, from_base64(p["value"].as_str()?)?)))
         .collect()
 }
 
@@ -785,7 +738,7 @@ async fn issue_program(
 async fn issue(api: &mut Api, device: &str, parts: &[(String, Vec<u8>)]) -> anyhow::Result<()> {
     let properties: serde_json::Map<String, Json> = parts
         .iter()
-        .map(|(code, bytes)| (code.clone(), Json::String(base64_of(bytes))))
+        .map(|(code, bytes)| (code.clone(), Json::String(base64(bytes))))
         .collect();
     api.post(
         &format!("/v2.0/cloud/thing/{device}/shadow/properties/issue"),
@@ -1086,10 +1039,6 @@ mod tests {
         Keys::parse("abcdefghij0123456789\nSECRETSECRET0123456789abcdefghij\n").unwrap()
     }
 
-    fn b64(bytes: &[u8]) -> String {
-        base64_of(bytes)
-    }
-
     #[test]
     fn keys_come_from_two_lines_or_not_at_all() {
         assert_eq!(keys().id, "abcdefghij0123456789");
@@ -1130,8 +1079,8 @@ mod tests {
         let inner = br#"{"devId":"bf00000000000000000001","status":[{"code":"doorcontact_state","value":true,"t":1}]}"#;
         // Old messages: AES-ECB.
         let outer =
-            serde_json::json!({ "data": b64(&ecb_encrypt(&key, inner, true)), "protocol": 4 });
-        let msg = open(&k, &b64(outer.to_string().as_bytes()), None).unwrap();
+            serde_json::json!({ "data": base64(&ecb_encrypt(&key, inner, true)), "protocol": 4 });
+        let msg = open(&k, &base64(outer.to_string().as_bytes()), None).unwrap();
         assert_eq!(
             events(&msg),
             [Event::Status {
@@ -1143,14 +1092,14 @@ mod tests {
         let iv = [7u8; 12];
         let mut sealed = iv.to_vec();
         sealed.extend(gcm_seal(&key, iv, b"", inner));
-        let outer = serde_json::json!({ "data": b64(&sealed), "protocol": 4 });
-        let msg = open(&k, &b64(outer.to_string().as_bytes()), Some("aes_gcm")).unwrap();
+        let outer = serde_json::json!({ "data": base64(&sealed), "protocol": 4 });
+        let msg = open(&k, &base64(outer.to_string().as_bytes()), Some("aes_gcm")).unwrap();
         assert_eq!(events(&msg).len(), 1);
         // A tampered one is refused.
         let mut bad = sealed.clone();
         bad[20] ^= 1;
-        let outer = serde_json::json!({ "data": b64(&bad) });
-        assert!(open(&k, &b64(outer.to_string().as_bytes()), Some("aes_gcm")).is_err());
+        let outer = serde_json::json!({ "data": base64(&bad) });
+        assert!(open(&k, &base64(outer.to_string().as_bytes()), Some("aes_gcm")).is_err());
     }
 
     #[test]

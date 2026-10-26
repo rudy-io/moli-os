@@ -25,6 +25,7 @@ use anyhow::{Context as _, bail};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
+use moli_core::encoding::hex;
 use moli_core::{Device, DeviceId, Value};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
@@ -618,16 +619,6 @@ fn meross_message(namespace: &str, payload: &serde_json::Value, key: &str) -> se
         },
         "payload": payload,
     })
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
 }
 
 /// The key a signing transport needs. `None` once a human has been told

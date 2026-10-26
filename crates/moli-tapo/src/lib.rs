@@ -14,6 +14,7 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt as _, BlockEncrypt as _, KeyInit as _};
 use anyhow::{Context as _, bail};
 use http::Method;
+use moli_core::encoding::from_base64;
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_net::lan::{self, Looked, Pace};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
@@ -304,7 +305,7 @@ fn range(min: f64, max: f64) -> Kind {
 fn device(ctx: &DriverCtx, id: &DeviceId, info: &Json) -> Device {
     let name = info["nickname"]
         .as_str()
-        .and_then(base64_decode)
+        .and_then(from_base64)
         .and_then(|b| String::from_utf8(b).ok())
         .unwrap_or_else(|| moli_i18n::tr!("pilotes.tapo.ampoule"));
     let mut points = vec![spec(
@@ -359,24 +360,6 @@ fn device(ctx: &DriverCtx, id: &DeviceId, info: &Json) -> Device {
         members: Vec::new(),
         points,
     }
-}
-
-fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::new();
-    let (mut buf, mut bits) = (0u32, 0);
-    for c in text
-        .bytes()
-        .filter(|&c| c != b'=' && !c.is_ascii_whitespace())
-    {
-        buf = (buf << 6) | u32::try_from(table.iter().position(|&t| t == c)?).ok()?;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((buf >> bits) & 0xFF).ok()?);
-        }
-    }
-    Some(out)
 }
 
 fn values(info: &Json) -> Vec<(&'static str, Value)> {
@@ -618,7 +601,7 @@ async fn run(tapo: &Tapo, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let Some(auth) = ctx
         .secret(AUTH_HASH)
         .as_deref()
-        .and_then(base64_decode)
+        .and_then(from_base64)
         .and_then(|b| <[u8; 32]>::try_from(b).ok())
     else {
         ctx.wait_for(moli_i18n::tr!(
@@ -748,6 +731,6 @@ mod tests {
         let v: std::collections::HashMap<_, _> = values(&info).into_iter().collect();
         assert_eq!(v["on"], Value::Bool(true));
         assert_eq!(v["brightness"], Value::Int(40));
-        assert_eq!(base64_decode("VG9pbGV0dGVz").unwrap(), b"Toilettes");
+        assert_eq!(from_base64("VG9pbGV0dGVz").unwrap(), b"Toilettes");
     }
 }

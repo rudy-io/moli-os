@@ -5,6 +5,7 @@
 //! with HMAC-SHA512: `target_position{position}{timestamp}{nonce}{window}`,
 //! the result in base64 with `-` and `_` for `+` and `/`.
 
+use moli_core::encoding::{base64, from_base64};
 use ring::hmac;
 
 pub struct Signer {
@@ -36,7 +37,7 @@ impl Signer {
     /// key is not base64.
     #[must_use]
     pub fn new(key: &str, id: &str) -> Option<Self> {
-        let bytes = decode(key)?;
+        let bytes = from_base64(key).filter(|b| !b.is_empty())?;
         Some(Self {
             key: hmac::Key::new(hmac::HMAC_SHA512, &bytes),
             id: id.trim().to_owned(),
@@ -53,58 +54,13 @@ impl Signer {
         self.last = Some((timestamp, nonce));
         let message = format!("target_position{position}{timestamp}{nonce}{window}");
         let tag = hmac::sign(&self.key, message.as_bytes());
-        let hash = encode(tag.as_ref()).replace('+', "-").replace('/', "_");
+        let hash = base64(tag.as_ref()).replace('+', "-").replace('/', "_");
         Stamp {
             timestamp,
             nonce,
             hash,
         }
     }
-}
-
-const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// Standard base64, padded.
-fn encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
-/// Base64, standard or URL-safe, padded or not.
-fn decode(text: &str) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut n = 0u32;
-    let mut bits = 0;
-    for c in text.trim().trim_end_matches('=').bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            _ => return None,
-        };
-        n = n << 6 | u32::from(v);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((n >> bits & 0xff) as u8);
-        }
-    }
-    (!out.is_empty()).then_some(out)
 }
 
 #[cfg(test)]
@@ -116,12 +72,12 @@ mod tests {
 
     #[test]
     fn base64_both_ways() {
-        assert_eq!(encode(&[0xfb, 0xff, 0xfe]), "+//+");
-        assert_eq!(encode(b"ab"), "YWI=");
-        assert_eq!(decode("YWI"), Some(b"ab".to_vec()));
-        assert_eq!(decode("-__-"), Some(vec![0xfb, 0xff, 0xfe]));
-        assert_eq!(decode(KEY), Some((0..32).collect()));
-        assert_eq!(decode("pas du base64!"), None);
+        assert_eq!(base64(&[0xfb, 0xff, 0xfe]), "+//+");
+        assert_eq!(base64(b"ab"), "YWI=");
+        assert_eq!(from_base64("YWI"), Some(b"ab".to_vec()));
+        assert_eq!(from_base64("-__-"), Some(vec![0xfb, 0xff, 0xfe]));
+        assert_eq!(from_base64(KEY), Some((0..32).collect()));
+        assert_eq!(from_base64("pas du base64!"), None);
     }
 
     /// Hashes computed apart, with Python's `hmac` and `base64`.

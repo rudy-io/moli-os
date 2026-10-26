@@ -271,11 +271,12 @@ impl Energy {
             + "\n";
         let file = self.inner.contracts_file.clone();
         blocking(move || {
-            // Written aside, then renamed: never half a file.
-            let tmp = file.with_extension("json.tmp");
-            std::fs::write(&tmp, text)
-                .and_then(|()| std::fs::rename(&tmp, &file))
-                .map_err(|e| EnergyError::Internal(e.to_string()))
+            moli_runtime::files::write_atomic(
+                &file,
+                text.as_bytes(),
+                moli_runtime::files::Mode::Shared,
+            )
+            .map_err(|e| EnergyError::Internal(e.to_string()))
         })
         .await?;
         {

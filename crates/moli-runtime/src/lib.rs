@@ -10,6 +10,7 @@
 
 mod addresses;
 mod driver;
+pub mod files;
 pub mod guard;
 mod hub;
 mod journal_log;

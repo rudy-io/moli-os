@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use anyhow::{Context as _, bail, ensure};
+use moli_core::encoding::hex;
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use ring::digest::{SHA256, digest};
@@ -143,16 +144,6 @@ fn text_ok(s: &str) -> bool {
     s.chars().count() <= MAX_TEXT && !s.chars().any(char::is_control)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
-}
-
 fn sha256(token: &str) -> String {
     hex(digest(&SHA256, token.as_bytes()).as_ref())
 }
@@ -193,9 +184,12 @@ impl Registry {
     }
 
     fn save(&self, file: &File) -> anyhow::Result<()> {
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(file)? + "\n")?;
-        std::fs::rename(&tmp, &self.path)?;
+        let text = serde_json::to_string_pretty(file)? + "\n";
+        moli_runtime::files::write_atomic(
+            &self.path,
+            text.as_bytes(),
+            moli_runtime::files::Mode::Shared,
+        )?;
         Ok(())
     }
 

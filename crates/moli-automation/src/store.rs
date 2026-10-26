@@ -54,23 +54,16 @@ async fn read(path: &Path) -> anyhow::Result<Vec<Automation>> {
     Ok(file.automations)
 }
 
-/// Written whole: to a temporary file, flushed to the disk, then renamed;
-/// the previous version kept as `.bak`.
+/// Written whole (never half a file); the previous version kept as `.bak`.
 pub(crate) async fn save(path: Option<&Path>, list: &[Automation]) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt as _;
     let Some(path) = path else {
         return Ok(());
     };
     let json = serde_json::to_vec_pretty(&serde_json::json!({ "automations": list }))?;
-    let tmp = path.with_extension("json.tmp");
-    let mut file = tokio::fs::File::create(&tmp).await?;
-    file.write_all(&json).await?;
-    file.sync_all().await?;
-    drop(file);
     if tokio::fs::try_exists(path).await.unwrap_or(false) {
         let _ = tokio::fs::copy(path, path.with_extension("json.bak")).await;
     }
-    tokio::fs::rename(&tmp, path).await
+    moli_runtime::files::save(path, json, moli_runtime::files::Mode::Shared).await
 }
 
 pub(crate) async fn load_runs(path: Option<&Path>) -> VecDeque<Run> {
@@ -107,9 +100,8 @@ pub(crate) async fn append_run(path: Option<&Path>, run: &Run, recent: Vec<Run>)
                 text.push_str(&serde_json::to_string(r)?);
                 text.push('\n');
             }
-            let tmp = path.with_extension("jsonl.tmp");
-            tokio::fs::write(&tmp, text).await?;
-            tokio::fs::rename(&tmp, path).await?;
+            moli_runtime::files::save(path, text.into_bytes(), moli_runtime::files::Mode::Shared)
+                .await?;
             return anyhow::Ok(());
         }
         let mut file = tokio::fs::OpenOptions::new()

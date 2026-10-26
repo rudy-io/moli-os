@@ -7,6 +7,7 @@
 //! The agent proves itself with a token; Moli only keeps its SHA-256
 //! (`agent_sha256` in the machine's config), never the token.
 
+use moli_core::encoding::hex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -62,16 +63,6 @@ impl std::fmt::Display for AgentError {
 pub struct Agents {
     slots: Arc<Mutex<HashMap<String, Slot>>>,
     reports: mpsc::Sender<Report>,
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
 }
 
 #[must_use]

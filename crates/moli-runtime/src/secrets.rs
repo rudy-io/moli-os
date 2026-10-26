@@ -174,7 +174,7 @@ impl SecretStore {
     /// Encrypts and writes `next`, then makes it current. Caller holds `write`.
     async fn commit(&self, next: BTreeMap<String, String>) -> io::Result<()> {
         let bytes = encrypt(&self.key, &next)?;
-        crate::labels::write_atomic(&self.path, &bytes).await?;
+        crate::files::save(&self.path, bytes, crate::files::Mode::Private).await?;
         set_owner_only(&self.path);
         *self.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
         Ok(())

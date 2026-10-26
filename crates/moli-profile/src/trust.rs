@@ -99,13 +99,12 @@ pub fn record(trust_file: &Path, file: &ProfileFile) -> io::Result<Recorded> {
     };
     approvals.trusted.push(approval);
     let text = toml::to_string(&approvals).map_err(io::Error::other)?;
-    if let Some(dir) = trust_file.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)?;
-    }
-    // Written aside then renamed: a crash never leaves half a list.
-    let tmp = trust_file.with_extension("toml.tmp");
-    std::fs::write(&tmp, format!("{HEADER}\n{text}"))?;
-    std::fs::rename(&tmp, trust_file)?;
+    let text = format!("{HEADER}\n{text}");
+    moli_runtime::files::write_atomic(
+        trust_file,
+        text.as_bytes(),
+        moli_runtime::files::Mode::Shared,
+    )?;
     Ok(recorded)
 }
 

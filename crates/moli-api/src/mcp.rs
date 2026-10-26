@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use moli_core::encoding::base64;
 use moli_core::{DeviceId, Origin, PointId, Value};
 use moli_history::History;
 use moli_runtime::{CommandError, DeviceView, Hub, LabelPatch};
@@ -595,36 +596,4 @@ fn ok(value: &Json) -> Result<CallToolResult, McpError> {
 
 fn fail(message: &str) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message.to_owned())])
-}
-
-/// Standard base64 (MCP images travel as text).
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(TABLE[((n >> (18 - 6 * i)) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn base64_matches_the_standard() {
-        assert_eq!(super::base64(b""), "");
-        assert_eq!(super::base64(b"f"), "Zg==");
-        assert_eq!(super::base64(b"fo"), "Zm8=");
-        assert_eq!(super::base64(b"foobar"), "Zm9vYmFy");
-        assert_eq!(super::base64(&[0xFF, 0xD8, 0xFF]), "/9j/");
-    }
 }

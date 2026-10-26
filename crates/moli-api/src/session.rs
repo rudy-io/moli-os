@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
+use moli_core::encoding::hex;
 use moli_core::now_ms;
 use moli_runtime::Hub;
 use ring::digest::{SHA256, digest};
@@ -185,16 +186,6 @@ impl fmt::Debug for Sessions {
             .field("pin_configured", &self.pin_configured())
             .finish_non_exhaustive()
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut hex, b| {
-            let _ = write!(hex, "{b:02x}");
-            hex
-        })
 }
 
 fn hash(s: &str) -> String {

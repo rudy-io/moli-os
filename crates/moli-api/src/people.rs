@@ -27,6 +27,7 @@ use std::sync::{Mutex, PoisonError};
 
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
+use moli_core::encoding::{from_hex, hex};
 use moli_core::{DeviceId, InstanceId, now_ms};
 use moli_runtime::{Hub, Snapshot};
 use ring::digest::{SHA256, digest};
@@ -244,26 +245,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    })
-}
-
-fn unhex(s: &str) -> Option<Vec<u8>> {
-    s.len()
-        .is_multiple_of(2)
-        .then(|| {
-            (0..s.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-                .collect()
-        })
-        .flatten()
-}
-
 fn hash(s: &str) -> String {
     hex(digest(&SHA256, s.as_bytes()).as_ref())
 }
@@ -300,8 +281,8 @@ fn password_matches(stored: &str, attempt: &str) -> bool {
     };
     let (Some(rounds), Some(salt), Some(expected)) = (
         rounds.parse::<u32>().ok().and_then(NonZeroU32::new),
-        unhex(salt),
-        unhex(expected),
+        from_hex(salt),
+        from_hex(expected),
     ) else {
         return false;
     };
@@ -342,20 +323,6 @@ fn plain_code(code: &str) -> String {
 /// How an invitation code is kept: its HMAC-SHA256 under the house's key.
 fn invite_digest(key: &hmac::Key, code: &str) -> String {
     hex(hmac::sign(key, plain_code(code).as_bytes()).as_ref())
-}
-
-/// `people.json` says who lives here, their e-mails and places: for Moli's
-/// user alone (0600 on unix, like the secret store).
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path)?;
-    // A file left there (a crash) kept its own mode.
-    private(path)?;
-    file.write_all(bytes)
 }
 
 #[cfg(unix)]
@@ -492,9 +459,7 @@ impl People {
             return Ok(());
         };
         let json = serde_json::to_vec_pretty(&*lock(&self.book)).unwrap_or_default();
-        let tmp = path.with_extension("json.tmp");
-        write_private(&tmp, &json)?;
-        std::fs::rename(&tmp, path)
+        moli_runtime::files::write_atomic(path, &json, moli_runtime::files::Mode::Private)
     }
 
     async fn change<T>(
@@ -719,7 +684,7 @@ impl People {
 
     /// The house's invitation key, from the encrypted store.
     fn invite_key(&self) -> Option<hmac::Key> {
-        let key = unhex(&self.hub.core_secret(INVITE_KEY)?)?;
+        let key = from_hex(&self.hub.core_secret(INVITE_KEY)?)?;
         Some(hmac::Key::new(hmac::HMAC_SHA256, &key))
     }
 

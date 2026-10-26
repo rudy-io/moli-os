@@ -210,12 +210,10 @@ impl Assistant {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         if let Some(path) = path {
-            let tmp = path.with_extension("json.tmp");
             let body = serde_json::to_vec_pretty(&prefs)
                 .map_err(|e| AssistantError::Upstream(e.to_string()))?;
-            tokio::fs::write(&tmp, body)
+            moli_runtime::files::save(&path, body, moli_runtime::files::Mode::Shared)
                 .await
-                .and(tokio::fs::rename(&tmp, &path).await)
                 .map_err(|e| AssistantError::Upstream(format!("cannot save the voice: {e}")))?;
         }
         tracing::info!(voice = %prefs.voice, style = %prefs.style, pace = ?prefs.pace, "voice chosen from the dashboard");

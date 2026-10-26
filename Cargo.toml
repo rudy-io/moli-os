@@ -52,6 +52,7 @@ moli-weather = { path = "crates/moli-weather" }
 
 aes = "0.8"
 anyhow = "1"
+base64 = "0.23"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "macros"] }
 crc32fast = "1"
 earshot = "1.2"

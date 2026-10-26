@@ -95,8 +95,11 @@ impl Kept {
     fn save(&self) {
         let Some(path) = &self.path else { return };
         let text = to_json(&self.weeks).to_string();
-        let tmp = path.with_extension("json.tmp");
-        if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, path)) {
+        if let Err(e) = moli_runtime::files::write_atomic(
+            path,
+            text.as_bytes(),
+            moli_runtime::files::Mode::Shared,
+        ) {
             tracing::warn!(file = %path.display(), error = %e, "tuya: kept setpoints not saved");
         }
     }
