@@ -102,6 +102,83 @@ pub const PROGRAMS: &[(&str, u8)] = &[
     ("coffee_rinse", 0x22),
 ];
 
+/// What a person may change in a drink for one cup (`brew_custom`): the
+/// recipe's byte it sits in (J.O.E.'s `F<n>` is byte n − 1), its range and
+/// step in people's units, and how many of them one unit of the byte is
+/// (water: 5 ml). Temperature: 0 low, 1 normal, 2 high.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Field {
+    pub key: &'static str,
+    byte: usize,
+    pub min: u16,
+    pub max: u16,
+    pub step: u16,
+    tick: u16,
+    pub unit: Option<&'static str>,
+}
+
+const fn field(
+    key: &'static str,
+    byte: usize,
+    (min, max): (u16, u16),
+    step: u16,
+    unit: Option<&'static str>,
+) -> Field {
+    Field {
+        key,
+        byte,
+        min,
+        max,
+        step,
+        tick: step,
+        unit,
+    }
+}
+
+const STRENGTH: Field = field("strength", 2, (1, 10), 1, None);
+const TEMPERATURE: Field = field("temperature", 6, (0, 2), 1, None);
+const MILK_FOAM: Field = field("milk_foam", 5, (1, 120), 1, Some("s"));
+const MILK_BREAK: Field = field("milk_break", 10, (0, 60), 1, Some("s"));
+const BYPASS: Field = field("bypass", 9, (0, 240), 5, Some("ml"));
+const fn water(min: u16, max: u16) -> Field {
+    field("water", 3, (min, max), 5, Some("ml"))
+}
+const SHORT: Field = water(15, 80);
+const LONG: Field = water(25, 240);
+
+/// The E8 (EC)'s drinks and what each lets change, as its J.O.E. file
+/// says (group EF1092): strength in ten steps, water by 5 ml within the
+/// drink's own bounds, temperature, milk foam and the latte's milk pause
+/// in seconds, the barista drinks' water added after (bypass). A double
+/// changes its water and temperature only.
+fn e8_fields(code: u8) -> &'static [Field] {
+    const ESPRESSO: &[Field] = &[STRENGTH, SHORT, TEMPERATURE];
+    const COFFEE: &[Field] = &[STRENGTH, LONG, TEMPERATURE];
+    const DOPPIO: &[Field] = &[STRENGTH, water(30, 160), TEMPERATURE];
+    const MILKY_SHORT: &[Field] = &[STRENGTH, SHORT, TEMPERATURE, MILK_FOAM];
+    const MILKY: &[Field] = &[STRENGTH, LONG, TEMPERATURE, MILK_FOAM];
+    const LATTE: &[Field] = &[STRENGTH, LONG, TEMPERATURE, MILK_FOAM, MILK_BREAK];
+    const BARISTA: &[Field] = &[STRENGTH, LONG, BYPASS, TEMPERATURE];
+    const FOAM: &[Field] = &[MILK_FOAM];
+    const HOT_WATER: &[Field] = &[water(25, 450), TEMPERATURE];
+    const TWO_ESPRESSI: &[Field] = &[SHORT, TEMPERATURE];
+    const TWO_COFFEES: &[Field] = &[LONG, TEMPERATURE];
+    match code {
+        0x02 => ESPRESSO,
+        0x03 => COFFEE,
+        0x30 => DOPPIO,
+        0x06 | 0x2B => MILKY_SHORT,
+        0x04 | 0x2E => MILKY,
+        0x07 => LATTE,
+        0x28 | 0x29 => BARISTA,
+        0x08 => FOAM,
+        0x0D => HOT_WATER,
+        0x31 => TWO_ESPRESSI,
+        0x36 => TWO_COFFEES,
+        _ => &[],
+    }
+}
+
 /// Status bits worth a point of their own (bit, key).
 const ALERTS: &[(usize, &str)] = &[
     (1, "water_empty"),
@@ -299,6 +376,30 @@ impl Model {
         self.drinks.iter().filter(|d| !d.counted_only)
     }
 
+    /// What may change in `drink` for one cup: none on a model not
+    /// described here.
+    #[must_use]
+    pub fn fields(&self, drink: &Drink) -> &'static [Field] {
+        match self.group.as_deref() {
+            Some("EF1092") => e8_fields(drink.code),
+            _ => &[],
+        }
+    }
+
+    /// The recipes to read: each drink that lets something change brews
+    /// its own, or its single's for a double.
+    #[must_use]
+    pub fn recipe_codes(&self) -> Vec<u8> {
+        let mut codes: Vec<u8> = self
+            .brewable()
+            .filter(|d| !self.fields(d).is_empty())
+            .map(recipe_code)
+            .collect();
+        codes.sort_unstable();
+        codes.dedup();
+        codes
+    }
+
     /// Every point of the machine.
     #[must_use]
     pub fn points(&self) -> Vec<PointSpec> {
@@ -349,22 +450,38 @@ impl Model {
         }
         let drinks = enumeration(self.brewable().map(|d| d.slug));
         let programs = enumeration(PROGRAMS.iter().map(|(name, _)| *name));
-        p.extend([
-            writable(spec(
-                "brew",
-                &tr("preparer"),
-                drinks,
-                None,
-                Semantic::Control,
-            )),
-            writable(spec(
-                "maintenance",
-                &tr("entretien"),
-                programs,
-                None,
-                Semantic::Control,
-            )),
-        ]);
+        p.push(writable(spec(
+            "brew",
+            &tr("preparer"),
+            drinks,
+            None,
+            Semantic::Control,
+        )));
+        if self.brewable().any(|d| !self.fields(d).is_empty()) {
+            p.extend([
+                spec(
+                    "recipes",
+                    &tr("recettes"),
+                    Kind::Text,
+                    None,
+                    Semantic::Other,
+                ),
+                writable(spec(
+                    "brew_custom",
+                    &tr("preparer_regle"),
+                    Kind::Text,
+                    None,
+                    Semantic::Control,
+                )),
+            ]);
+        }
+        p.extend([writable(spec(
+            "maintenance",
+            &tr("entretien"),
+            programs,
+            None,
+            Semantic::Control,
+        ))]);
         p
     }
 
@@ -676,17 +793,102 @@ pub fn recipe(reply: &str, code: u8) -> Option<Vec<u8>> {
 
 /// The brew command for `drink` from the recipe the machine keeps: the
 /// recipe's sixteen bytes, the drink's code first (a double's own code on
-/// its single's recipe), byte 8 set to 1 (« recipe valid »; without it the
-/// machine acknowledges and brews nothing).
+/// its single's recipe), `changes` (byte, value) for this cup, byte 8 set
+/// to 1 (« recipe valid »; without it the machine acknowledges and brews
+/// nothing).
 #[must_use]
-pub fn brew_command(drink: &Drink, recipe: &[u8]) -> String {
+pub fn brew_command(drink: &Drink, recipe: &[u8], changes: &[(usize, u8)]) -> String {
     let mut blob = [0u8; 16];
     for (b, r) in blob.iter_mut().zip(recipe) {
         *b = *r;
     }
+    for &(at, value) in changes {
+        if let Some(b) = blob.get_mut(at) {
+            *b = value;
+        }
+    }
     blob[0] = drink.code;
     blob[8] = 1;
     format!("@TP:{}", hex(&blob))
+}
+
+/// The `recipes` point: for each drink that lets something change, each
+/// field as the machine keeps it, with its bounds (`{"coffee": {"strength":
+/// {"value": 7, "min": 1, "max": 10, "step": 1}, "water": {…, "unit":
+/// "ml"}}}`), from the recipes read (code → bytes). A double tells its
+/// single's. A drink whose recipe was not read is left out.
+#[must_use]
+pub fn recipes_value(model: &Model, recipes: &BTreeMap<u8, Vec<u8>>) -> Value {
+    let mut out = serde_json::Map::new();
+    for drink in model.brewable() {
+        let fields = model.fields(drink);
+        let Some(recipe) = recipes.get(&recipe_code(drink)) else {
+            continue;
+        };
+        if fields.is_empty() {
+            continue;
+        }
+        let mut one = serde_json::Map::new();
+        for f in fields {
+            let Some(&raw) = recipe.get(f.byte) else {
+                continue;
+            };
+            let mut v = serde_json::json!({
+                "value": u16::from(raw) * f.tick,
+                "min": f.min,
+                "max": f.max,
+                "step": f.step,
+            });
+            if let Some(unit) = f.unit {
+                v["unit"] = unit.into();
+            }
+            one.insert(f.key.into(), v);
+        }
+        out.insert(drink.slug.into(), one.into());
+    }
+    Value::from(serde_json::Value::Object(out).to_string().as_str())
+}
+
+/// A `brew_custom` order's changes (`{"drink": "coffee", "water": 120,
+/// "strength": 5}`): its drink and, for each field named, the byte and its
+/// value. A field the drink does not let change, out of its bounds or off
+/// its step, is refused.
+fn custom(model: &Model, value: &Value) -> Result<(Drink, Vec<(usize, u8)>), String> {
+    let Value::Text(text) = value else {
+        return Err(tr("valeur_refusee"));
+    };
+    let json: serde_json::Value = serde_json::from_str(text).map_err(|_| tr("valeur_refusee"))?;
+    let asked = json.as_object().ok_or_else(|| tr("valeur_refusee"))?;
+    let drink = *asked
+        .get("drink")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|slug| model.drink(slug))
+        .filter(|d| !d.counted_only)
+        .ok_or_else(|| tr("boisson_inconnue"))?;
+    let fields = model.fields(&drink);
+    let mut changes = Vec::new();
+    for (key, v) in asked.iter().filter(|(k, _)| *k != "drink") {
+        let f = fields
+            .iter()
+            .find(|f| f.key == key)
+            .ok_or_else(|| moli_i18n::tr!("pilotes.jura.reglage_inconnu", reglage = key))?;
+        let n = v
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|n| (f.min..=f.max).contains(n) && n % f.step == 0)
+            .ok_or_else(|| {
+                moli_i18n::tr!(
+                    "pilotes.jura.reglage_hors_bornes",
+                    reglage = key,
+                    min = f.min,
+                    max = f.max,
+                    pas = f.step
+                )
+            })?;
+        let raw = u8::try_from(n / f.tick).map_err(|_| tr("valeur_refusee"))?;
+        changes.push((f.byte, raw));
+    }
+    Ok((drink, changes))
 }
 
 /// `@tm:<argument>,<value><sum>`: a setting's value.
@@ -707,8 +909,9 @@ pub fn setting_value(setting: &Setting, reply: &str) -> Option<Value> {
 /// What an order asks the machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Order {
-    /// Read the single's recipe (`@TM:41,<code>`), then brew `drink`.
-    Brew(Drink),
+    /// Read the single's recipe (`@TM:41,<code>`), then brew `drink`, the
+    /// recipe's bytes changed as said (byte, value) for this cup.
+    Brew(Drink, Vec<(usize, u8)>),
     /// `@TG:<code>`, answered by its echo.
     Program(u8),
     /// Write a setting (keys held around it), then read it back.
@@ -731,12 +934,17 @@ pub fn order(
     };
     let idle = matches!(status.state(model), "ready" | "energy_saving");
     match key {
-        "brew" => {
-            let slug = text(value).unwrap_or_default();
-            let drink = *model
-                .drink(&slug)
-                .filter(|d| !d.counted_only)
-                .ok_or_else(|| tr("boisson_inconnue"))?;
+        "brew" | "brew_custom" => {
+            let (drink, changes) = if key == "brew" {
+                let slug = text(value).unwrap_or_default();
+                let drink = *model
+                    .drink(&slug)
+                    .filter(|d| !d.counted_only)
+                    .ok_or_else(|| tr("boisson_inconnue"))?;
+                (drink, Vec::new())
+            } else {
+                custom(model, value)?
+            };
             if !idle {
                 return Err(moli_i18n::tr!(
                     "pilotes.jura.occupee",
@@ -746,7 +954,7 @@ pub fn order(
             if drink.milk && NO_MILK.iter().any(|&b| status.bit(b)) {
                 return Err(tr("pas_de_lait"));
             }
-            Ok(Order::Brew(drink))
+            Ok(Order::Brew(drink, changes))
         }
         "maintenance" => {
             let name = text(value).unwrap_or_default();
@@ -884,23 +1092,123 @@ mod tests {
         let r = recipe("@tm:41,020008090000020000000000000019", 2).unwrap();
         // The same bytes an E6's espresso was brewed with (jura-connect).
         assert_eq!(
-            brew_command(&espresso, &r),
+            brew_command(&espresso, &r, &[]),
             "@TP:02000809000002000100000000000000"
         );
         let double = *model.drink("two_espressi").unwrap();
         assert_eq!(recipe_code(&double), 2);
         assert_eq!(
-            brew_command(&double, &r),
+            brew_command(&double, &r, &[]),
             "@TP:31000809000002000100000000000000"
         );
         let barista = recipe("@tm:41,2800060C0000010000080000000002", 0x28).unwrap();
         assert_eq!(
-            brew_command(model.drink("cafe_barista").unwrap(), &barista),
+            brew_command(model.drink("cafe_barista").unwrap(), &barista, &[]),
             "@TP:2800060C000001000108000000000000"
         );
         assert_eq!(recipe("@tm:C1", 0x31), None);
         assert_eq!(recipe("@tm:41,020008090000020000000000000018", 2), None);
         assert_eq!(recipe("@tm:41,020008090000020000000000000019", 3), None);
+    }
+
+    #[test]
+    fn a_cup_brews_with_its_own_changes() {
+        let model = e8();
+        let ready = Status::parse("@TF:000400000C0000").unwrap();
+        let custom = |text: &str| order(&model, Some(&ready), "brew_custom", &Value::from(text));
+        // The real E8's coffee: strength 7, 100 ml, normal.
+        let coffee = recipe("@tm:41,03000714000001000000000000001E", 3).unwrap();
+        let Ok(Order::Brew(drink, changes)) =
+            custom(r#"{"drink": "coffee", "strength": 5, "water": 120, "temperature": 2}"#)
+        else {
+            panic!("a coffee within its bounds is taken");
+        };
+        assert_eq!(
+            brew_command(&drink, &coffee, &changes),
+            "@TP:03000518000002000100000000000000",
+            "strength 5, 120 ml (24 × 5), high; the rest as the machine keeps it"
+        );
+        // The barista's water added after, by 5 ml: byte 10 (F10).
+        let barista = recipe("@tm:41,2800060C0000010000080000000002", 0x28).unwrap();
+        let Ok(Order::Brew(drink, changes)) = custom(r#"{"drink": "cafe_barista", "bypass": 60}"#)
+        else {
+            panic!("a bypass within its bounds is taken");
+        };
+        assert_eq!(
+            brew_command(&drink, &barista, &changes),
+            "@TP:2800060C00000100010C000000000000"
+        );
+        // Nothing changed: the recipe as it is, as a plain `brew`.
+        assert!(
+            matches!(custom(r#"{"drink": "espresso"}"#), Ok(Order::Brew(d, c)) if d.code == 2 && c.is_empty())
+        );
+        // Out of the espresso's bounds (15 to 80 ml), off its 5 ml step, a
+        // field it has not (milk), a field unknown, ground coffee, not JSON.
+        assert!(custom(r#"{"drink": "espresso", "water": 120}"#).is_err());
+        assert!(custom(r#"{"drink": "coffee", "water": 102}"#).is_err());
+        assert!(custom(r#"{"drink": "coffee", "strength": 11}"#).is_err());
+        assert!(custom(r#"{"drink": "coffee", "milk_foam": 10}"#).is_err());
+        assert!(custom(r#"{"drink": "coffee", "sugar": 1}"#).is_err());
+        assert!(custom(r#"{"drink": "ground_coffee"}"#).is_err());
+        assert!(custom("coffee").is_err());
+        // A cup with milk waits for the milk, as a plain one.
+        let no_milk = Status::parse("@TF:000200000C0000").unwrap();
+        assert!(
+            order(
+                &model,
+                Some(&no_milk),
+                "brew_custom",
+                &Value::from(r#"{"drink": "cappuccino"}"#)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_recipes_say_each_field_with_its_bounds() {
+        let model = e8();
+        let mut recipes = BTreeMap::new();
+        for (code, reply) in [
+            (0x02, "@tm:41,020008090000020000000000000019"),
+            (0x07, "@tm:41,070008090014020000001E000000F9"),
+            (0x28, "@tm:41,2800060C0000010000080000000002"),
+        ] {
+            recipes.insert(code, recipe(reply, code).unwrap());
+        }
+        let Value::Text(text) = recipes_value(&model, &recipes) else {
+            panic!("a text");
+        };
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            json["espresso"],
+            serde_json::json!({
+                "strength": {"value": 8, "min": 1, "max": 10, "step": 1},
+                "water": {"value": 45, "min": 15, "max": 80, "step": 5, "unit": "ml"},
+                "temperature": {"value": 2, "min": 0, "max": 2, "step": 1},
+            })
+        );
+        assert_eq!(json["latte_macchiato"]["milk_foam"]["value"], 20);
+        assert_eq!(json["latte_macchiato"]["milk_break"]["value"], 30);
+        assert_eq!(json["cafe_barista"]["water"]["value"], 60);
+        assert_eq!(json["cafe_barista"]["bypass"]["value"], 40);
+        // A double tells its single's recipe, within its own fields.
+        assert_eq!(json["two_espressi"]["water"]["value"], 45);
+        assert!(json["two_espressi"].get("strength").is_none());
+        // A recipe not read is left out.
+        assert!(json.get("coffee").is_none());
+        assert_eq!(
+            model.recipe_codes(),
+            [
+                0x02, 0x03, 0x04, 0x06, 0x07, 0x08, 0x0D, 0x28, 0x29, 0x2B, 0x2E, 0x30
+            ]
+        );
+        // A model not described here changes nothing, and says no recipes.
+        assert!(
+            Model::new(None)
+                .points()
+                .iter()
+                .all(|p| &*p.key != "brew_custom")
+        );
     }
 
     #[test]
@@ -937,7 +1245,9 @@ mod tests {
         let busy = Status::parse("@TV:41280000091E0000FF00000000003200").unwrap();
         let no_milk = Status::parse("@TF:000200000C0000").unwrap();
         let brew = |s: Option<&Status>, d: &str| order(&model, s, "brew", &Value::from(d));
-        assert!(matches!(brew(Some(&ready), "cappuccino"), Ok(Order::Brew(d)) if d.code == 4));
+        assert!(
+            matches!(brew(Some(&ready), "cappuccino"), Ok(Order::Brew(d, c)) if d.code == 4 && c.is_empty())
+        );
         assert!(brew(Some(&busy), "coffee").is_err());
         assert!(brew(None, "coffee").is_err());
         assert!(brew(Some(&ready), "ground_coffee").is_err());
@@ -985,7 +1295,7 @@ mod tests {
                     match recipe(a, code) {
                         Some(r) => {
                             recipes += 1;
-                            let command = brew_command(d, &r);
+                            let command = brew_command(d, &r, &[]);
                             assert_eq!(command.len(), 4 + 32, "{command}");
                             assert_eq!(&command[20..22], "01", "{command}");
                         }
@@ -1047,6 +1357,6 @@ mod tests {
             .filter(|p| p.semantic == Semantic::Control)
             .map(|p| &*p.key)
             .collect();
-        assert_eq!(control, ["brew", "maintenance"]);
+        assert_eq!(control, ["brew", "brew_custom", "maintenance"]);
     }
 }

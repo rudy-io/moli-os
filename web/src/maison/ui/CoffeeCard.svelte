@@ -1,16 +1,20 @@
 <script>
   import { device, value, reachable, nameOf, act, num } from '../lib/home.svelte.js';
   import { STATE_TONE, stateWord, drinkName, programName, settingWord } from '../lib/coffee.js';
+  import { parseRecipes } from '../lib/coffee-recipes.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import CoffeeBrew from './CoffeeBrew.svelte';
+  import CoffeeRecipes from './CoffeeRecipes.svelte';
 
   /** One coffee machine, as J.O.E.'s cockpit: its state and what it waits
-   *  for, a button per drink (brewed with the recipe set on the machine),
-   *  the maintenance programs, how close each maintenance is, the counters,
-   *  and its settings. A drink or a program asks twice: a cup must be under
-   *  the spout, a program needs the tablet at hand. A machine that cannot
-   *  take an order now (its menu open, busy, waiting for a hand, off) says
-   *  why under its name, and a tap opens a window that says what to do.
+   *  for, a button per drink, the recipes side by side, the maintenance
+   *  programs, how close each maintenance is, the counters, and its
+   *  settings. A drink opens its window (its recipe, changeable for the cup,
+   *  then « Brew »); a program asks twice, the tablet at hand. A machine
+   *  that cannot take an order now (its menu open, busy, waiting for a
+   *  hand, off) says why under its name, and a tap opens a window that
+   *  says what to do.
    *  No cancel: J.O.E.'s cancel is acknowledged by an E8 and stops nothing. */
   let { id } = $props();
 
@@ -31,6 +35,10 @@
   const alerts = $derived(ok ? ALERTS.filter((k) => v(k) === true).map((k) => ({ k, label: point(k)?.label ?? k, due: k.endsWith('_due') })) : []);
 
   const drinks = $derived(point('brew')?.kind.values ?? []);
+  // The recipes the machine keeps, and whether a cup may change them.
+  const recipes = $derived(parseRecipes(v('recipes')));
+  const custom = $derived(!!point('brew_custom')?.access?.write);
+  let picked = $state(null);
   const programs = $derived(point('maintenance')?.kind.values ?? []);
   const NEEDS = ['cleaning_need', 'descaling_need', 'filter_wear'];
   const needs = $derived(NEEDS.filter((k) => typeof v(k) === 'number').map((k) => ({ k, label: point(k)?.label ?? k, n: v(k) })));
@@ -64,10 +72,19 @@
   // An order only when the machine can take it; refused on the way (its
   // state changed since the last reading), the window too.
   async function send(point, val, label) {
-    if (why) return explain();
-    if ((await act(point, val, label)) === 'error' && why) explain();
+    if (why) return explain(), 'error';
+    const done = await act(point, val, label);
+    if (done === 'error' && why) explain();
+    return done;
   }
-  const brew = (slug) => (why ? explain() : twice(`brew:${slug}`, () => send(`${id}/brew`, slug, t('salon.cafe.act_preparer', { boisson: drinkName(slug), nom: nameOf(id) }))));
+  const brew = (slug) => (why ? explain() : (picked = slug));
+  // From the drink's window: as the machine keeps it, or changed for this cup.
+  function brewPicked(changes) {
+    const slug = picked;
+    const label = t('salon.cafe.act_preparer', { boisson: drinkName(slug), nom: nameOf(id) });
+    if (changes && custom) return send(`${id}/brew_custom`, JSON.stringify({ drink: slug, ...changes }), label);
+    return send(`${id}/brew`, slug, label);
+  }
   const program = (p) => (why ? explain() : twice(`program:${p}`, () => send(`${id}/maintenance`, p, t('salon.cafe.act_entretien', { programme: programName(p), nom: nameOf(id) }))));
   function set(p, input) {
     const val = p.kind.type === 'numeric' ? Number(input.value) : input.value;
@@ -119,16 +136,21 @@
   {#if ok && drinks.length}
     <div class="block">
       <h3>{t('salon.cafe.boissons')}</h3>
-      <p class="hint muted">{asked?.startsWith('brew:') ? t('salon.cafe.tasse_confirmer') : t('salon.cafe.tasse')}</p>
+      <p class="hint muted">{t('salon.cafe.choisir')}</p>
       <div class="drinks">
         {#each drinks as slug (slug)}
-          <button class="drink" class:confirm={asked === `brew:${slug}`} class:waiting={!!why} onclick={() => brew(slug)}>
+          <button class="drink" class:waiting={!!why} onclick={() => brew(slug)}>
             <Icon name="coffee" size={20} />
-            <span>{asked === `brew:${slug}` ? t('salon.cafe.preparer_confirmer') : drinkName(slug)}</span>
+            <span>{drinkName(slug)}</span>
           </button>
         {/each}
       </div>
+      <CoffeeRecipes {recipes} {drinks} />
     </div>
+  {/if}
+  {#if picked}
+    <!-- A double brews its single's recipe twice: its water is per cup. -->
+    <CoffeeBrew slug={picked} recipe={custom ? recipes?.[picked] : null} double={picked.startsWith('two_')} onbrew={brewPicked} onclose={() => (picked = null)} />
   {/if}
 
   <div class="block">
@@ -214,6 +236,8 @@
 <style>
   .coffee {
     display: grid;
+    /* A wide child (the recipes' table) scrolls inside, the card keeps its width. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
 
@@ -263,6 +287,7 @@
 
   .block {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
 

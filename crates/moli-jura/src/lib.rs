@@ -5,13 +5,15 @@
 //! `every` seconds (20 by default, 5 while the machine works), reads what
 //! it needs and leaves: J.O.E. finds it free in between. Status every time;
 //! maintenance and drink counters every five minutes and after each drink
-//! or program; settings every ten minutes.
+//! or program; settings every ten minutes, and the drinks' recipes too, in
+//! another reading (a reading kept short leaves room for an order).
 //!
 //! Pairing, once: Moli asks, the machine shows a request, a person presses
 //! OK on it; the token the dongle gives goes to the vault (`token`), with
 //! the machine's security code if it has one (`pin`, filed by the person).
 //!
-//! Orders: a drink (brewed with the recipe the machine keeps for it), a
+//! Orders: a drink (brewed with the recipe the machine keeps for it, or
+//! with some of it changed for one cup, within the model's bounds), a
 //! maintenance program (the machine then leads on its display), and the
 //! settings of a known model. Drinks and programs are a machine's orders
 //! (`Semantic::Control`): an agent's waits for a person. No cancel: J.O.E.'s
@@ -64,6 +66,8 @@ const PIN: &str = "pin";
 const BUSY_EVERY: Duration = Duration::from_secs(5);
 const COUNTERS_EVERY: Duration = Duration::from_secs(300);
 const SETTINGS_EVERY: Duration = Duration::from_secs(600);
+/// Recipes as often, half a minute apart from the settings.
+const RECIPES_AFTER: Duration = Duration::from_secs(30);
 /// `@TF:` comes every 2.05 s.
 const STATUS_WAIT: Duration = Duration::from_millis(2600);
 /// While busy, `@TV:` comes about as often, and an order may be waiting
@@ -129,6 +133,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         last_close: None,
         counters_due: Instant::now(),
         settings_due: Instant::now(),
+        recipes_due: Instant::now() + RECIPES_AFTER,
         reachable: None,
         waiting: false,
     };
@@ -212,6 +217,7 @@ struct Machine<'a> {
     last_close: Option<Instant>,
     counters_due: Instant,
     settings_due: Instant,
+    recipes_due: Instant,
     reachable: Option<bool>,
     /// Shown waiting for a person (the code).
     waiting: bool,
@@ -352,6 +358,23 @@ impl Machine<'_> {
                 }
             }
             self.settings_due = Instant::now() + SETTINGS_EVERY;
+        } else if Instant::now() >= self.recipes_due {
+            let mut recipes = BTreeMap::new();
+            for code in self.model.recipe_codes() {
+                if let Some(answer) = session.ask(&format!("@TM:41,{code:02X}"), "@tm:").await?
+                    && let Some(recipe) = model::recipe(&answer, code)
+                {
+                    recipes.insert(code, recipe);
+                }
+            }
+            if !recipes.is_empty() {
+                ctx.set_state(
+                    &self.id,
+                    "recipes",
+                    model::recipes_value(&self.model, &recipes),
+                );
+            }
+            self.recipes_due = Instant::now() + SETTINGS_EVERY;
         }
         Ok(())
     }
@@ -413,13 +436,13 @@ impl Machine<'_> {
         let in_time = || Instant::now() + MARGIN < by;
         let refused = || Ok(Err(moli_i18n::tr("pilotes.jura.refuse")));
         match order {
-            Order::Brew(drink) => {
+            Order::Brew(drink, changes) => {
                 let code = model::recipe_code(&drink);
                 let answer = session.ask(&format!("@TM:41,{code:02X}"), "@tm:").await?;
                 let Some(recipe) = answer.and_then(|a| model::recipe(&a, code)) else {
                     return Ok(Err(moli_i18n::tr("pilotes.jura.recette_illisible")));
                 };
-                let command = model::brew_command(&drink, &recipe);
+                let command = model::brew_command(&drink, &recipe, &changes);
                 // Woken from energy saving, a machine may let the first go.
                 for _ in 0..2 {
                     if !in_time() {

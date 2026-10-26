@@ -36,3 +36,17 @@ export function settingWord(v) {
   if (/^\d+(min|h)$/.test(v)) return v.replace(/(min|h)$/, ' $1');
   return v === 'ml' || v === 'oz' ? v : t(`salon.cafe.valeur.${v}`);
 }
+
+/** A recipe's fields in the order people read them. */
+export const FIELDS = ['strength', 'water', 'bypass', 'milk_foam', 'milk_break', 'temperature'];
+
+/** Temperature: 0 low, 1 normal, 2 high. */
+export const TEMPERATURES = ['basse', 'normale', 'haute'];
+
+/** A field's value for people: « 8/10 », « 45 ml », « 12 s », « Haute ». */
+export function fieldWord(key, f) {
+  if (f?.value == null) return '—';
+  if (key === 'temperature') return t(`salon.cafe.temperature.${TEMPERATURES[f.value] ?? 'normale'}`);
+  if (key === 'strength') return `${f.value}/${f.max}`;
+  return f.unit ? `${f.value} ${f.unit}` : String(f.value);
+}

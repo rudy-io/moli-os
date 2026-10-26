@@ -1416,6 +1416,7 @@ dependencies = [
  "moli-i18n",
  "moli-runtime",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

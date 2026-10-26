@@ -35,5 +35,11 @@
   arrêter une boisson à distance.
 - Pas encore essayés : les autres boissons, les doubles (recette de la boisson simple sous le
   code du double), nettoyage, détartrage, filtre, rinçage et nettoyage du lait.
-- Pas fait : préparation avec des réglages changés pour une fois, minuteur, verrouillage,
-  mise à jour de la clé (peut la bloquer).
+- **Préparation avec des réglages changés pour une fois** (26 oct.) : la recette relue, quelques
+  octets changés (force `F3`, eau `F4`, mousse `F6`, température `F7`, eau ajoutée `F10`, pause du
+  lait `F11`), dans les bornes de chaque boisson de l'E8 (tirées de son fichier J.O.E., recopiées
+  en chiffres, le fichier lui-même non copié). Vérifié par jura-connect sur une S8 EB et un E6 ;
+  **pas encore essayé sur l'E8**.
+- Pas d'arrêt à distance : le fichier J.O.E. de l'E8 n'en a pas ; `@AN:02` (ancien protocole série)
+  n'a jamais été essayé, et la clé Wi-Fi s'éteint avec la machine (rien ne la rallumerait).
+- Pas fait : minuteur, verrouillage, mise à jour de la clé (peut la bloquer).
