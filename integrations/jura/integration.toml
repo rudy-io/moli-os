@@ -1,0 +1,32 @@
+[integration]
+id = "jura"
+name = "Machine à café Jura (Wi-Fi Connect, J.O.E.)"
+# Jura coffee machines with the Wi-Fi Connect dongle of the J.O.E. app.
+brands = ["Jura"]
+models = ["E8 (EC)"]
+# Home network only: the dongle's own server, TCP 51515, frames scrambled
+# by a fixed key schedule (no account, no cloud).
+transport = "tcp"
+driver = "jura"
+crate = "moli-jura"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [51515]
+
+[needs]
+# The token the dongle gives at pairing (OK pressed on the machine), and the
+# machine's security code when one is set in J.O.E. (filed by the person).
+secrets = ["token", "pin"]
+vars = []
+options = ["host", "every", "model", "name"]
+
+[origin]
+reused = "aucun code repris : protocole local du Wi-Fi Connect tel que le décrivent jura-connect (makefu, MIT : trames, brouillage, @HP, @TF, @TG, @TR, @TM, @TP, @TV, vérifiés sur des S8, E6, Z10) et l'intégration Home Assistant de dominikgysin (MIT, vérifiée sur une E8) ; trames de référence générées avec jura-connect ; tout revérifié par des sondes en lecture seule contre une E8 (EC) réelle"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-jura/src/model.rs): a real
+# E8 (EC)'s answers, read only (status, maintenance, counters, recipes, settings).
+[[fixture]]
+file = "fixtures/e8-ec.txt"

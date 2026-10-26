@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, climateIcon, setpointOf, climateOn, stoveState, climateOffLabel, switchStove, stoveAsked, sensorIcon, climateState, modeWord } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
+  import { isCoffee, STATE_TONE, stateWord } from '../lib/coffee.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
@@ -57,6 +58,10 @@
       const st = phase(v('state'));
       const text = st === 'printing' || st === 'paused' ? `${PHASES[st].label.toLowerCase()} ${t('commun.pourcent', { n: Math.round(Number(v('progress') ?? 0)) })}` : PHASES[st].label.toLowerCase();
       out.push({ tone: PHASES[st].tone, icon: 'printer3d', text: `${nameOf(d.id)} · ${d.online === false ? t('commun.piece.imprimante_eteinte') : text}`, href: '#/impression' });
+    }
+    if (isCoffee(d)) {
+      const st = d.online === false ? null : value(d.id, 'status');
+      out.push({ tone: STATE_TONE[st] ?? '', icon: 'coffee-maker', text: `${nameOf(d.id)} · ${stateWord(st).toLowerCase()}`, href: '#/cafe' });
     }
     if (every && !out.length) {
       // Its first reading, so that a quiet sensor still shows it is there.

@@ -17,6 +17,7 @@
   import Cameras from './pages/Cameras.svelte';
   import Energie from './pages/Energie.svelte';
   import Impression from './pages/Impression.svelte';
+  import Cafe from './pages/Cafe.svelte';
   import Dehors from './pages/Dehors.svelte';
   import Moli from './pages/Moli.svelte';
   import MoliSheet from './moli/MoliSheet.svelte';
@@ -175,6 +176,8 @@
       {#await import('./pages/Temperatures.svelte') then { default: Temperatures }}<Temperatures />{/await}
     {:else if page === 'impression'}
       <Impression />
+    {:else if page === 'cafe'}
+      <Cafe />
     {:else if page === 'dehors'}
       <Dehors />
     {:else if page === 'moli'}

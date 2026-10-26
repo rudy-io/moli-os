@@ -38,6 +38,7 @@ moli-lights.workspace = true
 moli-presence.workspace = true
 moli-telegram.workspace = true
 moli-micronova.workspace = true
+moli-jura.workspace = true
 moli-velux.workspace = true
 moli-phones.workspace = true
 moli-assistant.workspace = true

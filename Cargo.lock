@@ -1408,6 +1408,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-jura"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-lights"
 version = "0.1.0"
 dependencies = [
@@ -1504,6 +1517,7 @@ dependencies = [
  "moli-i18n",
  "moli-igd",
  "moli-ipp",
+ "moli-jura",
  "moli-lights",
  "moli-micronova",
  "moli-moonraker",

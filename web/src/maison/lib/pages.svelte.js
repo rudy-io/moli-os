@@ -7,6 +7,7 @@ import { tempKey } from './temperatures.js';
 import { energy } from './energy-live.svelte.js';
 import { isPrinter } from './printers.js';
 import { isPaperPrinter } from './paper.js';
+import { isCoffee } from './coffee.js';
 
 // `label` is a catalogue key, said where it is shown; Moli is a name.
 export const NAV = [
@@ -23,6 +24,7 @@ export const NAV = [
   { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
   { path: 'temperatures', label: 'commun.nav.temperatures', icon: 'thermometer' },
   { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
+  { path: 'cafe', label: 'commun.nav.cafe', icon: 'coffee-maker' },
   { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
   { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
   { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
@@ -45,6 +47,7 @@ export function filledPages() {
     energie: !energy.missing,
     temperatures: devices.some((d) => tempKey(d) && roomOf(d)),
     impression: devices.some((d) => isPrinter(d) || isPaperPrinter(d)),
+    cafe: devices.some(isCoffee),
     dehors: !!(cfg.outdoor?.weather || cfg.outdoor?.air || cfg.outdoor?.pool),
     infra: devices.some((d) => d.model === 'Serveur de la maison' || d.model === 'Ordinateur' || has(d, 'external_ip')),
   };
