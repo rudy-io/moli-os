@@ -20,7 +20,7 @@ export const STATE_TONE = {
   attention: 'alert',
 };
 
-export const stateWord = (s) => (s ? t(`salon.cafe.etat.${s}`) : t('salon.cafe.eteinte'));
+export const stateWord = (s) => t(`salon.cafe.etat.${s ?? 'off'}`);
 
 /** Why a machine cannot take an order now (`ok`: reachable; `status`: its
  *  state), as `salon.cafe.pourquoi.*` says it; null when it can. */
@@ -58,3 +58,9 @@ export function fieldWord(key, f) {
   if (key === 'strength') return `${f.value}/${f.max}`;
   return f.unit ? `${f.value} ${f.unit}` : String(f.value);
 }
+
+/** Drinks with milk, by name (the machine's recipe also says it: a milk field). */
+const MILK = ['cappuccino', 'flat_white', 'cortado', 'espresso_macchiato', 'latte_macchiato', 'milk_foam', 'latte', 'macchiato', 'milk'];
+
+/** Whether a drink holds milk: by its name, or a milk field in its recipe. */
+export const hasMilk = (slug, recipe) => MILK.includes(slug) || !!(recipe?.milk_foam || recipe?.milk_break);

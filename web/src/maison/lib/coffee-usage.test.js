@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { daily, byDrink, average, cupCounters } from './coffee-usage.js';
+import { daily, hourly, byDrink, average, cupCounters, drinkColors } from './coffee-usage.js';
+import { SERIES, NEUTRAL } from './palette.js';
 
 // Local times: the days are the house's.
 const at = (day, hour, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
@@ -59,4 +60,33 @@ test('by drink, and the average since counting began', () => {
   // Two days counted (25 and 26), six cups.
   assert.equal(average(days, since), 3);
   assert.equal(average(days, null), null);
+});
+
+test('today hour by hour, from six in the morning', () => {
+  const { hours } = hourly({ coffee: { before: [at(25, 20), 10], raw: [[at(26, 7, 10), 11], [at(26, 7, 50), 12], [at(26, 13, 5), 13]] } }, now);
+  assert.equal(hours.length, 18, '6 h to 23 h');
+  assert.equal(hours[0].start, at(26, 6));
+  assert.deepEqual(
+    hours.filter((h) => h.total).map((h) => [new Date(h.start).getHours(), h.total]),
+    [
+      [7, 2],
+      [13, 1],
+    ],
+  );
+});
+
+test('an early cup moves the morning back', () => {
+  const { hours } = hourly({ espresso: { before: [at(25, 20), 1], raw: [[at(26, 4, 30), 2]] } }, now);
+  assert.equal(new Date(hours[0].start).getHours(), 4);
+  assert.deepEqual(hours[0].by, { espresso: 1 });
+});
+
+test('a drink keeps its colour: the most brewed over the machine\'s life first', () => {
+  const colors = drinkColors({ coffee: 392, espresso: 152, hot_water: 300, cappuccino: 12, milk_foam: 5, cortado: 0 });
+  assert.deepEqual([...colors], [
+    ['coffee', SERIES[0]],
+    ['espresso', SERIES[1]],
+    ['cappuccino', SERIES[2]],
+  ]);
+  assert.ok(!SERIES.includes(NEUTRAL));
 });

@@ -5,11 +5,11 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import CoffeeBrew from './CoffeeBrew.svelte';
-  import DrinkIcon from './DrinkIcon.svelte';
-  import CoffeeRecipes from './CoffeeRecipes.svelte';
+  import CoffeeMenu from './CoffeeMenu.svelte';
 
   /** One coffee machine, as J.O.E.'s cockpit: its state and what it waits
-   *  for, a button per drink, the recipes side by side, the maintenance
+   *  for, the drinks in two columns (coffee or water, with milk), each with
+   *  its recipe beside it, the maintenance
    *  programs, how close each maintenance is, the counters, and its
    *  settings. A drink opens its window (its recipe, changeable for the cup,
    *  then « Brew »); a program asks twice, the tablet at hand. A machine
@@ -138,15 +138,8 @@
     <div class="block">
       <h3>{t('salon.cafe.boissons')}</h3>
       <p class="hint muted">{t('salon.cafe.choisir')}</p>
-      <div class="drinks">
-        {#each drinks as slug (slug)}
-          <button class="drink" class:waiting={!!why} onclick={() => brew(slug)}>
-            <DrinkIcon drink={slug} size={40} />
-            <span>{drinkName(slug)}</span>
-          </button>
-        {/each}
-      </div>
-      <CoffeeRecipes {recipes} {drinks} />
+      <CoffeeMenu {drinks} {recipes} waiting={!!why} onpick={brew} />
+      {#if recipes}<p class="hint muted small-note">{t('salon.cafe.recettes_aide')}</p>{/if}
     </div>
   {/if}
   {#if picked}
@@ -341,29 +334,11 @@
     gap: 8px;
   }
 
-  .drinks {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr));
-    gap: 8px;
+  .small-note {
+    font-size: 12px;
+    line-height: 1.45;
   }
 
-  .drink {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 52px;
-    padding: 6px 12px 6px 8px;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
-    color: var(--ink);
-    font: inherit;
-    font-weight: 600;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .drink.confirm,
   .act.confirm {
     background: var(--warm);
     color: #fff;
@@ -468,7 +443,6 @@
     cursor: pointer;
   }
 
-  .drink.waiting,
   .act.waiting {
     opacity: 0.45;
   }

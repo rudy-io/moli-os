@@ -3,6 +3,7 @@
   import { deviceSeries } from '../lib/energy-series.js';
   import { seriesColor, NEUTRAL } from '../lib/palette.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
+  import StackedBars from './StackedBars.svelte';
 
   /** Bars over 24 h / 30 days / 12 months, stacked by what drew it
    *  (`by` = 'devices': circuits, appliances, lights, the rest) or as
@@ -151,36 +152,6 @@
   // Off-peak and peak columns when every part knows its split.
   const splitShown = $derived(by === 'devices' && order.length > 0 && order.every((s) => totals.get(s.id)?.split));
 
-  let W = $state(720);
-  const H = 240;
-  const B = 24;
-  const T = 18;
-  const GAP = 2;
-  const max = $derived(niceMax(Math.max(0, ...bars.map((b) => b.total))));
-  const slot = $derived(bars.length ? W / bars.length : 0);
-  const barW = $derived(Math.max(3, Math.min(slot * 0.72, 28)));
-  const y = (v) => T + (H - B - T) * (1 - v / max);
-
-  /** A bar's segments, the biggest part of the period at the bottom; each
-   *  but the top one leaves a thin gap of the card's colour above it. */
-  function stack(bar) {
-    let base = 0;
-    const segs = [];
-    for (const s of order) {
-      const v = bar.amounts.get(s.id)?.kwh ?? 0;
-      if (v <= 0) continue;
-      segs.push({ s, y0: y(base), y1: y(base + v) });
-      base += v;
-    }
-    return segs.map((g, i) => ({ ...g, h: Math.max(0, g.y0 - g.y1 - (i < segs.length - 1 ? GAP : 0)) }));
-  }
-
-  function niceMax(v) {
-    if (v <= 0) return 1;
-    const p = 10 ** Math.floor(Math.log10(v));
-    return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
-  }
-
   const tz = $derived(report?.timezone);
   function tick(ts, i) {
     const d = new Date(ts);
@@ -221,27 +192,14 @@
     {#if (shown ? shown.cost : sumRow.cost) != null}<span class="num">{euros(shown ? shown.cost : sumRow.cost, cur)}</span>{/if}
   </div>
 
-  <div class="plot" bind:clientWidth={W}>
-    <svg viewBox="0 0 {W} {H}" height={H} role="img" aria-label={t('energie.chart.conso')} onpointerleave={() => (hover = null)}>
-      {#each [0.5, 1] as f (f)}
-        <line x1="0" x2={W} y1={y(max * f)} y2={y(max * f)} class="rule" />
-      {/each}
-      <line x1="0" x2={W} y1={y(0) + 0.5} y2={y(0) + 0.5} class="base" />
-      {#each bars as bar, i (bar.start)}
-        {@const x = i * slot + (slot - barW) / 2}
-        <g class:dim={hover != null && hover !== i}>
-          <rect x={i * slot} y="0" width={slot} height={H} class="hit" role="presentation" onpointerenter={() => (hover = i)} />
-          {#each stack(bar) as seg (seg.s.id)}
-            {#if seg.h > 0}<rect {x} width={barW} y={seg.y1} height={seg.h} fill={seg.s.color} />{/if}
-          {/each}
-        </g>
-        <text x={x + barW / 2} y={H - 4} class="axis" text-anchor="middle">{tick(bar.start, i)}</text>
-      {/each}
-      {#each [0.5, 1] as f (f)}
-        <text x="2" y={y(max * f) - 5} class="axis halo">{kwh(max * f)} kWh</text>
-      {/each}
-    </svg>
-  </div>
+  <StackedBars
+    {bars}
+    {order}
+    amount={(bar, id) => bar.amounts.get(id)?.kwh ?? 0}
+    tick={(bar, i) => tick(bar.start, i)}
+    rules={(v) => `${kwh(v)} kWh`}
+    label={t('energie.chart.conso')}
+    bind:hover />
 
   <table class="legend">
     <thead>
@@ -307,55 +265,6 @@
     font-size: 24px;
     font-weight: 650;
     letter-spacing: -0.02em;
-  }
-
-  .plot {
-    width: 100%;
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  /* The width follows the card (never the other way round). */
-  svg {
-    display: block;
-    width: 100%;
-    touch-action: pan-y;
-  }
-
-  .rule {
-    stroke: var(--line);
-    stroke-width: 1;
-  }
-
-  .base {
-    stroke: var(--ink-3);
-    stroke-width: 1;
-    opacity: 0.5;
-  }
-
-  .axis {
-    font-size: 11px;
-    fill: var(--ink-3);
-    font-weight: 600;
-  }
-
-  .hit {
-    fill: transparent;
-  }
-
-  .halo {
-    paint-order: stroke;
-    stroke: var(--surface);
-    stroke-width: 4px;
-    stroke-linejoin: round;
-  }
-
-  g {
-    transition: opacity 0.2s;
-  }
-
-  g.dim {
-    opacity: 0.35;
   }
 
   /* The table: one line per part, figures in aligned columns. */

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending, reachable } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
@@ -130,8 +130,11 @@
   // A card shows only when the house has what it shows.
   onMount(useEnergy);
   const climates = $derived(cfg.favorites?.climate ?? []);
-  // A coffee machine: its state and an espresso or a coffee, at hand.
+  // A coffee machine: its state and an espresso or a coffee, at hand; at
+  // the top of the page while it is on (reachable), in the side column off.
   const coffees = $derived(Object.values(hub.devices).filter(isCoffee).sort((a, b) => a.id.localeCompare(b.id)));
+  const coffeesOn = $derived(coffees.filter((c) => reachable(c.id)));
+  const coffeesOff = $derived(coffees.filter((c) => !reachable(c.id)));
   const outside = $derived(!!(out.weather || out.air || out.pool));
 
   const tv = $derived(cfg.salon?.tv);
@@ -195,6 +198,7 @@
   </section>
 
   <div class="grid">
+    {#each coffeesOn as c (c.id)}<div class="coffee-top"><CoffeeHome id={c.id} wide /></div>{/each}
     <div class="heating"><HeatingSummary /></div>
     <div class="covers"><CoversSummary /></div>
 
@@ -227,7 +231,7 @@
 
     <div class="side">
       {#if energy.summary}<EnergyCard />{/if}
-      {#each coffees as c (c.id)}<CoffeeHome id={c.id} />{/each}
+      {#each coffeesOff as c (c.id)}<CoffeeHome id={c.id} />{/each}
       <Routines />
     </div>
 
@@ -355,6 +359,11 @@
   .heating,
   .covers {
     grid-column: span 6;
+  }
+
+  .coffee-top {
+    grid-column: span 12;
+    container-type: inline-size;
   }
 
   /* A summary with nothing to sum up, energy unmeasured and no routine. */

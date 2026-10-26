@@ -73,6 +73,11 @@ const STATUS_WAIT: Duration = Duration::from_millis(2600);
 /// While busy, `@TV:` comes about as often, and an order may be waiting
 /// behind the reading: a missed status keeps the last one.
 const BUSY_STATUS_WAIT: Duration = Duration::from_millis(1500);
+/// Switched off, a machine stops talking at once, but its Wi-Fi dongle
+/// still opens sessions for about five minutes (an E8 said « switching off »
+/// from 13:53 to 13:58): after « switching off », this many readings in a
+/// row without a status and it is off.
+const SILENT_READINGS: u8 = 2;
 /// No one pressed OK: asked again this much later.
 const PAIR_AGAIN: Duration = Duration::from_secs(120);
 /// An order is not sent this close to its deadline.
@@ -136,6 +141,8 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         recipes_due: Instant::now() + RECIPES_AFTER,
         reachable: None,
         waiting: false,
+        off: false,
+        silent: 0,
     };
     let mut next = Instant::now();
     loop {
@@ -221,6 +228,16 @@ struct Machine<'a> {
     reachable: Option<bool>,
     /// Shown waiting for a person (the code).
     waiting: bool,
+    /// Switched off, its dongle still answering: shown off until it talks.
+    off: bool,
+    /// Readings without a status since it said « switching off ».
+    silent: u8,
+}
+
+/// Whether a reading without a status says the machine is off: it said
+/// « switching off » and has been silent `silent` readings in a row.
+fn switched_off(was_switching_off: bool, silent: u8) -> bool {
+    was_switching_off && silent >= SILENT_READINGS
 }
 
 impl Machine<'_> {
@@ -264,12 +281,17 @@ impl Machine<'_> {
                     ctx.ready();
                     self.waiting = false;
                 }
-                self.seen(ctx, true);
+                // Off, its dongle answering: on again once it talks.
+                if !self.off {
+                    self.seen(ctx, true);
+                }
                 Ok(Some(session))
             }
             Ok((session, Hello::Paired(token))) => {
                 ctx.store_secret(TOKEN, &token).await?;
-                self.seen(ctx, true);
+                if !self.off {
+                    self.seen(ctx, true);
+                }
                 Ok(Some(session))
             }
             Ok((session, Hello::WrongPin)) => {
@@ -333,12 +355,34 @@ impl Machine<'_> {
             STATUS_WAIT
         };
         if let Some(status) = session.status(wait).await?.cloned() {
+            self.silent = 0;
+            if self.off {
+                self.off = false;
+                self.seen(ctx, true);
+            }
             self.set(ctx, status.values(&self.model));
             if was_busy && matches!(status, Status::Idle(_)) {
                 // A drink or a program ended: its counters moved.
                 self.counters_due = Instant::now();
             }
             self.status = Some(status);
+        } else {
+            let was_switching_off = self
+                .status
+                .as_ref()
+                .is_some_and(|s| s.state(&self.model) == "switching_off");
+            self.silent = if was_switching_off {
+                self.silent + 1
+            } else {
+                0
+            };
+            if switched_off(was_switching_off, self.silent) {
+                tracing::info!(instance = %ctx.instance(), "jura machine switched off");
+                self.off = true;
+                self.silent = 0;
+                self.status = None;
+                self.seen(ctx, false);
+            }
         }
         // A busy machine answers its own stream first; the rest can wait.
         if !matches!(self.status, Some(Status::Idle(_))) {
@@ -405,6 +449,9 @@ impl Machine<'_> {
 
     /// Carries out an order, within its deadline.
     async fn obey(&mut self, ctx: &mut DriverCtx, command: &CommandRequest) -> Result<(), String> {
+        if self.off {
+            return Err(moli_i18n::tr("pilotes.jura.pas_joignable"));
+        }
         let order = model::order(
             &self.model,
             self.status.as_ref(),
@@ -508,5 +555,20 @@ impl Machine<'_> {
                 Ok(Ok(()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_machine_silent_after_switching_off_is_off() {
+        assert!(!switched_off(true, 1), "one status missed proves nothing");
+        assert!(switched_off(true, SILENT_READINGS));
+        assert!(
+            !switched_off(false, 5),
+            "a machine on that missed a status is still on"
+        );
     }
 }
