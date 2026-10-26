@@ -373,7 +373,7 @@
   "commun.clim.programme_maintenant": "{what} until {until}",
   "commun.programme.detail": "See the program in full",
   "commun.programme.titre": "Week program",
-  "commun.programme.relecture": "This heater was just switched to switch wiring: Moli reads its program again for its setpoints (a minute or two). Editing waits.",
+  "commun.programme.relecture": "Reading the heater’s setpoints…",
   "commun.programme.maintenant": "Now: {what}, until {until}",
   "commun.programme.legende": "What the colours mean",
   "commun.programme.couleur_temp": "The colour follows the requested temperature:",

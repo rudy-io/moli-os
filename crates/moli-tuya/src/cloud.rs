@@ -41,9 +41,11 @@ const RESYNC: Duration = Duration::from_secs(30 * 60);
 const PROGRAMS: Duration = Duration::from_secs(6 * 60 * 60);
 const PROGRAM_SETTLE: Duration = Duration::from_secs(10);
 /// A module whose wiring changed rewrites its 28 parts (setpoints kept for
-/// switch wiring, dropped for four or six orders): its program is read again
-/// this long after, not six hours later.
-const WIRING_SETTLE: Duration = Duration::from_secs(30);
+/// switch wiring, dropped for four or six orders), in a minute or more: its
+/// program is read this often until all are rewritten, at most this many
+/// times (three minutes).
+const REWIRE_EVERY: Duration = Duration::from_secs(10);
+const REWIRE_READS: usize = 18;
 const QUIET: Duration = Duration::from_secs(60);
 const BATCH: usize = 20;
 
@@ -450,11 +452,58 @@ pub struct ProgramWrite {
 /// module answers in about 5 s), then once more this much later.
 const PROGRAM_CONFIRM: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(10)];
 
-/// A written program to read back: which parts, and when.
+/// A module whose wiring changed (`switch`: to switch wiring), its program
+/// to read again as it rewrites it.
+#[derive(Debug)]
+pub struct Rewired {
+    pub device: String,
+    pub index: usize,
+    pub switch: bool,
+}
+
+/// What a read-back waits for: the parts written, or the whole program
+/// rewritten for a new wiring.
+enum Wanted {
+    Parts(Vec<(String, Vec<u8>)>),
+    Rewired { switch: bool },
+}
+
+impl Wanted {
+    fn seen(&self, parts: &HashMap<&str, Vec<u8>>) -> bool {
+        match self {
+            Self::Parts(wanted) => wanted
+                .iter()
+                .all(|(code, bytes)| parts.get(code.as_str()) == Some(bytes)),
+            Self::Rewired { switch } => rewritten(parts, *switch),
+        }
+    }
+
+    /// How long until read `tries` (none: given up).
+    fn wait(&self, tries: usize) -> Option<Duration> {
+        match self {
+            Self::Parts(_) => PROGRAM_CONFIRM.get(tries).copied(),
+            Self::Rewired { .. } => (tries < REWIRE_READS).then_some(REWIRE_EVERY),
+        }
+    }
+}
+
+/// Whether all 28 parts are kept as the wiring wants them (setpoints on
+/// switch wiring, orders only on four or six).
+fn rewritten(parts: &HashMap<&str, Vec<u8>>, switch: bool) -> bool {
+    (1..=program::DAYS).all(|day| {
+        (1..=program::PARTS).all(|part| {
+            parts
+                .get(program::part_code(day, part).as_str())
+                .is_some_and(|bytes| bytes.len() == program::part_len(switch))
+        })
+    })
+}
+
+/// A program to read back: what it waits for, and when.
 struct Check {
     device: String,
     index: usize,
-    wanted: Vec<(String, Vec<u8>)>,
+    wanted: Wanted,
     at: Instant,
     tries: usize,
 }
@@ -463,11 +512,12 @@ struct Check {
 /// cloud, sends those that change in one call and answers; reads the
 /// program back later, so that Moli shows what the module took. A write
 /// never waits behind a read-back (the hub waits 5 s for its answer). Its
-/// own API session: the message service is never kept waiting.
+/// own API session: the message service is never kept waiting. A module
+/// rewired is read every 10 s until its program is rewritten.
 pub async fn write_programs(
     keys: Keys,
     region: Region,
-    mut writes: mpsc::Receiver<ProgramWrite>,
+    (mut writes, mut rewires): (mpsc::Receiver<ProgramWrite>, mpsc::Receiver<Rewired>),
     up: mpsc::Sender<Up>,
 ) {
     let mut api = Api {
@@ -485,6 +535,17 @@ pub async fn write_programs(
                 if let Some(check) = write_program(&mut api, write).await {
                     checks.push(check);
                 }
+            }
+            Some(module) = rewires.recv() => {
+                // Rewired again meanwhile: only the last wiring is waited for.
+                checks.retain(|c| !(c.device == module.device && matches!(c.wanted, Wanted::Rewired { .. })));
+                checks.push(Check {
+                    device: module.device,
+                    index: module.index,
+                    wanted: Wanted::Rewired { switch: module.switch },
+                    at: Instant::now() + REWIRE_EVERY,
+                    tries: 0,
+                });
             }
             () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
                 let now = Instant::now();
@@ -512,7 +573,7 @@ async fn write_program(api: &mut Api, write: ProgramWrite) -> Option<Check> {
             Some(Check {
                 device: write.device,
                 index: write.index,
-                wanted,
+                wanted: Wanted::Parts(wanted),
                 at: Instant::now() + PROGRAM_CONFIRM[0],
                 tries: 0,
             })
@@ -528,8 +589,8 @@ async fn write_program(api: &mut Api, write: ProgramWrite) -> Option<Check> {
     }
 }
 
-/// Reads a written program back and shows it; once more later if the
-/// module has not taken it yet.
+/// Reads a program back and shows it; once more later if the module has
+/// not taken it (or not rewritten it) yet.
 async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option<Check> {
     let path = format!("/v2.0/cloud/thing/{}/shadow/properties", check.device);
     let taken = match api.call(&path).await {
@@ -539,26 +600,34 @@ async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option
             let _ = up
                 .send(Up::State(check.index, vec![(program::POINT.into(), week)]))
                 .await;
-            check
-                .wanted
-                .iter()
-                .all(|(code, bytes)| parts.get(code.as_str()) == Some(bytes))
+            check.wanted.seen(&parts)
         }
         Err(e) => {
             tracing::debug!(device = check.device, error = %e, "tuya cloud: program not read back");
             false
         }
     };
-    if taken {
-        tracing::info!(
-            device = check.device,
-            parts = check.wanted.len(),
-            "tuya cloud: week program written"
-        );
-        return None;
-    }
     let tries = check.tries + 1;
-    let Some(wait) = PROGRAM_CONFIRM.get(tries) else {
+    match (&check.wanted, taken) {
+        (Wanted::Parts(parts), true) => {
+            tracing::info!(
+                device = check.device,
+                parts = parts.len(),
+                "tuya cloud: week program written"
+            );
+            return None;
+        }
+        (Wanted::Rewired { .. }, true) => {
+            tracing::info!(
+                device = check.device,
+                reads = tries,
+                "tuya cloud: week program read after rewiring"
+            );
+            return None;
+        }
+        _ => {}
+    }
+    let Some(wait) = check.wanted.wait(tries) else {
         tracing::warn!(
             device = check.device,
             "tuya cloud: the module has not taken its week program"
@@ -566,7 +635,7 @@ async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option
         return None;
     };
     Some(Check {
-        at: Instant::now() + *wait,
+        at: Instant::now() + wait,
         tries,
         ..check
     })
@@ -613,15 +682,7 @@ fn program_news(status: &Json) -> bool {
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
 /// Reads the states, then follows the changes, for ever (reconnecting).
-/// `rewired`: devices whose wiring changed (Tuya ids), their program to read
-/// again.
-pub async fn watch(
-    keys: Keys,
-    region: Region,
-    devices: Watched,
-    up: mpsc::Sender<Up>,
-    mut rewired: mpsc::Receiver<String>,
-) {
+pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
     let mut api = Api {
         keys,
         region,
@@ -629,7 +690,7 @@ pub async fn watch(
     };
     let mut pause = Duration::from_secs(30);
     loop {
-        match follow(&mut api, &devices, &up, &mut rewired).await {
+        match follow(&mut api, &devices, &up).await {
             Ok(()) => return,
             Err(e) => {
                 tracing::warn!(error = %e.root_cause(), "tuya cloud: retrying in {} s", pause.as_secs());
@@ -707,24 +768,7 @@ fn online_flags(info: &Json) -> Vec<(&str, bool)> {
         .collect()
 }
 
-/// Modules whose wiring changed: their programs read once they settle.
-fn take_rewired(
-    rewired: &mut mpsc::Receiver<String>,
-    edited: &mut (HashSet<String>, Option<Instant>),
-) {
-    while let Ok(device) = rewired.try_recv() {
-        let at = Instant::now() + WIRING_SETTLE;
-        edited.1 = Some(edited.1.map_or(at, |was| was.max(at)));
-        edited.0.insert(device);
-    }
-}
-
-async fn follow(
-    api: &mut Api,
-    devices: &Watched,
-    up: &mpsc::Sender<Up>,
-    rewired: &mut mpsc::Receiver<String>,
-) -> anyhow::Result<()> {
+async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyhow::Result<()> {
     sync(api, devices, up).await?;
     tracing::info!(devices = devices.len(), "tuya cloud: states read");
     programs(api, devices, None, up).await?;
@@ -759,7 +803,6 @@ async fn follow(
             programs(api, devices, None, up).await?;
             reprogram = Instant::now() + PROGRAMS;
         }
-        take_rewired(rewired, &mut edited);
         if edited.1.is_some_and(|at| Instant::now() >= at) {
             programs(api, devices, Some(&edited.0), up).await?;
             edited = (HashSet::new(), None);
@@ -851,6 +894,35 @@ mod tests {
         assert!(program_news(&edit));
         let setpoint = serde_json::json!([{ "code": "temp_set", "value": 170 }]);
         assert!(!program_news(&setpoint));
+    }
+
+    #[test]
+    fn a_rewired_program_is_read_until_all_parts_are_rewritten() {
+        let codes: Vec<String> = (1..=program::DAYS)
+            .flat_map(|day| (1..=program::PARTS).map(move |p| program::part_code(day, p)))
+            .collect();
+        let week = |len: usize| -> HashMap<&str, Vec<u8>> {
+            codes
+                .iter()
+                .map(|c| (c.as_str(), vec![0x11; len]))
+                .collect()
+        };
+        // Switch wiring: every part with its 24 setpoints.
+        let mut parts = week(36);
+        assert!(rewritten(&parts, true));
+        assert!(!rewritten(&parts, false));
+        // Halfway: a part still holds orders only.
+        parts.insert(codes[27].as_str(), vec![0x11; 12]);
+        assert!(!rewritten(&parts, true));
+        parts.remove(codes[27].as_str());
+        assert!(!rewritten(&parts, true));
+        // Four or six orders: orders only.
+        assert!(rewritten(&week(12), false));
+        // Read every 10 s, for three minutes at most.
+        let wanted = Wanted::Rewired { switch: true };
+        assert_eq!(wanted.wait(1), Some(REWIRE_EVERY));
+        assert_eq!(wanted.wait(REWIRE_READS), None);
+        assert_eq!(Wanted::Parts(Vec::new()).wait(2), None);
     }
 
     #[test]

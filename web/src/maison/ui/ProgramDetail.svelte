@@ -40,7 +40,8 @@
 
   const bySetpoint = $derived(wiring === 'switch');
   // On switch wiring, a program read before the module was rewired has no
-  // setpoints yet: said, and not edited until Moli has read it again.
+  // setpoints yet: Moli reads it every 10 s until it has them (a minute or
+  // so); meanwhile the week pulses, quietly said, and is not edited.
   const stale = $derived(unread(read, wiring));
   const deg = (c) => num(c, c % 1 ? 1 : 0);
   // What a run says, and the class that colours it.
@@ -279,7 +280,7 @@
   </header>
 
   {#if stale && !editing}
-    <p class="stale"><Icon name="timer" size={18} />{t('commun.programme.relecture')}</p>
+    <p class="stale" aria-live="polite"><i></i>{t('commun.programme.relecture')}</p>
   {/if}
 
   {#if asking}
@@ -373,7 +374,7 @@
   {/snippet}
 
   {#if week}
-    <div class="week" class:editing>
+    <div class="week" class:editing class:reading={stale && !editing}>
       {#each week as runs, day (day)}
         {#if editing}
           <div class="row" class:picked={day === shown} class:changed={changed[day]}>
@@ -545,16 +546,39 @@
     font-weight: 650;
   }
 
+  /* Its setpoints being read: a quiet line, and the week pulsing. */
   .stale {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    margin-bottom: 14px;
-    border-radius: var(--r-lg);
-    background: color-mix(in srgb, var(--warm) 14%, var(--surface));
-    font-size: 13.5px;
-    font-weight: 600;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+
+  .stale i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    animation: reading 1.4s ease-in-out infinite;
+  }
+
+  .week.reading .bar {
+    animation: reading 1.4s ease-in-out infinite;
+  }
+
+  @keyframes reading {
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stale i,
+    .week.reading .bar {
+      animation: none;
+    }
   }
 
   .legend {
@@ -989,9 +1013,22 @@
     cursor: pointer;
   }
 
-  .row.changed .day::after {
-    content: ' •';
-    color: var(--warm);
+  /* A day changed: a dot in the margin, left of its name. After the name it
+     would wrap a long one (« dimanche ») and push its bar down. */
+  .row.changed .day {
+    position: relative;
+  }
+
+  .row.changed .day::before {
+    content: '';
+    position: absolute;
+    left: -10px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--warm);
+    transform: translateY(-50%);
   }
 
   .block {

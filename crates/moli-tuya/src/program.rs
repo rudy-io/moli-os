@@ -29,6 +29,13 @@ pub struct Slot {
     pub celsius: Option<f64>,
 }
 
+/// A part's length in bytes as the module keeps it: orders, then setpoints
+/// on switch wiring.
+#[must_use]
+pub const fn part_len(switch: bool) -> usize {
+    if switch { ORDERS + SLOTS } else { ORDERS }
+}
+
 /// A pilot wire's order, from its nibble; `None` for an unknown one.
 fn order(nibble: u8) -> Option<&'static str> {
     Some(match nibble {

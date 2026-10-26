@@ -135,7 +135,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let (program_tx, program_rx) = mpsc::channel::<cloud::ProgramWrite>(8);
     let program_tx = cloud.then_some(program_tx);
     // A module whose wiring changed: its program read again (the cloud's).
-    let (rewired_tx, rewired_rx) = mpsc::channel::<String>(16);
+    let (rewired_tx, rewired_rx) = mpsc::channel::<cloud::Rewired>(16);
     let rewired_tx = cloud.then_some(rewired_tx);
     // Gateways in the file: their links read the sub-devices that name them.
     let gateways: HashSet<String> = file
@@ -323,7 +323,7 @@ async fn serve(
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
     (programs, rewired): (
         Option<&mpsc::Sender<cloud::ProgramWrite>>,
-        Option<&mpsc::Sender<String>>,
+        Option<&mpsc::Sender<cloud::Rewired>>,
     ),
     devices: &[(DeviceId, Arc<TuyaDevice>)],
     await_keys: bool,
@@ -357,7 +357,11 @@ async fn serve(
                             && let Some(rewired) = rewired
                         {
                             tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");
-                            let _ = rewired.try_send(device.id.clone());
+                            let _ = rewired.try_send(cloud::Rewired {
+                                device: device.id.clone(),
+                                index,
+                                switch: matches!(&value, moli_core::Value::Text(t) if &**t == "switch"),
+                            });
                         }
                         ctx.set_state(id, &key, value);
                     }
@@ -390,7 +394,10 @@ fn start_cloud(
     config: &Config,
     keys: cloud::Keys,
     watched: cloud::Watched,
-    (programs, rewired): (mpsc::Receiver<cloud::ProgramWrite>, mpsc::Receiver<String>),
+    programs: (
+        mpsc::Receiver<cloud::ProgramWrite>,
+        mpsc::Receiver<cloud::Rewired>,
+    ),
     up: mpsc::Sender<Up>,
     tasks: &mut tokio::task::JoinSet<()>,
 ) {
@@ -404,7 +411,7 @@ fn start_cloud(
             programs,
             up.clone(),
         ));
-        tasks.spawn(cloud::watch(keys, region, watched, up, rewired));
+        tasks.spawn(cloud::watch(keys, region, watched, up));
     } else {
         tracing::warn!(region = %config.cloud_region, "tuya cloud: unknown region");
     }
