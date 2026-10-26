@@ -209,7 +209,6 @@
   "salon.cafe.reglages": "Machine settings",
   "salon.cafe.act_preparer": "{boisson} on {nom}",
   "salon.cafe.act_entretien": "{programme} of {nom}",
-  "salon.cafe.act_annuler": "Cancel on {nom}",
   "salon.cafe.act_reglage": "{reglage} of {nom}",
   "salon.cafe.etat.ready": "Ready",
   "salon.cafe.etat.energy_saving": "Energy saving",
@@ -239,5 +238,18 @@
   "salon.cafe.valeur.russian": "Русский",
   "salon.cafe.valeur.swedish": "Svenska",
   "salon.cafe.valeur.polish": "Polski",
-  "salon.cafe.valeur.estonian": "Eesti"
+  "salon.cafe.valeur.estonian": "Eesti",
+  "salon.cafe.indisponible": "The machine cannot take an order",
+  "salon.cafe.compris": "Got it",
+  "salon.cafe.pourquoi.eteinte": "Off or out of reach: no order possible",
+  "salon.cafe.pourquoi.programming": "Menu open on the machine: Moli waits for it to close",
+  "salon.cafe.pourquoi.attention": "The machine waits for a hand (see its display)",
+  "salon.cafe.pourquoi.switching_off": "The machine is switching off",
+  "salon.cafe.pourquoi.occupee": "Busy: Moli waits for it to finish",
+  "salon.cafe.fenetre.eteinte": "The machine is off, or Moli cannot reach it. Switch it on: Moli finds it again within 20 seconds.",
+  "salon.cafe.fenetre.programming": "The machine’s menu is open: while it is, it refuses every order. Leave the menu on the machine (back to the home screen); Moli takes over again within 5 seconds.",
+  "salon.cafe.fenetre.attention": "The machine waits for a hand: look at its display (water, grounds, tray, cover…). Once done, Moli takes over again within 5 seconds.",
+  "salon.cafe.fenetre.switching_off": "The machine is switching off: wait until it is off, switch it on again, then try again.",
+  "salon.cafe.fenetre.occupee": "The machine is {etat}. Wait until it is done, then try again: Moli sees it within 5 seconds.",
+  "salon.cafe.fenetre.prete": "The machine is ready."
 }

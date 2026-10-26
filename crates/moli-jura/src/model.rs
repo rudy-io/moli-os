@@ -364,13 +364,6 @@ impl Model {
                 None,
                 Semantic::Control,
             )),
-            writable(spec(
-                "cancel",
-                &tr("annuler"),
-                Kind::Binary,
-                None,
-                Semantic::Control,
-            )),
         ]);
         p
     }
@@ -718,8 +711,6 @@ pub enum Order {
     Brew(Drink),
     /// `@TG:<code>`, answered by its echo.
     Program(u8),
-    /// `@TG:FF`: stop the drink or the program's step.
-    Cancel,
     /// Write a setting (keys held around it), then read it back.
     Set { setting: Setting, value: String },
 }
@@ -740,7 +731,6 @@ pub fn order(
     };
     let idle = matches!(status.state(model), "ready" | "energy_saving");
     match key {
-        "cancel" => Ok(Order::Cancel),
         "brew" => {
             let slug = text(value).unwrap_or_default();
             let drink = *model
@@ -953,10 +943,8 @@ mod tests {
         assert!(brew(Some(&ready), "ground_coffee").is_err());
         assert!(brew(Some(&no_milk), "cappuccino").is_err());
         assert!(brew(Some(&no_milk), "coffee").is_ok());
-        assert_eq!(
-            order(&model, Some(&busy), "cancel", &Value::Bool(true)),
-            Ok(Order::Cancel)
-        );
+        // No cancel: `@TG:FF` is acknowledged by an E8 and stops nothing.
+        assert!(order(&model, Some(&busy), "cancel", &Value::Bool(true)).is_err());
         assert_eq!(
             order(
                 &model,
@@ -1059,6 +1047,6 @@ mod tests {
             .filter(|p| p.semantic == Semantic::Control)
             .map(|p| &*p.key)
             .collect();
-        assert_eq!(control, ["brew", "maintenance", "cancel"]);
+        assert_eq!(control, ["brew", "maintenance"]);
     }
 }

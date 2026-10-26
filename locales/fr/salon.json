@@ -209,7 +209,6 @@
   "salon.cafe.reglages": "Réglages de la machine",
   "salon.cafe.act_preparer": "{boisson} sur {nom}",
   "salon.cafe.act_entretien": "{programme} de {nom}",
-  "salon.cafe.act_annuler": "Annuler sur {nom}",
   "salon.cafe.act_reglage": "{reglage} de {nom}",
   "salon.cafe.etat.ready": "Prête",
   "salon.cafe.etat.energy_saving": "En veille",
@@ -239,5 +238,18 @@
   "salon.cafe.valeur.russian": "Русский",
   "salon.cafe.valeur.swedish": "Svenska",
   "salon.cafe.valeur.polish": "Polski",
-  "salon.cafe.valeur.estonian": "Eesti"
+  "salon.cafe.valeur.estonian": "Eesti",
+  "salon.cafe.indisponible": "La machine ne peut pas prendre d’ordre",
+  "salon.cafe.compris": "Compris",
+  "salon.cafe.pourquoi.eteinte": "Éteinte ou injoignable : pas d’ordre possible",
+  "salon.cafe.pourquoi.programming": "Menu ouvert sur la machine : Moli attend qu’il soit fermé",
+  "salon.cafe.pourquoi.attention": "La machine attend un geste (voir son écran)",
+  "salon.cafe.pourquoi.switching_off": "La machine s’éteint",
+  "salon.cafe.pourquoi.occupee": "Occupée : Moli attend qu’elle ait fini",
+  "salon.cafe.fenetre.eteinte": "La machine est éteinte, ou Moli ne la joint pas. Allumez-la : Moli la retrouve dans les 20 secondes.",
+  "salon.cafe.fenetre.programming": "Le menu de la machine est ouvert : tant qu’il l’est, elle refuse tout ordre. Quittez le menu sur la machine (revenez à l’écran d’accueil) ; Moli reprend la main dans les 5 secondes.",
+  "salon.cafe.fenetre.attention": "La machine attend un geste : regardez son écran (eau, marc, bac, couvercle…). Une fois fait, Moli reprend la main dans les 5 secondes.",
+  "salon.cafe.fenetre.switching_off": "La machine est en train de s’éteindre : attendez qu’elle soit éteinte, rallumez-la, puis réessayez.",
+  "salon.cafe.fenetre.occupee": "La machine est {etat}. Attendez qu’elle ait fini, puis réessayez : Moli le voit dans les 5 secondes.",
+  "salon.cafe.fenetre.prete": "La machine est prête."
 }

@@ -18,5 +18,7 @@
    la ranger dans sa pièce.
 7. Ordres (code de la maison demandé ; l'ordre d'un agent attend un humain) : une boisson,
    préparée avec la recette réglée sur la machine — **une tasse sous la buse d'abord** ; un
-   entretien, que la machine mène ensuite sur son écran (pastille, bac, confirmation) ; annuler.
+   entretien, que la machine mène ensuite sur son écran (pastille, bac, confirmation). Pas
+   d'annulation à distance (la commande de J.O.E. n'arrête rien sur une E8). Menu de la machine
+   ouvert : elle refuse tout ordre, le dashboard le dit.
    Premier essai : de l'eau chaude dans une tasse, avec la personne devant la machine.

@@ -8,7 +8,10 @@
    *  for, a button per drink (brewed with the recipe set on the machine),
    *  the maintenance programs, how close each maintenance is, the counters,
    *  and its settings. A drink or a program asks twice: a cup must be under
-   *  the spout, a program needs the tablet at hand. */
+   *  the spout, a program needs the tablet at hand. A machine that cannot
+   *  take an order now (its menu open, busy, waiting for a hand, off) says
+   *  why under its name, and a tap opens a window that says what to do.
+   *  No cancel: J.O.E.'s cancel is acknowledged by an E8 and stops nothing. */
   let { id } = $props();
 
   const d = $derived(device(id));
@@ -18,6 +21,8 @@
   const status = $derived(ok ? v('status') : null);
   const idle = $derived(status === 'ready' || status === 'energy_saving');
   const busy = $derived(ok && !idle && status != null);
+  // Why it cannot take an order now, if it cannot.
+  const why = $derived(!ok ? 'eteinte' : idle ? null : ['programming', 'attention', 'switching_off'].includes(status) ? status : 'occupee');
   const progress = $derived(Number(v('progress') ?? 0));
   const doing = $derived(v('activity') || '');
   const doingName = $derived(!doing ? '' : point('brew')?.kind.values?.includes(doing) ? drinkName(doing) : programName(doing));
@@ -53,19 +58,31 @@
     asked = null;
     fire();
   }
-  const brew = (slug) => twice(`brew:${slug}`, () => act(`${id}/brew`, slug, t('salon.cafe.act_preparer', { boisson: drinkName(slug), nom: nameOf(id) })));
-  const program = (p) => twice(`program:${p}`, () => act(`${id}/maintenance`, p, t('salon.cafe.act_entretien', { programme: programName(p), nom: nameOf(id) })));
-  // One cancel at a time: each one the machine takes stops a step.
-  let cancelling = $state(false);
-  async function cancel() {
-    cancelling = true;
-    await act(`${id}/cancel`, true, t('salon.cafe.act_annuler', { nom: nameOf(id) }));
-    cancelling = false;
+  // The window that says why, and what to do.
+  let dialog;
+  const explain = () => dialog?.showModal();
+  // An order only when the machine can take it; refused on the way (its
+  // state changed since the last reading), the window too.
+  async function send(point, val, label) {
+    if (why) return explain();
+    if ((await act(point, val, label)) === 'error' && why) explain();
   }
-  function set(p, raw) {
-    const val = p.kind.type === 'numeric' ? Number(raw) : raw;
+  const brew = (slug) => (why ? explain() : twice(`brew:${slug}`, () => send(`${id}/brew`, slug, t('salon.cafe.act_preparer', { boisson: drinkName(slug), nom: nameOf(id) }))));
+  const program = (p) => (why ? explain() : twice(`program:${p}`, () => send(`${id}/maintenance`, p, t('salon.cafe.act_entretien', { programme: programName(p), nom: nameOf(id) }))));
+  function set(p, input) {
+    const val = p.kind.type === 'numeric' ? Number(input.value) : input.value;
+    if (why) {
+      input.value = v(p.key) ?? '';
+      return explain();
+    }
     if (val === v(p.key) || (p.kind.type === 'numeric' && !Number.isFinite(val))) return;
-    act(`${id}/${p.key}`, val, t('salon.cafe.act_reglage', { reglage: p.label, nom: nameOf(id) }));
+    send(`${id}/${p.key}`, val, t('salon.cafe.act_reglage', { reglage: p.label, nom: nameOf(id) }));
+  }
+  // A setting not to be changed now: the window instead of the list.
+  function hold(e) {
+    if (!why) return;
+    e.preventDefault();
+    explain();
   }
 </script>
 
@@ -79,18 +96,15 @@
     <span class="chip {STATE_TONE[status] ?? ''}">{stateWord(status)}</span>
   </div>
 
+  {#if why && !(busy && doingName)}
+    <button class="why" onclick={explain}><Icon name="info" size={16} />{t(`salon.cafe.pourquoi.${why}`)}</button>
+  {/if}
+
   {#if busy && doingName}
     <div class="doing">
       <b>{doingName}</b>
       <div class="bar" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100"><i style:width="{Math.min(100, progress)}%"></i></div>
-      <div class="line">
-        <strong class="num">{num(progress)} %</strong>
-        <button class="act danger" disabled={cancelling} onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
-      </div>
-    </div>
-  {:else if busy}
-    <div class="line">
-      <button class="act danger" disabled={cancelling} onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
+      <strong class="num">{num(progress)} %</strong>
     </div>
   {/if}
 
@@ -108,7 +122,7 @@
       <p class="hint muted">{asked?.startsWith('brew:') ? t('salon.cafe.tasse_confirmer') : t('salon.cafe.tasse')}</p>
       <div class="drinks">
         {#each drinks as slug (slug)}
-          <button class="drink" class:confirm={asked === `brew:${slug}`} disabled={!idle} onclick={() => brew(slug)}>
+          <button class="drink" class:confirm={asked === `brew:${slug}`} class:waiting={!!why} onclick={() => brew(slug)}>
             <Icon name="coffee" size={20} />
             <span>{asked === `brew:${slug}` ? t('salon.cafe.preparer_confirmer') : drinkName(slug)}</span>
           </button>
@@ -157,7 +171,7 @@
       <p class="hint muted">{t('salon.cafe.entretien_aide')}</p>
       <div class="controls">
         {#each programs as p (p)}
-          <button class="act" class:confirm={asked === `program:${p}`} disabled={!idle} onclick={() => program(p)}>
+          <button class="act" class:confirm={asked === `program:${p}`} class:waiting={!!why} onclick={() => program(p)}>
             <Icon name="cleaning" size={18} />{asked === `program:${p}` ? t('salon.cafe.lancer_confirmer') : programName(p)}
           </button>
         {/each}
@@ -173,14 +187,14 @@
           <label>
             <span>{p.label}</span>
             {#if p.kind.type === 'enum'}
-              <select value={v(p.key)} disabled={!idle} onchange={(e) => set(p, e.currentTarget.value)}>
+              <select value={v(p.key)} onmousedown={hold} onkeydown={hold} onchange={(e) => set(p, e.currentTarget)}>
                 {#each p.kind.values as option (option)}
                   <option value={option}>{settingWord(option)}</option>
                 {/each}
               </select>
             {:else}
               <span class="number">
-                <input type="number" min={p.kind.min} max={p.kind.max} step={p.kind.step ?? 1} value={v(p.key)} disabled={!idle} onchange={(e) => set(p, e.currentTarget.value)} />
+                <input type="number" min={p.kind.min} max={p.kind.max} step={p.kind.step ?? 1} value={v(p.key)} onfocus={(e) => why && (e.currentTarget.blur(), explain())} onchange={(e) => set(p, e.currentTarget)} />
                 {#if p.unit}<small>{p.unit}</small>{/if}
               </span>
             {/if}
@@ -189,6 +203,12 @@
       </div>
     </details>
   {/if}
+
+  <dialog bind:this={dialog} onclick={(e) => e.target === dialog && dialog.close()} aria-labelledby="coffee-why-{id}">
+    <h3 id="coffee-why-{id}">{t('salon.cafe.indisponible')}</h3>
+    <p>{why ? t(`salon.cafe.fenetre.${why}`, { etat: stateWord(status).toLowerCase() }) : t('salon.cafe.fenetre.prete')}</p>
+    <button class="act" onclick={() => dialog.close()}>{t('salon.cafe.compris')}</button>
+  </dialog>
 </section>
 
 <style>
@@ -257,15 +277,7 @@
     gap: 8px;
   }
 
-  .line {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .line strong {
+  .doing strong {
     font-size: 26px;
     font-weight: 300;
     letter-spacing: -0.02em;
@@ -414,8 +426,51 @@
     cursor: pointer;
   }
 
-  .act.danger {
-    color: var(--alert);
+  .why {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    justify-self: start;
+    border: 0;
+    border-radius: var(--r-sm);
+    padding: 8px 12px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .drink.waiting,
+  .act.waiting {
+    opacity: 0.45;
+  }
+
+  dialog {
+    border: 0;
+    padding: 20px;
+    width: min(420px, 92vw);
+    border-radius: var(--r-xl);
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 30px 80px rgb(0 0 0 / 40%);
+  }
+
+  dialog::backdrop {
+    background: rgb(4 6 12 / 60%);
+    backdrop-filter: blur(4px);
+  }
+
+  dialog h3 {
+    font-size: 18px;
+    color: var(--ink);
+  }
+
+  dialog p {
+    margin: 12px 0 18px;
+    font-size: 15px;
+    line-height: 1.45;
   }
 
   .settings {

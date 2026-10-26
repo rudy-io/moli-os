@@ -12,9 +12,11 @@
 //! the machine's security code if it has one (`pin`, filed by the person).
 //!
 //! Orders: a drink (brewed with the recipe the machine keeps for it), a
-//! maintenance program (the machine then leads on its display), cancel,
-//! and the settings of a known model. Drinks, programs and cancel are a
-//! machine's orders (`Semantic::Control`): an agent's waits for a person.
+//! maintenance program (the machine then leads on its display), and the
+//! settings of a known model. Drinks and programs are a machine's orders
+//! (`Semantic::Control`): an agent's waits for a person. No cancel: J.O.E.'s
+//! `@TG:FF` (« cancel the product step ») is acknowledged by a real E8 and
+//! stops neither a coffee nor a rinse.
 
 mod model;
 mod session;
@@ -64,8 +66,8 @@ const COUNTERS_EVERY: Duration = Duration::from_secs(300);
 const SETTINGS_EVERY: Duration = Duration::from_secs(600);
 /// `@TF:` comes every 2.05 s.
 const STATUS_WAIT: Duration = Duration::from_millis(2600);
-/// While busy, `@TV:` comes about as often, and an order (cancel) may be
-/// waiting behind the reading: a missed status keeps the last one.
+/// While busy, `@TV:` comes about as often, and an order may be waiting
+/// behind the reading: a missed status keeps the last one.
 const BUSY_STATUS_WAIT: Duration = Duration::from_millis(1500);
 /// No one pressed OK: asked again this much later.
 const PAIR_AGAIN: Duration = Duration::from_secs(120);
@@ -454,14 +456,6 @@ impl Machine<'_> {
                         code,
                         percent: None,
                     });
-                    Ok(Ok(()))
-                } else {
-                    refused()
-                }
-            }
-            Order::Cancel => {
-                let answer = session.ask("@TG:FF", "@tg").await?;
-                if answer.is_some_and(|a| a.to_ascii_lowercase().starts_with("@tg:ff")) {
                     Ok(Ok(()))
                 } else {
                     refused()
