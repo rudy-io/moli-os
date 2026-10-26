@@ -43,6 +43,8 @@
   "maison.accueil.ambiance": "Ambiance",
   "maison.accueil.piece": "Pièce",
   "maison.accueil.clim": "Climatisation",
+  "maison.accueil.cafe_page": "Toute la cafetière",
+  "maison.accueil.cafe_encore": "Lancer ?",
   "maison.accueil.devant_porte": "Devant la porte",
   "maison.accueil.toutes_cameras": "Toutes les caméras",
   "maison.accueil.dernier_passage": "Dernier passage {when}",

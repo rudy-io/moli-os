@@ -4,6 +4,7 @@
   import { changesFrom } from '../lib/coffee-recipes.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import DrinkIcon from './DrinkIcon.svelte';
 
   /** A drink about to be brewed: its recipe as the machine keeps it, each
    *  field changeable within the machine's bounds for this cup only, then
@@ -20,6 +21,8 @@
   });
 
   const fields = $derived(FIELDS.filter((k) => recipe?.[k]));
+  // Fields with a word of help, on the line under them.
+  const HELPED = ['water', 'bypass', 'milk_foam', 'milk_break'];
   // The values chosen, from the recipe as it was when the window opened: a
   // reading meanwhile does not undo what is being set.
   const asKept = () => Object.fromEntries(Object.entries(recipe ?? {}).map(([k, f]) => [k, f.value]));
@@ -43,7 +46,7 @@
 
 <dialog bind:this={dialog} {onclose} onclick={(e) => e.target === dialog && dialog.close()} aria-labelledby="boisson-{slug}" tabindex="-1">
   <header>
-    <span class="logo"><Icon name="coffee" size={22} /></span>
+    <span class="logo"><DrinkIcon drink={slug} size={36} /></span>
     <div>
       <h3 id="boisson-{slug}">{drinkName(slug)}</h3>
       <p class="muted">{t(changes ? 'salon.cafe.boisson_modifiee' : 'salon.cafe.boisson_recette')}</p>
@@ -55,10 +58,7 @@
       {#each fields as k (k)}
         {@const f = recipe[k]}
         <li class:changed={chosen[k] !== f.value}>
-          <div class="what">
-            <b>{t(`salon.cafe.champ.${k}`)}</b>
-            {#if k === 'water' || k === 'bypass' || k === 'milk_break' || k === 'milk_foam'}<small>{t(`salon.cafe.champ_aide.${k}`)}</small>{/if}
-          </div>
+          <b class="what">{t(`salon.cafe.champ.${k}`)}</b>
           {#if k === 'temperature'}
             <div class="choice" role="radiogroup" aria-label={t('salon.cafe.champ.temperature')}>
               {#each TEMPERATURES as word, i (word)}
@@ -72,6 +72,7 @@
               <button onclick={() => nudge(k, 1)} disabled={chosen[k] >= f.max} aria-label={t('salon.cafe.plus')}>+</button>
             </div>
           {/if}
+          {#if HELPED.includes(k)}<small>{t(`salon.cafe.champ_aide.${k}`)}</small>{/if}
         </li>
       {/each}
     </ul>
@@ -123,8 +124,8 @@
   }
 
   .logo {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     flex: none;
     border-radius: 14px;
     display: grid;
@@ -151,12 +152,12 @@
     margin: 0 0 10px;
   }
 
+  /* The field and its control on one line, its help under them. */
   .fields li {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px 12px;
+    gap: 2px 10px;
     padding: 8px 10px;
     border-radius: 12px;
     background: var(--surface-2);
@@ -167,16 +168,13 @@
   }
 
   .what {
-    display: grid;
     min-width: 0;
-  }
-
-  .what b {
     font-size: 14px;
     font-weight: 650;
   }
 
-  .what small {
+  .fields small {
+    grid-column: 1 / -1;
     font-size: 11.5px;
     color: var(--ink-3);
   }

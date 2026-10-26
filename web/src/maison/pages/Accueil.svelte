@@ -13,6 +13,8 @@
   import SkyHero from '../ui/SkyHero.svelte';
   import HeatingSummary from '../ui/HeatingSummary.svelte';
   import CoversSummary from '../ui/CoversSummary.svelte';
+  import CoffeeHome from '../ui/CoffeeHome.svelte';
+  import { isCoffee } from '../lib/coffee.js';
   import { energy, useEnergy } from '../lib/energy-live.svelte.js';
 
   const cfg = $derived(home.config ?? {});
@@ -128,6 +130,8 @@
   // A card shows only when the house has what it shows.
   onMount(useEnergy);
   const climates = $derived(cfg.favorites?.climate ?? []);
+  // A coffee machine: its state and an espresso or a coffee, at hand.
+  const coffees = $derived(Object.values(hub.devices).filter(isCoffee).sort((a, b) => a.id.localeCompare(b.id)));
   const outside = $derived(!!(out.weather || out.air || out.pool));
 
   const tv = $derived(cfg.salon?.tv);
@@ -223,6 +227,7 @@
 
     <div class="side">
       {#if energy.summary}<EnergyCard />{/if}
+      {#each coffees as c (c.id)}<CoffeeHome id={c.id} />{/each}
       <Routines />
     </div>
 

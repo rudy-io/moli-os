@@ -1,10 +1,11 @@
 <script>
   import { device, value, reachable, nameOf, act, num } from '../lib/home.svelte.js';
-  import { STATE_TONE, stateWord, drinkName, programName, settingWord } from '../lib/coffee.js';
+  import { STATE_TONE, stateWord, drinkName, programName, settingWord, whyNot } from '../lib/coffee.js';
   import { parseRecipes } from '../lib/coffee-recipes.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import CoffeeBrew from './CoffeeBrew.svelte';
+  import DrinkIcon from './DrinkIcon.svelte';
   import CoffeeRecipes from './CoffeeRecipes.svelte';
 
   /** One coffee machine, as J.O.E.'s cockpit: its state and what it waits
@@ -26,7 +27,7 @@
   const idle = $derived(status === 'ready' || status === 'energy_saving');
   const busy = $derived(ok && !idle && status != null);
   // Why it cannot take an order now, if it cannot.
-  const why = $derived(!ok ? 'eteinte' : idle ? null : ['programming', 'attention', 'switching_off'].includes(status) ? status : 'occupee');
+  const why = $derived(whyNot(ok, status));
   const progress = $derived(Number(v('progress') ?? 0));
   const doing = $derived(v('activity') || '');
   const doingName = $derived(!doing ? '' : point('brew')?.kind.values?.includes(doing) ? drinkName(doing) : programName(doing));
@@ -140,7 +141,7 @@
       <div class="drinks">
         {#each drinks as slug (slug)}
           <button class="drink" class:waiting={!!why} onclick={() => brew(slug)}>
-            <Icon name="coffee" size={20} />
+            <DrinkIcon drink={slug} size={40} />
             <span>{drinkName(slug)}</span>
           </button>
         {/each}
@@ -350,8 +351,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 48px;
-    padding: 10px 12px;
+    min-height: 52px;
+    padding: 6px 12px 6px 8px;
     border: 0;
     border-radius: var(--r-sm);
     background: var(--surface-2);

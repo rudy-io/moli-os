@@ -22,6 +22,14 @@ export const STATE_TONE = {
 
 export const stateWord = (s) => (s ? t(`salon.cafe.etat.${s}`) : t('salon.cafe.eteinte'));
 
+/** Why a machine cannot take an order now (`ok`: reachable; `status`: its
+ *  state), as `salon.cafe.pourquoi.*` says it; null when it can. */
+export function whyNot(ok, status) {
+  if (!ok) return 'eteinte';
+  if (status === 'ready' || status === 'energy_saving') return null;
+  return ['programming', 'attention', 'switching_off'].includes(status) ? status : 'occupee';
+}
+
 /** A drink's name: translated when known, its code otherwise. */
 export function drinkName(slug) {
   const m = /^drink_([0-9a-f]{2})$/.exec(slug ?? '');

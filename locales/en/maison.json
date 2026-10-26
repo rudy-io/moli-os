@@ -43,6 +43,8 @@
   "maison.accueil.ambiance": "Mood",
   "maison.accueil.piece": "Room",
   "maison.accueil.clim": "Air conditioning",
+  "maison.accueil.cafe_page": "The whole coffee machine",
+  "maison.accueil.cafe_encore": "Brew?",
   "maison.accueil.devant_porte": "At the door",
   "maison.accueil.toutes_cameras": "All cameras",
   "maison.accueil.dernier_passage": "Last seen {when}",

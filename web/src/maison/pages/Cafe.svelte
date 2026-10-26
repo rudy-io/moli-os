@@ -3,6 +3,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import { isCoffee } from '../lib/coffee.js';
   import CoffeeCard from '../ui/CoffeeCard.svelte';
+  import CoffeeUsage from '../ui/CoffeeUsage.svelte';
 
   const machines = $derived(Object.values(hub.devices).filter(isCoffee).sort((a, b) => a.id.localeCompare(b.id)));
 </script>
@@ -16,6 +17,7 @@
   {#if machines.length}
     {#each machines as m (m.id)}
       <CoffeeCard id={m.id} />
+      <CoffeeUsage id={m.id} />
     {/each}
   {:else}
     <p class="muted">{t('salon.cafe.aucune')}</p>
