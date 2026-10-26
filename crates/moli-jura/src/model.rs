@@ -252,6 +252,17 @@ impl Model {
         }
     }
 
+    /// Milliseconds to leave between two sessions: the dongle refuses one
+    /// opened right after the last. A real E8 (EC) took one again after
+    /// 1 s (slowly) and 2 s (at once); other models wanted 3 s, a Z10 20 s.
+    #[must_use]
+    pub fn gap_ms(&self) -> u64 {
+        match self.group.as_deref() {
+            Some("EF1092") => 1500,
+            _ => 3000,
+        }
+    }
+
     /// The commercial name, for the device.
     #[must_use]
     pub fn name(&self) -> Option<&'static str> {
@@ -1015,6 +1026,12 @@ mod tests {
             all.keys()
                 .all(|c| *c == 0 || model.drink_by_code(*c).is_some())
         );
+    }
+
+    #[test]
+    fn an_e8_is_joined_again_sooner() {
+        assert_eq!(e8().gap_ms(), 1500);
+        assert_eq!(Model::new(None).gap_ms(), 3000);
     }
 
     #[test]

@@ -9,7 +9,8 @@
   échappés (`0x1B` puis l'octet XOR `0x80`). Le texte finit lui-même par `\r\n`.
 - Une seule connexion à la fois : Moli ouvre une session courte toutes les 20 s (5 s quand la
   machine travaille), et l'application J.O.E. trouve la place entre deux. Une E8 accepte une
-  nouvelle session 1 s après la précédente ; Moli attend 3 s.
+  nouvelle session 1 s après la précédente ; Moli attend 1,5 s pour elle, 3 s pour un autre modèle
+  (avec 3 s, un ordre « annuler » arrivé pendant une lecture dépassait ses 5 s).
 - Les noms des boissons et les réglages dépendent du modèle (groupe J.O.E.). Seul l'E8 (EC),
   `EF1092`, est décrit ici, d'après sa machine réelle ; un autre modèle a les codes communs, ses
   autres boissons sous leur code (`drink_28`), et pas de réglages. Les fichiers de l'application
@@ -24,9 +25,12 @@
   Sur l'E8, l'espresso donne exactement la commande avec laquelle un E6 a été servi
   (jura-connect). Les doubles (2 Espressi, 2 Cafés) n'ont pas de recette propre : celle de la
   boisson simple, sous le code du double — **pas encore essayé sur la machine**.
-- Pas encore essayés sur la machine réelle : préparer une boisson, les entretiens (`@TG:21` à
-  `@TG:26`), annuler (`@TG:FF`), écrire un réglage (`@TS:01`, `@TM:<argument>,<valeur><somme>`,
-  `@TS:00`, relu). L'intégration Home Assistant les a vus marcher sur une E8 (SDS) pour le café,
-  les rinçages et l'arrêt automatique ; nettoyage, détartrage et filtre nulle part.
+- **Essayé sur la machine réelle (26 oct.)** : eau chaude et café préparés depuis le dashboard
+  (recette relue, octet 8 à 1 : accepté en 50 à 150 ms), rinçage du café (`@TG:22`, son écho),
+  annuler (`@TG:FF` répond `@tg:FF` ; quatre annulations ont raccourci un café de moitié :
+  la commande d'origine s'appelle « annuler l'étape », elle n'arrête pas forcément toute la
+  boisson d'un coup).
+- Pas encore essayés : les autres boissons, les doubles (recette de la boisson simple sous le
+  code du double), nettoyage, détartrage, filtre, rinçage et nettoyage du lait, écrire un réglage.
 - Pas fait : préparation avec des réglages changés pour une fois, minuteur, verrouillage,
   mise à jour de la clé (peut la bloquer).

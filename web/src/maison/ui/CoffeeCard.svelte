@@ -55,7 +55,13 @@
   }
   const brew = (slug) => twice(`brew:${slug}`, () => act(`${id}/brew`, slug, t('salon.cafe.act_preparer', { boisson: drinkName(slug), nom: nameOf(id) })));
   const program = (p) => twice(`program:${p}`, () => act(`${id}/maintenance`, p, t('salon.cafe.act_entretien', { programme: programName(p), nom: nameOf(id) })));
-  const cancel = () => act(`${id}/cancel`, true, t('salon.cafe.act_annuler', { nom: nameOf(id) }));
+  // One cancel at a time: each one the machine takes stops a step.
+  let cancelling = $state(false);
+  async function cancel() {
+    cancelling = true;
+    await act(`${id}/cancel`, true, t('salon.cafe.act_annuler', { nom: nameOf(id) }));
+    cancelling = false;
+  }
   function set(p, raw) {
     const val = p.kind.type === 'numeric' ? Number(raw) : raw;
     if (val === v(p.key) || (p.kind.type === 'numeric' && !Number.isFinite(val))) return;
@@ -79,12 +85,12 @@
       <div class="bar" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100"><i style:width="{Math.min(100, progress)}%"></i></div>
       <div class="line">
         <strong class="num">{num(progress)} %</strong>
-        <button class="act danger" onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
+        <button class="act danger" disabled={cancelling} onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
       </div>
     </div>
   {:else if busy}
     <div class="line">
-      <button class="act danger" onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
+      <button class="act danger" disabled={cancelling} onclick={cancel}><Icon name="stop" size={18} />{t('commun.annuler')}</button>
     </div>
   {/if}
 

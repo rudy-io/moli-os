@@ -58,19 +58,19 @@ fn default_name() -> String {
 
 const TOKEN: &str = "token";
 const PIN: &str = "pin";
-/// The dongle refuses a session opened right after the last one (an E8
-/// took one again after 1 s; other models want more).
-const GAP: Duration = Duration::from_secs(3);
 /// While the machine works: how often to look.
 const BUSY_EVERY: Duration = Duration::from_secs(5);
 const COUNTERS_EVERY: Duration = Duration::from_secs(300);
 const SETTINGS_EVERY: Duration = Duration::from_secs(600);
 /// `@TF:` comes every 2.05 s.
 const STATUS_WAIT: Duration = Duration::from_millis(2600);
+/// While busy, `@TV:` comes about as often, and an order (cancel) may be
+/// waiting behind the reading: a missed status keeps the last one.
+const BUSY_STATUS_WAIT: Duration = Duration::from_millis(1500);
 /// No one pressed OK: asked again this much later.
 const PAIR_AGAIN: Duration = Duration::from_secs(120);
 /// An order is not sent this close to its deadline.
-const MARGIN: Duration = Duration::from_millis(800);
+const MARGIN: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 pub struct Jura {
@@ -143,7 +143,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 command.reply(answer);
                 if done {
                     // See it start.
-                    next = Instant::now() + GAP;
+                    next = Instant::now() + machine.gap();
                 }
             }
             () = tokio::time::sleep_until(next) => {
@@ -216,6 +216,10 @@ struct Machine<'a> {
 }
 
 impl Machine<'_> {
+    fn gap(&self) -> Duration {
+        Duration::from_millis(self.model.gap_ms())
+    }
+
     fn pace(&self) -> Duration {
         match &self.status {
             Some(s)
@@ -236,7 +240,7 @@ impl Machine<'_> {
         by: Option<Instant>,
     ) -> anyhow::Result<Option<Session>> {
         if let Some(closed) = self.last_close {
-            let from = closed + GAP;
+            let from = closed + self.gap();
             if by.is_some_and(|by| from + MARGIN > by) {
                 return Ok(None);
             }
@@ -315,7 +319,12 @@ impl Machine<'_> {
 
     async fn read(&mut self, ctx: &mut DriverCtx, session: &mut Session) -> anyhow::Result<()> {
         let was_busy = matches!(self.status, Some(Status::Busy { .. }));
-        if let Some(status) = session.status(STATUS_WAIT).await?.cloned() {
+        let wait = if was_busy {
+            BUSY_STATUS_WAIT
+        } else {
+            STATUS_WAIT
+        };
+        if let Some(status) = session.status(wait).await?.cloned() {
             self.set(ctx, status.values(&self.model));
             if was_busy && matches!(status, Status::Idle(_)) {
                 // A drink or a program ended: its counters moved.
