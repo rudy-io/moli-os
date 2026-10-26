@@ -190,7 +190,7 @@ fn day_slots(runs: &serde_json::Value) -> Result<Vec<Slot>, String> {
 }
 
 /// A setpoint in the module's half degrees, when it takes it.
-fn half(celsius: f64) -> Option<u8> {
+pub(crate) fn half(celsius: f64) -> Option<u8> {
     HALVES
         .into_iter()
         .find(|h| (f64::from(*h) - celsius * 2.0).abs() < 1e-9)

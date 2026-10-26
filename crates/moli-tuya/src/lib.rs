@@ -14,6 +14,7 @@
 pub mod cloud;
 mod connections;
 mod device;
+mod kept;
 pub mod model;
 pub mod program;
 pub mod protocol;
@@ -137,6 +138,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // A module whose wiring changed: its program read again (the cloud's).
     let (rewired_tx, rewired_rx) = mpsc::channel::<cloud::Rewired>(16);
     let rewired_tx = cloud.then_some(rewired_tx);
+    // The setpoints of the switch-wired programs, kept by Moli.
+    let kept: kept::Shared = Arc::new(std::sync::Mutex::new(kept::Kept::load(
+        config.devices_file.with_file_name("tuya-programs.json"),
+    )));
     // Gateways in the file: their links read the sub-devices that name them.
     let gateways: HashSet<String> = file
         .devices
@@ -244,6 +249,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             keys,
             watched,
             (program_rx, rewired_rx),
+            &kept,
             up_tx.clone(),
             &mut tasks,
         );
@@ -261,6 +267,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         &mut up,
         &orders,
         (program_tx.as_ref(), rewired_tx.as_ref()),
+        &kept,
         &devices,
         await_keys,
     )
@@ -315,7 +322,8 @@ fn stored_keys(ctx: &DriverCtx) -> Option<cloud::Keys> {
 }
 
 /// Orders go to the devices, what they say goes to the hub, until the end.
-/// A program keeper whose wiring changes has its program read again.
+/// A program keeper whose wiring changes has its program read again;
+/// rewired to switch, the setpoints Moli keeps are shown at once.
 /// Returns whether cloud keys arrived meanwhile (then the driver restarts).
 async fn serve(
     ctx: &mut DriverCtx,
@@ -325,6 +333,7 @@ async fn serve(
         Option<&mpsc::Sender<cloud::ProgramWrite>>,
         Option<&mpsc::Sender<cloud::Rewired>>,
     ),
+    kept: &kept::Shared,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
     await_keys: bool,
 ) -> bool {
@@ -350,20 +359,28 @@ async fn serve(
             message = up.recv() => match message {
                 Some(Up::State(index, values)) => {
                     let (id, device) = &devices[index];
+                    // The week shown again once its new wiring is said.
+                    let mut shown = None;
                     for (key, value) in values {
-                        if key == WIRING
-                            && program::kept_by(&device.dps)
-                            && rewiring(&mut wirings, index, &value)
-                            && let Some(rewired) = rewired
-                        {
-                            tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");
-                            let _ = rewired.try_send(cloud::Rewired {
-                                device: device.id.clone(),
-                                index,
-                                switch: matches!(&value, moli_core::Value::Text(t) if &**t == "switch"),
+                        if key == WIRING && program::kept_by(&device.dps) {
+                            let switch = matches!(&value, moli_core::Value::Text(t) if &**t == "switch");
+                            let changed = rewiring(&mut wirings, index, &value);
+                            shown = kept.lock().ok().and_then(|mut k| {
+                                k.wired(&device.id, switch, changed).then(|| k.week(&device.id))
                             });
+                            if changed && let Some(rewired) = rewired {
+                                tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");
+                                let _ = rewired.try_send(cloud::Rewired {
+                                    device: device.id.clone(),
+                                    index,
+                                    switch,
+                                });
+                            }
                         }
                         ctx.set_state(id, &key, value);
+                    }
+                    if let Some(week) = shown {
+                        ctx.set_state(id, program::POINT, moli_core::Value::Text(week.to_string().into()));
                     }
                 }
                 Some(Up::Online(index, online)) => ctx.set_availability(&devices[index].0, online),
@@ -398,6 +415,7 @@ fn start_cloud(
         mpsc::Receiver<cloud::ProgramWrite>,
         mpsc::Receiver<cloud::Rewired>,
     ),
+    kept: &kept::Shared,
     up: mpsc::Sender<Up>,
     tasks: &mut tokio::task::JoinSet<()>,
 ) {
@@ -409,9 +427,10 @@ fn start_cloud(
             keys.clone(),
             region,
             programs,
+            Arc::clone(kept),
             up.clone(),
         ));
-        tasks.spawn(cloud::watch(keys, region, watched, up));
+        tasks.spawn(cloud::watch(keys, region, watched, Arc::clone(kept), up));
     } else {
         tracing::warn!(region = %config.cloud_region, "tuya cloud: unknown region");
     }

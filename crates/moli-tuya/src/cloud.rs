@@ -28,6 +28,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::device::Up;
+use crate::kept;
 use crate::model::TuyaDevice;
 use crate::program;
 use crate::protocol::{ecb_decrypt, gcm_open, hmac_sha256, random};
@@ -353,8 +354,9 @@ fn base64_of(bytes: &[u8]) -> String {
     out
 }
 
-/// A device's week program, from the cloud's copy of its raw DPs.
-async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
+/// A device's week program, from the cloud's copy of its raw DPs (on
+/// switch wiring, with the setpoints Moli keeps).
+async fn read_program(api: &mut Api, id: &str, kept: &kept::Shared) -> anyhow::Result<Value> {
     let shadow = api
         .call(&format!("/v2.0/cloud/thing/{id}/shadow/properties"))
         .await?;
@@ -394,7 +396,24 @@ async fn read_program(api: &mut Api, id: &str) -> anyhow::Result<Value> {
             "tuya cloud: week program incomplete"
         );
     }
-    Ok(Value::Text(week.to_string().into()))
+    Ok(shown(kept, id, &shadow))
+}
+
+/// The week to show from a shadow just read, as `Kept::seen` says it.
+fn shown(kept: &kept::Shared, id: &str, shadow: &Json) -> Value {
+    let parts = owned(&shadow_parts(shadow));
+    let week = match kept.lock() {
+        Ok(mut kept) => kept.seen(id, parts),
+        Err(_) => shadow_week(shadow),
+    };
+    Value::Text(week.to_string().into())
+}
+
+fn owned(parts: &HashMap<&str, Vec<u8>>) -> kept::Parts {
+    parts
+        .iter()
+        .map(|(code, bytes)| ((*code).to_owned(), bytes.clone()))
+        .collect()
 }
 
 /// A device's shadow's raw parts, by code (base64 in the shadow).
@@ -418,13 +437,14 @@ async fn programs(
     api: &mut Api,
     devices: &Watched,
     only: Option<&HashSet<String>>,
+    kept: &kept::Shared,
     up: &mpsc::Sender<Up>,
 ) -> anyhow::Result<()> {
     for (id, (index, device)) in devices {
         if !program::kept_by(&device.dps) || only.is_some_and(|only| !only.contains(id)) {
             continue;
         }
-        match read_program(api, id).await {
+        match read_program(api, id, kept).await {
             Ok(week) => {
                 up.send(Up::State(*index, vec![(program::POINT.into(), week)]))
                     .await?;
@@ -518,6 +538,7 @@ pub async fn write_programs(
     keys: Keys,
     region: Region,
     (mut writes, mut rewires): (mpsc::Receiver<ProgramWrite>, mpsc::Receiver<Rewired>),
+    kept: kept::Shared,
     up: mpsc::Sender<Up>,
 ) {
     let mut api = Api {
@@ -532,7 +553,10 @@ pub async fn write_programs(
             biased;
             write = writes.recv() => {
                 let Some(write) = write else { return };
-                if let Some(check) = write_program(&mut api, write).await {
+                if let Some(check) = write_program(&mut api, write, &kept, &up).await {
+                    if matches!(check.wanted, Wanted::Rewired { .. }) {
+                        checks.retain(|c| !(c.device == check.device && matches!(c.wanted, Wanted::Rewired { .. })));
+                    }
                     checks.push(check);
                 }
             }
@@ -552,7 +576,7 @@ pub async fn write_programs(
                 let (due, later): (Vec<Check>, Vec<Check>) = checks.drain(..).partition(|c| c.at <= now);
                 checks = later;
                 for check in due {
-                    if let Some(again) = read_back(&mut api, check, &up).await {
+                    if let Some(again) = read_back(&mut api, check, &kept, &up).await {
                         checks.push(again);
                     }
                 }
@@ -561,20 +585,47 @@ pub async fn write_programs(
     }
 }
 
-/// One write, answered; what to read back after it.
-async fn write_program(api: &mut Api, write: ProgramWrite) -> Option<Check> {
+/// One write, answered; what to read back after it. A week kept for a
+/// module still rewriting its parts is shown at once, and waits for them.
+async fn write_program(
+    api: &mut Api,
+    write: ProgramWrite,
+    kept: &kept::Shared,
+    up: &mpsc::Sender<Up>,
+) -> Option<Check> {
     // Nobody waits any more (the hub gave up): never sent late.
     if write.done.is_closed() || std::time::Instant::now() >= write.deadline {
         return None;
     }
-    match issue_program(api, &write.device, &write.week).await {
-        Ok(wanted) => {
+    match issue_program(api, &write.device, &write.week, kept).await {
+        Ok(Issued::Sent(wanted)) => {
             let _ = write.done.send(Ok(()));
             Some(Check {
                 device: write.device,
                 index: write.index,
                 wanted: Wanted::Parts(wanted),
                 at: Instant::now() + PROGRAM_CONFIRM[0],
+                tries: 0,
+            })
+        }
+        Ok(Issued::Kept) => {
+            let _ = write.done.send(Ok(()));
+            tracing::info!(
+                device = write.device,
+                "tuya cloud: week program kept until the module has rewritten its parts"
+            );
+            let week = kept.lock().ok().map(|k| k.week(&write.device));
+            if let Some(week) = week {
+                let week = Value::Text(week.to_string().into());
+                let _ = up
+                    .send(Up::State(write.index, vec![(program::POINT.into(), week)]))
+                    .await;
+            }
+            Some(Check {
+                device: write.device,
+                index: write.index,
+                wanted: Wanted::Rewired { switch: true },
+                at: Instant::now() + REWIRE_EVERY,
                 tries: 0,
             })
         }
@@ -590,21 +641,27 @@ async fn write_program(api: &mut Api, write: ProgramWrite) -> Option<Check> {
 }
 
 /// Reads a program back and shows it; once more later if the module has
-/// not taken it (or not rewritten it) yet.
-async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option<Check> {
+/// not taken it (or not rewritten it) yet. Rewritten on switch wiring, it
+/// is sent the setpoints Moli keeps if it holds others.
+async fn read_back(
+    api: &mut Api,
+    check: Check,
+    kept: &kept::Shared,
+    up: &mpsc::Sender<Up>,
+) -> Option<Check> {
     let path = format!("/v2.0/cloud/thing/{}/shadow/properties", check.device);
-    let taken = match api.call(&path).await {
+    let (taken, parts) = match api.call(&path).await {
         Ok(shadow) => {
             let parts = shadow_parts(&shadow);
-            let week = Value::Text(shadow_week(&shadow).to_string().into());
+            let week = shown(kept, &check.device, &shadow);
             let _ = up
                 .send(Up::State(check.index, vec![(program::POINT.into(), week)]))
                 .await;
-            check.wanted.seen(&parts)
+            (check.wanted.seen(&parts), owned(&parts))
         }
         Err(e) => {
             tracing::debug!(device = check.device, error = %e, "tuya cloud: program not read back");
-            false
+            (false, kept::Parts::new())
         }
     };
     let tries = check.tries + 1;
@@ -617,13 +674,17 @@ async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option
             );
             return None;
         }
-        (Wanted::Rewired { .. }, true) => {
+        (Wanted::Rewired { switch }, true) => {
             tracing::info!(
                 device = check.device,
                 reads = tries,
                 "tuya cloud: week program read after rewiring"
             );
-            return None;
+            return if *switch {
+                send_kept(api, check, &parts, kept).await
+            } else {
+                None
+            };
         }
         _ => {}
     }
@@ -632,6 +693,9 @@ async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option
             device = check.device,
             "tuya cloud: the module has not taken its week program"
         );
+        if let Ok(mut kept) = kept.lock() {
+            kept.settle(&check.device);
+        }
         return None;
     };
     Some(Check {
@@ -641,23 +705,88 @@ async fn read_back(api: &mut Api, check: Check, up: &mpsc::Sender<Up>) -> Option
     })
 }
 
-/// Sends what changes in a device's week; the parts sent (none: nothing changes).
+/// A module rewritten on switch wiring that holds other setpoints than
+/// Moli's (Moli's are shown): sent Moli's, then read back.
+async fn send_kept(
+    api: &mut Api,
+    check: Check,
+    parts: &kept::Parts,
+    kept: &kept::Shared,
+) -> Option<Check> {
+    let wanted = kept
+        .lock()
+        .ok()
+        .filter(|k| k.is_ahead(&check.device))
+        .map(|k| k.to_send(&check.device, parts))
+        .unwrap_or_default();
+    if wanted.is_empty() {
+        return None;
+    }
+    match issue(api, &check.device, &wanted).await {
+        Ok(()) => {
+            tracing::info!(
+                device = check.device,
+                parts = wanted.len(),
+                "tuya cloud: the setpoints Moli keeps sent to the module"
+            );
+            Some(Check {
+                wanted: Wanted::Parts(wanted),
+                at: Instant::now() + PROGRAM_CONFIRM[0],
+                tries: 0,
+                ..check
+            })
+        }
+        Err(e) => {
+            tracing::warn!(device = check.device, error = %e, "tuya cloud: the setpoints Moli keeps not sent");
+            if let Ok(mut kept) = kept.lock() {
+                kept.settle(&check.device);
+            }
+            None
+        }
+    }
+}
+
+/// What became of a week a person saved.
+enum Issued {
+    /// The parts sent (none: nothing changes).
+    Sent(Vec<(String, Vec<u8>)>),
+    /// Kept by Moli for a module still rewriting its parts.
+    Kept,
+}
+
+/// Sends what changes in a device's week. On switch wiring, a module still
+/// rewriting its parts (no setpoints yet) cannot take it: Moli keeps it.
 async fn issue_program(
     api: &mut Api,
     device: &str,
     week: &str,
-) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    kept: &kept::Shared,
+) -> anyhow::Result<Issued> {
     let shadow = api
         .call(&format!("/v2.0/cloud/thing/{device}/shadow/properties"))
         .await?;
     let parts = shadow_parts(&shadow);
+    let keep = match kept.lock() {
+        Ok(mut k) if k.is_switch(device) && !kept::complete(&owned(&parts)) => {
+            k.take(device, week)?
+        }
+        _ => false,
+    };
+    if keep {
+        return Ok(Issued::Kept);
+    }
     let wanted = program::changes(week, |day, part| {
         parts.get(program::part_code(day, part).as_str()).cloned()
     })?;
-    if wanted.is_empty() {
-        return Ok(wanted);
+    if !wanted.is_empty() {
+        issue(api, device, &wanted).await?;
     }
-    let properties: serde_json::Map<String, Json> = wanted
+    Ok(Issued::Sent(wanted))
+}
+
+/// Sends parts to a module, in one call.
+async fn issue(api: &mut Api, device: &str, parts: &[(String, Vec<u8>)]) -> anyhow::Result<()> {
+    let properties: serde_json::Map<String, Json> = parts
         .iter()
         .map(|(code, bytes)| (code.clone(), Json::String(base64_of(bytes))))
         .collect();
@@ -666,7 +795,7 @@ async fn issue_program(
         &serde_json::json!({ "properties": Json::Object(properties).to_string() }),
     )
     .await?;
-    Ok(wanted)
+    Ok(())
 }
 
 /// Whether a status message touches a week program.
@@ -682,7 +811,13 @@ fn program_news(status: &Json) -> bool {
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
 /// Reads the states, then follows the changes, for ever (reconnecting).
-pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
+pub async fn watch(
+    keys: Keys,
+    region: Region,
+    devices: Watched,
+    kept: kept::Shared,
+    up: mpsc::Sender<Up>,
+) {
     let mut api = Api {
         keys,
         region,
@@ -690,7 +825,7 @@ pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sende
     };
     let mut pause = Duration::from_secs(30);
     loop {
-        match follow(&mut api, &devices, &up).await {
+        match follow(&mut api, &devices, &kept, &up).await {
             Ok(()) => return,
             Err(e) => {
                 tracing::warn!(error = %e.root_cause(), "tuya cloud: retrying in {} s", pause.as_secs());
@@ -768,10 +903,15 @@ fn online_flags(info: &Json) -> Vec<(&str, bool)> {
         .collect()
 }
 
-async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyhow::Result<()> {
+async fn follow(
+    api: &mut Api,
+    devices: &Watched,
+    kept: &kept::Shared,
+    up: &mpsc::Sender<Up>,
+) -> anyhow::Result<()> {
     sync(api, devices, up).await?;
     tracing::info!(devices = devices.len(), "tuya cloud: states read");
-    programs(api, devices, None, up).await?;
+    programs(api, devices, None, kept, up).await?;
     let keys = api.keys.clone();
     let path = format!(
         "/ws/v2/consumer/persistent/{0}/out/event/{0}-sub?ackTimeoutMillis=3000&subscriptionType=Failover",
@@ -800,11 +940,11 @@ async fn follow(api: &mut Api, devices: &Watched, up: &mpsc::Sender<Up>) -> anyh
             resync = Instant::now() + RESYNC;
         }
         if Instant::now() >= reprogram {
-            programs(api, devices, None, up).await?;
+            programs(api, devices, None, kept, up).await?;
             reprogram = Instant::now() + PROGRAMS;
         }
         if edited.1.is_some_and(|at| Instant::now() >= at) {
-            programs(api, devices, Some(&edited.0), up).await?;
+            programs(api, devices, Some(&edited.0), kept, up).await?;
             edited = (HashSet::new(), None);
         }
         let text = match ws.recv_text(QUIET).await {
