@@ -12,16 +12,8 @@
 //! never gave with setpoints takes the setpoint before it in the week.
 //! Saving a program also sends the parts the cloud holds without setpoints,
 //! so that the module holds what is shown.
-//!
-//! The cloud's copy may also keep a part as it was before a write, for days,
-//! though the module took it (seen 26 Oct 2026: four parts copied to another
-//! heater, Smart Life showing them, the cloud's copy not). So Moli keeps the
-//! parts it sent and when (`tuya-programs-sent.json`): a part the cloud has
-//! not rewritten since is shown, saved and copied as sent; one the cloud
-//! rewrote later (the module's answer, Smart Life, a rewiring) is the cloud's.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -29,13 +21,6 @@ use crate::program::{self, DAYS, PARTS, SLOTS};
 
 /// A module's parts by code, as the cloud gives them.
 pub type Parts = HashMap<String, Vec<u8>>;
-
-/// The parts Moli sent, by Tuya id then part code: the bytes, and when (ms).
-type Sent = HashMap<String, HashMap<String, (Vec<u8>, i64)>>;
-
-/// When the cloud last rewrote each part of its copy, by code (ms since the
-/// Unix epoch).
-pub type Times = HashMap<String, i64>;
 
 /// Shared by the driver's loop (wirings) and the cloud's tasks (reads, writes).
 pub type Shared = Arc<Mutex<Kept>>;
@@ -55,9 +40,6 @@ pub struct Kept {
     switch: HashMap<String, bool>,
     /// The parts last read, by module.
     last: HashMap<String, Parts>,
-    /// By Tuya id: the parts Moli sent, and when (ms), until the cloud
-    /// rewrites them.
-    sent: Sent,
 }
 
 /// The 28 parts' codes, Monday 0 h first.
@@ -84,64 +66,11 @@ impl Kept {
                 }),
             Err(_) => HashMap::new(),
         };
-        let sent = std::fs::read(sent_path(&path))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .and_then(|json| sent_from_json(&json))
-            .unwrap_or_default();
         Self {
             path: Some(path),
             weeks,
-            sent,
             ..Self::default()
         }
-    }
-
-    fn save_sent(&self) {
-        let Some(path) = &self.path else { return };
-        let path = sent_path(path);
-        let tmp = path.with_extension("json.tmp");
-        let text = sent_to_json(&self.sent).to_string();
-        if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)) {
-            tracing::warn!(file = %path.display(), error = %e, "tuya: parts sent not saved");
-        }
-    }
-
-    /// Parts the cloud took to send to a module at `at` (ms): shown as sent
-    /// until the cloud rewrites them.
-    pub fn issued(&mut self, id: &str, parts: &[(String, Vec<u8>)], at: i64) {
-        if parts.is_empty() {
-            return;
-        }
-        let sent = self.sent.entry(id.to_owned()).or_default();
-        for (code, bytes) in parts {
-            sent.insert(code.clone(), (bytes.clone(), at));
-        }
-        self.save_sent();
-    }
-
-    /// The cloud's parts, with those Moli sent since it last rewrote them;
-    /// a part the cloud rewrote after it was sent is the cloud's again.
-    fn fresh(&mut self, id: &str, mut parts: Parts, times: &Times) -> Parts {
-        let Some(sent) = self.sent.get_mut(id) else {
-            return parts;
-        };
-        let before = sent.len();
-        sent.retain(|code, (bytes, at)| {
-            if times.get(code).is_some_and(|t| *t >= *at) {
-                return false;
-            }
-            parts.insert(code.clone(), bytes.clone());
-            true
-        });
-        let dropped = sent.len() != before;
-        if sent.is_empty() {
-            self.sent.remove(id);
-        }
-        if dropped {
-            self.save_sent();
-        }
-        parts
     }
 
     fn save(&self) {
@@ -163,21 +92,10 @@ impl Kept {
         self.switch.get(id).copied().unwrap_or(false)
     }
 
-    /// A module's parts read with when the cloud rewrote each (`wiring`: as
-    /// the cloud says it, taken until the driver says it): the setpoints of
-    /// those that hold some are kept, and the week to show.
-    pub fn seen(
-        &mut self,
-        id: &str,
-        parts: Parts,
-        times: &Times,
-        wiring: Option<bool>,
-    ) -> serde_json::Value {
-        let parts = self.fresh(id, parts, times);
-        self.keep(id, parts, wiring)
-    }
-
-    fn keep(&mut self, id: &str, parts: Parts, wiring: Option<bool>) -> serde_json::Value {
+    /// A module's parts read (`wiring`: as the cloud says it, taken until
+    /// the driver says it): the setpoints of those that hold some are kept,
+    /// and the week to show.
+    pub fn seen(&mut self, id: &str, parts: Parts, wiring: Option<bool>) -> serde_json::Value {
         if let Some(switch) = wiring {
             self.switch.entry(id.to_owned()).or_insert(switch);
         }
@@ -259,11 +177,9 @@ impl Kept {
         id: &str,
         week: &str,
         parts: &Parts,
-        times: &Times,
         wiring: Option<bool>,
     ) -> Result<Vec<(String, Vec<u8>)>, program::Refused> {
-        let parts = &self.fresh(id, parts.clone(), times);
-        self.keep(id, parts.clone(), wiring);
+        self.seen(id, parts.clone(), wiring);
         let mut out = program::changes(week, |day, part| self.part(id, day, part, parts))?;
         if self.is_switch(id) {
             for (day, part) in (1..=DAYS).flat_map(|d| (1..=PARTS).map(move |p| (d, p))) {
@@ -279,47 +195,6 @@ impl Kept {
         }
         Ok(out)
     }
-}
-
-fn sent_path(path: &std::path::Path) -> PathBuf {
-    path.with_file_name("tuya-programs-sent.json")
-}
-
-/// On disk: `{"<id>": {"<part code>": {"at": <ms>, "hex": "<bytes>"}}}`.
-fn sent_to_json(sent: &Sent) -> serde_json::Value {
-    sent.iter()
-        .map(|(id, parts)| {
-            let parts: serde_json::Map<String, serde_json::Value> = parts
-                .iter()
-                .map(|(code, (bytes, at))| {
-                    let hex = bytes.iter().fold(String::new(), |mut hex, b| {
-                        let _ = write!(hex, "{b:02x}");
-                        hex
-                    });
-                    (code.clone(), serde_json::json!({ "at": at, "hex": hex }))
-                })
-                .collect();
-            (id.clone(), serde_json::Value::Object(parts))
-        })
-        .collect::<serde_json::Map<_, _>>()
-        .into()
-}
-
-fn sent_from_json(json: &serde_json::Value) -> Option<Sent> {
-    let mut out = HashMap::new();
-    for (id, parts) in json.as_object()? {
-        let mut sent = HashMap::new();
-        for (code, part) in parts.as_object()? {
-            let hex = part["hex"].as_str()?;
-            let bytes = (0..hex.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
-                .collect::<Option<Vec<u8>>>()?;
-            sent.insert(code.clone(), (bytes, part["at"].as_i64()?));
-        }
-        out.insert(id.clone(), sent);
-    }
-    Some(out)
 }
 
 /// On disk, in the point's words, setpoints only (`null` in a part never
@@ -434,16 +309,16 @@ mod tests {
     fn a_module_rewired_to_switch_shows_its_setpoints_at_once() {
         let mut kept = Kept::default();
         kept.wired("fp", true);
-        kept.seen("fp", module(Some(34)), &Times::new(), None);
+        kept.seen("fp", module(Some(34)), None);
         // Rewired to six orders: its parts lose their setpoints.
         assert!(kept.wired("fp", false));
-        let six = kept.seen("fp", module(None), &Times::new(), None);
+        let six = kept.seen("fp", module(None), None);
         assert!(celsius(&six).iter().all(Option::is_none));
         // Back to switch: 17 °C at once, the module still on orders only.
         assert!(kept.wired("fp", true), "shown again now");
         assert_eq!(celsius(&kept.shown("fp").unwrap()), vec![Some(17.0); 7]);
         assert_eq!(
-            celsius(&kept.seen("fp", module(None), &Times::new(), None)),
+            celsius(&kept.seen("fp", module(None), None)),
             vec![Some(17.0); 7]
         );
         assert!(!kept.wired("fp", true), "the same wiring heard again");
@@ -456,14 +331,13 @@ mod tests {
         // Monday was refused (« day 4 part 3: this wiring keeps no setpoints »).
         let mut kept = Kept::default();
         let parts = but_one(32, "week_program_18_4_3");
-        let week = kept.seen("fp", parts.clone(), &Times::new(), Some(true));
+        let week = kept.seen("fp", parts.clone(), Some(true));
         assert_eq!(celsius(&week), vec![Some(16.0); 7], "16 °C all along");
         let sent = kept
             .changes(
                 "fp",
                 &monday(&serde_json::json!([{ "at": 0, "celsius": 19.0 }])),
                 &parts,
-                &Times::new(),
                 Some(true),
             )
             .unwrap();
@@ -490,7 +364,7 @@ mod tests {
         let mut kept = Kept::default();
         let mut parts = but_one(34, "week_program_18_1_1");
         parts.get_mut("week_program_18_7_4").unwrap()[ORDERS..].fill(32);
-        let week = kept.seen("fp", parts, &Times::new(), Some(true));
+        let week = kept.seen("fp", parts, Some(true));
         assert_eq!(
             week["days"][0][0],
             serde_json::json!({ "at": 0, "order": "comfort", "celsius": 16.0 })
@@ -507,7 +381,7 @@ mod tests {
         let mut kept = Kept::default();
         let mut parts = module(None);
         parts.insert("week_program_18_5_3".into(), vec![0x11; ORDERS + SLOTS]);
-        let week = kept.seen("fp", parts.clone(), &Times::new(), Some(false));
+        let week = kept.seen("fp", parts.clone(), Some(false));
         assert_eq!(
             week,
             program::week(|d, p| parts.get(&program::part_code(d, p)).cloned())
@@ -515,9 +389,7 @@ mod tests {
         let eco = monday(
             &serde_json::json!([{ "at": 0, "order": "eco" }, { "at": 12, "order": "comfort" }]),
         );
-        let sent = kept
-            .changes("fp", &eco, &parts, &Times::new(), Some(false))
-            .unwrap();
+        let sent = kept.changes("fp", &eco, &parts, Some(false)).unwrap();
         assert_eq!(sent.len(), 1, "only the part that changes");
         assert_eq!(sent[0].0, "week_program_18_1_1");
     }
@@ -526,7 +398,7 @@ mod tests {
     fn a_module_never_read_with_setpoints_waits_for_its_module() {
         let mut kept = Kept::default();
         assert_eq!(kept.shown("fp"), None, "nothing read, nothing shown");
-        let week = kept.seen("fp", module(None), &Times::new(), Some(true));
+        let week = kept.seen("fp", module(None), Some(true));
         assert!(celsius(&week).iter().all(Option::is_none));
         assert!(kept.weeks.is_empty());
     }
@@ -535,10 +407,10 @@ mod tests {
     fn what_the_cloud_says_is_kept() {
         // Smart Life sets 20 °C: read, kept, shown.
         let mut kept = Kept::default();
-        kept.seen("fp", module(Some(34)), &Times::new(), Some(true));
-        kept.seen("fp", module(Some(40)), &Times::new(), None);
+        kept.seen("fp", module(Some(34)), Some(true));
+        kept.seen("fp", module(Some(40)), None);
         kept.wired("fp", false);
-        kept.seen("fp", module(None), &Times::new(), None);
+        kept.seen("fp", module(None), None);
         kept.wired("fp", true);
         assert_eq!(celsius(&kept.shown("fp").unwrap()), vec![Some(20.0); 7]);
     }
@@ -547,61 +419,10 @@ mod tests {
     fn the_driver_says_the_wiring_before_the_cloud() {
         let mut kept = Kept::default();
         kept.wired("fp", true);
-        kept.seen("fp", module(Some(34)), &Times::new(), None);
+        kept.seen("fp", module(Some(34)), None);
         // The cloud's copy still says six orders: the driver's word stands.
-        let week = kept.seen("fp", module(None), &Times::new(), Some(false));
+        let week = kept.seen("fp", module(None), Some(false));
         assert_eq!(celsius(&week), vec![Some(17.0); 7]);
-    }
-
-    /// Every part rewritten by the cloud at `at` (ms).
-    fn at(at: i64) -> Times {
-        codes().map(|code| (code, at)).collect()
-    }
-
-    #[test]
-    fn a_part_sent_is_shown_as_sent_until_the_cloud_rewrites_it() {
-        // As the corridor's bathroom heater (26 Oct 2026): 17 °C copied to
-        // it all week, Smart Life shows 17 °C, the cloud's copy still has
-        // Tuesday 12 h – 18 h at 26 °C from before.
-        const TUESDAY: &str = "week_program_18_2_3";
-        let mut kept = Kept::default();
-        let mut cloud = module(Some(34));
-        cloud.get_mut(TUESDAY).unwrap()[ORDERS..].fill(52);
-        kept.seen("fp", cloud.clone(), &at(100), Some(true));
-        kept.issued(
-            "fp",
-            &[(TUESDAY.into(), module(Some(34))[TUESDAY].clone())],
-            200,
-        );
-        let week = kept.seen("fp", cloud.clone(), &at(100), None);
-        assert_eq!(celsius(&week), vec![Some(17.0); 7], "as sent");
-        // Copied again, or Monday changed: Tuesday is held, not sent again.
-        let monday_19 = monday(&serde_json::json!([{ "at": 0, "celsius": 19.0 }]));
-        let sent = kept
-            .changes("fp", &monday_19, &cloud, &at(100), None)
-            .unwrap();
-        assert!(
-            sent.iter()
-                .all(|(code, _)| code.starts_with("week_program_18_1_"))
-        );
-        // The cloud rewrites it as sent: the cloud's again.
-        let mut taken = module(Some(34));
-        let mut times = at(100);
-        times.insert(TUESDAY.into(), 300);
-        kept.seen("fp", taken.clone(), &times, None);
-        assert!(kept.sent.is_empty());
-        // Later, Smart Life sets 20 °C there: shown.
-        taken.get_mut(TUESDAY).unwrap()[ORDERS..].fill(40);
-        times.insert(TUESDAY.into(), 400);
-        let week = kept.seen("fp", taken, &times, None);
-        assert_eq!(
-            week["days"][1],
-            serde_json::json!([
-                { "at": 0, "order": "comfort", "celsius": 17.0 },
-                { "at": 48, "order": "comfort", "celsius": 20.0 },
-                { "at": 72, "order": "comfort", "celsius": 17.0 },
-            ])
-        );
     }
 
     #[test]
@@ -612,19 +433,12 @@ mod tests {
         let mut kept = Kept::load(path.clone());
         let mut parts = but_one(34, "week_program_18_2_1");
         parts.get_mut("week_program_18_3_1").unwrap()[ORDERS + 6] = 31;
-        kept.seen("fp", parts, &Times::new(), Some(true));
+        kept.seen("fp", parts, Some(true));
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains(r#"{"at":6,"celsius":15.5}"#), "{text}");
         assert!(text.contains(r#"{"at":0,"celsius":null}"#), "{text}");
-        kept.issued(
-            "fp",
-            &[("week_program_18_2_3".into(), vec![0x11, 0xAB])],
-            1_793_030_837_836,
-        );
-        assert!(dir.join("tuya-programs-sent.json").exists());
         let again = Kept::load(path);
         assert_eq!(again.weeks, kept.weeks);
-        assert_eq!(again.sent, kept.sent);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

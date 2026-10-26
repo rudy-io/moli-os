@@ -402,7 +402,7 @@ async fn read_program(api: &mut Api, id: &str, kept: &kept::Shared) -> anyhow::R
 /// The week to show from a shadow just read, as `Kept::seen` says it.
 fn shown(kept: &kept::Shared, id: &str, shadow: &Json) -> Value {
     let parts = owned(&shadow_parts(shadow));
-    let week = lock(kept).seen(id, parts, &shadow_times(shadow), shadow_wiring(shadow));
+    let week = lock(kept).seen(id, parts, shadow_wiring(shadow));
     Value::Text(week.to_string().into())
 }
 
@@ -429,23 +429,6 @@ fn owned(parts: &HashMap<&str, Vec<u8>>) -> kept::Parts {
 }
 
 /// A device's shadow's raw parts, by code (base64 in the shadow).
-/// When the cloud last rewrote each property of its copy (ms).
-fn shadow_times(shadow: &Json) -> kept::Times {
-    shadow["properties"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| Some((p["code"].as_str()?.to_owned(), p["time"].as_i64()?)))
-        .collect()
-}
-
-/// Now, in ms since the Unix epoch (as the cloud's times).
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-}
-
 fn shadow_parts(shadow: &Json) -> HashMap<&str, Vec<u8>> {
     shadow["properties"]
         .as_array()
@@ -683,11 +666,9 @@ async fn read_back(
     }
     let Some(wait) = check.wanted.wait(tries) else {
         match check.wanted {
-            // Often only the copy, late (Smart Life shows the module took
-            // it): shown as sent until the cloud rewrites it (`kept`).
-            Wanted::Parts(_) => tracing::info!(
+            Wanted::Parts(_) => tracing::warn!(
                 device = check.device,
-                "tuya cloud: the cloud's copy has not caught up with the program sent"
+                "tuya cloud: the module has not taken its week program"
             ),
             // Shown all the same, part by part (`kept`).
             Wanted::Rewired { .. } => tracing::info!(
@@ -716,17 +697,9 @@ async fn issue_program(
         .call(&format!("/v2.0/cloud/thing/{device}/shadow/properties"))
         .await?;
     let parts = owned(&shadow_parts(&shadow));
-    let wanted = lock(kept).changes(
-        device,
-        week,
-        &parts,
-        &shadow_times(&shadow),
-        shadow_wiring(&shadow),
-    )?;
+    let wanted = lock(kept).changes(device, week, &parts, shadow_wiring(&shadow))?;
     if !wanted.is_empty() {
-        let at = now_ms();
         issue(api, device, &wanted).await?;
-        lock(kept).issued(device, &wanted, at);
     }
     Ok(wanted)
 }
