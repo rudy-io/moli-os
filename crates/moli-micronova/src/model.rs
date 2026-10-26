@@ -16,9 +16,9 @@
 //! A command becomes register writes (`Map::writes`): the value through the
 //! register's inverse formula, within its bounds, and only what changes.
 //! On and off are a button (`status_managed_get`: ON or OFF written, read
-//! back at rest): lit only from off, never while it shuts down or in
-//! alarm; the point is a machine's (`Semantic::Control`), so an agent's
-//! order waits for a person.
+//! back at rest): lit only from off, never while it shuts down; nothing
+//! in alarm (it is reset on the stove); the point is a machine's
+//! (`Semantic::Control`), so an agent's order waits for a person.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -367,7 +367,8 @@ impl Map {
     }
 
     /// Lighting or putting out: the button's ON from off only, its OFF unless
-    /// already off or going out; nothing in alarm but putting out.
+    /// already off or going out; nothing in alarm (an OFF there was tried on
+    /// a real stove: taken, and the alarm stayed; it is reset on the stove).
     fn switch_writes(&self, value: &Value, reading: &Reading) -> Result<Vec<Write>, String> {
         let Value::Bool(on) = value else {
             return Err(moli_i18n::tr("pilotes.micronova.oui_non_attendu"));
@@ -379,7 +380,7 @@ impl Map {
         let going_out = ["shut_off", "cleaning"].contains(&state);
         let wanted = match (on, state) {
             (true, "off") => "ON",
-            (true, "alarm" | "mem_alarm") => {
+            (_, "alarm" | "mem_alarm") => {
                 return Err(moli_i18n::tr("pilotes.micronova.en_alarme"));
             }
             (true, _) if going_out => return Err(moli_i18n::tr("pilotes.micronova.en_extinction")),
@@ -1106,10 +1107,15 @@ mod tests {
             assert!(on(&reading, true).is_err());
             assert_eq!(on(&reading, false), Ok(vec![]));
         }
-        // In alarm: put out, never lit.
-        reading.insert(33, 8);
-        assert!(on(&reading, true).is_err());
-        assert_eq!(on(&reading, false), Ok(vec![w(232, 0xffff, 170)]));
+        // In alarm: neither lit nor put out (an OFF leaves the alarm as it is).
+        for state in [8, 9] {
+            reading.insert(33, state);
+            assert!(on(&reading, true).is_err());
+            assert_eq!(
+                on(&reading, false),
+                Err(moli_i18n::tr("pilotes.micronova.en_alarme"))
+            );
+        }
         let point = map.points().into_iter().find(|p| &*p.key == "on").unwrap();
         assert_eq!(
             point.semantic,

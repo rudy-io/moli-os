@@ -317,6 +317,8 @@
   "pilotes.micronova.programmes_heures": "a program's times go from 00:00 to 24:00, in steps of 10 minutes",
   "pilotes.micronova.programmes_ordre": "program P{n} must end after it starts",
   "pilotes.micronova.pas_encore_lu": "the stove has not been read yet, try again in a minute",
+  "pilotes.micronova.en_alarme": "the stove is in alarm: it is reset on the stove, once the cause is fixed and the stove is cold",
+  "pilotes.micronova.en_extinction": "the stove is shutting down: wait until it is off to light it again",
   "pilotes.micronova.pas_pris": "{name} did not take the last setting sent: it stayed as it was",
   "pilotes.velux.identifiants": "VELUX ACTIVE credentials expected in the vault: moli-os secrets set {instance} email, then password",
   "pilotes.velux.connexion_refusee": "the VELUX cloud refused the login (HTTP {status}): e-mail or password?",

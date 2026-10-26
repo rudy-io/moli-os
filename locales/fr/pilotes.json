@@ -317,6 +317,8 @@
   "pilotes.micronova.programmes_heures": "les heures d’un programme vont de 00:00 à 24:00, par 10 minutes",
   "pilotes.micronova.programmes_ordre": "le programme P{n} doit finir après son début",
   "pilotes.micronova.pas_encore_lu": "le poêle n’a pas encore été lu, réessayez dans une minute",
+  "pilotes.micronova.en_alarme": "le poêle est en alarme : il se réarme sur le poêle, une fois la cause réglée et le poêle froid",
+  "pilotes.micronova.en_extinction": "le poêle est en train de s’éteindre : attendez qu’il soit éteint pour le rallumer",
   "pilotes.micronova.pas_pris": "{name} n’a pas pris le dernier réglage envoyé : il est resté comme avant",
   "pilotes.velux.identifiants": "identifiants VELUX ACTIVE attendus dans le coffre : moli-os secrets set {instance} email, puis password",
   "pilotes.velux.connexion_refusee": "le cloud VELUX a refusé la connexion (HTTP {status}) : e-mail ou mot de passe ?",

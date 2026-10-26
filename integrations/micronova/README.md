@@ -28,4 +28,6 @@
   registre avec les bits de ses mots. Vu sur un vrai poêle : état « MEM. ALARM » avec une alarme
   lue « OK ». Réarmement à distance : rien de connu pour cette carte (l'application ne propose
   pas Arrêt en alarme d'après `status_managed_off_enable` des cartes MCZ ; py-agua-iot n'en a
-  pas) ; à prouver sur un vrai poêle avant de l'offrir.
+  pas) ; essayé sur le vrai poêle en « MEM. ALARM » : un OFF est pris (bouton à 170 puis au
+  repos) et l'alarme reste. Le réarmement se fait sur le poêle ; Moli refuse marche et arrêt
+  en alarme.
