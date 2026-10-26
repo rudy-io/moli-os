@@ -48,6 +48,7 @@ moli-lifx = { path = "crates/moli-lifx" }
 moli-shelly = { path = "crates/moli-shelly" }
 moli-izypower = { path = "crates/moli-izypower" }
 moli-solarman = { path = "crates/moli-solarman" }
+moli-vicare = { path = "crates/moli-vicare" }
 moli-igd = { path = "crates/moli-igd" }
 moli-ipp = { path = "crates/moli-ipp" }
 moli-assistant = { path = "crates/moli-assistant" }

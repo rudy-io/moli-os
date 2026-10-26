@@ -1,0 +1,35 @@
+{
+ "data": [
+  {
+   "id": 1234567,
+   "gateways": [
+    {
+     "serial": "7777777777777777",
+     "gatewayType": "VitoconnectOPTO2",
+     "devices": [
+      {
+       "id": "gateway",
+       "deviceType": "vitoconnect",
+       "modelId": "Heatbox2_SRC"
+      },
+      {
+       "id": "0",
+       "deviceType": "heating",
+       "modelId": "CU401B_S"
+      },
+      {
+       "id": "RoomControl-1",
+       "deviceType": "roomControl",
+       "modelId": "Smart_RoomControl"
+      },
+      {
+       "id": "HeatDemandControl",
+       "deviceType": "virtual",
+       "modelId": "HeatDemandControl"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
