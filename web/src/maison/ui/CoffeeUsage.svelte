@@ -22,13 +22,18 @@
   let series = $state(null);
   let error = $state(null);
   const counters = $derived(cupCounters(device(id)?.points));
-  // A drink counted: read again (the history has it a moment later).
+  // Read at once; a drink counted, read again once the history has it (it
+  // writes every 2 s).
   const total = $derived(value(id, 'brews_total'));
+  let readOnce = false;
   $effect(() => {
     const keys = counters;
     // Thirty-one days: every span from one reading (today's needs midnight's count).
     const hours = compact ? 26 : 31 * 24 + 24;
     void total;
+    if (!keys.length) return;
+    const wait = readOnce ? 3000 : 0;
+    readOnce = true;
     let gone = false;
     const late = setTimeout(async () => {
       try {
@@ -37,7 +42,7 @@
       } catch (e) {
         if (!gone) error = e.status === 404 ? t('salon.cafe.conso.sans_historique') : e.message;
       }
-    }, 1500);
+    }, wait);
     return () => ((gone = true), clearTimeout(late));
   });
 
