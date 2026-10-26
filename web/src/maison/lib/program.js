@@ -22,8 +22,8 @@ export const hhmm = (slot) => `${String(Math.floor(slot / 4)).padStart(2, '0')}:
 export const orderOn = (wiring, order) => (wiring === 'four' && order?.startsWith('comfort') ? 'comfort' : order);
 
 /** A day's runs with their end, as the module plays them: on switch wiring
- *  a run's setpoint only, never an order (a part Moli has read without one,
- *  the module rewired since, has neither: `unread`), else its order. Runs
+ *  a run's setpoint only, never an order (a module never seen with
+ *  setpoints has neither: `unread`), else its order. Runs
  *  that play the same are one: on switch wiring the orders the module keeps
  *  beside its setpoints do not cut a run. */
 export function spans(runs, wiring) {
@@ -39,8 +39,9 @@ export function spans(runs, wiring) {
   return out;
 }
 
-/** On switch wiring, whether the program read lacks setpoints somewhere: read
- *  before the module was rewired, Moli reads it again. */
+/** On switch wiring, whether the program lacks setpoints somewhere: Moli
+ *  fills a part the cloud gives without them from the setpoints it keeps,
+ *  so only a module never seen with any waits for its rewrite. */
 export const unread = (week, wiring) => wiring === 'switch' && (week ?? []).some((runs) => (runs ?? []).some((r) => r.celsius == null));
 
 /** Setpoints coloured as the room gauge: blue when cool, red when hot. */

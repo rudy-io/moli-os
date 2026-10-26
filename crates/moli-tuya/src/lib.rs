@@ -322,8 +322,8 @@ fn stored_keys(ctx: &DriverCtx) -> Option<cloud::Keys> {
 }
 
 /// Orders go to the devices, what they say goes to the hub, until the end.
-/// A program keeper whose wiring changes has its program read again;
-/// rewired to switch, the setpoints Moli keeps are shown at once.
+/// A program keeper whose wiring changes has its program read again, and
+/// shown at once on its new wiring (on switch, with the setpoints Moli keeps).
 /// Returns whether cloud keys arrived meanwhile (then the driver restarts).
 async fn serve(
     ctx: &mut DriverCtx,
@@ -365,9 +365,11 @@ async fn serve(
                         if key == WIRING && program::kept_by(&device.dps) {
                             let switch = matches!(&value, moli_core::Value::Text(t) if &**t == "switch");
                             let changed = rewiring(&mut wirings, index, &value);
-                            shown = kept.lock().ok().and_then(|mut k| {
-                                k.wired(&device.id, switch, changed).then(|| k.week(&device.id))
-                            });
+                            let mut k = kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if k.wired(&device.id, switch) {
+                                shown = k.shown(&device.id);
+                            }
+                            drop(k);
                             if changed && let Some(rewired) = rewired {
                                 tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");
                                 let _ = rewired.try_send(cloud::Rewired {

@@ -39,9 +39,9 @@
   });
 
   const bySetpoint = $derived(wiring === 'switch');
-  // On switch wiring, a program read before the module was rewired has no
-  // setpoints yet: Moli reads it every 10 s until it has them (a minute or
-  // so); meanwhile the week pulses, quietly said, and is not edited.
+  // On switch wiring, a module never seen with setpoints has none yet: Moli
+  // reads it every 10 s until it has them (a minute or so, once); meanwhile
+  // the week pulses, quietly said, and is not edited.
   const stale = $derived(unread(read, wiring));
   const deg = (c) => num(c, c % 1 ? 1 : 0);
   // What a run says, and the class that colours it.

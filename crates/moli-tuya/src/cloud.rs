@@ -44,7 +44,7 @@ const PROGRAM_SETTLE: Duration = Duration::from_secs(10);
 /// A module whose wiring changed rewrites its 28 parts (setpoints kept for
 /// switch wiring, dropped for four or six orders), in a minute or more: its
 /// program is read this often until all are rewritten, at most this many
-/// times (three minutes).
+/// times (three minutes; some parts never reach the cloud).
 const REWIRE_EVERY: Duration = Duration::from_secs(10);
 const REWIRE_READS: usize = 18;
 const QUIET: Duration = Duration::from_secs(60);
@@ -402,11 +402,23 @@ async fn read_program(api: &mut Api, id: &str, kept: &kept::Shared) -> anyhow::R
 /// The week to show from a shadow just read, as `Kept::seen` says it.
 fn shown(kept: &kept::Shared, id: &str, shadow: &Json) -> Value {
     let parts = owned(&shadow_parts(shadow));
-    let week = match kept.lock() {
-        Ok(mut kept) => kept.seen(id, parts),
-        Err(_) => shadow_week(shadow),
-    };
+    let week = lock(kept).seen(id, parts, shadow_wiring(shadow));
     Value::Text(week.to_string().into())
+}
+
+fn lock(kept: &kept::Shared) -> std::sync::MutexGuard<'_, kept::Kept> {
+    kept.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A pilot-wire module's wiring in its shadow (true: switch), if it says it.
+fn shadow_wiring(shadow: &Json) -> Option<bool> {
+    shadow["properties"]
+        .as_array()?
+        .iter()
+        .find(|p| p["code"] == "device_mode_type")?["value"]
+        .as_str()
+        .map(|wiring| wiring == "switch")
 }
 
 fn owned(parts: &HashMap<&str, Vec<u8>>) -> kept::Parts {
@@ -553,10 +565,7 @@ pub async fn write_programs(
             biased;
             write = writes.recv() => {
                 let Some(write) = write else { return };
-                if let Some(check) = write_program(&mut api, write, &kept, &up).await {
-                    if matches!(check.wanted, Wanted::Rewired { .. }) {
-                        checks.retain(|c| !(c.device == check.device && matches!(c.wanted, Wanted::Rewired { .. })));
-                    }
+                if let Some(check) = write_program(&mut api, write, &kept).await {
                     checks.push(check);
                 }
             }
@@ -585,47 +594,20 @@ pub async fn write_programs(
     }
 }
 
-/// One write, answered; what to read back after it. A week kept for a
-/// module still rewriting its parts is shown at once, and waits for them.
-async fn write_program(
-    api: &mut Api,
-    write: ProgramWrite,
-    kept: &kept::Shared,
-    up: &mpsc::Sender<Up>,
-) -> Option<Check> {
+/// One write, answered; what to read back after it.
+async fn write_program(api: &mut Api, write: ProgramWrite, kept: &kept::Shared) -> Option<Check> {
     // Nobody waits any more (the hub gave up): never sent late.
     if write.done.is_closed() || std::time::Instant::now() >= write.deadline {
         return None;
     }
     match issue_program(api, &write.device, &write.week, kept).await {
-        Ok(Issued::Sent(wanted)) => {
+        Ok(wanted) => {
             let _ = write.done.send(Ok(()));
             Some(Check {
                 device: write.device,
                 index: write.index,
                 wanted: Wanted::Parts(wanted),
                 at: Instant::now() + PROGRAM_CONFIRM[0],
-                tries: 0,
-            })
-        }
-        Ok(Issued::Kept) => {
-            let _ = write.done.send(Ok(()));
-            tracing::info!(
-                device = write.device,
-                "tuya cloud: week program kept until the module has rewritten its parts"
-            );
-            let week = kept.lock().ok().map(|k| k.week(&write.device));
-            if let Some(week) = week {
-                let week = Value::Text(week.to_string().into());
-                let _ = up
-                    .send(Up::State(write.index, vec![(program::POINT.into(), week)]))
-                    .await;
-            }
-            Some(Check {
-                device: write.device,
-                index: write.index,
-                wanted: Wanted::Rewired { switch: true },
-                at: Instant::now() + REWIRE_EVERY,
                 tries: 0,
             })
         }
@@ -641,8 +623,7 @@ async fn write_program(
 }
 
 /// Reads a program back and shows it; once more later if the module has
-/// not taken it (or not rewritten it) yet. Rewritten on switch wiring, it
-/// is sent the setpoints Moli keeps if it holds others.
+/// not taken it (or not rewritten it) yet.
 async fn read_back(
     api: &mut Api,
     check: Check,
@@ -650,18 +631,17 @@ async fn read_back(
     up: &mpsc::Sender<Up>,
 ) -> Option<Check> {
     let path = format!("/v2.0/cloud/thing/{}/shadow/properties", check.device);
-    let (taken, parts) = match api.call(&path).await {
+    let taken = match api.call(&path).await {
         Ok(shadow) => {
-            let parts = shadow_parts(&shadow);
             let week = shown(kept, &check.device, &shadow);
             let _ = up
                 .send(Up::State(check.index, vec![(program::POINT.into(), week)]))
                 .await;
-            (check.wanted.seen(&parts), owned(&parts))
+            check.wanted.seen(&shadow_parts(&shadow))
         }
         Err(e) => {
             tracing::debug!(device = check.device, error = %e, "tuya cloud: program not read back");
-            (false, kept::Parts::new())
+            false
         }
     };
     let tries = check.tries + 1;
@@ -674,27 +654,27 @@ async fn read_back(
             );
             return None;
         }
-        (Wanted::Rewired { switch }, true) => {
+        (Wanted::Rewired { .. }, true) => {
             tracing::info!(
                 device = check.device,
                 reads = tries,
                 "tuya cloud: week program read after rewiring"
             );
-            return if *switch {
-                send_kept(api, check, &parts, kept).await
-            } else {
-                None
-            };
+            return None;
         }
         _ => {}
     }
     let Some(wait) = check.wanted.wait(tries) else {
-        tracing::warn!(
-            device = check.device,
-            "tuya cloud: the module has not taken its week program"
-        );
-        if let Ok(mut kept) = kept.lock() {
-            kept.settle(&check.device);
+        match check.wanted {
+            Wanted::Parts(_) => tracing::warn!(
+                device = check.device,
+                "tuya cloud: the module has not taken its week program"
+            ),
+            // Shown all the same, part by part (`kept`).
+            Wanted::Rewired { .. } => tracing::info!(
+                device = check.device,
+                "tuya cloud: some parts not rewritten in the cloud's copy"
+            ),
         }
         return None;
     };
@@ -705,83 +685,23 @@ async fn read_back(
     })
 }
 
-/// A module rewritten on switch wiring that holds other setpoints than
-/// Moli's (Moli's are shown): sent Moli's, then read back.
-async fn send_kept(
-    api: &mut Api,
-    check: Check,
-    parts: &kept::Parts,
-    kept: &kept::Shared,
-) -> Option<Check> {
-    let wanted = kept
-        .lock()
-        .ok()
-        .filter(|k| k.is_ahead(&check.device))
-        .map(|k| k.to_send(&check.device, parts))
-        .unwrap_or_default();
-    if wanted.is_empty() {
-        return None;
-    }
-    match issue(api, &check.device, &wanted).await {
-        Ok(()) => {
-            tracing::info!(
-                device = check.device,
-                parts = wanted.len(),
-                "tuya cloud: the setpoints Moli keeps sent to the module"
-            );
-            Some(Check {
-                wanted: Wanted::Parts(wanted),
-                at: Instant::now() + PROGRAM_CONFIRM[0],
-                tries: 0,
-                ..check
-            })
-        }
-        Err(e) => {
-            tracing::warn!(device = check.device, error = %e, "tuya cloud: the setpoints Moli keeps not sent");
-            if let Ok(mut kept) = kept.lock() {
-                kept.settle(&check.device);
-            }
-            None
-        }
-    }
-}
-
-/// What became of a week a person saved.
-enum Issued {
-    /// The parts sent (none: nothing changes).
-    Sent(Vec<(String, Vec<u8>)>),
-    /// Kept by Moli for a module still rewriting its parts.
-    Kept,
-}
-
-/// Sends what changes in a device's week. On switch wiring, a module still
-/// rewriting its parts (no setpoints yet) cannot take it: Moli keeps it.
+/// Sends what changes in a device's week (with, on switch wiring, the parts
+/// the cloud holds without setpoints: `Kept::changes`); the parts sent.
 async fn issue_program(
     api: &mut Api,
     device: &str,
     week: &str,
     kept: &kept::Shared,
-) -> anyhow::Result<Issued> {
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     let shadow = api
         .call(&format!("/v2.0/cloud/thing/{device}/shadow/properties"))
         .await?;
-    let parts = shadow_parts(&shadow);
-    let keep = match kept.lock() {
-        Ok(mut k) if k.is_switch(device) && !kept::complete(&owned(&parts)) => {
-            k.take(device, week)?
-        }
-        _ => false,
-    };
-    if keep {
-        return Ok(Issued::Kept);
-    }
-    let wanted = program::changes(week, |day, part| {
-        parts.get(program::part_code(day, part).as_str()).cloned()
-    })?;
+    let parts = owned(&shadow_parts(&shadow));
+    let wanted = lock(kept).changes(device, week, &parts, shadow_wiring(&shadow))?;
     if !wanted.is_empty() {
         issue(api, device, &wanted).await?;
     }
-    Ok(Issued::Sent(wanted))
+    Ok(wanted)
 }
 
 /// Sends parts to a module, in one call.
