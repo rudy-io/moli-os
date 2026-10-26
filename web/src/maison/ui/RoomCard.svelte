@@ -9,6 +9,7 @@
   import CoverTile from './CoverTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
+  import { writeState } from '../lib/program.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
    *  head, its lights and plugs as small pads (a ⚙ opens a lamp's dimmer,
@@ -277,10 +278,17 @@
   {#each room.climates as d (d.id)}
     {@const on = climateOn(d)}
     {@const setpoint = setpointOf(d.id)}
+    {@const notTaken = writeState(value(d.id, 'week_program')).missing.length}
     <div class="clim-row" id="clim-{d.id}">
       <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
         <Icon name={climateIcon(d)} size={18} />
         <b>{nameOf(d.id)}</b>
+        <!-- Parts of its program the cloud never took: said here too (a program copied to several heaters). -->
+        {#if notTaken}
+          <span class="not-taken" role="img" title={t('commun.programme.non_pris_court', { count: notTaken })} aria-label={t('commun.programme.non_pris_court', { count: notTaken })}>
+            <Icon name="warning" size={15} />
+          </span>
+        {/if}
         <!-- A pilot wire on four or six orders has no setpoint of its own. -->
         <span class="num">{degrees(value(d.id, 'temperature'))}°{#if setpoint != null} → {degrees(setpoint)}°{/if}</span>
         <span class="state">{d.id in stoveAsked ? t('commun.poele.en_cours') : climateIcon(d) === 'stove' && stoveState(d.id) ? climateState(d) : on ? modeWord(d.id) : t(climateOffLabel(d))}</span>
@@ -325,6 +333,11 @@
 </section>
 
 <style>
+  .not-taken {
+    display: inline-flex;
+    color: var(--warm-ink);
+  }
+
   .room {
     display: grid;
     gap: 12px;

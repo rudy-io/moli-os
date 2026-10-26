@@ -36,6 +36,14 @@ pub const fn part_len(switch: bool) -> usize {
     if switch { ORDERS + SLOTS } else { ORDERS }
 }
 
+/// The day (1–7) and part (1–4) of a part's code.
+#[must_use]
+pub fn part_of(code: &str) -> Option<(u8, u8)> {
+    let (day, part) = code.strip_prefix("week_program_18_")?.split_once('_')?;
+    let (day, part) = (day.parse().ok()?, part.parse().ok()?);
+    ((1..=DAYS).contains(&day) && (1..=PARTS).contains(&part)).then_some((day, part))
+}
+
 /// A pilot wire's order, from its nibble; `None` for an unknown one.
 fn order(nibble: u8) -> Option<&'static str> {
     Some(match nibble {
@@ -264,6 +272,9 @@ mod tests {
     fn parts_are_named_by_day_and_quarter() {
         assert_eq!(part_code(1, 1), "week_program_18_1_1");
         assert_eq!(part_code(7, 4), "week_program_18_7_4");
+        assert_eq!(part_of("week_program_18_2_3"), Some((2, 3)));
+        assert_eq!(part_of("week_program_18_2"), None);
+        assert_eq!(part_of("week_program_18_8_1"), None);
     }
 
     #[test]

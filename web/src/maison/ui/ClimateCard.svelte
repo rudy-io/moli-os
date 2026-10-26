@@ -5,6 +5,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import ProgramWeek from './ProgramWeek.svelte';
+  import { writeState } from '../lib/program.js';
   import StoveDetail from './StoveDetail.svelte';
 
   let { id, name } = $props();
@@ -32,6 +33,9 @@
     const point = d?.points.find((p) => p.key === 'device_mode_type');
     return point?.access?.write ? Object.keys(WIRING).filter((key) => point.kind.values?.includes(key)) : [];
   });
+  // A program being checked against the cloud: rewired now, the module would
+  // rewrite its parts from what it holds and could undo it.
+  const checking = $derived(writeState(value(id, 'week_program')).checking);
   const setWiring = (key) =>
     act(`${id}/device_mode_type`, key, t('commun.action', { label: name, action: t(WIRING[key].label).toLowerCase() }));
   // Frost guard, eco or holiday on switch wiring: the module's own
@@ -264,12 +268,13 @@
     {#if wirings.length}
       <label class="wiring">
         <span>{t('commun.clim.cablage')}</span>
-        <select value={value(id, 'device_mode_type')} onchange={(e) => setWiring(e.currentTarget.value)} disabled={!reachable(id)}>
+        <select value={value(id, 'device_mode_type')} onchange={(e) => setWiring(e.currentTarget.value)} disabled={!reachable(id) || checking}>
           {#each wirings as key (key)}
             <option value={key}>{t(WIRING[key].label)}</option>
           {/each}
         </select>
       </label>
+      {#if checking}<small class="wiring-wait">{t('commun.clim.cablage_attente')}</small>{/if}
     {/if}
     {#if controllable}
       <!-- A heater on a pilot wire is switched off from its modes; a stove's chip is its switch, said once done. -->
@@ -339,6 +344,12 @@
 </div>
 
 <style>
+  .wiring-wait {
+    display: block;
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+
   .costs {
     display: flex;
     flex-wrap: wrap;

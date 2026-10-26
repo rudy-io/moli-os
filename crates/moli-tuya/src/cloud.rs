@@ -481,8 +481,15 @@ pub struct ProgramWrite {
 }
 
 /// After a write, the cloud's copy is read again this long after (the
-/// module answers in about 5 s), then once more this much later.
-const PROGRAM_CONFIRM: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(10)];
+/// module answers in about 5 s), then each next wait after the one before:
+/// a minute in all. The parts still not held are sent once more and read
+/// back the same way; then said not taken.
+const PROGRAM_CONFIRM: [Duration; 4] = [
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+];
 
 /// A module whose wiring changed (`switch`: to switch wiring), its program
 /// to read again as it rewrites it.
@@ -501,15 +508,6 @@ enum Wanted {
 }
 
 impl Wanted {
-    fn seen(&self, parts: &HashMap<&str, Vec<u8>>) -> bool {
-        match self {
-            Self::Parts(wanted) => wanted
-                .iter()
-                .all(|(code, bytes)| parts.get(code.as_str()) == Some(bytes)),
-            Self::Rewired { switch } => rewritten(parts, *switch),
-        }
-    }
-
     /// How long until read `tries` (none: given up).
     fn wait(&self, tries: usize) -> Option<Duration> {
         match self {
@@ -517,6 +515,12 @@ impl Wanted {
             Self::Rewired { .. } => (tries < REWIRE_READS).then_some(REWIRE_EVERY),
         }
     }
+}
+
+fn rewritten_owned(parts: &kept::Parts, switch: bool) -> bool {
+    let borrowed: HashMap<&str, Vec<u8>> =
+        parts.iter().map(|(c, b)| (c.as_str(), b.clone())).collect();
+    rewritten(&borrowed, switch)
 }
 
 /// Whether all 28 parts are kept as the wiring wants them (setpoints on
@@ -538,6 +542,8 @@ struct Check {
     wanted: Wanted,
     at: Instant,
     tries: usize,
+    /// The parts not held were sent once more already.
+    resent: bool,
 }
 
 /// Writes the programs people edit: reads the module's parts from the
@@ -566,6 +572,15 @@ pub async fn write_programs(
             write = writes.recv() => {
                 let Some(write) = write else { return };
                 if let Some(check) = write_program(&mut api, write, &kept).await {
+                    // A new write to the module: only it is checked.
+                    checks.retain(|c| !(c.device == check.device && matches!(c.wanted, Wanted::Parts(_))));
+                    // « Checking » said at once.
+                    let week = lock(&kept).shown(&check.device);
+                    if let Some(week) = week {
+                        let _ = up
+                            .send(Up::State(check.index, vec![(program::POINT.into(), Value::Text(week.to_string().into()))]))
+                            .await;
+                    }
                     checks.push(check);
                 }
             }
@@ -578,6 +593,7 @@ pub async fn write_programs(
                     wanted: Wanted::Rewired { switch: module.switch },
                     at: Instant::now() + REWIRE_EVERY,
                     tries: 0,
+                    resent: false,
                 });
             }
             () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
@@ -609,6 +625,7 @@ async fn write_program(api: &mut Api, write: ProgramWrite, kept: &kept::Shared) 
                 wanted: Wanted::Parts(wanted),
                 at: Instant::now() + PROGRAM_CONFIRM[0],
                 tries: 0,
+                resent: false,
             })
         }
         Err(e) => {
@@ -622,8 +639,9 @@ async fn write_program(api: &mut Api, write: ProgramWrite, kept: &kept::Shared) 
     }
 }
 
-/// Reads a program back and shows it; once more later if the module has
-/// not taken it (or not rewritten it) yet.
+/// Reads a program back and shows it; again later while the cloud's copy
+/// does not show it yet. A write's parts still not held after a minute are
+/// sent once more, then said not taken (`kept`).
 async fn read_back(
     api: &mut Api,
     check: Check,
@@ -631,58 +649,106 @@ async fn read_back(
     up: &mpsc::Sender<Up>,
 ) -> Option<Check> {
     let path = format!("/v2.0/cloud/thing/{}/shadow/properties", check.device);
-    let taken = match api.call(&path).await {
-        Ok(shadow) => {
-            let week = shown(kept, &check.device, &shadow);
-            let _ = up
-                .send(Up::State(check.index, vec![(program::POINT.into(), week)]))
-                .await;
-            check.wanted.seen(&shadow_parts(&shadow))
-        }
+    let shadow = match api.call(&path).await {
+        Ok(shadow) => Some(shadow),
         Err(e) => {
             tracing::debug!(device = check.device, error = %e, "tuya cloud: program not read back");
-            false
+            None
         }
     };
+    let parts = shadow.as_ref().map(|s| owned(&shadow_parts(s)));
+    let (device, index) = (check.device.clone(), check.index);
     let tries = check.tries + 1;
-    match (&check.wanted, taken) {
-        (Wanted::Parts(parts), true) => {
-            tracing::info!(
-                device = check.device,
-                parts = parts.len(),
-                "tuya cloud: week program written"
-            );
-            return None;
+    let again = match (&check.wanted, &parts) {
+        (Wanted::Parts(wanted), Some(parts)) => {
+            let missing = kept::Kept::not_held(wanted, parts);
+            if missing.is_empty() {
+                lock(kept).confirmed(&check.device);
+                tracing::info!(
+                    device = check.device,
+                    parts = wanted.len(),
+                    "tuya cloud: week program written"
+                );
+                None
+            } else if let Some(wait) = PROGRAM_CONFIRM.get(tries) {
+                Some(Check {
+                    at: Instant::now() + *wait,
+                    tries,
+                    ..check
+                })
+            } else if !check.resent && resend(api, &check.device, &missing).await {
+                Some(Check {
+                    wanted: Wanted::Parts(missing),
+                    at: Instant::now() + PROGRAM_CONFIRM[0],
+                    tries: 0,
+                    resent: true,
+                    ..check
+                })
+            } else {
+                tracing::warn!(
+                    device = check.device,
+                    parts = missing.len(),
+                    "tuya cloud: parts of the week program not taken"
+                );
+                lock(kept).not_taken(&check.device, parts);
+                None
+            }
         }
-        (Wanted::Rewired { .. }, true) => {
+        (Wanted::Rewired { switch }, Some(parts)) if rewritten_owned(parts, *switch) => {
             tracing::info!(
                 device = check.device,
                 reads = tries,
                 "tuya cloud: week program read after rewiring"
             );
-            return None;
+            None
         }
-        _ => {}
-    }
-    let Some(wait) = check.wanted.wait(tries) else {
-        match check.wanted {
-            Wanted::Parts(_) => tracing::warn!(
-                device = check.device,
-                "tuya cloud: the module has not taken its week program"
-            ),
-            // Shown all the same, part by part (`kept`).
-            Wanted::Rewired { .. } => tracing::info!(
-                device = check.device,
-                "tuya cloud: some parts not rewritten in the cloud's copy"
-            ),
+        _ => {
+            if let Some(wait) = check.wanted.wait(tries) {
+                Some(Check {
+                    at: Instant::now() + wait,
+                    tries,
+                    ..check
+                })
+            } else {
+                match &check.wanted {
+                    Wanted::Parts(_) => {
+                        tracing::warn!(device, "tuya cloud: week program not read back");
+                        lock(kept)
+                            .not_taken(&device, parts.as_ref().unwrap_or(&kept::Parts::new()));
+                    }
+                    // Shown all the same, part by part (`kept`).
+                    Wanted::Rewired { .. } => tracing::info!(
+                        device,
+                        "tuya cloud: some parts not rewritten in the cloud's copy"
+                    ),
+                }
+                None
+            }
         }
-        return None;
     };
-    Some(Check {
-        at: Instant::now() + wait,
-        tries,
-        ..check
-    })
+    if let Some(shadow) = &shadow {
+        let week = shown(kept, &device, shadow);
+        let _ = up
+            .send(Up::State(index, vec![(program::POINT.into(), week)]))
+            .await;
+    }
+    again
+}
+
+/// Sends once more the parts of a write the cloud's copy does not show.
+async fn resend(api: &mut Api, device: &str, missing: &[(String, Vec<u8>)]) -> bool {
+    tracing::info!(
+        device,
+        parts = missing.len(),
+        "tuya cloud: parts of the week program not taken, sent again"
+    );
+    match issue(api, device, missing).await {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(device, error = %e, "tuya cloud: parts not sent again");
+            false
+        }
+    }
 }
 
 /// Sends what changes in a device's week (with, on switch wiring, the parts
@@ -693,6 +759,16 @@ async fn issue_program(
     week: &str,
     kept: &kept::Shared,
 ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    // « Send again »: the parts of the last write not taken.
+    if serde_json::from_str::<Json>(week).is_ok_and(|w| w["resend"] == Json::Bool(true)) {
+        let again = lock(kept).to_resend(device);
+        if again.is_empty() {
+            anyhow::bail!(moli_i18n::tr!("pilotes.tuya.rien_a_renvoyer"));
+        }
+        issue(api, device, &again).await?;
+        lock(kept).checking(device, &again);
+        return Ok(again);
+    }
     let shadow = api
         .call(&format!("/v2.0/cloud/thing/{device}/shadow/properties"))
         .await?;
@@ -700,6 +776,7 @@ async fn issue_program(
     let wanted = lock(kept).changes(device, week, &parts, shadow_wiring(&shadow))?;
     if !wanted.is_empty() {
         issue(api, device, &wanted).await?;
+        lock(kept).checking(device, &wanted);
     }
     Ok(wanted)
 }
@@ -982,7 +1059,14 @@ mod tests {
         let wanted = Wanted::Rewired { switch: true };
         assert_eq!(wanted.wait(1), Some(REWIRE_EVERY));
         assert_eq!(wanted.wait(REWIRE_READS), None);
-        assert_eq!(Wanted::Parts(Vec::new()).wait(2), None);
+        // A write: read back for a minute (5, 15, 30, 60 s).
+        let write = Wanted::Parts(Vec::new());
+        assert_eq!(write.wait(3), Some(Duration::from_secs(30)));
+        assert_eq!(write.wait(PROGRAM_CONFIRM.len()), None);
+        assert_eq!(
+            PROGRAM_CONFIRM.iter().sum::<Duration>(),
+            Duration::from_secs(60)
+        );
     }
 
     #[test]

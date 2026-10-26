@@ -3,6 +3,18 @@
 // (four or six orders) and a setpoint (switch wiring). Shared by the card's
 // strip and the detail window.
 
+/** The last write as Moli says it beside the week: `checking` while the
+ *  cloud's copy is read back, `missing` the ranges the cloud never took
+ *  (`{ day, at, end }`, Monday 0, quarters of an hour) until it rewrites them. */
+export function writeState(text) {
+  try {
+    const week = JSON.parse(text ?? 'null');
+    return { checking: week?.checking === true, missing: Array.isArray(week?.missing) ? week.missing : [] };
+  } catch {
+    return { checking: false, missing: [] };
+  }
+}
+
 /** Quarters of an hour in a day. */
 export const SLOTS = 96;
 

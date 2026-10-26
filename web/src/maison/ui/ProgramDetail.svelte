@@ -8,7 +8,7 @@
   // nothing leaves before « Save ».
   import { onMount } from 'svelte';
   import { value, num, act, hub, nameOf } from '../lib/home.svelte.js';
-  import { parseWeek, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns, unread } from '../lib/program.js';
+  import { parseWeek, writeState, spans, hhmm, warmth, nowIn, dayName, SLOTS, slotsOf, runsOf, sentRuns, unread } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -23,6 +23,17 @@
   });
 
   const read = $derived(parseWeek(value(id, 'week_program')));
+  // The last write, as Moli checks it against the cloud's copy (the reference).
+  const write = $derived(writeState(value(id, 'week_program')));
+  const missingText = $derived(
+    write.missing.map((m) => `${dayName(m.day, locale(), 'long')} ${hhmm(m.at)}–${hhmm(m.end)}`).join(', '),
+  );
+  let resending = $state(false);
+  async function resend() {
+    resending = true;
+    await act(`${id}/week_program`, JSON.stringify({ resend: true }), t('commun.programme.label_renvoyer', { name }));
+    resending = false;
+  }
   // Editing: the week being drawn, seven days of 96 quarters (null: a day
   // not read). Saved: what was sent, shown until the heater says it back.
   let draft = $state(null);
@@ -33,7 +44,8 @@
   const same = (a, b) => JSON.stringify(a?.map(slotsOf)) === JSON.stringify(b?.map(slotsOf));
   $effect(() => {
     if (!sent) return;
-    if (same(read, sent)) sent = null;
+    // Not all taken: the cloud's copy is shown, as it is.
+    if (same(read, sent) || write.missing.length) sent = null;
     const late = setTimeout(() => (sent = null), 30_000);
     return () => clearTimeout(late);
   });
@@ -206,10 +218,13 @@
   // or `late` (not said within 30 s); `others`: how many other heaters it
   // went to.
   let status = $state(null);
+  // Moli reads the cloud's copy back for a minute, sends what it lacks once
+  // more, and reads a minute again: then it says what was not taken.
   $effect(() => {
     if (status?.state !== 'waiting') return;
-    if (same(read, status.expect)) status = { ...status, state: 'taken' };
-    const late = setTimeout(() => status?.state === 'waiting' && (status = { ...status, state: 'late' }), 30_000);
+    if (write.missing.length) status = { ...status, state: 'missing' };
+    else if (!write.checking && same(read, status.expect)) status = { ...status, state: 'taken' };
+    const late = setTimeout(() => status?.state === 'waiting' && (status = { ...status, state: 'late' }), 150_000);
     return () => clearTimeout(late);
   });
   // A new change: the last outcome is no longer news.
@@ -222,6 +237,7 @@
     if (status.state === 'waiting') return t('commun.programme.attente') + others;
     if (status.state === 'taken') return t('commun.programme.pris') + others;
     if (status.state === 'late') return t('commun.programme.pas_confirme') + others;
+    if (status.state === 'missing') return t('commun.programme.envoye_non_pris') + others;
     return t('commun.programme.envoye_autres', { count: status.others });
   });
   async function save() {
@@ -281,6 +297,15 @@
 
   {#if stale && !editing}
     <p class="stale" aria-live="polite"><i></i>{t('commun.programme.relecture')}</p>
+  {:else if write.checking}
+    <p class="stale" aria-live="polite"><i></i>{t('commun.programme.verification')}</p>
+  {/if}
+  {#if write.missing.length}
+    <section class="not-taken" role="alert">
+      <Icon name="warning" size={20} />
+      <p>{t('commun.programme.non_pris', { count: write.missing.length, blocs: missingText })}</p>
+      <button class="soft" disabled={resending} onclick={resend}>{t('commun.programme.renvoyer')}</button>
+    </section>
   {/if}
 
   {#if asking}
@@ -365,6 +390,9 @@
           {:else if modes[s.order]}<Icon name={modes[s.order].icon} size={14} />{/if}
         {/if}
       </i>
+    {/each}
+    {#each write.missing.filter((m) => m.day === day) as m (m.at)}
+      <b class="gap" style="left:{(m.at / SLOTS) * 100}%;width:{((m.end - m.at) / SLOTS) * 100}%" title={t('commun.programme.non_pris_court', { count: 1 })}></b>
     {/each}
     {#if day === today}<b class="here" style="left:{(slot / SLOTS) * 100}%"></b>{/if}
     {#if editing && range?.day === day}<b class="chosen" style="left:{(range.lo / SLOTS) * 100}%;width:{((range.hi - range.lo) / SLOTS) * 100}%"></b>{/if}
@@ -469,7 +497,7 @@
       <footer>
         <p class="status {status?.state ?? ''}" aria-live="polite">
           {#if statusText}
-            <Icon name={status.state === 'waiting' ? 'timer' : status.state === 'late' ? 'warning' : 'ok'} size={18} />{statusText}
+            <Icon name={status.state === 'waiting' ? 'timer' : status.state === 'late' || status.state === 'missing' ? 'warning' : 'ok'} size={18} />{statusText}
           {/if}
         </p>
         <button class="soft" onclick={dirty ? stop : finish}>{t(dirty ? 'commun.annuler' : 'commun.programme.terminer')}</button>
@@ -554,6 +582,34 @@
     margin-bottom: 12px;
     font-size: 13px;
     color: var(--ink-3);
+  }
+
+  /* Parts the cloud never took: said, hatched on their bars, sent again on demand. */
+  .not-taken {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--warm) 14%, var(--surface));
+    color: var(--warm-ink);
+    font-size: 13.5px;
+  }
+
+  .not-taken p {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .gap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(135deg, rgb(0 0 0 / 35%) 0 3px, transparent 3px 7px);
+    outline: 2px solid var(--warm-ink);
+    outline-offset: -2px;
+    pointer-events: none;
   }
 
   .stale i {
@@ -683,8 +739,13 @@
     font-style: normal;
     font-size: 12px;
     font-weight: 750;
-    box-shadow: inset -1px 0 0 rgb(0 0 0 / 12%);
     overflow: hidden;
+  }
+
+  /* A run starts where the order or setpoint changes: a gap says so, even
+     between two setpoints of the same colour (16 and 17 °C). */
+  .run + .run {
+    box-shadow: inset 2px 0 0 var(--surface);
   }
 
   /* Orders (four or six), as the card's strip. */

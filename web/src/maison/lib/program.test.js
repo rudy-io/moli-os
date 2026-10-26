@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spans, sentRuns, slotsOf, unread } from './program.js';
+import { spans, sentRuns, slotsOf, unread, writeState } from './program.js';
 
 // A real switch module's Monday: 17 °C all day, its hidden orders (kept
 // from six-order wiring) changing at 6:00, 7:00 and 8:00.
@@ -61,4 +61,15 @@ test('on four orders comfort −1 then comfort is one comfort run', () => {
 
 test('a switch module is sent its setpoints only', () => {
   assert.deepEqual(sentRuns(slotsOf(monday), 'switch'), [{ at: 0, celsius: 17 }]);
+});
+
+test('the last write is read beside the week', () => {
+  const days = [[{ at: 0, order: 'comfort', celsius: 17 }]];
+  assert.deepEqual(writeState(JSON.stringify({ days })), { checking: false, missing: [] });
+  assert.deepEqual(writeState(JSON.stringify({ days, checking: true })), { checking: true, missing: [] });
+  // Tuesday 12 h – 18 h never taken (the corridor's bathroom heater, 26 Oct 2026).
+  const missing = [{ day: 1, at: 48, end: 72 }];
+  assert.deepEqual(writeState(JSON.stringify({ days, missing })), { checking: false, missing });
+  assert.deepEqual(writeState('not json'), { checking: false, missing: [] });
+  assert.deepEqual(writeState(null), { checking: false, missing: [] });
 });

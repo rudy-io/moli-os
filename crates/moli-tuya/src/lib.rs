@@ -369,6 +369,11 @@ async fn serve(
                             if k.wired(&device.id, switch) {
                                 shown = k.shown(&device.id);
                             }
+                            // The module rewrites its parts from what it holds: a write
+                            // not shown by the cloud yet may be undone.
+                            if changed && k.is_checking(&device.id) {
+                                tracing::warn!(device = device.name, "tuya: wiring changed while its week program is being checked");
+                            }
                             drop(k);
                             if changed && let Some(rewired) = rewired {
                                 tracing::info!(device = device.name, wiring = ?value, "tuya: wiring changed, its program read again");

@@ -12,6 +12,12 @@
 //! never gave with setpoints takes the setpoint before it in the week.
 //! Saving a program also sends the parts the cloud holds without setpoints,
 //! so that the module holds what is shown.
+//!
+//! The cloud's copy is the reference. A write is checked part by part
+//! against it (`checking`), the parts it never takes sent once more, and
+//! those it still lacks said with the week (`missing`) until the cloud
+//! rewrites them: seen 26 Oct 2026, a program copied to a heater, four of
+//! its 28 parts never rewritten, and nothing said.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -40,6 +46,19 @@ pub struct Kept {
     switch: HashMap<String, bool>,
     /// The parts last read, by module.
     last: HashMap<String, Parts>,
+    /// By Tuya id: the last write, being checked or not all taken.
+    unconfirmed: HashMap<String, Unconfirmed>,
+}
+
+/// A write the cloud's copy does not show yet.
+#[derive(Debug)]
+struct Unconfirmed {
+    /// The parts sent.
+    wanted: Vec<(String, Vec<u8>)>,
+    /// Still read back (true); else given up, `missing` the parts not
+    /// taken with what the cloud held instead.
+    checking: bool,
+    missing: Vec<(String, Vec<u8>)>,
 }
 
 /// The 28 parts' codes, Monday 0 h first.
@@ -118,6 +137,17 @@ impl Kept {
         } else if changed {
             self.save();
         }
+        // A part not taken that the cloud rewrote since (the write at last,
+        // or anyone else's): the cloud's word again.
+        if let Some(u) = self.unconfirmed.get_mut(id)
+            && !u.checking
+        {
+            u.missing
+                .retain(|(code, held)| parts.get(code) == Some(held));
+            if u.missing.is_empty() {
+                self.unconfirmed.remove(id);
+            }
+        }
         self.last.insert(id.to_owned(), parts);
         self.week(id)
     }
@@ -128,10 +158,97 @@ impl Kept {
         self.last.contains_key(id).then(|| self.week(id))
     }
 
+    /// The week, and the state of the last write when the cloud's copy does
+    /// not show it yet: `checking`, or the quarters of each part it did not
+    /// take (`missing`: day, Monday 0, and quarters of an hour from `at` to
+    /// `end`).
     fn week(&self, id: &str) -> serde_json::Value {
         let empty = Parts::new();
         let parts = self.last.get(id).unwrap_or(&empty);
-        program::week(|day, part| self.part(id, day, part, parts))
+        let mut week = program::week(|day, part| self.part(id, day, part, parts));
+        if let Some(u) = self.unconfirmed.get(id) {
+            if u.checking {
+                week["checking"] = true.into();
+            } else {
+                let missing: Vec<serde_json::Value> = u
+                    .missing
+                    .iter()
+                    .filter_map(|(code, _)| program::part_of(code))
+                    .map(|(day, part)| {
+                        let at = usize::from(part - 1) * SLOTS;
+                        serde_json::json!({ "day": day - 1, "at": at, "end": at + SLOTS })
+                    })
+                    .collect();
+                week["missing"] = missing.into();
+            }
+        }
+        week
+    }
+
+    /// A write sent: checked against the cloud's copy from now on.
+    pub fn checking(&mut self, id: &str, wanted: &[(String, Vec<u8>)]) {
+        self.unconfirmed.insert(
+            id.to_owned(),
+            Unconfirmed {
+                wanted: wanted.to_vec(),
+                checking: true,
+                missing: Vec::new(),
+            },
+        );
+    }
+
+    /// The parts of `wanted` the cloud's copy does not hold as sent.
+    #[must_use]
+    pub fn not_held(wanted: &[(String, Vec<u8>)], parts: &Parts) -> Vec<(String, Vec<u8>)> {
+        wanted
+            .iter()
+            .filter(|(code, bytes)| parts.get(code) != Some(bytes))
+            .cloned()
+            .collect()
+    }
+
+    /// The cloud's copy shows the write: nothing more to say.
+    pub fn confirmed(&mut self, id: &str) {
+        self.unconfirmed.remove(id);
+    }
+
+    /// Checking given up: the parts the cloud's copy (`parts`) still lacks.
+    pub fn not_taken(&mut self, id: &str, parts: &Parts) {
+        if let Some(u) = self.unconfirmed.get_mut(id) {
+            u.checking = false;
+            u.missing = Self::not_held(&u.wanted, parts)
+                .into_iter()
+                .map(|(code, _)| {
+                    let held = parts.get(&code).cloned().unwrap_or_default();
+                    (code, held)
+                })
+                .collect();
+            if u.missing.is_empty() {
+                self.unconfirmed.remove(id);
+            }
+        }
+    }
+
+    /// The parts not taken, as they were sent (« Send again »).
+    #[must_use]
+    pub fn to_resend(&self, id: &str) -> Vec<(String, Vec<u8>)> {
+        self.unconfirmed
+            .get(id)
+            .filter(|u| !u.checking)
+            .map(|u| {
+                u.wanted
+                    .iter()
+                    .filter(|(code, _)| u.missing.iter().any(|(m, _)| m == code))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether a write to the module is being checked.
+    #[must_use]
+    pub fn is_checking(&self, id: &str) -> bool {
+        self.unconfirmed.get(id).is_some_and(|u| u.checking)
     }
 
     /// A part as its wiring holds it: on switch wiring its orders, then the
@@ -423,6 +540,44 @@ mod tests {
         // The cloud's copy still says six orders: the driver's word stands.
         let week = kept.seen("fp", module(None), Some(false));
         assert_eq!(celsius(&week), vec![Some(17.0); 7]);
+    }
+
+    #[test]
+    fn parts_a_write_never_took_are_said_until_the_cloud_rewrites_them() {
+        // As the corridor's bathroom heater (26 Oct 2026): 17 °C copied to
+        // it, four of its 28 parts never rewritten in the cloud's copy.
+        const TUESDAY: &str = "week_program_18_2_3";
+        let mut kept = Kept::default();
+        let mut cloud = module(Some(34));
+        cloud.get_mut(TUESDAY).unwrap()[ORDERS..].fill(52);
+        kept.seen("fp", cloud.clone(), Some(true));
+        let wanted = vec![(TUESDAY.to_owned(), module(Some(34))[TUESDAY].clone())];
+        kept.checking("fp", &wanted);
+        assert!(kept.is_checking("fp"));
+        let week = kept.seen("fp", cloud.clone(), None);
+        assert_eq!(week["checking"], true);
+        assert_eq!(Kept::not_held(&wanted, &cloud), wanted);
+        // Given up: the cloud's copy is shown (26 °C), the part said not taken.
+        kept.not_taken("fp", &cloud);
+        let week = kept.seen("fp", cloud.clone(), None);
+        assert_eq!(week["days"][1][1]["celsius"], 26.0, "the cloud's word");
+        assert_eq!(
+            week["missing"],
+            serde_json::json!([{ "day": 1, "at": 48, "end": 72 }])
+        );
+        assert_eq!(kept.to_resend("fp"), wanted, "« Send again »: as sent");
+        // The cloud rewrites it (sent again, or Smart Life): nothing more to say.
+        let week = kept.seen("fp", module(Some(34)), None);
+        assert!(week.get("missing").is_none() && week.get("checking").is_none());
+        assert!(kept.to_resend("fp").is_empty());
+        // Confirmed at once: nothing said either.
+        kept.checking("fp", &wanted);
+        kept.confirmed("fp");
+        assert!(
+            kept.seen("fp", module(Some(34)), None)
+                .get("checking")
+                .is_none()
+        );
     }
 
     #[test]

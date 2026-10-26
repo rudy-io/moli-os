@@ -1,6 +1,6 @@
 <script>
   import { value, num } from '../lib/home.svelte.js';
-  import { parseWeek, spans as spansOf, hhmm, warmth, nowIn, dayName, SLOTS } from '../lib/program.js';
+  import { parseWeek, writeState, spans as spansOf, hhmm, warmth, nowIn, dayName, SLOTS } from '../lib/program.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import ProgramDetail from './ProgramDetail.svelte';
@@ -11,6 +11,7 @@
   let { id, name, wiring, modeLabel, modes, compact = false } = $props();
 
   const week = $derived(parseWeek(value(id, 'week_program')));
+  const write = $derived(writeState(value(id, 'week_program')));
   const bySetpoint = $derived(wiring === 'switch');
   const spans = (runs) =>
     spansOf(runs, wiring).map((s) => ({ ...s, what: s.celsius != null ? `${num(s.celsius, s.celsius % 1 ? 1 : 0)}°` : modeLabel(s.order) }));
@@ -27,16 +28,30 @@
   const current = $derived(spans(week?.[today]).find((s) => s.at <= slot && slot < s.end));
 </script>
 
+{#snippet notice()}
+  {#if write.missing.length}
+    <button class="not-taken" onclick={() => (open = true)}>
+      <Icon name="warning" size={15} />{t('commun.programme.non_pris_court', { count: write.missing.length })}
+    </button>
+  {:else if write.checking}
+    <span class="checking">{t('commun.programme.verification')}</span>
+  {/if}
+{/snippet}
+
 {#if week && compact}
-  <button class="link" onclick={() => (open = true)}>
-    <Icon name="magnify" size={16} />{t('commun.programme.titre')}
-  </button>
+  <div class="compact">
+    <button class="link" onclick={() => (open = true)}>
+      <Icon name="magnify" size={16} />{t('commun.programme.titre')}
+    </button>
+    {@render notice()}
+  </div>
 {:else if week}
   <div class="program">
     <div class="head">
       {#if current}
         <p class="now">{t('commun.clim.programme_maintenant', { what: current.what, until: hhmm(current.end) })}</p>
       {/if}
+      {@render notice()}
       <button class="zoom" onclick={() => (open = true)} title={t('commun.programme.detail')} aria-label={t('commun.programme.detail')}>
         <Icon name="magnify" size={18} />
       </button>
@@ -55,6 +70,9 @@
                   role="cell"></i>
               {/each}
             {/if}
+            {#each write.missing.filter((m) => m.day === day) as m (m.at)}
+              <b class="gap" style="left:{(m.at / SLOTS) * 100}%;width:{((m.end - m.at) / SLOTS) * 100}%"></b>
+            {/each}
             {#if day === today}
               <b class="here" style="left:{(slot / SLOTS) * 100}%"></b>
             {/if}
@@ -157,6 +175,46 @@
 
   .bar i {
     height: 100%;
+  }
+
+  .gap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(135deg, rgb(0 0 0 / 40%) 0 2px, transparent 2px 5px);
+  }
+
+  .not-taken {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px 4px 8px;
+    border: none;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--warm) 16%, var(--surface));
+    color: var(--warm-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .compact {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .checking {
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+
+  /* A run starts where the order or setpoint changes: a gap says so, even
+     between two setpoints of the same colour (16 and 17 °C). */
+  .bar i + i {
+    box-shadow: inset 2px 0 0 var(--surface);
   }
 
   /* Orders (four or six). */
