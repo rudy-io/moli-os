@@ -183,13 +183,7 @@ fn main() -> anyhow::Result<()> {
         }) => tuya_import(&config, &instance, devices_file),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
-        Command::CheckConfig => {
-            for driver in &config.drivers {
-                build_driver(driver, &config.server.data_dir)?;
-            }
-            println!("configuration OK ({} driver(s))", config.drivers.len());
-            Ok(())
-        }
+        Command::CheckConfig => check_config(&config),
         Command::Secrets(SecretsCommand::Forget { instance, name }) => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
@@ -464,6 +458,18 @@ async fn start_brains(
         moli.start_recap();
     }
     Ok((assistant, automations, task))
+}
+
+/// `moli-os check-config`: every driver builds, the assistant's providers hold together.
+fn check_config(config: &Config) -> anyhow::Result<()> {
+    for driver in &config.drivers {
+        build_driver(driver, &config.server.data_dir)?;
+    }
+    if let Some(assistant) = &config.assistant {
+        assistant.check().context("[assistant]")?;
+    }
+    println!("configuration OK ({} driver(s))", config.drivers.len());
+    Ok(())
 }
 
 /// The home's own assistant: always there (without `[assistant]`, with its
@@ -1198,6 +1204,14 @@ mod tests {
             panic!("an unknown kind is built");
         };
         assert!(e.to_string().contains("unknown driver kind"), "{e}");
+    }
+
+    #[test]
+    fn check_config_validates_the_assistant_providers() {
+        let bad: moli_assistant::Config = toml::from_str("[routes]\nchat = \"local\"\n").unwrap();
+        assert!(bad.check().is_err());
+        let good: moli_assistant::Config = toml::from_str("").unwrap();
+        assert!(good.check().is_ok());
     }
 
     #[test]

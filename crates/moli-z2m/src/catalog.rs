@@ -27,6 +27,9 @@ struct Codec {
     /// Enum whose values are numbers on the wire (`[0, 1, 2]`): exposed as
     /// text like every enum, converted back to numbers for the device.
     numeric_enum: bool,
+    /// A dimming level the device counts from 0 to this maximum (Zigbee: 254),
+    /// exposed in percent like every other driver and the dashboard do.
+    level_max: Option<f64>,
 }
 
 /// One Z2M device with everything needed to decode its messages.
@@ -148,13 +151,18 @@ impl Entry {
             .filter_map(|point| {
                 let json = lookup(payload, &point.key)?;
                 let codec = self.codecs.get(&point.key);
-                let value = match codec.and_then(|c| c.binary.as_ref()) {
-                    Some((on, _)) if json == on => Value::Bool(true),
-                    Some((_, off)) if json == off => Value::Bool(false),
-                    _ if codec.is_some_and(|c| c.numeric_enum) && json.is_number() => {
-                        Value::Text(json.to_string().into())
+                let level = codec.and_then(|c| c.level_max).zip(json.as_f64());
+                let value = if let Some((max, level)) = level {
+                    Value::Int(level_to_percent(level, max))
+                } else {
+                    match codec.and_then(|c| c.binary.as_ref()) {
+                        Some((on, _)) if json == on => Value::Bool(true),
+                        Some((_, off)) if json == off => Value::Bool(false),
+                        _ if codec.is_some_and(|c| c.numeric_enum) && json.is_number() => {
+                            Value::Text(json.to_string().into())
+                        }
+                        _ => Value::from_json(json),
                     }
-                    _ => Value::from_json(json),
                 };
                 Some((point.key.clone(), value))
             })
@@ -165,22 +173,27 @@ impl Entry {
     #[must_use]
     pub fn encode(&self, key: &str, value: &Value) -> Json {
         let codec = self.codecs.get(key);
-        let wire = match (codec.and_then(|c| c.binary.as_ref()), value) {
-            (Some((on, _)), Value::Bool(true)) => on.clone(),
-            (Some((_, off)), Value::Bool(false)) => off.clone(),
-            (_, Value::Text(t)) if codec.is_some_and(|c| c.numeric_enum) => {
-                serde_json::from_str::<Json>(t)
-                    .ok()
-                    .filter(Json::is_number)
-                    .unwrap_or_else(|| Json::String(t.to_string()))
+        let level = codec.and_then(|c| c.level_max).zip(value.as_f64());
+        let wire = if let Some((max, percent)) = level {
+            Json::from(percent_to_level(percent, max))
+        } else {
+            match (codec.and_then(|c| c.binary.as_ref()), value) {
+                (Some((on, _)), Value::Bool(true)) => on.clone(),
+                (Some((_, off)), Value::Bool(false)) => off.clone(),
+                (_, Value::Text(t)) if codec.is_some_and(|c| c.numeric_enum) => {
+                    serde_json::from_str::<Json>(t)
+                        .ok()
+                        .filter(Json::is_number)
+                        .unwrap_or_else(|| Json::String(t.to_string()))
+                }
+                // Z2M wants integers where the spec has an integer step.
+                (_, Value::Float(f)) if f.fract() == 0.0 && f.abs() < 9e15 =>
+                {
+                    #[allow(clippy::cast_possible_truncation)]
+                    Json::from(*f as i64)
+                }
+                (_, v) => v.to_json(),
             }
-            // Z2M wants integers where the spec has an integer step.
-            (_, Value::Float(f)) if f.fract() == 0.0 && f.abs() < 9e15 =>
-            {
-                #[allow(clippy::cast_possible_truncation)]
-                Json::from(*f as i64)
-            }
-            (_, v) => v.to_json(),
         };
         // `color.x` → {"color": {"x": …}}
         key.rsplit('.').fold(wire, |inner, part| {
@@ -189,6 +202,20 @@ impl Entry {
             Json::Object(map)
         })
     }
+}
+
+/// A Zigbee dimming level (0..`max`) as a whole percent. A lit level is never
+/// shown as 0 %.
+#[allow(clippy::cast_possible_truncation)]
+fn level_to_percent(level: f64, max: f64) -> i64 {
+    let percent = ((level * 100.0 / max).round() as i64).clamp(0, 100);
+    if level > 0.0 { percent.max(1) } else { percent }
+}
+
+/// A percent as a Zigbee dimming level (0..`max`).
+#[allow(clippy::cast_possible_truncation)]
+fn percent_to_level(percent: f64, max: f64) -> i64 {
+    (percent.clamp(0.0, 100.0) * max / 100.0).round() as i64
 }
 
 fn lookup<'a>(payload: &'a Map<String, Json>, key: &str) -> Option<&'a Json> {
@@ -261,10 +288,11 @@ fn flatten(
         "text" => (Kind::Text, None),
         _ => return,
     };
-    let codec = Codec {
+    let mut codec = Codec {
         binary,
         gettable: expose.access & ACCESS_GET != 0,
         numeric_enum: !expose.values.is_empty() && expose.values.iter().all(Json::is_number),
+        level_max: None,
     };
     let unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
@@ -272,6 +300,22 @@ fn flatten(
         Semantic::Config
     } else {
         Semantic::infer(&key, unit.as_ref())
+    };
+    // Zigbee dims from 0 to 254 (`value_max`); every other driver, the dashboard
+    // and the agents speak percent: expose 0-100 and convert on the wire.
+    let (kind, unit) = match (&kind, semantic) {
+        (Kind::Numeric { max: Some(max), .. }, Semantic::Brightness) if *max > 100.0 => {
+            codec.level_max = Some(*max);
+            (
+                Kind::Numeric {
+                    min: Some(0.0),
+                    max: Some(100.0),
+                    step: Some(1.0),
+                },
+                Some(Unit::Percent),
+            )
+        }
+        _ => (kind, unit),
     };
     // Z2M converters expect composites (color {x, y}…) as a whole: writing
     // one member alone is rejected. Members are read-only until a composite
@@ -539,6 +583,112 @@ mod tests {
             "matches the enum's text values"
         );
         assert_eq!(entry.encode("mode", &Value::from("2")), json!({"mode": 2}));
+    }
+
+    /// An entry built from one inline expose, as Z2M announces it.
+    fn entry_of(expose: serde_json::Value) -> Entry {
+        let expose: RawExpose = serde_json::from_value(expose).unwrap();
+        let mut points = Vec::new();
+        let mut codecs = HashMap::new();
+        flatten(&expose, "", &mut points, &mut codecs);
+        Entry {
+            ieee: "0x3".into(),
+            friendly_name: "bulb".into(),
+            mains: true,
+            device: Device {
+                id: DeviceId::from("z2m:0x3"),
+                instance: InstanceId::from("z2m"),
+                native_name: "bulb".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points,
+            },
+            codecs,
+        }
+    }
+
+    fn light(brightness_max: u32) -> serde_json::Value {
+        json!({"type": "light", "features": [
+            {"type": "binary", "property": "state", "access": 7, "value_on": "ON", "value_off": "OFF"},
+            {"type": "numeric", "property": "brightness", "access": 7,
+             "value_min": 0, "value_max": brightness_max},
+            {"type": "numeric", "property": "color_temp", "access": 7, "unit": "mired",
+             "value_min": 153, "value_max": 500}
+        ]})
+    }
+
+    #[test]
+    fn zigbee_dimming_level_is_exposed_in_percent() {
+        let bulb = entry_of(light(254));
+        let brightness = bulb.device.point("brightness").unwrap();
+        assert_eq!(brightness.semantic, Semantic::Brightness);
+        assert_eq!(brightness.unit, Some(Unit::Percent));
+        let Kind::Numeric { min, max, step } = &brightness.kind else {
+            panic!("brightness is numeric");
+        };
+        assert_eq!((*min, *max, *step), (Some(0.0), Some(100.0), Some(1.0)));
+
+        // The white temperature keeps the device's own scale.
+        let Kind::Numeric { min, max, .. } = &bulb.device.point("color_temp").unwrap().kind else {
+            panic!("color_temp is numeric");
+        };
+        assert_eq!((*min, *max), (Some(153.0), Some(500.0)));
+
+        let read = |level: i64| {
+            let values: HashMap<_, _> = bulb
+                .decode(json!({"brightness": level}).as_object().unwrap())
+                .into_iter()
+                .collect();
+            values["brightness"].clone()
+        };
+        assert_eq!(read(254), Value::Int(100));
+        assert_eq!(read(127), Value::Int(50));
+        assert_eq!(read(0), Value::Int(0));
+        assert_eq!(read(1), Value::Int(1), "a lit bulb is never shown at 0 %");
+
+        assert_eq!(
+            bulb.encode("brightness", &Value::Int(100)),
+            json!({"brightness": 254})
+        );
+        assert_eq!(
+            bulb.encode("brightness", &Value::Float(50.0)),
+            json!({"brightness": 127})
+        );
+        assert_eq!(
+            bulb.encode("brightness", &Value::Int(1)),
+            json!({"brightness": 3})
+        );
+    }
+
+    #[test]
+    fn every_whole_percent_survives_the_round_trip() {
+        let bulb = entry_of(light(254));
+        for percent in 1..=100_i64 {
+            let wire = bulb.encode("brightness", &Value::Int(percent));
+            let back: HashMap<_, _> = bulb.decode(wire.as_object().unwrap()).into_iter().collect();
+            assert_eq!(back["brightness"], Value::Int(percent), "{percent} %");
+        }
+    }
+
+    #[test]
+    fn a_light_already_in_percent_is_left_alone() {
+        let bulb = entry_of(light(100));
+        let Kind::Numeric { max, .. } = &bulb.device.point("brightness").unwrap().kind else {
+            panic!("brightness is numeric");
+        };
+        assert_eq!(*max, Some(100.0));
+        let values: HashMap<_, _> = bulb
+            .decode(json!({"brightness": 42}).as_object().unwrap())
+            .into_iter()
+            .collect();
+        assert_eq!(values["brightness"], Value::Int(42));
+        assert_eq!(
+            bulb.encode("brightness", &Value::Int(42)),
+            json!({"brightness": 42})
+        );
     }
 
     #[test]

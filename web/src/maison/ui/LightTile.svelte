@@ -2,6 +2,7 @@
   import { device, isOn, pending, reachable, toggle, value, act, nameOf, setLook, note, unpowered, isFixture, powerKey } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import Slider from './Slider.svelte';
   import LightTile from './LightTile.svelte';
 
   /** A light (or any on/off thing): tap to switch. With `dimmer`, dimmable
@@ -33,7 +34,7 @@
             ? '…'
             : on
               ? level != null && dimmable
-                ? t('commun.pourcent', { n: Math.round(level) })
+                ? t('commun.pourcent', { n: Math.round(sentLevel ?? level) })
                 : t('commun.lampe.allumee')
               : t('commun.lampe.eteinte'),
   );
@@ -73,16 +74,6 @@
       return;
     }
     act(`${fanId}/${key}`, v, t('commun.lampe.label_ventilateur', { label }));
-  }
-
-  let dragging = $state(null);
-  function setLevel(e) {
-    dragging = Number(e.currentTarget.value);
-  }
-  function commitLevel(e) {
-    const v = Number(e.currentTarget.value);
-    dragging = null;
-    act(`${id}/brightness`, v, label);
   }
 
   // Colour (« #rrggbb ») and white temperature, where the lamp takes them.
@@ -134,6 +125,61 @@
     act(`${id}/color_temp`, v, label);
   }
 
+  // The whites as a slider too, in kelvin over the lamp's own range (a point in
+  // mireds counts the other way round: its max is the warmest white).
+  const inMireds = $derived(tempPoint && (tempPoint.unit === 'mired' || (tempPoint.kind?.max ?? 0) <= 1000));
+  // No slider when the range is of no use: missing, empty, or 0 mired (no kelvin).
+  const kelvinRange = $derived.by(() => {
+    const kind = tempPoint?.kind;
+    if (!kind || !(kind.min > 0) || !(kind.max > kind.min)) return null;
+    const range = inMireds ? [Math.ceil(1e6 / kind.max), Math.floor(1e6 / kind.min)] : [kind.min, kind.max];
+    return range[1] > range[0] ? range : null;
+  });
+  const kelvinNow = $derived.by(() => {
+    const v = value(id, 'color_temp');
+    if (typeof v !== 'number' || v <= 0) return null;
+    return Math.round(inMireds ? 1e6 / v : v);
+  });
+  // What was just sent shows until the lamp reports it: no flash back to the old
+  // value between the release and the answer. Cleared when the lamp answers, or
+  // after a while if it never does.
+  let sentLevel = $state(null);
+  let sentK = $state(null);
+  let sentTimer;
+  function sent(level, kelvin) {
+    sentLevel = level ?? sentLevel;
+    sentK = kelvin ?? sentK;
+    clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => {
+      sentLevel = null;
+      sentK = null;
+    }, 4000);
+  }
+  $effect(() => () => clearTimeout(sentTimer));
+  $effect(() => {
+    level;
+    sentLevel = null;
+  });
+  $effect(() => {
+    kelvinNow;
+    sentK = null;
+  });
+  // The temperature in words (people do not think in kelvin).
+  const whiteName = (k) =>
+    k == null
+      ? '…'
+      : k < 2500
+        ? t('commun.lampe.blanc_tres_chaud')
+        : k < 3500
+          ? t('commun.lampe.blanc_chaud')
+          : k < 4800
+            ? t('commun.lampe.blanc_neutre')
+            : k < 5800
+              ? t('commun.lampe.blanc_jour')
+              : k < 7500
+                ? t('commun.lampe.blanc_froid')
+                : t('commun.lampe.blanc_bleute');
+
   function paint(c) {
     if (!colorPoint) return setLook(members, { color: c.toLowerCase() }, label);
     act(`${id}/color`, c.toLowerCase(), label);
@@ -152,15 +198,15 @@
   {#if on && (dimmable || canColor || canWhite)}
     <div class="controls">
       {#if dimmable}
-        <input
-          class="level"
-          type="range"
-          min="1"
-          max="100"
-          value={dragging ?? level ?? 100}
-          oninput={setLevel}
-          onchange={commitLevel}
-          aria-label={t('commun.lampe.luminosite', { label })} />
+        <Slider
+          min={1}
+          max={100}
+          value={sentLevel ?? level ?? 100}
+          label={t('commun.lampe.luminosite', { label })}
+          oncommit={(v) => {
+            sent(v, null);
+            act(`${id}/brightness`, v, label);
+          }} />
       {/if}
       {#if bulbs.length > 1}
         <button class="apart" class:open={apart} onclick={() => (apart = !apart)} aria-expanded={apart} title={t('commun.lampe.ampoule_par_ampoule')} aria-label={t('commun.action', { label, action: t('commun.lampe.ampoule_par_ampoule').toLowerCase() })}>
@@ -179,6 +225,23 @@
     </div>
     {#if palette}
       <div class="palette" role="group" aria-label={t('commun.lampe.couleurs', { label })}>
+        {#if kelvinRange}
+          <label class="kelvin">
+            <Slider
+              tone="kelvin"
+              min={kelvinRange[0]}
+              max={kelvinRange[1]}
+              step={50}
+              value={sentK ?? kelvinNow ?? 4000}
+              label={t('commun.lampe.temperature', { label })}
+              valuetext={(k) => t('commun.lampe.temperature_valeur', { n: k, nom: whiteName(k) })}
+              oncommit={(k) => {
+                sent(null, k);
+                white(k);
+              }} />
+            <small title={t('commun.kelvin', { n: sentK ?? kelvinNow ?? '…' })}>{whiteName(sentK ?? kelvinNow)}</small>
+          </label>
+        {/if}
         {#if canWhite}
           {#each WHITES as [key, kelvin, look] (kelvin)}
             <button class="dot white" style:background={look} onclick={() => white(kelvin)} title={t(key)} aria-label={t(key)}></button>
@@ -455,14 +518,6 @@
     margin: -6px 16px 16px;
   }
 
-  .level {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    accent-color: var(--warm);
-    height: 28px;
-  }
-
   /* The current colour, ringed by the hue wheel. */
   .swatch-toggle {
     all: unset;
@@ -503,6 +558,21 @@
     flex-wrap: wrap;
     gap: 10px;
     padding: 0 16px 16px;
+  }
+
+  /* The white temperature: a slider from the warmest to the coldest white. */
+  .kelvin {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 0 100%;
+  }
+
+  .kelvin small {
+    flex: none;
+    min-width: 7.5em;
+    text-align: right;
+    color: var(--ink-3);
   }
 
   .dot {

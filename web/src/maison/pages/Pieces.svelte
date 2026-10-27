@@ -108,6 +108,9 @@
 <style>
   .pieces {
     display: grid;
+    /* minmax(0, …): a plain column grows to the widest card and pushes the page
+       sideways on a phone. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 22px;
   }
 

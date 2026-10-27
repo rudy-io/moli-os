@@ -33,6 +33,27 @@ raisonnement » (gpt-5…, o…) sont reconnus (`max_completion_tokens`, `reason
 | gpt-5-mini | plus précis mais 5 à 7 s et sec : trop lent pour la famille |
 | **gpt-4.1** | ✅ conception d'automatismes : 5 à 9 s ; gpt-4.1-mini inversait le sens des capteurs de porte et oubliait des liens |
 
+### Fournisseurs et niveaux de confidentialité
+
+Les données que l'assistant manipule ont quatre niveaux de sensibilité (plus le nombre est petit, plus la
+donnée est sensible) : **0** ne sort jamais (secrets, caméras, position), **1** reste chez soi (noms, valeurs en
+direct, présence, historiques), **2** peut aller chez un cloud une fois pseudonymisée (la structure de la
+maison), **3** est libre (code, documentation). Un fournisseur déclare `tier` = le niveau le plus sensible qu'il
+peut recevoir ; il reçoit ce niveau et les moins sensibles, jamais le 0.
+
+`[[assistant.provider]]` (`id`, `base_url`, `model`, `tier`) et `[assistant.routes]` (`chat` obligatoire ; `voice`
+et `builder` suivent `chat` pour l'instant ; `audit` pour les tâches lourdes) remplacent `base_url` et `model` de
+`[assistant]` : ces champs, `builder_model` et `search_model` sont ignorés en mode fournisseurs, et la recherche
+web (qui passe par la recherche d'un fournisseur cloud) est coupée. Sans fournisseur déclaré, rien ne change :
+un fournisseur implicite `default` de niveau 1. La clé d'un fournisseur nommé est le secret `api_key.<id>`
+(`moli-os secrets set assistant api_key.<id>`), jamais celui d'un autre : une clé donnée à un hôte ne part pas
+vers un autre. `moli-os check-config` valide le tout ; `GET /api/assistant` expose `privacy` (mode, fournisseurs,
+niveaux, routes ; `local` = adresse privée, boucle locale ou nom de la maison, pas seulement « sans TLS »).
+
+Pour l'instant, la conversation ne peut aller que vers un fournisseur de niveau 1 : les niveaux 2 et 3 arrivent
+avec le filtre de contexte. Un ancien `[assistant]` avec une clé et une adresse hors de chez soi écrit un
+avertissement au démarrage : les noms et les valeurs en direct de la maison y partent.
+
 ## Une question, côté serveur (`turn`)
 
 1. Prompt système en français : style (2 phrases, 40 mots, pas de jargon, pas de relance),

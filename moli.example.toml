@@ -101,5 +101,22 @@ base_topic = "zigbee2mqtt"
 # local_voice = "fr_FR-siwis-medium"
 # local_listen = "127.0.0.1:10300"              # Whisper (Wyoming), repli de l'écoute ; "" = aucun
 
+# Plusieurs fournisseurs, chacun avec le niveau de données le plus sensible qu'il peut recevoir
+# (1 = un modèle chez soi, 2 = un cloud qui ne voit que la structure pseudonymisée, 3 = un cloud libre).
+# Sans `tier`, un fournisseur ne reçoit rien. Sans `[[assistant.provider]]`, le réglage ci-dessus s'applique.
+# Avec des fournisseurs, `base_url`, `model` et `builder_model` de `[assistant]` sont remplacés par ceux du
+# fournisseur de la route `chat`, et la recherche web est coupée. Clé du fournisseur :
+# `moli-os secrets set assistant api_key.<id>`.
+# [[assistant.provider]]
+# id = "local"
+# base_url = "http://127.0.0.1:11434/v1"   # Ollama
+# model = "un-modele-local"
+# tier = 1
+#
+# [assistant.routes]
+# chat = "local"        # la conversation (obligatoire avec des fournisseurs)
+# # voice, builder : le même fournisseur que chat pour l'instant
+# # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
+
 # Le Cellier : la liste de courses du foyer et la comparaison des drives (dormant sans cette section).
 # [pantry]

@@ -237,5 +237,17 @@
   "commun.code.saisis_one": "{count} digit entered",
   "commun.code.saisis_other": "{count} digits entered",
   "commun.code.effacer": "Delete",
-  "commun.code.nouveau_choisir": "Choose a new code"
+  "commun.code.nouveau_choisir": "Choose a new code",
+  "commun.lampe.temperature": "{label} color temperature",
+  "commun.kelvin": "{n} K",
+  "commun.lampe.temperature_valeur": "{n} K, {nom}",
+  "commun.lampe.blanc_tres_chaud": "Very warm white",
+  "commun.lampe.blanc_jour": "Daylight",
+  "commun.lampe.blanc_bleute": "Bluish white",
+  "commun.piece.eclairement": "Illuminance",
+  "commun.capteur.monoxyde": "Carbon monoxide",
+  "commun.niveau.bon": "Good",
+  "commun.niveau.attention": "Worth watching",
+  "commun.niveau.mauvais": "Poor",
+  "commun.capteur.humidite": "Humidity"
 }

@@ -21,15 +21,19 @@ mod import;
 mod llm;
 mod outside;
 mod pricing;
+mod providers;
 mod recap;
 mod recordings;
 mod satellite;
 mod settings;
+mod tier;
 mod voice;
 
 pub use auto::Draft;
 pub use exchanges::{Cost, Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
+pub use providers::{ProviderConfig, Routes};
+pub use tier::Tier;
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
 #[cfg(test)]
@@ -103,6 +107,14 @@ pub struct Config {
     pub latitude: Option<f64>,
     #[serde(default)]
     pub longitude: Option<f64>,
+    /// Named providers (`[[assistant.provider]]`): where each kind of request
+    /// may go, and the most sensitive tier each one may receive. Empty: the
+    /// single provider of `base_url` and `model`, as before.
+    #[serde(default)]
+    pub provider: Vec<ProviderConfig>,
+    /// Which provider serves which task (`[assistant.routes]`).
+    #[serde(default)]
+    pub routes: Routes,
 }
 
 impl Default for Config {
@@ -126,6 +138,8 @@ impl Default for Config {
             door_speakers: Vec::new(),
             latitude: None,
             longitude: None,
+            provider: Vec::new(),
+            routes: Routes::default(),
         }
     }
 }
@@ -216,6 +230,8 @@ struct Inner {
     layout_path: Option<PathBuf>,
     config: Config,
     endpoint: Endpoint,
+    /// The named providers and routes (see `providers.rs`).
+    providers: providers::Providers,
     tz: jiff::tz::TimeZone,
     running: tokio::sync::Semaphore,
     recent: Mutex<VecDeque<Instant>>,
@@ -362,6 +378,13 @@ impl Assistant {
         layout_path: Option<PathBuf>,
         config: Config,
     ) -> anyhow::Result<Self> {
+        let (config, providers) = config.resolved()?;
+        let key_present = providers
+            .key_name(providers::Route::Chat)
+            .is_some_and(|name| hub.secret(&InstanceId::from("assistant"), &name).is_some());
+        if let Some(warning) = providers.warning(key_present) {
+            tracing::warn!("{warning}");
+        }
         let endpoint = Endpoint::parse(&config.base_url)?;
         let tz = jiff::tz::TimeZone::get(&config.timezone)?;
         anyhow::ensure!(
@@ -375,6 +398,7 @@ impl Assistant {
             layout_path,
             config,
             endpoint,
+            providers,
             tz,
             running: tokio::sync::Semaphore::new(2),
             recent: Mutex::new(VecDeque::new()),
@@ -392,12 +416,22 @@ impl Assistant {
         })))
     }
 
+    /// The secret holding the chat provider's API key (`api_key` for an old
+    /// config, `api_key.<id>` for a named provider).
+    fn key_name(&self) -> String {
+        self.0
+            .providers
+            .key_name(providers::Route::Chat)
+            .unwrap_or_else(|| "api_key".to_owned())
+    }
+
     fn key(&self) -> Result<Option<String>, AssistantError> {
-        let key = self.0.hub.secret(&InstanceId::from("assistant"), "api_key");
+        let name = self.key_name();
+        let key = self.0.hub.secret(&InstanceId::from("assistant"), &name);
         if key.is_none() && !self.0.endpoint.is_local() {
-            return Err(AssistantError::NotConfigured(
-                "no API key: pipe it into `moli-os secrets set assistant api_key`".into(),
-            ));
+            return Err(AssistantError::NotConfigured(format!(
+                "no API key: pipe it into `moli-os secrets set assistant {name}`"
+            )));
         }
         Ok(key)
     }
@@ -416,6 +450,7 @@ impl Assistant {
             "listen": ready && (cloud_listen || local_listen),
             "speak": ready && (cloud_voice || local_voice),
             "voices": { "cloud": cloud_voice, "local": local_voice },
+            "privacy": self.0.providers.summary(),
         })
     }
 

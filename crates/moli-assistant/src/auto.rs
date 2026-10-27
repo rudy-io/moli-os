@@ -665,7 +665,11 @@ mod tests {
             });
             assert_eq!(nodes[1]["rules"][0], expected);
             assert_eq!(nodes[2]["rule"], expected);
-            assert_eq!(graph.nodes[1].x, 120.0);
+            assert!(
+                (graph.nodes[1].x - 120.0).abs() < 1e-9,
+                "x={}",
+                graph.nodes[1].x
+            );
         }
     }
 

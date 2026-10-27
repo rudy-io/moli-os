@@ -9,3 +9,6 @@
   prochain message (ou par le cache d'état).
 - **Vérifié sur du vrai matériel** (octobre 2026) : capteur d'ouverture HOBEIAN ZG-102ZA, `contact`
   suit l'état réel (`true` = fermée) ; firmware non relevé.
+- **Vérifié sur du vrai matériel** (octobre 2026) : ampoules Moes ZB-TD5-RCW-GU10 et Tuya
+  CK-BL702-AL-01, luminosité en % (100 % envoie le niveau 254, 50 % le niveau 127) ; firmware non
+  relevé.

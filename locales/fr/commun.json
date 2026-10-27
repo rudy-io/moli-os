@@ -225,5 +225,17 @@
   "commun.code.saisis_one": "{count} chiffre saisi",
   "commun.code.saisis_other": "{count} chiffres saisis",
   "commun.code.effacer": "Effacer",
-  "commun.code.nouveau_choisir": "Choisir un nouveau code"
+  "commun.code.nouveau_choisir": "Choisir un nouveau code",
+  "commun.lampe.temperature": "Température de {label}",
+  "commun.kelvin": "{n} K",
+  "commun.lampe.temperature_valeur": "{n} K, {nom}",
+  "commun.lampe.blanc_tres_chaud": "Blanc très chaud",
+  "commun.lampe.blanc_jour": "Lumière du jour",
+  "commun.lampe.blanc_bleute": "Blanc bleuté",
+  "commun.piece.eclairement": "Éclairement",
+  "commun.capteur.monoxyde": "Monoxyde de carbone",
+  "commun.niveau.bon": "Bon",
+  "commun.niveau.attention": "À surveiller",
+  "commun.niveau.mauvais": "Mauvais",
+  "commun.capteur.humidite": "Humidité"
 }

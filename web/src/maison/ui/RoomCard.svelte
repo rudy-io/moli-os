@@ -18,10 +18,59 @@
 
   const locked = $derived(protectedRoom(room.name));
 
+  /** What a quiet sensor shows when nothing is wrong (the « Capteurs » view): one
+   *  small icon by what it measures, a value only when it is a measure. */
+  const NOISE = /^(linkquality|voltage|power_outage_count|motion_timeout|illumination|action|side|operation_mode|update|identify|countdown|cycle_time|random_time|switch_inching|relay_status|light_mode|child_lock|battery_state|.*_calibration)/;
+  const ORDER = ['occupancy', 'contact', 'smoke', 'water_leak', 'temperature', 'humidity', 'illuminance', 'battery'];
+  const ICON_OF = { temperature: 'thermometer', humidity: 'humidity', illuminance: 'sun', contact: 'door-closed', occupancy: 'walk', smoke: 'smoke', water_leak: 'water-alert' };
+  function quietChip(d) {
+    const name = nameOf(d.id);
+    const read = (p) => value(d.id, p.key);
+    const rank = (p) => {
+      const i = ORDER.indexOf(p.semantic);
+      return i < 0 ? ORDER.length : i;
+    };
+    const p = d.points
+      .filter((p) => p.access?.read !== false && !NOISE.test(p.key) && read(p) != null && read(p) !== '')
+      .sort((a, b) => rank(a) - rank(b))[0];
+    if (!p) return null; // nothing read yet: nothing to show (no mystery icon)
+    const x = read(p);
+    const shown = typeof x === 'number' ? num(x, p.semantic === 'battery' ? 0 : 1) : x === true ? t('commun.oui').toLowerCase() : x === false ? t('commun.non').toLowerCase() : x;
+    const title = t('commun.piece.lecture', { name, label: p.label, value: `${shown}${p.unit && typeof x === 'number' ? ` ${p.unit}` : ''}` });
+    if (p.semantic === 'battery' && typeof x === 'number') {
+      return { tone: x >= 50 ? 'good' : '', icon: x >= 80 ? 'battery' : x >= 30 ? 'battery-50' : 'battery-20', text: t('commun.pourcent', { n: num(x) }), title };
+    }
+    const icon = ICON_OF[p.semantic];
+    if (!icon) return null; // a reading Moli has no picture for stays quiet
+    if (typeof x === 'number') return { tone: '', icon, text: `${shown}${p.unit ? ` ${p.unit}` : ''}`, title };
+    return { tone: '', icon, text: '', title };
+  }
+
+  /** A reading graded by the usual norms: the tone of its chip says whether the air is
+   *  fine ('good'), worth watching ('warm') or bad ('alert'). The tooltip says it in words.
+   *  CO: WHO 9 ppm over 8 h, 30 ppm over 1 h. CO₂: 1000 ppm is the French indoor
+   *  guideline, 1500 ppm calls for fresh air. */
+  const LEVELS = [
+    ['commun.niveau.bon', 'good'],
+    ['commun.niveau.attention', 'warm'],
+    ['commun.niveau.mauvais', 'alert'],
+  ];
+  const grade = (x, limits) => LEVELS[limits.filter((l) => x >= l).length];
+  const GRADES = {
+    co: (x) => grade(x, [9, 30]),
+    co2: (x) => grade(x, [1000, 1500]),
+    // Humidity has no universal norm (it depends on the room and the season): always blue.
+    humidity: () => [null, 'cool'],
+  };
+  const measure = (kind, x, label, text) => {
+    const [word, tone] = GRADES[kind](x);
+    return { tone, icon: kind, text, title: word ? `${label} : ${text} · ${t(word)}` : `${label} : ${text}` };
+  };
+
   function chips(d) {
     // An appliance that is no button: what it draws, nothing when unplugged.
     if (quiet(d.id)) {
-      if (d.online === false) return every ? [{ tone: '', icon: 'alert', text: t('commun.piece.hors_ligne', { name: nameOf(d.id) }) }] : [];
+      if (d.online === false) return every ? [{ tone: '', icon: 'offline', text: t('commun.piece.hors_ligne', { name: nameOf(d.id) }) }] : [];
       const w = value(d.id, 'cur_power') ?? value(d.id, 'power');
       if (typeof w === 'number' && w >= 3) return [{ tone: 'warm', icon: 'power', text: t('commun.piece.consomme', { name: nameOf(d.id), watts: num(w) }) }];
       return every ? [{ tone: '', icon: 'power', text: t('commun.piece.au_repos', { name: nameOf(d.id) }) }] : [];
@@ -29,34 +78,37 @@
     // A silent sensor's last readings are old news: say it is silent.
     if (d.online === false && deviceKind(d) === 'sensor') {
       const dead = lowBattery(d.id);
-      return [{ tone: dead ? 'alert' : '', icon: 'alert', text: t(dead ? 'commun.piece.pile_vide' : 'commun.piece.hors_ligne', { name: nameOf(d.id) }) }];
+      return [{ tone: dead ? 'alert' : '', icon: dead ? 'battery-alert' : 'offline', text: t(dead ? 'commun.piece.pile_vide' : 'commun.piece.hors_ligne', { name: nameOf(d.id) }) }];
     }
     const out = [];
     const v = (k) => value(d.id, k);
-    if (v('smoke') === true) out.push({ tone: 'alert', icon: 'fire', text: t('commun.capteur.fumee') });
-    if (leak(d.id)) out.push({ tone: 'alert', icon: 'water', text: t('commun.piece.fuite', { name: nameOf(d.id) }) });
+    if (v('smoke') === true) out.push({ tone: 'alert', icon: 'smoke', text: t('commun.capteur.fumee') });
+    if (v('carbon_monoxide') === true) out.push({ tone: 'alert', icon: 'smoke', text: t('commun.capteur.monoxyde') });
+    if (leak(d.id)) out.push({ tone: 'alert', icon: 'water-alert', text: t('commun.piece.fuite', { name: nameOf(d.id) }) });
     const open = doorOpen(d.id);
-    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
-    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: t('commun.piece.fermee', { name: nameOf(d.id) }) });
+    if (open === true) out.push({ tone: 'warm', icon: 'door-open', text: '', title: t('commun.piece.ouverte', { name: nameOf(d.id) }) });
+    else if (open === false) out.push({ tone: '', icon: 'door-closed', text: '', title: t('commun.piece.fermee', { name: nameOf(d.id) }) });
     // The temperature is the room's, in the head.
     const hum = v('humidity') ?? v('humidity_value');
-    if (typeof hum === 'number') out.push({ tone: '', icon: 'humidity', text: t('commun.pourcent', { n: num(hum) }) });
+    if (typeof hum === 'number') out.push(measure('humidity', hum, t('commun.capteur.humidite'), t('commun.pourcent', { n: num(hum) })));
     const co2 = v('co2_value') ?? v('co2');
-    if (typeof co2 === 'number') out.push({ tone: co2 > 1200 ? 'warm' : '', icon: 'leaf', text: `CO₂ ${num(co2)} ppm` });
-    if (motion(d.id)) out.push({ tone: 'warm', icon: 'motion', text: t('commun.piece.presence') });
-    if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
+    if (typeof co2 === 'number') out.push(measure('co2', co2, 'CO₂', `${num(co2)} ppm`));
+    const co = v('co');
+    if (typeof co === 'number') out.push(measure('co', co, t('commun.capteur.monoxyde'), `${num(co)} ppm`));
+    const lx = v('illuminance') ?? v('illuminance_lux');
+    if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: t('commun.piece.eclairement') });
+    if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: t('commun.piece.presence') });
+    if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
     if (deviceKind(d) === 'camera') out.push({ tone: 'cool', icon: 'cctv', text: nameOf(d.id), href: '#/cameras' });
     if (deviceKind(d) === 'printer') {
       const st = phase(v('state'));
       const text = st === 'printing' || st === 'paused' ? `${PHASES[st].label.toLowerCase()} ${t('commun.pourcent', { n: Math.round(Number(v('progress') ?? 0)) })}` : PHASES[st].label.toLowerCase();
       out.push({ tone: PHASES[st].tone, icon: 'printer3d', text: `${nameOf(d.id)} · ${d.online === false ? t('commun.piece.imprimante_eteinte') : text}`, href: '#/impression' });
     }
+    // A quiet sensor in the filtered view: an icon (its reading in the tooltip), not a sentence.
     if (every && !out.length) {
-      // Its first reading, so that a quiet sensor still shows it is there.
-      const p = d.points.find((p) => p.access?.read !== false && value(d.id, p.key) != null && value(d.id, p.key) !== '');
-      const x = p ? value(d.id, p.key) : null;
-      const shown = typeof x === 'number' ? num(x, 1) : x === true ? t('commun.oui').toLowerCase() : x === false ? t('commun.non').toLowerCase() : x;
-      out.push({ tone: '', icon: 'info', text: p ? t('commun.piece.lecture', { name: nameOf(d.id), label: p.label, value: `${shown}${p.unit ? ` ${p.unit}` : ''}` }) : nameOf(d.id) });
+      const quiet = quietChip(d);
+      if (quiet) out.push(quiet);
     }
     return out;
   }
@@ -248,9 +300,9 @@
     <div class="chips">
       {#each sensorChips as c, i (i)}
         {#if c.href}
-          <a class="chip {c.tone}" href={c.href}><Icon name={c.icon} size={15} />{c.text}</a>
+          <a class="chip {c.tone}" href={c.href} title={c.title ?? c.text}><Icon name={c.icon} size={15} />{c.text}</a>
         {:else}
-          <span class="chip {c.tone}"><Icon name={c.icon} size={15} />{c.text}</span>
+          <span class="chip {c.tone}" title={c.title ?? c.text}><Icon name={c.icon} size={c.text ? 15 : 18} label={c.text ? null : c.title} />{c.text}</span>
         {/if}
       {/each}
     </div>
@@ -300,6 +352,14 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* A phone: the name wraps instead of being cut by the temperature gauge. */
+  @media (max-width: 520px) {
+    .title h2 {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
   }
 
   .lock {

@@ -224,7 +224,8 @@ export function deviceKind(d) {
     if (isFixture(d)) return 'light';
     const name = d.label?.name || d.native_name;
     if (NOT_LIGHT.test(name) || /plug/i.test(d.model ?? '')) return 'plug';
-    if (d.id.startsWith('hue:') || LIGHTISH.test(name)) return 'light';
+    // Dimming or colour is what makes a light (a « Ruban led » is no plug, whatever its name).
+    if (d.id.startsWith('hue:') || LIGHTISH.test(name) || ['brightness', 'color_temp', 'color'].some((k) => has(d, k, true))) return 'light';
     return 'plug';
   }
   return 'sensor';
@@ -373,7 +374,13 @@ export async function confirmHeld(pin) {
   const held = home.held;
   if (!held) return null;
   const error = await login(pin);
-  if (error) return /verrou|locked/i.test(error) ? t('commun.trop_d_essais') : t('commun.code_incorrect');
+  // The server's words, told apart: a locked device must not read « incorrect code »
+  // (it refuses every attempt, the right code included), and any other failure
+  // is shown as it is.
+  if (error) {
+    if (/essais|attempts|verrou|locked/i.test(error)) return t('commun.trop_d_essais');
+    return /incorrect/i.test(error) ? t('commun.code_incorrect') : error;
+  }
   if (held.custom) {
     home.held = null;
     await held.custom();
