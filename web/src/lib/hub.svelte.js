@@ -1,4 +1,5 @@
 import { setLanguage, t } from './i18n.svelte.js';
+import { request } from './api.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -212,22 +213,14 @@ function toast(text) {
   setTimeout(() => (hub.toasts = hub.toasts.filter((x) => x.id !== id)), 5000);
 }
 
-const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
-
 export async function command(point, value) {
   hub.pending[point] = value;
   try {
-    const res = await fetch('/api/command', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ point, value }),
-    });
-    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
-    if (res.status === 202) {
+    const answer = await request('POST', '/api/command', { point, value });
+    if (answer.pending) {
       // Held by the guard: this dashboard is not (yet) recognized as human.
       delete hub.pending[point];
-      const { reason } = await res.json();
-      toast(t('systeme.hub.retenu', { reason }));
+      toast(t('systeme.hub.retenu', { reason: answer.reason }));
       return;
     }
     // Confirmation arrives as a state event; give up waiting after a while.
@@ -242,19 +235,14 @@ export async function command(point, value) {
 
 /** A human approves or denies an order the guard held (naming the point
  *  shown on the card, so a decision never lands on another request). */
-export async function decide(request, approve) {
+export async function decide(held, approve) {
+  const gone = () => (hub.approvals = hub.approvals.filter((a) => a.id !== held.id));
   try {
-    const res = await fetch(`/api/approvals/${request.id}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ approve, point: request.point }),
-    });
-    // Gone: already decided or expired — the card can go.
-    if (res.ok || res.status === 410) {
-      hub.approvals = hub.approvals.filter((a) => a.id !== request.id);
-    }
-    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    await request('POST', `/api/approvals/${held.id}`, { approve, point: held.point });
+    gone();
   } catch (err) {
+    // Gone: already decided or expired — the card can go.
+    if (err.status === 410) gone();
     toast(t('systeme.hub.decision_non_appliquee', { message: err.message }));
   }
 }
@@ -274,21 +262,21 @@ export async function refreshSession() {
 
 /** Opens a human session with the PIN. Returns an error message or null. */
 export async function login(pin) {
-  try {
-    const res = await fetch('/api/session', { method: 'POST', headers, body: JSON.stringify({ pin }) });
-    await refreshSession();
-    return res.ok ? null : ((await res.json()).error ?? res.statusText);
-  } catch (err) {
-    return err.message;
-  }
+  const error = await request('POST', '/api/session', { pin }).then(
+    () => null,
+    (err) => err.message,
+  );
+  await refreshSession();
+  return error;
 }
 
 export async function logout() {
-  await fetch('/api/session', { method: 'DELETE', headers }).catch(() => {});
+  await request('DELETE', '/api/session').catch(() => {});
   await refreshSession();
 }
 
-// Who asks a person for the house's code (the dashboard's sheet), if any.
+// Who asks a person for the house's code (the dashboard's sheet), if any:
+// `ask(label, hold, retry)`.
 let askCode = null;
 export function onCodeNeeded(ask) {
   askCode = ask;
@@ -296,21 +284,13 @@ export function onCodeNeeded(ask) {
 
 export async function setLabel(id, label, again = false) {
   try {
-    const res = await fetch(`/api/labels/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(label),
-    });
-    if (!res.ok) {
-      const error = (await res.json().catch(() => ({}))).error ?? res.statusText;
-      // Guarded: only a person may, once the code is typed; asked once.
-      if (res.status === 403 && askCode && !again) {
-        askCode(t('systeme.hub.ranger'), error, () => setLabel(id, label, true));
-        return;
-      }
-      throw new Error(error);
-    }
+    await request('PUT', `/api/labels/${encodeURIComponent(id)}`, label);
   } catch (err) {
+    // Guarded: only a person may, once the code is typed; asked once.
+    if (err.status === 403 && askCode && !again) {
+      askCode(t('systeme.hub.ranger'), err.body?.hold, () => setLabel(id, label, true));
+      return;
+    }
     toast(t('systeme.hub.etiquette_non_enregistree', { message: err.message }));
   }
 }

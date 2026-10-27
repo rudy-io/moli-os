@@ -4,12 +4,9 @@
 
 import { hub } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { home, nameOf, note } from './home.svelte.js';
+import { nameOf, asHuman as asPersonFor, CANCELLED } from './home.svelte.js';
+import { request } from '../../lib/api.js';
 
-/** What a cancelled code sheet rejects with: a signal, never shown. */
-export const CANCELLED = 'cancelled';
-
-const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
 
 // ---- catalog -------------------------------------------------------------------
 
@@ -325,16 +322,7 @@ export const needsLayout = (graph) => graph.nodes.length > 0 && graph.nodes.ever
 
 // ---- API -------------------------------------------------------------------------
 
-async function call(method, url, body) {
-  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(data.error ?? res.statusText);
-    err.status = res.status;
-    throw err;
-  }
-  return data;
-}
+const call = (method, url, body) => request(method, url, body);
 
 export const api = {
   list: () => call('GET', '/api/automations'),
@@ -354,32 +342,11 @@ export const api = {
   runs: (limit = 20) => call('GET', `/api/automations/runs?limit=${limit}`),
 };
 
-/** What a person does (approve, run, delete) needs « c'est moi »: asks the
- *  code once, then does it. */
-export async function asHuman(label, action) {
-  if (hub.session?.human) {
-    try {
-      return await action();
-    } catch (err) {
-      if (err.status !== 403) throw err;
-    }
-  }
-  return new Promise((resolve, reject) => {
-    home.held = {
-      label,
-      reason: 'automatisme',
-      custom: async () => {
-        try {
-          resolve(await action());
-        } catch (err) {
-          note(err.message, 'error');
-          reject(err);
-        }
-      },
-      onCancel: () => reject(new Error(CANCELLED)),
-    };
-  });
-}
+export { CANCELLED };
+
+/** What a person does to an automation (approve, run, delete) needs
+ *  « c'est moi »: the code sheet says why. */
+export const asHuman = (label, action) => asPersonFor(label, action, 'automation');
 
 /** A draft (from Moli) waiting for the editor to open it. */
 export const pending = $state({ draft: null });

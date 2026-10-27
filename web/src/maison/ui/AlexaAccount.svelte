@@ -1,5 +1,6 @@
 <script>
-  import { hub, home, value } from '../lib/home.svelte.js';
+  import { hub, value, asPerson } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -20,21 +21,9 @@
     busy = true;
     error = '';
     try {
-      const res = await fetch('/api/command', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ point: `${id}/sign_in`, value: pasted.trim() }),
-      });
-      if (res.status === 403) {
-        home.held = { label: t('systeme.alexa.connecter'), reason: 'ton code', custom: () => connect(id) };
-        return;
-      }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        error = body.error ?? res.statusText;
-        return;
-      }
-      pasted = '';
+      const order = { point: `${id}/sign_in`, value: pasted.trim() };
+      const done = await asPerson(t('systeme.alexa.connecter'), () => request('POST', '/api/command', order));
+      if (done) pasted = '';
     } catch (e) {
       error = e.message;
     } finally {

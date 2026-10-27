@@ -212,7 +212,11 @@ Chemin d'une commande (`Hub::command`, `crates/moli-runtime/src/hub.rs`) :
      l'appareil ensuite ne déguise pas ce que l'humain approuve) ;
    - événement `approval_requested`, entrée de journal au résultat `pending`.
 
-   Réponse REST : **`202 Accepted`** `{"ok": false, "pending": <id>, "reason": "..."}`.
+   Réponse REST : **`202 Accepted`** `{"ok": false, "pending": <id>, "reason": "...", "hold": "..."}`.
+   `reason` est la phrase, dans la langue de la maison ; `hold` dit pourquoi, pour le code :
+   `protected` (pièce protégée), `unassigned` (appareil sans pièce), `quiet` (heures calmes),
+   `machine` (une machine au travail) ou `named` (renommer un appareil déjà nommé, refus `403`
+   d'une étiquette). Le tableau de bord choisit ses mots d'après `hold`, jamais d'après `reason`.
    Réponse MCP : succès avec `status: "awaiting_human_approval"` (voir § 4).
 3. **Sinon** : envoi au pilote propriétaire, attente de sa réponse (5 s), entrée de
    journal. Le pilote confirme l'**envoi** ; la confirmation d'état arrive par l'événement
@@ -293,8 +297,8 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
-| POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
-| PUT | `/api/labels/{id}` | libre ; changer la pièce d'un appareil gardé exige `ui` | `{name?, room?}` : absent = inchangé, `""` = effacé | `Label` `{name?, room?}` | `404` unknown device ; `403` changement de pièce gardé ; `500` écriture de `labels.toml` |
+| POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason, hold}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
+| PUT | `/api/labels/{id}` | libre ; changer la pièce d'un appareil gardé exige `ui` | `{name?, room?}` : absent = inchangé, `""` = effacé | `Label` `{name?, room?}` | `404` unknown device ; `403 {error, hold}` changement de pièce gardé ; `500` écriture de `labels.toml` |
 | GET | `/api/journal` | libre | `?limit=` (défaut 100) | `[JournalEntry]`, plus récent d'abord (500 au plus en mémoire) | `400` requête invalide |
 | GET | `/api/approvals` | libre ; un invité : ses pièces seulement | aucune | `[ApprovalRequest]`, plus ancien d'abord | aucune |
 | POST | `/api/approvals/{id}` | **humain** + `x-moli-origin: ui` | `{approve: bool, point}` | `{ok:true}` | `403` ; `409` mauvais point ; `410` inconnue / expirée ; erreurs de commande si l'ordre approuvé échoue ; `400` id non numérique |

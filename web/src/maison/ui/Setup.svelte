@@ -1,5 +1,6 @@
 <script>
   import { hub, refreshSession } from '../lib/home.svelte.js';
+  import { request, Refused } from '../../lib/api.js';
   import { i18n, languages, setLanguage, t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -37,19 +38,15 @@
     busy = true;
     error = '';
     try {
-      const res = await fetch('/api/session/setup', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ code, pin, language }),
-      });
-      if (res.ok) {
-        await refreshSession();
+      await request('POST', '/api/session/setup', { code, pin, language });
+      await refreshSession();
+    } catch (err) {
+      if (!(err instanceof Refused)) {
+        error = t('installation.injoignable');
         return;
       }
-      error = (await res.json().catch(() => ({}))).error ?? t('installation.erreur', { status: res.status });
-      if (res.status === 409) await refreshSession();
-    } catch {
-      error = t('installation.injoignable');
+      error = err.body.error ?? t('installation.erreur', { status: err.status });
+      if (err.status === 409) await refreshSession();
     } finally {
       busy = false;
     }

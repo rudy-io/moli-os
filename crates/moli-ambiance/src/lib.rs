@@ -377,6 +377,8 @@ pub struct Held {
     pub point: PointId,
     pub approval: u64,
     pub reason: String,
+    /// Why (`protected`, `machine`…): the dashboard chooses its words by it.
+    pub hold: moli_runtime::guard::Hold,
 }
 
 #[derive(Debug, Serialize)]
@@ -445,12 +447,13 @@ pub async fn apply(
         match outcome {
             None => report.skipped.push(device),
             Some(Ok(())) => report.done.push(device),
-            Some(Err((point, CommandError::NeedsApproval { id, reason }))) => {
+            Some(Err((point, CommandError::NeedsApproval { id, reason, hold }))) => {
                 report.held.push(Held {
                     device,
                     point,
                     approval: id,
                     reason,
+                    hold,
                 });
             }
             Some(Err((_, e))) => report.failed.push(Failed {

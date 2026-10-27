@@ -1,6 +1,7 @@
 <script>
   import { home, hub, confirmHeld, dismissHeld, refreshSession } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
+  import { request } from '../../lib/api.js';
   import Icon from './Icon.svelte';
 
   /** The code, asked when the house wants to be sure it is a person. A new
@@ -22,8 +23,12 @@
   // The shortest code the house accepts (six digits without an owner).
   const min = $derived(hub.session?.min_pin ?? 4);
 
-  // The guard's reason is the house's own words (French or English): the
-  // patterns recognise it, the sentence shown is ours.
+  // Why the house asks (`home.held.hold`, from the server or the gesture).
+  const why = {
+    automation: 'commun.code.raison_automatisme',
+    quiet: 'commun.code.raison_calme',
+    protected: 'commun.code.raison_protegee',
+  };
   const reason = $derived(
     mode === 'current'
       ? t('commun.code.actuel_d_abord')
@@ -31,13 +36,7 @@
       ? mode === 'new'
         ? t('commun.code.choisir', { min })
         : t('commun.code.seconde_fois')
-      : /automatisme|automation/i.test(home.held?.reason ?? '')
-        ? t('commun.code.raison_automatisme')
-        : /calme|quiet/i.test(home.held?.reason ?? '')
-          ? t('commun.code.raison_calme')
-          : /prot/i.test(home.held?.reason ?? '')
-            ? t('commun.code.raison_protegee')
-            : t('commun.code.raison_defaut'),
+      : t(why[home.held?.hold] ?? 'commun.code.raison_defaut'),
   );
 
   async function press(digit) {
@@ -47,12 +46,11 @@
   }
 
   async function choose(code) {
-    const res = await fetch('/api/session/pin', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-      body: JSON.stringify(current ? { pin: code, current } : { pin: code }),
-    });
-    if (!res.ok) return (await res.json().catch(() => ({}))).error ?? t('commun.code.erreur', { status: res.status });
+    try {
+      await request('PUT', '/api/session/pin', current ? { pin: code, current } : { pin: code });
+    } catch (err) {
+      return err.body?.error ?? t('commun.code.erreur', { status: err.status });
+    }
     await refreshSession();
     return null;
   }

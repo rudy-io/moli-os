@@ -196,7 +196,7 @@ export async function settle(a, approve, label) {
     moli.decided[a.request] = 'approved';
     return;
   }
-  home.held = { id: a.request, point: a.point, reason: a.reason, label, onApproved: () => (moli.decided[a.request] = 'approved') };
+  home.held = { id: a.request, point: a.point, hold: a.hold, label, onApproved: () => (moli.decided[a.request] = 'approved') };
 }
 
 // ---- what to ask -----------------------------------------------------------------

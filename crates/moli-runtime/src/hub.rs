@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::addresses::{self, KnownAddress};
 use crate::driver::CommandRequest;
-use crate::guard::{GuardPolicy, GuardStatus, Verdict};
+use crate::guard::{GuardPolicy, GuardStatus, Hold, Verdict};
 use crate::journal_log::JournalLog;
 use crate::secrets::{self, MasterKey, SecretStore};
 use crate::state_cache::{self, States};
@@ -80,7 +80,7 @@ pub enum CommandError {
     Driver(String),
     /// Held by the guard: a human must approve request `id`.
     #[error("awaiting human approval #{id}: {reason}")]
-    NeedsApproval { id: u64, reason: String },
+    NeedsApproval { id: u64, reason: String, hold: Hold },
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -140,8 +140,8 @@ pub enum LabelError {
     UnknownDevice,
     #[error("could not persist labels: {0}")]
     Persist(#[from] std::io::Error),
-    #[error("{0}")]
-    Guarded(String),
+    #[error("{reason}")]
+    Guarded { hold: Hold, reason: String },
 }
 
 /// A partial label update: `None` keeps a field, `Some("")` clears it.
@@ -499,20 +499,19 @@ impl Hub {
             Err(e) => Err(e),
             Ok(prepared) => match self.verdict(point, origin) {
                 Verdict::Allow => self.send(prepared).await,
-                Verdict::Approval(reason) => {
+                Verdict::Approval(hold, reason) => {
                     let id = self.hold(point, &value, origin, actor.clone(), &reason);
-                    Err(CommandError::NeedsApproval { id, reason })
+                    Err(CommandError::NeedsApproval { id, reason, hold })
                 }
             },
         };
-        let outcome =
-            match &result {
-                Ok(()) => Outcome::Ok,
-                Err(CommandError::NeedsApproval { id, reason }) => Outcome::Pending(
-                    moli_i18n::tr!("serveur.garde.en_attente", id = id, reason = reason),
-                ),
-                Err(e) => Outcome::Err(e.to_string()),
-            };
+        let outcome = match &result {
+            Ok(()) => Outcome::Ok,
+            Err(CommandError::NeedsApproval { id, reason, .. }) => Outcome::Pending(
+                moli_i18n::tr!("serveur.garde.en_attente", id = id, reason = reason),
+            ),
+            Err(e) => Outcome::Err(e.to_string()),
+        };
         self.record(
             origin,
             actor,
@@ -533,7 +532,7 @@ impl Hub {
     pub fn would_hold(&self, point: &PointId, origin: Origin) -> Option<String> {
         match self.verdict(point, origin) {
             Verdict::Allow => None,
-            Verdict::Approval(reason) => Some(reason),
+            Verdict::Approval(_, reason) => Some(reason),
         }
     }
 
@@ -544,7 +543,7 @@ impl Hub {
         // without a code.
         let agent = !matches!(origin, Origin::Ui | Origin::System | Origin::Automation);
         if agent && self.is_control(point) {
-            return Verdict::Approval(moli_i18n::tr!("serveur.garde.machine"));
+            return Verdict::Approval(Hold::Machine, moli_i18n::tr!("serveur.garde.machine"));
         }
         let rooms = point
             .split()
@@ -1017,7 +1016,7 @@ impl Hub {
     ) -> Result<Label, LabelError> {
         let started = Instant::now();
         let result = match self.label_verdict(device, &patch, origin) {
-            Some(reason) => Err(LabelError::Guarded(reason)),
+            Some((hold, reason)) => Err(LabelError::Guarded { hold, reason }),
             None => self.write_label(device, patch).await,
         };
         let outcome = match &result {
@@ -1046,7 +1045,7 @@ impl Hub {
         device: &DeviceId,
         patch: &LabelPatch,
         origin: Origin,
-    ) -> Option<String> {
+    ) -> Option<(Hold, String)> {
         if matches!(origin, Origin::Ui | Origin::System) {
             return None;
         }
@@ -1060,7 +1059,7 @@ impl Hub {
                 .get(device)
                 .is_some_and(|l| l.name.is_some())
         {
-            return Some(moli_i18n::tr!("serveur.garde.renommer_humain"));
+            return Some((Hold::Named, moli_i18n::tr!("serveur.garde.renommer_humain")));
         }
         patch.room.as_ref()?;
         let rooms = self.rooms_of(device);
@@ -1069,7 +1068,12 @@ impl Hub {
             .opts
             .guard
             .room_change_needs_human(&rooms)
-            .map(|why| moli_i18n::tr!("serveur.garde.changer_piece_humain", why = why))
+            .map(|(hold, why)| {
+                (
+                    hold,
+                    moli_i18n::tr!("serveur.garde.changer_piece_humain", why = why),
+                )
+            })
     }
 
     async fn write_label(&self, device: &DeviceId, patch: LabelPatch) -> Result<Label, LabelError> {

@@ -123,9 +123,9 @@ pub(crate) async fn command(
     match hub.command(&body.point, body.value, origin, actor).await {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         // Accepted, not executed: a human decides.
-        Err(CommandError::NeedsApproval { id, reason }) => (
+        Err(CommandError::NeedsApproval { id, reason, hold }) => (
             StatusCode::ACCEPTED,
-            Json(json!({ "ok": false, "pending": id, "reason": reason })),
+            Json(json!({ "ok": false, "pending": id, "reason": reason, "hold": hold })),
         )
             .into_response(),
         Err(e) => error(command_status(&e), &e.to_string()),
@@ -271,7 +271,11 @@ pub(crate) async fn set_label(
     {
         Ok(label) => Json(label).into_response(),
         Err(LabelError::UnknownDevice) => error(StatusCode::NOT_FOUND, "unknown device"),
-        Err(e @ LabelError::Guarded(_)) => error(StatusCode::FORBIDDEN, &e.to_string()),
+        Err(LabelError::Guarded { hold, reason }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": reason, "hold": hold })),
+        )
+            .into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }

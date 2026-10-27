@@ -7,8 +7,8 @@
   // asks for the house's code and sends the whole list: the past is
   // repriced at once (a contract applies to every hour since its day).
   import { onMount } from 'svelte';
-  import { asHuman, CANCELLED } from '../lib/auto.svelte.js';
-  import { note } from '../lib/home.svelte.js';
+  import { asHuman, CANCELLED, note } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { refresh } from '../lib/energy-live.svelte.js';
   import { toDraft, toContract, problems, inForce, freeWindow, hhmm, toMin, isoDay } from '../lib/contracts.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
@@ -85,21 +85,8 @@
   async function save() {
     busy = true;
     try {
-      const body = JSON.stringify({ contracts: drafts.map(toContract) });
-      const saved = await asHuman(t('energie.contrat.enregistrer_label'), async () => {
-        const res = await fetch('/api/energy/contracts', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-          body,
-        });
-        const out = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const err = new Error(out.error ?? res.statusText);
-          err.status = res.status;
-          throw err;
-        }
-        return out;
-      });
+      const body = { contracts: drafts.map(toContract) };
+      const saved = await asHuman(t('energie.contrat.enregistrer_label'), () => request('PUT', '/api/energy/contracts', body));
       await refresh();
       note(t('energie.contrat.enregistre'));
       onsaved?.(saved);

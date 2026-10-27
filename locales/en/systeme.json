@@ -320,7 +320,6 @@
   "systeme.page.statut.waiting": "waiting",
   "systeme.page.statut.starting": "starting",
   "systeme.page.surface": "{what}. Everything done there goes through the core, and so through the guard and the log.",
-  "systeme.infra.pc.erreur": "error {status}",
   "systeme.infra.pc.act_ouvrir": "{name}: open Claude and Codex for the phone",
   "systeme.infra.pc.reveil": "{name} is waking up: Claude and Codex will open as soon as the Windows session answers.",
   "systeme.infra.pc.demande": "Requested: Claude and Codex are opening (a few seconds).",
@@ -389,7 +388,6 @@
   "systeme.alexa.verification": "Connecting…",
   "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
   "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice.",
-
   "systeme.pages.role.temperatures": "Each room's temperature over a day, a week or a month, compared with outside.",
   "systeme.pages.quand.temperatures": "Appears with a sensor, a radiator or an air conditioner that measures a room's temperature."
 }

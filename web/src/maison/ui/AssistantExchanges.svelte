@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub } from '../lib/home.svelte.js';
+  import { home, hub, asPerson } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { t, i18n } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -35,16 +36,12 @@
   });
 
   async function record(days) {
-    const res = await fetch('/api/assistant/recording', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-      body: JSON.stringify({ days }),
-    });
-    if (res.status === 403) {
-      home.held = { label: t('moli.echanges.enregistrer'), reason: 'ton code', custom: () => record(days) };
-      return;
+    try {
+      const body = await asPerson(t('moli.echanges.enregistrer'), () => request('PUT', '/api/assistant/recording', { days }));
+      if (body) recordingUntil = body.recording_until ?? null;
+    } catch {
+      /* the card stays as it was */
     }
-    if (res.ok) recordingUntil = (await res.json()).recording_until ?? null;
   }
 
   function play(audio) {
@@ -55,7 +52,7 @@
     }
     // What the satellite heard is a person's to hear: the code first.
     if (!hub.session?.human) {
-      home.held = { label: t('moli.echanges.ecouter'), reason: 'ton code', custom: () => play(audio) };
+      home.held = { label: t('moli.echanges.ecouter'), custom: () => play(audio) };
       return;
     }
     player = new Audio(`/api/assistant/recordings/${encodeURIComponent(audio)}`);
@@ -98,13 +95,8 @@
     sending = true;
     sent = '';
     try {
-      const res = await fetch('/api/assistant/recap', { method: 'POST', headers: { 'x-moli-origin': 'ui' } });
-      if (res.status === 403) {
-        home.held = { label: t('moli.echanges.recap'), reason: 'ton code', custom: sendRecap };
-        return;
-      }
-      const body = res.ok ? await res.json() : { sent: false };
-      sent = body.sent ? t('moli.echanges.recap_ok') : t('moli.echanges.recap_rien');
+      const body = await asPerson(t('moli.echanges.recap'), () => request('POST', '/api/assistant/recap'));
+      if (body) sent = body.sent ? t('moli.echanges.recap_ok') : t('moli.echanges.recap_rien');
     } catch {
       sent = t('moli.echanges.recap_rien');
     } finally {

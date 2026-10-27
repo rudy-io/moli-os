@@ -3,13 +3,16 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
+import { request } from '../../lib/api.js';
 
 export { hub };
 
 export const home = $state({
   /** @type {any} layout from /api/home ({} = automatic) */
   config: null,
-  /** an order the guard held, waiting for « c'est moi » */
+  /** what waits for « c'est moi » (the code sheet): `label`, `hold` (why:
+   *  `protected`, `quiet`, `automation`…), then the held order's `id` or
+   *  a `custom` step to run once the code is typed */
   held: null,
   /** the installation, put off for now (a house already in use) */
   setupLater: false,
@@ -403,25 +406,76 @@ export function lampsOf(room) {
 
 // ---- acting --------------------------------------------------------------------
 
-const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
+/** What a cancelled code sheet rejects with: a signal, never shown. */
+export const CANCELLED = 'cancelled';
+
+/** What only a person does (approve, run, delete, save the plan) needs
+ *  « c'est moi »: tried at once with a session, else (or refused, 403) the
+ *  code is asked once, then it is done. `hold` says why (the sheet's words);
+ *  a refusal names its own. */
+export async function asHuman(label, action, hold) {
+  let refused = null;
+  if (hub.session?.human) {
+    try {
+      return await action();
+    } catch (err) {
+      if (err.status !== 403) throw err;
+      refused = err;
+    }
+  }
+  return new Promise((resolve, reject) => {
+    home.held = {
+      label,
+      hold: hold ?? refused?.body?.hold,
+      custom: async () => {
+        try {
+          resolve(await action());
+        } catch (err) {
+          note(err.message, 'error');
+          reject(err);
+        }
+      },
+      onCancel: () => reject(new Error(CANCELLED)),
+    };
+  });
+}
+
+/** A gesture the house may refuse without the code (403): tried at once;
+ *  refused, the code is asked once, then it is tried again. Closing the
+ *  code sheet just stops it (`undefined`). */
+export async function asPerson(label, action, hold) {
+  try {
+    return await action();
+  } catch (err) {
+    if (err.status !== 403) throw err;
+    return new Promise((resolve, reject) => {
+      home.held = {
+        label,
+        hold: hold ?? err.body?.hold,
+        custom: async () => {
+          try {
+            resolve(await action());
+          } catch (again) {
+            reject(again);
+          }
+        },
+        onCancel: () => resolve(undefined),
+      };
+    });
+  }
+}
 
 /** Sends an order. Held by the guard (protected room, quiet hours): asks
  *  « c'est moi » through the PIN sheet, then approves it. */
 export async function act(point, val, label) {
   hub.pending[point] = val;
   try {
-    const res = await fetch('/api/command', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ point, value: val }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.status === 202) {
+    const body = await request('POST', '/api/command', { point, value: val });
+    if (body.pending) {
       delete hub.pending[point];
-      home.held = { id: body.pending, point, reason: body.reason, label };
+      home.held = { id: body.pending, point, hold: body.hold, label };
       return 'held';
     }
-    if (!res.ok) throw new Error(body.error ?? res.statusText);
     setTimeout(() => {
       if (hub.pending[point] === val) delete hub.pending[point];
     }, 8000);
@@ -454,11 +508,9 @@ export async function setLook(lights, look, label) {
   const key = JSON.stringify(look);
   looks.busy = key;
   try {
-    const res = await fetch('/api/ambiance', { method: 'POST', headers, body: JSON.stringify({ lights, ...look }) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? res.statusText);
+    const body = await request('POST', '/api/ambiance', { lights, ...look });
     if (body.held?.length) {
-      home.held = { label, reason: body.held[0].reason, custom: () => setLook(lights, look, label) };
+      home.held = { label, hold: body.held[0].hold, custom: () => setLook(lights, look, label) };
       return 'held';
     }
     if (body.failed?.length) {

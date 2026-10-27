@@ -3,6 +3,7 @@
 // live through the hub like any other device.
 import { hub, refreshSession } from '../../lib/hub.svelte.js';
 import { t } from '../../lib/i18n.svelte.js';
+import { request } from '../../lib/api.js';
 
 export const people = $state({
   loaded: false,
@@ -14,13 +15,12 @@ export const people = $state({
   error: '',
 });
 
-const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
-
 async function call(method, path, body) {
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error ?? t('personnes.erreur', { status: res.status }));
-  return json;
+  try {
+    return await request(method, path, body);
+  } catch (err) {
+    throw new Error(err.body?.error ?? (err.status ? t('personnes.erreur', { status: err.status }) : err.message));
+  }
 }
 
 export async function loadPeople() {
@@ -79,7 +79,7 @@ export async function redeem(code, password) {
 }
 
 export async function signOut() {
-  await fetch('/api/session', { method: 'DELETE', headers });
+  await request('DELETE', '/api/session');
   location.reload();
 }
 

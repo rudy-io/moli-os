@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, note } from '../lib/home.svelte.js';
+  import { note, asPerson } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { moli } from '../lib/moli.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import { playSpeech, stop, unlock } from '../lib/voice/player.js';
@@ -28,18 +29,10 @@
   async function saveKey() {
     busy = true;
     try {
-      const res = await fetch('/api/assistant/key', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ api_key: key.trim() }),
-      });
-      if (res.status === 403) {
-        // A person's gesture: the code first, then the same request again.
-        home.held = { label: t('moli.reglages.cle_titre'), reason: 'ton code', custom: saveKey };
-        return;
-      }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      const given = { api_key: key.trim() };
+      // A person's gesture: the code first if asked, then the same request.
+      const done = await asPerson(t('moli.reglages.cle_titre'), () => request('PUT', '/api/assistant/key', given));
+      if (!done) return;
       key = '';
       open = false;
       note(t('moli.reglages.cle_enregistree'), 'info');
@@ -56,13 +49,7 @@
     const before = s;
     s = { ...s, ...change };
     try {
-      const res = await fetch('/api/assistant/settings', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify(change),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
-      s = await res.json();
+      s = await request('PUT', '/api/assistant/settings', change);
     } catch (e) {
       s = before;
       note(t('moli.reglages.voix_erreur', { message: e.message }), 'error');

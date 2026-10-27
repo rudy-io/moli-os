@@ -325,6 +325,9 @@ pub struct Action {
     pub request: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Why it is held (`protected`, `machine`…): the dashboard's words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hold: Option<moli_runtime::guard::Hold>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -1252,14 +1255,16 @@ impl Assistant {
             status: "done",
             request: None,
             reason: None,
+            hold: None,
             error: None,
         };
         let answer = match result {
             Ok(()) => json!({ "status": "done" }),
-            Err(CommandError::NeedsApproval { id, reason }) => {
+            Err(CommandError::NeedsApproval { id, reason, hold }) => {
                 action.status = "held";
                 action.request = Some(id);
                 action.reason = Some(reason.clone());
+                action.hold = Some(hold);
                 json!({
                     "status": "awaiting_approval",
                     "reason": reason,
@@ -1334,6 +1339,7 @@ impl Assistant {
                 status: "done",
                 request: None,
                 reason: None,
+                hold: None,
                 error: None,
             });
         }
@@ -1345,6 +1351,7 @@ impl Assistant {
                 status: "held",
                 request: Some(held.approval),
                 reason: Some(held.reason.clone()),
+                hold: Some(held.hold),
                 error: None,
             });
         }

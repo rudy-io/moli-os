@@ -273,11 +273,12 @@ impl MoliMcp {
             Ok(()) => ok(&json!({ "ok": true, "point": point })),
             // Not an error: the order exists, a human decides. Say it plainly
             // so the agent relays it instead of retrying.
-            Err(CommandError::NeedsApproval { id, reason }) => ok(&json!({
+            Err(CommandError::NeedsApproval { id, reason, hold }) => ok(&json!({
                 "ok": false,
                 "status": "awaiting_human_approval",
                 "request": id,
                 "reason": reason,
+                "hold": hold,
                 "message": "Not executed. A human must approve this request from the Moli OS dashboard (it expires in 10 minutes). Do not retry; tell the user.",
             })),
             Err(e) => Ok(fail(&e.to_string())),

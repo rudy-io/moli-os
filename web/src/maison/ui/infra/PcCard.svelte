@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { value, act } from '../../lib/home.svelte.js';
-  import { asHuman, CANCELLED } from '../../lib/auto.svelte.js';
+  import { value, act, asHuman, CANCELLED } from '../../lib/home.svelte.js';
+  import { request } from '../../../lib/api.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
   import Icon from '../Icon.svelte';
   import Gauge from './Gauge.svelte';
@@ -75,17 +75,6 @@
   let said = $state('');
   let error = $state('');
 
-  async function post(url) {
-    const res = await fetch(url, { method: 'POST', headers: { 'x-moli-origin': 'ui' } });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(data.error ?? t('systeme.infra.pc.erreur', { status: res.status }));
-      err.status = res.status;
-      throw err;
-    }
-    return data;
-  }
-
   async function remote() {
     if (sending) return;
     sending = true;
@@ -93,7 +82,7 @@
     said = '';
     try {
       const done = await asHuman(t('systeme.infra.pc.act_ouvrir', { name }), () =>
-        post(`/api/machines/${encodeURIComponent(pc.id)}/remote`),
+        request('POST', `/api/machines/${encodeURIComponent(pc.id)}/remote`),
       );
       said = done.waking ? t('systeme.infra.pc.reveil', { name }) : t('systeme.infra.pc.demande');
       load();

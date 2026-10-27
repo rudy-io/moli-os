@@ -56,8 +56,25 @@ pub struct QuietHours {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Allow,
-    /// Needs a human: the reason, in words the human will read.
-    Approval(String),
+    /// Needs a human: why, and the reason in words the human will read.
+    Approval(Hold, String),
+}
+
+/// Why the guard wants a human, for the surfaces to choose their words
+/// (the sentence itself is in the house's language).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hold {
+    /// A protected room.
+    Protected,
+    /// A device in no room, while those are protected.
+    Unassigned,
+    /// Quiet hours.
+    Quiet,
+    /// A machine at work (a window, a print, a computer).
+    Machine,
+    /// A device a person already named.
+    Named,
 }
 
 /// Policy summary for the surfaces (dashboard badges, agents).
@@ -134,13 +151,16 @@ impl GuardPolicy {
             return Verdict::Allow;
         }
         if let Some(protected) = self.protected(rooms) {
-            return Verdict::Approval(moli_i18n::tr!(
-                "serveur.garde.piece_protegee",
-                room = protected
-            ));
+            return Verdict::Approval(
+                Hold::Protected,
+                moli_i18n::tr!("serveur.garde.piece_protegee", room = protected),
+            );
         }
         if self.protect_unassigned && rooms.is_empty() {
-            return Verdict::Approval(moli_i18n::tr!("serveur.garde.sans_piece_connue"));
+            return Verdict::Approval(
+                Hold::Unassigned,
+                moli_i18n::tr!("serveur.garde.sans_piece_connue"),
+            );
         }
         // Quiet hours keep agents quiet, not the family at its dashboard.
         if origin == Origin::Household {
@@ -150,11 +170,14 @@ impl GuardPolicy {
             && quiet.covers(rooms)
             && quiet.contains(now)
         {
-            return Verdict::Approval(moli_i18n::tr!(
-                "serveur.garde.heures_calmes",
-                from = quiet.from.strftime("%H:%M"),
-                to = quiet.to.strftime("%H:%M")
-            ));
+            return Verdict::Approval(
+                Hold::Quiet,
+                moli_i18n::tr!(
+                    "serveur.garde.heures_calmes",
+                    from = quiet.from.strftime("%H:%M"),
+                    to = quiet.to.strftime("%H:%M")
+                ),
+            );
         }
         Verdict::Allow
     }
@@ -163,21 +186,27 @@ impl GuardPolicy {
     /// escape a rule: protected room, unassigned device (when protected),
     /// or a room under room-specific quiet hours. Returns why.
     #[must_use]
-    pub fn room_change_needs_human(&self, rooms: &[&str]) -> Option<String> {
+    pub fn room_change_needs_human(&self, rooms: &[&str]) -> Option<(Hold, String)> {
         if let Some(room) = self.protected(rooms) {
-            return Some(moli_i18n::tr!(
-                "serveur.garde.deplacer.piece_protegee",
-                room = room
+            return Some((
+                Hold::Protected,
+                moli_i18n::tr!("serveur.garde.deplacer.piece_protegee", room = room),
             ));
         }
         if self.protect_unassigned && rooms.is_empty() {
-            return Some(moli_i18n::tr!("serveur.garde.deplacer.sans_piece"));
+            return Some((
+                Hold::Unassigned,
+                moli_i18n::tr!("serveur.garde.deplacer.sans_piece"),
+            ));
         }
         if let Some(quiet) = &self.quiet_hours
             && !quiet.rooms.is_empty()
             && quiet.covers(rooms)
         {
-            return Some(moli_i18n::tr!("serveur.garde.deplacer.heures_calmes"));
+            return Some((
+                Hold::Quiet,
+                moli_i18n::tr!("serveur.garde.deplacer.heures_calmes"),
+            ));
         }
         None
     }
@@ -267,7 +296,7 @@ mod tests {
     fn protected_rooms_need_approval_day_and_night() {
         let noon = at("2026-10-03T10:00:00Z");
         let verdict = policy().check(&["petite CHAMBRE"], Origin::Mcp, noon);
-        assert!(matches!(verdict, Verdict::Approval(r) if r.contains("protégée")));
+        assert!(matches!(verdict, Verdict::Approval(_, r) if r.contains("protégée")));
         assert_eq!(
             policy().check(&["Salon"], Origin::Mcp, noon),
             Verdict::Allow
@@ -281,7 +310,7 @@ mod tests {
         // bedroom wants the code…
         assert!(matches!(
             policy().check(&["Petite chambre"], Origin::Household, night),
-            Verdict::Approval(r) if r.contains("protégée")
+            Verdict::Approval(_, r) if r.contains("protégée")
         ));
         // …the rest of the house does not, even during quiet hours.
         assert_eq!(
@@ -294,7 +323,7 @@ mod tests {
         };
         assert!(matches!(
             unassigned.check(&[], Origin::Household, night),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
     }
 
@@ -313,11 +342,11 @@ mod tests {
         let night = at("2026-10-02T23:00:00Z");
         assert!(matches!(
             policy().check(&["Petite chambre"], Origin::Assistant, noon),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         assert!(matches!(
             policy().check(&["Salon"], Origin::Assistant, night),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
     }
 
@@ -327,12 +356,12 @@ mod tests {
         // 23:00 Paris in summer time (UTC+2) = 21:00Z: inside.
         assert!(matches!(
             p.check(&["Salon"], Origin::Api, at("2026-10-02T21:00:00Z")),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         // 07:29 Paris = 05:29Z (summer): inside; 07:31 = 05:31Z: outside.
         assert!(matches!(
             p.check(&["Salon"], Origin::Api, at("2026-10-03T05:29:00Z")),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         assert_eq!(
             p.check(&["Salon"], Origin::Api, at("2026-10-03T05:31:00Z")),
@@ -341,7 +370,7 @@ mod tests {
         // Winter time (UTC+1): 20:30Z = 21:30 Paris → inside; 19:30Z = 20:30 → outside.
         assert!(matches!(
             p.check(&[], Origin::Cli, at("2026-12-01T20:30:00Z")),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         assert_eq!(
             p.check(&[], Origin::Cli, at("2026-12-01T19:30:00Z")),
@@ -362,7 +391,7 @@ mod tests {
         let night = at("2026-10-02T21:30:00Z");
         assert!(matches!(
             p.check(&["salon"], Origin::Mcp, night),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         assert_eq!(p.check(&["Grenier"], Origin::Mcp, night), Verdict::Allow);
         assert_eq!(p.check(&[], Origin::Mcp, night), Verdict::Allow);
@@ -373,7 +402,7 @@ mod tests {
         let noon = at("2026-10-03T10:00:00Z");
         // Label says "Salon", the source system says "Petite chambre": protected.
         let verdict = policy().check(&["Salon", "Petite  chambre "], Origin::Mcp, noon);
-        assert!(matches!(verdict, Verdict::Approval(_)));
+        assert!(matches!(verdict, Verdict::Approval(..)));
     }
 
     #[test]
@@ -383,7 +412,7 @@ mod tests {
         let decomposed = "Chambre a\u{300} coucher";
         assert!(matches!(
             policy().check(&[decomposed], Origin::Mcp, noon),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
 
         let strict = GuardPolicy {
@@ -392,7 +421,7 @@ mod tests {
         };
         assert!(matches!(
             strict.check(&[], Origin::Mcp, noon),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
         assert_eq!(policy().check(&[], Origin::Mcp, noon), Verdict::Allow);
     }
@@ -432,7 +461,7 @@ mod tests {
         };
         assert!(matches!(
             p.check(&[], Origin::Mcp, at("2026-10-03T12:00:00Z")),
-            Verdict::Approval(_)
+            Verdict::Approval(..)
         ));
     }
 

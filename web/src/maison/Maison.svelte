@@ -54,7 +54,7 @@
     useEnergy()();
     // What only a person may do (the Atelier moving a device out of a
     // guarded room): the code first, then the same request once more.
-    onCodeNeeded((label, reason, retry) => (home.held = { label, reason, custom: retry }));
+    onCodeNeeded((label, hold, retry) => (home.held = { label, hold, custom: retry }));
     const media = matchMedia('(prefers-color-scheme: dark)');
     prefersDark = media.matches;
     const update = (e) => (prefersDark = e.matches);

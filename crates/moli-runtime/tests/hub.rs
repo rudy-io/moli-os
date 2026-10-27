@@ -362,10 +362,11 @@ async fn guard_holds_agents_and_obeys_humans() {
             Some("agent".into()),
         )
         .await;
-    let Err(CommandError::NeedsApproval { id, reason }) = held else {
+    let Err(CommandError::NeedsApproval { id, reason, hold }) = held else {
         panic!("expected a held order, got {held:?}");
     };
     assert!(reason.contains("Chambre"));
+    assert_eq!(hold, moli_runtime::guard::Hold::Protected);
     assert_eq!(
         hub.state(&point("state")).unwrap().value,
         Value::Bool(false)
@@ -460,7 +461,10 @@ async fn agents_cannot_relabel_their_way_out_of_a_protected_room() {
     let refused = hub
         .set_label(&"fake:plug1".into(), escape.clone(), Origin::Mcp, None)
         .await;
-    assert!(matches!(refused, Err(moli_runtime::LabelError::Guarded(_))));
+    assert!(matches!(
+        refused,
+        Err(moli_runtime::LabelError::Guarded { .. })
+    ));
     // Renaming without moving stays allowed.
     let rename = LabelPatch {
         name: Some("Veilleuse".into()),
@@ -1011,7 +1015,7 @@ async fn agents_name_but_never_rename() {
         .set_label(&plug, name("Lampe du couloir"), Origin::Mcp, None)
         .await;
     assert!(
-        matches!(renamed, Err(moli_runtime::LabelError::Guarded(_))),
+        matches!(renamed, Err(moli_runtime::LabelError::Guarded { .. })),
         "{renamed:?}"
     );
     let by_human = hub

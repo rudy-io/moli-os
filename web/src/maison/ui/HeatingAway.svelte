@@ -4,7 +4,8 @@
   // as it was. Anyone of the house, without the code; kept on the server:
   // the return works from any phone, after any restart.
   import { onMount } from 'svelte';
-  import { home, note, nameOf, clock } from '../lib/home.svelte.js';
+  import { note, nameOf, clock, asPerson } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -24,18 +25,10 @@
   async function go(away) {
     busy = true;
     try {
-      const res = await fetch('/api/heating/away', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ away }),
-      });
-      const body = await res.json().catch(() => ({}));
       // A dashboard that asks for the code everywhere (`dashboard = "pin"`).
-      if (res.status === 403) {
-        home.held = { label: t(away ? 'commun.depart.label_part' : 'commun.depart.label_rentre'), reason: body.error, custom: () => go(away) };
-        return;
-      }
-      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      const label = t(away ? 'commun.depart.label_part' : 'commun.depart.label_rentre');
+      const body = await asPerson(label, () => request('POST', '/api/heating/away', { away }));
+      if (!body) return;
       state = { ...state, away: body.away, since: body.since };
       const failed = body.failed ?? [];
       if (failed.length) note(t('commun.depart.pas_tous', { count: failed.length, names: failed.map((f) => nameOf(f.device)).join(', ') }), 'error');

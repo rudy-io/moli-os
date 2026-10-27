@@ -1,8 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
-  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered, climateIcon, coverIcon, sensorIcon } from '../lib/home.svelte.js';
-  import { asHuman, CANCELLED } from '../lib/auto.svelte.js';
+  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered, climateIcon, coverIcon, sensorIcon, asHuman, CANCELLED } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import Drawing from '../plan/Drawing.svelte';
   import House3D from '../plan/House3D.svelte';
   import { SKINS, SKIN_IDS, ITEMS } from '../plan/skins.js';
@@ -77,8 +77,6 @@
     const v = row ? (typeof row.v === 'number' ? num(row.v, 1) : row.v === true ? t('maison.plan.oui') : row.v === false ? t('maison.plan.non') : row.v) : null;
     note(row ? t('maison.plan.lecture', { name: nameOf(id), label: row.label, value: `${v}${row.unit ? ` ${row.unit}` : ''}` }) : nameOf(id));
   }
-
-  const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
 
   onMount(load);
 
@@ -234,17 +232,7 @@
   }
 
   async function uploadImage(file) {
-    const res = await fetch('/api/plan/images', {
-      method: 'POST',
-      headers: { 'content-type': file.type || 'application/octet-stream', 'x-moli-origin': 'ui' },
-      body: file,
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(body.error ?? res.statusText);
-      err.status = res.status;
-      throw err;
-    }
+    const body = await request('POST', '/api/plan/images', file, { type: file.type || 'application/octet-stream' });
     return body.image;
   }
 
@@ -378,16 +366,7 @@
   async function save() {
     busy = true;
     try {
-      const saved = await asHuman(t('maison.plan.enregistrer_plan'), async () => {
-        const res = await fetch('/api/plan', { method: 'PUT', headers, body: JSON.stringify($state.snapshot(draft)) });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const err = new Error(body.error ?? res.statusText);
-          err.status = res.status;
-          throw err;
-        }
-        return body;
-      });
+      const saved = await asHuman(t('maison.plan.enregistrer_plan'), () => request('PUT', '/api/plan', $state.snapshot(draft)));
       plan = saved;
       editing = false;
       draft = null;

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, note } from '../lib/home.svelte.js';
+  import { note, asPerson } from '../lib/home.svelte.js';
+  import { request } from '../../lib/api.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -28,18 +29,10 @@
   async function save() {
     busy = true;
     try {
-      const res = await fetch('/api/integrations/tuya-cloud', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ access_id: id.trim(), access_secret: secret.trim() }),
-      });
-      if (res.status === 403) {
-        // A person's gesture: the code first, then the same request again.
-        home.held = { label: t('systeme.tuya.cle_titre'), reason: 'ton code', custom: save };
-        return;
-      }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      const keys = { access_id: id.trim(), access_secret: secret.trim() };
+      // A person's gesture: the code first if asked, then the same request.
+      const done = await asPerson(t('systeme.tuya.cle_titre'), () => request('PUT', '/api/integrations/tuya-cloud', keys));
+      if (!done) return;
       id = '';
       secret = '';
       open = false;

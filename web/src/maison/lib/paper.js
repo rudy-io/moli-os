@@ -3,6 +3,7 @@
 // photo re-encoded), then sent one by one to Moli, which queues them.
 
 import { t } from '../../lib/i18n.svelte.js';
+import { request } from '../../lib/api.js';
 
 /** A page's longest side, at most (A4 at 300 dpi): bigger is only heavier. */
 const MAX_SIDE = 3508;
@@ -86,17 +87,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** One page to Moli; a full queue or a burst is waited out, not failed. */
 async function send(id, blob, query, waiting) {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`/api/devices/${encodeURIComponent(id)}/print?${query}`, {
-      method: 'POST',
-      headers: { 'content-type': 'image/jpeg', 'x-moli-origin': 'ui' },
-      body: blob,
-    });
-    if (res.ok) return;
-    const said = (await res.json().catch(() => ({}))).error ?? t('salon.papier.erreur', { status: res.status });
-    const busy = res.status === 429 || (res.status === 409 && /pleine|full/.test(said));
-    if (!busy || attempt >= RETRIES) throw new Error(said);
+    let status;
+    try {
+      await request('POST', `/api/devices/${encodeURIComponent(id)}/print?${query}`, blob, { type: 'image/jpeg' });
+      return;
+    } catch (err) {
+      if (!err.status) throw err;
+      status = err.status;
+      const said = err.body.error ?? t('salon.papier.erreur', { status });
+      const busy = status === 429 || (status === 409 && /pleine|full/.test(said));
+      if (!busy || attempt >= RETRIES) throw new Error(said);
+    }
     waiting();
-    await sleep(RETRY_WAIT[res.status] ?? 10_000);
+    await sleep(RETRY_WAIT[status] ?? 10_000);
   }
 }
 

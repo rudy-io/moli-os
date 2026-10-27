@@ -12,7 +12,6 @@
     done = false;
     home.held = {
       label: t('systeme.code.titre'),
-      reason: 'code',
       newCode: true,
       custom: async () => {
         done = true;
