@@ -464,5 +464,11 @@
   "commun.code.saisis_one": "{count} digit entered",
   "commun.code.saisis_other": "{count} digits entered",
   "commun.code.effacer": "Delete",
-  "commun.code.nouveau_choisir": "Choose a new code"
+  "commun.code.nouveau_choisir": "Choose a new code",
+  "commun.installer.titre": "Install {nom}",
+  "commun.installer.texte": "A shortcut on your home screen that opens full screen, like an app.",
+  "commun.installer.bouton": "Install",
+  "commun.installer.ios": "Tap Share, then “Add to Home Screen”.",
+  "commun.installer.android": "Open the browser menu ⋮, then “Add to Home screen”.",
+  "commun.installer.masquer": "Don’t show again"
 }

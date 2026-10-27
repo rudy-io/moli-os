@@ -95,6 +95,8 @@ impl Household {
 pub struct Options {
     /// Host names (or IPs) this instance is reached by, besides localhost.
     pub allowed_hosts: Vec<String>,
+    /// The name the dashboard bears on a phone's home screen (`None`: Moli).
+    pub app_name: Option<String>,
     /// PIN that opens a human session in the dashboard. `None`: nobody is
     /// recognized as human, so guarded orders can only wait (safe default).
     pub ui_pin: Option<UiPin>,
@@ -344,7 +346,9 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
                 options.demo,
             ),
         )
+        .route("/manifest.webmanifest", get(assets::manifest))
         .fallback(assets::serve)
+        .layer(Extension(assets::AppName::new(options.app_name.as_deref())))
         .layer(Extension(shutdown))
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))

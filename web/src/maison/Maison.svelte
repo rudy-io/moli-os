@@ -8,6 +8,7 @@
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
+  import InstallApp from './ui/InstallApp.svelte';
   import Setup from './ui/Setup.svelte';
   import Login from './ui/Login.svelte';
   import Accueil from './pages/Accueil.svelte';
@@ -148,6 +149,7 @@
   </nav>
 
   <main class="content">
+    <InstallApp />
     {#if page === 'salon'}
       <Salon />
     {:else if page === 'pieces'}

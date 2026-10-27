@@ -297,6 +297,17 @@ fn demo_fresh(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What the surfaces take straight from `[server]`.
+fn server_options(config: &Config) -> moli_api::Options {
+    moli_api::Options {
+        allowed_hosts: config.server.allowed_hosts.clone(),
+        app_name: config.server.app_name.clone(),
+        access: config.server.access.clone(),
+        demo: config.server.demo,
+        ..moli_api::Options::default()
+    }
+}
+
 async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     // Before anything opens the data directory.
     demo_fresh(&config)?;
@@ -368,7 +379,6 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
     let surfaces = moli_api::Options {
-        allowed_hosts: config.server.allowed_hosts.clone(),
         ui_pin,
         history,
         bench_path: Some(config.server.data_dir.join("bench.json")),
@@ -376,12 +386,11 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         home_path: Some(config.server.data_dir.join("home.json")),
         assistant,
         automations: Some(automations),
-        access: config.server.access.clone(),
-        demo: config.server.demo,
         household: Some(household),
         phones: gates.phones,
         machines: gates.machines,
         weather: weather(&config),
+        ..server_options(&config)
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(

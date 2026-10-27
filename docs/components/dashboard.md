@@ -78,6 +78,23 @@ telles que les appareils les nomment).
   pour toute la multiprise (« 2 sur 3 » ; un appui allume tout, ou éteint tout si tout est
   allumé). Seuls les points inscriptibles comptent.
 
+## Sur l'écran d'accueil d'un téléphone
+
+Le dashboard est une appli web installable, sans service worker (rien n'est mis en cache : une page
+rechargée est toujours celle du serveur, ce qui convient à un usage sur le réseau de la maison).
+
+- `/manifest.webmanifest` n'est pas un fichier : le serveur l'écrit (`crates/moli-api/src/assets.rs`) avec
+  le nom de la maison, `[server] app_name` de `moli.toml` (défaut `Moli`). Le nom reste dans la config de la
+  maison, jamais dans le dépôt : ce peut être un prénom. Le serveur le met aussi dans `<title>` et dans
+  `apple-mobile-web-app-title` d'`index.html`.
+- Les icônes sont dans `web/public/` (le logo du favicon : disque d'or, anneau sombre). `maskable` et
+  `apple-touch-icon` sont pleine page, l'anneau dans la zone sûre.
+- `ui/InstallApp.svelte` propose l'installation sur téléphone, jamais sur ordinateur ni dans l'appli Moli
+  (`MoliNative` dans le user-agent), et se masque pour de bon. En `http://` sur le réseau local, Android
+  n'envoie pas `beforeinstallprompt` et iOS n'en a pas : la carte donne alors les gestes à faire.
+  **Limite** : Chrome Android n'installe une vraie appli (plein écran) qu'en HTTPS ; en `http://` il ne
+  crée qu'un raccourci qui s'ouvre dans le navigateur. Safari iOS, lui, ouvre en plein écran même en `http://`.
+
 ## Conception visuelle
 
 - Thème **porcelaine** le jour, **nuit** après le coucher du soleil (point `daylight` de la

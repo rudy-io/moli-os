@@ -8,6 +8,8 @@ data_dir = "/data"
 worker_threads = 2
 # Names/IPs this instance is reached by, besides localhost (DNS-rebinding guard).
 allowed_hosts = ["192.168.0.10", "moli.local"]
+# The name of the dashboard once put on a phone's home screen (default "Moli").
+# app_name = "Moli"
 
 # Reached from the Internet through a Cloudflare tunnel behind Cloudflare
 # Access: Moli checks Access's signed assertion itself and recognizes the

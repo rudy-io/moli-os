@@ -23,7 +23,7 @@ export const home = $state({
   now: Date.now(),
 });
 
-function readPref(key, fallback) {
+export function readPref(key, fallback) {
   try {
     return localStorage.getItem(key) ?? fallback;
   } catch {

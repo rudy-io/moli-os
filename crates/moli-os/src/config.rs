@@ -18,6 +18,8 @@ data_dir = {data_dir}
 # Les noms par lesquels on joint Moli (garde contre le rebinding DNS) ; une
 # adresse IP tapée telle quelle marche toujours.
 # allowed_hosts = ["moli.local"]
+# Le nom du tableau de bord une fois posé sur l'écran d'accueil d'un téléphone (défaut : Moli).
+# app_name = "Moli"
 
 # Les appareils : un bloc [[driver]] par intégration (integrations/<nom>/onboarding.md),
 # puis redémarrer Moli. Par exemple, Zigbee par un Zigbee2MQTT existant :
@@ -126,6 +128,11 @@ pub struct Server {
     /// nobody coming through Cloudflare is recognized).
     #[serde(default)]
     pub access: Option<moli_api::AccessConfig>,
+    /// The name the dashboard bears when put on a phone's home screen
+    /// (absent: "Moli"). It lives here, not in the repository: it may be a
+    /// person's name.
+    #[serde(default)]
+    pub app_name: Option<String>,
     /// The house's language (`locales/<language>/`): its words, its
     /// assistant, its dashboard. The one chosen at the installation wins.
     #[serde(default = "default_language")]
@@ -158,6 +165,7 @@ impl Default for Server {
             allowed_hosts: Vec::new(),
             history_days: default_history_days(),
             access: None,
+            app_name: None,
             language: default_language(),
             demo: false,
             demo_seed: None,

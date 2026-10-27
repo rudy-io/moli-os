@@ -452,5 +452,11 @@
   "commun.code.saisis_one": "{count} chiffre saisi",
   "commun.code.saisis_other": "{count} chiffres saisis",
   "commun.code.effacer": "Effacer",
-  "commun.code.nouveau_choisir": "Choisir un nouveau code"
+  "commun.code.nouveau_choisir": "Choisir un nouveau code",
+  "commun.installer.titre": "Installer {nom}",
+  "commun.installer.texte": "Un raccourci sur l’écran d’accueil, qui s’ouvre en plein écran comme une appli.",
+  "commun.installer.bouton": "Installer",
+  "commun.installer.ios": "Touche Partager, puis « Sur l’écran d’accueil ».",
+  "commun.installer.android": "Ouvre le menu ⋮ du navigateur, puis « Ajouter à l’écran d’accueil ».",
+  "commun.installer.masquer": "Ne plus afficher"
 }
