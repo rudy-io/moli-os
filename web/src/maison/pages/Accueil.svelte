@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending, reachable } from '../lib/home.svelte.js';
-  import { isPrinter, phase } from '../lib/printers.js';
+  import { isPrinter, phase, duration } from '../lib/printers.js';
+  import { isPaperPrinter, onMinutes, onLevel } from '../lib/paper.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import LightTile from '../ui/LightTile.svelte';
@@ -14,6 +15,7 @@
   import HeatingSummary from '../ui/HeatingSummary.svelte';
   import CoversSummary from '../ui/CoversSummary.svelte';
   import CoffeeHome from '../ui/CoffeeHome.svelte';
+  import PrinterHome from '../ui/PrinterHome.svelte';
   import { isCoffee } from '../lib/coffee.js';
   import { energy, useEnergy } from '../lib/energy-live.svelte.js';
 
@@ -110,6 +112,17 @@
         list.push({ tone: 'alert', icon: 'printer3d', text: t('maison.accueil.impression_erreur', { name: nameOf(p.id) }), href: '#/impression' });
       }
     }
+    // A paper printer left on: a word after 3 hours, a worry after 12.
+    for (const p of Object.values(hub.devices).filter(isPaperPrinter)) {
+      const level = onLevel(p, home.now);
+      if (!level) continue;
+      const time = duration(onMinutes(p, home.now));
+      list.push(
+        level === 'too_long'
+          ? { tone: 'alert', icon: 'printer', text: t('maison.accueil.imprimante_oubliee', { name: nameOf(p.id), time }), href: '#/impression' }
+          : { tone: 'warm', icon: 'printer', text: t('maison.accueil.imprimante_longtemps', { name: nameOf(p.id), time }), href: '#/impression' },
+      );
+    }
     if (value('energie:maison', 'over_budget') === true) {
       const bill = value('energie:maison', 'bill_projection');
       list.push({ tone: 'warm', icon: 'bolt', text: t('maison.accueil.facture', { bill: num(bill) }), href: '#/energie' });
@@ -135,6 +148,8 @@
   const coffees = $derived(Object.values(hub.devices).filter(isCoffee).sort((a, b) => a.id.localeCompare(b.id)));
   const coffeesOn = $derived(coffees.filter((c) => reachable(c.id)));
   const coffeesOff = $derived(coffees.filter((c) => !reachable(c.id)));
+  // A paper printer: at the very top while it is on, above the coffee machine.
+  const papersOn = $derived(Object.values(hub.devices).filter((d) => isPaperPrinter(d) && reachable(d.id) && d.online === true).sort((a, b) => a.id.localeCompare(b.id)));
   const outside = $derived(!!(out.weather || out.air || out.pool));
 
   const tv = $derived(cfg.salon?.tv);
@@ -198,6 +213,7 @@
   </section>
 
   <div class="grid">
+    {#each papersOn as p (p.id)}<div class="printer-top"><PrinterHome id={p.id} /></div>{/each}
     {#each coffeesOn as c (c.id)}<div class="coffee-top"><CoffeeHome id={c.id} wide /></div>{/each}
     <div class="heating"><HeatingSummary /></div>
     <div class="covers"><CoversSummary /></div>
@@ -361,6 +377,7 @@
     grid-column: span 6;
   }
 
+  .printer-top,
   .coffee-top {
     grid-column: span 12;
     container-type: inline-size;

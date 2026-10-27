@@ -16,6 +16,24 @@ const RETRIES = 40;
 
 export const isPaperPrinter = (d) => d?.printer === true;
 
+/** On for this long, a printer is worth a word; for this long, it is a worry. */
+const LONG_ON = 3 * 3_600_000;
+const TOO_LONG_ON = 12 * 3_600_000;
+
+/** How long a paper printer has been on, in minutes (Moli says since when
+ *  it answers); null when it is off or Moli does not know. */
+export function onMinutes(d, now = Date.now()) {
+  if (!d || d.online !== true || typeof d.online_since !== 'number') return null;
+  return Math.max(0, Math.floor((now - d.online_since) / 60_000));
+}
+
+/** « long » after 3 hours on, « too_long » after 12; null before. */
+export function onLevel(d, now = Date.now()) {
+  const m = onMinutes(d, now);
+  if (m == null) return null;
+  return m * 60_000 >= TOO_LONG_ON ? 'too_long' : m * 60_000 >= LONG_ON ? 'long' : null;
+}
+
 export const isPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
 /** The canvas as a JPEG, then freed (Safari caps the canvases' memory). */

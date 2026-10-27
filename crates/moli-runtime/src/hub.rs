@@ -188,6 +188,9 @@ pub struct DeviceView {
     pub device: Arc<Device>,
     pub label: Label,
     pub online: Option<bool>,
+    /// Since when it has been online (ms; this run of Moli at the earliest).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub online_since: Option<u64>,
     pub state: BTreeMap<Arc<str>, Sample>,
     /// Images on demand (`/api/devices/{id}/snapshot`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -265,6 +268,9 @@ struct Model {
     /// published it yet in this run).
     restored: States,
     availability: HashMap<DeviceId, bool>,
+    /// When each online device came online (ms): a printer left on for hours
+    /// is worth a word.
+    online_since: HashMap<DeviceId, u64>,
     /// Devices taken offline because their driver failed, with what they
     /// were before: given back when the driver runs again, unless it said
     /// something itself in between (a group that nothing ever re-announces
@@ -1323,6 +1329,12 @@ impl Hub {
                         Some(online) => model.availability.insert(device.clone(), online),
                         None => model.availability.remove(&device),
                     };
+                    if before == Some(true) {
+                        model
+                            .online_since
+                            .entry(device.clone())
+                            .or_insert_with(now_ms);
+                    }
                     back.push(device);
                 }
             }
@@ -1411,6 +1423,7 @@ impl Hub {
             let mut model = self.write();
             model.states.remove(id);
             model.availability.remove(id);
+            model.online_since.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
             model.devices.remove(id).is_some()
@@ -1601,6 +1614,14 @@ impl Hub {
             }
             // The driver speaks for it again.
             model.held_offline.remove(device);
+            if online {
+                model
+                    .online_since
+                    .entry(device.clone())
+                    .or_insert_with(now_ms);
+            } else {
+                model.online_since.remove(device);
+            }
             model.availability.insert(device.clone(), online) != Some(online)
         };
         if changed {
@@ -1624,6 +1645,7 @@ impl Hub {
                 .collect();
             ids.into_iter()
                 .filter(|id| {
+                    model.online_since.remove(id);
                     let before = model.availability.insert(id.clone(), false);
                     if before == Some(false) {
                         return false;
@@ -1668,6 +1690,7 @@ impl Model {
             device: Arc::clone(device),
             label: self.labels.get(&device.id).cloned().unwrap_or_default(),
             online: self.availability.get(&device.id).copied(),
+            online_since: self.online_since.get(&device.id).copied(),
             state: self.states.get(&device.id).cloned().unwrap_or_default(),
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),

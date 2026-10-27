@@ -304,6 +304,7 @@ mod tests {
             device: Arc::new(device),
             label: moli_core::Label::default(),
             online: Some(true),
+            online_since: None,
             state: [
                 (Arc::from("on"), sample(Value::Bool(on))),
                 (Arc::from("mode"), sample(Value::Text(mode.into()))),

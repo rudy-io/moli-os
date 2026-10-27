@@ -356,6 +356,7 @@ mod tests {
             }),
             label: moli_core::Label::default(),
             online: None,
+            online_since: None,
             state: BTreeMap::new(),
             camera: false,
             printer: false,
