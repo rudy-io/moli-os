@@ -120,11 +120,6 @@
       {#if d?.model || d?.manufacturer}<span class="muted">{[d.manufacturer, d.model].filter(Boolean).join(' ')}</span>{/if}
     </div>
     <span class="chip {tone}">{status}</span>
-    {#if ok}
-      <button class="round" onclick={() => act(`${id}/identify`, true, t('salon.papier.act_clignoter', { nom: nameOf(id) }))} title={t('salon.papier.clignoter_titre')} aria-label={t('salon.papier.clignoter')}>
-        <Icon name="flash" size={18} />
-      </button>
-    {/if}
   </div>
 
   {#if inks.length}

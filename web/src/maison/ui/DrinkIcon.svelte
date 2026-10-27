@@ -58,9 +58,40 @@
   const known = $derived(drink in CUPS || drink in GLASSES);
   const shape = $derived(known ? drink : 'coffee');
   const glass = $derived(GLASSES[shape]);
+
+  // The drawing's box (strokes included), to set it in the middle of the
+  // 32 × 32 square: the drawings share one floor, so left as they are they
+  // sit low. A cup's handle is `handle(…)` wide; the foam of a cappuccino
+  // rises above its rim, a hot water's steam above its cup.
+  const LINE = 0.65;
+  const SAUCER = 0.8;
+  const EXTRA_TOP = { cappuccino: 18 - 3.25, hot_water: 3.5 };
+  function extent(s) {
+    const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    const grow = (x0, y0, x1, y1, pad = LINE) => {
+      box.x0 = Math.min(box.x0, x0 - pad);
+      box.y0 = Math.min(box.y0, y0 - pad);
+      box.x1 = Math.max(box.x1, x1 + pad);
+      box.y1 = Math.max(box.y1, y1 + pad);
+    };
+    if (GLASSES[s]) {
+      const [x, top, w] = GLASSES[s].at;
+      grow(x, GLASSES[s].dome ? top - w / 6 : top, x + w, 29);
+    } else {
+      for (const [cx, w] of SAUCERS[s] ?? []) grow(cx - w / 2, 29.2, cx + w / 2, 29.2, SAUCER);
+      for (const [x, top, w, h] of CUPS[s]) grow(x, top, x + w + 1 + (h > 14 ? 3.4 : h > 9 ? 2.6 : 1.9), top + h);
+      if (EXTRA_TOP[s]) grow(box.x0 + LINE, EXTRA_TOP[s], box.x1 - LINE, EXTRA_TOP[s]);
+    }
+    return box;
+  }
+  const centred = $derived.by(() => {
+    const b = extent(shape);
+    return `translate(${(16 - (b.x0 + b.x1) / 2).toFixed(2)} ${(16 - (b.y0 + b.y1) / 2).toFixed(2)})`;
+  });
 </script>
 
 <svg class="drink-icon" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true" focusable="false">
+  <g transform={centred}>
   {#if glass}
     {@const [x, top, w] = glass.at}
     {@const floor = 28.4}
@@ -91,6 +122,7 @@
       <path d="M12 11.5q-1.5 -2 0 -4t0 -4M15.5 11.5q-1.5 -2 0 -4t0 -4M19 11.5q-1.5 -2 0 -4t0 -4" class="line steam" />
     {/if}
   {/if}
+  </g>
 </svg>
 
 <style>

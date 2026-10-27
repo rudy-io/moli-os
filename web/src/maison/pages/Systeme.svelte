@@ -103,7 +103,9 @@
 
   // Bricks: their icon here, their description in the catalog (systeme.briques.<id>.desc).
   const BRICKS = { guard: 'shield', history: 'history', energy: 'bolt', automations: 'robot', assistant: 'sparkles', cameras: 'cctv' };
-  const brickWord = (id) => (Object.hasOwn(BRICKS, id) ? t(`systeme.briques.${id}.desc`) : '');
+  // History says how long it keeps things (36500 days or more: no limit).
+  const keptFor = (days) => (days == null ? '' : days >= 36500 ? t('systeme.briques.history.sans_limite') : t('systeme.briques.history.jours', { count: days }));
+  const brickWord = (b) => (Object.hasOwn(BRICKS, b.id) ? t(`systeme.briques.${b.id}.desc`, { kept: keptFor(b.facts?.retention_days) }) : '');
   const SURFACES = { maison: 'home', atelier: 'atelier', mcp: 'robot', rest: 'branch' };
 
   // Commandable devices in no room: nobody can tell whether they sit in a
@@ -317,7 +319,7 @@
         {:else if chosen.kind === 'brick'}
           {@const b = chosen.item}
           <h3>{b.name} <small class="muted">{b.active ? t('systeme.page.active') : t('systeme.page.inactive')}</small></h3>
-          <p>{brickWord(b.id)}</p>
+          <p>{brickWord(b)}</p>
           <p class="how">{brickFacts(b)}</p>
         {:else}
           {@const s = chosen.item}

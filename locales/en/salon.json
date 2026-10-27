@@ -122,7 +122,6 @@
   "salon.securite.calme": "no motion",
 
   "salon.impression.titre": "Printing",
-  "salon.impression.sous_titre": "The 3D printers, how each print is going, and the controls (only a person can pause or cancel), plus the paper printer.",
   "salon.impression.aucune": "Moli doesn’t know of any printers yet.",
   "salon.impression.phase.printing": "Printing",
   "salon.impression.phase.paused": "Paused",
@@ -157,9 +156,6 @@
 
   "salon.papier.imprimante": "Printer",
   "salon.papier.prete": "Ready",
-  "salon.papier.act_clignoter": "{nom}: blink",
-  "salon.papier.clignoter_titre": "Make it blink (to find it)",
-  "salon.papier.clignoter": "Make it blink",
   "salon.papier.zero_pour_cent": "The printer says 0%: cartridges empty, or refilled (it can no longer measure them).",
   "salon.papier.pages_imprimees_one": "{n} page printed since it was new",
   "salon.papier.pages_imprimees_other": "{n} pages printed since it was new",

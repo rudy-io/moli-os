@@ -3,7 +3,7 @@
 ## Historique (`crates/moli-history`)
 
 - SQLite `data/history.db`, enregistrement **au changement** (le hub n'émet que les
-  changements), 30 jours (`[server] history_days` ; `36500` pour tout garder), la dernière valeur de chaque point jamais
+  changements), 30 jours par défaut (`[server] history_days` ; `36500` pour tout garder ; la page Système affiche la durée réellement réglée), la dernière valeur de chaque point jamais
   purgée (une valeur stable a toujours une valeur « avant la fenêtre »).
 - Lecture : `series(point, from, to, max_points)` → valeurs brutes, ou seaux (moyenne, min,
   max, nombre) quand il y en a trop.

@@ -129,6 +129,16 @@
     }),
   );
 
+  // « Tarif » draws what was billed: the bars and their scale in euros
+  // (kWh when no price is known).
+  const inEuros = $derived(by !== 'devices' && bars.some((b) => b.cost != null));
+  const drawn = (bar, id) => {
+    const a = bar.amounts.get(id);
+    return (inEuros ? a?.cost : a?.kwh) ?? 0;
+  };
+
+  const cur = $derived(report?.currency ?? '€');
+
   // Over the period, each part: kWh, euros, off-peak and peak.
   const sumOf = (list) => {
     const priced = list.some((a) => a.cost != null);
@@ -174,7 +184,6 @@
   // The table: the hovered bar's figures, else the period's, in the period's order.
   const rows = $derived(order.map((s) => ({ s, a: shown ? sumOf([shown.amounts.get(s.id)]) : totals.get(s.id) })));
   const sumRow = $derived(sumOf(rows.map((r) => ({ kwh: r.a.kwh, cost: r.a.cost, split: r.a.split }))));
-  const cur = $derived(report?.currency ?? '€');
   const zero = (v) => v == null || v < 0.0005;
   // In the table: the column says the unit; nothing drawn is a plain 0.
   const k = (v) => (zero(v) ? '0' : kwh(v));
@@ -195,9 +204,9 @@
   <StackedBars
     {bars}
     {order}
-    amount={(bar, id) => bar.amounts.get(id)?.kwh ?? 0}
+    amount={drawn}
     tick={(bar, i) => tick(bar.start, i)}
-    rules={(v) => `${kwh(v)} kWh`}
+    rules={(v) => (inEuros ? euros(v, cur) : `${kwh(v)} kWh`)}
     label={t('energie.chart.conso')}
     bind:hover />
 

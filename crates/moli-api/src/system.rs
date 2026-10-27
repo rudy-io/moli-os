@@ -65,7 +65,7 @@ pub(crate) async fn system(
                 "pending_approvals": snapshot.approvals.len(),
             },
         },
-        { "id": "history", "name": moli_i18n::tr!("serveur.systeme.brique.history"), "active": history.is_some(), "facts": { "db_bytes": size("history.db") } },
+        { "id": "history", "name": moli_i18n::tr!("serveur.systeme.brique.history"), "active": history.is_some(), "facts": { "db_bytes": size("history.db"), "retention_days": history.as_ref().and_then(moli_history::History::retention_days) } },
         { "id": "energy", "name": moli_i18n::tr!("serveur.systeme.brique.energy"), "active": energy.is_some(), "facts": energy_facts },
         { "id": "automations", "name": moli_i18n::tr!("serveur.systeme.brique.automations"), "active": autos.is_some(), "facts": automation_facts },
         {

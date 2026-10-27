@@ -17,14 +17,18 @@
 <div class="impression">
   <header>
     <h1 class="page-title">{t('salon.impression.titre')}</h1>
-    <p class="page-sub">{t('salon.impression.sous_titre')}</p>
   </header>
 
   {#if printers.length || paper.length}
-    <div class="grid">
-      {#each printers as p (p.id)}
-        <PrinterCard id={p.id} />
-      {/each}
+    {#if printers.length}
+      <div class="grid">
+        {#each printers as p (p.id)}
+          <PrinterCard id={p.id} />
+        {/each}
+      </div>
+    {/if}
+    <!-- The paper printer's tile: a third of the page at most (all of it on a phone). -->
+    <div class="paper-grid">
       {#each paper as p (p.id)}
         <PaperPrinterCard id={p.id} />
       {/each}
@@ -46,5 +50,11 @@
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
     gap: 20px;
     align-items: start;
+  }
+
+  .paper-grid {
+    display: grid;
+    grid-template-columns: minmax(0, min(100%, max(33.333%, 380px)));
+    gap: 20px;
   }
 </style>

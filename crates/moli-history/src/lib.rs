@@ -42,6 +42,7 @@ pub struct Options {
 #[derive(Clone, Debug)]
 pub struct History {
     store: Arc<Store>,
+    retention_days: Option<u32>,
 }
 
 impl History {
@@ -66,12 +67,28 @@ impl History {
             record(source, batches, cancel).await;
             let _ = writer.await;
         });
-        Ok((Self { store }, recorder))
+        Ok((
+            Self {
+                store,
+                retention_days: Some(options.retention_days),
+            },
+            recorder,
+        ))
     }
 
     #[must_use]
     pub fn from_store(store: Arc<Store>) -> Self {
-        Self { store }
+        Self {
+            store,
+            retention_days: None,
+        }
+    }
+
+    /// How many days of history are kept (`None` when the handle was not
+    /// started with a retention pass).
+    #[must_use]
+    pub fn retention_days(&self) -> Option<u32> {
+        self.retention_days
     }
 
     pub async fn series(
