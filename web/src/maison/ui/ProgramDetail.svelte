@@ -31,7 +31,7 @@
   let resending = $state(false);
   async function resend() {
     resending = true;
-    await act(`${id}/week_program`, JSON.stringify({ resend: true }), t('commun.programme.label_renvoyer', { name }));
+    await act(`${id}/week_program_resend`, true, t('commun.programme.label_renvoyer', { name }));
     resending = false;
   }
   // Editing: the week being drawn, seven days of 96 quarters (null: a day

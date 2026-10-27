@@ -13,15 +13,17 @@
 //! Saving a program also sends the parts the cloud holds without setpoints,
 //! so that the module holds what is shown.
 //!
-//! The cloud's copy is the reference. A write is checked part by part
-//! against it (`checking`), the parts it never takes sent once more, and
-//! those it still lacks said with the week (`missing`) until the cloud
+//! The cloud's copy is the reference. A write is followed here from end to
+//! end ([`Kept::sent`], [`Kept::read_back`]): read back part by part against
+//! the cloud's copy (`checking`), the parts it never takes sent once more,
+//! and those it still lacks said with the week (`missing`) until the cloud
 //! rewrites them: seen 26 Oct 2026, a program copied to a heater, four of
 //! its 28 parts never rewritten, and nothing said.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::program::{self, DAYS, PARTS, SLOTS};
 
@@ -35,6 +37,16 @@ pub type Shared = Arc<Mutex<Kept>>;
 const ORDERS: usize = SLOTS / 2;
 /// A week's slots: 28 parts of 24.
 const WEEK: usize = DAYS as usize * PARTS as usize * SLOTS;
+
+/// After a write, the cloud's copy is read back this long after the read
+/// before (the module answers in about 5 s): a minute in all. The parts
+/// still not held are then sent once more and read back the same way.
+pub const READ_BACK: [Duration; 4] = [
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+];
 
 #[derive(Debug, Default)]
 pub struct Kept {
@@ -55,10 +67,29 @@ pub struct Kept {
 struct Unconfirmed {
     /// The parts sent.
     wanted: Vec<(String, Vec<u8>)>,
-    /// Still read back (true); else given up, `missing` the parts not
-    /// taken with what the cloud held instead.
-    checking: bool,
-    missing: Vec<(String, Vec<u8>)>,
+    state: Verifying,
+}
+
+#[derive(Debug)]
+enum Verifying {
+    /// Read back `reads` times so far; `resent`: the parts not held were
+    /// sent once more already.
+    Reading { reads: usize, resent: bool },
+    /// Given up: the parts not taken, with what the cloud held instead.
+    NotTaken(Vec<(String, Vec<u8>)>),
+}
+
+/// What to do once a write was read back.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    /// Nothing more: the cloud shows it, or it was given up (said with the
+    /// week).
+    Done,
+    /// Read back again in this long.
+    ReadIn(Duration),
+    /// Send these parts once more, then read back from [`READ_BACK`]'s
+    /// start (or, if they cannot leave, [`Kept::not_taken`]).
+    SendAgain(Vec<(String, Vec<u8>)>),
 }
 
 /// The 28 parts' codes, Monday 0 h first.
@@ -142,12 +173,13 @@ impl Kept {
         }
         // A part not taken that the cloud rewrote since (the write at last,
         // or anyone else's): the cloud's word again.
-        if let Some(u) = self.unconfirmed.get_mut(id)
-            && !u.checking
+        if let Some(Unconfirmed {
+            state: Verifying::NotTaken(missing),
+            ..
+        }) = self.unconfirmed.get_mut(id)
         {
-            u.missing
-                .retain(|(code, held)| parts.get(code) == Some(held));
-            if u.missing.is_empty() {
+            missing.retain(|(code, held)| parts.get(code) == Some(held));
+            if missing.is_empty() {
                 self.unconfirmed.remove(id);
             }
         }
@@ -169,12 +201,11 @@ impl Kept {
         let empty = Parts::new();
         let parts = self.last.get(id).unwrap_or(&empty);
         let mut week = program::week(|day, part| self.part(id, day, part, parts));
-        if let Some(u) = self.unconfirmed.get(id) {
-            if u.checking {
-                week["checking"] = true.into();
-            } else {
-                let missing: Vec<serde_json::Value> = u
-                    .missing
+        match self.unconfirmed.get(id).map(|u| &u.state) {
+            None => {}
+            Some(Verifying::Reading { .. }) => week["checking"] = true.into(),
+            Some(Verifying::NotTaken(missing)) => {
+                let missing: Vec<serde_json::Value> = missing
                     .iter()
                     .filter_map(|(code, _)| program::part_of(code))
                     .map(|(day, part)| {
@@ -188,70 +219,110 @@ impl Kept {
         week
     }
 
-    /// A write sent: checked against the cloud's copy from now on.
-    pub fn checking(&mut self, id: &str, wanted: &[(String, Vec<u8>)]) {
+    /// A write sent (`wanted`: its parts): read back against the cloud's
+    /// copy from now on, first in `READ_BACK[0]`.
+    pub fn sent(&mut self, id: &str, wanted: Vec<(String, Vec<u8>)>) {
+        if wanted.is_empty() {
+            self.unconfirmed.remove(id);
+            return;
+        }
         self.unconfirmed.insert(
             id.to_owned(),
             Unconfirmed {
-                wanted: wanted.to_vec(),
-                checking: true,
-                missing: Vec::new(),
+                wanted,
+                state: Verifying::Reading {
+                    reads: 0,
+                    resent: false,
+                },
             },
         );
     }
 
-    /// The parts of `wanted` the cloud's copy does not hold as sent.
-    #[must_use]
-    pub fn not_held(wanted: &[(String, Vec<u8>)], parts: &Parts) -> Vec<(String, Vec<u8>)> {
-        wanted
-            .iter()
-            .filter(|(code, bytes)| parts.get(code) != Some(bytes))
-            .cloned()
-            .collect()
-    }
-
-    /// The cloud's copy shows the write: nothing more to say.
-    pub fn confirmed(&mut self, id: &str) {
-        self.unconfirmed.remove(id);
-    }
-
-    /// Checking given up: the parts the cloud's copy (`parts`) still lacks.
-    pub fn not_taken(&mut self, id: &str, parts: &Parts) {
-        if let Some(u) = self.unconfirmed.get_mut(id) {
-            u.checking = false;
-            u.missing = Self::not_held(&u.wanted, parts)
-                .into_iter()
-                .map(|(code, _)| {
-                    let held = parts.get(&code).cloned().unwrap_or_default();
-                    (code, held)
-                })
-                .collect();
-            if u.missing.is_empty() {
-                self.unconfirmed.remove(id);
-            }
+    /// The cloud's copy read back after a write (`None`: it could not be
+    /// read): what to do next.
+    pub fn read_back(&mut self, id: &str, parts: Option<&Parts>) -> Next {
+        let Some(Unconfirmed {
+            wanted,
+            state: Verifying::Reading { reads, resent },
+        }) = self.unconfirmed.get_mut(id)
+        else {
+            return Next::Done;
+        };
+        *reads += 1;
+        let missing = parts.map(|parts| not_held(wanted, parts));
+        if missing.as_ref().is_some_and(Vec::is_empty) {
+            tracing::info!(
+                device = id,
+                parts = wanted.len(),
+                "tuya cloud: week program written"
+            );
+            self.unconfirmed.remove(id);
+            return Next::Done;
         }
+        if let Some(wait) = READ_BACK.get(*reads) {
+            return Next::ReadIn(*wait);
+        }
+        if let Some(missing) = missing.filter(|_| !*resent) {
+            tracing::info!(
+                device = id,
+                parts = missing.len(),
+                "tuya cloud: parts of the week program not taken, sent again"
+            );
+            (*reads, *resent) = (0, true);
+            return Next::SendAgain(missing);
+        }
+        self.not_taken(id, parts.unwrap_or(&Parts::new()));
+        Next::Done
+    }
+
+    /// Checking given up: the parts the cloud's copy (`parts`) still lacks,
+    /// said with the week.
+    pub fn not_taken(&mut self, id: &str, parts: &Parts) {
+        let Some(u) = self.unconfirmed.get_mut(id) else {
+            return;
+        };
+        let missing: Vec<(String, Vec<u8>)> = not_held(&u.wanted, parts)
+            .into_iter()
+            .map(|(code, _)| {
+                let held = parts.get(&code).cloned().unwrap_or_default();
+                (code, held)
+            })
+            .collect();
+        if missing.is_empty() {
+            self.unconfirmed.remove(id);
+            return;
+        }
+        tracing::warn!(
+            device = id,
+            parts = missing.len(),
+            "tuya cloud: parts of the week program not taken"
+        );
+        u.state = Verifying::NotTaken(missing);
     }
 
     /// The parts not taken, as they were sent (« Send again »).
     #[must_use]
     pub fn to_resend(&self, id: &str) -> Vec<(String, Vec<u8>)> {
-        self.unconfirmed
-            .get(id)
-            .filter(|u| !u.checking)
-            .map(|u| {
-                u.wanted
-                    .iter()
-                    .filter(|(code, _)| u.missing.iter().any(|(m, _)| m == code))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
+        let Some(Unconfirmed {
+            wanted,
+            state: Verifying::NotTaken(missing),
+        }) = self.unconfirmed.get(id)
+        else {
+            return Vec::new();
+        };
+        wanted
+            .iter()
+            .filter(|(code, _)| missing.iter().any(|(m, _)| m == code))
+            .cloned()
+            .collect()
     }
 
     /// Whether a write to the module is being checked.
     #[must_use]
     pub fn is_checking(&self, id: &str) -> bool {
-        self.unconfirmed.get(id).is_some_and(|u| u.checking)
+        self.unconfirmed
+            .get(id)
+            .is_some_and(|u| matches!(u.state, Verifying::Reading { .. }))
     }
 
     /// A part as its wiring holds it: on switch wiring its orders, then the
@@ -315,6 +386,15 @@ impl Kept {
         }
         Ok(out)
     }
+}
+
+/// The parts of `wanted` the cloud's copy does not hold as sent.
+fn not_held(wanted: &[(String, Vec<u8>)], parts: &Parts) -> Vec<(String, Vec<u8>)> {
+    wanted
+        .iter()
+        .filter(|(code, bytes)| parts.get(code) != Some(bytes))
+        .cloned()
+        .collect()
 }
 
 /// On disk, in the point's words, setpoints only (`null` in a part never
@@ -555,13 +635,25 @@ mod tests {
         cloud.get_mut(TUESDAY).unwrap()[ORDERS..].fill(52);
         kept.seen("fp", cloud.clone(), Some(true));
         let wanted = vec![(TUESDAY.to_owned(), module(Some(34))[TUESDAY].clone())];
-        kept.checking("fp", &wanted);
+        kept.sent("fp", wanted.clone());
         assert!(kept.is_checking("fp"));
-        let week = kept.seen("fp", cloud.clone(), None);
-        assert_eq!(week["checking"], true);
-        assert_eq!(Kept::not_held(&wanted, &cloud), wanted);
-        // Given up: the cloud's copy is shown (26 °C), the part said not taken.
-        kept.not_taken("fp", &cloud);
+        assert_eq!(kept.seen("fp", cloud.clone(), None)["checking"], true);
+        // Read back for a minute (5, 15, 30, 60 s), then sent once more…
+        let mut waits = Vec::new();
+        while let Next::ReadIn(wait) = kept.read_back("fp", Some(&cloud)) {
+            waits.push(wait);
+        }
+        assert_eq!(waits, READ_BACK[1..]);
+        assert_eq!(READ_BACK.iter().sum::<Duration>(), Duration::from_secs(60));
+        assert_eq!(
+            kept.read_back("fp", Some(&cloud)),
+            Next::ReadIn(READ_BACK[1]),
+            "read back again"
+        );
+        // …and given up a minute later: the cloud's copy is shown (26 °C),
+        // the part said not taken.
+        while let Next::ReadIn(_) = kept.read_back("fp", Some(&cloud)) {}
+        assert!(!kept.is_checking("fp"));
         let week = kept.seen("fp", cloud.clone(), None);
         assert_eq!(week["days"][1][1]["celsius"], 26.0, "the cloud's word");
         assert_eq!(
@@ -573,14 +665,39 @@ mod tests {
         let week = kept.seen("fp", module(Some(34)), None);
         assert!(week.get("missing").is_none() && week.get("checking").is_none());
         assert!(kept.to_resend("fp").is_empty());
-        // Confirmed at once: nothing said either.
-        kept.checking("fp", &wanted);
-        kept.confirmed("fp");
+        // Shown at the first read back: nothing said either.
+        kept.sent("fp", wanted.clone());
+        assert_eq!(kept.read_back("fp", Some(&module(Some(34)))), Next::Done);
         assert!(
             kept.seen("fp", module(Some(34)), None)
                 .get("checking")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_write_the_cloud_never_shows_is_sent_once_more() {
+        const TUESDAY: &str = "week_program_18_2_3";
+        let mut kept = Kept::default();
+        let cloud = module(Some(52));
+        let wanted = vec![(TUESDAY.to_owned(), module(Some(34))[TUESDAY].clone())];
+        kept.sent("fp", wanted.clone());
+        for _ in 1..READ_BACK.len() {
+            assert!(matches!(
+                kept.read_back("fp", Some(&cloud)),
+                Next::ReadIn(_)
+            ));
+        }
+        assert_eq!(
+            kept.read_back("fp", Some(&cloud)),
+            Next::SendAgain(wanted.clone())
+        );
+        // Unreadable all along afterwards: given up, every part said.
+        while let Next::ReadIn(_) = kept.read_back("fp", None) {}
+        assert_eq!(kept.to_resend("fp"), wanted);
+        // Nothing to send: nothing followed.
+        kept.sent("fp", Vec::new());
+        assert!(!kept.is_checking("fp") && kept.to_resend("fp").is_empty());
     }
 
     #[test]

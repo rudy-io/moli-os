@@ -291,6 +291,7 @@
   "pilotes.tuya.temperature": "Température",
   "pilotes.tuya.consigne": "Consigne",
   "pilotes.tuya.programme": "Programme de la semaine",
+  "pilotes.tuya.programme_renvoyer": "Renvoyer les blocs non pris",
   "pilotes.micronova.marche": "En marche",
   "pilotes.micronova.etat": "État",
   "pilotes.micronova.temperature": "Température",

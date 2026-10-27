@@ -292,18 +292,33 @@ impl TuyaDevice {
                 .dps
                 .iter()
                 .filter_map(|dp| dp.point(self.key(dp)))
-                .chain(crate::program::kept_by(&self.dps).then(|| PointSpec {
-                    key: crate::program::POINT.into(),
-                    label: moli_i18n::tr("pilotes.tuya.programme").into(),
-                    kind: Kind::Text,
-                    // Written through the cloud (`cloud::write_programs`).
-                    access: Access {
-                        read: true,
-                        write: true,
-                    },
-                    unit: None,
-                    semantic: Semantic::Other,
-                }))
+                .chain(
+                    crate::program::kept_by(&self.dps)
+                        .then(|| {
+                            // Written through the cloud (`cloud::write_programs`).
+                            [
+                                (crate::program::POINT, "pilotes.tuya.programme", Kind::Text),
+                                (
+                                    crate::program::RESEND,
+                                    "pilotes.tuya.programme_renvoyer",
+                                    Kind::Binary,
+                                ),
+                            ]
+                            .map(|(key, label, kind)| PointSpec {
+                                key: key.into(),
+                                label: moli_i18n::tr(label).into(),
+                                kind,
+                                access: Access {
+                                    read: true,
+                                    write: true,
+                                },
+                                unit: None,
+                                semantic: Semantic::Other,
+                            })
+                        })
+                        .into_iter()
+                        .flatten(),
+                )
                 .collect(),
         }
     }

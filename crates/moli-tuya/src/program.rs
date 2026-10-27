@@ -70,6 +70,9 @@ pub const DAY_SLOTS: usize = SLOTS * PARTS as usize;
 
 /// The point a device with a week program shows it under.
 pub const POINT: &str = "week_program";
+/// The button that sends once more the parts of the last write the cloud
+/// never took (« Send again »).
+pub const RESEND: &str = "week_program_resend";
 
 /// Whether a device keeps a week program (its parts are among its DPs).
 #[must_use]

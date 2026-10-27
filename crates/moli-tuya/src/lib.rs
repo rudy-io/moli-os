@@ -350,7 +350,7 @@ async fn serve(
             // `None` once the driver is cancelled.
             command = ctx.next_command() => {
                 let Some(command) = command else { break };
-                if command.key.as_ref() == program::POINT {
+                if [program::POINT, program::RESEND].contains(&command.key.as_ref()) {
                     write_program(command, programs, devices);
                 } else {
                     dispatch(command, orders, devices);
@@ -479,16 +479,22 @@ fn write_program(
         command.reply(Err(moli_i18n::tr!("pilotes.tuya.programme_sans_cloud")));
         return;
     };
-    let moli_core::Value::Text(week) = command.value.clone() else {
-        let message = moli_i18n::tr!("pilotes.tuya.ne_se_regle_pas", point = command.key);
-        command.reply(Err(message));
-        return;
+    let asked = match (command.key.as_ref(), &command.value) {
+        (program::POINT, moli_core::Value::Text(week)) => cloud::Asked::Week(week.clone()),
+        (program::RESEND, moli_core::Value::Bool(true)) => cloud::Asked::Resend,
+        // A button released does nothing.
+        (program::RESEND, moli_core::Value::Bool(false)) => return command.reply(Ok(())),
+        _ => {
+            let message = moli_i18n::tr!("pilotes.tuya.ne_se_regle_pas", point = command.key);
+            command.reply(Err(message));
+            return;
+        }
     };
     let (done, outcome) = oneshot::channel();
     let write = cloud::ProgramWrite {
         device: devices[index].1.id.clone(),
         index,
-        week,
+        asked,
         deadline: command.deadline,
         done,
     };

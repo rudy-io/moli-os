@@ -291,6 +291,7 @@
   "pilotes.tuya.temperature": "Temperature",
   "pilotes.tuya.consigne": "Setpoint",
   "pilotes.tuya.programme": "Week program",
+  "pilotes.tuya.programme_renvoyer": "Send the blocks not taken again",
   "pilotes.micronova.marche": "Running",
   "pilotes.micronova.etat": "State",
   "pilotes.micronova.temperature": "Temperature",
