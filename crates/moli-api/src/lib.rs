@@ -181,7 +181,7 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .map(|dir| dir.join("infra.json"));
     Router::new()
         .merge(weather::routes(options.weather.clone()))
-        .merge(pantry::routes(options.pantry.clone()))
+        .merge(pantry::routes(options.pantry.clone(), humans))
         .route("/api/infra", get(rest::infra))
         .layer(Extension(rest::InfraFile(infra)))
         .route("/api/plan", get(plan::get).put(plan::put))

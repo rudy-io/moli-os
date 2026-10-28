@@ -53,6 +53,7 @@ moli-pantry = { path = "crates/moli-pantry" }
 
 aes = "0.8"
 anyhow = "1"
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "macros"] }
 crc32fast = "1"
 earshot = "1.2"

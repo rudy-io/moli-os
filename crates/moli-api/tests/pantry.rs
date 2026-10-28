@@ -82,8 +82,13 @@ fn temp(name: &str) -> std::path::PathBuf {
     dir
 }
 
-/// A house with a pantry (or without), served on a free port.
-async fn house(name: &str, pantry: bool, demo: bool) -> (String, std::path::PathBuf) {
+/// A house with a pantry (or without), served on a free port, and a handle
+/// on that pantry.
+async fn open_house(
+    name: &str,
+    pantry: bool,
+    demo: bool,
+) -> (String, std::path::PathBuf, Option<Pantry>) {
     let dir = temp(name);
     // The people's passwords are kept in the secrets file.
     let hub = Hub::new(HubOptions {
@@ -94,14 +99,21 @@ async fn house(name: &str, pantry: bool, demo: bool) -> (String, std::path::Path
         ..HubOptions::default()
     })
     .unwrap();
+    let pantry = pantry.then(|| Pantry::open(&hub, &dir).unwrap());
     let options = moli_api::Options {
         ui_pin: Some(moli_api::UiPin::new(PIN)),
         home_path: Some(dir.join("home.json")),
-        pantry: pantry.then(|| Pantry::open(&hub, &dir).unwrap()),
+        pantry: pantry.clone(),
         demo,
         ..moli_api::Options::default()
     };
-    (serve(&hub, &options).await, dir)
+    (serve(&hub, &options).await, dir, pantry)
+}
+
+/// A house with a pantry (or without), served on a free port.
+async fn house(name: &str, pantry: bool, demo: bool) -> (String, std::path::PathBuf) {
+    let (addr, dir, _) = open_house(name, pantry, demo).await;
+    (addr, dir)
 }
 
 #[tokio::test]
@@ -624,4 +636,423 @@ async fn mcp_purchases_provisional_then_confirmed_once() {
     assert_eq!(bought, vec![("drive".into(), 115, "confirmed".into())]);
     drop(store);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+// ---- receipts and purchases ---------------------------------------------------
+
+const HOUR: u64 = 3_600_000;
+
+/// The headers (lower-cased) and the body of a GET, for what is not JSON.
+async fn fetch(addr: &str, path: &str) -> (u16, String, Vec<u8>) {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.unwrap();
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let headers = String::from_utf8_lossy(&raw[..split]).to_lowercase();
+    let status = headers[9..12].parse().unwrap();
+    (status, headers, raw[split + 4..].to_vec())
+}
+
+/// Bytes that start like a JPEG, as the dashboard sends them.
+fn jpeg() -> Vec<u8> {
+    vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F']
+}
+
+fn encoded(bytes: &[u8]) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+}
+
+fn line(label: &str, cents: i64, product: &str) -> moli_pantry::DraftLine {
+    moli_pantry::DraftLine {
+        label: label.into(),
+        name: label.to_lowercase(),
+        qty: 1.0,
+        price_cents: cents,
+        line_cents: cents,
+        keep: true,
+        product: Some(product.into()),
+        ..moli_pantry::DraftLine::default()
+    }
+}
+
+fn draft(total: Option<i64>, lines: Vec<moli_pantry::DraftLine>) -> moli_pantry::ReceiptDraft {
+    moli_pantry::ReceiptDraft {
+        provider: "enseigne-x".into(),
+        store: "Ville-A".into(),
+        at: Some(moli_core::now_ms() - 5 * HOUR),
+        total_cents: total,
+        lines,
+        ..moli_pantry::ReceiptDraft::default()
+    }
+}
+
+/// A pantry with two products and a draft of one receipt (two photos).
+async fn with_draft(name: &str) -> (String, std::path::PathBuf, Pantry, i64) {
+    let (addr, dir, pantry) = open_house(name, true, false).await;
+    let pantry = pantry.unwrap();
+    for (id, label) in [("lait", "Lait"), ("pain", "Pain")] {
+        let product = moli_pantry::Product {
+            id: id.into(),
+            name: label.into(),
+            ..moli_pantry::Product::default()
+        };
+        pantry.save_product(&product).await.unwrap();
+    }
+    let receipt = pantry
+        .add_receipt(
+            vec![jpeg(), jpeg()],
+            draft(
+                Some(320),
+                vec![line("LAIT", 120, "lait"), line("PAIN", 200, "pain")],
+            ),
+            json!({ "lines": [] }),
+            "model-x".into(),
+            "Sam".into(),
+        )
+        .await
+        .unwrap();
+    (addr, dir, pantry, receipt.id)
+}
+
+/// The cookie header of the household's session (the PIN proves the owner).
+async fn owner(addr: &str) -> String {
+    let (status, cookie, body) = request(
+        addr,
+        "POST",
+        "/api/session",
+        &json!({ "pin": PIN }),
+        "",
+        "moli_session",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    format!(
+        "Cookie: {}
+",
+        cookie.unwrap()
+    )
+}
+
+#[tokio::test]
+async fn guest_cannot_send_or_read_receipts() {
+    let (addr, dir, _) = open_house("receipt-guest", true, false).await;
+    let (status, cookie, body) = request(
+        &addr,
+        "POST",
+        "/api/session",
+        &json!({ "pin": PIN }),
+        "",
+        "moli_session",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let owner = format!("Cookie: {}\r\n", cookie.unwrap());
+    let invited = json!({ "name": "Sam", "role": "guest", "rooms": ["Salon"] });
+    call(&addr, "POST", "/api/people", &invited, &owner).await;
+    let (_, body) = call(&addr, "POST", "/api/people/sam/invite", &Json::Null, &owner).await;
+    let outside = "X-Forwarded-For: 203.0.113.9\r\n";
+    let (status, cookie, body) = request(
+        &addr,
+        "POST",
+        "/api/invitation",
+        &json!({ "code": body["code"], "password": "une valise bleue" }),
+        outside,
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let guest = format!(
+        "{outside}Cookie: {}\r\nx-moli-origin: ui\r\n",
+        cookie.unwrap()
+    );
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, &guest).await;
+    assert_eq!(status, 403, "{body}");
+    for path in ["/api/cellier/receipts", "/api/cellier/purchases"] {
+        let (status, body) = call(&addr, "GET", path, &Json::Null, &guest).await;
+        assert_eq!(status, 403, "{path}: {body}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn demo_cannot_send_receipts() {
+    let (addr, dir) = house("receipt-demo", true, true).await;
+    let cookie = owner(&addr).await;
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 403, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn sending_photos_without_an_assistant_creates_nothing() {
+    let (addr, dir, pantry) = open_house("receipt-503", true, false).await;
+    let cookie = owner(&addr).await;
+    // A script without a person's session is refused before the body is read.
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, "").await;
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 503, "{body}");
+    assert!(body["error"].is_string());
+    assert!(pantry.unwrap().receipts(None).await.unwrap().is_empty());
+    let kept = dir.join("receipts");
+    assert!(!kept.exists() || kept.read_dir().unwrap().next().is_none());
+
+    // Bad photos are refused before anything else.
+    let five = json!({ "photos": vec![encoded(&jpeg()); 5] });
+    for bad in [
+        json!({ "photos": [] }),
+        five,
+        json!({ "photos": ["not base64 !"] }),
+        json!({ "photos": [encoded(b"\x89PNG\r\n\x1a\n")] }),
+    ] {
+        let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &bad, &cookie).await;
+        assert_eq!(status, 400, "{bad}: {body}");
+    }
+    let (status, body) = call(&addr, "GET", "/api/cellier/reader", &Json::Null, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({ "allowed": false, "reason": "no assistant" }));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_draft_is_corrected_validated_and_shown_with_the_purchases() {
+    let (addr, dir, _pantry, id) = with_draft("receipt-flow").await;
+    let path = format!("/api/cellier/receipts/{id}");
+
+    let (status, body) = call(
+        &addr,
+        "GET",
+        "/api/cellier/receipts?status=draft",
+        &Json::Null,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body[0]["id"], id);
+    let (status, body) = call(
+        &addr,
+        "GET",
+        "/api/cellier/receipts?status=validated",
+        &Json::Null,
+        "",
+    )
+    .await;
+    assert_eq!((status, &body), (200, &json!([])));
+    let (status, _) = call(
+        &addr,
+        "GET",
+        "/api/cellier/receipts?status=bogus",
+        &Json::Null,
+        "",
+    )
+    .await;
+    assert_eq!(status, 400);
+
+    // A person corrects the reading.
+    let (status, shown) = call(&addr, "GET", &path, &Json::Null, "").await;
+    assert_eq!(status, 200, "{shown}");
+    let mut corrected = shown["draft"].clone();
+    corrected["lines"][1]["price_cents"] = json!(210);
+    corrected["lines"][1]["line_cents"] = json!(210);
+    corrected["store"] = json!("Ville-B");
+    let (status, saved) = call(&addr, "PUT", &path, &corrected, "").await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["draft"]["store"], "Ville-B");
+    assert_eq!(saved["gap_cents"], -10, "the total printed is 320: {saved}");
+
+    // Drafts show next to the purchases before they are validated.
+    let (_, before) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    assert_eq!(before["purchases"], json!([]), "{before}");
+    assert_eq!(before["receipts"][0]["id"], id);
+
+    let validate = format!("{path}/validate");
+    let (status, done) = call(&addr, "POST", &validate, &json!({}), "").await;
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(done["status"], "validated");
+    assert!(done["validated_by"].is_string());
+
+    let (status, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    assert_eq!(status, 200, "{shown}");
+    let bought = shown["purchases"].as_array().unwrap();
+    assert_eq!(bought.len(), 2, "{shown}");
+    assert!(
+        bought
+            .iter()
+            .all(|p| p["receipt"] == id && p["source"] == "ticket")
+    );
+    assert!(bought.iter().any(|p| p["price_cents"] == 210));
+    let receipts = shown["receipts"].as_array().unwrap();
+    assert_eq!(receipts.len(), 1, "{shown}");
+    assert_eq!(receipts[0]["id"], id);
+    assert_eq!(receipts[0]["status"], "validated");
+    assert_eq!(
+        receipts[0]["read"],
+        Json::Null,
+        "no raw reading in the list"
+    );
+
+    // The period is honoured: nothing before the receipt.
+    let (_, empty) = call(
+        &addr,
+        "GET",
+        "/api/cellier/purchases?from=0&to=1000",
+        &Json::Null,
+        "",
+    )
+    .await;
+    assert_eq!(empty["purchases"], json!([]), "{empty}");
+    assert_eq!(empty["receipts"], json!([]), "{empty}");
+
+    // A validated receipt is frozen.
+    let (status, body) = call(&addr, "PUT", &path, &corrected, "").await;
+    assert_eq!(status, 400, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_twin_receipt_needs_force() {
+    let (addr, dir, pantry, first) = with_draft("receipt-twin").await;
+    let (status, _) = call(
+        &addr,
+        "POST",
+        &format!("/api/cellier/receipts/{first}/validate"),
+        &json!({}),
+        "",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let twin = pantry
+        .add_receipt(
+            vec![jpeg()],
+            draft(
+                Some(320),
+                vec![line("LAIT", 120, "lait"), line("PAIN", 200, "pain")],
+            ),
+            json!({}),
+            "model-x".into(),
+            "Sam".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(twin.duplicate_of, Some(first));
+    let path = format!("/api/cellier/receipts/{}/validate", twin.id);
+    let (status, body) = call(&addr, "POST", &path, &json!({}), "").await;
+    assert_eq!(status, 400, "{body}");
+    let (status, body) = call(&addr, "POST", &path, &json!({ "force": false }), "").await;
+    assert_eq!(status, 400, "{body}");
+    let (status, body) = call(&addr, "POST", &path, &json!({ "force": true }), "").await;
+    assert_eq!(status, 200, "{body}");
+    let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    assert_eq!(shown["purchases"].as_array().unwrap().len(), 4);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn dropping_a_draft_erases_its_photos() {
+    let (addr, dir, _pantry, id) = with_draft("receipt-drop").await;
+    let photo = |n: usize| format!("/api/cellier/receipts/{id}/photos/{n}");
+    let (status, headers, bytes) = fetch(&addr, &photo(1)).await;
+    assert_eq!(status, 200, "{headers}");
+    assert!(headers.contains("content-type: image/jpeg"), "{headers}");
+    assert!(
+        headers.contains("cache-control: private, max-age=86400"),
+        "{headers}"
+    );
+    assert_eq!(bytes, jpeg());
+    assert_eq!(fetch(&addr, &photo(2)).await.0, 200);
+    for n in [0, 3, 9] {
+        assert_eq!(fetch(&addr, &photo(n)).await.0, 404, "photo {n}");
+    }
+
+    let path = format!("/api/cellier/receipts/{id}");
+    let (status, body) = call(&addr, "DELETE", &path, &Json::Null, "").await;
+    assert_eq!(status, 204, "{body}");
+    for n in [1, 2] {
+        assert_eq!(fetch(&addr, &photo(n)).await.0, 404, "photo {n} is gone");
+    }
+    let (status, _) = call(&addr, "GET", &path, &Json::Null, "").await;
+    assert_eq!(status, 404);
+    let (status, _) = call(&addr, "DELETE", &path, &Json::Null, "").await;
+    assert_eq!(status, 404);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_purchase_is_corrected_then_dropped() {
+    let (addr, dir, _pantry, id) = with_draft("purchase-edit").await;
+    let validate = format!("/api/cellier/receipts/{id}/validate");
+    call(&addr, "POST", &validate, &json!({}), "").await;
+    let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    let first = shown["purchases"][0]["id"].as_i64().unwrap();
+    let path = format!("/api/cellier/purchases/{first}");
+
+    let fix = json!({ "qty": 2, "price_cents": 110, "product": "pain" });
+    let (status, fixed) = call(&addr, "PUT", &path, &fix, "").await;
+    assert_eq!(status, 200, "{fixed}");
+    assert_eq!(fixed["qty"], 2.0);
+    assert_eq!(fixed["line_cents"], 220, "recomputed: {fixed}");
+    let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    let again = shown["purchases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == first)
+        .unwrap();
+    assert_eq!(again["product"], "pain");
+    assert_eq!(again["price_cents"], 110);
+
+    let unknown = json!({ "qty": 1, "price_cents": 100, "product": "nope" });
+    let (status, _) = call(&addr, "PUT", &path, &unknown, "").await;
+    assert_eq!(status, 404, "unknown product");
+    let negative = json!({ "qty": -1, "price_cents": 100, "product": "pain" });
+    let (status, _) = call(&addr, "PUT", &path, &negative, "").await;
+    assert_eq!(status, 400);
+    let (status, _) = call(&addr, "PUT", "/api/cellier/purchases/999", &fix, "").await;
+    assert_eq!(status, 404);
+
+    let (status, _) = call(&addr, "DELETE", &path, &Json::Null, "").await;
+    assert_eq!(status, 204);
+    let (status, _) = call(&addr, "DELETE", &path, &Json::Null, "").await;
+    assert_eq!(status, 404);
+    let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
+    assert_eq!(shown["purchases"].as_array().unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The contract with the assistant: what `Assistant::read_receipt` gives
+/// (every field of a draft, `at` in ms, no `items_done`) is a draft.
+#[test]
+fn a_reading_from_the_assistant_is_a_draft() {
+    let reading = json!({
+        "provider": "enseigne-x",
+        "store": "Ville-A",
+        "at": 1_790_000_000_000_u64,
+        "total_cents": 1234,
+        "unreadable": false,
+        "lines": [
+            {
+                "label": "LAIT 1L", "name": "lait", "qty": 2, "unit": null,
+                "price_cents": 99, "discount_cents": 10, "line_cents": 188,
+                "vat": 5.5, "aisle": "Cremerie", "keep": true, "reason": "",
+                "product": "lait", "new_product": null
+            },
+            {
+                "label": "SAC", "name": "sac", "qty": 1.5, "unit": "kg",
+                "price_cents": 5, "discount_cents": 0, "line_cents": 8,
+                "vat": null, "aisle": null, "keep": false, "reason": "a bag",
+                "product": null, "new_product": "Sac"
+            }
+        ]
+    });
+    let draft = serde_json::from_value::<moli_pantry::ReceiptDraft>(reading).unwrap();
+    assert_eq!(draft.at, Some(1_790_000_000_000));
+    assert_eq!(draft.lines.len(), 2);
+    assert_eq!(draft.lines[0].product.as_deref(), Some("lait"));
+    assert!(draft.items_done.is_empty());
+    assert!(!draft.lines[1].keep);
 }
