@@ -12,8 +12,8 @@
     "@fontsource-variable/figtree": "^5.3.0",
     "@mdi/js": "^7.4.47",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
-    "svelte": "^5.0.0",
-    "three": "^0.180.0",
+    "svelte": "^5.57.2",
+    "three": "^0.186.1",
     "vite": "^7.0.0"
   },
   "dependencies": {
