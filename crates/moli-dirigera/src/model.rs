@@ -24,7 +24,23 @@ enum Read {
     /// Kelvins → mireds, what Hue and the light fixtures (`moli-lights`)
     /// speak: an IKEA and a Hue lamp are set together.
     Mired,
+    /// `blindsCurrentLevel` → `position`: the hub counts how far down a
+    /// blind is (0 = open), Moli how far open (100 = open).
+    Opening,
+    /// `blindsState` → `moving` (see [`MOVES`]); a state never seen is
+    /// unknown, not a way.
+    Moving,
 }
+
+/// A blind's orders (`control`) and the `blindsState` each one sends: the
+/// blind runs to its end and stops there, or stops where it is
+/// (lpgera/dirigera, tried on a FYRTUR). A state, not a toggle: safe to
+/// send twice.
+const ORDERS: [(&str, &str); 3] = [("open", "up"), ("stop", "stopped"), ("close", "down")];
+
+/// A blind's `blindsState` and its `moving`, spelled as Zigbee2MQTT's
+/// shutters: the dashboard shows the way for `UP` and `DOWN`.
+const MOVES: [(&str, &str); 3] = [("up", "UP"), ("down", "DOWN"), ("stopped", "STOP")];
 
 /// One point fed by one attribute.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +85,7 @@ pub struct Index {
 pub struct Skipped {
     pub device_type: String,
     /// Known to the driver and left out on purpose (the hub itself,
-    /// repeaters, blinds…), as opposed to a type never seen before.
+    /// repeaters, speakers…), as opposed to a type never seen before.
     pub known: bool,
 }
 
@@ -108,6 +124,7 @@ enum Family {
     Outlet,
     Sensor,
     Remote,
+    Blinds,
     /// Not published: `known` when left out on purpose.
     Skipped {
         known: bool,
@@ -121,11 +138,10 @@ fn family(device_type: &str) -> Family {
         "environmentSensor" | "motionSensor" | "occupancySensor" | "lightSensor"
         | "openCloseSensor" | "waterSensor" => Family::Sensor,
         t if t.ends_with("Controller") || t == "genericSwitch" => Family::Remote,
+        "blinds" => Family::Blinds,
         // The hub itself and repeaters (nothing to show), then what v1
-        // leaves for later: blinds need a position in Moli's core first.
-        "gateway" | "repeater" | "blinds" | "airPurifier" | "speaker" => {
-            Family::Skipped { known: true }
-        }
+        // leaves for later.
+        "gateway" | "repeater" | "airPurifier" | "speaker" => Family::Skipped { known: true },
         _ => Family::Skipped { known: false },
     }
 }
@@ -278,6 +294,30 @@ fn spec(key: &str) -> PointSpec {
         "button" => (
             tr!("pilotes.dirigera.bouton"),
             Kind::Text,
+            None,
+            Semantic::Other,
+        ),
+        "position" => (
+            tr!("pilotes.dirigera.ouverture"),
+            numeric(Some(0.0), Some(100.0)),
+            Some(Unit::Percent),
+            Semantic::Position,
+        ),
+        // An order, never a switch: what the dashboard and the assistant
+        // look for to open, stop and close a shutter.
+        "control" => (
+            tr!("pilotes.dirigera.commande"),
+            Kind::Enum {
+                values: ORDERS.map(|(order, _)| Arc::from(order)).to_vec(),
+            },
+            None,
+            Semantic::Other,
+        ),
+        "moving" => (
+            tr!("pilotes.dirigera.deplacement"),
+            Kind::Enum {
+                values: MOVES.map(|(_, moving)| Arc::from(moving)).to_vec(),
+            },
             None,
             Semantic::Other,
         ),
@@ -482,6 +522,27 @@ fn device(
                 points.push(point);
             }
         }
+        Family::Blinds => {
+            // Read where the blind is, sent where it should go.
+            if has("blindsCurrentLevel") || writable("blindsTargetLevel") {
+                add(
+                    &mut entry,
+                    &mut points,
+                    "position",
+                    Some(("blindsCurrentLevel", Read::Opening)),
+                    writable("blindsTargetLevel"),
+                );
+            }
+            // Never read back: `moving` says what the blind does.
+            if writable("blindsState") {
+                let control = add(&mut entry, &mut points, "control", None, true);
+                control.access.read = false;
+            }
+            if has("blindsState") {
+                let feed = Some(("blindsState", Read::Moving));
+                add(&mut entry, &mut points, "moving", feed, false);
+            }
+        }
     }
     for &(attribute, key) in measures(device_type) {
         if has(attribute) {
@@ -606,6 +667,21 @@ impl Index {
                     (Read::Mired, Json::Number(n)) => {
                         n.as_f64().and_then(kelvins).map(|k| Value::Int(mireds(k)))
                     }
+                    // Held to 0-100 first: a level out of range never
+                    // shows as a position out of bounds.
+                    (Read::Opening, Json::Number(n)) => n
+                        .as_i64()
+                        .map(|down| Value::Int(100 - down.clamp(0, 100)))
+                        .or_else(|| {
+                            n.as_f64()
+                                .map(|down| Value::Float(100.0 - down.clamp(0.0, 100.0)))
+                        }),
+                    (Read::Moving, Json::String(state)) => Some(
+                        MOVES
+                            .iter()
+                            .find(|(hub, _)| *hub == state.as_str())
+                            .map_or(Value::Null, |(_, moving)| Value::from(*moving)),
+                    ),
                     _ => None,
                 }
             };
@@ -699,6 +775,15 @@ impl Index {
             ("color", Value::Text(hex)) => {
                 let (hue, saturation) = hex_to_hs(hex)?;
                 json!({ "colorHue": hue, "colorSaturation": saturation })
+            }
+            // Moli counts how far open, the hub how far down.
+            ("position", v) => {
+                let down = 100.0 - v.as_f64()?.clamp(0.0, 100.0);
+                json!({ "blindsTargetLevel": down.round() as i64 })
+            }
+            ("control", Value::Text(order)) => {
+                let (_, state) = ORDERS.iter().find(|(o, _)| **o == **order)?;
+                json!({ "blindsState": state })
             }
             _ => return None,
         };
@@ -1180,13 +1265,203 @@ mod tests {
         );
     }
 
+    /// A blind as lpgera/dirigera publishes one (a real answer), with fake
+    /// values. Nobody here has one: the hub's own spelling, not a capture.
+    fn blind(attributes: &Json, can_receive: &[&str]) -> Json {
+        json!({
+            "id": "s1", "type": "blinds", "deviceType": "blinds", "isReachable": true,
+            "attributes": attributes,
+            "capabilities": {"canSend": [], "canReceive": can_receive},
+            "room": {"id": "r1", "name": "Salon"},
+        })
+    }
+
+    const BLIND_RECEIVES: [&str; 4] = [
+        "customName",
+        "blindsCurrentLevel",
+        "blindsTargetLevel",
+        "blindsState",
+    ];
+
+    #[test]
+    fn a_blind_is_a_position_and_its_orders() {
+        let item = blind(
+            &json!({"customName": "Store", "model": "FYRTUR block-out roller blind",
+                   "manufacturer": "IKEA of Sweden", "batteryPercentage": 93,
+                   "blindsCurrentLevel": 0, "blindsTargetLevel": 0, "blindsState": "stopped"}),
+            &BLIND_RECEIVES,
+        );
+        let mut load = one(item.clone());
+        assert!(load.skipped.is_empty());
+        let store = &load.devices[0];
+        assert_eq!(keys(store), ["position", "control", "moving", "battery"]);
+        let point = |key: &str| store.point(key).unwrap();
+        // How far it is open, as a Zigbee2MQTT shutter: the dashboard's slider.
+        let position = point("position");
+        assert_eq!(position.semantic, Semantic::Position);
+        assert_eq!(position.unit, Some(Unit::Percent));
+        assert_eq!(position.kind, numeric(Some(0.0), Some(100.0)));
+        assert!(position.access.write);
+        // An order in lower case, as Tuya's `control`: what the dashboard and
+        // the assistant look for to open, stop and close.
+        let control = point("control");
+        assert_eq!(
+            control.kind,
+            Kind::Enum {
+                values: ["open", "stop", "close"].map(Arc::from).to_vec()
+            }
+        );
+        assert!(control.access.write);
+        assert!(!control.access.read, "an order, never read back");
+        assert_eq!(control.semantic, Semantic::Other);
+        let moving = point("moving");
+        assert_eq!(
+            moving.kind,
+            Kind::Enum {
+                values: ["UP", "DOWN", "STOP"].map(Arc::from).to_vec()
+            }
+        );
+        assert!(!moving.access.write);
+        assert_eq!(point("battery").semantic, Semantic::Battery);
+        assert!(
+            store.points.iter().all(|p| p.semantic != Semantic::OnOff),
+            "nothing on a blind reads as a switch"
+        );
+
+        // Fully up on the hub (0) is fully open in Moli (100); the order
+        // is never read back.
+        let update = load.index.decode(&item).unwrap();
+        assert_eq!(update.online, Some(true));
+        assert_eq!(
+            update.values,
+            vec![
+                (Arc::from("position"), Value::Int(100)),
+                (Arc::from("moving"), Value::from("STOP")),
+                (Arc::from("battery"), Value::Int(93)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_blind_reads_how_far_open_and_its_way() {
+        let mut load = one(blind(
+            &json!({"blindsCurrentLevel": 0, "blindsState": "stopped"}),
+            &BLIND_RECEIVES,
+        ));
+        let mut event = |attributes: Json| {
+            load.index
+                .decode(&json!({"id": "s1", "attributes": attributes}))
+                .unwrap()
+                .values
+        };
+        // 70 % down on the hub, 30 % open in Moli, on its way down.
+        assert_eq!(
+            event(json!({"blindsCurrentLevel": 70, "blindsState": "down"})),
+            vec![
+                (Arc::from("position"), Value::Int(30)),
+                (Arc::from("moving"), Value::from("DOWN")),
+            ]
+        );
+        assert_eq!(
+            event(json!({"blindsCurrentLevel": 100})),
+            vec![(Arc::from("position"), Value::Int(0))],
+            "fully down = closed"
+        );
+        assert_eq!(
+            event(json!({"blindsCurrentLevel": 33.5})),
+            vec![(Arc::from("position"), Value::Float(66.5))]
+        );
+        assert_eq!(
+            event(json!({"blindsCurrentLevel": 120})),
+            vec![(Arc::from("position"), Value::Int(0))],
+            "out of range: held within the bounds"
+        );
+        assert_eq!(
+            event(json!({"blindsState": "up"})),
+            vec![(Arc::from("moving"), Value::from("UP"))]
+        );
+        // A state never seen: unknown, never a stale way.
+        assert_eq!(
+            event(json!({"blindsState": "calibrating"})),
+            vec![(Arc::from("moving"), Value::Null)]
+        );
+    }
+
+    #[test]
+    fn blind_orders_encode() {
+        let load = one(blind(
+            &json!({"blindsCurrentLevel": 0, "blindsTargetLevel": 0, "blindsState": "stopped"}),
+            &BLIND_RECEIVES,
+        ));
+        let id = &load.devices[0].id;
+        let body = |key: &str, value: Value| load.index.encode(id, key, &value).unwrap().1;
+        // 30 % open in Moli is 70 % down on the hub.
+        assert_eq!(
+            body("position", Value::Float(30.0)),
+            json!([{"attributes": {"blindsTargetLevel": 70}}])
+        );
+        assert_eq!(
+            body("position", Value::Float(100.0)),
+            json!([{"attributes": {"blindsTargetLevel": 0}}])
+        );
+        assert_eq!(
+            body("position", Value::Float(0.0)),
+            json!([{"attributes": {"blindsTargetLevel": 100}}])
+        );
+        assert_eq!(
+            body("position", Value::Float(30.4)),
+            json!([{"attributes": {"blindsTargetLevel": 70}}]),
+            "the hub takes whole steps"
+        );
+        for (order, state) in [("open", "up"), ("stop", "stopped"), ("close", "down")] {
+            assert_eq!(
+                body("control", Value::from(order)),
+                json!([{"attributes": {"blindsState": state}}]),
+                "{order}"
+            );
+        }
+        // Zigbee2MQTT's spelling is not this device's.
+        assert!(
+            load.index
+                .encode(id, "control", &Value::from("OPEN"))
+                .is_none()
+        );
+        assert!(
+            load.index
+                .encode(id, "moving", &Value::from("UP"))
+                .is_none(),
+            "read only"
+        );
+
+        // A hub that takes no order: no `control`, a position to read only.
+        let quiet = one(blind(&json!({"blindsCurrentLevel": 40}), &["customName"]));
+        let store = &quiet.devices[0];
+        assert_eq!(keys(store), ["position"]);
+        assert!(!store.point("position").unwrap().access.write);
+        assert!(
+            quiet
+                .index
+                .encode(&store.id, "position", &Value::Float(50.0))
+                .is_none()
+        );
+
+        // A level to reach but no state to send: a slider, no orders.
+        let level_only = one(blind(
+            &json!({"blindsCurrentLevel": 40}),
+            &["blindsTargetLevel"],
+        ));
+        let store = &level_only.devices[0];
+        assert_eq!(keys(store), ["position"]);
+        assert!(store.point("position").unwrap().access.write);
+    }
+
     #[test]
     fn unknown_and_unsupported_types_are_skipped() {
         let load = load(
             &InstanceId::from("ikea"),
             &[
                 json!({"id": "h", "deviceType": "gateway", "attributes": {"isOn": false}}),
-                json!({"id": "b", "deviceType": "blinds", "attributes": {"blindsCurrentLevel": 0}}),
+                json!({"id": "p", "deviceType": "airPurifier", "attributes": {"isOn": true}}),
                 json!({"id": "x", "deviceType": "teleporter", "attributes": {"isOn": true}}),
                 json!({"deviceType": "light", "attributes": {"isOn": true}}),
             ],
@@ -1200,7 +1475,7 @@ mod tests {
                     known: true
                 },
                 Skipped {
-                    device_type: "blinds".into(),
+                    device_type: "airPurifier".into(),
                     known: true
                 },
                 Skipped {

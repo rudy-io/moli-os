@@ -169,8 +169,9 @@ host = "192.168.1.x"
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
   puissance, courant, tension, énergie), capteurs (température, humidité, PM2,5, COV, CO₂,
-  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis) et batteries.
-  Pas encore : stores, purificateurs, enceintes, pièces et scènes IKEA.
+  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis), stores
+  (position, ouvrir / stop / fermer, mouvement ; non vérifiés sur un vrai store) et batteries.
+  Pas encore : purificateurs, enceintes, pièces et scènes IKEA.
 - **Protocole** : API locale **non officielle**, HTTPS sur **8443**, certificat épinglé (un
   certificat d'usine P-384 valable jusqu'en 2071). Chargement complet `GET /v1/home`, puis
   WebSocket `wss://<hub>:8443/v1` (événements `deviceStateChanged`, `remotePressEvent`…), un
@@ -214,7 +215,12 @@ host = "192.168.1.x"
   `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
   Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
   `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
-  (`single`, `double`, `long`, en `pulse`). `battery` partout où il y a une pile.
+  (`single`, `double`, `long`, en `pulse`). Store : `position` ✎ (sens `position`, 0-100 %,
+  100 = ouvert ; le hub compte à l'envers, 0 = en haut : lue dans `blindsCurrentLevel`,
+  envoyée en `blindsTargetLevel`, inversée), `control` ✎ (`open` / `stop` / `close`, un ordre
+  jamais relu, envoyé en `blindsState` `up` / `stopped` / `down`), `moving` (`UP` / `DOWN` /
+  `STOP` depuis `blindsState`, `null` pour une valeur inconnue) ; reconnu comme volet par le
+  tableau de bord et l'assistant. `battery` partout où il y a une pile.
   Disponibilité : `isReachable` (aussi dans chaque événement).
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
@@ -236,7 +242,8 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
+  inversé, couleur partielle, store (points et sens, position inversée dans les deux sens,
+  ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
@@ -605,7 +612,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
-| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
+| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
