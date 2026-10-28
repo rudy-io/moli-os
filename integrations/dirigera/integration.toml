@@ -22,7 +22,7 @@ vars = []
 options = ["host"]
 
 [origin]
-reused = "aucun code repris : API locale non officielle, lue dans lpgera/dirigera et Leggin/dirigera (MIT), appairage vérifié sur un hub"
+reused = "aucun code repris : API locale non officielle, lue dans lpgera/dirigera et Leggin/dirigera (MIT) ; stores recoupés avec openHAB, Home Assistant (dirigera_platform) et homebridge-dirigera ; appairage vérifié sur un hub"
 author = "agent"
 
 # Replayed by the crate's tests (crates/moli-dirigera/src/model.rs).

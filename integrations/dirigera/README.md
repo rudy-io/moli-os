@@ -20,7 +20,19 @@
   saturation arrondies par le hub ; un nom de pièce avec une espace insécable au bout.
 - Les points viennent des attributs présents, pas seulement du `deviceType` : le vieux
   détecteur TRADFRI n'a pas `isDetected`, un TIMMERFLOTTE se présente en deux appareils.
-- Reste : stores, purificateurs, enceintes, pièces et scènes IKEA ; un produit à plusieurs
+- Stores (`deviceType: blinds` ; FYRTUR, TREDANSEN et PRAKTLYSING dans les réponses
+  publiées) : le hub compte de combien le store est descendu (`blindsCurrentLevel`,
+  `blindsTargetLevel` : 0 = en haut, ouvert ; 100 = en bas, fermé), Moli de combien il est
+  ouvert. `position` (sens `position`, 100 = ouvert) est lue dans `blindsCurrentLevel` et
+  envoyée en `blindsTargetLevel`, inversée. `control` (`open`, `stop`, `close`) envoie
+  `blindsState` `up`, `stopped`, `down` : le store va jusqu'au bout et s'y arrête, ou
+  s'arrête où il est. `moving` (`UP`, `DOWN`, `STOP`) lit `blindsState` ; une valeur
+  inconnue donne `null`. Sources, sans code repris : la documentation de lpgera/dirigera
+  (essayée sur un FYRTUR ; `blindsCurrentLevel` en écriture y est refusé par le hub),
+  Leggin/dirigera, la liaison openHAB (`blind-state` stopped/up/down ; elle garde l'échelle
+  du hub, qui est aussi la sienne), et Home Assistant (dirigera_platform) et
+  homebridge-dirigera, qui inversent de la même façon (`100 - niveau`).
+- Reste : purificateurs, enceintes, pièces et scènes IKEA ; un produit à plusieurs
   fonctions (VALLHORN) reste en plusieurs appareils (`relationId` non regroupé).
 - **Vérifié sur du vrai matériel** (17 octobre 2026, hub DIRIGERA matériel P2.5, firmware
   2.975.3) : appairage par le pilote, chargement, événements, commandes `on`, `brightness`,
@@ -30,4 +42,7 @@
   WebSocket jamais fermé par le hub en 20 min, même sans ping (le ping reste, son `pong`
   prouve que la connexion vit).
 - **Pas encore vu en vrai** : prises, boutons de raccourci, capteurs d'air, d'ouverture et de
-  fuite (écrits d'après les réponses réelles publiées par lpgera/dirigera).
+  fuite (écrits d'après les réponses réelles publiées par lpgera/dirigera). **Stores : non
+  vérifiés sur un vrai store**, écrits d'après le protocole documenté ; à confirmer par
+  quelqu'un qui en a un (ouvrir, stop, fermer, curseur, valeurs de `moving` pendant un
+  mouvement lancé par `position`).
