@@ -199,6 +199,15 @@ fn product_exists(conn: &Connection, id: &str) -> Result<bool, PantryError> {
     )?)
 }
 
+/// The name of a product, if it exists.
+fn product_name(conn: &Connection, id: &str) -> Result<Option<String>, PantryError> {
+    Ok(conn
+        .query_row("SELECT name FROM products WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?)
+}
+
 /// The product a kept line is bought as: the existing one it names, or a new
 /// one made from `new_product` (one per distinct name in the receipt) under
 /// the first free id.
@@ -457,26 +466,27 @@ impl Store {
                 "this receipt looks already recorded: {twin}"
             )));
         }
+        let mut draft_lines = Vec::with_capacity(lines.len());
+        for l in lines {
+            draft_lines.push(DraftLine {
+                label: l.label.clone(),
+                name: product_name(&tx, &l.product)?.unwrap_or_else(|| l.label.clone()),
+                qty: l.qty,
+                unit: l.unit.clone(),
+                price_cents: l.price_cents,
+                discount_cents: l.discount_cents,
+                line_cents: line_cost(l),
+                keep: true,
+                product: Some(l.product.clone()),
+                ..DraftLine::default()
+            });
+        }
         let draft = ReceiptDraft {
             provider: header.provider.clone(),
             store: header.store.clone(),
             at: Some(header.at),
             total_cents: header.total_cents,
-            lines: lines
-                .iter()
-                .map(|l| DraftLine {
-                    label: l.label.clone(),
-                    name: l.label.to_lowercase(),
-                    qty: l.qty,
-                    unit: l.unit.clone(),
-                    price_cents: l.price_cents,
-                    discount_cents: l.discount_cents,
-                    line_cents: line_cost(l),
-                    keep: true,
-                    product: Some(l.product.clone()),
-                    ..DraftLine::default()
-                })
-                .collect(),
+            lines: draft_lines,
             ..ReceiptDraft::default()
         };
         tx.execute(
@@ -497,12 +507,23 @@ impl Store {
         let attached: Vec<Purchase> = lines
             .iter()
             .map(|l| Purchase {
+                provider: header.provider.clone(),
+                store: header.store.clone(),
+                at: header.at,
                 receipt: Some(id),
                 status: "confirmed".into(),
                 ..l.clone()
             })
             .collect();
         insert_lines(&tx, &attached)?;
+        // As a validation does: remember what each printed label stands for.
+        for l in lines.iter().filter(|l| !l.label.trim().is_empty()) {
+            tx.execute(
+                "INSERT INTO label_links(provider, label, product) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(provider, label) DO UPDATE SET product = excluded.product",
+                params![header.provider, label_key(&l.label), l.product],
+            )?;
+        }
         let done = load_receipt(&tx, id)?;
         tx.commit()?;
         tracing::info!(receipt = id, by, "receipt recorded by an agent");
@@ -782,6 +803,37 @@ mod tests {
         }
         assert_eq!(bought[0].line_cents, Some(120));
         assert_eq!(bought[0].discount_cents, 10);
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn an_agent_receipt_dates_its_lines_and_teaches_its_labels() {
+        let (store, dir) = setup("agent-receipt-links");
+        product(&store, "p1", "Céréales");
+        // The lines say other things than the header: the header wins.
+        let mut cereal = ticket("p1", "CHOCO CEREAL 430G", 300);
+        cereal.provider = "enseigne-y".into();
+        cereal.store = "Ville-Z".into();
+        cereal.at = 7;
+        let unknown = ticket("p9", "AUTRE", 100);
+        let done = store
+            .record_receipt(&header(None), &[cereal, unknown], "agent-x", NOW)
+            .unwrap();
+        assert_eq!(done.draft.lines[0].name, "Céréales", "the product's name");
+        assert_eq!(
+            done.draft.lines[1].name, "AUTRE",
+            "else the label as printed"
+        );
+        for p in all_purchases(&store) {
+            assert_eq!(p.provider, "enseigne-x");
+            assert_eq!(p.store, "Ville-A");
+            assert_eq!(p.at, NOW);
+        }
+        // A later photo reading of the chain is pre-filled.
+        let mut later = draft(vec![line("choco  cereal 430g", 310, None)]);
+        later.at = Some(NOW + DAY);
+        let next = store.receipt(create(&store, &later)).unwrap().draft.lines;
+        assert_eq!(next[0].product.as_deref(), Some("p1"));
         cleanup(store, dir);
     }
 

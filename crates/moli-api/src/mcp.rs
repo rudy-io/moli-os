@@ -326,7 +326,7 @@ struct PeriodArgs {
     /// Start of the period, in ms (default: 30 days ago).
     #[serde(default)]
     from: Option<u64>,
-    /// End of the period, in ms (default: now).
+    /// End of the period, in ms (default: now + 1 day).
     #[serde(default)]
     to: Option<u64>,
 }
@@ -872,7 +872,7 @@ impl MoliMcp {
     }
 
     #[tool(
-        description = "Record what was bought, from an order confirmation (source `drive`, status `provisional`) or a receipt (source `ticket`, status `confirmed`). Amounts are in cents: `price_cents` is the unit price and `line_cents` what the line really cost, discount deducted (default `qty` x price - `discount_cents`). With `confirm: true` (and the `basket`), at the pick-up, the basket's drive lines (provisional, or already confirmed) are replaced by `lines`, the corrected ones, always kept as source `drive` and status `confirmed` whatever they say: sending the same confirmation twice records it once. With `receipt` ({provider, store, at, total_cents}), a till receipt you read yourself: it is recorded as a validated receipt and the `lines` (all source `ticket`) are attached to it; never send photos to Moli, you read them yourself; the same receipt sent twice is refused. You record what a human paid; a basket is never paid by an agent. `actor` and `on_behalf_of` are kept on a receipt only."
+        description = "Record what was bought, from an order confirmation (source `drive`, status `provisional`) or a receipt (source `ticket`, status `confirmed`). Amounts are in cents: `price_cents` is the unit price and `line_cents` what the line really cost, discount deducted (default `qty` x price - `discount_cents`). With `confirm: true` (and the `basket`), at the pick-up, the basket's drive lines (provisional, or already confirmed) are replaced by `lines`, the corrected ones, always kept as source `drive` and status `confirmed` whatever they say: sending the same confirmation twice records it once. With `receipt` ({provider, store, at, total_cents}), a till receipt you read yourself: it is recorded as a validated receipt and the `lines` (all source `ticket`) are attached to it; never send photos to Moli, you read them yourself; a receipt with the same chain, minute and total as a recorded one is refused (so a retry is not counted twice). You record what a human paid; a basket is never paid by an agent. `actor` and `on_behalf_of` are kept on a receipt only."
     )]
     async fn pantry_record_purchases(
         &self,
