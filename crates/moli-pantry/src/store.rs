@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS purchases (
 -- A receipt read from photos. `draft` is the editable reading, `read` the model's raw answer;
 -- provider, store, at and total_cents are copies of the draft's, to find a duplicate.
 CREATE TABLE IF NOT EXISTS receipts (
-    id           INTEGER PRIMARY KEY,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,   -- never reused: it names the photo files
     status       TEXT NOT NULL CHECK (status IN ('draft', 'validated')),
     provider     TEXT NOT NULL,
     store        TEXT NOT NULL,

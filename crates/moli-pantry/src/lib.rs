@@ -295,11 +295,14 @@ impl Pantry {
         let dir = self.receipts_dir();
         let written = tokio::task::spawn_blocking(move || write_photos(&dir, id, &photos))
             .await
-            .map_err(|e| PantryError::Internal(e.to_string()))?;
-        if let Err(e) = written {
-            let _ = self.read(move |s| s.abandon_receipt(id)).await;
+            .map_err(|e| e.to_string())
+            .and_then(|done| done.map_err(|e| e.to_string()));
+        if let Err(why) = written {
+            if let Err(e) = self.read(move |s| s.abandon_receipt(id)).await {
+                tracing::warn!(receipt = id, error = %e, "cannot remove the draft left without photos");
+            }
             return Err(PantryError::Internal(format!(
-                "cannot save the photos: {e}"
+                "cannot save the photos: {why}"
             )));
         }
         self.hub.pantry_changed();
@@ -345,9 +348,13 @@ impl Pantry {
     pub async fn abandon_receipt(&self, id: i64) -> Result<(), PantryError> {
         self.write(move |s| s.abandon_receipt(id)).await?;
         let dir = self.receipts_dir();
-        tokio::task::spawn_blocking(move || remove_photos(&dir, id))
+        let erased = tokio::task::spawn_blocking(move || remove_photos(&dir, id))
             .await
-            .map_err(|e| PantryError::Internal(e.to_string()))
+            .map_err(|e| PantryError::Internal(e.to_string()))?;
+        if let Err(e) = erased {
+            tracing::warn!(receipt = id, error = %e, "cannot erase the photos of an abandoned receipt");
+        }
+        Ok(())
     }
 
     pub async fn photos_to_purge(&self, now: u64) -> Result<Vec<(i64, usize)>, PantryError> {

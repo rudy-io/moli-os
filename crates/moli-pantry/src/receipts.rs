@@ -365,7 +365,10 @@ impl Store {
                 unit: line.unit.clone(),
                 ..Purchase::default()
             };
-            check_purchase(&purchase)?;
+            check_purchase(&purchase).map_err(|e| match e {
+                PantryError::Invalid(why) => PantryError::Invalid(format!("line {}: {why}", n + 1)),
+                other => other,
+            })?;
             insert_purchase(&tx, &purchase, None)?;
             if !line.label.trim().is_empty() {
                 tx.execute(
@@ -443,14 +446,23 @@ pub(crate) fn photo_file(dir: &Path, id: i64, n: usize) -> PathBuf {
     dir.join(format!("{id}-{n}.jpg"))
 }
 
-/// Erases every photo of a receipt (and any half-written one). Missing files
-/// are not an error.
-pub(crate) fn remove_photos(dir: &Path, id: i64) {
+/// Erases every photo of a receipt (and any half-written one). A file that is
+/// already missing counts as erased; any other failure is returned (the first
+/// one) after the other files were tried.
+pub(crate) fn remove_photos(dir: &Path, id: i64) -> std::io::Result<()> {
+    let mut failure = None;
     for n in 1..=MAX_PHOTOS {
         let path = photo_file(dir, id, n);
-        let _ = std::fs::remove_file(path.with_extension("jpg.tmp"));
-        let _ = std::fs::remove_file(path);
+        for file in [path.with_extension("jpg.tmp"), path] {
+            match std::fs::remove_file(&file) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    failure.get_or_insert(e);
+                }
+                _ => {}
+            }
+        }
     }
+    failure.map_or(Ok(()), Err)
 }
 
 /// Writes the photos of a receipt, each through a temporary file renamed once
@@ -463,20 +475,31 @@ pub(crate) fn write_photos(dir: &Path, id: i64, photos: &[Vec<u8>]) -> std::io::
         std::fs::write(&tmp, bytes)?;
         std::fs::rename(&tmp, &path)
     });
-    if written.is_err() {
-        remove_photos(dir, id);
+    if written.is_err()
+        && let Err(e) = remove_photos(dir, id)
+    {
+        tracing::warn!(receipt = id, error = %e, "cannot clean up the receipt photos");
     }
     written
 }
 
-/// Erases the photos that are due; returns how many receipts had some.
+/// Erases the photos that are due; returns how many receipts were cleared. A
+/// receipt whose files could not all be erased keeps its photo count, so the
+/// next purge tries again.
 pub(crate) fn purge_old_photos(store: &Store, dir: &Path, now: u64) -> Result<usize, PantryError> {
-    let due = store.photos_to_purge(now)?;
-    for (id, _) in &due {
-        remove_photos(dir, *id);
-        store.forget_photos(*id)?;
+    let mut purged = 0;
+    for (id, _) in store.photos_to_purge(now)? {
+        match remove_photos(dir, id) {
+            Ok(()) => {
+                store.forget_photos(id)?;
+                purged += 1;
+            }
+            Err(e) => {
+                tracing::warn!(receipt = id, error = %e, "cannot erase the receipt photos, will retry");
+            }
+        }
     }
-    Ok(due.len())
+    Ok(purged)
 }
 
 #[cfg(test)]
@@ -645,6 +668,11 @@ mod tests {
             store.validate_receipt(id, "Sam", NOW, false),
             Err(PantryError::Invalid(_))
         ));
+        let mut zero = line("ZERO", 100, Some("p1"));
+        zero.qty = 0.0;
+        let bad = create(&store, &draft(vec![line("LAIT", 120, Some("p1")), zero]));
+        let err = store.validate_receipt(bad, "Sam", NOW, false).unwrap_err();
+        assert!(err.to_string().starts_with("line 2: "), "{err}");
         let unknown = create(&store, &draft(vec![line("X", 100, Some("nope"))]));
         assert!(store.validate_receipt(unknown, "Sam", NOW, false).is_err());
         assert!(
@@ -1040,6 +1068,32 @@ mod tests {
         assert!((1..=2).all(|n| !pantry.photo_path(r.id, n).exists()));
         assert_eq!(pantry.receipt(r.id).await.unwrap().photos, 0);
         assert_eq!(all_purchases(&pantry.store).len(), 1, "the purchases stay");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn photos_that_cannot_be_erased_are_kept_for_the_next_purge() {
+        let (pantry, dir) = pantry("purge-retry");
+        milk(&pantry).await;
+        let d = draft(vec![line("LAIT", 100, Some("p1"))]);
+        let r = add(&pantry, jpeg(1), d).await.unwrap();
+        pantry
+            .validate_receipt(r.id, "Sam", NOW - 91 * DAY, false)
+            .await
+            .unwrap();
+        // A non-empty folder where the photo should be: removing it as a file fails.
+        let path = pantry.photo_path(r.id, 1);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("stuck"), b"x").unwrap();
+
+        assert_eq!(pantry.purge_photos(NOW).await.unwrap(), 0);
+        assert_eq!(pantry.receipt(r.id).await.unwrap().photos, 1, "still due");
+        assert_eq!(pantry.photos_to_purge(NOW).await.unwrap(), vec![(r.id, 1)]);
+
+        std::fs::remove_dir_all(&path).unwrap();
+        assert_eq!(pantry.purge_photos(NOW).await.unwrap(), 1);
+        assert_eq!(pantry.receipt(r.id).await.unwrap().photos, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 
