@@ -1534,6 +1534,7 @@ dependencies = [
  "moli-tuya",
  "moli-weather",
  "moli-z2m",
+ "moli-zwave",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1779,6 +1780,20 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "moli-core",
+ "moli-runtime",
+ "rumqttc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+[[package]]
+name = "moli-zwave"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
  "moli-runtime",
  "rumqttc",
  "serde",

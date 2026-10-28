@@ -1,0 +1,325 @@
+{
+  "success": true,
+  "message": "ok",
+  "args": {},
+  "origin": "getNodes",
+  "result": [
+    {
+      "nodeId": 2,
+      "ready": true,
+      "name": "bureau_lamp",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "1.0",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 2,
+      "productType": "ZWL",
+      "productIdVersion": "02",
+      "productLabel": "ZWL-02",
+      "interviewStage": "Finished",
+      "commandClasses": [32, 38, 114, 132, 133, 134],
+      "commandClassesAvailable": [32, 38, 114, 132, 133, 134],
+      "isListening": true,
+      "isFrequentListening": false,
+      "isSleeping": false,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "values": [
+        {
+          "id": "38-0-currentValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "currentValue",
+          "propertyKey": null,
+          "label": "Current value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Current value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 65
+        },
+        {
+          "id": "38-0-targetValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "targetValue",
+          "propertyKey": null,
+          "label": "Target value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": true,
+            "description": "Target value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 65
+        }
+      ]
+    },
+    {
+      "nodeId": 3,
+      "ready": true,
+      "name": "cuisine_plug",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "1.0",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 3,
+      "productType": "ZWP",
+      "productIdVersion": "03",
+      "productLabel": "ZWP-03",
+      "interviewStage": "Finished",
+      "commandClasses": [32, 50, 114, 133, 134],
+      "commandClassesAvailable": [32, 50, 114, 133, 134],
+      "isListening": true,
+      "isFrequentListening": false,
+      "isSleeping": false,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "values": [
+        {
+          "id": "32-0-currentValue",
+          "commandClassName": "Basic",
+          "commandClass": 32,
+          "endpointIndex": 0,
+          "property": "currentValue",
+          "propertyKey": null,
+          "label": "Current value",
+          "unit": "",
+          "metadata": {
+            "type": "boolean",
+            "readable": true,
+            "writeable": true,
+            "description": "Current state of the basic command class"
+          },
+          "value": true
+        },
+        {
+          "id": "50-0-power",
+          "commandClassName": "Meter",
+          "commandClass": 50,
+          "endpointIndex": 0,
+          "property": "power",
+          "propertyKey": null,
+          "label": "Power",
+          "unit": "W",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Active power"
+          },
+          "value": 12.4
+        }
+      ]
+    },
+    {
+      "nodeId": 5,
+      "ready": true,
+      "name": "garage_sensor",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "2.3",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 5,
+      "productType": "ZWS",
+      "productIdVersion": "05",
+      "productLabel": "ZWS-05",
+      "interviewStage": "Finished",
+      "commandClasses": [31, 49, 53, 114, 133, 134],
+      "commandClassesAvailable": [31, 49, 53, 114, 133, 134],
+      "isListening": false,
+      "isFrequentListening": false,
+      "isSleeping": true,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "values": [
+        {
+          "id": "31-0-Air_temperature",
+          "commandClassName": "Sensor Multilevel",
+          "commandClass": 31,
+          "endpointIndex": 0,
+          "property": "Air_temperature",
+          "propertyKey": null,
+          "label": "Air temperature",
+          "unit": "°C",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Air temperature"
+          },
+          "value": 21.5
+        },
+        {
+          "id": "49-0-Relative_humidity-0",
+          "commandClassName": "Multi Command",
+          "commandClass": 49,
+          "endpointIndex": 0,
+          "property": "Relative_humidity",
+          "propertyKey": 0,
+          "label": "Relative humidity",
+          "unit": "%",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Relative humidity"
+          },
+          "value": 45
+        },
+        {
+          "id": "53-0-batteryLevel",
+          "commandClassName": "Battery",
+          "commandClass": 53,
+          "endpointIndex": 0,
+          "property": "batteryLevel",
+          "propertyKey": null,
+          "label": "Battery level",
+          "unit": "%",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Battery level",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "value": 87
+        }
+      ]
+    },
+    {
+      "nodeId": 7,
+      "ready": true,
+      "name": "couloir_switch",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "1.0",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 7,
+      "productType": "ZWT",
+      "productIdVersion": "07",
+      "productLabel": "ZWT-07",
+      "interviewStage": "Finished",
+      "commandClasses": [37, 114, 133, 134],
+      "commandClassesAvailable": [37, 114, 133, 134],
+      "isListening": true,
+      "isFrequentListening": false,
+      "isSleeping": false,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "values": [
+        {
+          "id": "37-0-currentValue",
+          "commandClassName": "Switch Binary",
+          "commandClass": 37,
+          "endpointIndex": 0,
+          "property": "currentValue",
+          "propertyKey": null,
+          "label": "Current value",
+          "unit": "",
+          "metadata": {
+            "type": "boolean",
+            "readable": true,
+            "writeable": false,
+            "description": "Current state of the switch"
+          },
+          "value": false
+        },
+        {
+          "id": "37-0-targetValue",
+          "commandClassName": "Switch Binary",
+          "commandClass": 37,
+          "endpointIndex": 0,
+          "property": "targetValue",
+          "propertyKey": null,
+          "label": "Target value",
+          "unit": "",
+          "metadata": {
+            "type": "boolean",
+            "readable": true,
+            "writeable": true,
+            "description": "Target state of the switch"
+          },
+          "value": false
+        }
+      ]
+    },
+    {
+      "nodeId": 9,
+      "ready": true,
+      "name": "kitchen_dimmer",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "1.0",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 9,
+      "productType": "ZWD",
+      "productIdVersion": "09",
+      "productLabel": "ZWD-09",
+      "interviewStage": "Finished",
+      "commandClasses": [38, 114, 133, 134],
+      "commandClassesAvailable": [38, 114, 133, 134],
+      "isListening": true,
+      "isFrequentListening": false,
+      "isSleeping": false,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "values": [
+        {
+          "id": "38-0-currentValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "currentValue",
+          "propertyKey": null,
+          "label": "Current value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Current value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 0
+        },
+        {
+          "id": "38-0-targetValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "targetValue",
+          "propertyKey": null,
+          "label": "Target value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": true,
+            "description": "Target value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

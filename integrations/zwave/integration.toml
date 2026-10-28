@@ -1,0 +1,41 @@
+[integration]
+id = "zwave"
+name = "Z-Wave (via zwave-js-ui)"
+# Any Z-Wave node the zwave-js-ui gateway describes: no list per brand.
+brands = []
+models = []
+transport = "mqtt"
+driver = "zwave"
+crate = "moli-zwave"
+
+[discovery]
+# Devices come from the gateway's getNodes API, not from the network.
+mdns = []
+ssdp = []
+# The MQTT broker.
+ports = [1883]
+
+[needs]
+# A broker password, if any, comes from the environment variable named by
+# `password_env`: never from the store, never in moli.toml.
+secrets = []
+vars = []
+# Every option has a default.
+options = []
+
+[origin]
+reused = "protocole MQTT de zwave-js-ui (getNodes, topics valeur/…/set, status)"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-zwave/src/catalog.rs).
+[[fixture]]
+file = "fixtures/get_nodes.json"
+
+[[fixture]]
+file = "fixtures/value_messages.json"
+
+# Anonymized capture of the live gateway's getNodes response (plan 01-03) —
+# regression oracle for the real contract (id/loc fields, values as a map,
+# CC 49 spaced properties, CC 128 battery, meter propertyKeys).
+[[fixture]]
+file = "fixtures/get_nodes_real.json"

@@ -1,0 +1,12 @@
+{
+  "bureau_lamp/38/0/currentValue": "80",
+  "bureau_lamp/38/0/targetValue": "80",
+  "cuisine_plug/32/0/currentValue": "true",
+  "cuisine_plug/50/0/power": "15.2",
+  "garage_sensor/31/0/Air_temperature": "21.5",
+  "garage_sensor/49/0/Relative_humidity/0": "45",
+  "garage_sensor/53/0/batteryLevel": "87",
+  "couloir_switch/37/0/currentValue": "false",
+  "kitchen_dimmer/38/0/targetValue": "40",
+  "inconnu/99/0/quelque_chose": "42"
+}

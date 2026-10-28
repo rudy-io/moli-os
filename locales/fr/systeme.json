@@ -355,5 +355,7 @@
   "systeme.alexa.connecter": "Connecter",
   "systeme.alexa.verification": "Connexion…",
   "systeme.alexa.aide": "Moli ne voit jamais ton mot de passe : il apparaîtra comme un appareil « Moli » de ton compte Amazon, et garde un jeton chiffré dans son coffre.",
-  "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir."
+  "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir.",
+  "systeme.pilotes.zwave.nom": "Z-Wave",
+  "systeme.pilotes.zwave.desc": "Les nœuds Z-Wave (lumières, serrure, capteurs), via la passerelle MQTT de Z-Wave JS UI."
 }

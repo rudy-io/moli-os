@@ -32,6 +32,7 @@ moli-tapo.workspace = true
 moli-shelly.workspace = true
 moli-izypower.workspace = true
 moli-solarman.workspace = true
+moli-zwave.workspace = true
 moli-igd.workspace = true
 moli-ipp.workspace = true
 moli-helpers.workspace = true
