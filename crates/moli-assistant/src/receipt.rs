@@ -305,6 +305,7 @@ fn tidy(
     fill(&mut read, "store", json!(""));
     fill(&mut read, "total_cents", Json::Null);
     fill(&mut read, "unreadable", json!(false));
+    whole_cents(&mut read);
     let at = read
         .remove("at_local")
         .as_ref()
@@ -332,6 +333,9 @@ fn tidy(
             fill(line, "keep", json!(true));
             fill(line, "reason", json!(""));
             fill(line, "discount_cents", json!(0));
+            fill(line, "label", json!(""));
+            fill(line, "name", json!(""));
+            whole_cents(line);
             for field in ["label", "name", "unit", "aisle", "reason", "new_product"] {
                 if let Some(Json::String(words)) = line.get_mut(field) {
                     *words = scrub(words);
@@ -357,6 +361,25 @@ fn tidy(
         }
     }
     Ok(Json::Object(read))
+}
+
+/// A model may write an amount as `99.0`: an amount of cents is a whole
+/// number, and the draft refuses anything else. Every `*_cents` field that
+/// holds a whole float becomes an integer.
+fn whole_cents(object: &mut Map<String, Json>) {
+    for (key, value) in object.iter_mut() {
+        if !key.ends_with("_cents") || !value.is_f64() {
+            continue;
+        }
+        let Some(cents) = value.as_f64() else {
+            continue;
+        };
+        if cents.fract() == 0.0 && cents.abs() < 9e15 {
+            #[allow(clippy::cast_possible_truncation)] // whole and bounded, checked above
+            let whole = cents as i64;
+            *value = json!(whole);
+        }
+    }
 }
 
 /// `field` when it is missing or null.
@@ -812,6 +835,36 @@ mod tests {
         let read = tidy(&said.to_string(), &products(), &chains(), &paris).unwrap();
         assert_eq!(read["lines"][0]["keep"], false);
         assert_eq!(read["lines"][0]["discount_cents"], 30);
+    }
+
+    /// A reading the model wrote with floats for the amounts and without the
+    /// labels is still a reading that fits the draft (it was paid for).
+    #[test]
+    fn whole_floats_and_missing_labels_still_fit_the_draft() {
+        let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+        let loose = json!({
+            "total_cents": 1047.0,
+            "lines": [{
+                "qty": 2.0, "price_cents": 99.0, "line_cents": 198.0,
+                "discount_cents": 0.0, "keep": true,
+            }, {
+                "label": "X", "name": "x", "qty": 1, "price_cents": 10.5, "line_cents": 10,
+            }],
+        });
+        let read = tidy(&loose.to_string(), &products(), &chains(), &paris).unwrap();
+        assert_eq!(read["total_cents"], json!(1047));
+        assert!(read["total_cents"].is_i64());
+        let line = &read["lines"][0];
+        for field in ["price_cents", "line_cents", "discount_cents"] {
+            assert!(line[field].is_i64(), "{field}: {line}");
+        }
+        assert_eq!(line["price_cents"], 99);
+        assert_eq!(
+            (line["label"].as_str(), line["name"].as_str()),
+            (Some(""), Some(""))
+        );
+        // A real fraction of a cent is left as it is (it is not a whole amount).
+        assert!(read["lines"][1]["price_cents"].is_f64());
     }
 
     #[test]

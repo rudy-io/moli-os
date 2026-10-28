@@ -89,6 +89,17 @@ async fn open_house(
     pantry: bool,
     demo: bool,
 ) -> (String, std::path::PathBuf, Option<Pantry>) {
+    open_house_with(name, pantry, demo, None).await
+}
+
+/// The same, with an assistant whose only provider is at `provider` (an
+/// OpenAI-compatible API on the local network).
+async fn open_house_with(
+    name: &str,
+    pantry: bool,
+    demo: bool,
+    provider: Option<String>,
+) -> (String, std::path::PathBuf, Option<Pantry>) {
     let dir = temp(name);
     // The people's passwords are kept in the secrets file.
     let hub = Hub::new(HubOptions {
@@ -104,6 +115,13 @@ async fn open_house(
         ui_pin: Some(moli_api::UiPin::new(PIN)),
         home_path: Some(dir.join("home.json")),
         pantry: pantry.clone(),
+        assistant: provider.map(|base_url| {
+            let config = moli_assistant::Config {
+                base_url,
+                ..moli_assistant::Config::default()
+            };
+            moli_assistant::Assistant::new(hub.clone(), None, None, None, config).unwrap()
+        }),
         demo,
         ..moli_api::Options::default()
     };
@@ -728,11 +746,7 @@ async fn owner(addr: &str) -> String {
     )
     .await;
     assert_eq!(status, 200, "{body}");
-    format!(
-        "Cookie: {}
-",
-        cookie.unwrap()
-    )
+    format!("Cookie: {}\r\n", cookie.unwrap())
 }
 
 #[tokio::test]
@@ -871,7 +885,8 @@ async fn a_draft_is_corrected_validated_and_shown_with_the_purchases() {
     assert_eq!(before["receipts"][0]["id"], id);
 
     let validate = format!("{path}/validate");
-    let (status, done) = call(&addr, "POST", &validate, &json!({}), "").await;
+    let cookie = owner(&addr).await;
+    let (status, done) = call(&addr, "POST", &validate, &json!({}), &cookie).await;
     assert_eq!(status, 200, "{done}");
     assert_eq!(done["status"], "validated");
     assert!(done["validated_by"].is_string());
@@ -917,12 +932,13 @@ async fn a_draft_is_corrected_validated_and_shown_with_the_purchases() {
 #[tokio::test]
 async fn a_twin_receipt_needs_force() {
     let (addr, dir, pantry, first) = with_draft("receipt-twin").await;
+    let cookie = owner(&addr).await;
     let (status, _) = call(
         &addr,
         "POST",
         &format!("/api/cellier/receipts/{first}/validate"),
         &json!({}),
-        "",
+        &cookie,
     )
     .await;
     assert_eq!(status, 200);
@@ -941,11 +957,11 @@ async fn a_twin_receipt_needs_force() {
         .unwrap();
     assert_eq!(twin.duplicate_of, Some(first));
     let path = format!("/api/cellier/receipts/{}/validate", twin.id);
-    let (status, body) = call(&addr, "POST", &path, &json!({}), "").await;
+    let (status, body) = call(&addr, "POST", &path, &json!({}), &cookie).await;
     assert_eq!(status, 400, "{body}");
-    let (status, body) = call(&addr, "POST", &path, &json!({ "force": false }), "").await;
+    let (status, body) = call(&addr, "POST", &path, &json!({ "force": false }), &cookie).await;
     assert_eq!(status, 400, "{body}");
-    let (status, body) = call(&addr, "POST", &path, &json!({ "force": true }), "").await;
+    let (status, body) = call(&addr, "POST", &path, &json!({ "force": true }), &cookie).await;
     assert_eq!(status, 200, "{body}");
     let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
     assert_eq!(shown["purchases"].as_array().unwrap().len(), 4);
@@ -986,7 +1002,9 @@ async fn dropping_a_draft_erases_its_photos() {
 async fn a_purchase_is_corrected_then_dropped() {
     let (addr, dir, _pantry, id) = with_draft("purchase-edit").await;
     let validate = format!("/api/cellier/receipts/{id}/validate");
-    call(&addr, "POST", &validate, &json!({}), "").await;
+    let cookie = owner(&addr).await;
+    let (status, body) = call(&addr, "POST", &validate, &json!({}), &cookie).await;
+    assert_eq!(status, 200, "{body}");
     let (_, shown) = call(&addr, "GET", "/api/cellier/purchases", &Json::Null, "").await;
     let first = shown["purchases"][0]["id"].as_i64().unwrap();
     let path = format!("/api/cellier/purchases/{first}");
@@ -1055,4 +1073,189 @@ fn a_reading_from_the_assistant_is_a_draft() {
     assert_eq!(draft.lines[0].product.as_deref(), Some("lait"));
     assert!(draft.items_done.is_empty());
     assert!(!draft.lines[1].keep);
+}
+
+// ---- reading a receipt end to end, with a provider on the local network -------
+
+/// The requests a mock provider received.
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// A chat provider on 127.0.0.1 that answers every request with `content`
+/// (the words of the model); gives its `base_url` and the requests it got.
+async fn mock_provider(content: &str) -> (String, Asked) {
+    let body = json!({
+        "choices": [{ "message": { "role": "assistant", "content": content } }],
+        "usage": { "prompt_tokens": 3_000, "completion_tokens": 400 },
+    })
+    .to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let asked = Asked::default();
+    let kept = asked.clone();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let (body, kept) = (body.clone(), kept.clone());
+            tokio::spawn(async move {
+                let mut raw = Vec::new();
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = socket.read(&mut buf).await.unwrap_or(0);
+                    raw.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&raw).to_string();
+                    if let Some((head, rest)) = text.split_once("\r\n\r\n") {
+                        let len = head
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if rest.len() >= len {
+                            break;
+                        }
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                }
+                kept.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&raw).to_string());
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    (url, asked)
+}
+
+/// A pantry with a product, an assistant whose model says `content`, and the
+/// cookie of a person.
+async fn reading_house(
+    name: &str,
+    content: &str,
+) -> (String, std::path::PathBuf, Pantry, Asked, String) {
+    let (url, asked) = mock_provider(content).await;
+    let (addr, dir, pantry) = open_house_with(name, true, false, Some(url)).await;
+    let pantry = pantry.unwrap();
+    let product = moli_pantry::Product {
+        id: "lait".into(),
+        name: "Lait".into(),
+        ..moli_pantry::Product::default()
+    };
+    pantry.save_product(&product).await.unwrap();
+    let cookie = owner(&addr).await;
+    (addr, dir, pantry, asked, cookie)
+}
+
+#[tokio::test]
+async fn a_receipt_is_read_into_a_draft() {
+    // Floats for the amounts and no label on the second line: still a draft.
+    let reading = json!({
+        "provider": "Enseigne-X", "store": "Ville-A", "at_local": "2026-10-28 12:37",
+        "total_cents": 1047.0, "unreadable": false,
+        "lines": [
+            { "label": "LAIT 1L", "name": "Lait", "qty": 2.0, "unit": null,
+              "price_cents": 99.0, "discount_cents": 0.0, "line_cents": 198.0,
+              "vat": 5.5, "aisle": null, "keep": true, "reason": "", "product": "lait",
+              "new_product": null },
+            { "qty": 1, "price_cents": 849, "line_cents": 849, "keep": true },
+        ],
+    });
+    let (addr, dir, pantry, asked, cookie) =
+        reading_house("receipt-read", &reading.to_string()).await;
+
+    let (status, body) = call(&addr, "GET", "/api/cellier/reader", &Json::Null, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["allowed"], true, "{body}");
+
+    let photos = json!({ "photos": [encoded(&jpeg()), encoded(&jpeg())] });
+    let (status, receipt) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 201, "{receipt}");
+    assert_eq!(receipt["status"], "draft");
+    assert_eq!(receipt["photos"], 2);
+    assert_eq!(receipt["draft"]["provider"], "Enseigne-X", "{receipt}");
+    assert_eq!(receipt["draft"]["total_cents"], 1047);
+    assert_eq!(receipt["draft"]["lines"][0]["price_cents"], 99);
+    assert_eq!(receipt["draft"]["lines"][1]["label"], "");
+    assert_eq!(receipt["draft"]["lines"][0]["product"], "lait");
+    assert!(
+        receipt["reader"].as_str().unwrap().contains('/'),
+        "{receipt}"
+    );
+    assert!(!receipt["sent_by"].as_str().unwrap().is_empty());
+    assert_eq!(receipt["read"]["lines"].as_array().unwrap().len(), 2);
+
+    let id = receipt["id"].as_i64().unwrap();
+    assert_eq!(pantry.receipts(None).await.unwrap().len(), 1);
+    for n in [1, 2] {
+        assert!(pantry.photo_path(id, n).exists(), "photo {n} is kept");
+    }
+    // The list leaves the raw reading out; the receipt itself keeps it.
+    let (_, listed) = call(&addr, "GET", "/api/cellier/receipts", &Json::Null, "").await;
+    assert_eq!(listed[0]["read"], Json::Null, "{listed}");
+    let path = format!("/api/cellier/receipts/{id}");
+    let (_, shown) = call(&addr, "GET", &path, &Json::Null, "").await;
+    assert!(shown["read"]["lines"].is_array(), "{shown}");
+
+    // The model got both photos, as images.
+    let asked = asked.lock().unwrap();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].matches("data:image/jpeg;base64,").count(), 2);
+    drop(asked);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn an_unreadable_receipt_creates_nothing() {
+    let reading = json!({ "unreadable": true, "lines": [] });
+    let (addr, dir, pantry, _, cookie) = reading_house("receipt-blur", &reading.to_string()).await;
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body, json!({ "error": "unreadable" }));
+    assert!(pantry.receipts(None).await.unwrap().is_empty());
+    let kept = dir.join("receipts");
+    assert!(!kept.exists() || kept.read_dir().unwrap().next().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_garbled_reading_creates_nothing() {
+    let (addr, dir, pantry, asked, cookie) =
+        reading_house("receipt-garbled", "Je ne peux pas lire ce ticket.").await;
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+    let (status, body) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 502, "{body}");
+    assert!(body["error"].is_string());
+    assert_eq!(asked.lock().unwrap().len(), 1, "the model was asked once");
+    assert!(pantry.receipts(None).await.unwrap().is_empty());
+    let kept = dir.join("receipts");
+    assert!(!kept.exists() || kept.read_dir().unwrap().next().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn only_a_person_validates_a_receipt() {
+    let (addr, dir, pantry, id) = with_draft("receipt-human").await;
+    let path = format!("/api/cellier/receipts/{id}/validate");
+    // No session: a script, an agent, the bare dashboard.
+    let (status, body) = call(&addr, "POST", &path, &json!({}), "").await;
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = call(&addr, "POST", &path, &json!({}), "x-moli-origin: ui\r\n").await;
+    assert_eq!(status, 403, "{body}");
+    assert!(pantry.purchases(0, u64::MAX / 4).await.unwrap().is_empty());
+    assert_eq!(
+        pantry.receipt(id).await.unwrap().status,
+        moli_pantry::ReceiptStatus::Draft
+    );
+    let cookie = owner(&addr).await;
+    let (status, body) = call(&addr, "POST", &path, &json!({}), &cookie).await;
+    assert_eq!(status, 200, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
 }

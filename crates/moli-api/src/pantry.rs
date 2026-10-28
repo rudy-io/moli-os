@@ -14,10 +14,11 @@
 //! - `POST /api/cellier/baskets/{id}/status {status}`: move the basket on.
 //! - `POST /api/cellier/receipts {photos}`: read the photos (1 to 4, JPEG,
 //!   base64) of one receipt and keep the reading as a draft.
-//! - `GET /api/cellier/receipts?status=`, `GET|PUT|DELETE
-//!   /api/cellier/receipts/{id}`: the receipts, a draft corrected or dropped.
-//! - `POST /api/cellier/receipts/{id}/validate {force}`: a person records the
-//!   draft: its kept lines become purchases.
+//! - `GET /api/cellier/receipts?status=` (without the raw reading),
+//!   `GET|PUT|DELETE /api/cellier/receipts/{id}`: the receipts, a draft
+//!   corrected or dropped.
+//! - `POST /api/cellier/receipts/{id}/validate {force}`: a person (a human
+//!   session) records the draft: its kept lines become purchases.
 //! - `GET /api/cellier/receipts/{id}/photos/{n}`: a photo kept.
 //! - `GET /api/cellier/purchases?from=&to=`, `PUT|DELETE
 //!   /api/cellier/purchases/{id}`: what was bought, corrected or dropped.
@@ -80,9 +81,11 @@ pub(crate) fn routes(pantry: Option<Pantry>, humans: &Arc<Sessions>) -> Router<H
             "/api/cellier/receipts/{id}",
             get(show_receipt).put(save_receipt).delete(drop_receipt),
         )
+        // Nothing becomes a purchase without a person (agents record theirs
+        // through MCP).
         .route(
             "/api/cellier/receipts/{id}/validate",
-            post(validate_receipt),
+            crate::human_only(post(validate_receipt), humans),
         )
         .route("/api/cellier/receipts/{id}/photos/{n}", get(receipt_photo))
         .route("/api/cellier/purchases", get(purchases))
@@ -383,7 +386,8 @@ pub(crate) async fn read_receipt(
     let draft = match serde_json::from_value::<ReceiptDraft>(read.clone()) {
         Ok(draft) => draft,
         Err(e) => {
-            tracing::warn!(error = %e, "the receipt reading does not fit a draft");
+            // The schema keeps card numbers out of a reading: it is safe to log.
+            tracing::warn!(error = %e, reading = %read, "the receipt reading does not fit a draft");
             return error(
                 StatusCode::BAD_GATEWAY,
                 "the reading of the receipt is not usable",
@@ -419,7 +423,13 @@ pub(crate) async fn list_receipts(
         Some("validated") => Some(ReceiptStatus::Validated),
         Some(_) => return error(StatusCode::BAD_REQUEST, "unknown receipt status"),
     };
-    json_or(pantry.receipts(status).await)
+    // As in the purchases listing, the raw reading stays out of the list.
+    json_or(pantry.receipts(status).await.map(|mut receipts| {
+        for receipt in &mut receipts {
+            receipt.read = serde_json::Value::Null;
+        }
+        receipts
+    }))
 }
 
 pub(crate) async fn show_receipt(

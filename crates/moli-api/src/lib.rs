@@ -151,12 +151,16 @@ fn upload(
     max: usize,
     humans: &Arc<session::Sessions>,
 ) -> MethodRouter<Hub> {
-    route
-        .layer(DefaultBodyLimit::max(max))
-        .layer(middleware::from_fn_with_state(
-            Arc::clone(humans),
-            session::human_first,
-        ))
+    human_only(route.layer(DefaultBodyLimit::max(max)), humans)
+}
+
+/// An order only a person gives (checked before the body is read): a script
+/// or an agent is refused, whatever it claims.
+fn human_only(route: MethodRouter<Hub>, humans: &Arc<session::Sessions>) -> MethodRouter<Hub> {
+    route.layer(middleware::from_fn_with_state(
+        Arc::clone(humans),
+        session::human_first,
+    ))
 }
 
 /// The devices, their images, their printing.
