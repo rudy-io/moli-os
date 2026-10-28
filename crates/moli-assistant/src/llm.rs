@@ -58,6 +58,11 @@ impl Endpoint {
         })
     }
 
+    /// The host requests go to (a name or an address, without the port).
+    pub(crate) fn host(&self) -> &str {
+        &self.host
+    }
+
     /// Plain HTTP only makes sense for a model on the local network: no key
     /// is required there, and none is ever sent (it would travel in clear).
     pub(crate) fn is_local(&self) -> bool {

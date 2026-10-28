@@ -54,6 +54,11 @@ pub struct ReceiptReader {
     pub allowed: bool,
     /// Why not, in the house's language.
     pub reason: Option<String>,
+    /// Where the photos are sent: the provider's host.
+    pub host: String,
+    /// That host is at home (a private address, a local name): the photos
+    /// do not leave the house.
+    pub at_home: bool,
 }
 
 /// The receipts route, resolved: the provider, its model, its key.
@@ -73,6 +78,8 @@ impl Assistant {
             model: route.model,
             allowed: route.refused.is_none(),
             reason: route.refused,
+            host: route.provider.endpoint.host().to_owned(),
+            at_home: route.provider.endpoint.at_home(),
         }
     }
 
@@ -279,7 +286,8 @@ pub(crate) fn schema() -> Json {
 
 /// The model's answer as a reading: `at_local` becomes `at` (ms, the
 /// house's zone), a known chain's name its id, a product id the pantry does
-/// not have a product to create, and long numbers go.
+/// not have a product to create, and long numbers go. Only the schema's
+/// fields are kept: a model that strays from it may add the payment.
 fn tidy(
     content: &str,
     products: &[(String, String, Option<String>)],
@@ -358,6 +366,15 @@ fn tidy(
                     line.insert("new_product".into(), name);
                 }
             }
+        }
+    }
+    let schema = schema();
+    let known = |object: &Json, key: &str| object["properties"].get(key).is_some();
+    read.retain(|key, _| key == "at" || (key != "at_local" && known(&schema, key)));
+    if let Some(Json::Array(lines)) = read.get_mut("lines") {
+        let line = &schema["properties"]["lines"]["items"];
+        for fields in lines.iter_mut().filter_map(Json::as_object_mut) {
+            fields.retain(|key, _| known(line, key));
         }
     }
     Ok(Json::Object(read))
@@ -865,6 +882,55 @@ mod tests {
         );
         // A real fraction of a cent is left as it is (it is not a whole amount).
         assert!(read["lines"][1]["price_cents"].is_f64());
+    }
+
+    /// A model that does not hold to the schema may add what it saw (the
+    /// payment, a card number): only the draft's fields come out.
+    #[test]
+    fn only_the_schemas_fields_are_kept() {
+        let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+        let mut raw = reading();
+        raw["payment"] = json!({ "card": "1234", "auth": "A1B2" });
+        raw["lines"][0]["payment"] = json!("CB 1234");
+        raw["lines"][1]["extra"] = json!(1);
+        let read = tidy(&raw.to_string(), &products(), &chains(), &paris).unwrap();
+        let keys = |o: &Json| {
+            let mut k: Vec<String> = o.as_object().unwrap().keys().cloned().collect();
+            k.sort();
+            k
+        };
+        let mut top = vec![
+            "provider",
+            "store",
+            "at",
+            "total_cents",
+            "lines",
+            "unreadable",
+        ];
+        top.sort_unstable();
+        assert_eq!(keys(&read), top);
+        let fields = keys(&schema()["properties"]["lines"]["items"]["properties"]);
+        for line in read["lines"].as_array().unwrap() {
+            assert_eq!(keys(line), fields, "{line}");
+        }
+        assert!(!read.to_string().contains("1234"), "{read}");
+    }
+
+    #[test]
+    fn the_reader_says_where_the_photos_go() {
+        let far: Config = toml::from_str(
+            "[[provider]]\nid = \"far\"\nbase_url = \"https://api.example.com/v1\"\nmodel = \"vision\"\ntier = 1\n\n\
+             [routes]\nchat = \"far\"\nreceipts = \"far\"\n",
+        )
+        .unwrap();
+        let reader = Assistant::new(hub(), None, None, None, far)
+            .unwrap()
+            .receipt_reader();
+        assert_eq!(reader.host, "api.example.com");
+        assert!(!reader.at_home);
+        let home = implicit("http://192.168.0.20:11434/v1", "").receipt_reader();
+        assert_eq!(home.host, "192.168.0.20");
+        assert!(home.at_home);
     }
 
     #[test]
