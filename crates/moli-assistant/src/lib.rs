@@ -14,13 +14,20 @@
 #![recursion_limit = "256"]
 
 mod auto;
+mod contract;
+mod directory;
 mod door;
 mod exchanges;
 mod house;
+mod house_model;
+mod house_tools;
 mod import;
+mod layout_edit;
 mod llm;
 mod outside;
+mod places;
 mod pricing;
+mod proposals;
 mod providers;
 mod recap;
 mod recordings;
@@ -30,8 +37,12 @@ mod tier;
 mod voice;
 
 pub use auto::Draft;
+pub use contract::{TOOLS_JSON as MODEL_TOOLS_JSON, render_prompt as render_model_prompt};
+pub use directory::{Directory, Done as DirectoryDone};
 pub use exchanges::{Cost, Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
+pub use layout_edit::saved_place;
+pub use places::{OpenMeteoPlaces, Place, Places};
 pub use providers::{ProviderConfig, Routes};
 pub use tier::Tier;
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
@@ -39,7 +50,7 @@ pub use voice::{Heard, Speech, SpeechStream, Spoken};
 #[cfg(test)]
 mod before;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -49,9 +60,13 @@ use moli_core::{DeviceId, InstanceId, Origin, PointId, Value};
 use moli_runtime::{CommandError, Hub};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::house::{Layout, name_of};
+pub use crate::house_model::ProposalError;
 use crate::llm::Endpoint;
+pub use crate::proposals::Proposal;
+use crate::proposals::Proposals;
 
 /// `[assistant]` in moli.toml.
 #[derive(Clone, Debug, Deserialize)]
@@ -202,6 +217,13 @@ const MAX_STEPS: usize = 6;
 /// Messages of the conversation sent back (the model has no memory).
 const MAX_MESSAGES: usize = 14;
 const MAX_MESSAGE_CHARS: usize = 2_000;
+/// What the model may write in one step when it only has to talk: a short
+/// answer, a call or two.
+const WORDS: usize = 700;
+/// The tools that take the person's request whole (`automation` hands it to
+/// the builder model): offered one, the model may have to write the request
+/// out again, inside the call's JSON.
+const COPIES_THE_REQUEST: &[&str] = &["automation"];
 /// Turns per window, all clients together: a runaway page cannot run up a bill.
 const MAX_TURNS: usize = 60;
 const TURN_WINDOW: Duration = Duration::from_secs(10 * 60);
@@ -232,6 +254,14 @@ struct Inner {
     endpoint: Endpoint,
     /// The named providers and routes (see `providers.rs`).
     providers: providers::Providers,
+    /// What the conversation proposed and nobody decided yet.
+    proposals: Proposals,
+    /// The house model reads its prompt again after a confirmed change (off in tests that script the provider).
+    warm_after_change: std::sync::atomic::AtomicBool,
+    /// At most one prompt read at a time after changes (Ollama would queue them).
+    warm: house_model::WarmGate,
+    /// One confirmed change at a time: working out the inverse, applying and remembering go together.
+    changing: tokio::sync::Mutex<()>,
     tz: jiff::tz::TimeZone,
     running: tokio::sync::Semaphore,
     recent: Mutex<VecDeque<Instant>>,
@@ -244,6 +274,21 @@ struct Inner {
     prefs_path: std::sync::RwLock<Option<PathBuf>>,
     /// For drafting automations from the conversation.
     automations: std::sync::RwLock<Option<moli_automation::Automations>>,
+    /// The weather the dashboard shows (« actualise la météo » forgets what it kept).
+    weather: std::sync::RwLock<Option<moli_weather::Weather>>,
+    /// Where the house is (latitude, longitude): `moli.toml`'s, or the one a person chose.
+    location: std::sync::RwLock<Option<(f64, f64)>>,
+    /// Who finds a town by its name, and who keeps the household's people.
+    places: std::sync::RwLock<std::sync::Arc<dyn Places>>,
+    directory: std::sync::RwLock<Option<std::sync::Arc<dyn Directory>>>,
+    /// When the model last made the weather forget what it kept (a floor: see `refresh_weather`).
+    weather_refreshed: Mutex<Option<Instant>>,
+    /// Orders and reminders for later (in memory: a restart forgets them).
+    planned: std::sync::Mutex<Vec<house_tools::Planned>>,
+    /// The dashboard's turns being thought out, by the id the dashboard
+    /// gave them, so the person who asked can stop theirs (and only theirs).
+    /// Each turn adds its entry once admitted and removes it itself.
+    stoppable: Mutex<HashMap<String, CancellationToken>>,
     /// A Home Assistant import is running.
     importing: std::sync::atomic::AtomicBool,
     /// SHA-256 of the HA automations translated since start: not paid for
@@ -282,6 +327,17 @@ pub struct Turn {
     /// The question was spoken and the answer will be heard.
     #[serde(default)]
     pub spoken: bool,
+    /// Names the turn so the person who asked can stop it
+    /// (`POST /api/assistant/stop`): 1 to 64 letters, digits, `-` or `_`.
+    /// The dashboard sends one; a satellite's turn is never stopped from
+    /// a screen.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Who asked, as the server knows it (a dashboard's client, a satellite):
+    /// never read from the request. A proposal belongs to it, and « annule »
+    /// only takes back its own.
+    #[serde(skip)]
+    pub asker: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -309,6 +365,13 @@ pub struct Reply {
     /// The person asked to end the spoken conversation (`end_conversation`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub end: bool,
+    /// The person stopped the turn before it answered: no words, but the
+    /// orders already given are in `actions`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
+    /// Changes of configuration proposed, for a person to confirm or cancel.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<Proposal>,
     /// The tools called, for the history.
     #[serde(skip)]
     pub tools: Vec<String>,
@@ -379,11 +442,20 @@ impl Assistant {
         config: Config,
     ) -> anyhow::Result<Self> {
         let (config, providers) = config.resolved()?;
+        if providers.any_contract() {
+            // Its prompt is French and frozen: caught here, not at the first turn.
+            contract::ensure_french()?;
+        }
         let key_present = providers
             .key_name(providers::Route::Chat)
             .is_some_and(|name| hub.secret(&InstanceId::from("assistant"), &name).is_some());
         if let Some(warning) = providers.warning(key_present) {
             tracing::warn!("{warning}");
+        }
+        if let Some((id, declared, known)) = providers.refused_chat() {
+            tracing::warn!(
+                "assistant: provider {id:?} declares contract {declared:?}, this Moli speaks {known}: the conversation is off until the model or the configuration is updated"
+            );
         }
         let endpoint = Endpoint::parse(&config.base_url)?;
         let tz = jiff::tz::TimeZone::get(&config.timezone)?;
@@ -391,6 +463,12 @@ impl Assistant {
             (0.25..=4.0).contains(&config.speech_speed),
             "speech_speed must be between 0.25 and 4"
         );
+        // A position a person chose wins over the file's.
+        let location = layout_path
+            .as_deref()
+            .and_then(layout_edit::saved_place)
+            .map(|p| (p.latitude, p.longitude))
+            .or(config.latitude.zip(config.longitude));
         Ok(Self(Arc::new(Inner {
             hub,
             energy,
@@ -399,14 +477,25 @@ impl Assistant {
             config,
             endpoint,
             providers,
+            proposals: Proposals::default(),
+            warm_after_change: std::sync::atomic::AtomicBool::new(true),
+            warm: house_model::WarmGate::default(),
+            changing: tokio::sync::Mutex::new(()),
             tz,
             running: tokio::sync::Semaphore::new(2),
+            stoppable: Mutex::new(HashMap::new()),
             recent: Mutex::new(VecDeque::new()),
             voice_running: tokio::sync::Semaphore::new(3),
             voice_recent: Mutex::new(VecDeque::new()),
             prefs: std::sync::RwLock::new(None),
             prefs_path: std::sync::RwLock::new(None),
             automations: std::sync::RwLock::new(None),
+            weather: std::sync::RwLock::new(None),
+            location: std::sync::RwLock::new(location),
+            places: std::sync::RwLock::new(std::sync::Arc::new(OpenMeteoPlaces)),
+            directory: std::sync::RwLock::new(None),
+            weather_refreshed: Mutex::new(None),
+            planned: std::sync::Mutex::default(),
             importing: std::sync::atomic::AtomicBool::new(false),
             imported: Mutex::default(),
             prepared: Mutex::default(),
@@ -414,6 +503,42 @@ impl Assistant {
             recordings: recordings::Recordings::default(),
             last_heard: Mutex::new(None),
         })))
+    }
+
+    /// The weather of the house, for « actualise la météo ».
+    pub fn set_weather(&self, weather: moli_weather::Weather) {
+        *self
+            .0
+            .weather
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(weather);
+    }
+
+    /// Who finds a town by its name (the geocoding service; a fake in tests).
+    pub fn set_places(&self, places: Arc<dyn Places>) {
+        *self
+            .0
+            .places
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = places;
+    }
+
+    /// The household's people, for « ajoute Léa au foyer ».
+    pub fn set_directory(&self, directory: Arc<dyn Directory>) {
+        *self
+            .0
+            .directory
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(directory);
+    }
+
+    /// Where the house is, when known (latitude, longitude).
+    pub(crate) fn position(&self) -> Option<(f64, f64)> {
+        *self
+            .0
+            .location
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The secret holding the chat provider's API key (`api_key` for an old
@@ -425,7 +550,21 @@ impl Assistant {
             .unwrap_or_else(|| "api_key".to_owned())
     }
 
+    /// Why the conversation is off: a contract this Moli does not speak.
+    fn refused(&self) -> Option<String> {
+        let (provider, declared, known) = self.0.providers.refused_chat()?;
+        Some(moli_i18n::tr!(
+            "assistant.contract.refused",
+            provider = provider,
+            declared = declared,
+            known = known
+        ))
+    }
+
     fn key(&self) -> Result<Option<String>, AssistantError> {
+        if let Some(why) = self.refused() {
+            return Err(AssistantError::NotConfigured(why));
+        }
         let name = self.key_name();
         let key = self.0.hub.secret(&InstanceId::from("assistant"), &name);
         if key.is_none() && !self.0.endpoint.is_local() {
@@ -451,6 +590,7 @@ impl Assistant {
             "speak": ready && (cloud_voice || local_voice),
             "voices": { "cloud": cloud_voice, "local": local_voice },
             "privacy": self.0.providers.summary(),
+            "refused": self.refused(),
         })
     }
 
@@ -613,6 +753,83 @@ impl Assistant {
         Ok(speech)
     }
 
+    /// Stops the dashboard's turn named `id`. Says whether there was one:
+    /// « stop » pressed on nothing should be told so. Only the wait for the
+    /// model is cut: a tool, an order or a draft already started goes to
+    /// its end, and what the turn already did stays done.
+    #[must_use]
+    pub fn stop(&self, id: &str) -> bool {
+        let token = self
+            .0
+            .stoppable
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned();
+        token.inspect(CancellationToken::cancel).is_some()
+    }
+
+    /// Admits a turn, THEN lists it as stoppable: in that order, a turn
+    /// refused as busy never shows up in the table.
+    fn admit_turn(
+        &self,
+        id: Option<&str>,
+        stop: &CancellationToken,
+    ) -> Result<(tokio::sync::SemaphorePermit<'_>, Option<Stoppable<'_>>), AssistantError> {
+        // A malformed id is refused before it takes a place in the window.
+        if let Some(id) = id {
+            valid_turn_id(id)?;
+        }
+        let permit = self.admit()?;
+        Ok((permit, self.stoppable(id, stop)?))
+    }
+
+    /// Lists an admitted turn under its `id` for as long as it runs. A turn
+    /// refused (busy, invalid) never shows up, and an id in use is refused:
+    /// one entry, one owner.
+    fn stoppable(
+        &self,
+        id: Option<&str>,
+        stop: &CancellationToken,
+    ) -> Result<Option<Stoppable<'_>>, AssistantError> {
+        let Some(id) = id else {
+            return Ok(None);
+        };
+        valid_turn_id(id)?;
+        let mut table = self
+            .0
+            .stoppable
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if table.contains_key(id) {
+            return Err(AssistantError::Invalid("turn id already in use".into()));
+        }
+        table.insert(id.to_owned(), stop.clone());
+        Ok(Some(Stoppable {
+            table: &self.0.stoppable,
+            id: id.to_owned(),
+        }))
+    }
+
+    /// The model's answer, or `None` when the person stopped the turn while
+    /// it was awaited. Only this wait is cut: what the answer asks for runs
+    /// outside it, and always to its end.
+    pub(crate) async fn ask_model(
+        &self,
+        key: Option<&str>,
+        body: &Json,
+        stop: &CancellationToken,
+    ) -> Result<Option<Json>, AssistantError> {
+        tokio::select! {
+            // Stopped already: not even asked (nor paid for).
+            biased;
+            () = stop.cancelled() => Ok(None),
+            answer = self.0.endpoint.chat(key, body) => answer
+                .map(Some)
+                .map_err(|e| AssistantError::Upstream(e.to_string())),
+        }
+    }
+
     /// One turn of the conversation: the model reads the house, may act and
     /// pick cards, then answers.
     /// One turn, kept in the history (question, answer, orders, time taken).
@@ -625,7 +842,8 @@ impl Assistant {
             .map(|m| m.content.clone());
         let surface = turn.surface.clone().unwrap_or_default();
         let spoken = turn.spoken;
-        let result = self.converse(turn).await;
+        let stop = CancellationToken::new();
+        let result = self.converse(turn, &stop).await;
         if let Some(question) = question {
             let heard = self.take_heard();
             let c = &self.0.config;
@@ -635,7 +853,11 @@ impl Assistant {
                 .map_or(0.0, |h| pricing::hear(&c.transcribe_model, h.seconds));
             let (kind, reply, tools, orders, cost) = match &result {
                 Ok(r) => (
-                    exchanges::Kind::Turn,
+                    if r.interrupted {
+                        exchanges::Kind::Interrupted
+                    } else {
+                        exchanges::Kind::Turn
+                    },
                     r.reply.clone(),
                     r.tools.clone(),
                     r.actions
@@ -869,14 +1091,18 @@ impl Assistant {
         }
     }
 
-    async fn converse(&self, turn: Turn) -> Result<Reply, AssistantError> {
+    async fn converse(
+        &self,
+        turn: Turn,
+        stop: &CancellationToken,
+    ) -> Result<Reply, AssistantError> {
         if turn.messages.last().is_none_or(|m| m.role != Role::User) {
             return Err(AssistantError::Invalid(
                 "the last message must be the user's".into(),
             ));
         }
         let key = self.key()?;
-        let _permit = self.admit()?;
+        let _admitted = self.admit_turn(turn.id.as_deref(), stop)?;
         let layout = Layout::load(self.0.layout_path.as_deref()).await;
         let page = turn.surface.as_deref() == Some("page");
         let question = turn
@@ -884,6 +1110,12 @@ impl Assistant {
             .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
+
+        if self.speaks_contract() {
+            return self
+                .converse_house(&turn, &layout, key.as_deref(), stop)
+                .await;
+        }
 
         let power = self.power_now().await;
         let mut messages = vec![
@@ -901,13 +1133,7 @@ impl Assistant {
             list.push(end_tool());
         }
         if let Some(list) = offered.as_array_mut() {
-            if self
-                .0
-                .config
-                .latitude
-                .zip(self.0.config.longitude)
-                .is_some()
-            {
+            if self.position().is_some() {
                 list.push(forecast_tool());
             }
             if self.searches() {
@@ -930,17 +1156,14 @@ impl Assistant {
                 if takes_temperature(&self.0.config.model) {
                     body["temperature"] = json!(0.3);
                 }
-                body["max_tokens"] = json!(700);
+                body["max_tokens"] = json!(output_room(&offered, &question));
             }
             if step + 1 == MAX_STEPS {
                 body["tool_choice"] = json!("none");
             }
-            let answer = self
-                .0
-                .endpoint
-                .chat(key.as_deref(), &body)
-                .await
-                .map_err(|e| AssistantError::Upstream(e.to_string()))?;
+            let Some(answer) = self.ask_model(key.as_deref(), &body, stop).await? else {
+                return Ok(self.interrupted(run));
+            };
             run.usage.steps = step + 1;
             run.usage.prompt_tokens += answer["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
             run.usage.completion_tokens +=
@@ -1038,6 +1261,30 @@ impl Assistant {
         (carried_out && (!said.is_empty() || run.end)).then_some(said)
     }
 
+    /// What a stopped turn leaves: no words, but the orders already given,
+    /// and the steps already taken, whose cost stays counted.
+    fn interrupted(&self, run: Run) -> Reply {
+        tracing::info!(
+            steps = run.usage.steps,
+            actions = run.actions.len(),
+            "assistant turn stopped"
+        );
+        Reply {
+            reply: String::new(),
+            cards: Vec::new(),
+            actions: run.actions,
+            model: self.0.config.model.clone(),
+            usage: run.usage,
+            end: false,
+            interrupted: true,
+            // Proposed before the stop: still a person's to confirm.
+            proposals: run.proposals,
+            tools: run.tools,
+            search_cost: run.search_cost,
+            draft_cost: run.draft_cost,
+        }
+    }
+
     fn finish(&self, text: &str, mut run: Run, layout: &Layout, question: &str) -> Reply {
         // The model sometimes answers in words only: the screen still shows
         // what the question was obviously about.
@@ -1072,6 +1319,8 @@ impl Assistant {
             model: self.0.config.model.clone(),
             usage: run.usage,
             end: run.end,
+            interrupted: false,
+            proposals: run.proposals,
             tools: run.tools,
             search_cost: run.search_cost,
             draft_cost: run.draft_cost,
@@ -1080,8 +1329,7 @@ impl Assistant {
 
     /// `forecast`: the days and hours to come where the house is.
     async fn forecast(&self, args: &Json) -> Json {
-        let (Some(latitude), Some(longitude)) = (self.0.config.latitude, self.0.config.longitude)
-        else {
+        let Some((latitude, longitude)) = self.position() else {
             return json!({ "error": "the house's location is unknown" });
         };
         let days = args["days"].as_u64().unwrap_or(3);
@@ -1446,6 +1694,12 @@ impl Assistant {
 struct Run {
     cards: Vec<Json>,
     actions: Vec<Action>,
+    /// Changes of configuration proposed in the turn.
+    proposals: Vec<Proposal>,
+    /// Who asked (see `Turn::asker`), and whether it is a satellite: it has no
+    /// screen to confirm on, so it proposes nothing.
+    asker: Option<String>,
+    satellite: bool,
     usage: Usage,
     /// The tools called, in order, for the log: where a slow turn went.
     tools: Vec<String>,
@@ -1464,8 +1718,39 @@ struct Run {
     draft_cost: f64,
 }
 
+/// A stoppable turn's entry, removed by the turn itself when it ends,
+/// however it ends.
+struct Stoppable<'a> {
+    table: &'a Mutex<HashMap<String, CancellationToken>>,
+    id: String,
+}
+
+impl Drop for Stoppable<'_> {
+    fn drop(&mut self) {
+        self.table
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
 /// A paid tool called once too often in a turn: the model is told, the turn
 /// goes on with what it has.
+/// A turn's id, as the dashboard names it: 1 to 64 letters, digits, `-` or `_`.
+fn valid_turn_id(id: &str) -> Result<(), AssistantError> {
+    if id.is_empty()
+        || id.len() > 64
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(AssistantError::Invalid(
+            "turn id: 1 to 64 letters, digits, - or _".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn over_budget(tool: &str, max: usize) -> Json {
     json!({ "error": moli_i18n::tr!("assistant.tools.limit", tool = tool, max = max) })
 }
@@ -1483,6 +1768,27 @@ fn once(text: &str) -> String {
         }
     }
     t.to_owned()
+}
+
+/// Room for the model's output in one step: its own words, and, when an
+/// offered tool copies the request, the request itself (as many tokens as
+/// characters: French and its JSON escaping fit). Without it a long request
+/// is cut mid-call, the call is lost and the turn ends with nothing. It
+/// depends on the tools offered, not on who answers: any tool that carries a
+/// long text meets the same limit.
+fn output_room(offered: &Json, question: &str) -> usize {
+    let copies = offered.as_array().is_some_and(|list| {
+        list.iter().any(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .is_some_and(|name| COPIES_THE_REQUEST.contains(&name))
+        })
+    });
+    if copies {
+        WORDS + question.chars().count().min(MAX_MESSAGE_CHARS)
+    } else {
+        WORDS
+    }
 }
 
 /// The conversation sent to the model: the last `MAX_MESSAGES` at most, each
@@ -2265,8 +2571,10 @@ mod tests {
         assert_eq!(reply.cards[0]["kind"], "weather");
     }
 
-    /// A lamp that does what it is told.
-    struct Lamp;
+    /// A lamp that does what it is told (or that nobody reaches: `offline`).
+    pub(crate) struct Lamp {
+        pub(crate) offline: bool,
+    }
 
     impl moli_runtime::Driver for Lamp {
         fn kind(&self) -> &'static str {
@@ -2301,6 +2609,9 @@ mod tests {
                     }],
                 });
                 ctx.set_state(&id, "on", Value::Bool(false));
+                if self.offline {
+                    ctx.set_availability(&id, false);
+                }
                 ctx.ready();
                 while let Some(cmd) = ctx.next_command().await {
                     ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
@@ -2311,14 +2622,29 @@ mod tests {
         }
     }
 
-    /// Moli over a hub with the lamp running, its provider answering `answer` once.
-    async fn moli_with_lamp(answer: &'static [u8]) -> Assistant {
-        let (url, _task) = crate::llm::tests::fake_http(200, answer).await;
-        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+    /// A hub with the lamp running.
+    pub(crate) async fn lamp_hub() -> moli_runtime::Hub {
+        lamp_hub_with(false).await
+    }
+
+    pub(crate) async fn lamp_hub_with(offline: bool) -> moli_runtime::Hub {
+        lamp_hub_guarded(offline, moli_runtime::guard::GuardPolicy::default()).await
+    }
+
+    /// The lamp under a guard policy (`protect_unassigned`: it has no room, so nobody acts on it unattended).
+    pub(crate) async fn lamp_hub_guarded(
+        offline: bool,
+        guard: moli_runtime::guard::GuardPolicy,
+    ) -> moli_runtime::Hub {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions {
+            guard,
+            ..moli_runtime::HubOptions::default()
+        })
+        .unwrap();
         moli_runtime::spawn_driver(
             &hub,
             InstanceId::from("fake"),
-            Arc::new(Lamp),
+            Arc::new(Lamp { offline }),
             tokio_util::sync::CancellationToken::new(),
         );
         for _ in 0..200 {
@@ -2327,8 +2653,117 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+        hub
+    }
+
+    /// Moli over a hub with the lamp running, its provider answering `answer` once.
+    async fn moli_with_lamp(answer: &'static [u8]) -> Assistant {
+        let (url, _task) = crate::llm::tests::fake_http(200, answer).await;
+        let hub = lamp_hub().await;
         let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
         Assistant::new(hub, None, None, None, config).unwrap()
+    }
+
+    /// A provider that takes every question and never answers.
+    async fn silent_provider() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        url
+    }
+
+    /// A question from the dashboard, its turn named `id`.
+    fn asked_as(id: &str, question: &str) -> Turn {
+        serde_json::from_value(json!({
+            "id": id,
+            "surface": "bubble",
+            "messages": [{ "role": "user", "content": question }],
+        }))
+        .unwrap()
+    }
+
+    /// Whether a turn runs under `id`, without stopping it.
+    fn listed(moli: &Assistant, id: &str) -> bool {
+        moli.0.stoppable.lock().unwrap().contains_key(id)
+    }
+
+    async fn until_listed(moli: &Assistant, id: &str) {
+        for _ in 0..400 {
+            if listed(moli, id) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("turn {id} never became stoppable");
+    }
+
+    #[tokio::test]
+    async fn a_turn_is_stopped_by_its_own_id_only() {
+        let config: Config =
+            serde_json::from_value(json!({ "base_url": silent_provider().await })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let ask = |id: &'static str| {
+            let moli = moli.clone();
+            tokio::spawn(async move { moli.turn(asked_as(id, "allume la lampe")).await })
+        };
+        let (a, b) = (ask("a"), ask("b"));
+        until_listed(&moli, "a").await;
+        until_listed(&moli, "b").await;
+        assert!(!moli.stop("c"), "nothing runs under that id");
+
+        assert!(moli.stop("a"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), a)
+            .await
+            .expect("a stopped turn ends at once")
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
+        assert!(reply.reply.is_empty());
+        assert!(!listed(&moli, "a"), "the turn took its entry with it");
+        assert!(!moli.stop("a"));
+
+        // The other turn was not touched: still waiting, still stoppable.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!b.is_finished());
+        assert!(moli.stop("b"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), b)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
+        assert!(moli.0.stoppable.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_turn_id_is_checked_and_never_shared() {
+        let config: Config =
+            serde_json::from_value(json!({ "base_url": silent_provider().await })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let err = moli.turn(asked_as("a b", "?")).await.unwrap_err();
+        assert!(matches!(err, AssistantError::Invalid(_)), "{err}");
+
+        let first = {
+            let moli = moli.clone();
+            tokio::spawn(async move { moli.turn(asked_as("x", "?")).await })
+        };
+        until_listed(&moli, "x").await;
+        let err = moli.turn(asked_as("x", "?")).await.unwrap_err();
+        assert!(matches!(err, AssistantError::Invalid(_)), "{err}");
+        // Refused, the second turn did not take the first one's entry away.
+        assert!(listed(&moli, "x"));
+        assert!(moli.stop("x"));
+        let reply = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.interrupted);
     }
 
     fn spoken(question: &str) -> Turn {
@@ -2507,6 +2942,52 @@ mod tests {
         assert!(zone.contains("Travail"), "{zone}");
         drop(moli);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_output_room_follows_the_tools_offered() {
+        let long = "allume la lampe du salon quand il fait nuit, ".repeat(40);
+        assert!(long.chars().count() > 1_500);
+        // `automation` is offered: the request may have to be written out again.
+        assert_eq!(output_room(&tools(), "allume"), WORDS + 6);
+        assert_eq!(output_room(&tools(), &long), WORDS + long.chars().count());
+        let huge = "x".repeat(10 * MAX_MESSAGE_CHARS);
+        assert_eq!(output_room(&tools(), &huge), WORDS + MAX_MESSAGE_CHARS);
+        // Nothing offered copies it: the words alone.
+        let mut without = tools();
+        without
+            .as_array_mut()
+            .unwrap()
+            .retain(|t| t["function"]["name"] != "automation");
+        assert_eq!(output_room(&without, &long), WORDS);
+    }
+
+    /// The ceiling the provider is sent: room for a long request, measured on
+    /// the request itself, not a constant that a long one outgrows.
+    #[tokio::test]
+    async fn a_long_request_leaves_room_to_be_written_out() {
+        let answer =
+            json!({ "choices": [{ "message": { "role": "assistant", "content": "D'accord." } }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5 } })
+            .to_string();
+        let (url, asked) = crate::llm::tests::fake_provider(vec![answer]).await;
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        let moli = Assistant::new(lamp_hub().await, None, None, None, config).unwrap();
+        let long =
+            "quand quelqu'un rentre le soir et qu'il fait nuit, allume l'entrée puis le salon ; "
+                .repeat(20);
+        let turn: Turn = serde_json::from_value(json!({
+            "messages": [{ "role": "user", "content": long }],
+        }))
+        .unwrap();
+        moli.turn(turn).await.unwrap();
+        let asked = asked.lock().unwrap().clone();
+        let body: Json = serde_json::from_str(asked[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            body["max_tokens"],
+            json!(WORDS + long.chars().count().min(MAX_MESSAGE_CHARS))
+        );
+        assert!(body["max_tokens"].as_u64().unwrap() > 1_500);
     }
 
     /// Whatever the model asks in a turn, two web searches and one draft at
@@ -3205,6 +3686,7 @@ mod tests {
             ("auto.rs", include_str!("auto.rs")),
             ("door.rs", include_str!("door.rs")),
             ("house.rs", include_str!("house.rs")),
+            ("house_model.rs", include_str!("house_model.rs")),
             ("import.rs", include_str!("import.rs")),
             ("settings.rs", include_str!("settings.rs")),
             ("voice.rs", include_str!("voice.rs")),
@@ -3304,5 +3786,59 @@ mod tests {
         );
         assert!(guess_cards_with("Please arrange the Sunday plan", &list).is_empty());
         assert!(guess_cards_with("Tell me a joke", &list).is_empty());
+    }
+
+    #[tokio::test]
+    async fn named_providers_set_the_model_and_the_privacy_status() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config: Config = toml::from_str(
+            "[[provider]]\nid = \"local\"\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"small-model\"\ntier = 1\n\n[routes]\nchat = \"local\"\n",
+        )
+        .unwrap();
+        let moli = Assistant::new(hub, None, None, None, config).unwrap();
+        let status = moli.status();
+        assert_eq!(status["model"], "small-model");
+        assert_eq!(status["privacy"]["mode"], "named");
+        assert_eq!(status["privacy"]["routes"]["chat"], "local");
+        assert_eq!(status["privacy"]["providers"][0]["local"], true);
+    }
+
+    fn house_model_config(contract: &str) -> Config {
+        toml::from_str(&format!(
+            "[[provider]]\nid = \"house\"\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"moli-maison\"\ntier = 1\ncontract = \"{contract}\"\n\n[routes]\nchat = \"house\"\n"
+        ))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_provider_can_declare_the_house_model_contract() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let moli = Assistant::new(hub, None, None, None, house_model_config("moli-v4")).unwrap();
+        assert_eq!(
+            moli.status()["privacy"]["providers"][0]["contract"],
+            "moli-v4"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_contract_other_than_the_one_the_model_learned_is_refused() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        // Refused, not fatal: Moli starts and its assistant says why it is out.
+        let moli = Assistant::new(hub, None, None, None, house_model_config("moli-v9")).unwrap();
+        let status = moli.status();
+        assert_eq!(status["ready"], false);
+        assert!(
+            status["refused"].as_str().unwrap().contains("moli-v9"),
+            "{status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_config_reports_the_legacy_mode_and_keeps_its_model() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let moli = Assistant::new(hub, None, None, None, Config::default()).unwrap();
+        let status = moli.status();
+        assert_eq!(status["model"], "gpt-4.1-mini");
+        assert_eq!(status["privacy"]["mode"], "legacy");
     }
 }

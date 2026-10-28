@@ -645,7 +645,13 @@ pub(crate) async fn home(Extension(HomeFile(path)): Extension<HomeFile>) -> Resp
     };
     match tokio::fs::read(&path).await {
         Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
-            Ok(layout) => Json(layout).into_response(),
+            // The house's position is not the dashboard's business (a guest reads this too).
+            Ok(mut layout) => {
+                if let Some(root) = layout.as_object_mut() {
+                    root.remove("location");
+                }
+                Json(layout).into_response()
+            }
             Err(e) => error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("home.json: {e}"),
@@ -898,4 +904,27 @@ pub(crate) async fn journal(State(hub): State<Hub>, Query(q): Query<JournalQuery
 
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_layout_is_served_without_the_position_of_the_house() {
+        let path = std::env::temp_dir().join(format!("moli-home-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"{"title":"Chez nous","location":{"place":"Lyon","latitude":45.76,"longitude":4.84}}"#,
+        )
+        .unwrap();
+        let response = home(Extension(HomeFile(Some(path.clone())))).await;
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let layout: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(layout["title"], "Chez nous");
+        assert!(layout.get("location").is_none(), "{layout}");
+        let _ = std::fs::remove_file(path);
+    }
 }

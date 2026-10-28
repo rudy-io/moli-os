@@ -7,7 +7,7 @@
   import AlexaAccount from '../ui/AlexaAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
-  import { hub, home } from '../lib/home.svelte.js';
+  import { hub, home, hidden, watches } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
   // « Comment ça marche » : the system as it runs, drawn from /api/system and
@@ -105,12 +105,20 @@
   const brickWord = (id) => (Object.hasOwn(BRICKS, id) ? t(`systeme.briques.${id}.desc`) : '');
   const SURFACES = { maison: 'home', atelier: 'atelier', mcp: 'robot', rest: 'branch' };
 
-  // Commandable devices in no room: nobody can tell whether they sit in a
-  // bedroom. (Weather, tariffs, the house's own helpers belong to no room.)
+  // Devices in no room appear in no room's page. The commandable ones
+  // first (in bold): nobody can tell whether they sit in a bedroom, so the
+  // guard cannot protect them. Not listed: what was hidden on purpose, and
+  // what has a page of its own: the house's helpers, the « Parc » page,
+  // what the layout puts outside (weather, air, pool), and the devices Moli
+  // runs itself for its people and its energy (reserved instances).
+  const outside = $derived(
+    new Set(Object.values(home.config?.outdoor ?? {}).flatMap((v) => (Array.isArray(v) ? v.map((x) => x?.id ?? x) : [v]))),
+  );
+  const OWN = ['personnes:', 'energie:'];
   const roomless = $derived(
     Object.values(hub.devices)
       .filter((d) => !d.label?.room && !d.native_room && d.model !== 'Aide')
-      .filter((d) => d.points.some((p) => p.access?.write))
+      .filter((d) => !hidden(d.id) && !watches(d) && !outside.has(d.id) && !OWN.some((p) => d.id.startsWith(p)))
       .map((d) => ({ id: d.id, name: d.label?.name || d.native_name, writable: d.points.some((p) => p.access?.write) }))
       .sort((a, b) => Number(b.writable) - Number(a.writable) || a.name.localeCompare(b.name, locale()))
   );
@@ -205,7 +213,10 @@
         </div>
       {/if}
     </section>
+  {/if}
 
+  <!-- The map needs only the system itself, measured against Home Assistant or not. -->
+  {#if sys}
     {#if roomless.length}
       <section class="roomless">
         <p><Icon name="info" size={16} /><b>{t('systeme.page.sans_piece', { count: roomless.length })}</b>

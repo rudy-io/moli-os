@@ -43,6 +43,7 @@
   "commun.nav.cellier": "Le Cellier",
   "commun.nav.parler": "Parler",
   "commun.nav.infra": "Infra",
+  "commun.nav.parc": "Parc",
   "commun.nav.systeme": "Système",
   "commun.nav.systeme_titre": "Comment ça marche : la carte vivante du système",
   "commun.nav.atelier": "Atelier",
@@ -237,5 +238,6 @@
   "commun.niveau.bon": "Bon",
   "commun.niveau.attention": "À surveiller",
   "commun.niveau.mauvais": "Mauvais",
-  "commun.capteur.humidite": "Humidité"
+  "commun.capteur.humidite": "Humidité",
+  "commun.code.raison_configuration": "Un changement de la maison : elle demande que ce soit bien toi."
 }

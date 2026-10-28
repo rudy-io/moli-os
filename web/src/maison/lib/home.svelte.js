@@ -52,6 +52,16 @@ export async function start() {
   }
 }
 
+/** The layout again (/api/home): after a change of rooms or of hidden devices. */
+export async function reloadLayout() {
+  try {
+    const res = await fetch('/api/home');
+    if (res.ok) home.config = await res.json();
+  } catch {
+    /* keep the layout known */
+  }
+}
+
 export function note(text, tone = 'info') {
   const id = Date.now() + Math.random();
   home.notes = [...home.notes, { id, text, tone }];
@@ -183,6 +193,10 @@ export const protectedRoom = (name) =>
     ),
   );
 
+/** A device the house watches: it has an `alert` point and says itself
+ *  whether it is well (the « Parc » page). */
+export const watches = (d) => (d?.points ?? []).some((p) => p.semantic === 'alert');
+
 export function hidden(id) {
   return (home.config?.hidden ?? []).includes(id);
 }
@@ -204,7 +218,7 @@ export function outletsOf(id) {
     .map(([key, name]) => ({ key, name }));
 }
 
-const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge/i;
+const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge|éclairage|eclairage|néon|neon|\bleds?\b|veilleuse|guirlande|phare/i;
 /** On/off things that are not lights, whatever their bridge calls them. */
 const NOT_LIGHT = /vmc|ventil|pompe|prise|chauffe|\bfan\b|pump|heater|outlet|socket/i;
 const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!write || p.access?.write));
@@ -213,9 +227,10 @@ const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!w
 export function deviceKind(d) {
   if (!d) return 'unknown';
   if (has(d, 'progress') && has(d, 'nozzle_temperature')) return 'printer';
+  // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
+  if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
-  if (has(d, 'key', true)) return 'tv';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
   if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
     return 'cover';

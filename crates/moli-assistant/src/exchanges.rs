@@ -25,6 +25,8 @@ pub enum Kind {
     Turn,
     /// A question Moli could not answer (the provider failed…).
     Failed,
+    /// A question the person stopped before Moli answered.
+    Interrupted,
     /// A satellite woke and heard nothing it could understand: a wake word
     /// said for nothing, or a false activation.
     Silence,

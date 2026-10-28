@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Actions from './Actions.svelte';
   import MoliCards from './MoliCards.svelte';
+  import Proposals from './Proposals.svelte';
   import Orb from './Orb.svelte';
   import Icon from '../ui/Icon.svelte';
 
@@ -30,6 +31,7 @@
         <div class="body">
           <p>{m.content}</p>
           <Actions actions={m.actions ?? []} />
+          <Proposals proposals={m.proposals ?? []} />
           {#if m.cards?.length}
             {#if inline && i === moli.messages.length - 1}
               <div class="cards"><MoliCards cards={m.cards} compact /></div>

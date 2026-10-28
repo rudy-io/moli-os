@@ -285,7 +285,7 @@ fn sun_minute(
     event: SunEvent,
     offset_min: i32,
 ) -> Option<u32> {
-    let (lat, lon) = (autos.0.config.latitude?, autos.0.config.longitude?);
+    let (lat, lon) = autos.position()?;
     let (rise, set) = crate::sun::times(now.date(), lat, lon)?;
     let at = if event == SunEvent::Rise { rise } else { set };
     let local = at.to_zoned(autos.0.tz.clone());

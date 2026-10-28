@@ -129,7 +129,9 @@ pub struct Automations(Arc<Inner>);
 #[derive(Debug)]
 struct Inner {
     hub: Hub,
-    config: Config,
+    /// Where the house is, for the sun: the configuration's at start, or the
+    /// one a person chose from the conversation (`set_position`).
+    position: std::sync::RwLock<Option<(f64, f64)>>,
     tz: jiff::tz::TimeZone,
     path: Option<PathBuf>,
     runs_path: Option<PathBuf>,
@@ -217,6 +219,25 @@ pub(crate) fn yes_no(yes: bool) -> String {
 }
 
 impl Automations {
+    /// Where the house is (latitude, longitude), for the sun.
+    #[must_use]
+    pub fn position(&self) -> Option<(f64, f64)> {
+        *self
+            .0
+            .position
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The house moves (or is no longer placed): sunrise and sunset follow at once.
+    pub fn set_position(&self, position: Option<(f64, f64)>) {
+        *self
+            .0
+            .position
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = position;
+    }
+
     /// Loads the automations and starts the engine (until `cancel`).
     pub async fn start(
         hub: &Hub,
@@ -233,7 +254,7 @@ impl Automations {
         let (live, _) = broadcast::channel(256);
         let this = Self(Arc::new(Inner {
             hub: hub.clone(),
-            config,
+            position: std::sync::RwLock::new(config.latitude.zip(config.longitude)),
             tz,
             path,
             runs_path,
@@ -318,7 +339,7 @@ impl Automations {
             matches!(n.step, Step::AtSun { .. })
                 || matches!(&n.step, Step::If { rules, .. } if rules.iter().any(|r| matches!(r, Rule::Sun { .. })))
         });
-        if uses_sun && (self.0.config.latitude.is_none() || self.0.config.longitude.is_none()) {
+        if uses_sun && self.position().is_none() {
             c.problems.push(Problem {
                 node: None,
                 level: Level::Warning,

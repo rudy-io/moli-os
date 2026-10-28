@@ -58,6 +58,7 @@
   "moli.composer.question": "Your question",
   "moli.composer.parler_avec": "Talk with Moli",
   "moli.composer.arreter": "Stop",
+  "moli.composer.arreter_reflexion": "Stop thinking",
   "moli.composer.dicter": "Speak",
   "moli.composer.arreter_ecoute": "Stop listening",
   "moli.composer.parler_a": "Speak to Moli",
@@ -144,6 +145,7 @@
   "moli.echanges.silence": "Satellite woke, no sentence understood",
   "moli.echanges.echec": "Failed: {error}",
   "moli.echanges.fin": "Conversation closed",
+  "moli.echanges.interrompu": "Stopped",
   "moli.echanges.recherche": "web search",
   "moli.echanges.plus": "Show more",
   "moli.echanges.recap": "Send the recap on Telegram",
@@ -156,5 +158,11 @@
   "moli.echanges.enregistrer_aide": "To test the microphone: each sentence can be heard here, then is deleted after 7 days.",
   "moli.echanges.enregistre_jusqu": "The satellite is recorded until {date} (each recording is deleted after 7 days).",
   "moli.echanges.arreter": "Stop recording",
-  "moli.echanges.estimation": "Costs are estimated from OpenAI's public prices; the exact bill is on platform.openai.com."
+  "moli.echanges.estimation": "Costs are estimated from OpenAI's public prices; the exact bill is on platform.openai.com.",
+  "moli.proposition.confirmer": "Confirm",
+  "moli.proposition.annuler": "Cancel",
+  "moli.proposition.fait": "Done",
+  "moli.proposition.annule": "Cancelled",
+  "moli.proposition.perimee": "No longer pending",
+  "moli.proposition.echec": "Not applied"
 }

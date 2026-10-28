@@ -403,6 +403,7 @@ mod tests {
             (Method::POST, "/api/automations/draft"),
             (Method::PUT, "/api/assistant/recording"),
             (Method::POST, "/api/assistant/recap"),
+            (Method::POST, "/api/assistant/proposals/3"),
             (Method::PUT, "/api/session/pin"),
             (Method::POST, "/api/session/setup"),
             (Method::POST, "/api/machines/pc/remote"),

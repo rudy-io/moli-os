@@ -537,7 +537,7 @@ impl Automations {
     /// Sun up, from the house's position, else from a weather `daylight`.
     pub(crate) fn is_day(&self) -> bool {
         let now = jiff::Timestamp::now();
-        if let (Some(lat), Some(lon)) = (self.0.config.latitude, self.0.config.longitude) {
+        if let Some((lat, lon)) = self.position() {
             let date = now.to_zoned(self.0.tz.clone()).date();
             return crate::sun::times(date, lat, lon)
                 .is_some_and(|(rise, set)| rise <= now && now < set);

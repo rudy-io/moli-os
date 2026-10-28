@@ -8,6 +8,11 @@ data_dir = "/data"
 worker_threads = 2
 # Names/IPs this instance is reached by, besides localhost (DNS-rebinding guard).
 allowed_hosts = ["192.168.0.10", "moli.local"]
+# The house's time zone (IANA), for everything that tells the time: when
+# automations fire, where energy days are cut, the assistant's clock, the
+# quiet hours. Absent: the system's, named at start; in a container it is
+# usually UTC, so write it.
+timezone = "Europe/Paris"
 
 # Reached from the Internet through a Cloudflare tunnel behind Cloudflare
 # Access: Moli checks Access's signed assertion itself and recognizes the
@@ -31,14 +36,12 @@ allowed_hosts = ["192.168.0.10", "moli.local"]
 # [guard.quiet_hours]
 # from = "21:00"
 # to = "07:30"
-# timezone = "Europe/Paris"
 # rooms = []            # empty = the whole home
 
 # Energy: cumulative counters (Wh or kWh) become kWh and cost per hour,
 # kept forever in data/energy.db. Roles: grid (billed: the reference),
 # total (whole home, fine), circuit (part of the total).
 # [energy]
-# timezone = "Europe/Paris"
 # [energy.tariff]
 # period = "z2m:linky/active_register_tier_delivered"
 # prices = { "HP" = 0.17, "HC" = 0.14 }
@@ -112,6 +115,9 @@ base_topic = "zigbee2mqtt"
 # base_url = "http://127.0.0.1:11434/v1"   # Ollama
 # model = "un-modele-local"
 # tier = 1
+# contract = "moli-v4"   # optionnel : le modèle maison, entraîné sur ce contrat (docs/components/moli.md).
+#                        # Prompt statique (appareils numérotés), 25 outils figés ; Moli traduit les numéros,
+#                        # lit les valeurs et formule la réponse. Un autre contrat est refusé.
 #
 # [assistant.routes]
 # chat = "local"        # la conversation (obligatoire avec des fournisseurs)

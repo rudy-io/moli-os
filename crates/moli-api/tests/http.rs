@@ -259,6 +259,20 @@ async fn labels_via_rest() {
 }
 
 #[tokio::test]
+async fn the_system_map_names_the_house_time_zone() {
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        timezone: Some("Indian/Reunion".into()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let (status, body) = request(&addr, "GET", "/api/system", None).await;
+    assert_eq!(status, 200, "{body}");
+    let system: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(system["timezone"], "Indian/Reunion");
+}
+
+#[tokio::test]
 async fn foreign_host_is_rejected_everywhere() {
     let (addr, _hub) = server().await;
     for path in ["/api/devices", "/mcp", "/"] {
@@ -395,6 +409,54 @@ async fn speaking_without_an_assistant_says_so() {
     assert_eq!(status, 200);
     assert!(body.contains("\"speak\":false"), "{body}");
 }
+#[tokio::test]
+async fn deciding_a_proposal_without_an_assistant_says_so() {
+    let (addr, _hub) = server().await;
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/api/assistant/proposals/1",
+        Some(&json!({ "approve": true })),
+    )
+    .await;
+    assert_eq!(status, 503, "{body}");
+}
+
+/// A proposal is a person's to decide: without the code, a script, an agent or the bare
+/// dashboard is refused; another site is refused even with the session; with it, an
+/// unknown proposal is simply gone.
+#[tokio::test]
+async fn only_a_person_decides_what_the_assistant_proposed() {
+    let hub = lamp_hub().await;
+    let moli = moli_assistant::Assistant::new(
+        hub.clone(),
+        None,
+        None,
+        None,
+        moli_assistant::Config::default(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        assistant: Some(moli),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let approve = json!({ "approve": true });
+    let path = "/api/assistant/proposals/7";
+    let (status, text) = request_with(&addr, "POST", path, Some(&approve), ui).await;
+    assert_eq!(status, 403, "{text}");
+    // The dashboard of a person: the code's session, and the header that says it speaks for the screen.
+    let pin = format!("{}{ui}", pin_session(&addr, "482915").await);
+    let foreign = format!("{pin}sec-fetch-site: cross-site\r\n");
+    let (status, text) = request_with(&addr, "POST", path, Some(&approve), &foreign).await;
+    assert_eq!(status, 403, "{text}");
+    assert!(text.contains("cross-site"), "{text}");
+    let (status, text) = request_with(&addr, "POST", path, Some(&approve), &pin).await;
+    assert_eq!(status, 410, "{text}");
+}
+
 #[tokio::test]
 async fn only_a_person_gives_the_assistant_a_key() {
     let (addr, _hub) = server().await;
@@ -1045,6 +1107,51 @@ async fn live_streams_are_counted() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("the seat of a closed stream never came back");
+}
+
+/// Without Cloudflare Access, an owner who has only an e-mail cannot sign in:
+/// the house's code keeps managing the people (and can invite that owner).
+#[tokio::test]
+async fn an_owner_e_mail_without_access_leaves_the_people_to_the_code() {
+    let dir = std::env::temp_dir().join(format!("moli-http-owner-mail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let hub = Hub::new(HubOptions {
+        secrets: Some((
+            dir.join("secrets.enc"),
+            moli_runtime::MasterKey::generate().unwrap(),
+        )),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "Alex", "role": "owner", "emails": ["alex@example.org"] })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    // Alex cannot sign in yet: the code still manages the people.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "Sam", "role": "member" })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/people/alex/invite", None, &pin).await;
+    assert_eq!(status, 200, "the code invites the owner: {body}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Élodie, from the Internet: nothing until she is invited, then the house.

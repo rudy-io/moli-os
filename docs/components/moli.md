@@ -16,8 +16,9 @@ model = "gpt-4.1-mini"                 # la conversation
 builder_model = "gpt-4.1"              # dessiner des automatismes (rare, donc un modèle plus fort)
 transcribe_model = "gpt-4o-mini-transcribe"   # voix → texte ; "" = pas de voix
 # base_url = "https://api.openai.com/v1"      # http://… pour un modèle local (pas de clé exigée)
-# timezone = "Europe/Paris"
 ```
+
+L'heure que Moli connaît est celle de la maison : `[server] timezone`.
 
 Clé : `moli-os secrets set assistant api_key` (une clé déjà donnée à l'intégration
 `openai_conversation` de HA peut être reprise, toujours par tube). Elle ne part qu'en
@@ -44,7 +45,10 @@ peut recevoir ; il reçoit ce niveau et les moins sensibles, jamais le 0.
 `[[assistant.provider]]` (`id`, `base_url`, `model`, `tier`) et `[assistant.routes]` (`chat` obligatoire ; `voice`
 et `builder` suivent `chat` pour l'instant ; `audit` pour les tâches lourdes) remplacent `base_url` et `model` de
 `[assistant]` : ces champs, `builder_model` et `search_model` sont ignorés en mode fournisseurs, et la recherche
-web (qui passe par la recherche d'un fournisseur cloud) est coupée. Sans fournisseur déclaré, rien ne change :
+web (qui passe par la recherche d'un fournisseur cloud) est coupée. Si le fournisseur de `chat` est chez soi,
+la voix cloud l'est aussi (`transcribe_model` et `speech_model` vidés : Ollama ne fait ni l'un ni l'autre) et les
+voix locales (Whisper, Piper) servent ; un fournisseur cloud garde la sienne. Un fournisseur nommé de niveau 1
+hors de chez soi est accepté (c'est un choix déclaré), mais une ligne le dit au démarrage dans le journal. Sans fournisseur déclaré, rien ne change :
 un fournisseur implicite `default` de niveau 1. La clé d'un fournisseur nommé est le secret `api_key.<id>`
 (`moli-os secrets set assistant api_key.<id>`), jamais celui d'un autre : une clé donnée à un hôte ne part pas
 vers un autre. `moli-os check-config` valide le tout ; `GET /api/assistant` expose `privacy` (mode, fournisseurs,
@@ -53,6 +57,79 @@ niveaux, routes ; `local` = adresse privée, boucle locale ou nom de la maison, 
 Pour l'instant, la conversation ne peut aller que vers un fournisseur de niveau 1 : les niveaux 2 et 3 arrivent
 avec le filtre de contexte. Un ancien `[assistant]` avec une clé et une adresse hors de chez soi écrit un
 avertissement au démarrage : les noms et les valeurs en direct de la maison y partent.
+
+### Le modèle maison (contrat `moli-v4`)
+
+Optionnel et inactif par défaut. Un petit modèle local (Qwen3-1.7B affiné, GGUF Q4_K_M de 1,1 Go,
+servi par Ollama sur le CPU) **reconnaît** la demande et appelle un outil ; Moli exécute sous la garde
+et formule la réponse. Il ne voit aucune valeur de la maison : un prompt statique (pièces, appareils
+numérotés `d1…dN` et leurs points) et les 25 outils du contrat (`tools/model/contract/tools.json`).
+
+- **Le contrat est versionné.** `tools/model/contract/snapshots.txt` garde l'empreinte de
+  `moli-os model tools` et `moli-os model prompt` pour chaque version : un test échoue si l'un des
+  deux change sans nouvelle version. Un fournisseur qui déclare une autre version est refusé :
+  l'assistant se dit hors service et dit pourquoi (statut `refused`), sans repli vers une
+  conversation générale, et `moli-os check-config` échoue.
+- **Les poids ne sont ni dans le dépôt ni dans l'image.** Moli ne télécharge rien. Le modèle est
+  publié sur Hugging Face, avec l'empreinte de son fichier :
+
+  ```sh
+  hf download MaTa31/moli-home-1.7b-v4 --local-dir moli-home-1.7b-v4
+  cd moli-home-1.7b-v4
+  sha256sum -c SHA256SUMS      # moli-home-1.7b-v4-q4_k_m.gguf: OK
+  ollama create moli-home-v4 -f Modelfile
+  ```
+
+  SHA-256 de `moli-home-1.7b-v4-q4_k_m.gguf` : `1e11026d6729ad589c4c3f076cd68534b7a9563efc0a9c967d2ae4136cf0e3c9`.
+  **Garder le `Modelfile` fourni** : il fige le gabarit de conversation de l'entraînement (outils avant
+  le prompt de la maison). Avec le gabarit par défaut de Qwen3 (`ollama pull` ou un `Modelfile` réduit
+  à `FROM`), Ollama réécrit les outils dans un autre format et la précision chute nettement.
+- **Dans `moli.toml`** : un fournisseur de niveau 1 qui déclare le contrat.
+
+  ```toml
+  [[assistant.provider]]
+  id = "maison"
+  base_url = "http://127.0.0.1:11434/v1"
+  model = "moli-home-v4"
+  tier = 1
+  contract = "moli-v4"
+
+  [assistant.routes]
+  chat = "maison"
+  ```
+
+  Moli fait lire le prompt de la maison au modèle au démarrage (une trentaine de secondes sur un CPU
+  modeste), puis la réponse vient en quelques secondes. Après un changement d'appareils ou de noms,
+  le premier tour relit le prompt.
+- **Garde-fous de Moli, hors du modèle** : les réglages d'un appareil (délais, calibrage…) ne sont ni
+  montrés au modèle ni commandés depuis la conversation ; un ordre « pour plus tard » n'est exécuté que
+  par `schedule` ou `remind` ; un appareil d'une autre pièce que celle que la personne a nommée n'est pas
+  commandé ; ouvrir une serrure, une porte de garage ou un portail attend toujours la validation d'une
+  personne (garde du hub), quelle que soit la pièce ; fermer passe (règle détaillée dans `SECURITY.md`).
+- **Hors du cadre de la maison** (une blague, une explication), l'outil `delegate` répond « pas encore
+  disponible » : rien ne quitte la maison tant que la délégation (#17) n'a pas de forme décidée.
+- **Configuration proposée, puis confirmée par une personne.** `rename_device`, `move_device`,
+  `set_device_enabled`, `rename_room`, `add_person` et `set_home_location` ne changent rien : Moli
+  vérifie la demande, garde une **proposition** (10 minutes, en mémoire) et l'écrit sous sa réponse
+  (Confirmer / Annuler). Seule une session humaine (`Origin::Ui`, le code de la maison) la confirme,
+  par `POST /api/assistant/proposals/{id}` ; un agent, un script ou le tableau de bord sans code reçoit
+  403, et le tableau de bord demande alors le code. La garde s'applique à la confirmation : une pièce
+  protégée n'est pas renommée, un appareil n'en sort pas sans une personne.
+  - Les noms et les pièces vont dans `home.json` (écriture atomique, ancien nom d'une pièce gardé
+    en alias) ; un nom vide, trop long, identique ou avec un caractère de contrôle n'est pas proposé.
+  - `add_person` ajoute un membre avec un nom, rien d'autre (ni e-mail, ni pièce, ni téléphone), par
+    le même foyer que l'écran Personnes.
+  - `set_home_location` cherche la ville par le géocodage d'**Open-Meteo** (le nom de la ville, et
+    seulement lui, part chez ce service ; au plus 12 s de recherches par demande, 4 s chacune),
+    arrondit la position à 0,01° et la garde dans `home.json` (`location`). La météo du tableau de
+    bord et le soleil des automatismes la suivent sans redémarrage, même si Moli a démarré sans
+    position ; au démarrage, elle l'emporte sur celle de `moli.toml`. `GET /api/home` ne la renvoie pas.
+  - `undo` reprend ce qui vient d'être programmé, sinon propose l'inverse du dernier changement
+    confirmé (à confirmer aussi) ; « annule » juste après une proposition refuse la plus récente
+    **de celui qui parle** (le même client du tableau de bord), jamais celle d'un autre.
+  - **Un satellite vocal ne propose rien** : il n'a pas d'écran où confirmer. Moli invite à faire la
+    demande depuis le tableau de bord.
+  - Après une confirmation, Moli fait relire le prompt de la maison au modèle, en arrière-plan.
 
 ## Une question, côté serveur (`turn`)
 

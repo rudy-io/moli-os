@@ -20,6 +20,7 @@ mod assets;
 mod assistant;
 mod automations;
 mod caller;
+mod directory;
 mod guard;
 mod integrations;
 mod limit;
@@ -76,6 +77,12 @@ impl Household {
         )))
     }
 
+    /// The door the assistant adds people through (a name, a member, nothing else).
+    #[must_use]
+    pub fn directory(&self) -> Arc<dyn moli_assistant::Directory> {
+        Arc::new(directory::PeopleDirectory(self.0.clone()))
+    }
+
     /// The driver of `personnes:*` (where each person is, from their phones).
     #[must_use]
     pub fn whereabouts(
@@ -130,6 +137,9 @@ pub struct Options {
     pub weather: Option<moli_weather::Weather>,
     /// The household's pantry (« Le Cellier »), when `[pantry]` is configured.
     pub pantry: Option<moli_pantry::Pantry>,
+    /// The house's time zone (IANA), as resolved at start: shown in
+    /// `/api/system`.
+    pub timezone: Option<String>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -241,6 +251,14 @@ fn people(
         },
         |h| h.0.clone(),
     );
+    persons.set_behind_access(options.access.is_some());
+    let unreachable = persons.email_only_owners();
+    if options.access.is_none() && unreachable > 0 {
+        tracing::warn!(
+            owners = unreachable,
+            "owners with an e-mail but no password cannot sign in without [server.access]:              the house's code manages the people (invite them so they set a password)"
+        );
+    }
     // The phone of someone no longer of the house hears nothing more of it.
     if let Some(phones) = &options.phones {
         let persons = Arc::clone(&persons);
@@ -266,9 +284,14 @@ fn assistant_routes() -> Router<Hub> {
             "/api/assistant/listen",
             post(assistant::listen).layer(DefaultBodyLimit::max(BIG_BODY)),
         )
+        .route("/api/assistant/stop", post(assistant::stop))
         .route("/api/assistant/speak", post(assistant::speak))
         .route("/api/assistant/exchanges", get(assistant::exchanges))
         .route("/api/assistant/recap", post(assistant::recap))
+        .route(
+            "/api/assistant/proposals/{id}",
+            post(assistant::decide_proposal),
+        )
         .route("/api/assistant/recording", put(assistant::set_recording))
         .route(
             "/api/assistant/recordings/{name}",
@@ -285,6 +308,10 @@ fn assistant_routes() -> Router<Hub> {
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
+    // Moli adds people through the same household the screens use.
+    if let (Some(moli), Some(household)) = (&options.assistant, &options.household) {
+        moli.set_directory(household.directory());
+    }
     Router::new()
         .route("/api/health", get(rest::health))
         .merge(device_routes())
@@ -349,6 +376,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
+        .layer(Extension(system::HouseZone(options.timezone.clone())))
         .layer(Extension(rest::HomeFile(options.home_path.clone())))
         .layer(Extension(plan::PlanDir(
             options

@@ -54,7 +54,11 @@
       <h1>{t('moli.page.titre', { greeting: greeting(home.now) })}</h1>
       {#if moli.status && !moli.status.ready}
         <p class="asleep">
-          {asleep[0]}<a href="#/systeme">{t('moli.lien_systeme')}</a>{asleep[1]}
+          {#if moli.status.refused}
+            {moli.status.refused}
+          {:else}
+            {asleep[0]}<a href="#/systeme">{t('moli.lien_systeme')}</a>{asleep[1]}
+          {/if}
         </p>
       {:else}
         <div class="composer"><Composer surface="page" big autofocus placeholder={t('moli.page.placeholder')} /></div>

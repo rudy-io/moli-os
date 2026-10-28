@@ -156,6 +156,12 @@ pub enum Semantic {
     /// An order to a machine at work (pause or cancel a print): an agent
     /// asking gets a human's approval first.
     Control,
+    /// A lock's state (true: locked).
+    Lock,
+    /// Something the house watches says it is not well (binary, true:
+    /// something is wrong): a backup, a disk, a link. A device with one is
+    /// shown on the dashboard's « Parc » page; a text point `detail` words it.
+    Alert,
     Other,
 }
 
@@ -286,6 +292,16 @@ mod tests {
         assert_eq!(Unit::parse("µg/m³"), Some(Unit::Other("µg/m³".into())));
         assert_eq!(Unit::parse("  "), None);
         assert_eq!(serde_json::to_string(&Unit::Celsius).unwrap(), "\"°C\"");
+    }
+
+    #[test]
+    fn alert_is_declared_never_guessed() {
+        assert_eq!(
+            serde_json::to_string(&Semantic::Alert).unwrap(),
+            "\"alert\""
+        );
+        // No magic key: a point named so is not an alert until it says it is.
+        assert_eq!(Semantic::infer("alert", None), Semantic::Other);
     }
 
     #[test]

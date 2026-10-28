@@ -29,6 +29,12 @@ pub struct ProviderConfig {
     /// content. Absent: it receives nothing and cannot be routed.
     #[serde(default)]
     pub tier: Option<u8>,
+    /// `moli-v4`: the model was trained on Moli's house contract (its static
+    /// prompt, devices numbered, and its thirteen tools, `tools/model/`), so the
+    /// conversation speaks that contract to it, in one round trip. Absent: a
+    /// general model.
+    #[serde(default)]
+    pub contract: Option<String>,
 }
 
 /// `[assistant.routes]`: which provider serves which task.
@@ -73,6 +79,11 @@ pub struct Provider {
     pub(crate) endpoint: Endpoint,
     pub model: String,
     pub tier: Option<Tier>,
+    /// The house-model contract the provider speaks (`moli-v4`), if any.
+    pub contract: Option<String>,
+    /// A contract declared that this Moli does not speak (`moli-v3` after an
+    /// update): the provider is refused, with no fallback to a general model.
+    pub refused_contract: Option<String>,
 }
 
 /// The providers of an assistant and who serves what.
@@ -117,6 +128,10 @@ fn declared(config: &Config) -> anyhow::Result<Vec<Provider>> {
                     })?,
             ),
         };
+        // A contract this Moli does not speak is refused, not fatal: Moli starts
+        // and says why its assistant is out (`check-config` still fails).
+        let known = crate::contract::name()?;
+        let refused_contract = p.contract.clone().filter(|c| *c != known);
         let endpoint =
             Endpoint::parse(&p.base_url).with_context(|| format!("provider {:?}", p.id))?;
         list.push(Provider {
@@ -125,6 +140,8 @@ fn declared(config: &Config) -> anyhow::Result<Vec<Provider>> {
             endpoint,
             model: p.model.clone(),
             tier,
+            contract: p.contract.clone().filter(|_| refused_contract.is_none()),
+            refused_contract,
         });
     }
 
@@ -148,6 +165,8 @@ impl Providers {
                     endpoint,
                     model: config.model.clone(),
                     tier: Some(Tier::LocalOnly),
+                    contract: None,
+                    refused_contract: None,
                 }],
                 chat: 0,
                 voice: 0,
@@ -254,6 +273,23 @@ impl Providers {
         })
     }
 
+    /// The chat provider's contract, when this Moli refuses it: (provider,
+    /// contract declared, contract spoken).
+    pub(crate) fn refused_chat(&self) -> Option<(&str, &str, String)> {
+        let chat = &self.list[self.chat];
+        let declared = chat.refused_contract.as_deref()?;
+        Some((
+            &chat.id,
+            declared,
+            crate::contract::name().unwrap_or_default(),
+        ))
+    }
+
+    /// Whether a provider speaks the house-model contract.
+    pub(crate) fn any_contract(&self) -> bool {
+        self.list.iter().any(|p| p.contract.is_some())
+    }
+
     pub(crate) fn is_legacy(&self) -> bool {
         self.legacy
     }
@@ -267,6 +303,8 @@ impl Providers {
                 "id": p.id,
                 "tier": p.tier.map(Tier::level),
                 "local": p.endpoint.at_home(),
+                "contract": p.contract,
+                "refused_contract": p.refused_contract,
             })).collect::<Vec<_>>(),
             "routes": {
                 "chat": id(self.chat),
@@ -283,19 +321,39 @@ impl Providers {
     /// not at home.
     pub(crate) fn warning(&self, key_present: bool) -> Option<String> {
         let chat = &self.list[self.chat];
-        (self.legacy && (key_present || chat.endpoint.is_local()) && !chat.endpoint.at_home()).then(|| {
-            format!(
-                "assistant: the house's names and live values (tier 1) go to {}; declare [[assistant.provider]] to choose where each request may go",
-                chat.base_url
-            )
-        })
+        if chat.endpoint.at_home() {
+            return None;
+        }
+        if self.legacy {
+            return (key_present || chat.endpoint.is_local()).then(|| {
+                format!(
+                    "assistant: the house's names and live values (tier 1) go to {}; declare [[assistant.provider]] to choose where each request may go",
+                    chat.base_url
+                )
+            });
+        }
+        // A named provider out of the house was chosen on purpose: said anyway, so that it shows in the logs.
+        Some(format!(
+            "assistant: provider {:?} (tier 1) receives the house's names and live values at {}, outside the house",
+            chat.id, chat.base_url
+        ))
     }
 }
 
 impl Config {
     /// Validates `[assistant]` (what `moli-os check-config` runs).
     pub fn check(&self) -> anyhow::Result<()> {
-        self.clone().resolved().map(|_| ())
+        let (_, providers) = self.clone().resolved()?;
+        for p in &providers.list {
+            if let Some(declared) = &p.refused_contract {
+                anyhow::bail!(
+                    "provider {:?}: contract {declared:?} is not the one this Moli speaks ({})",
+                    p.id,
+                    crate::contract::name()?
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The configuration the rest of the assistant runs on, and the providers.
@@ -314,6 +372,18 @@ impl Config {
             effective.model.clone_from(&chat.model);
             effective.builder_model.clone_from(&chat.model);
             effective.search_model = String::new();
+            // The cloud voice would go to the chat provider: a model at home has
+            // none (Ollama answers neither), so the local voices (Whisper, Piper)
+            // serve, and the status does not claim a cloud voice. Only the defaults
+            // go: a voice model set by hand is the owner's choice.
+            if chat.endpoint.at_home() {
+                if effective.transcribe_model == crate::default_transcribe() {
+                    effective.transcribe_model = String::new();
+                }
+                if effective.speech_model == crate::default_speech_model() {
+                    effective.speech_model = String::new();
+                }
+            }
         }
         Ok((effective, providers))
     }
@@ -329,6 +399,27 @@ mod tests {
 
     fn err(text: &str) -> String {
         format!("{:#}", cfg(text).resolved().unwrap_err())
+    }
+
+    #[test]
+    fn a_contract_this_moli_does_not_speak_is_refused_not_fatal() {
+        let old = LOCAL.replace("tier = 1\n", "tier = 1\ncontract = \"moli-v1\"\n");
+        // Moli still starts: the provider is refused, and says why.
+        let (_, providers) = cfg(&old).resolved().unwrap();
+        let (id, declared, known) = providers.refused_chat().unwrap();
+        assert_eq!((id, declared), ("local", "moli-v1"));
+        assert_eq!(known, crate::contract::name().unwrap());
+        assert!(
+            !providers.any_contract(),
+            "no fallback: nobody speaks the contract"
+        );
+        // `moli-os check-config` names it.
+        let e = format!("{:#}", cfg(&old).check().unwrap_err());
+        assert!(e.contains("moli-v1") && e.contains("local"), "{e}");
+        // The contract this Moli speaks is accepted.
+        let now = LOCAL.replace("tier = 1\n", &format!("tier = 1\ncontract = \"{known}\"\n"));
+        assert!(cfg(&now).check().is_ok());
+        assert!(cfg(&now).resolved().unwrap().1.refused_chat().is_none());
     }
 
     const LOCAL: &str = r#"
@@ -472,6 +563,35 @@ chat = "local"
         assert!(local_legacy.warning(true).is_none(), "a model at home");
         let (_, named) = cfg(LOCAL).resolved().unwrap();
         assert!(named.warning(true).is_none());
+        // A named tier-1 provider in a cloud is allowed (a choice), and said at start.
+        let cloud = LOCAL.replace("http://127.0.0.1:11434/v1", "https://api.example.com/v1");
+        let (_, named_cloud) = cfg(&cloud).resolved().unwrap();
+        let said = named_cloud.warning(false).unwrap();
+        assert!(
+            said.contains("\"local\"") && said.contains("api.example.com"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_provider_at_home_gets_no_cloud_voice_a_cloud_one_keeps_it() {
+        let (home, _) = cfg(LOCAL).resolved().unwrap();
+        assert!(home.transcribe_model.is_empty() && home.speech_model.is_empty());
+        let cloud = LOCAL.replace("http://127.0.0.1:11434/v1", "https://api.example.com/v1");
+        let (away, _) = cfg(&cloud).resolved().unwrap();
+        let defaults = cfg("");
+        assert_eq!(away.transcribe_model, defaults.transcribe_model);
+        assert_eq!(away.speech_model, defaults.speech_model);
+        // A voice model set by hand stays.
+        let chosen = LOCAL.replace("[[provider]]", "speech_model = \"ma-voix\"\n\n[[provider]]");
+        let (mine, _) = cfg(&chosen).resolved().unwrap();
+        assert_eq!(mine.speech_model, "ma-voix");
+        assert!(mine.transcribe_model.is_empty());
+        // The old single provider is left as it was.
+        let (legacy, _) = cfg("base_url = \"http://127.0.0.1:11434/v1\"")
+            .resolved()
+            .unwrap();
+        assert_eq!(legacy.speech_model, defaults.speech_model);
     }
 
     #[test]

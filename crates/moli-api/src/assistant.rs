@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use axum::Extension;
 use axum::body::Bytes;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use moli_assistant::{Assistant, AssistantError, Speech, Turn};
+use moli_assistant::{Assistant, AssistantError, ProposalError, Speech, Turn};
+use moli_runtime::Hub;
 use serde_json::json;
 
 use crate::caller::Caller;
@@ -29,14 +31,81 @@ pub(crate) async fn status(Extension(Moli(moli)): Extension<Moli>) -> Response {
 
 pub(crate) async fn turn(
     Extension(Moli(moli)): Extension<Moli>,
-    axum::Json(turn): axum::Json<Turn>,
+    caller: Caller,
+    axum::Json(mut turn): axum::Json<Turn>,
 ) -> Response {
     let Some(moli) = moli else {
         return not_configured();
     };
+    // Who asked, as the server knows it: what « annule » may take back is theirs.
+    turn.asker = Some(format!("client:{}", caller.key));
     match moli.turn(turn).await {
         Ok(reply) => axum::Json(reply).into_response(),
         Err(e) => failure(&e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Stop {
+    /// The `id` the dashboard gave its turn.
+    id: String,
+}
+
+/// `POST /api/assistant/stop`: stops the dashboard's turn of that `id`.
+/// `{stopped}` says whether one was running.
+pub(crate) async fn stop(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::Json(stop): axum::Json<Stop>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    axum::Json(json!({ "stopped": moli.stop(&stop.id) })).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Decision {
+    approve: bool,
+}
+
+/// A person's answer to a change the conversation proposed. Only the
+/// dashboard's person decides (a human session: the household alone is not
+/// enough): a script or an agent is refused whatever it claims, and the
+/// proposal waits for a person.
+#[allow(clippy::too_many_arguments)] // axum extractors
+pub(crate) async fn decide_proposal(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(persons): Extension<Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+    axum::Json(body): axum::Json<Decision>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    let owner = crate::people_api::is_owner(&caller, &humans, &persons, &headers);
+    match moli
+        .decide_proposal_by(id, body.approve, origin, Some(caller.describe()), owner)
+        .await
+    {
+        Ok(said) => axum::Json(json!({ "ok": true, "said": said })).into_response(),
+        Err(e) => {
+            let status = match e {
+                ProposalError::Unknown => StatusCode::GONE,
+                // 403: not a person (the dashboard asks for the code); 409: the house's guard refused.
+                ProposalError::HumanOnly | ProposalError::OwnersOnly => StatusCode::FORBIDDEN,
+                ProposalError::Refused(_) => StatusCode::CONFLICT,
+                ProposalError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            if status == StatusCode::INTERNAL_SERVER_ERROR {
+                tracing::warn!(error = %e, "proposal could not be applied");
+            }
+            (status, axum::Json(json!({ "error": e.to_string() }))).into_response()
+        }
     }
 }
 

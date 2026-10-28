@@ -36,6 +36,7 @@ Quatre sections : `[profile]`, au moins une `[[request]]`, au moins un `[[point]
 | `mac` | non | `<requête>.<chemin>` de l'adresse MAC de l'appareil, pour le retrouver si son adresse change (voir « Une adresse qui change ») ; quand c'est aussi `identity`, l'appareil est retrouvable avant même d'avoir répondu une fois |
 | `name_from` | non | `<requête>.<chemin>` du nom que l'appareil se donne |
 | `secret` | non | nom du secret (par instance, dans le coffre chiffré) dont le profil a besoin. Un profil **fichier** qui en déclare un doit aussi déclarer `host` |
+| `snapshot` | non | chemin `GET` qui répond par **une image** (PNG, JPEG, GIF ou WebP, 8 Mio au plus) : l'appareil fournit alors des images à la demande, demandées seulement quand une surface en veut une, jamais interrogées en boucle. Même forme que `[[request]] path`, et une lecture : pas de query hors des points d'accès sûrs. Une réponse qui n'est pas une image est une erreur |
 
 ### `[[request]]`
 
@@ -63,7 +64,7 @@ Il n'y a pas de transport « https » séparé : HTTP ou HTTPS dépend de `[prof
 | `values` | valeurs de l'enum (obligatoires pour `enum`, distinctes, non vides) |
 | `map` | valeur brute (en texte) → sens, appliqué **avant** tout le reste ; chaque valeur doit coller au `kind` |
 | `unit` | unité (voir ci-dessous) |
-| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`, `smoke`, `tamper`, `config`, `other`. Par défaut : déduite de la clé et de l'unité |
+| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`, `smoke`, `tamper`, `config`, `alert`, `other`. Par défaut : déduite de la clé et de l'unité ; `alert` n'est jamais déduite, elle se déclare (voir « Ce que la maison surveille ») |
 | `scale` | multiplicateur (numérique seulement ; fini, non nul, \|s\| ≤ 1e9) |
 | `round` | décimales gardées après `scale` (numérique seulement, 6 au plus) |
 | `min`, `max` | bornes d'une commande (numérique seulement, finies, `min < max`) : le hub refuse un ordre hors bornes. Les lectures ne sont pas bornées |
@@ -91,6 +92,31 @@ Il n'y a pas de transport « https » séparé : HTTP ou HTTPS dépend de `[prof
    - `enum` : doit être une des `values`, sinon `null` + avertissement (nouveau mode de firmware) ;
    - `text` : texte brut.
 4. Une clé absente de la réponse laisse la dernière valeur en place.
+
+### Ce que la maison surveille (`semantic = "alert"`)
+
+Un point binaire déclaré `semantic = "alert"` dit qu'un appareil **va bien ou non** :
+`true` = quelque chose ne va pas (une sauvegarde en retard, un disque qui faiblit, un
+lien coupé). Cette sémantique ne se déduit jamais d'un nom de clé : elle se déclare, et
+un pilote peut la poser aussi. Tout appareil qui en a une apparaît sur la page **Parc**
+du tableau de bord, ce qui va mal en premier ; la page n'est dans la navigation que si
+au moins un appareil en expose une. Un point texte de clé `detail`, s'il existe, donne
+la phrase de la carte ; sinon la carte montre ses autres valeurs.
+
+```toml
+[[point]]
+key = "en_alerte"
+label = "En alerte"
+from = "etat.ko"
+kind = "binary"
+semantic = "alert"
+
+[[point]]
+key = "detail"
+label = "Détail"
+from = "etat.message"
+kind = "text"
+```
 
 ### `[[write]]`
 

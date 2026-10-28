@@ -109,6 +109,10 @@
 
   "serveur.config.depart_ecrite": "première mise en route : configuration de départ écrite",
   "serveur.config.depart_non_ecrite": "configuration de départ non écrite : réglages par défaut, en mémoire",
+  "serveur.fuseau.section": "{section} timezone : réglage par section accepté mais déprécié ; écris-le une fois pour toute la maison, dans [server] : timezone = \"{zone}\"",
+  "serveur.fuseau.systeme": "aucun fuseau écrit : celui du système est pris ({zone}). Écris-le dans [server] timezone pour qu'il ne dépende plus de la machine",
+  "serveur.fuseau.systeme_utc": "aucun fuseau écrit, et le système dit {zone} : dans un conteneur, ce n'est presque jamais celui de la maison. Les automatismes, les jours d'énergie et les heures calmes suivent cette heure-là : écris [server] timezone",
+  "serveur.fuseau.inconnu": "aucun fuseau écrit, et le système n'en donne aucun : UTC est utilisé. Écris [server] timezone (par exemple \"Europe/Paris\")",
 
   "serveur.energie.lecture_seule": "lecture seule",
   "serveur.energie.appareil": "Énergie",
@@ -161,5 +165,7 @@
   "serveur.personnes.point_depuis": "Dans cette zone depuis",
   "serveur.personnes.point_nombre": "Personnes à la maison",
   "serveur.personnes.point_quelquun": "Quelqu'un à la maison",
-  "serveur.personnes.point_tous_partis": "Tout le monde est parti"
+  "serveur.personnes.point_tous_partis": "Tout le monde est parti",
+  "serveur.garde.ouverture": "ouvrir une serrure, une porte de garage ou un portail : une personne valide",
+  "serveur.personnes.deja_configuree": "cette personne est déjà configurée : à retirer depuis l’écran Personnes"
 }

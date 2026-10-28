@@ -109,6 +109,10 @@
 
   "serveur.config.depart_ecrite": "first start: starter configuration written",
   "serveur.config.depart_non_ecrite": "starter configuration not written: default settings, in memory",
+  "serveur.fuseau.section": "{section} timezone: per-section setting accepted but deprecated; write it once for the whole house, in [server]: timezone = \"{zone}\"",
+  "serveur.fuseau.systeme": "no time zone written: the system's is used ({zone}). Write it in [server] timezone so it no longer depends on the machine",
+  "serveur.fuseau.systeme_utc": "no time zone written, and the system says {zone}: in a container this is almost never the house's. Automations, energy days and quiet hours follow that clock: write [server] timezone",
+  "serveur.fuseau.inconnu": "no time zone written, and the system gives none: UTC is used. Write [server] timezone (e.g. \"Europe/Paris\")",
 
   "serveur.energie.lecture_seule": "read-only",
   "serveur.energie.appareil": "Energy",
@@ -161,5 +165,7 @@
   "serveur.personnes.point_depuis": "In this zone since",
   "serveur.personnes.point_nombre": "People at home",
   "serveur.personnes.point_quelquun": "Someone at home",
-  "serveur.personnes.point_tous_partis": "Everyone has left"
+  "serveur.personnes.point_tous_partis": "Everyone has left",
+  "serveur.garde.ouverture": "opening a lock, a garage door or a gate: a person approves",
+  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen"
 }

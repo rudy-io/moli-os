@@ -1099,3 +1099,106 @@ async fn oversized_orders_are_refused_and_journaled_without_their_bulk() {
         other => panic!("{other:?}"),
     }
 }
+
+#[tokio::test]
+async fn an_agent_opening_a_garage_door_or_a_lock_waits_for_a_person() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    let named = |name: &str| moli_runtime::LabelPatch {
+        name: Some(name.into()),
+        room: None,
+    };
+    hub.set_label(&plug, named("Porte de garage"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let open = hub
+        .command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await;
+    assert!(
+        matches!(open, Err(CommandError::NeedsApproval { .. })),
+        "{open:?}"
+    );
+    let close = hub
+        .command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+        .await;
+    assert!(close.is_ok(), "closing goes through: {close:?}");
+    let by_person = hub
+        .command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await;
+    assert!(by_person.is_ok(), "a person opens: {by_person:?}");
+
+    hub.set_label(&plug, named("Serrure entrée"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let lock = hub
+        .command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+        .await;
+    assert!(
+        matches!(lock, Err(CommandError::NeedsApproval { .. })),
+        "{lock:?}"
+    );
+
+    hub.set_label(&plug, named("Prise du salon"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let plain = hub
+        .command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await;
+    assert!(plain.is_ok(), "{plain:?}");
+}
+
+#[tokio::test]
+async fn a_device_only_named_after_the_garage_or_with_lock_inside_a_word_is_not_held() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    for name in [
+        "Prise garage",
+        "Lumière garage",
+        "Radiateur garage",
+        "Clock",
+    ] {
+        let patch = moli_runtime::LabelPatch {
+            name: Some(name.into()),
+            room: None,
+        };
+        hub.set_label(&plug, patch, Origin::Ui, None).await.unwrap();
+        for value in [true, false] {
+            let sent = hub
+                .command(&point("state"), Value::Bool(value), Origin::Household, None)
+                .await;
+            assert!(sent.is_ok(), "{name} {value}: {sent:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_routine_that_opens_is_held_for_the_dashboard_without_a_code() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    let named = |name: &str| moli_runtime::LabelPatch {
+        name: Some(name.into()),
+        room: None,
+    };
+    hub.set_label(&plug, named("Porte de garage"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let state = point("state");
+    let open = Value::Bool(true);
+    let close = Value::Bool(false);
+    assert!(
+        hub.would_hold(&state, Some(&open), Origin::Household)
+            .is_some()
+    );
+    assert!(
+        hub.would_hold(&state, Some(&close), Origin::Household)
+            .is_none()
+    );
+    // A toggle may open: held.
+    assert!(hub.would_hold(&state, None, Origin::Household).is_some());
+    // A person's session decides alone.
+    assert!(hub.would_hold(&state, Some(&open), Origin::Ui).is_none());
+    hub.set_label(&plug, named("Prise du salon"), Origin::Ui, None)
+        .await
+        .unwrap();
+    assert!(hub.would_hold(&state, None, Origin::Household).is_none());
+}

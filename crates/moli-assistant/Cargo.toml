@@ -16,6 +16,7 @@ moli-history.workspace = true
 moli-energy.workspace = true
 moli-net.workspace = true
 moli-automation.workspace = true
+moli-weather.workspace = true
 anyhow.workspace = true
 http.workspace = true
 http-body-util.workspace = true
@@ -24,13 +25,13 @@ ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]
 toml.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tokio-util.workspace = true
 
 [lints]
 workspace = true

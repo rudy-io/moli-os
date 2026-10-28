@@ -18,10 +18,22 @@ Moli runs a home: knowing its trust model helps you install it safely and find w
   (typed once, a session lasts 30 days on that browser). The code is also needed to approve
   what commits the house: an automation, an order an agent asked for. Set `[guard] dashboard =
   "pin"` to require the code for every command.
+- **Opening the house always takes a person.** Unlocking a lock, opening a garage door or a
+  gate waits for a person's approval, whatever the room and whatever the dashboard mode: from an
+  agent, a script, the command line, the house model, and from the dashboard without a code
+  (directly, or by running a routine that would). Closing a gate goes through, and so does
+  locking a lock known by its point (a Zigbee lock's `LOCK`/`UNLOCK` state); a lock known by its
+  name only (a strike on a relay) is held both ways. Failing a point, a device is a lock
+  or a gate by a whole word of its name (« serrure », « verrou », « lock », « portail », « gate »,
+  « porte de garage »), its own name and the name it was given both counting. « Garage » alone is
+  not a gate (« Prise garage »), and a light opens nothing: name a garage door « Porte de garage »
+  for the rule to hold it.
 - **Agents never act freely.** Orders from agents (MCP), scripts (REST), the command line, and
   anything that only claims to be the dashboard go through the guard: in protected rooms (and,
   for agents and scripts, during quiet hours) they wait for a person. An automation written by
-  an agent stays a draft until a person approves its exact version.
+  an agent stays a draft until a person approves its exact version. A change of configuration the
+  house model proposes (renaming, moving or hiding a device, renaming a room, adding a person,
+  the house's position) only applies when a person confirms it with the code.
 - **Browsers**: a write sent from another site's page (by its `Origin` or `Sec-Fetch-Site`) is
   refused, and no page can show the dashboard inside a frame.
 - **A demo house** (`[server] demo = true`) lets anyone play with it, from anywhere, and keeps

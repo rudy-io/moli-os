@@ -18,6 +18,9 @@ data_dir = {data_dir}
 # Les noms par lesquels on joint Moli (garde contre le rebinding DNS) ; une
 # adresse IP tapée telle quelle marche toujours.
 # allowed_hosts = ["moli.local"]
+# Le fuseau de la maison (automatismes, énergie, heures calmes, Moli). Sans lui,
+# celui du système, souvent UTC dans un conteneur.
+# timezone = "Europe/Paris"
 
 # Les appareils : un bloc [[driver]] par intégration (integrations/<nom>/onboarding.md),
 # puis redémarrer Moli. Par exemple, Zigbee par un Zigbee2MQTT existant :
@@ -51,13 +54,16 @@ pub struct Config {
     /// Its API key: `moli-os secrets set assistant api_key`.
     #[serde(default)]
     pub assistant: Option<moli_assistant::Config>,
-    /// Automations: the house's position (sunrise, sunset) and time zone.
+    /// Automations: the house's position (sunrise, sunset).
     #[serde(default)]
     pub automations: moli_automation::Config,
     /// The pantry, « Le Cellier » (absent: no shopping list). `[pantry]`,
     /// even empty, switches it on; never in a demo house.
     #[serde(default)]
     pub pantry: Option<moli_pantry::Config>,
+    /// The house's time zone, resolved once and given to every section.
+    #[serde(skip)]
+    pub zone: crate::timezone::Zone,
 }
 
 /// Where and when agents need a human's approval. Edited by humans only:
@@ -85,8 +91,9 @@ pub struct QuietHoursConfig {
     pub from: String,
     /// `"07:30"` (may be earlier than `from`: the window crosses midnight)
     pub to: String,
-    /// IANA name, e.g. `"Europe/Paris"` (daylight saving handled).
-    pub timezone: String,
+    /// The house's (`[server] timezone`). Written here, it must agree.
+    #[serde(default)]
+    pub timezone: Option<String>,
     /// Rooms concerned; empty or absent = the whole home.
     #[serde(default)]
     pub rooms: Vec<String>,
@@ -95,10 +102,17 @@ pub struct QuietHoursConfig {
 impl GuardConfig {
     pub fn policy(&self) -> anyhow::Result<GuardPolicy> {
         let quiet_hours = match &self.quiet_hours {
-            Some(q) => Some(
-                QuietHours::parse(&q.from, &q.to, &q.timezone, q.rooms.clone())
-                    .map_err(|e| anyhow::anyhow!("[guard.quiet_hours] {e}"))?,
-            ),
+            Some(q) => {
+                // Given the house's when the configuration is read: never guessed here.
+                let timezone = q
+                    .timezone
+                    .as_deref()
+                    .context("[guard.quiet_hours] no time zone: write [server] timezone")?;
+                Some(
+                    QuietHours::parse(&q.from, &q.to, timezone, q.rooms.clone())
+                        .map_err(|e| anyhow::anyhow!("[guard.quiet_hours] {e}"))?,
+                )
+            }
             None => None,
         };
         Ok(GuardPolicy {
@@ -130,6 +144,11 @@ pub struct Server {
     /// nobody coming through Cloudflare is recognized).
     #[serde(default)]
     pub access: Option<moli_api::AccessConfig>,
+    /// The house's time zone (IANA): when automations fire, where energy
+    /// days are cut, the assistant's clock, the quiet hours. Absent: the
+    /// system's, named at start (in a container, usually UTC).
+    #[serde(default)]
+    pub timezone: Option<String>,
     /// The house's language (`locales/<language>/`): its words, its
     /// assistant, its dashboard. The one chosen at the installation wins.
     #[serde(default = "default_language")]
@@ -162,6 +181,7 @@ impl Default for Server {
             allowed_hosts: Vec::new(),
             history_days: default_history_days(),
             access: None,
+            timezone: None,
             language: default_language(),
             demo: false,
             demo_seed: None,
@@ -233,7 +253,7 @@ impl Config {
                 );
             }
         }
-        let config: Self = toml::from_str(&text).context("starter configuration")?;
+        let config = Self::parse(&text).context("starter configuration")?;
         config.check()?;
         Ok(config)
     }
@@ -241,10 +261,34 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read {}", path.display()))?;
-        let mut config: Self =
-            toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+        let mut config =
+            Self::parse(&text).with_context(|| format!("invalid {}", path.display()))?;
         config.beside(path.parent().unwrap_or(Path::new(".")));
         config.check()?;
+        Ok(config)
+    }
+
+    /// The configuration, its time zone resolved and given to every
+    /// section that reads one (see `timezone`).
+    fn parse(text: &str) -> anyhow::Result<Self> {
+        let sections = crate::timezone::written(&toml::from_str(text)?)?;
+        let mut config: Self = toml::from_str(text)?;
+        config.zone = crate::timezone::settle(
+            config.server.timezone.as_deref(),
+            &sections,
+            crate::timezone::system,
+        )?;
+        let zone = config.zone.name.clone();
+        config.automations.timezone.clone_from(&zone);
+        if let Some(energy) = &mut config.energy {
+            energy.timezone.clone_from(&zone);
+        }
+        if let Some(assistant) = &mut config.assistant {
+            assistant.timezone.clone_from(&zone);
+        }
+        if let Some(quiet) = &mut config.guard.quiet_hours {
+            quiet.timezone = Some(zone);
+        }
         Ok(config)
     }
 
@@ -367,6 +411,36 @@ mod tests {
         assert!(
             toml::from_str::<Config>("[pantry]\nx = 1\n").is_err(),
             "an unknown pantry option is refused"
+        );
+    }
+
+    #[test]
+    fn every_section_inherits_the_house_zone() {
+        let config = Config::parse(
+            "[server]\ntimezone = \"Indian/Reunion\"\n\
+             [assistant]\n\
+             [energy]\n\
+             [guard.quiet_hours]\nfrom = \"21:00\"\nto = \"07:30\"",
+        )
+        .unwrap();
+        assert_eq!(config.zone.source, crate::timezone::Source::Server);
+        assert_eq!(config.automations.timezone, "Indian/Reunion");
+        assert_eq!(config.energy.unwrap().timezone, "Indian/Reunion");
+        assert_eq!(config.assistant.unwrap().timezone, "Indian/Reunion");
+        let quiet = config.guard.policy().unwrap().quiet_hours.unwrap();
+        assert_eq!(quiet.tz_name, "Indian/Reunion");
+    }
+
+    #[test]
+    fn a_section_contradicting_the_house_zone_is_refused() {
+        let err = Config::parse(
+            "[server]\ntimezone = \"Indian/Reunion\"\n[automations]\ntimezone = \"Europe/Paris\"",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("[server]") && err.contains("[automations]"),
+            "both are named: {err}"
         );
     }
 

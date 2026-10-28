@@ -110,25 +110,28 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
         } else {
             moli_i18n::tr!("assistant.recap.appli")
         };
-        let reply = if e.kind == Kind::Failed {
-            moli_i18n::tr!("assistant.recap.echec")
-        } else if e.reply.trim().is_empty() {
-            moli_i18n::tr!("assistant.recap.fin")
-        } else {
-            short(&e.reply, REPLY_CHARS)
-        };
         lines.push(moli_i18n::tr!(
             "assistant.recap.line",
             time = time,
             place = place,
             question = short(&e.question, QUESTION_CHARS),
-            reply = reply
+            reply = outcome(e)
         ));
     }
     if skipped > 0 {
         lines.push(moli_i18n::tr!("assistant.recap.more", n = skipped));
     }
     Some(lines.join("\n"))
+}
+
+/// What came of a turn, in a recap line: its answer, or why there is none.
+fn outcome(e: &Exchange) -> String {
+    match e.kind {
+        Kind::Failed => moli_i18n::tr!("assistant.recap.echec"),
+        Kind::Interrupted => moli_i18n::tr!("assistant.recap.interrompu"),
+        _ if e.reply.trim().is_empty() => moli_i18n::tr!("assistant.recap.fin"),
+        _ => short(&e.reply, REPLY_CHARS),
+    }
 }
 
 /// Dollars to the cent, below a cent to the tenth of a cent.

@@ -58,6 +58,7 @@
   "moli.composer.question": "Ta question",
   "moli.composer.parler_avec": "Parler avec Moli",
   "moli.composer.arreter": "Arrêter",
+  "moli.composer.arreter_reflexion": "Arrêter la réflexion",
   "moli.composer.dicter": "Parler",
   "moli.composer.arreter_ecoute": "Arrêter l’écoute",
   "moli.composer.parler_a": "Parler à Moli",
@@ -144,6 +145,7 @@
   "moli.echanges.silence": "Réveil du boîtier sans phrase comprise",
   "moli.echanges.echec": "Échec : {error}",
   "moli.echanges.fin": "Conversation close",
+  "moli.echanges.interrompu": "Interrompu",
   "moli.echanges.recherche": "recherche web",
   "moli.echanges.plus": "Voir plus",
   "moli.echanges.recap": "Envoyer le récap sur Telegram",
@@ -156,5 +158,11 @@
   "moli.echanges.enregistrer_aide": "Pour tester le micro : chaque phrase reste écoutable ici, puis s'efface au bout de 7 jours.",
   "moli.echanges.enregistre_jusqu": "Le boîtier est enregistré jusqu'au {date} (chaque enregistrement s'efface au bout de 7 jours).",
   "moli.echanges.arreter": "Arrêter l'enregistrement",
-  "moli.echanges.estimation": "Les coûts sont estimés d'après les tarifs publics d'OpenAI ; la facture exacte est sur platform.openai.com."
+  "moli.echanges.estimation": "Les coûts sont estimés d'après les tarifs publics d'OpenAI ; la facture exacte est sur platform.openai.com.",
+  "moli.proposition.confirmer": "Confirmer",
+  "moli.proposition.annuler": "Annuler",
+  "moli.proposition.fait": "Fait",
+  "moli.proposition.annule": "Annulé",
+  "moli.proposition.perimee": "Plus en attente",
+  "moli.proposition.echec": "Pas appliqué"
 }

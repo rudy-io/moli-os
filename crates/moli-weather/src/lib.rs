@@ -54,8 +54,8 @@ pub struct Weather(Arc<Inner>);
 
 #[derive(Debug)]
 struct Inner {
-    latitude: f64,
-    longitude: f64,
+    /// Where the house is: it can move (« j'habite à Lyon »).
+    position: std::sync::RwLock<Option<(f64, f64)>>,
     /// Where the land's tiles are kept (`weather-land/`), when there is a
     /// disk.
     data_dir: Option<PathBuf>,
@@ -148,12 +148,34 @@ fn tile(latitude: f64, longitude: f64) -> (u32, u32) {
     )
 }
 
+/// The house has no position yet: nothing to forecast.
+#[derive(Debug)]
+pub struct Unplaced;
+
+impl std::fmt::Display for Unplaced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the house's location is unknown")
+    }
+}
+
+impl std::error::Error for Unplaced {}
+
 impl Weather {
     #[must_use]
     pub fn new(latitude: f64, longitude: f64, data_dir: Option<PathBuf>) -> Self {
+        Self::at(Some((latitude, longitude)), data_dir)
+    }
+
+    /// A house that is not placed yet (« j'habite à … » will place it): no
+    /// forecast, no map, until it is.
+    #[must_use]
+    pub fn unplaced(data_dir: Option<PathBuf>) -> Self {
+        Self::at(None, data_dir)
+    }
+
+    fn at(position: Option<(f64, f64)>, data_dir: Option<PathBuf>) -> Self {
         Self(Arc::new(Inner {
-            latitude,
-            longitude,
+            position: std::sync::RwLock::new(position),
             data_dir,
             forecast: Mutex::new(None),
             map: Mutex::new(None),
@@ -161,10 +183,49 @@ impl Weather {
         }))
     }
 
+    /// Where the house is now (latitude, longitude), if it is placed.
+    #[must_use]
+    pub fn position(&self) -> Option<(f64, f64)> {
+        *self
+            .0
+            .position
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The house moves (or is no longer placed): the position changes now.
+    pub fn move_to(&self, position: Option<(f64, f64)>) {
+        *self
+            .0
+            .position
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = position;
+    }
+
+    /// What was kept belongs to the old place and goes (it waits for a download in
+    /// progress: run it apart from what must not wait).
+    pub async fn forget_all(&self) {
+        self.forget().await;
+        *self.0.land.lock().await = Land::default();
+    }
+
+    /// Both: the house moves and what was kept goes.
+    pub async fn relocate(&self, position: Option<(f64, f64)>) {
+        self.move_to(position);
+        self.forget_all().await;
+    }
+
+    /// Forgets the forecast and the map kept: the next look asks the service
+    /// again (« actualise la météo »).
+    pub async fn forget(&self) {
+        *self.0.forecast.lock().await = None;
+        *self.0.map.lock().await = None;
+    }
+
     /// The next 24 hours (hour by hour) and the next 7 days, as Open-Meteo's
     /// columns (`hourly`, `daily`), times in the house's time zone.
     pub async fn forecast(&self) -> anyhow::Result<Json> {
-        let (lat, lon) = (self.0.latitude, self.0.longitude);
+        let (lat, lon) = self.position().ok_or(Unplaced)?;
         kept(&self.0.forecast, FORECAST_KEEP, fetch_forecast(lat, lon)).await
     }
 
@@ -172,7 +233,8 @@ impl Weather {
     /// the weather's grid, and the land's tiles (null until they are all
     /// there).
     pub async fn map(&self) -> anyhow::Result<Json> {
-        let area = Area::around(self.0.latitude, self.0.longitude);
+        let (latitude, longitude) = self.position().ok_or(Unplaced)?;
+        let area = Area::around(latitude, longitude);
         let weather = kept(&self.0.map, MAP_KEEP, fetch_map(area)).await?;
         let [x0, y0, x1, y1] = area.tiles();
         let land = self
@@ -387,6 +449,48 @@ async fn fetch_map(area: Area) -> anyhow::Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn refreshing_forgets_what_is_kept_so_the_next_look_asks_again() {
+        let weather = Weather::new(48.86, 2.33, None);
+        *weather.0.forecast.lock().await = Some((Instant::now(), json!({ "kept": true })));
+        *weather.0.map.lock().await = Some((Instant::now(), json!({ "kept": true })));
+        weather.forget().await;
+        assert!(weather.0.forecast.lock().await.is_none());
+        assert!(weather.0.map.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_house_placed_after_the_start_has_its_sky_from_then_on() {
+        let weather = Weather::unplaced(None);
+        assert!(weather.position().is_none());
+        let e = weather.forecast().await.unwrap_err();
+        assert!(e.is::<Unplaced>(), "{e}");
+        assert!(weather.map().await.unwrap_err().is::<Unplaced>());
+        weather.move_to(Some((45.76, 4.84)));
+        assert_eq!(weather.position(), Some((45.76, 4.84)));
+        weather.move_to(None);
+        assert!(weather.position().is_none(), "forgotten: unplaced again");
+    }
+
+    #[tokio::test]
+    async fn moving_the_house_drops_what_belonged_to_the_old_place() {
+        let weather = Weather::new(48.86, 2.33, None);
+        *weather.0.forecast.lock().await = Some((Instant::now(), json!({ "kept": true })));
+        *weather.0.map.lock().await = Some((Instant::now(), json!({ "kept": true })));
+        weather
+            .0
+            .land
+            .lock()
+            .await
+            .tiles
+            .insert((1, 1), Bytes::new());
+        weather.relocate(Some((45.76, 4.84))).await;
+        assert_eq!(weather.position(), Some((45.76, 4.84)));
+        assert!(weather.0.forecast.lock().await.is_none());
+        assert!(weather.0.map.lock().await.is_none());
+        assert!(weather.0.land.lock().await.tiles.is_empty());
+    }
 
     #[test]
     fn the_house_sits_near_the_middle_of_its_map() {

@@ -138,8 +138,12 @@ dashboard commande sans code), `via` et `who` (l'e-mail reconnu par Access).
   maison (6 chiffres au moins sans propriétaire Access, 4 sinon) et ouvre la session ; la
   maison en est avertie. Une maison qui a perdu son code ne se rouvre jamais ainsi.
 - Changer le code (`PUT /api/session/pin {pin, current?}`) : le propriétaire Access librement ;
-  dans une maison sans propriétaire, quiconque prouve le code actuel (mêmes verrous). La
-  maison en est avertie, toutes les sessions se ferment.
+  dans une maison sans propriétaire qui puisse se connecter (mot de passe, ou e-mail derrière
+  Access), quiconque prouve le code actuel (mêmes verrous). La maison en est avertie, toutes
+  les sessions se ferment. Sans `[server.access]`, un e-mail n'ouvre rien : un propriétaire
+  qui n'a qu'un e-mail ne compte pas, le code garde la main (avertissement au démarrage).
+  Retirer Access d'une maison dont les propriétaires n'ont pas de mot de passe rend donc la
+  gestion des personnes au code.
 - Cookie `moli_session` : `HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000` (30 jours),
   lié à la clé de l'appelant qui l'a ouvert : son adresse sur le réseau local, son e-mail
   à travers Access (l'adresse publique d'un téléphone change sans arrêt). Un cookie volé
@@ -178,8 +182,8 @@ Règles, dans l'ordre :
    Raison affichée : `pièce protégée (<pièce>)`.
 2. **Appareil sans pièce** (`protect_unassigned = true`) : raison `appareil sans pièce
    connue`.
-3. **Heures calmes** (`quiet_hours` : `from`, `to` en `HH:MM`, `timezone` IANA, `rooms`
-   facultatif ; liste vide = toute la maison) : la fenêtre peut passer minuit, `from == to`
+3. **Heures calmes** (`quiet_hours` : `from`, `to` en `HH:MM` dans le fuseau de la maison
+   (`[server] timezone`), `rooms` facultatif ; liste vide = toute la maison) : la fenêtre peut passer minuit, `from == to`
    = toute la journée, l'heure d'été est suivie. Raison `heures calmes (21:00 → 07:30)`.
 
 Règles annexes :
@@ -282,7 +286,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
 | GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
-| GET | `/api/system` | libre | aucune | `{version, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
+| GET | `/api/system` | libre | aucune | `{version, timezone, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
 | GET | `/api/bench` | libre | aucune | `data/bench.json` tel quel (comparaison avec Home Assistant, écrite par un script côté hôte, hors de ce dépôt) | `404` no comparison available yet |
 
 **Commandes, étiquettes, approbations, journal**
@@ -323,7 +327,9 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
 |---|---|---|---|---|---|
 | GET | `/api/assistant` | libre | aucune | `{ready, model, listen}` ; non configuré : `{ready:false, listen:false, configured:false}` | aucune |
-| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page"}`, dernier message = utilisateur | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}}` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page", id?}`, dernier message = utilisateur ; `id` (1 à 64 lettres, chiffres, `-`, `_`, unique parmi les tours en cours) permet d'arrêter le tour | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}, interrupted?}` ; `interrupted:true` : tour arrêté avant de répondre, `reply` vide, les ordres déjà donnés restent dans `actions` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| POST | `/api/assistant/stop` | libre | `{id}` : l'`id` donné au tour | `{stopped}` : un tour de cet `id` tournait et s'arrête. Seule l'attente du modèle est coupée : un outil, un ordre ou un brouillon commencé va au bout, et le coût des étapes faites reste compté | `503` |
+| POST | `/api/assistant/proposals/{id}` | **humain** | `{approve: bool}` | `{ok, said}` : la proposition du modèle maison est appliquée (ou annulée) | `403` pas une personne ; `409` refusée par la garde ; `410` inconnue, déjà décidée ou expirée (10 min) ; `500` écriture impossible (la proposition reste) ; `503` sans assistant |
 | POST | `/api/assistant/listen` | libre | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text}` (transcription) | `400` pas de l'audio / trop court ; `429` ; `502` ; `503` voix désactivée |
 | PUT | `/api/assistant/recording` | **humain** | `{days}` (7 au plus, 0 = arrêt) | `{recording_until}` : ce qu'entendent les boîtiers est gardé jusque-là | `403` ; `503` |
 | GET | `/api/assistant/recordings/{name}` | **humain** | aucune | le WAV d'un boîtier (gardé 7 jours) | `403` ; `404` |
@@ -403,7 +409,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
   `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`,
-  `smoke`, `tamper`, `config`, `other`.
+  `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose ne va pas), `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
 
@@ -462,6 +468,8 @@ status:"done"|"failed"|"simulated"|"yes"|"no"|"timeout"|"waiting", detail?}]}`.
 
 Description du système tel qu'il tourne (rien n'est écrit à la main) :
 
+- `timezone` : le fuseau de la maison tel que Moli l'a retenu au démarrage (`[server] timezone`,
+  sinon celui des sections qui en écrivent encore un, sinon celui du système, sinon `UTC`) ;
 - `drivers` : `[{instance, kind, integration, status, devices, points, offline, cameras}]` ;
   `integration` = le paquet du catalogue qu'il exécute (`integrations/<id>/`) : le `kind`
   d'un pilote natif, l'id du profil intégré, `profile` pour un profil fichier ;
@@ -709,7 +717,7 @@ La configuration est chargée et validée pour toutes les commandes **sauf** `pr
 | Commande | Arguments | Effet |
 |---|---|---|
 | *(aucune)* ou `serve` | aucun | lance le hub, les pilotes, l'historique, l'énergie, les automatismes, Moli et toutes les surfaces |
-| `check-config` | aucun | valide la configuration et chaque pilote, affiche `configuration OK (N driver(s))` |
+| `check-config` | aucun | valide la configuration et chaque pilote ; affiche le fuseau retenu et d'où il vient (`time zone: …`), les avertissements qui l'accompagnent, puis `configuration OK (N driver(s))`. Échoue si deux fuseaux se contredisent, en les nommant |
 | `secrets set <instance> <name>` | instance de pilote (ou `assistant`, `automations`), nom du secret | lit la valeur sur **l'entrée standard**, refuse un terminal interactif et une valeur vide, chiffre dans `data/secrets.enc`, n'affiche que la longueur |
 | `secrets forget <instance> <name>` | idem | supprime le secret, affiche `forgotten` ou `not found` ; redémarrer ensuite |
 | `profile check <profile>` | fichier de profil ou id intégré | valide un profil déclaratif et affiche variables, requêtes et points (la porte que tout profil écrit par un agent doit passer) ; sans configuration |

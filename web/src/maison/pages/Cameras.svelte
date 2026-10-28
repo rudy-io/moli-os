@@ -1,5 +1,5 @@
 <script>
-  import { home, hub, roomOf, hidden, protectedRoom, nameOf, clock, relative } from '../lib/home.svelte.js';
+  import { home, hub, roomOf, hidden, protectedRoom, nameOf, clock, relative, deviceKind } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
@@ -10,7 +10,7 @@
     const listed = home.config?.favorites?.cameras ?? [];
     const known = new Set(listed.map((c) => c.id));
     const others = Object.values(hub.devices)
-      .filter((d) => d.camera && !known.has(d.id) && !hidden(d.id))
+      .filter((d) => deviceKind(d) === 'camera' && !known.has(d.id) && !hidden(d.id))
       .map((d) => ({ id: d.id, name: nameOf(d.id), refresh: 15 }));
     return [...listed, ...others].map((c) => ({ ...c, locked: protectedRoom(roomOf(hub.devices[c.id]) ?? '') }));
   });

@@ -296,8 +296,18 @@ fn flatten(
     };
     let unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
+    // A lock's state (`LOCK`/`UNLOCK`, Z2M's `lock` expose) is no switch: `true` is
+    // locked, and the guard asks a person before an agent opens it.
+    // Only the state itself (`state`, `state_l1`…): a plug's `child_lock` is
+    // LOCK/UNLOCK too, and it locks the plug's button, not a door.
+    let lock = expose.kind == "binary"
+        && (&**property == "state" || property.starts_with("state_"))
+        && expose.value_on.as_ref().and_then(Json::as_str) == Some("LOCK")
+        && expose.value_off.as_ref().and_then(Json::as_str) == Some("UNLOCK");
     let semantic = if expose.category.as_deref() == Some("config") {
         Semantic::Config
+    } else if lock {
+        Semantic::Lock
     } else {
         Semantic::infer(&key, unit.as_ref())
     };
@@ -618,6 +628,62 @@ mod tests {
             {"type": "numeric", "property": "color_temp", "access": 7, "unit": "mired",
              "value_min": 153, "value_max": 500}
         ]})
+    }
+
+    #[test]
+    fn a_zigbee_lock_is_a_lock_not_a_switch() {
+        // Z2M's `lock` expose (zigbee-herdsman-converters `e.lock()`), as a real
+        // door lock announces it in `bridge/devices`.
+        let entry = entry_of(json!({
+            "type": "lock",
+            "features": [
+                {"type": "binary", "name": "state", "label": "State", "property": "state",
+                 "access": 7, "value_on": "LOCK", "value_off": "UNLOCK",
+                 "description": "State of the lock"},
+                {"type": "enum", "name": "lock_state", "label": "Lock state",
+                 "property": "lock_state", "access": 1,
+                 "values": ["not_fully_locked", "locked", "unlocked", "unknown"],
+                 "description": "Actual state of the lock"}
+            ]
+        }));
+        let state = entry
+            .device
+            .points
+            .iter()
+            .find(|p| &*p.key == "state")
+            .unwrap();
+        assert_eq!(state.semantic, Semantic::Lock);
+        assert_eq!(state.kind, Kind::Binary);
+        // `true` is locked, both ways on the wire.
+        let decoded: HashMap<_, _> = entry
+            .decode(json!({"state": "LOCK"}).as_object().unwrap())
+            .into_iter()
+            .collect();
+        assert_eq!(decoded["state"], Value::Bool(true));
+        assert_eq!(
+            entry.encode("state", &Value::Bool(false)),
+            json!({"state": "UNLOCK"})
+        );
+        // Whatever its name, the guard sees a lock.
+        assert_eq!(
+            moli_runtime::opener(&["Porte d'entrée"], &entry.device.points),
+            moli_runtime::Opener::Lock
+        );
+        // A plain switch stays a switch.
+        let plug = entry_of(json!({"type": "switch", "features": [
+            {"type": "binary", "name": "state", "property": "state", "access": 7,
+             "value_on": "ON", "value_off": "OFF"}]}));
+        assert_eq!(plug.device.points[0].semantic, Semantic::OnOff);
+        // A plug's child lock (LOCK/UNLOCK too) locks its button, not a door:
+        // the plug stays a plug to the guard.
+        let catalog = catalog();
+        let plug = catalog.by_name("0x00124b0000000009").unwrap();
+        let child_lock = plug.device.point("child_lock").unwrap();
+        assert_ne!(child_lock.semantic, Semantic::Lock);
+        assert_eq!(
+            moli_runtime::opener(&["Prise salon"], &plug.device.points),
+            moli_runtime::Opener::None
+        );
     }
 
     #[test]

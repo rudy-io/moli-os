@@ -45,6 +45,7 @@
   "commun.nav.cellier": "Pantry",
   "commun.nav.parler": "Speak",
   "commun.nav.infra": "Infra",
+  "commun.nav.parc": "Watch",
   "commun.nav.systeme": "System",
   "commun.nav.systeme_titre": "How it works: the living map of the system",
   "commun.nav.atelier": "Workshop",
@@ -249,5 +250,6 @@
   "commun.niveau.bon": "Good",
   "commun.niveau.attention": "Worth watching",
   "commun.niveau.mauvais": "Poor",
-  "commun.capteur.humidite": "Humidity"
+  "commun.capteur.humidite": "Humidity",
+  "commun.code.raison_configuration": "A change to the house: it wants to be sure it’s you."
 }
