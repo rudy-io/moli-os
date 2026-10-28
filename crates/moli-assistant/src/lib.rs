@@ -30,6 +30,7 @@ mod pricing;
 mod proposals;
 mod providers;
 mod recap;
+mod receipt;
 mod recordings;
 mod satellite;
 mod settings;
@@ -44,6 +45,7 @@ pub use import::HaAutomation;
 pub use layout_edit::saved_place;
 pub use places::{OpenMeteoPlaces, Place, Places};
 pub use providers::{ProviderConfig, Routes};
+pub use receipt::ReceiptReader;
 pub use tier::Tier;
 pub use voice::{Heard, Speech, SpeechStream, Spoken};
 
@@ -80,6 +82,12 @@ pub struct Config {
     /// For drafting automations: rare, so a stronger model is affordable.
     #[serde(default = "default_builder")]
     pub builder_model: String,
+    /// For reading receipts: a model that sees images. Empty: `model`. Only
+    /// the single provider of `base_url` uses it; with named providers,
+    /// receipts are read by the model of the provider that serves them
+    /// (`[assistant.routes] receipts`, else the chat provider).
+    #[serde(default)]
+    pub receipts_model: String,
     /// Speech to text; empty to disable voice.
     #[serde(default = "default_transcribe")]
     pub transcribe_model: String,
@@ -139,6 +147,7 @@ impl Default for Config {
             base_url: default_base_url(),
             model: default_model(),
             builder_model: default_builder(),
+            receipts_model: String::new(),
             transcribe_model: default_transcribe(),
             speech_model: default_speech_model(),
             speech_voice: default_speech_voice(),
@@ -2537,6 +2546,11 @@ mod tests {
         assert!((c.speech_speed - 1.2).abs() < f64::EPSILON);
         assert_eq!(c.local_speech, "127.0.0.1:10200");
         assert_eq!(c.local_listen, "127.0.0.1:10300");
+        assert!(
+            c.receipts_model.is_empty(),
+            "receipts: the conversation's model"
+        );
+        assert!(Config::default().receipts_model.is_empty());
     }
 
     #[test]

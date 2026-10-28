@@ -103,6 +103,7 @@ base_topic = "zigbee2mqtt"
 # local_speech = "127.0.0.1:10200"              # Piper (Wyoming), repli de la voix ; "" = aucun
 # local_voice = "fr_FR-siwis-medium"
 # local_listen = "127.0.0.1:10300"              # Whisper (Wyoming), repli de l'écoute ; "" = aucun
+# receipts_model = ""             # lecture des tickets de caisse (un modèle qui voit les images) ; "" = model
 
 # Plusieurs fournisseurs, chacun avec le niveau de données le plus sensible qu'il peut recevoir
 # (1 = un modèle chez soi, 2 = un cloud qui ne voit que la structure pseudonymisée, 3 = un cloud libre).
@@ -123,6 +124,8 @@ base_topic = "zigbee2mqtt"
 # chat = "local"        # la conversation (obligatoire avec des fournisseurs)
 # # voice, builder : le même fournisseur que chat pour l'instant
 # # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
+# # receipts = "…"      # lecture des tickets de caisse du Cellier (un modèle qui voit les images ; niveau 1
+#                       # seulement) ; absent = le fournisseur de chat
 
 # Le Cellier : la liste de courses du foyer et la comparaison des drives (dormant sans cette section).
 # [pantry]

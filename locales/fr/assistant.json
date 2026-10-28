@@ -231,5 +231,10 @@
   "assistant.house.person_known": "{name} est déjà dans le foyer.",
   "assistant.house.place_unknown": "Je ne trouve pas cette ville. Dis-moi juste son nom, par exemple « Lyon ».",
   "assistant.house.place_unavailable": "Je n’arrive pas à chercher cette ville pour l’instant.",
-  "assistant.house.p_undo": "annuler la dernière modification : {text}"
+  "assistant.house.p_undo": "annuler la dernière modification : {text}",
+  "assistant.receipt.question": "ticket de caisse",
+  "assistant.receipt.lines_one": "{count} ligne lue",
+  "assistant.receipt.lines_other": "{count} lignes lues",
+  "assistant.receipt.tier": "Le fournisseur « {provider} » ne peut pas lire les tickets de caisse : ils ne vont qu’à un fournisseur de niveau 1.",
+  "assistant.receipt.no_key": "Pas de clé d’API pour lire les tickets de caisse : à donner avec `moli-os secrets set assistant {name}`."
 }

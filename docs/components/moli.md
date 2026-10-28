@@ -14,6 +14,7 @@ consigne d'un nœud « Moli écrit » (`house::private`) ; il lit `home`, `zone`
 [assistant]
 model = "gpt-4.1-mini"                 # la conversation
 builder_model = "gpt-4.1"              # dessiner des automatismes (rare, donc un modèle plus fort)
+# receipts_model = "gpt-4.1"           # lire les tickets de caisse du Cellier (un modèle qui voit les images) ; "" = model
 transcribe_model = "gpt-4o-mini-transcribe"   # voix → texte ; "" = pas de voix
 # base_url = "https://api.openai.com/v1"      # http://… pour un modèle local (pas de clé exigée)
 ```
@@ -43,8 +44,9 @@ maison), **3** est libre (code, documentation). Un fournisseur déclare `tier` =
 peut recevoir ; il reçoit ce niveau et les moins sensibles, jamais le 0.
 
 `[[assistant.provider]]` (`id`, `base_url`, `model`, `tier`) et `[assistant.routes]` (`chat` obligatoire ; `voice`
-et `builder` suivent `chat` pour l'instant ; `audit` pour les tâches lourdes) remplacent `base_url` et `model` de
-`[assistant]` : ces champs, `builder_model` et `search_model` sont ignorés en mode fournisseurs, et la recherche
+et `builder` suivent `chat` pour l'instant ; `audit` pour les tâches lourdes ; `receipts` lit les tickets de caisse
+du Cellier, sinon le fournisseur de `chat`) remplacent `base_url` et `model` de
+`[assistant]` : ces champs, `builder_model`, `search_model` et `receipts_model` sont ignorés en mode fournisseurs, et la recherche
 web (qui passe par la recherche d'un fournisseur cloud) est coupée. Si le fournisseur de `chat` est chez soi,
 la voix cloud l'est aussi (`transcribe_model` et `speech_model` vidés : Ollama ne fait ni l'un ni l'autre) et les
 voix locales (Whisper, Piper) servent ; un fournisseur cloud garde la sienne. Un fournisseur nommé de niveau 1

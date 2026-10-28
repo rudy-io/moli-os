@@ -49,6 +49,10 @@ pub struct Routes {
     pub builder: Option<String>,
     #[serde(default)]
     pub audit: Option<String>,
+    /// Who reads receipt photos (a model that sees images); absent: the chat
+    /// provider. Only a provider of tier 1 is ever sent one.
+    #[serde(default)]
+    pub receipts: Option<String>,
 }
 
 impl Routes {
@@ -57,6 +61,7 @@ impl Routes {
             && self.voice.is_none()
             && self.builder.is_none()
             && self.audit.is_none()
+            && self.receipts.is_none()
     }
 }
 
@@ -69,6 +74,8 @@ pub enum Route {
     Voice,
     Builder,
     Audit,
+    /// Receipt photos (tier 1 data: the provider's tier is checked at the call).
+    Receipts,
 }
 
 /// A provider as the assistant runs it.
@@ -94,6 +101,7 @@ pub struct Providers {
     voice: usize,
     builder: usize,
     audit: Option<usize>,
+    receipts: usize,
     legacy: bool,
 }
 
@@ -172,6 +180,7 @@ impl Providers {
                 voice: 0,
                 builder: 0,
                 audit: None,
+                receipts: 0,
                 legacy: true,
             });
         }
@@ -193,14 +202,17 @@ impl Providers {
         let voice_route = find("voice", &config.routes.voice)?;
         let builder_route = find("builder", &config.routes.builder)?;
         let audit = find("audit", &config.routes.audit)?;
+        let receipts_route = find("receipts", &config.routes.receipts)?;
         let voice = voice_route.unwrap_or(chat);
         let builder = builder_route.unwrap_or(chat);
+        let receipts = receipts_route.unwrap_or(chat);
 
         for (route, index) in [
             ("chat", Some(chat)),
             ("voice", Some(voice)),
             ("builder", Some(builder)),
             ("audit", audit),
+            ("receipts", Some(receipts)),
         ] {
             let Some(index) = index else { continue };
             ensure!(
@@ -215,6 +227,15 @@ impl Providers {
             ensure!(
                 !list[index].endpoint.is_local() || list[index].endpoint.at_home(),
                 "routes.audit: provider {:?} would send over plain http to an address that is not at home: use https",
+                list[index].id
+            );
+        }
+
+        if let Some(index) = receipts_route {
+            // The photos of what the household buys: never in clear over the Internet.
+            ensure!(
+                !list[index].endpoint.is_local() || list[index].endpoint.at_home(),
+                "routes.receipts: provider {:?} would send over plain http to an address that is not at home: use https",
                 list[index].id
             );
         }
@@ -244,6 +265,7 @@ impl Providers {
             voice,
             builder,
             audit,
+            receipts,
             legacy: false,
         })
     }
@@ -256,8 +278,14 @@ impl Providers {
             Route::Voice => Some(self.voice),
             Route::Builder => Some(self.builder),
             Route::Audit => self.audit,
+            Route::Receipts => Some(self.receipts),
         };
         index.map(|i| &self.list[i])
+    }
+
+    /// Who reads receipts: the `receipts` route, or else the chat provider.
+    pub(crate) fn receipts(&self) -> &Provider {
+        &self.list[self.receipts]
     }
 
     /// The secret (of the `assistant` instance) that holds the API key of the
@@ -311,6 +339,7 @@ impl Providers {
                 "voice": id(self.voice),
                 "builder": id(self.builder),
                 "audit": self.audit.map(id),
+                "receipts": id(self.receipts),
             },
         })
     }
@@ -645,6 +674,36 @@ chat = "local"
             Some("api_key.local")
         );
         assert_eq!(named.key_name(Route::Audit), None);
+    }
+
+    #[test]
+    fn receipts_go_to_their_route_or_else_to_the_chat_provider() {
+        let (_, legacy) = cfg("").resolved().unwrap();
+        assert_eq!(legacy.resolve(Route::Receipts).unwrap().id, "default");
+        assert_eq!(legacy.key_name(Route::Receipts).as_deref(), Some("api_key"));
+        let (_, named) = cfg(LOCAL).resolved().unwrap();
+        assert_eq!(named.resolve(Route::Receipts).unwrap().id, "local");
+        // A route of their own, with its own key; its tier is checked at the
+        // call (the settings page says why a tier 3 cannot read them).
+        let text = format!(
+            "{}\n[[provider]]\nid = \"eyes\"\nbase_url = \"https://api.example.org/v1\"\nmodel = \"vision\"\ntier = 3\n",
+            LOCAL.replace("[routes]\n", "[routes]\nreceipts = \"eyes\"\n")
+        );
+        let (_, routed) = cfg(&text).resolved().unwrap();
+        assert_eq!(routed.resolve(Route::Receipts).unwrap().id, "eyes");
+        assert_eq!(
+            routed.key_name(Route::Receipts).as_deref(),
+            Some("api_key.eyes")
+        );
+        assert_eq!(routed.summary()["routes"]["receipts"], "eyes");
+        // Never over plain http to an address that is not at home.
+        let e = err(&text.replace("https://api.example.org", "http://api.example.org"));
+        assert!(e.contains("plain http") && e.contains("receipts"), "{e}");
+        let e = err(&text.replace("tier = 3\n", ""));
+        assert!(
+            e.contains("routes.receipts") && e.contains("no tier"),
+            "{e}"
+        );
     }
 
     #[test]

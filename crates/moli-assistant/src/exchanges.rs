@@ -32,6 +32,8 @@ pub enum Kind {
     Silence,
     /// A message left at a door, passed on to the household.
     Door,
+    /// Receipt photos read for the pantry: not a conversation, but paid for.
+    Receipt,
 }
 
 /// An order given during a turn, as the history shows it.
