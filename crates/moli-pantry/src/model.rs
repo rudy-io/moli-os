@@ -356,6 +356,20 @@ pub struct ReceiptDraft {
     pub items_done: Vec<i64>,
 }
 
+/// The header of a till receipt an agent already read itself: no photo is
+/// sent, the receipt is recorded as validated together with its lines.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentReceipt {
+    /// The chain's id (see `providers` in the overview).
+    pub provider: String,
+    pub store: String,
+    /// When the receipt was issued, in ms.
+    pub at: u64,
+    /// The total printed, in cents.
+    #[serde(default)]
+    pub total_cents: Option<i64>,
+}
+
 /// A receipt: its draft, and what is known around it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Receipt {

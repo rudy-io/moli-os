@@ -8,7 +8,7 @@ use std::sync::Arc;
 use moli_core::{DeviceId, Origin, PointId, Value};
 use moli_history::History;
 use moli_pantry::{
-    BasketStatus, Deviation, Offer, Pantry, PantryError, Product, Purchase, Reading,
+    AgentReceipt, BasketStatus, Deviation, Offer, Pantry, PantryError, Product, Purchase, Reading,
 };
 use moli_runtime::{CommandError, DeviceView, Hub, LabelPatch};
 use rmcp::handler::server::wrapper::Parameters;
@@ -312,6 +312,23 @@ struct PurchasesArgs {
     /// basket's drive lines (provisional or confirmed) by these corrected ones.
     #[serde(default)]
     confirm: bool,
+    /// A till receipt you read yourself: it is recorded as validated (no
+    /// photo) and the lines are attached to it. The lines must then be
+    /// source `ticket`. Not with `confirm`.
+    #[serde(default)]
+    receipt: Option<AgentReceipt>,
+    #[serde(flatten)]
+    who: Who,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct PeriodArgs {
+    /// Start of the period, in ms (default: 30 days ago).
+    #[serde(default)]
+    from: Option<u64>,
+    /// End of the period, in ms (default: now).
+    #[serde(default)]
+    to: Option<u64>,
 }
 
 #[tool_router]
@@ -834,7 +851,28 @@ impl MoliMcp {
     }
 
     #[tool(
-        description = "Record what was bought, from an order confirmation (source `drive`, status `provisional`) or a receipt (source `ticket`, status `confirmed`). Amounts are unit prices in cents. With `confirm: true` (and the `basket`), at the pick-up, the basket's drive lines (provisional, or already confirmed) are replaced by `lines`, the corrected ones, always kept as source `drive` and status `confirmed` whatever they say: sending the same confirmation twice records it once. You record what a human paid; a basket is never paid by an agent. No author is recorded, so there is no `actor`."
+        description = "What was bought over a period (`from`/`to` in ms, default the last 30 days), oldest first, as `{purchases, receipts}`: the receipts the purchases come from and the drafts still waiting for a human to check them. Amounts are in cents; `line_cents` is what a line really cost, discount deducted."
+    )]
+    async fn pantry_purchases(
+        &self,
+        Parameters(args): Parameters<PeriodArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let pantry = match self.pantry(false) {
+            Ok(p) => p,
+            Err(refused) => return Ok(refused),
+        };
+        let now = moli_core::now_ms();
+        let to = args
+            .to
+            .unwrap_or_else(|| now.saturating_add(crate::pantry::DAY_MS));
+        let from = args
+            .from
+            .unwrap_or_else(|| now.saturating_sub(30 * crate::pantry::DAY_MS));
+        reply(crate::pantry::purchases_with_receipts(pantry, from, to).await)
+    }
+
+    #[tool(
+        description = "Record what was bought, from an order confirmation (source `drive`, status `provisional`) or a receipt (source `ticket`, status `confirmed`). Amounts are in cents: `price_cents` is the unit price and `line_cents` what the line really cost, discount deducted (default `qty` x price - `discount_cents`). With `confirm: true` (and the `basket`), at the pick-up, the basket's drive lines (provisional, or already confirmed) are replaced by `lines`, the corrected ones, always kept as source `drive` and status `confirmed` whatever they say: sending the same confirmation twice records it once. With `receipt` ({provider, store, at, total_cents}), a till receipt you read yourself: it is recorded as a validated receipt and the `lines` (all source `ticket`) are attached to it; never send photos to Moli, you read them yourself; the same receipt sent twice is refused. You record what a human paid; a basket is never paid by an agent. `actor` and `on_behalf_of` are kept on a receipt only."
     )]
     async fn pantry_record_purchases(
         &self,
@@ -846,6 +884,9 @@ impl MoliMcp {
         };
         let count = args.lines.len();
         if args.confirm {
+            if args.receipt.is_some() {
+                return Ok(fail("receipt cannot be used with confirm"));
+            }
             let Some(basket) = args.basket else {
                 return Ok(fail("basket is required to confirm purchases"));
             };
@@ -864,6 +905,14 @@ impl MoliMcp {
                 ..l
             })
             .collect();
+        if let Some(header) = args.receipt {
+            return reply(
+                pantry
+                    .record_receipt(&header, &lines, &args.who.name())
+                    .await
+                    .map(|r| json!({ "ok": true, "recorded": count, "receipt": r.id })),
+            );
+        }
         reply(
             pantry
                 .record_purchases(&lines)

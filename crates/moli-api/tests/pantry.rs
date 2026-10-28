@@ -656,6 +656,112 @@ async fn mcp_purchases_provisional_then_confirmed_once() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[tokio::test]
+async fn mcp_reads_purchases_and_attaches_a_receipt() {
+    let (addr, dir) = house("mcp-receipt", true, false).await;
+    let now = moli_core::now_ms();
+    let line = |label: &str, price: i64| {
+        json!({
+            "product": "lait", "provider": "enseigne-x", "store": "Ville-A", "qty": 2,
+            "price_cents": price, "discount_cents": 20, "at": now - HOUR, "source": "ticket",
+            "status": "confirmed", "label": label,
+        })
+    };
+    let header = json!({
+        "provider": "enseigne-x", "store": "Ville-A", "at": now - HOUR, "total_cents": 220
+    });
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({
+            "lines": [line("LAIT", 120)], "receipt": header,
+            "actor": "agent-x", "on_behalf_of": "Sam",
+        }),
+    )
+    .await;
+    assert!(!failed, "{said}");
+    assert_eq!(said["recorded"], 1);
+    let receipt = said["receipt"].as_i64().unwrap();
+
+    // The period default is the last 30 days; the receipt comes with the lines.
+    let (failed, bought) = tool(&addr, "pantry_purchases", &json!({})).await;
+    assert!(!failed, "{bought}");
+    let lines = bought["purchases"].as_array().unwrap();
+    assert_eq!(lines.len(), 1, "{bought}");
+    assert_eq!(lines[0]["receipt"], receipt);
+    assert_eq!(lines[0]["line_cents"], 220, "2 x 120 - 20");
+    let receipts = bought["receipts"].as_array().unwrap();
+    assert_eq!(receipts.len(), 1, "{bought}");
+    assert_eq!(receipts[0]["id"], receipt);
+    assert_eq!(receipts[0]["status"], "validated");
+    assert_eq!(receipts[0]["photos"], 0);
+    assert_eq!(receipts[0]["reader"], "agent");
+    assert_eq!(receipts[0]["sent_by"], "agent-x (de la part de Sam)");
+    assert_eq!(receipts[0]["read"], Json::Null);
+
+    // Outside the period: nothing.
+    let (failed, none) = tool(&addr, "pantry_purchases", &json!({ "from": 0, "to": 1000 })).await;
+    assert!(!failed, "{none}");
+    assert_eq!(none["purchases"], json!([]));
+    assert_eq!(none["receipts"], json!([]));
+
+    // The same receipt twice, a non-ticket line, confirm with a receipt: refused.
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "lines": [line("LAIT", 120)], "receipt": header }),
+    )
+    .await;
+    assert!(failed, "{said}");
+    assert!(
+        said.as_str().unwrap().contains("already recorded"),
+        "{said}"
+    );
+    let mut drive = line("LAIT", 120);
+    drive["source"] = json!("drive");
+    let other = json!({ "provider": "enseigne-x", "store": "Ville-A", "at": now });
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "lines": [drive], "receipt": other }),
+    )
+    .await;
+    assert!(failed, "{said}");
+    assert!(said.as_str().unwrap().contains("source ticket"), "{said}");
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "basket": 1, "lines": [line("LAIT", 120)], "receipt": other, "confirm": true }),
+    )
+    .await;
+    assert!(failed, "{said}");
+    let (_, bought) = tool(&addr, "pantry_purchases", &json!({})).await;
+    assert_eq!(bought["purchases"].as_array().unwrap().len(), 1, "{bought}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn mcp_receipts_are_refused_in_the_demo_house() {
+    let (addr, dir) = house("mcp-demo-receipt", true, true).await;
+    let line = json!({
+        "product": "lait", "provider": "enseigne-x", "store": "Ville-A", "qty": 1,
+        "price_cents": 100, "at": 1, "source": "ticket", "status": "confirmed",
+    });
+    let receipt = json!({ "provider": "enseigne-x", "store": "Ville-A", "at": 1 });
+    let (failed, _) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "lines": [line], "receipt": receipt }),
+    )
+    .await;
+    assert!(failed);
+    // Reading stays open.
+    let (failed, bought) = tool(&addr, "pantry_purchases", &json!({})).await;
+    assert!(!failed, "{bought}");
+    assert_eq!(bought["purchases"], json!([]));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // ---- receipts and purchases ---------------------------------------------------
 
 const HOUR: u64 = 3_600_000;

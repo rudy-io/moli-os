@@ -35,9 +35,9 @@ use crate::store::now_ms;
 
 pub use basket::{BasketOptions, Choice, Line, Terms, compute};
 pub use model::{
-    Basket, BasketStatus, Deviation, DraftLine, Flexibility, Item, Offer, OfferStatus, Product,
-    ProviderInfo, ProviderKind, ProviderSettings, Purchase, Reading, Receipt, ReceiptDraft,
-    ReceiptStatus,
+    AgentReceipt, Basket, BasketStatus, Deviation, DraftLine, Flexibility, Item, Offer,
+    OfferStatus, Product, ProviderInfo, ProviderKind, ProviderSettings, Purchase, Reading, Receipt,
+    ReceiptDraft, ReceiptStatus,
 };
 pub use providers::PROVIDERS;
 pub use receipts::MAX_PHOTOS;
@@ -307,6 +307,19 @@ impl Pantry {
         }
         self.hub.pantry_changed();
         self.read(move |s| s.receipt(id)).await
+    }
+
+    /// Records a receipt an agent read itself, validated, with its lines (see
+    /// [`Store::record_receipt`]).
+    pub async fn record_receipt(
+        &self,
+        header: &AgentReceipt,
+        lines: &[Purchase],
+        by: &str,
+    ) -> Result<Receipt, PantryError> {
+        let (header, lines, by) = (header.clone(), lines.to_vec(), by.to_owned());
+        self.write(move |s| s.record_receipt(&header, &lines, &by, now_ms()))
+            .await
     }
 
     pub async fn receipt(&self, id: i64) -> Result<Receipt, PantryError> {

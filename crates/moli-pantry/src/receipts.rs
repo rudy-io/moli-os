@@ -13,8 +13,12 @@ use std::path::{Path, PathBuf};
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::baskets::{check_purchase, insert_purchase, json_col, json_text};
-use crate::model::{DraftLine, Product, Purchase, Receipt, ReceiptDraft, ReceiptStatus};
+use crate::baskets::{
+    check_purchase, insert_lines, insert_purchase, json_col, json_text, line_cost,
+};
+use crate::model::{
+    AgentReceipt, DraftLine, Product, Purchase, Receipt, ReceiptDraft, ReceiptStatus,
+};
 use crate::store::{PantryError, Store, ms, save_product_in, ts};
 
 /// A receipt is photographed in at most this many shots.
@@ -126,6 +130,33 @@ fn receipt_row(r: &Row<'_>) -> rusqlite::Result<Receipt> {
     })
 }
 
+/// The validated receipt (other than `except`) of the same chain, the same
+/// minute and the same total, if any.
+fn validated_twin(
+    conn: &Connection,
+    provider: &str,
+    total_cents: i64,
+    at: u64,
+    except: i64,
+) -> Result<Option<i64>, PantryError> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM receipts
+             WHERE status = 'validated' AND provider = ?1 AND total_cents = ?2
+               AND at / ?3 = ?4 AND id <> ?5
+             ORDER BY id LIMIT 1",
+            params![
+                provider,
+                total_cents,
+                ts(MINUTE_MS),
+                ts(at / MINUTE_MS),
+                except
+            ],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 /// A receipt, with the validated one it probably repeats (looked for on a
 /// draft only: same chain, same minute, same total).
 fn load_receipt(conn: &Connection, id: i64) -> Result<Receipt, PantryError> {
@@ -139,16 +170,7 @@ fn load_receipt(conn: &Connection, id: i64) -> Result<Receipt, PantryError> {
         .ok_or_else(|| PantryError::NotFound(format!("receipt {id}")))?;
     let d = &receipt.draft;
     if let (ReceiptStatus::Draft, Some(at), Some(total)) = (receipt.status, d.at, d.total_cents) {
-        receipt.duplicate_of = conn
-            .query_row(
-                "SELECT id FROM receipts
-                 WHERE status = 'validated' AND provider = ?1 AND total_cents = ?2
-                   AND at / ?3 = ?4 AND id <> ?5
-                 ORDER BY id LIMIT 1",
-                params![d.provider, total, ts(MINUTE_MS), ts(at / MINUTE_MS), id],
-                |r| r.get(0),
-            )
-            .optional()?;
+        receipt.duplicate_of = validated_twin(conn, &d.provider, total, at, id)?;
     }
     Ok(receipt)
 }
@@ -399,6 +421,94 @@ impl Store {
         Ok(done)
     }
 
+    /// Records a receipt an agent read itself, with its lines, in one go: a
+    /// validated receipt without photos (reader `agent`, sent and validated
+    /// by `by`) and its lines as confirmed `ticket` purchases attached to it.
+    /// Every line must be a `ticket` line; the receipt of the same chain,
+    /// minute and total already recorded is refused, so a retry cannot count
+    /// a receipt twice. Returns the receipt.
+    pub fn record_receipt(
+        &self,
+        header: &AgentReceipt,
+        lines: &[Purchase],
+        by: &str,
+        now: u64,
+    ) -> Result<Receipt, PantryError> {
+        if lines.is_empty() {
+            return Err(PantryError::Invalid(
+                "a receipt needs at least one line".into(),
+            ));
+        }
+        if let Some(n) = lines.iter().position(|l| l.source != "ticket") {
+            return Err(PantryError::Invalid(format!(
+                "line {}: a receipt only holds lines of source ticket",
+                n + 1
+            )));
+        }
+        if header.provider.trim().is_empty() {
+            return Err(PantryError::Invalid("a receipt needs a provider".into()));
+        }
+        let mut conn = self.lock();
+        let tx = conn.transaction()?;
+        if let Some(total) = header.total_cents
+            && let Some(twin) = validated_twin(&tx, &header.provider, total, header.at, 0)?
+        {
+            return Err(PantryError::Invalid(format!(
+                "this receipt looks already recorded: {twin}"
+            )));
+        }
+        let draft = ReceiptDraft {
+            provider: header.provider.clone(),
+            store: header.store.clone(),
+            at: Some(header.at),
+            total_cents: header.total_cents,
+            lines: lines
+                .iter()
+                .map(|l| DraftLine {
+                    label: l.label.clone(),
+                    name: l.label.to_lowercase(),
+                    qty: l.qty,
+                    unit: l.unit.clone(),
+                    price_cents: l.price_cents,
+                    discount_cents: l.discount_cents,
+                    line_cents: line_cost(l),
+                    keep: true,
+                    product: Some(l.product.clone()),
+                    ..DraftLine::default()
+                })
+                .collect(),
+            ..ReceiptDraft::default()
+        };
+        tx.execute(
+            "INSERT INTO receipts(status, provider, store, at, total_cents, photos, sent_at,
+                                  sent_by, validated_at, validated_by, reader, draft, read)
+             VALUES ('validated', ?1, ?2, ?3, ?4, 0, ?5, ?6, ?5, ?6, 'agent', ?7, 'null')",
+            params![
+                header.provider,
+                header.store,
+                ts(header.at),
+                header.total_cents,
+                ts(now),
+                by,
+                json_text(&draft)?
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        let attached: Vec<Purchase> = lines
+            .iter()
+            .map(|l| Purchase {
+                receipt: Some(id),
+                status: "confirmed".into(),
+                ..l.clone()
+            })
+            .collect();
+        insert_lines(&tx, &attached)?;
+        let done = load_receipt(&tx, id)?;
+        tx.commit()?;
+        tracing::info!(receipt = id, by, "receipt recorded by an agent");
+        Ok(done)
+    }
+
     /// Deletes a draft; returns how many photos it had, for the caller to erase.
     pub fn abandon_receipt(&self, id: i64) -> Result<usize, PantryError> {
         let conn = self.lock();
@@ -616,6 +726,103 @@ mod tests {
             assert_eq!(p.store, "Ville-A");
             assert_eq!(p.at, NOW);
         }
+        cleanup(store, dir);
+    }
+
+    /// A `ticket` line as an agent sends it.
+    fn ticket(product: &str, label: &str, cents: i64) -> Purchase {
+        Purchase {
+            product: product.into(),
+            provider: "enseigne-x".into(),
+            store: "Ville-A".into(),
+            qty: 1.0,
+            price_cents: cents,
+            at: NOW,
+            source: "ticket".into(),
+            status: "confirmed".into(),
+            label: label.into(),
+            ..Purchase::default()
+        }
+    }
+
+    fn header(total: Option<i64>) -> AgentReceipt {
+        AgentReceipt {
+            provider: "enseigne-x".into(),
+            store: "Ville-A".into(),
+            at: NOW,
+            total_cents: total,
+        }
+    }
+
+    #[test]
+    fn an_agent_receipt_is_validated_with_its_lines() {
+        let (store, dir) = setup("agent-receipt");
+        let mut milk = ticket("p1", "LAIT", 130);
+        milk.discount_cents = 10;
+        milk.line_cents = Some(120);
+        let lines = [milk, ticket("p2", "PAIN", 250)];
+        let done = store
+            .record_receipt(&header(Some(370)), &lines, "agent-x", NOW + 5)
+            .unwrap();
+        assert_eq!(done.status, ReceiptStatus::Validated);
+        assert_eq!(done.photos, 0);
+        assert_eq!(done.reader, "agent");
+        assert_eq!(done.sent_by, "agent-x");
+        assert_eq!(done.validated_by.as_deref(), Some("agent-x"));
+        assert_eq!(done.validated_at, Some(NOW + 5));
+        assert_eq!(done.gap_cents, Some(0), "120 + 250 = 370");
+        assert_eq!(done.draft.lines.len(), 2);
+        assert_eq!(store.receipts(None).unwrap().len(), 1);
+        let bought = all_purchases(&store);
+        assert_eq!(bought.len(), 2);
+        for p in &bought {
+            assert_eq!(p.receipt, Some(done.id));
+            assert_eq!(p.source, "ticket");
+            assert_eq!(p.status, "confirmed");
+        }
+        assert_eq!(bought[0].line_cents, Some(120));
+        assert_eq!(bought[0].discount_cents, 10);
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn an_agent_receipt_only_holds_ticket_lines_and_nothing_is_kept_on_error() {
+        let (store, dir) = setup("agent-receipt-invalid");
+        let mut drive = ticket("p1", "LAIT", 130);
+        drive.source = "drive".into();
+        let err = store
+            .record_receipt(&header(None), &[ticket("p2", "PAIN", 250), drive], "a", NOW)
+            .unwrap_err();
+        assert!(matches!(err, PantryError::Invalid(_)), "{err}");
+        let err = store
+            .record_receipt(&header(None), &[], "a", NOW)
+            .unwrap_err();
+        assert!(matches!(err, PantryError::Invalid(_)), "{err}");
+        // A bad line (no product) rolls the receipt back.
+        let err = store
+            .record_receipt(&header(None), &[ticket("", "X", 1)], "a", NOW)
+            .unwrap_err();
+        assert!(matches!(err, PantryError::Invalid(_)), "{err}");
+        assert!(store.receipts(None).unwrap().is_empty());
+        assert!(all_purchases(&store).is_empty());
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn an_agent_receipt_sent_twice_is_recorded_once() {
+        let (store, dir) = setup("agent-receipt-twice");
+        let lines = [ticket("p1", "LAIT", 120)];
+        let first = store
+            .record_receipt(&header(Some(120)), &lines, "a", NOW)
+            .unwrap();
+        let err = store
+            .record_receipt(&header(Some(120)), &lines, "a", NOW + 1)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("this receipt looks already recorded: {}", first.id)
+        );
+        assert_eq!(all_purchases(&store).len(), 1);
         cleanup(store, dir);
     }
 

@@ -180,9 +180,26 @@ pub(crate) fn check_purchase(p: &Purchase) -> Result<(), PantryError> {
 
 /// What a line cost: the stated amount, or `round(qty * price) - discount`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn line_cost(p: &Purchase) -> i64 {
+pub(crate) fn line_cost(p: &Purchase) -> i64 {
     p.line_cents
         .unwrap_or_else(|| (p.qty * p.price_cents as f64).round() as i64 - p.discount_cents)
+}
+
+/// Inserts checked purchase lines, then closes the baskets they settle. The
+/// caller owns the transaction.
+pub(crate) fn insert_lines(conn: &Connection, lines: &[Purchase]) -> Result<(), PantryError> {
+    for line in lines {
+        check_purchase(line)?;
+        if let Some(basket) = line.basket {
+            load_basket(conn, basket)?;
+        }
+        insert_purchase(conn, line, line.basket)?;
+    }
+    let baskets: BTreeSet<i64> = lines.iter().filter_map(|l| l.basket).collect();
+    for basket in baskets {
+        close_if_settled(conn, basket)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn insert_purchase(
@@ -555,17 +572,7 @@ impl Store {
     pub fn record_purchases(&self, p: &[Purchase]) -> Result<(), PantryError> {
         let mut conn = self.lock();
         let tx = conn.transaction()?;
-        for line in p {
-            check_purchase(line)?;
-            if let Some(basket) = line.basket {
-                load_basket(&tx, basket)?;
-            }
-            insert_purchase(&tx, line, line.basket)?;
-        }
-        let baskets: BTreeSet<i64> = p.iter().filter_map(|l| l.basket).collect();
-        for basket in baskets {
-            close_if_settled(&tx, basket)?;
-        }
+        insert_lines(&tx, p)?;
         tx.commit()?;
         Ok(())
     }

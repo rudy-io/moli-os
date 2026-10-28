@@ -58,7 +58,7 @@ pub(crate) const MAX_RECEIPT: usize = 12 * 1024 * 1024;
 /// A year, in ms: how far back the purchases page looks by default.
 const YEAR_MS: u64 = 365 * 24 * 3_600_000;
 /// A day, in ms: the slack kept after now for a clock a little ahead.
-const DAY_MS: u64 = 24 * 3_600_000;
+pub(crate) const DAY_MS: u64 = 24 * 3_600_000;
 
 #[derive(Clone)]
 pub(crate) struct Cellier(pub(crate) Option<Pantry>);
@@ -525,27 +525,16 @@ pub(crate) struct Period {
     to: Option<u64>,
 }
 
-/// The purchases of a period (the last 12 months by default), with the
-/// receipts they come from and the drafts still to check. Receipts go without
-/// the model's raw reading.
-pub(crate) async fn purchases(
-    Extension(Cellier(pantry)): Extension<Cellier>,
-    Query(period): Query<Period>,
-) -> Response {
-    let Some(pantry) = pantry else {
-        return absent();
-    };
-    let now = moli_core::now_ms();
-    let to = period.to.unwrap_or(now.saturating_add(DAY_MS));
-    let from = period.from.unwrap_or_else(|| now.saturating_sub(YEAR_MS));
-    let bought = match pantry.purchases(from, to).await {
-        Ok(bought) => bought,
-        Err(e) => return failed(&e),
-    };
-    let mut receipts = match pantry.receipts(Some(ReceiptStatus::Draft)).await {
-        Ok(drafts) => drafts,
-        Err(e) => return failed(&e),
-    };
+/// The purchases of a period with the receipts they come from and the drafts
+/// still to check, as `{purchases, receipts}`. Receipts go without the
+/// model's raw reading. Shared by the REST route and the MCP tool.
+pub(crate) async fn purchases_with_receipts(
+    pantry: &Pantry,
+    from: u64,
+    to: u64,
+) -> Result<serde_json::Value, PantryError> {
+    let bought = pantry.purchases(from, to).await?;
+    let mut receipts = pantry.receipts(Some(ReceiptStatus::Draft)).await?;
     let known = receipts.iter().map(|r| r.id).collect::<BTreeSet<_>>();
     let wanted = bought
         .iter()
@@ -557,13 +546,28 @@ pub(crate) async fn purchases(
             Ok(receipt) => receipts.push(receipt),
             // A purchase may outlive its receipt's record.
             Err(PantryError::NotFound(_)) => {}
-            Err(e) => return failed(&e),
+            Err(e) => return Err(e),
         }
     }
     for receipt in &mut receipts {
         receipt.read = serde_json::Value::Null;
     }
-    Json(json!({ "purchases": bought, "receipts": receipts })).into_response()
+    Ok(json!({ "purchases": bought, "receipts": receipts }))
+}
+
+/// The purchases of a period (the last 12 months by default), with the
+/// receipts they come from and the drafts still to check.
+pub(crate) async fn purchases(
+    Extension(Cellier(pantry)): Extension<Cellier>,
+    Query(period): Query<Period>,
+) -> Response {
+    let Some(pantry) = pantry else {
+        return absent();
+    };
+    let now = moli_core::now_ms();
+    let to = period.to.unwrap_or(now.saturating_add(DAY_MS));
+    let from = period.from.unwrap_or_else(|| now.saturating_sub(YEAR_MS));
+    json_or(purchases_with_receipts(&pantry, from, to).await)
 }
 
 #[derive(Deserialize)]
