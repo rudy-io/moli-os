@@ -22,6 +22,7 @@
     centsText,
     toLocalInput,
     fromLocalInput,
+    dateWarning,
   } from '../../lib/cellier/draft.js';
   import { holdLeave } from '../../../lib/leave.js';
   import { home, note, relative } from '../../lib/home.svelte.js';
@@ -45,6 +46,9 @@
   let detail = $state('');
   /** The problems show once a validation was tried. */
   let checked = $state(false);
+  /** The server refused a save or a validation: the draft was saved
+   *  elsewhere since it was loaded here. */
+  let conflict = $state(false);
 
   function take(r) {
     receipt = r;
@@ -85,12 +89,22 @@
 
   const products = $derived([...cellier.products].sort((a, b) => a.name.localeCompare(b.name, locale())));
   const gap = $derived(draft ? gapOf(draft) : null);
-  const problems = $derived(draft ? new Map(draftProblems(draft).map((p) => [p.index, p.why])) : new Map());
+  const allProblems = $derived(draft ? draftProblems(draft) : []);
+  const noProvider = $derived(allProblems.some((p) => p.why === 'provider'));
+  const problems = $derived(new Map(allProblems.filter((p) => p.index != null).map((p) => [p.index, p.why])));
   const kept = $derived(draft ? draft.lines.filter((l) => l.keep) : []);
   const keptCents = $derived(kept.reduce((sum, l) => sum + l.line_cents, 0));
   const matches = $derived(draft ? listMatches(draft, cellier.items) : []);
   const twin = $derived(receipt?.duplicate_of != null ? cellier.receipts.find((r) => r.id === receipt.duplicate_of) : null);
   const photos = $derived(receipt?.photos ? Array.from({ length: receipt.photos }, (_, i) => i + 1) : []);
+  /** The draft as the last read shows it: another version than the one
+   *  loaded here means someone saved it meanwhile (read after this page's
+   *  own writes, so not while busy). */
+  const listed = $derived(cellier.receipts.find((r) => r.id === id && r.status === 'draft'));
+  const changedElsewhere = $derived(
+    receipt?.status === 'draft' && (conflict || (!busy && listed != null && listed.version !== receipt.version)),
+  );
+  const when = $derived(draft ? dateWarning(draft.at, home.now) : null);
   /** Validated or abandoned elsewhere while open: only concluded from a
    *  purchases read that succeeded. */
   const gone = $derived(
@@ -136,17 +150,35 @@
     try {
       await task();
     } catch (err) {
-      ({ text: error, detail } = explain(err));
+      if (err.status === 409) conflict = true;
+      else ({ text: error, detail } = explain(err));
     } finally {
       busy = false;
     }
   }
 
-  /** Saves the draft as edited, without list items it no longer settles. */
-  async function store() {
+  /** Saves the draft as edited, without list items it no longer settles,
+   *  over the version loaded here (`version`: another one, to keep this
+   *  page's draft over a newer one). */
+  async function store(version = receipt.version) {
     prune();
-    take(await saveDraft(id, draft));
+    take(await saveDraft(id, draft, version));
+    conflict = false;
   }
+
+  /** Changed elsewhere: take the other version, this page's edits go. */
+  const reload = () =>
+    run(async () => {
+      take(await loadReceipt(id));
+      conflict = false;
+    });
+
+  /** Changed elsewhere: save this page's draft over the other version. */
+  const keepMine = () =>
+    run(async () => {
+      await store((await loadReceipt(id)).version);
+      note(t('cellier.ticket.enregistre'));
+    });
 
   const save = () =>
     run(async () => {
@@ -156,6 +188,13 @@
 
   function validate() {
     checked = true;
+    if (changedElsewhere) return;
+    if (noProvider) {
+      error = t('cellier.ticket.probleme.provider');
+      detail = '';
+      document.getElementById('cellier-ticket-provider')?.focus();
+      return;
+    }
     if (problems.size) {
       error = t('cellier.ticket.a_corriger', { count: problems.size });
       detail = '';
@@ -172,12 +211,12 @@
         force = true;
       }
       try {
-        await validateReceipt(id, force);
+        await validateReceipt(id, force, receipt.version);
       } catch (err) {
         // Recorded elsewhere in the meantime: the same question, then force.
         if (force || err.status !== 400 || !/already recorded/i.test(err.detail ?? '')) throw err;
         if (!confirm(t('cellier.ticket.doublon_confirmer'))) return;
-        await validateReceipt(id, true);
+        await validateReceipt(id, true, receipt.version);
       }
       note(t('cellier.ticket.valide', { count: kept.length }));
       location.hash = '#/cellier/achats';
@@ -216,11 +255,32 @@
   <div class="ticket">
     {#if gone}
       <p class="banner alert" role="alert"><Icon name="alert" size={18} />{t('cellier.ticket.parti')}</p>
+    {:else if changedElsewhere}
+      <div class="banner alert conflict" role="alert">
+        <Icon name="alert" size={18} />
+        <span>{t('cellier.ticket.modifie_ailleurs')}</span>
+        <span class="choices">
+          <button disabled={busy} onclick={reload}>{t('cellier.ticket.recharger')}</button>
+          <button disabled={busy} onclick={keepMine}>{t('cellier.ticket.garder_ma_version')}</button>
+        </span>
+      </div>
     {/if}
     {#if receipt.duplicate_of != null}
       <p class="banner alert">
         <Icon name="alert" size={18} />
         {twin?.draft.at ? t('cellier.ticket.doublon', { date: day(twin.draft.at) }) : t('cellier.ticket.doublon_sans_date')}
+      </p>
+    {/if}
+    {#if receipt.drive_twin}
+      <p class="banner warm">
+        <Icon name="warning" size={18} />
+        {t('cellier.ticket.drive_double', { date: day(receipt.drive_twin.at), montant: euros(receipt.drive_twin.total_cents) })}
+      </p>
+    {/if}
+    {#if when}
+      <p class="banner warm">
+        <Icon name="warning" size={18} />
+        {when === 'future' ? t('cellier.ticket.date_future') : t('cellier.ticket.date_ancienne')}
       </p>
     {/if}
     {#if gap != null && Math.abs(gap) > 1}
@@ -238,7 +298,14 @@
       <div class="fields">
         <label>
           <span>{t('cellier.ticket.enseigne')}</span>
-          <input value={draft.provider} oninput={(e) => set('provider', e.currentTarget.value)} list="cellier-chains" autocomplete="off" />
+          <input
+            id="cellier-ticket-provider"
+            value={draft.provider}
+            oninput={(e) => set('provider', e.currentTarget.value)}
+            list="cellier-chains"
+            autocomplete="off"
+            aria-invalid={checked && noProvider}
+          />
         </label>
         <label>
           <span>{t('cellier.ticket.magasin')}</span>
@@ -311,8 +378,8 @@
     <div class="actions">
       <button class="ghost danger" disabled={busy || gone} onclick={abandon}><Icon name="trash" size={20} />{t('cellier.ticket.abandonner')}</button>
       <span class="grow"></span>
-      <button class="ghost" disabled={busy || gone || !dirty} onclick={save}><Icon name="save" size={20} />{t('cellier.ticket.enregistrer')}</button>
-      <button class="primary" disabled={busy || gone} onclick={validate}><Icon name="ok" size={20} />{t('cellier.ticket.valider')}</button>
+      <button class="ghost" disabled={busy || gone || changedElsewhere || !dirty} onclick={save}><Icon name="save" size={20} />{t('cellier.ticket.enregistrer')}</button>
+      <button class="primary" disabled={busy || gone || changedElsewhere} onclick={validate}><Icon name="ok" size={20} />{t('cellier.ticket.valider')}</button>
     </div>
   </div>
 {/if}
@@ -381,6 +448,36 @@
     background: var(--surface);
     color: var(--alert);
     font-weight: 650;
+  }
+
+  .banner.conflict {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .banner.conflict > span:first-of-type {
+    flex: 1;
+    min-width: min(100%, 220px);
+  }
+
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .choices button {
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--alert);
+    font-weight: 650;
+  }
+
+  .fields input[aria-invalid='true'] {
+    border-color: var(--alert);
   }
 
   .banner.warm {

@@ -14,6 +14,7 @@ import {
   qtyPrice,
   toLocalInput,
   fromLocalInput,
+  dateWarning,
 } from './draft.js';
 
 const line = (over) => ({
@@ -85,6 +86,26 @@ test('what stops a validation, kept lines only', () => {
     { index: 4, why: 'qty' },
     { index: 5, why: 'price' },
   ]);
+});
+
+test('a draft without a chain is reported before the lines', () => {
+  const draft = { provider: '  ', lines: [line(), line({ product: null })] };
+  assert.deepEqual(draftProblems(draft), [
+    { index: null, why: 'provider' },
+    { index: 1, why: 'product' },
+  ]);
+  assert.deepEqual(draftProblems({ provider: 'enseigne-x', lines: [line()] }), []);
+});
+
+test('a date Achats would not show is pointed out', () => {
+  const now = Date.UTC(2026, 9, 28, 12);
+  const day = 86_400_000;
+  assert.equal(dateWarning(now - 3 * day, now), null);
+  assert.equal(dateWarning(null, now), null, 'no date: dated at validation');
+  assert.equal(dateWarning(now + 2 * 60_000, now), null, 'a clock a little ahead');
+  assert.equal(dateWarning(now + day, now), 'future');
+  assert.equal(dateWarning(now - 364 * day, now), null);
+  assert.equal(dateWarning(now - 366 * day, now), 'old');
 });
 
 test('the list lines a receipt may settle share a kept product', () => {

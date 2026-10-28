@@ -23,8 +23,9 @@ transmettre au service de reconnaissance vocale que vous avez choisi.
 
 **Appareil photo.** Il n'est utilisé que lorsque vous scannez un ticket de caisse dans le Cellier.
 La photo va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, la transmettre
-au service de lecture que vous avez choisi. Elle y est effacée 90 jours après la validation du
-ticket (Moli y veille au démarrage puis chaque jour). La photo d'un brouillon que personne n'a validé
+au service de lecture que vous avez choisi. Sur votre serveur Moli, elle est effacée 90 jours après
+la validation du ticket (Moli y veille au démarrage puis chaque jour) ; le service de lecture applique
+sa propre politique de conservation. La photo d'un brouillon que personne n'a validé
 reste sur votre serveur jusqu'à ce que quelqu'un le supprime ; le supprimer efface aussitôt ses
 photos.
 
@@ -58,8 +59,9 @@ to your Moli server, which may, depending on how you set it up, pass it to the s
 service you chose.
 
 **Camera.** Used only when you scan a till receipt in the Cellier. The photo goes to your Moli
-server, which may, depending on how you set it up, pass it to the reading service you chose. It is
-erased there 90 days after the receipt is validated (Moli checks at startup, then every day). The
+server, which may, depending on how you set it up, pass it to the reading service you chose. On your
+Moli server, it is erased 90 days after the receipt is validated (Moli checks at startup, then every
+day); the reading service applies its own retention policy. The
 photo of a draft nobody has validated stays on your server until someone deletes the draft; deleting
 it erases its photos right away.
 

@@ -47,12 +47,14 @@ export function qtyText(qty, locale = 'fr-FR') {
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
-/** Why the draft cannot be validated yet, line by line (kept lines only):
- *  `[{index, why}]` with `why` one of `product` (no product chosen),
- *  `name` (a new product needs a name with letters or digits), `qty`
- *  (above zero) or `price` (zero or more, discount too). */
+/** Why the draft cannot be validated yet: first the receipt itself
+ *  (`{index: null, why: 'provider'}` without a chain), then line by line
+ *  (kept lines only): `{index, why}` with `why` one of `product` (no
+ *  product chosen), `name` (a new product needs a name with letters or
+ *  digits), `qty` (above zero) or `price` (zero or more, discount too). */
 export function draftProblems(draft) {
   const out = [];
+  if (draft.provider != null && !String(draft.provider).trim()) out.push({ index: null, why: 'provider' });
   draft.lines.forEach((line, index) => {
     if (!line.keep) return;
     const product = line.product?.trim();
@@ -63,6 +65,20 @@ export function draftProblems(draft) {
     else if (line.price_cents < 0 || line.discount_cents < 0) out.push({ index, why: 'price' });
   });
   return out;
+}
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
+/** How far back the purchases page looks (the server's default). */
+const YEAR_MS = 365 * DAY_MS;
+
+/** A receipt date the purchases page would not show: `future` (beyond a
+ *  few minutes of clock drift), `old` (over 12 months back), else null. */
+export function dateWarning(at, now) {
+  if (at == null) return null;
+  if (at > now + 5 * MINUTE_MS) return 'future';
+  if (at < now - YEAR_MS) return 'old';
+  return null;
 }
 
 /** The open shopping-list lines this receipt may settle: those of a product

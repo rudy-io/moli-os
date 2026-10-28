@@ -169,8 +169,8 @@ Quand l'humain montre un ticket **à l'agent** (photo ou texte lu par l'agent lu
 2. **`pantry_overview`** pour retrouver l'`id` des produits connus et celui de l'enseigne
    (`providers[].info`).
 3. **`pantry_record_purchases`** avec `receipt` = `{provider, store, at, total_cents}` (l'enseigne par
-   son id, le magasin tel qu'imprimé, la date du ticket en ms depuis l'epoch, le total imprimé en
-   centimes) et `lines` : une ligne par article, `source: "ticket"`, `status: "confirmed"`, `product`,
+   son id, `store` la commune du magasin comme le fait la lecture des photos par Moli, la date du
+   ticket en ms depuis l'epoch, le total imprimé en centimes) et `lines` : une ligne par article, `source: "ticket"`, `status: "confirmed"`, `product`,
    `provider`, `store`, `qty`, `price_cents` (prix unitaire), `at`, et si besoin `label` (le libellé
    imprimé), `discount_cents`, `line_cents` (ce que la ligne a vraiment coûté, remise déduite) et
    `unit` (`kg`, `l`) pour un produit pesé. Moli reprend l'enseigne, le magasin et la date de

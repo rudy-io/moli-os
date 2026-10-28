@@ -82,6 +82,11 @@
       <p class="muted">…</p>
     {:else if reader.allowed}
       <p><b>{t('cellier.reglages.lecteur', { lecteur: `${reader.provider}/${reader.model}` })}</b></p>
+      {#if reader.host}
+        <p class="small">
+          {reader.at_home ? t('cellier.reglages.photos_maison', { hote: reader.host }) : t('cellier.reglages.photos_vers', { hote: reader.host })}
+        </p>
+      {/if}
       <p class="muted small">{t('cellier.reglages.photos_partent')}</p>
     {:else}
       <p><b>{t('cellier.reglages.lecteur_refuse')}</b></p>

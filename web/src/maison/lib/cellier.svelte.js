@@ -25,7 +25,8 @@ export const cellier = $state({
   receipts: [],
   /** The purchases were read at least once. */
   purchasesLoaded: false,
-  /** Who reads receipts: `{provider, model, allowed, reason}`, null until read. */
+  /** Who reads receipts: `{provider, model, allowed, reason, host, at_home}`,
+   *  null until read. */
   reader: null,
   /** Why the last read failed, one field per read so that one succeeding
    *  does not hide another failing: the pantry, the purchases, the reader. */
@@ -234,11 +235,15 @@ async function scanError(e) {
   }
 }
 
-/** Saves the corrected draft of a receipt (a `ReceiptDraft`); answers the receipt. */
-export const saveDraft = (id, draft) => write('PUT', `/api/cellier/receipts/${id}`, draft);
+/** Saves the corrected draft of a receipt (a `ReceiptDraft`); answers the
+ *  receipt. With the `version` of the receipt the page loaded, a draft
+ *  saved elsewhere since answers 409. */
+export const saveDraft = (id, draft, version) => write('PUT', `/api/cellier/receipts/${id}`, { ...draft, version });
 /** Validates a draft: its kept lines become purchases. A receipt that looks
- *  recorded already answers 400 until `force` is set. */
-export const validateReceipt = (id, force = false) => write('POST', `/api/cellier/receipts/${id}/validate`, { force });
+ *  recorded already answers 400 until `force` is set; one saved elsewhere
+ *  since `version` was loaded, 409. */
+export const validateReceipt = (id, force = false, version) =>
+  write('POST', `/api/cellier/receipts/${id}/validate`, { force, version });
 /** Drops a draft that will not be recorded. */
 export const abandonReceipt = (id) => write('DELETE', `/api/cellier/receipts/${id}`);
 /** `{qty, price_cents, line_cents, product}` */
