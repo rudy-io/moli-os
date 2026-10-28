@@ -236,5 +236,6 @@
   "assistant.receipt.lines_one": "{count} line read",
   "assistant.receipt.lines_other": "{count} lines read",
   "assistant.receipt.tier": "Provider \"{provider}\" cannot read receipts: they only go to a tier 1 provider.",
-  "assistant.receipt.no_key": "No API key to read receipts: set it with `moli-os secrets set assistant {name}`."
+  "assistant.receipt.no_key": "No API key to read receipts: set it with `moli-os secrets set assistant {name}`.",
+  "assistant.receipt.failed": "could not be read"
 }

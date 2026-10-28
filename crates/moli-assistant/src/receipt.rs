@@ -24,6 +24,11 @@ pub const MAX_PHOTOS: usize = 4;
 /// A run of digits this long is a card, authorisation or transaction number,
 /// never a product's: it is not kept, whatever the model copied.
 const LONG_NUMBER: usize = 6;
+/// What the model may write: a long receipt is some sixty lines of a dozen
+/// fields each.
+const WORDS: u32 = 8_000;
+/// A reasoning model thinks within the same budget: twice as much.
+const THINKING_WORDS: u32 = 16_000;
 
 /// What the model is told, in English (its answer keeps the receipt's words).
 const RULES: &str = "\
@@ -146,19 +151,17 @@ impl Assistant {
             .as_str()
             .unwrap_or_default();
         let reading = tidy(content, products, known_providers, &self.0.tz);
-        let (kind, reply) = match &reading {
-            Ok(read) => (
-                Kind::Receipt,
-                moli_i18n::tr!(
-                    "assistant.receipt.lines",
-                    count = read["lines"].as_array().map_or(0, Vec::len)
-                ),
+        // A reading that failed is still a receipt (paid for, not a conversation).
+        let reply = match &reading {
+            Ok(read) => moli_i18n::tr!(
+                "assistant.receipt.lines",
+                count = read["lines"].as_array().map_or(0, Vec::len)
             ),
-            Err(why) => (Kind::Failed, why.clone()),
+            Err(_) => moli_i18n::tr!("assistant.receipt.failed"),
         };
         self.0.exchanges.add(Exchange {
             at: jiff::Timestamp::now().as_millisecond(),
-            kind,
+            kind: Kind::Receipt,
             surface: "cellier".into(),
             spoken: false,
             question: moli_i18n::tr!("assistant.receipt.question"),
@@ -216,15 +219,15 @@ fn request(
         ],
         "response_format": { "type": "json_schema", "json_schema": { "name": "receipt", "strict": true, "schema": schema() } },
     });
-    // As the automation builder: a structured answer of some length.
+    // As the automation builder, with room for a long receipt.
     if is_reasoning(model) {
-        body["max_completion_tokens"] = json!(8_000);
+        body["max_completion_tokens"] = json!(THINKING_WORDS);
         body["reasoning_effort"] = json!("low");
     } else {
         if takes_temperature(model) {
             body["temperature"] = json!(0.2);
         }
-        body["max_tokens"] = json!(3_000);
+        body["max_tokens"] = json!(WORDS);
     }
     body
 }
@@ -296,6 +299,12 @@ fn tidy(
     if !read.get("lines").is_some_and(Json::is_array) {
         return Err("the reading has no lines".into());
     }
+    // A model that does not hold to the schema (some local ones) may leave
+    // fields out: the draft needs them.
+    fill(&mut read, "provider", json!(""));
+    fill(&mut read, "store", json!(""));
+    fill(&mut read, "total_cents", Json::Null);
+    fill(&mut read, "unreadable", json!(false));
     let at = read
         .remove("at_local")
         .as_ref()
@@ -320,6 +329,9 @@ fn tidy(
             lines.clear();
         }
         for line in lines.iter_mut().filter_map(Json::as_object_mut) {
+            fill(line, "keep", json!(true));
+            fill(line, "reason", json!(""));
+            fill(line, "discount_cents", json!(0));
             for field in ["label", "name", "unit", "aisle", "reason", "new_product"] {
                 if let Some(Json::String(words)) = line.get_mut(field) {
                     *words = scrub(words);
@@ -347,9 +359,21 @@ fn tidy(
     Ok(Json::Object(read))
 }
 
-/// `YYYY-MM-DD HH:MM` in the house's zone, in ms since the epoch.
+/// `field` when it is missing or null.
+fn fill(object: &mut Map<String, Json>, field: &str, default: Json) {
+    if object.get(field).is_none_or(Json::is_null) {
+        object.insert(field.to_owned(), default);
+    }
+}
+
+/// `YYYY-MM-DD HH:MM` (seconds and a `T` accepted) in the house's zone, in
+/// ms since the epoch. An hour skipped by a clock change reads as the hour
+/// after; an hour that happens twice, as the first one.
 pub(crate) fn local_ms(local: &str, tz: &jiff::tz::TimeZone) -> Option<u64> {
-    let civil = jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M", local.trim()).ok()?;
+    let local = local.trim().replacen('T', " ", 1);
+    let civil = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]
+        .iter()
+        .find_map(|format| jiff::civil::DateTime::strptime(format, &local).ok())?;
     let ms = civil
         .to_zoned(tz.clone())
         .ok()?
@@ -523,8 +547,13 @@ mod tests {
         assert_eq!(format["type"], "json_schema");
         assert_eq!(format["json_schema"]["strict"], true);
         assert_eq!(format["json_schema"]["schema"], schema());
-        assert_eq!(body["max_tokens"], 3_000);
+        assert_eq!(body["max_tokens"], 8_000);
         assert_eq!(body["temperature"], 0.2);
+        // A reasoning model thinks within twice the room.
+        let thinking = request("gpt-5-mini", "today", &photos, &[], &[]);
+        assert_eq!(thinking["max_completion_tokens"], 16_000);
+        assert_eq!(thinking["reasoning_effort"], "low");
+        assert!(thinking.get("max_tokens").is_none());
 
         // The reading has the draft's shape: `at` in ms, no `at_local`.
         assert_eq!(read["at"], 1_793_187_420_000_u64);
@@ -608,6 +637,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AssistantError::Upstream(_)), "{err}");
+        // Paid for all the same, and still a receipt, not a conversation.
+        let kept = moli.exchanges(1);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].kind, Kind::Receipt);
+        assert_eq!(kept[0].reply, "lecture impossible");
+        assert!(kept[0].cost.total > 0.0);
     }
 
     #[tokio::test]
@@ -635,6 +670,28 @@ mod tests {
         assert_eq!(
             local_ms("2026-10-28 12:37", &paris),
             Some(1_793_187_420_000)
+        );
+        // Seconds, or a `T`, as some models write it.
+        for written in [
+            "2026-10-28 12:37:00",
+            "2026-10-28T12:37",
+            "2026-10-28T12:37:00",
+        ] {
+            assert_eq!(
+                local_ms(written, &paris),
+                Some(1_793_187_420_000),
+                "{written}"
+            );
+        }
+        // 02:30 never happened on 29 March: the hour after (03:30 CEST, 01:30 UTC).
+        assert_eq!(
+            local_ms("2026-03-29 02:30", &paris),
+            Some(1_774_747_800_000)
+        );
+        // 02:30 happened twice on 25 October: the first one (CEST, 00:30 UTC).
+        assert_eq!(
+            local_ms("2026-10-25 02:30", &paris),
+            Some(1_792_888_200_000)
         );
         assert_eq!(local_ms("28/10/2026", &paris), None);
     }
@@ -728,6 +785,33 @@ mod tests {
         // Not an object, or no lines: refused.
         assert!(tidy("[1, 2]", &products(), &chains(), &paris).is_err());
         assert!(tidy("{\"provider\":\"x\"}", &products(), &chains(), &paris).is_err());
+    }
+
+    /// A model that does not hold to the schema still gives a draft.
+    #[test]
+    fn missing_fields_take_the_drafts_defaults() {
+        let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+        let sparse = json!({
+            "provider": null,
+            "lines": [{ "label": "PAIN", "name": "Pain", "qty": 1, "price_cents": 120, "line_cents": 120 }],
+        });
+        let read = tidy(&sparse.to_string(), &products(), &chains(), &paris).unwrap();
+        assert_eq!(read["provider"], "");
+        assert_eq!(read["store"], "");
+        assert_eq!(read["total_cents"], Json::Null);
+        assert_eq!(read["unreadable"], false);
+        assert_eq!(read["at"], Json::Null);
+        let line = &read["lines"][0];
+        assert_eq!(line["keep"], true);
+        assert_eq!(line["reason"], "");
+        assert_eq!(line["discount_cents"], 0);
+        // What the model said is kept.
+        let mut said = sparse;
+        said["lines"][0]["keep"] = json!(false);
+        said["lines"][0]["discount_cents"] = json!(30);
+        let read = tidy(&said.to_string(), &products(), &chains(), &paris).unwrap();
+        assert_eq!(read["lines"][0]["keep"], false);
+        assert_eq!(read["lines"][0]["discount_cents"], 30);
     }
 
     #[test]

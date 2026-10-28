@@ -236,5 +236,6 @@
   "assistant.receipt.lines_one": "{count} ligne lue",
   "assistant.receipt.lines_other": "{count} lignes lues",
   "assistant.receipt.tier": "Le fournisseur « {provider} » ne peut pas lire les tickets de caisse : ils ne vont qu’à un fournisseur de niveau 1.",
-  "assistant.receipt.no_key": "Pas de clé d’API pour lire les tickets de caisse : à donner avec `moli-os secrets set assistant {name}`."
+  "assistant.receipt.no_key": "Pas de clé d’API pour lire les tickets de caisse : à donner avec `moli-os secrets set assistant {name}`.",
+  "assistant.receipt.failed": "lecture impossible"
 }
