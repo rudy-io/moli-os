@@ -358,7 +358,7 @@ impl Store {
     /// Stores a freshly read receipt as a draft. A line whose printed label
     /// was matched to a product on an earlier receipt of the same chain gets
     /// that product, whatever the model guessed or proposed to create: a
-    /// person chose it. `read` is the model's raw answer, kept as is;
+    /// person chose it. `read` is the model's answer, already cut down to the schema's fields;
     /// `photos` how many pictures go with it.
     pub fn create_receipt(
         &self,

@@ -102,7 +102,7 @@
    *  own writes, so not while busy). */
   const listed = $derived(cellier.receipts.find((r) => r.id === id && r.status === 'draft'));
   const changedElsewhere = $derived(
-    receipt?.status === 'draft' && (conflict || (!busy && listed != null && listed.version !== receipt.version)),
+    receipt?.status === 'draft' && (conflict || (!busy && !cellier.purchasesError && listed != null && listed.version > receipt.version)),
   );
   const when = $derived(draft ? dateWarning(draft.at, home.now) : null);
   /** Validated or abandoned elsewhere while open: only concluded from a
