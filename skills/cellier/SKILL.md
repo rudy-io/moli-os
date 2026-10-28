@@ -1,6 +1,6 @@
 ---
 name: cellier
-description: Prépare les courses du foyer avec le Cellier de Moli OS (outils MCP pantry_*) et les drives de l'utilisateur dans son propre Chrome (Claude in Chrome) - relève les vrais prix, propose un panier, remplit le ou les paniers des drives et s'arrête avant le paiement. Déclencheurs - « ajoute … aux courses », « prépare les courses », « compare Inter et Carrefour », « j'ai passé la commande », « on a récupéré le drive ».
+description: Prépare les courses du foyer avec le Cellier de Moli OS (outils MCP pantry_*) et les drives de l'utilisateur dans son propre Chrome (Claude in Chrome) - relève les vrais prix, propose un panier, remplit le ou les paniers des drives et s'arrête avant le paiement. Déclencheurs - « ajoute … aux courses », « prépare les courses », « compare Inter et Carrefour », « j'ai passé la commande », « on a récupéré le drive », « voilà le ticket de caisse », « qu'est-ce qu'on a acheté ».
 ---
 
 <!--
@@ -58,8 +58,9 @@ relevés. Moli compare ; l'agent lit les vrais prix sur les sites, remplit les p
   panier ni au compte tant que sa limite de paiement n'est pas décrite et vérifiée.
 
 Les appels qui écrivent prennent `actor` (le nom de l'agent) et `on_behalf_of` (le prénom de la
-personne qui parle, s'il y en a une), gardés avec ce qui est écrit, sauf `pantry_save_product` et
-`pantry_record_purchases`, qui ne gardent aucun auteur et ne les prennent pas.
+personne qui parle, s'il y en a une), gardés avec ce qui est écrit, sauf `pantry_save_product`, qui ne
+garde aucun auteur et ne les prend pas, et `pantry_record_purchases`, qui ne les garde que sur un
+ticket de caisse (argument `receipt`).
 
 ## Ajouter un article
 
@@ -152,6 +153,40 @@ panier qui l'achète.
    `confirm: true` : elles remplacent les lignes `drive` déjà enregistrées pour ce panier
    (provisoires, ou une correction précédente). Renvoyer le même appel ne compte qu'une fois.
 
+## Tickets de caisse
+
+Le foyer scanne ses tickets lui-même : dans le tableau de bord, page **Achats**, il photographie le
+ticket, Moli en tire un **brouillon** (enseigne, date, total, lignes) et c'est un humain qui le
+vérifie et le **valide** : rien ne devient un achat avant. Ce chemin n'est pas celui de l'agent (la
+lecture et la validation sont réservées au tableau de bord) ; s'il s'agit de saisir un ticket, le dire
+et renvoyer le foyer vers la page Achats.
+
+Quand l'humain montre un ticket **à l'agent** (photo ou texte lu par l'agent lui-même) :
+
+1. Lire le ticket soi-même. **Ne jamais envoyer la photo à Moli** : aucun outil ne le permet, et un
+   ticket n'a rien à faire ailleurs que dans la conversation.
+2. **`pantry_overview`** pour retrouver l'`id` des produits connus et celui de l'enseigne
+   (`providers[].info`).
+3. **`pantry_record_purchases`** avec `receipt` = `{provider, store, at, total_cents}` (l'enseigne par
+   son id, le magasin tel qu'imprimé, la date du ticket en ms depuis l'epoch, le total imprimé en
+   centimes) et `lines` : une ligne par article, `source: "ticket"`, `status: "confirmed"`, `product`,
+   `provider`, `store`, `qty`, `price_cents` (prix unitaire), `at`, et si besoin `label` (le libellé
+   imprimé), `discount_cents`, `line_cents` (ce que la ligne a vraiment coûté, remise déduite) et
+   `unit` (`kg`, `l`) pour un produit pesé. Moli reprend l'enseigne, le magasin et la date de
+   `receipt` pour toutes les lignes, et retient chaque `label` pour reconnaître le produit au
+   prochain ticket : le donner tel qu'imprimé. Les montants sont toujours en centimes. Un produit
+   inconnu passe d'abord par `pantry_save_product`.
+4. Un ticket déjà enregistré (même enseigne, même minute, même total) est refusé : ne pas le
+   renvoyer en changeant un détail, le dire. Un nouvel essai après une erreur ne compte pas deux fois.
+5. Dire ce qui a été enregistré (nombre de lignes, total) et ce qui reste douteux.
+
+Pour **répondre à une question sur ce qui a été acheté** (« combien on a dépensé en lait ce mois-ci ? »,
+« à quel prix a-t-on pris le café la dernière fois ? ») : **`pantry_purchases`** avec `from` et `to`
+en ms (30 derniers jours par défaut). Il renvoie `{purchases, receipts}` : les achats, avec les
+tickets dont ils viennent. Les montants sont en centimes, `line_cents` est ce qu'une ligne a vraiment
+coûté. Les brouillons de ticket (`receipts` au statut `draft`) ne sont **pas encore des achats** :
+les signaler comme « à valider par le foyer », ne pas les compter.
+
 ## Règles
 
 - **Jamais de produit changé en douce** : un écart n'est appliqué que s'il a été accepté.
@@ -163,5 +198,5 @@ panier qui l'achète.
   le refuser (« Continuer sans accepter », « Refuser tous les cookies »).
 - **Naviguer au rythme d'un humain** : une page à la fois, pas de boucle rapide.
 - Ne jamais confirmer une fiche (seul un humain le fait dans le tableau de bord) ni essayer de passer
-  un panier à `done`.
+  un panier à `done`, ni de valider un brouillon de ticket.
 - N'utiliser que les outils MCP `pantry_*`, jamais l'API REST du Cellier.

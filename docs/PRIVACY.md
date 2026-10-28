@@ -21,6 +21,11 @@ de votre Wi-Fi**.
 Ce que vous dites va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, le
 transmettre au service de reconnaissance vocale que vous avez choisi.
 
+**Appareil photo.** Il n'est utilisé que lorsque vous scannez un ticket de caisse dans le Cellier.
+La photo va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, la transmettre
+au service de lecture que vous avez choisi. Elle y est effacée 90 jours après la validation du
+ticket.
+
 **Notifications.** Si vous les autorisez, votre maison peut vous en envoyer, par le service de
 notifications d'Expo et d'Apple. Le jeton de notification n'est envoyé qu'à votre serveur Moli.
 
@@ -49,6 +54,10 @@ devices to answer ("someone is home"), **never your precise location or your Wi-
 **Microphone.** Used only when you tap the button to talk to Moli, the assistant. What you say goes
 to your Moli server, which may, depending on how you set it up, pass it to the speech recognition
 service you chose.
+
+**Camera.** Used only when you scan a till receipt in the Cellier. The photo goes to your Moli
+server, which may, depending on how you set it up, pass it to the reading service you chose. It is
+erased there 90 days after the receipt is validated.
 
 **Notifications.** If you allow them, your house can send you notifications through Expo's and
 Apple's notification services. The notification token is only sent to your Moli server.

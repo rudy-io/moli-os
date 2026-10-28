@@ -358,6 +358,36 @@ Limites de `Turn` : 14 derniers messages renvoyés au modèle, 2 000 caractères
 | GET | `/api/automations/runs` | libre | `?automation=<id>&limit=` (défaut 50, max 500) | `[Run]`, plus récente d'abord | `503` |
 | GET | `/api/automations/live` | libre | aucune | flux SSE (§ 3.2) | `503` (dont trop de flux ouverts, § 3.1) |
 
+**Le Cellier : tickets de caisse et achats** (`crates/moli-api/src/pantry.rs`)
+
+Sans `[pantry]`, toutes ces routes répondent `404` `the pantry is not set up ([pantry])`. Un invité y est
+refusé (`403`), et en maison démo les écritures le sont aussi. Les autres routes `/api/cellier*` (liste,
+produits, fiches, réglages, paniers) sont décrites dans l'en-tête de `pantry.rs`. Les montants sont en
+centimes, les dates en ms. Un ticket est un `Receipt` : `{id, status:"draft"\|"validated", photos (encore
+gardées), sent_at, sent_by, validated_at, validated_by, reader, draft, read, gap_cents, duplicate_of}`,
+où `draft` = `{provider, store, at?, total_cents?, lines:[{label, name, qty, unit?, price_cents,
+discount_cents, line_cents, vat?, aisle?, keep, reason, product?, new_product?}], unreadable,
+items_done}`, `read` la réponse brute du modèle, `gap_cents` le total imprimé moins la somme des lignes,
+`duplicate_of` un ticket déjà validé de même enseigne, même minute et même total.
+
+| Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
+|---|---|---|---|---|---|
+| GET | `/api/cellier/reader` | le foyer | aucune | `{provider, model, allowed, reason\|null}` : qui lit les tickets, et s'il en a le droit (niveau 1 seulement, clé présente) ; sans assistant : `{allowed:false, reason:"no assistant"}` | `404` |
+| POST | `/api/cellier/receipts` | **humain** | `{photos:[…]}` : 1 à 4 JPEG en base64, d'un seul ticket ; 12 Mo de corps au plus | `201` `Receipt` en **brouillon** (rien n'est encore un achat) | `400` nombre de photos, base64 invalide, pas du JPEG ; `403` pas une personne ; `404` ; `413` corps trop gros (texte brut) ; `422` `unreadable` : les photos ne sont pas un ticket lisible, rien n'est créé ; `429` Moli occupé ; `502` fournisseur en échec, ou lecture inutilisable (`the reading of the receipt is not usable`) ; `503` pas d'assistant, ou lecteur refusé (`reason` de `/reader`) |
+| GET | `/api/cellier/receipts?status=` | le foyer | `status` : `draft` ou `validated` (absent = tous) | `[Receipt]` sans la lecture brute (`read: null`) | `400` `unknown receipt status` ; `404` |
+| GET | `/api/cellier/receipts/{id}` | le foyer | aucune | `Receipt` | `404` |
+| PUT | `/api/cellier/receipts/{id}` | le foyer | le `draft` corrigé (même forme que `Receipt.draft`) | `Receipt` | `400` ticket déjà validé (`… cannot be edited`), ligne avec `product` **et** `new_product` ; `404` ; `422` corps de mauvaise forme |
+| DELETE | `/api/cellier/receipts/{id}` | le foyer | aucune | `204` : le brouillon et ses photos sont supprimés | `400` ticket validé (`… cannot be abandoned`) ; `404` |
+| POST | `/api/cellier/receipts/{id}/validate` | **humain** (vérifié avant la lecture du corps) | `{force?}` (corps JSON obligatoire, `{}` suffit) | `Receipt` validé : ses lignes gardées (`keep`) deviennent des achats `ticket` `confirmed`, les produits `new_product` sont créés, les articles de `items_done` sont soldés ; un ticket déjà validé est rendu tel quel | `400` ligne sans produit, `product` et `new_product` ensemble, ou ticket déjà enregistré (`this receipt looks already recorded: <id>`, contourné par `force:true`) ; `403` pas une personne ; `404` ticket ou produit inconnu |
+| GET | `/api/cellier/receipts/{id}/photos/{n}` | le foyer | `n` de 1 à 4 | la photo, `image/jpeg`, `cache-control: private, max-age=86400` | `404` `no such photo` (numéro hors de 1 à 4, ou photo déjà effacée : 90 jours après la validation) |
+| GET | `/api/cellier/purchases?from=&to=` | le foyer | `from`, `to` en ms (défaut : les 12 derniers mois, jusqu'à demain) | `{purchases:[Purchase], receipts:[Receipt]}` : les achats, oldest first, avec les tickets dont ils viennent et les brouillons à vérifier, tous sans lecture brute | `400` paramètre inconnu ou non numérique (texte brut) ; `404` |
+| PUT | `/api/cellier/purchases/{id}` | le foyer | `{qty, price_cents, line_cents?, product}` (`line_cents` absent : recalculé, remise déduite) | le `Purchase` corrigé | `400` valeurs refusées ; `404` achat ou produit inconnu |
+| DELETE | `/api/cellier/purchases/{id}` | le foyer | aucune | `204` | `404` |
+
+Un agent n'a pas ces routes : il lit les achats avec l'outil MCP `pantry_purchases` et enregistre un
+ticket qu'il a lu lui-même avec `pantry_record_purchases` et son argument `receipt` (§ 4.2). Aucune
+photo n'est envoyée à Moli par MCP.
+
 **Flux et MCP**
 
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
@@ -630,7 +660,7 @@ exception : `camera_snapshot` renvoie un bloc image (base64 + type MIME).
 Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/mcp`
 (Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent.
 
-### 4.2 Les 23 outils
+### 4.2 Les 24 outils
 
 | Outil | Paramètres | Renvoie | Notes |
 |---|---|---|---|
@@ -656,11 +686,12 @@ Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/m
 | `pantry_propose_basket` | `deviations?:[{product, kind, text, gain_cents}]`, `actor?`, `on_behalf_of?` | le panier (`options.recommended`, `singles`, `split`, `nowhere`…) | seuls les relevés de moins de 12 h comptent ; rien n'est acheté |
 | `pantry_choose_option` | `basket`, `option` (id d'un magasin ou `split`), `accepted?` (index d'écarts), `actor?`, `on_behalf_of?` | le panier choisi | confirme les fiches de l'option choisie |
 | `pantry_set_basket_status` | `basket`, `status` (`filled`, `ordered` ou `dropped`), `actor?`, `on_behalf_of?` | le panier | `done` n'existe pas ici : un panier n'est jamais payé par un agent |
-| `pantry_record_purchases` | `basket?`, `lines:[Purchase]`, `confirm?` (défaut faux) | `{ok, recorded}` ou `{ok, confirmed}` | `confirm: true` (au retrait) remplace toutes les lignes `drive` du panier (provisoires ou déjà confirmées) par `lines`, gardées en source `drive` et statut `confirmed` quoi qu'elles disent : le même appel répété ne compte qu'une fois ; sans `basket` : `basket is required to confirm purchases` ; pas d'`actor` (aucun auteur n'est gardé) |
+| `pantry_purchases` | `from?`, `to?` (ms ; défaut les 30 derniers jours) | `{purchases:[Purchase], receipts:[Receipt]}` : les achats, du plus ancien au plus récent, avec les tickets dont ils viennent et les brouillons qui attendent qu'un humain les vérifie ; sans la lecture brute du modèle | lecture seule ; `line_cents` = ce que la ligne a vraiment coûté, remise déduite ; brique absente : `Le Cellier n'est pas activé sur cette instance` |
+| `pantry_record_purchases` | `basket?`, `lines:[Purchase]`, `confirm?` (défaut faux), `receipt?` (`{provider, store, at, total_cents?}`) | `{ok, recorded}`, `{ok, confirmed}` ou, avec `receipt`, `{ok, recorded, receipt:<id>}` | `confirm: true` (au retrait) remplace toutes les lignes `drive` du panier (provisoires ou déjà confirmées) par `lines`, gardées en source `drive` et statut `confirmed` quoi qu'elles disent : le même appel répété ne compte qu'une fois ; sans `basket` : `basket is required to confirm purchases` ; `receipt` (un ticket de caisse que l'agent a lu lui-même : aucune photo n'est envoyée à Moli) l'enregistre **validé** avec ses `lines` (toutes de source `ticket`, sinon `line N: a receipt only holds lines of source ticket`), sans lignes `a receipt needs at least one line`, sans enseigne `a receipt needs a provider` ; un ticket de même enseigne, même minute et même total qu'un ticket enregistré est refusé (`this receipt looks already recorded: <id>`), donc un nouvel essai ne compte pas deux fois ; `receipt` avec `confirm` est refusé (`receipt cannot be used with confirm`) ; `actor` et `on_behalf_of` ne sont gardés que sur un ticket |
 
 Il n'existe volontairement **aucun** outil MCP pour approuver un ordre, valider, allumer,
 lancer pour de vrai, restaurer ou supprimer un automatisme, ni pour confirmer une fiche du
-Cellier, ni pour payer un panier : c'est réservé à l'humain du dashboard. Pour le Cellier,
+Cellier, ni pour valider un brouillon de ticket, ni pour payer un panier : c'est réservé à l'humain du dashboard. Pour le Cellier,
 cette limite est celle du MCP, pas du serveur : confirmer une fiche
 (`POST /api/cellier/offers/{id}/confirm`) passe par l'API REST, qui est la surface du tableau de
 bord et répond à tout appelant du foyer sur le réseau de la maison (ni aux invités, ni en maison

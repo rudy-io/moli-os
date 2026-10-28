@@ -337,7 +337,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             source={{ uri: base }}
             style={styles.web}
             applicationNameForUserAgent="MoliNative"
-            injectedJavaScriptBeforeContentLoaded={`window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); } }; true;`}
+            injectedJavaScriptBeforeContentLoaded={`window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, camera: true, changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); } }; true;`}
             injectedJavaScript={THEME_WATCH}
             allowsBackForwardNavigationGestures
             allowsInlineMediaPlayback
