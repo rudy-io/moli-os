@@ -648,7 +648,7 @@ Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/m
 | `pantry_propose_basket` | `deviations?:[{product, kind, text, gain_cents}]`, `actor?`, `on_behalf_of?` | le panier (`options.recommended`, `singles`, `split`, `nowhere`…) | seuls les relevés de moins de 12 h comptent ; rien n'est acheté |
 | `pantry_choose_option` | `basket`, `option` (id d'un magasin ou `split`), `accepted?` (index d'écarts), `actor?`, `on_behalf_of?` | le panier choisi | confirme les fiches de l'option choisie |
 | `pantry_set_basket_status` | `basket`, `status` (`filled`, `ordered` ou `dropped`), `actor?`, `on_behalf_of?` | le panier | `done` n'existe pas ici : un panier n'est jamais payé par un agent |
-| `pantry_record_purchases` | `basket?`, `lines:[Purchase]`, `confirm?` (défaut faux) | `{ok, recorded}` ou `{ok, confirmed}` | `confirm: true` (au retrait) remplace toutes les lignes `drive` du panier (provisoires ou déjà confirmées) par `lines`, confirmées : le même appel répété ne compte qu'une fois ; sans `basket` : `basket is required to confirm purchases` ; pas d'`actor` (aucun auteur n'est gardé) |
+| `pantry_record_purchases` | `basket?`, `lines:[Purchase]`, `confirm?` (défaut faux) | `{ok, recorded}` ou `{ok, confirmed}` | `confirm: true` (au retrait) remplace toutes les lignes `drive` du panier (provisoires ou déjà confirmées) par `lines`, gardées en source `drive` et statut `confirmed` quoi qu'elles disent : le même appel répété ne compte qu'une fois ; sans `basket` : `basket is required to confirm purchases` ; pas d'`actor` (aucun auteur n'est gardé) |
 
 Il n'existe volontairement **aucun** outil MCP pour approuver un ordre, valider, allumer,
 lancer pour de vrai, restaurer ou supprimer un automatisme, ni pour confirmer une fiche du
