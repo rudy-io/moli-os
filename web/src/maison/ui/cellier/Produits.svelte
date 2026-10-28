@@ -1,8 +1,9 @@
 <script>
   import Icon from '../Icon.svelte';
-  import { cellier, saveProduct, confirmOffer, providerName } from '../../lib/cellier.svelte.js';
+  import { cellier, saveProduct, confirmOffer, providerName, euros } from '../../lib/cellier.svelte.js';
+  import { qtyText } from '../../lib/cellier/draft.js';
   import { note } from '../../lib/home.svelte.js';
-  import { t } from '../../../lib/i18n.svelte.js';
+  import { t, locale } from '../../../lib/i18n.svelte.js';
 
   /** The products the household buys again and again: how strict a swap may
    *  be, a store they always come from, and their sheet in each chain. */
@@ -14,6 +15,24 @@
     for (const o of cellier.offers) by.set(o.product, [...(by.get(o.product) ?? []), o]);
     return by;
   });
+
+  /** The last purchases of each product (5, newest first), from the
+   *  purchases the Cellier read (the last 12 months). */
+  const LAST = 5;
+  const bought = $derived.by(() => {
+    const by = new Map();
+    for (const p of [...cellier.purchases].sort((a, b) => b.at - a.at)) {
+      const list = by.get(p.product) ?? [];
+      if (list.length < LAST) by.set(p.product, [...list, p]);
+    }
+    return by;
+  });
+  const day = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' });
+  /** « 1,29 € », « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg ». */
+  function price(p) {
+    const each = `${euros(p.price_cents)}${p.unit ? `/${p.unit}` : ''}`;
+    return p.qty === 1 && !p.unit ? each : `${qtyText(p.qty, locale())}${p.unit ? ` ${p.unit}` : ''} × ${each}`;
+  }
 
   async function act(run, done) {
     try {
@@ -83,6 +102,21 @@
           </ul>
         {:else}
           <p class="muted small">{t('cellier.produits.aucune_fiche')}</p>
+        {/if}
+
+        <h4>{t('cellier.produits.derniers_achats')}</h4>
+        {#if bought.get(p.id)?.length}
+          <ul class="bought">
+            {#each bought.get(p.id) as b (b.id)}
+              <li>
+                <span class="muted">{day(b.at)}</span>
+                <span class="where">{providerName(b.provider)}</span>
+                <span class="num">{price(b)}</span>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="muted small">{t('cellier.produits.aucun_achat')}</p>
         {/if}
       </article>
     {/each}
@@ -173,6 +207,35 @@
   .sheets span,
   .sheets small {
     overflow-wrap: anywhere;
+  }
+
+  .bought {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 14px;
+  }
+
+  .bought li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 0;
+  }
+
+  .bought li + li {
+    border-top: 1px solid var(--line);
+  }
+
+  .bought .where {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bought .num {
+    white-space: nowrap;
   }
 
   .pending {

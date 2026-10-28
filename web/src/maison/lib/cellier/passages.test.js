@@ -77,6 +77,26 @@ test('drive lines of one basket make one passage', () => {
   assert.equal(out[1].key, 'basket:5');
 });
 
+test('a line with both receipt and basket goes to the ticket passage', () => {
+  const purchases = [
+    line({ id: 1, receipt: 7, basket: 4, source: 'drive', line_cents: 120 }),
+    line({ id: 2, basket: 4, source: 'drive', line_cents: 80 }),
+  ];
+  const out = passages(purchases, [receipt({ draft: { total_cents: 120, lines: [] } })]);
+  assert.equal(out.length, 2);
+  const ticket = out.find((p) => p.kind === 'ticket');
+  assert.equal(ticket.key, 'ticket:7');
+  assert.equal(ticket.receipt, 7);
+  assert.equal(ticket.total_cents, 120);
+  assert.equal(ticket.printed_cents, null);
+  const drive = out.find((p) => p.kind === 'drive');
+  assert.equal(drive.receipt, null);
+  assert.deepEqual(
+    drive.lines.map((l) => l.id),
+    [2],
+  );
+});
+
 test('lines without ticket nor basket are grouped by chain, store and minute', () => {
   const purchases = [
     line({ id: 1, source: 'ticket', at: T0 + 5_000 }),

@@ -22,6 +22,8 @@ export const cellier = $state({
    *  (the drafts still to check included). */
   purchases: [],
   receipts: [],
+  /** The purchases were read at least once. */
+  purchasesLoaded: false,
   /** Who reads receipts: `{provider, model, allowed, reason}`, null until read. */
   reader: null,
   error: '',
@@ -62,11 +64,12 @@ export async function loadCellier() {
   }
 }
 
-/** Every write re-reads the whole pantry: the answer is small, and the same
- *  read comes anyway with the change event. */
+/** Every write re-reads the whole pantry (and the purchases, once a page read
+ *  them): the answers are small, and the same read comes anyway with the
+ *  change event. Writes throw; the pages catch and say why. */
 async function write(method, path, body) {
   const answer = await call(method, path, body);
-  await loadCellier();
+  await reloadCellier();
   return answer;
 }
 
@@ -96,20 +99,37 @@ export const providerName = (id) => cellier.providers.find((p) => p.info.id === 
 
 // ---- Receipts and purchases ---------------------------------------------------
 
+/** The period the purchases were read for last; null until a page reads them. */
+let period = null;
+
 /** The purchases between two instants (ms; the server defaults to the last
  *  12 months) with the receipts they come from and the drafts to check. */
 export async function loadPurchases(from, to) {
+  period = { from, to };
   const query = new URLSearchParams();
   if (from != null) query.set('from', String(from));
   if (to != null) query.set('to', String(to));
-  const suffix = query.size ? `?${query}` : '';
+  // `URLSearchParams.size` is too recent for some phones' WebViews.
+  const suffix = query.toString() ? `?${query}` : '';
   try {
     const all = await call('GET', `/api/cellier/purchases${suffix}`);
     Object.assign(cellier, { purchases: all.purchases, receipts: all.receipts, error: '' });
   } catch (e) {
     cellier.error = e.message;
+  } finally {
+    cellier.purchasesLoaded = true;
   }
 }
+
+/** Re-reads what the pages show: the pantry, and the purchases of the same
+ *  period once a page read them (a draft scanned by someone else, a line
+ *  corrected...). What `pantry_changed` calls. */
+export async function reloadCellier() {
+  await Promise.all([loadCellier(), period ? loadPurchases(period.from, period.to) : null]);
+}
+
+/** One receipt with its draft (and the model's raw reading). Throws. */
+export const loadReceipt = (id) => call('GET', `/api/cellier/receipts/${id}`);
 
 /** Who reads receipts, and whether they may. */
 export async function loadReader() {
@@ -121,45 +141,75 @@ export async function loadReader() {
   }
 }
 
+/** Why receipts cannot be read, for a person: the server's reason (said in
+ *  the house's language), or « no assistant » translated. */
+export const readerWhy = (reader) =>
+  !reader?.reason || reader.reason === 'no assistant' ? t('cellier.ticket.pas_assistant') : reader.reason;
+
 /** Why the server refused to read (503): no assistant, or the provider is not allowed. */
 async function refusal() {
   await loadReader();
-  return cellier.reader && cellier.reader.allowed === false && cellier.reader.reason !== 'no assistant'
-    ? t('cellier.ticket.refuse')
-    : t('cellier.ticket.pas_assistant');
+  const reader = cellier.reader;
+  if (!reader || reader.allowed !== false || reader.reason === 'no assistant') return t('cellier.ticket.pas_assistant');
+  // The server's reason says which provider and why; the generic words otherwise.
+  return reader.reason || t('cellier.ticket.refuse');
 }
 
 /** Sends the photos of one receipt (1 to 4 images, shrunk here) to be read.
  *  Answers the draft receipt created, or throws an error with a translated
- *  message (unreadable, no assistant, refused...) and the HTTP `status`. */
+ *  message (a photo the browser cannot open, unreadable, no assistant,
+ *  refused, busy...) and the HTTP `status` (0 when nothing was sent). */
 export async function scanReceipt(photos) {
-  const sent = await Promise.all(photos.map(async (photo) => toBase64(await shrink(photo))));
+  let sent;
   try {
-    return await call('POST', '/api/cellier/receipts', { photos: sent });
+    sent = await Promise.all(photos.map(async (photo) => toBase64(await shrink(photo))));
+  } catch {
+    // A format the browser cannot decode (HEIC on a desktop browser...).
+    const err = new Error(t('cellier.ticket.photo_illisible'));
+    err.status = 0;
+    throw err;
+  }
+  let receipt;
+  try {
+    receipt = await call('POST', '/api/cellier/receipts', { photos: sent });
   } catch (e) {
-    const message =
-      e.status === 422
-        ? t('cellier.ticket.illisible')
-        : e.status === 503
-          ? await refusal()
-          : e.status === 502
-            ? t('cellier.ticket.lecture_inutilisable')
-            : e.status === 400
-              ? t('cellier.ticket.photos_refusees')
-              : e.message;
-    const err = new Error(message);
+    const err = new Error(await scanError(e));
     err.status = e.status;
     throw err;
   }
+  await reloadCellier();
+  return receipt;
 }
 
-/** Saves the corrected draft of a receipt (a `ReceiptDraft`). */
-export const saveDraft = (id, draft) => call('PUT', `/api/cellier/receipts/${id}`, draft);
+/** What to tell about a refused scan. */
+async function scanError(e) {
+  switch (e.status) {
+    case 422:
+      return t('cellier.ticket.illisible');
+    case 503:
+      return refusal();
+    case 502:
+      return t('cellier.ticket.lecture_inutilisable');
+    case 429:
+      return t('cellier.ticket.occupe');
+    case 413:
+      return t('cellier.ticket.trop_lourd');
+    case 400:
+      // The assistant's own refusals say « invalid request: ... »; the
+      // others come from the photos' checks.
+      return /^invalid request/i.test(e.message) ? t('cellier.ticket.demande_refusee') : t('cellier.ticket.photos_refusees');
+    default:
+      return e.message;
+  }
+}
+
+/** Saves the corrected draft of a receipt (a `ReceiptDraft`); answers the receipt. */
+export const saveDraft = (id, draft) => write('PUT', `/api/cellier/receipts/${id}`, draft);
 /** Validates a draft: its kept lines become purchases. A receipt that looks
  *  recorded already answers 400 until `force` is set. */
 export const validateReceipt = (id, force = false) => write('POST', `/api/cellier/receipts/${id}/validate`, { force });
 /** Drops a draft that will not be recorded. */
-export const abandonReceipt = (id) => call('DELETE', `/api/cellier/receipts/${id}`);
+export const abandonReceipt = (id) => write('DELETE', `/api/cellier/receipts/${id}`);
 /** `{qty, price_cents, line_cents, product}` */
 export const updatePurchase = (id, fields) => write('PUT', `/api/cellier/purchases/${id}`, fields);
 export const deletePurchase = (id) => write('DELETE', `/api/cellier/purchases/${id}`);

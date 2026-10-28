@@ -3,28 +3,47 @@
   import Icon from '../ui/Icon.svelte';
   import Liste from '../ui/cellier/Liste.svelte';
   import Panier from '../ui/cellier/Panier.svelte';
+  import Achats from '../ui/cellier/Achats.svelte';
+  import Scan from '../ui/cellier/Scan.svelte';
+  import Ticket from '../ui/cellier/Ticket.svelte';
   import Produits from '../ui/cellier/Produits.svelte';
+  import Stats from '../ui/cellier/Stats.svelte';
   import Reglages from '../ui/cellier/Reglages.svelte';
-  import { cellier, loadCellier } from '../lib/cellier.svelte.js';
+  import { cellier, loadCellier, loadPurchases, loadReader } from '../lib/cellier.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
 
-  /** « Le Cellier »: the household's shopping list and the drives' basket.
-   *  Humans add needs and choose; an agent reads prices and proposes baskets
-   *  in the background, so everything here follows `pantry_changed`. */
+  /** « Le Cellier »: the household's shopping list, the drives' basket and
+   *  what was bought. Humans add needs, choose and check receipts; an agent
+   *  reads prices and proposes baskets in the background, so everything here
+   *  follows `pantry_changed`. Each page has its address, `#/cellier/<page>`;
+   *  a receipt is scanned at `#/cellier/achats/scan` and checked at
+   *  `#/cellier/achats/ticket/<id>`. */
   let { route = '' } = $props();
 
-  const TABS = ['liste', 'panier', 'produits', 'reglages'];
-  const tab = $derived(TABS.includes(route.split('/')[1]) ? route.split('/')[1] : 'liste');
+  const PAGES = ['liste', 'panier', 'achats', 'produits', 'stats', 'reglages'];
+  const parts = $derived(route.split('/'));
+  const page = $derived(PAGES.includes(parts[1]) ? parts[1] : 'liste');
+  const sub = $derived(page === 'achats' ? (parts[2] ?? '') : '');
+  const ticketId = $derived(sub === 'ticket' && /^\d+$/.test(parts[3] ?? '') ? Number(parts[3]) : null);
 
-  onMount(loadCellier);
+  // The purchases too, from the start: the drafts to check badge their page.
+  onMount(() => {
+    loadCellier();
+    loadPurchases();
+    loadReader();
+  });
 
-  // Small cues on the tabs: what is on the list, a basket waiting for a
-  // choice, sheets an agent found that nobody checked yet.
+  // Small cues on the pages: what is on the list, a basket waiting for a
+  // choice, receipts read and not yet checked, sheets an agent found that
+  // nobody checked yet.
   const pending = $derived(cellier.offers.filter((o) => o.status === 'pending').length);
+  const drafts = $derived(cellier.receipts.filter((r) => r.status === 'draft').length);
   const badge = $derived({
     liste: cellier.items.length || null,
     panier: cellier.basket?.status === 'proposed' ? '•' : null,
+    achats: drafts || null,
     produits: pending || null,
+    stats: null,
     reglages: null,
   });
 </script>
@@ -49,19 +68,27 @@
     {#if cellier.error}<p class="error" role="alert"><Icon name="alert" size={18} />{cellier.error}</p>{/if}
 
     <nav class="tabs" aria-label={t('cellier.vues')}>
-      {#each TABS as id (id)}
-        <a href="#/cellier/{id}" class:on={tab === id} aria-current={tab === id ? 'page' : undefined}>
+      {#each PAGES as id (id)}
+        <a href="#/cellier/{id}" class:on={page === id} aria-current={page === id ? 'page' : undefined}>
           {t(`cellier.onglet.${id}`)}
           {#if badge[id]}<small class="num">{badge[id]}</small>{/if}
         </a>
       {/each}
     </nav>
 
-    {#if tab === 'panier'}
+    {#if page === 'panier'}
       <Panier />
-    {:else if tab === 'produits'}
+    {:else if page === 'achats' && sub === 'scan'}
+      <Scan />
+    {:else if page === 'achats' && ticketId != null}
+      {#key ticketId}<Ticket id={ticketId} />{/key}
+    {:else if page === 'achats'}
+      <Achats />
+    {:else if page === 'produits'}
       <Produits />
-    {:else if tab === 'reglages'}
+    {:else if page === 'stats'}
+      <Stats />
+    {:else if page === 'reglages'}
       <Reglages />
     {:else}
       <Liste />
@@ -165,6 +192,21 @@
       flex: 1;
       justify-content: center;
       padding: 0 10px;
+    }
+  }
+
+  /* Six pages do not fit one row on a phone: two rows of three, every page
+     in sight (a row scrolling sideways would hide some). */
+  @media (max-width: 720px) {
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-radius: 24px;
+    }
+
+    .tabs a {
+      padding: 0 4px;
+      font-size: 14px;
     }
   }
 </style>

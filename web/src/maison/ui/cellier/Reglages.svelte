@@ -1,10 +1,14 @@
 <script>
-  import { cellier, saveSettings } from '../../lib/cellier.svelte.js';
+  import Icon from '../Icon.svelte';
+  import { cellier, saveSettings, readerWhy } from '../../lib/cellier.svelte.js';
   import { note } from '../../lib/home.svelte.js';
   import { t } from '../../../lib/i18n.svelte.js';
 
-  /** The split threshold, and each chain: on or off, the store used, its
-   *  minimum order and fee (typed in euros, kept in cents). */
+  /** The split threshold, each chain (on or off, the store used, its
+   *  minimum order and fee, typed in euros, kept in cents), and who reads
+   *  the receipts. */
+
+  const reader = $derived(cellier.reader);
 
   // The slider while it moves; the saved value otherwise.
   let moving = $state(null);
@@ -70,6 +74,22 @@
   </label>
 </section>
 
+<h2 class="title">{t('cellier.reglages.tickets')}</h2>
+<section class="card reader">
+  <span class="ic" class:off={!reader?.allowed}><Icon name="receipt" size={22} /></span>
+  <div>
+    {#if !reader}
+      <p class="muted">…</p>
+    {:else if reader.allowed}
+      <p><b>{t('cellier.reglages.lecteur', { lecteur: `${reader.provider}/${reader.model}` })}</b></p>
+      <p class="muted small">{t('cellier.reglages.photos_partent')}</p>
+    {:else}
+      <p><b>{t('cellier.reglages.lecteur_refuse')}</b></p>
+      <p class="muted small">{readerWhy(reader)}</p>
+    {/if}
+  </div>
+</section>
+
 <h2 class="title">{t('cellier.reglages.enseignes')}</h2>
 <div class="chains">
   {#each cellier.providers as p (p.info.id)}
@@ -130,6 +150,43 @@
     font-size: 15px;
     font-weight: 650;
     color: var(--ink-2);
+  }
+
+  .reader {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .reader > div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .reader b {
+    font-weight: 650;
+    overflow-wrap: anywhere;
+  }
+
+  .small {
+    font-size: 13px;
+  }
+
+  .ic {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background: var(--good-soft);
+    color: var(--good);
+  }
+
+  .ic.off {
+    background: var(--surface-2);
+    color: var(--ink-3);
   }
 
   .chains {

@@ -5,7 +5,7 @@ const MINUTE = 60_000;
 
 /** What a purchase line cost: the server's figure, else quantity times price
  *  less the discount (rounded half away from zero, as the server does). */
-function cost(p) {
+export function cost(p) {
   if (p.line_cents != null) return p.line_cents;
   const gross = p.qty * p.price_cents;
   return Math.sign(gross) * Math.round(Math.abs(gross)) - (p.discount_cents ?? 0);
@@ -13,8 +13,9 @@ function cost(p) {
 
 /** Group purchases by receipt, else by basket, else by (chain, store, minute).
  *  `receipts` carries the printed totals. Newest first.
- *  @returns {{key: string, kind: 'ticket'|'drive'|'other', provider: string, store: string,
- *             at: number, total_cents: number, printed_cents: number|null, lines: object[]}[]} */
+ *  @returns {{key: string, kind: 'ticket'|'drive'|'other', receipt: number|null, provider: string,
+ *             store: string, at: number, total_cents: number, printed_cents: number|null,
+ *             lines: object[]}[]} */
 export function passages(purchases, receipts = []) {
   const known = new Map(receipts.map((r) => [r.id, r]));
   const groups = new Map();
@@ -33,7 +34,17 @@ export function passages(purchases, receipts = []) {
     }
     let group = groups.get(key);
     if (!group) {
-      group = { key, kind, provider: p.provider, store: p.store, at: p.at, total_cents: 0, printed_cents: null, lines: [] };
+      group = {
+        key,
+        kind,
+        receipt: kind === 'ticket' ? p.receipt : null,
+        provider: p.provider,
+        store: p.store,
+        at: p.at,
+        total_cents: 0,
+        printed_cents: null,
+        lines: [],
+      };
       groups.set(key, group);
     }
     group.lines.push(p);
@@ -42,7 +53,7 @@ export function passages(purchases, receipts = []) {
   }
   for (const group of groups.values()) {
     if (group.kind !== 'ticket') continue;
-    const printed = known.get(Number(group.key.slice('ticket:'.length)))?.draft?.total_cents;
+    const printed = known.get(group.receipt)?.draft?.total_cents;
     if (printed != null && printed !== group.total_cents) group.printed_cents = printed;
   }
   return [...groups.values()].sort((a, b) => b.at - a.at);

@@ -1,5 +1,5 @@
 import { setLanguage, t } from './i18n.svelte.js';
-import { cellier, loadCellier } from '../maison/lib/cellier.svelte.js';
+import { cellier, reloadCellier } from '../maison/lib/cellier.svelte.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -106,7 +106,7 @@ function applyEvent(e) {
       // dashboard that never opened the pantry does not read it at all.
       if (!cellier.loaded) break;
       clearTimeout(pantryTimer);
-      pantryTimer = setTimeout(loadCellier, 300);
+      pantryTimer = setTimeout(reloadCellier, 300);
       break;
     case 'notice': {
       const id = `${e.notice.ts}-${Math.random()}`;

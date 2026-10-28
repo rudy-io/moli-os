@@ -49,6 +49,8 @@ export async function shrink(file) {
   // JPEG has no alpha: a transparent PNG would turn black.
   context.fillStyle = '#fff';
   context.fillRect(0, 0, width, height);
+  // A strong reduction (a 4000 px photo to 1200) keeps small print legible.
+  context.imageSmoothingQuality = 'high';
   context.drawImage(image, 0, 0, width, height);
   image.close?.();
   return new Promise((resolve, reject) => {
