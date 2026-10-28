@@ -22,6 +22,7 @@ mod away;
 mod caller;
 mod guard;
 mod integrations;
+pub use integrations::TuyaDiscover;
 mod limit;
 mod machines;
 mod mcp;
@@ -129,6 +130,9 @@ pub struct Options {
     /// The sky over the house (forecast, satellite), when its position is
     /// known.
     pub weather: Option<moli_weather::Weather>,
+    /// Looks for new devices in a Tuya account (the driver's instance gives
+    /// the cloud keys and the device file), when a `tuya` driver runs.
+    pub tuya_discover: Option<integrations::TuyaDiscover>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -189,6 +193,10 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .route(
             "/api/integrations/tuya-cloud",
             get(integrations::tuya_cloud).put(integrations::set_tuya_cloud),
+        )
+        .route(
+            "/api/integrations/tuya-cloud/discover",
+            post(integrations::discover_tuya),
         )
         .route("/api/session/pin", put(rest::set_pin))
         .route(
@@ -351,6 +359,9 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(assets::AppName::new(options.app_name.as_deref())))
         .layer(Extension(shutdown))
         .layer(Extension(sse::Streams::default()))
+        .layer(Extension(integrations::TuyaDiscoverGate(
+            options.tuya_discover.clone(),
+        )))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
         .layer(Extension(rest::HomeFile(options.home_path.clone())))

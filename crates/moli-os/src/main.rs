@@ -390,6 +390,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         phones: gates.phones,
         machines: gates.machines,
         weather: weather(&config),
+        tuya_discover: tuya_discover(&config),
         ..server_options(&config)
     };
     // Client addresses matter: human sessions are bound to them.
@@ -419,6 +420,27 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .await
         .context("final state cache write")?;
     Ok(())
+}
+
+/// Lets the dashboard look for new devices in the Tuya account: each `tuya`
+/// driver's own settings (device file, cloud region) say where.
+fn tuya_discover(config: &Config) -> Option<moli_api::TuyaDiscover> {
+    let drivers: std::collections::HashMap<String, moli_tuya::Config> = config
+        .drivers
+        .iter()
+        .filter(|d| d.kind == "tuya" && d.enabled != Some(false))
+        .filter_map(|d| Some((d.id.clone(), d.options.clone().try_into().ok()?)))
+        .collect();
+    if drivers.is_empty() {
+        return None;
+    }
+    Some(moli_api::TuyaDiscover::new(move |hub, instance| {
+        let driver = drivers.get(instance.as_str()).cloned();
+        Box::pin(async move {
+            let driver = driver.context("no such tuya driver")?;
+            moli_tuya::discover::file_new(&driver, &hub, &instance).await
+        })
+    }))
 }
 
 /// The sky over the house (the dashboard's forecast and weather map):

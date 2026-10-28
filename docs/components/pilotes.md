@@ -255,7 +255,8 @@ devices_file = "/data/tuya.json"   # défaut : data/tuya.json
 ```
 
 - **Secrets** : une clé locale par appareil, `key-<device_id>` (16 caractères), rangée par l'import.
-- **Import** (une fois, puis à chaque nouvel appareil) : `tools/home-assistant/tuya-export.py` tourne **dans le conteneur Home Assistant** et lit, via le compte Tuya déjà lié à HA, la liste des appareils, leurs DP et leurs clés locales.
+- **Nouveaux appareils sans script** (`src/discover.rs`) : Système → Cloud Tuya → « Chercher les nouveaux appareils » (code demandé, `POST /api/integrations/tuya-cloud/discover`) : Moli liste les appareils du compte avec les clés du projet cloud qu'il tient (celles du fichier du coffre, sinon celles du tableau de bord), décrit **seulement les nouveaux** (modèle + spécification, comme `tuya-iot-export.py`, trois appels chacun) et les ajoute à `tuya.json` ; un appareil connu garde ses DP, `ip`, `version`, `room`, et seule sa clé locale est relue (un appareil réappairé en change), un appareil que le compte ne liste plus reste dans le fichier. Le pilote surveille la date du fichier (toutes les 20 s) et redémarre quand il est écrit, par une recherche comme par `tuya import`. Pas encore vérifié sur un vrai nouvel appareil au 28 oct. (le chemin « décrire » est le portage du script, testé seulement en pièces).
+- **Import** (une fois, puis à chaque nouvel appareil, ou la recherche ci-dessus) : `tools/home-assistant/tuya-export.py` tourne **dans le conteneur Home Assistant** et lit, via le compte Tuya déjà lié à HA, la liste des appareils, leurs DP et leurs clés locales.
 
 ```sh
 docker exec -i homeassistant python3 - --summary < tuya-export.py      # contrôle, sans secret

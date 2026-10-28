@@ -24,6 +24,22 @@
   }
   onMount(load);
 
+  let looking = $state(false);
+
+  /** Moli asks the account itself, with the keys it holds (code asked). */
+  async function look() {
+    looking = true;
+    try {
+      const done = await asPerson(t('systeme.tuya.chercher'), () => request('POST', '/api/integrations/tuya-cloud/discover'));
+      if (!done) return;
+      note(done.added.length ? t('systeme.tuya.trouves', { names: done.added.join(', ') }) : t('systeme.tuya.rien_trouve'), 'info');
+    } catch (e) {
+      note(t('systeme.tuya.erreur_recherche', { message: e.message }), 'error');
+    } finally {
+      looking = false;
+    }
+  }
+
   const configured = $derived(state?.instances?.some((i) => i.configured));
 
   async function save() {
@@ -58,6 +74,9 @@
             : t('systeme.tuya.a_configurer')}
         </span>
       </div>
+      {#if configured}
+        <button class="btn" disabled={looking} title={t('systeme.tuya.chercher_aide')} onclick={look}>{looking ? '…' : t('systeme.tuya.chercher')}</button>
+      {/if}
       <button class="btn" onclick={() => (open = !open)}>{configured ? t('systeme.tuya.remplacer') : t('systeme.tuya.ajouter')}</button>
     </div>
     {#if open}

@@ -138,14 +138,22 @@ pub fn sign(keys: &Keys, token: Option<&str>, t: u64, nonce: &str, to_sign: &str
     hex(&hmac_sha256(keys.secret.as_bytes(), message.as_bytes())).to_ascii_uppercase()
 }
 
-struct Api {
+pub(crate) struct Api {
     keys: Keys,
     region: Region,
     token: Option<(String, Instant)>,
 }
 
 impl Api {
-    async fn call(&mut self, path: &str) -> anyhow::Result<Json> {
+    pub(crate) fn new(keys: Keys, region: Region) -> Self {
+        Self {
+            keys,
+            region,
+            token: None,
+        }
+    }
+
+    pub(crate) async fn call(&mut self, path: &str) -> anyhow::Result<Json> {
         let token = self.token().await?;
         self.request(Method::GET, path, b"", Some(&token)).await
     }

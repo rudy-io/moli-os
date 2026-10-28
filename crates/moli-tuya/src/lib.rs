@@ -14,6 +14,7 @@
 pub mod cloud;
 mod connections;
 mod device;
+pub mod discover;
 mod kept;
 pub mod model;
 pub mod program;
@@ -262,19 +263,19 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     ctx.ready();
     tracing::info!(instance = %ctx.instance(), devices = devices.len(), "tuya devices loaded");
 
-    let keys_came = serve(
+    let restart = serve(
         ctx,
         &mut up,
         &orders,
         (program_tx.as_ref(), rewired_tx.as_ref()),
         &kept,
         &devices,
-        await_keys,
+        (await_keys, &config.devices_file),
     )
     .await;
     tasks.abort_all();
-    if keys_came {
-        anyhow::bail!(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
+    if let Some(reason) = restart {
+        anyhow::bail!(reason);
     }
     Ok(())
 }
@@ -324,7 +325,8 @@ fn stored_keys(ctx: &DriverCtx) -> Option<cloud::Keys> {
 /// Orders go to the devices, what they say goes to the hub, until the end.
 /// A program keeper whose wiring changes has its program read again, and
 /// shown at once on its new wiring (on switch, with the setpoints Moli keeps).
-/// Returns whether cloud keys arrived meanwhile (then the driver restarts).
+/// Returns why the driver must restart, when it must: cloud keys arrived
+/// meanwhile, or the device file was written (a discovery, an import).
 async fn serve(
     ctx: &mut DriverCtx,
     up: &mut mpsc::Receiver<Up>,
@@ -335,16 +337,24 @@ async fn serve(
     ),
     kept: &kept::Shared,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
-    await_keys: bool,
-) -> bool {
+    (await_keys, devices_file): (bool, &std::path::Path),
+) -> Option<String> {
     let mut look = tokio::time::interval(std::time::Duration::from_secs(20));
+    let mut file_look = tokio::time::interval(std::time::Duration::from_secs(20));
+    let loaded = modified(devices_file).await;
     let mut wirings: HashMap<usize, moli_core::Value> = HashMap::new();
     loop {
         tokio::select! {
             _ = look.tick(), if await_keys => {
                 if stored_keys(ctx).is_some() {
                     tracing::info!(instance = %ctx.instance(), "tuya cloud keys given in the dashboard");
-                    return true;
+                    return Some(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
+                }
+            }
+            _ = file_look.tick() => {
+                if modified(devices_file).await != loaded {
+                    tracing::info!(instance = %ctx.instance(), "tuya device file written");
+                    return Some(moli_i18n::tr!("pilotes.tuya.fichier_ecrit"));
                 }
             }
             // `None` once the driver is cancelled.
@@ -395,7 +405,12 @@ async fn serve(
             },
         }
     }
-    false
+    None
+}
+
+/// When the device file was last written (`None`: not there).
+async fn modified(file: &std::path::Path) -> Option<std::time::SystemTime> {
+    tokio::fs::metadata(file).await.ok()?.modified().ok()
 }
 
 /// A pilot-wire module's wiring (four, six orders or switch).

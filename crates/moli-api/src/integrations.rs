@@ -10,7 +10,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use moli_core::InstanceId;
-use moli_runtime::Hub;
+use moli_runtime::{BoxFuture, Hub};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -102,4 +102,83 @@ pub(crate) async fn set_tuya_cloud(
     }
     tracing::info!(%instance, "tuya cloud keys filed from the dashboard");
     Json(json!({ "stored": true, "instance": instance })).into_response()
+}
+
+/// Looks for the new devices of a Tuya instance's account and files them:
+/// the names of those found.
+type Look =
+    dyn Fn(Hub, InstanceId) -> BoxFuture<'static, anyhow::Result<Vec<String>>> + Send + Sync;
+
+#[derive(Clone)]
+pub struct TuyaDiscover(Arc<Look>);
+
+impl TuyaDiscover {
+    pub fn new(
+        look: impl Fn(Hub, InstanceId) -> BoxFuture<'static, anyhow::Result<Vec<String>>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(look))
+    }
+}
+
+impl std::fmt::Debug for TuyaDiscover {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TuyaDiscover")
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TuyaDiscoverGate(pub(crate) Option<TuyaDiscover>);
+
+#[derive(Deserialize, Default)]
+pub(crate) struct Which {
+    #[serde(default)]
+    instance: Option<String>,
+}
+
+/// A person asks Moli to look for the account's new Tuya devices with the
+/// keys it holds. The Tuya driver restarts with what was found.
+pub(crate) async fn discover_tuya(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(TuyaDiscoverGate(discover)): Extension<TuyaDiscoverGate>,
+    caller: Caller,
+    headers: HeaderMap,
+    which: Option<Json<Which>>,
+) -> Response {
+    let refuse = |status: StatusCode, message: &str| {
+        (status, Json(json!({ "error": message }))).into_response()
+    };
+    if !humans.is_human(&headers, &caller.key) {
+        return refuse(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.cle.tuya_humain"),
+        );
+    }
+    let instances = tuya_instances(&hub);
+    let wanted = which.and_then(|Json(w)| w.instance);
+    let instance = match wanted.as_deref() {
+        Some(name) => InstanceId::from(name),
+        None => match instances.first() {
+            Some(i) => i.clone(),
+            None => {
+                return refuse(
+                    StatusCode::NOT_FOUND,
+                    &moli_i18n::tr!("serveur.pilote.absent", pilote = "tuya"),
+                );
+            }
+        },
+    };
+    let (true, Some(discover)) = (instances.contains(&instance), discover) else {
+        return refuse(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.cle.tuya_pilote_inconnu"),
+        );
+    };
+    match (discover.0)(hub, instance.clone()).await {
+        Ok(added) => Json(json!({ "instance": instance, "added": added })).into_response(),
+        Err(e) => refuse(StatusCode::BAD_GATEWAY, &format!("{e:#}")),
+    }
 }
