@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use jiff::tz::TimeZone;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
@@ -17,9 +18,9 @@ use crate::baskets::{
     check_purchase, insert_lines, insert_purchase, json_col, json_text, line_cost,
 };
 use crate::model::{
-    AgentReceipt, DraftLine, Product, Purchase, Receipt, ReceiptDraft, ReceiptStatus,
+    AgentReceipt, DraftLine, DriveTwin, Product, Purchase, Receipt, ReceiptDraft, ReceiptStatus,
 };
-use crate::store::{PantryError, Store, ms, save_product_in, ts};
+use crate::store::{PantryError, Store, day_of, ms, save_product_in, ts};
 
 /// A receipt is photographed in at most this many shots.
 pub const MAX_PHOTOS: usize = 4;
@@ -27,7 +28,10 @@ pub const MAX_PHOTOS: usize = 4;
 const KEEP_PHOTOS_MS: u64 = 90 * 86_400_000;
 const MINUTE_MS: u64 = 60_000;
 const COLUMNS: &str = "id, status, photos, sent_at, sent_by, validated_at, validated_by, reader, \
-                       draft, read";
+                       draft, read, version";
+/// A drive basket within this share of a receipt's total (1/50, 2 %) is
+/// probably the same shopping.
+const DRIVE_TWIN_SHARE: i64 = 50;
 
 /// Letters with an accent (or a ligature) and what they fold to in an id.
 fn fold(c: char) -> Option<&'static str> {
@@ -74,7 +78,7 @@ pub(crate) fn slug(name: &str) -> String {
 }
 
 /// A printed label as a key: spaces collapsed, case ignored.
-fn label_key(label: &str) -> String {
+pub(crate) fn label_key(label: &str) -> String {
     label
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -99,6 +103,17 @@ fn check_draft(d: &ReceiptDraft) -> Result<(), PantryError> {
         }
     }
     Ok(())
+}
+
+/// Refuses a change made from `version` when the receipt moved on since.
+fn check_version(receipt: &Receipt, version: Option<u64>) -> Result<(), PantryError> {
+    match version {
+        Some(v) if v != receipt.version => Err(PantryError::Conflict(format!(
+            "receipt {} was changed elsewhere (version {}, not {v})",
+            receipt.id, receipt.version
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn receipt_row(r: &Row<'_>) -> rusqlite::Result<Receipt> {
@@ -127,6 +142,8 @@ fn receipt_row(r: &Row<'_>) -> rusqlite::Result<Receipt> {
         read: json_col(r, 9)?,
         gap_cents,
         duplicate_of: None,
+        drive_twin: None,
+        version: u64::try_from(r.get::<_, i64>(10)?).unwrap_or(0),
     })
 }
 
@@ -157,9 +174,44 @@ fn validated_twin(
         .optional()?)
 }
 
-/// A receipt, with the validated one it probably repeats (looked for on a
-/// draft only: same chain, same minute, same total).
-fn load_receipt(conn: &Connection, id: i64) -> Result<Receipt, PantryError> {
+/// The confirmed drive basket of `provider` collected on the house's day of
+/// `at` whose lines cost about `total_cents` (2 % apart at most), the
+/// closest one if several.
+fn drive_twin(
+    conn: &Connection,
+    tz: &TimeZone,
+    provider: &str,
+    total_cents: i64,
+    at: u64,
+) -> Result<Option<DriveTwin>, PantryError> {
+    let Some((start, end)) = day_of(tz, at) else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare(
+        "SELECT basket, MIN(at), SUM(COALESCE(line_cents, 0)) FROM purchases
+         WHERE source = 'drive' AND status = 'confirmed' AND basket IS NOT NULL
+           AND provider = ?1 AND at >= ?2 AND at < ?3
+         GROUP BY basket ORDER BY basket",
+    )?;
+    let baskets = stmt
+        .query_map(params![provider, ts(start), ts(end)], |r| {
+            Ok(DriveTwin {
+                basket: r.get(0)?,
+                at: ms(r.get(1)?),
+                total_cents: r.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(baskets
+        .into_iter()
+        .filter(|b| (b.total_cents - total_cents).abs() * DRIVE_TWIN_SHARE <= total_cents.abs())
+        .min_by_key(|b| (b.total_cents - total_cents).abs()))
+}
+
+/// A receipt, with what it probably repeats (looked for on a draft only):
+/// a validated receipt of the same chain, minute and total, and a drive
+/// basket of the same chain, day and about the same total.
+fn load_receipt(conn: &Connection, tz: &TimeZone, id: i64) -> Result<Receipt, PantryError> {
     let mut receipt = conn
         .query_row(
             &format!("SELECT {COLUMNS} FROM receipts WHERE id = ?1"),
@@ -171,6 +223,7 @@ fn load_receipt(conn: &Connection, id: i64) -> Result<Receipt, PantryError> {
     let d = &receipt.draft;
     if let (ReceiptStatus::Draft, Some(at), Some(total)) = (receipt.status, d.at, d.total_cents) {
         receipt.duplicate_of = validated_twin(conn, &d.provider, total, at, id)?;
+        receipt.drive_twin = drive_twin(conn, tz, &d.provider, total, at)?;
     }
     Ok(receipt)
 }
@@ -208,9 +261,43 @@ fn product_name(conn: &Connection, id: &str) -> Result<Option<String>, PantryErr
         .optional()?)
 }
 
-/// The product a kept line is bought as: the existing one it names, or a new
-/// one made from `new_product` (one per distinct name in the receipt) under
-/// the first free id.
+/// Remembers that a chain's printed label stands for `product`.
+pub(crate) fn link_label(
+    conn: &Connection,
+    provider: &str,
+    label: &str,
+    product: &str,
+) -> Result<(), PantryError> {
+    if label.trim().is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO label_links(provider, label, product) VALUES (?1, ?2, ?3)
+         ON CONFLICT(provider, label) DO UPDATE SET product = excluded.product",
+        params![provider, label_key(label), product],
+    )?;
+    Ok(())
+}
+
+/// The existing product whose name is `name` once folded as an id (case,
+/// accents and spacing ignored), if any.
+fn product_named(conn: &Connection, name: &str) -> Result<Option<String>, PantryError> {
+    let wanted = slug(name);
+    let mut stmt = conn.prepare("SELECT id, name FROM products ORDER BY id")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let (id, known): (String, String) = (row.get(0)?, row.get(1)?);
+        if slug(&known) == wanted {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// The product a kept line is bought as: the existing one it names, the
+/// existing one named as its `new_product`, or a new one made from
+/// `new_product` (one per distinct name in the receipt) under the first
+/// free id.
 fn resolve_product(
     tx: &Connection,
     n: usize,
@@ -242,6 +329,10 @@ fn resolve_product(
             if let Some(id) = created.get(&base) {
                 return Ok(id.clone());
             }
+            if let Some(id) = product_named(tx, name)? {
+                created.insert(base, id.clone());
+                return Ok(id);
+            }
             let mut id = base.clone();
             let mut suffix = 2;
             while product_exists(tx, &id)? {
@@ -264,9 +355,10 @@ fn resolve_product(
 }
 
 impl Store {
-    /// Stores a freshly read receipt as a draft. The lines without a product
-    /// get the one their printed label was matched to on an earlier receipt
-    /// of the same chain. `read` is the model's raw answer, kept as is;
+    /// Stores a freshly read receipt as a draft. A line whose printed label
+    /// was matched to a product on an earlier receipt of the same chain gets
+    /// that product, whatever the model guessed or proposed to create: a
+    /// person chose it. `read` is the model's raw answer, kept as is;
     /// `photos` how many pictures go with it.
     pub fn create_receipt(
         &self,
@@ -282,10 +374,9 @@ impl Store {
         let mut conn = self.lock();
         let tx = conn.transaction()?;
         for line in &mut draft.lines {
-            if filled(line.product.as_deref()).is_none()
-                && filled(line.new_product.as_deref()).is_none()
-            {
-                line.product = linked_product(&tx, &draft.provider, &line.label)?;
+            if let Some(product) = linked_product(&tx, &draft.provider, &line.label)? {
+                line.product = Some(product);
+                line.new_product = None;
             }
         }
         tx.execute(
@@ -312,7 +403,7 @@ impl Store {
     }
 
     pub fn receipt(&self, id: i64) -> Result<Receipt, PantryError> {
-        load_receipt(&self.lock(), id)
+        load_receipt(&self.lock(), self.tz(), id)
     }
 
     /// The receipts, the drafts first, then the most recent.
@@ -325,20 +416,31 @@ impl Store {
         let ids = stmt
             .query_map([status.map(ReceiptStatus::as_str)], |r| r.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        ids.into_iter().map(|id| load_receipt(&conn, id)).collect()
+        ids.into_iter()
+            .map(|id| load_receipt(&conn, self.tz(), id))
+            .collect()
     }
 
-    /// Replaces the draft of a receipt not yet validated.
-    pub fn save_draft(&self, id: i64, draft: &ReceiptDraft) -> Result<Receipt, PantryError> {
+    /// Replaces the draft of a receipt not yet validated. With the
+    /// `version` the editor loaded, refused when someone saved meanwhile.
+    pub fn save_draft(
+        &self,
+        id: i64,
+        draft: &ReceiptDraft,
+        version: Option<u64>,
+    ) -> Result<Receipt, PantryError> {
         check_draft(draft)?;
         let conn = self.lock();
-        if load_receipt(&conn, id)?.status == ReceiptStatus::Validated {
+        let current = load_receipt(&conn, self.tz(), id)?;
+        if current.status == ReceiptStatus::Validated {
             return Err(PantryError::Invalid(format!(
                 "receipt {id} is validated: it cannot be edited"
             )));
         }
+        check_version(&current, version)?;
         conn.execute(
-            "UPDATE receipts SET provider = ?2, store = ?3, at = ?4, total_cents = ?5, draft = ?6
+            "UPDATE receipts SET provider = ?2, store = ?3, at = ?4, total_cents = ?5, draft = ?6,
+                                 version = version + 1
              WHERE id = ?1",
             params![
                 id,
@@ -349,27 +451,30 @@ impl Store {
                 json_text(draft)?
             ],
         )?;
-        load_receipt(&conn, id)
+        load_receipt(&conn, self.tz(), id)
     }
 
     /// Records the receipt, all or nothing: its kept lines become `ticket`
     /// purchases, the new products are created, the labels are remembered and
     /// the shopping-list lines in `items_done` that are still open are
     /// closed. A receipt that looks already recorded is refused unless
-    /// `force`; one already validated is returned as it is.
+    /// `force`, one saved since the validator loaded `version` too; one
+    /// already validated is returned as it is.
     pub fn validate_receipt(
         &self,
         id: i64,
         by: &str,
         now: u64,
         force: bool,
+        version: Option<u64>,
     ) -> Result<Receipt, PantryError> {
         let mut conn = self.lock();
         let tx = conn.transaction()?;
-        let receipt = load_receipt(&tx, id)?;
+        let receipt = load_receipt(&tx, self.tz(), id)?;
         if receipt.status == ReceiptStatus::Validated {
             return Ok(receipt);
         }
+        check_version(&receipt, version)?;
         if let (Some(twin), false) = (receipt.duplicate_of, force) {
             return Err(PantryError::Invalid(format!(
                 "this receipt looks already recorded: {twin}"
@@ -401,13 +506,7 @@ impl Store {
                 other => other,
             })?;
             insert_purchase(&tx, &purchase, None)?;
-            if !line.label.trim().is_empty() {
-                tx.execute(
-                    "INSERT INTO label_links(provider, label, product) VALUES (?1, ?2, ?3)
-                     ON CONFLICT(provider, label) DO UPDATE SET product = excluded.product",
-                    params![provider, label_key(&line.label), product],
-                )?;
-            }
+            link_label(&tx, &provider, &line.label, &product)?;
             line.product = Some(product);
             line.new_product = None;
         }
@@ -420,11 +519,11 @@ impl Store {
         }
         tx.execute(
             "UPDATE receipts SET status = 'validated', validated_at = ?2, validated_by = ?3,
-                                 draft = ?4
+                                 draft = ?4, version = version + 1
              WHERE id = ?1",
             params![id, ts(now), by, json_text(&draft)?],
         )?;
-        let done = load_receipt(&tx, id)?;
+        let done = load_receipt(&tx, self.tz(), id)?;
         tx.commit()?;
         tracing::info!(receipt = id, by, "receipt validated");
         Ok(done)
@@ -517,14 +616,10 @@ impl Store {
             .collect();
         insert_lines(&tx, &attached)?;
         // As a validation does: remember what each printed label stands for.
-        for l in lines.iter().filter(|l| !l.label.trim().is_empty()) {
-            tx.execute(
-                "INSERT INTO label_links(provider, label, product) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(provider, label) DO UPDATE SET product = excluded.product",
-                params![header.provider, label_key(&l.label), l.product],
-            )?;
+        for l in lines {
+            link_label(&tx, &header.provider, &l.label, &l.product)?;
         }
-        let done = load_receipt(&tx, id)?;
+        let done = load_receipt(&tx, self.tz(), id)?;
         tx.commit()?;
         tracing::info!(receipt = id, by, "receipt recorded by an agent");
         Ok(done)
@@ -533,7 +628,7 @@ impl Store {
     /// Deletes a draft; returns how many photos it had, for the caller to erase.
     pub fn abandon_receipt(&self, id: i64) -> Result<usize, PantryError> {
         let conn = self.lock();
-        let receipt = load_receipt(&conn, id)?;
+        let receipt = load_receipt(&conn, self.tz(), id)?;
         if receipt.status == ReceiptStatus::Validated {
             return Err(PantryError::Invalid(format!(
                 "receipt {id} is validated: it cannot be abandoned"
@@ -642,11 +737,12 @@ mod tests {
 
     use super::*;
     use crate::Pantry;
-    use crate::model::{DraftLine, Product, Purchase, ReceiptDraft, ReceiptStatus};
+    use crate::model::{DraftLine, DriveTwin, Product, Purchase, ReceiptDraft, ReceiptStatus};
 
     const NOW: u64 = 1_000_000_000_000;
     const DAY: u64 = 86_400_000;
     const MINUTE: u64 = 60_000;
+    const HOUR: u64 = 3_600_000;
 
     fn setup(name: &str) -> (Store, PathBuf) {
         let dir = std::env::temp_dir().join(format!("moli-receipts-{name}-{}", std::process::id()));
@@ -728,7 +824,7 @@ mod tests {
         );
 
         let done = store
-            .validate_receipt(id, "Élodie", NOW + 5, false)
+            .validate_receipt(id, "Élodie", NOW + 5, false, None)
             .unwrap();
         assert_eq!(done.status, ReceiptStatus::Validated);
         assert_eq!(done.validated_by.as_deref(), Some("Élodie"));
@@ -902,7 +998,9 @@ mod tests {
         let mut d = draft(vec![line("LAIT", 120, Some("p1"))]);
         d.at = None;
         let id = create(&store, &d);
-        store.validate_receipt(id, "Sam", NOW + 7, false).unwrap();
+        store
+            .validate_receipt(id, "Sam", NOW + 7, false, None)
+            .unwrap();
         assert_eq!(all_purchases(&store)[0].at, NOW + 7);
         cleanup(store, dir);
     }
@@ -924,16 +1022,22 @@ mod tests {
             &draft(vec![line("LAIT", 120, Some("p1")), line("???", 100, None)]),
         );
         assert!(matches!(
-            store.validate_receipt(id, "Sam", NOW, false),
+            store.validate_receipt(id, "Sam", NOW, false, None),
             Err(PantryError::Invalid(_))
         ));
         let mut zero = line("ZERO", 100, Some("p1"));
         zero.qty = 0.0;
         let bad = create(&store, &draft(vec![line("LAIT", 120, Some("p1")), zero]));
-        let err = store.validate_receipt(bad, "Sam", NOW, false).unwrap_err();
+        let err = store
+            .validate_receipt(bad, "Sam", NOW, false, None)
+            .unwrap_err();
         assert!(err.to_string().starts_with("line 2: "), "{err}");
         let unknown = create(&store, &draft(vec![line("X", 100, Some("nope"))]));
-        assert!(store.validate_receipt(unknown, "Sam", NOW, false).is_err());
+        assert!(
+            store
+                .validate_receipt(unknown, "Sam", NOW, false, None)
+                .is_err()
+        );
         assert!(
             all_purchases(&store).is_empty(),
             "all or nothing: nothing was recorded"
@@ -947,9 +1051,9 @@ mod tests {
         let (store, dir) = setup("twice");
         product(&store, "p1", "Lait");
         let id = create(&store, &draft(vec![line("LAIT", 120, Some("p1"))]));
-        let first = store.validate_receipt(id, "Sam", NOW, false).unwrap();
+        let first = store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
         let second = store
-            .validate_receipt(id, "Élodie", NOW + DAY, false)
+            .validate_receipt(id, "Élodie", NOW + DAY, false, None)
             .unwrap();
         assert_eq!(first, second, "the second call changes nothing");
         assert_eq!(all_purchases(&store).len(), 1);
@@ -959,14 +1063,15 @@ mod tests {
     #[test]
     fn a_new_product_is_created_with_a_free_id() {
         let (store, dir) = setup("new-product");
-        product(&store, "cereales-chocolat", "Céréales chocolat");
+        // The id is taken, by a product of another name.
+        product(&store, "cereales-chocolat", "Autre chose");
         let mut a = line("CHOCO CEREAL", 300, None);
         a.new_product = Some("Céréales chocolat".into());
         a.aisle = Some("petit-dejeuner".into());
         let mut b = line("CHOCO CEREAL 2", 300, None);
         b.new_product = Some("Céréales chocolat".into());
         let id = create(&store, &draft(vec![a, b]));
-        let done = store.validate_receipt(id, "Sam", NOW, false).unwrap();
+        let done = store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
 
         let made = store
             .products()
@@ -1017,7 +1122,7 @@ mod tests {
             &store,
             &draft(vec![line("CHOCO CEREAL 430G", 300, Some("p1"))]),
         );
-        store.validate_receipt(id, "Sam", NOW, false).unwrap();
+        store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
 
         let mut later = draft(vec![
             line("CHOCO CEREAL 430G", 310, None),
@@ -1041,6 +1146,259 @@ mod tests {
         cleanup(store, dir);
     }
 
+    /// A line as the reader tidies it when the model knows no product for
+    /// it: no product, a product to create named after it.
+    fn fresh(label: &str, cents: i64, name: &str) -> DraftLine {
+        DraftLine {
+            new_product: Some(name.into()),
+            ..line(label, cents, None)
+        }
+    }
+
+    #[test]
+    fn a_label_a_person_matched_fills_the_next_reading() {
+        let (store, dir) = setup("link-reading");
+        product(&store, "p1", "Céréales");
+        // Ticket 1, as read: a product to create. A person points it to p1.
+        let first = create(
+            &store,
+            &draft(vec![fresh("CHOCO CEREAL 430G", 300, "Choco")]),
+        );
+        let mut corrected = store.receipt(first).unwrap().draft;
+        corrected.lines[0].product = Some("p1".into());
+        corrected.lines[0].new_product = None;
+        store.save_draft(first, &corrected, None).unwrap();
+        store
+            .validate_receipt(first, "Sam", NOW, false, None)
+            .unwrap();
+
+        // Ticket 2, as read: the same label, again a product to create, and
+        // a line the model guessed wrong. The person's choice wins.
+        let mut guessed = line("choco cereal 430g", 310, Some("p2"));
+        guessed.name = "autre".into();
+        product(&store, "p2", "Autre");
+        let mut later = draft(vec![
+            fresh("CHOCO CEREAL 430G", 310, "Choco"),
+            guessed,
+            fresh("INCONNU", 100, "Inconnu"),
+        ]);
+        later.at = Some(NOW + DAY);
+        let next = store.receipt(create(&store, &later)).unwrap().draft.lines;
+        for l in &next[..2] {
+            assert_eq!(l.product.as_deref(), Some("p1"), "{l:?}");
+            assert_eq!(l.new_product, None, "{l:?}");
+        }
+        assert_eq!(next[2].product, None, "an unknown label is left as read");
+        assert_eq!(next[2].new_product.as_deref(), Some("Inconnu"));
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn a_new_product_named_as_an_existing_one_is_that_one() {
+        let (store, dir) = setup("same-name");
+        product(&store, "cereales-chocolat", "Céréales chocolat");
+        let id = create(
+            &store,
+            &draft(vec![fresh("CHOCO", 300, "  CEREALES   Chocolat ")]),
+        );
+        let done = store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
+        assert_eq!(store.products().unwrap().len(), 1, "no copy is made");
+        assert_eq!(
+            done.draft.lines[0].product.as_deref(),
+            Some("cereales-chocolat")
+        );
+        assert_eq!(all_purchases(&store)[0].product, "cereales-chocolat");
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn correcting_a_purchase_teaches_its_label() {
+        let (store, dir) = setup("correct-link");
+        product(&store, "p1", "Céréales");
+        product(&store, "p2", "Muesli");
+        let id = create(&store, &draft(vec![line("MUESLI 500G", 300, Some("p1"))]));
+        store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
+        let bought = all_purchases(&store)[0].id.unwrap();
+        store.update_purchase(bought, 1.0, 300, None, "p2").unwrap();
+
+        let mut later = draft(vec![fresh("MUESLI 500G", 300, "Muesli")]);
+        later.at = Some(NOW + DAY);
+        let next = store.receipt(create(&store, &later)).unwrap().draft.lines;
+        assert_eq!(next[0].product.as_deref(), Some("p2"));
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn an_edit_from_a_stale_page_is_refused() {
+        let (store, dir) = setup("version");
+        product(&store, "p1", "Lait");
+        let id = create(&store, &draft(vec![line("LAIT", 120, Some("p1"))]));
+        let loaded = store.receipt(id).unwrap().version;
+        // Two adults opened the draft; the first one saves.
+        let mut first = draft(vec![line("LAIT", 130, Some("p1"))]);
+        first.store = "Ville-B".into();
+        let saved = store.save_draft(id, &first, Some(loaded)).unwrap();
+        assert_ne!(saved.version, loaded, "a save moves the version on");
+        // The second one saves or validates what they loaded: refused.
+        let err = store
+            .save_draft(id, &draft(Vec::new()), Some(loaded))
+            .unwrap_err();
+        assert!(matches!(err, PantryError::Conflict(_)), "{err}");
+        let err = store
+            .validate_receipt(id, "Sam", NOW, false, Some(loaded))
+            .unwrap_err();
+        assert!(matches!(err, PantryError::Conflict(_)), "{err}");
+        assert!(all_purchases(&store).is_empty());
+        assert_eq!(store.receipt(id).unwrap().draft, first, "nothing lost");
+        // Keeping their version: sent again with the new one.
+        let kept = store
+            .save_draft(
+                id,
+                &draft(vec![line("LAIT", 140, Some("p1"))]),
+                Some(saved.version),
+            )
+            .unwrap();
+        // Without a version (an older page, a script), no check.
+        let unchecked = store.save_draft(id, &kept.draft, None).unwrap();
+        let done = store
+            .validate_receipt(id, "Sam", NOW, false, Some(unchecked.version))
+            .unwrap();
+        assert_eq!(done.status, ReceiptStatus::Validated);
+        // A validation sent again (a lost answer) is not a conflict.
+        let again = store
+            .validate_receipt(id, "Sam", NOW, false, Some(unchecked.version))
+            .unwrap();
+        assert_eq!(again, done);
+        assert_eq!(all_purchases(&store).len(), 1);
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn a_receipts_table_without_versions_is_migrated() {
+        let (store, dir) = setup("version-migrate");
+        let path = dir.join("pantry.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "DROP TABLE receipts;
+                 CREATE TABLE receipts (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     status TEXT NOT NULL, provider TEXT NOT NULL, store TEXT NOT NULL,
+                     at INTEGER, total_cents INTEGER, photos INTEGER NOT NULL DEFAULT 0,
+                     sent_at INTEGER NOT NULL, sent_by TEXT NOT NULL, validated_at INTEGER,
+                     validated_by TEXT, reader TEXT NOT NULL DEFAULT '',
+                     draft TEXT NOT NULL, read TEXT NOT NULL);",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO receipts(status, provider, store, sent_at, sent_by, draft, read)
+                 VALUES ('draft', 'enseigne-x', 'Ville-A', 1, 'Sam', ?1, 'null')",
+                [serde_json::to_string(&draft(Vec::new())).unwrap()],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let old = store.receipts(None).unwrap();
+        assert_eq!(old.len(), 1);
+        assert_eq!(old[0].version, 1);
+        let saved = store.save_draft(old[0].id, &old[0].draft, Some(1)).unwrap();
+        assert_eq!(saved.version, 2);
+        cleanup(store, dir);
+    }
+
+    /// A drive basket of `cents`, collected at `at` from enseigne-x.
+    fn collected(store: &Store, at: u64, cents: i64, status: &str) -> i64 {
+        let basket = store.propose("Sam", vec![], at).unwrap().id;
+        let mut bought = ticket("p1", "", cents);
+        bought.source = "drive".into();
+        bought.status = status.into();
+        bought.basket = Some(basket);
+        bought.at = at;
+        store.record_purchases(&[bought]).unwrap();
+        basket
+    }
+
+    #[test]
+    fn a_drive_basket_of_the_same_day_and_total_is_pointed_out() {
+        let (store, dir) = setup("drive-twin");
+        product(&store, "p1", "Lait");
+        let basket = collected(&store, NOW - HOUR, 10_000, "confirmed");
+        let mut paper = draft(vec![line("LAIT", 10_150, Some("p1"))]);
+        paper.total_cents = Some(10_150);
+        let id = create(&store, &paper);
+        let twin = store.receipt(id).unwrap().drive_twin.expect("1.5 % apart");
+        assert_eq!(
+            twin,
+            DriveTwin {
+                basket,
+                at: NOW - HOUR,
+                total_cents: 10_000
+            }
+        );
+        // A warning only: the receipt is validated all the same.
+        store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
+        assert_eq!(store.receipt(id).unwrap().drive_twin, None, "drafts only");
+
+        for change in [
+            |d: &mut ReceiptDraft| d.total_cents = Some(10_300),
+            |d: &mut ReceiptDraft| d.total_cents = None,
+            |d: &mut ReceiptDraft| d.at = Some(NOW + DAY),
+            |d: &mut ReceiptDraft| d.provider = "enseigne-y".into(),
+        ] {
+            let mut d = paper.clone();
+            change(&mut d);
+            let r = store.receipt(create(&store, &d)).unwrap();
+            assert_eq!(r.drive_twin, None, "{:?}", r.draft);
+        }
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn a_drive_basket_still_provisional_is_not_counted_yet() {
+        let (store, dir) = setup("drive-provisional");
+        product(&store, "p1", "Lait");
+        collected(&store, NOW - HOUR, 10_000, "provisional");
+        let mut paper = draft(Vec::new());
+        paper.total_cents = Some(10_000);
+        assert_eq!(
+            store.receipt(create(&store, &paper)).unwrap().drive_twin,
+            None
+        );
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn the_same_day_is_the_houses_day() {
+        let dir = std::env::temp_dir().join(format!("moli-receipts-day-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+        let store = Store::open_in(&dir.join("pantry.db"), paris).unwrap();
+        product(&store, "p1", "Lait");
+        // NOW is 01:46 UTC (03:46 in Paris); two hours before is the day
+        // before in UTC, the same day in Paris.
+        collected(&store, NOW - 2 * HOUR, 5_000, "confirmed");
+        let mut paper = draft(Vec::new());
+        paper.total_cents = Some(5_000);
+        assert!(
+            store
+                .receipt(create(&store, &paper))
+                .unwrap()
+                .drive_twin
+                .is_some()
+        );
+        cleanup(store, dir.clone());
+
+        let (store, dir) = setup("day-utc");
+        product(&store, "p1", "Lait");
+        collected(&store, NOW - 2 * HOUR, 5_000, "confirmed");
+        assert_eq!(
+            store.receipt(create(&store, &paper)).unwrap().drive_twin,
+            None
+        );
+        cleanup(store, dir);
+    }
+
     #[test]
     fn a_duplicate_needs_force() {
         let (store, dir) = setup("duplicate");
@@ -1057,15 +1415,17 @@ mod tests {
             "a is still a draft"
         );
 
-        store.validate_receipt(a, "Sam", NOW, false).unwrap();
+        store.validate_receipt(a, "Sam", NOW, false, None).unwrap();
         assert_eq!(store.receipt(b).unwrap().duplicate_of, Some(a));
-        let err = store.validate_receipt(b, "Sam", NOW, false).unwrap_err();
+        let err = store
+            .validate_receipt(b, "Sam", NOW, false, None)
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             format!("this receipt looks already recorded: {a}")
         );
         assert_eq!(all_purchases(&store).len(), 1);
-        store.validate_receipt(b, "Sam", NOW, true).unwrap();
+        store.validate_receipt(b, "Sam", NOW, true, None).unwrap();
         assert_eq!(all_purchases(&store).len(), 2);
 
         // Another minute, another total or another chain is another receipt.
@@ -1096,7 +1456,10 @@ mod tests {
         let r = store.receipt(create(&store, &d)).unwrap();
         assert_eq!(r.gap_cents, Some(50), "every line counts, kept or not");
         d.lines.pop();
-        assert_eq!(store.save_draft(r.id, &d).unwrap().gap_cents, Some(350));
+        assert_eq!(
+            store.save_draft(r.id, &d, None).unwrap().gap_cents,
+            Some(350)
+        );
         cleanup(store, dir);
     }
 
@@ -1115,7 +1478,7 @@ mod tests {
         let mut d = draft(vec![line("LAIT", 120, Some("p1"))]);
         d.items_done = vec![milk, eggs, gone, 9_999];
         let id = create(&store, &d);
-        store.validate_receipt(id, "Sam", NOW, false).unwrap();
+        store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
         let open: Vec<i64> = store.open_items().unwrap().iter().map(|i| i.id).collect();
         assert_eq!(open, vec![kept]);
         let done_at: Option<i64> = store
@@ -1134,9 +1497,9 @@ mod tests {
         product(&store, "p1", "Lait");
         let d = draft(vec![line("LAIT", 120, Some("p1"))]);
         let id = create(&store, &d);
-        store.validate_receipt(id, "Sam", NOW, false).unwrap();
+        store.validate_receipt(id, "Sam", NOW, false, None).unwrap();
         assert!(matches!(
-            store.save_draft(id, &draft(Vec::new())),
+            store.save_draft(id, &draft(Vec::new()), None),
             Err(PantryError::Invalid(_))
         ));
         assert!(matches!(
@@ -1156,7 +1519,7 @@ mod tests {
         let mut d = draft(vec![line("A", 100, None)]);
         d.store = "Ville-B".into();
         d.total_cents = Some(100);
-        let saved = store.save_draft(id, &d).unwrap();
+        let saved = store.save_draft(id, &d, None).unwrap();
         assert_eq!(saved.draft, d);
         assert_eq!(saved.photos, 3);
         assert_eq!(store.abandon_receipt(id).unwrap(), 3);
@@ -1178,7 +1541,9 @@ mod tests {
             d.at = Some(NOW + day * DAY);
             ids.push(create(&store, &d));
         }
-        store.validate_receipt(ids[2], "Sam", NOW, false).unwrap();
+        store
+            .validate_receipt(ids[2], "Sam", NOW, false, None)
+            .unwrap();
         let listed: Vec<i64> = store.receipts(None).unwrap().iter().map(|r| r.id).collect();
         assert_eq!(listed, vec![ids[1], ids[0], ids[2]]);
         let validated = store.receipts(Some(ReceiptStatus::Validated)).unwrap();
@@ -1200,10 +1565,10 @@ mod tests {
         let recent = mk(NOW + 1);
         let draft_only = mk(NOW + 2);
         store
-            .validate_receipt(old, "Sam", NOW - 91 * DAY, false)
+            .validate_receipt(old, "Sam", NOW - 91 * DAY, false, None)
             .unwrap();
         store
-            .validate_receipt(recent, "Sam", NOW - 89 * DAY, false)
+            .validate_receipt(recent, "Sam", NOW - 89 * DAY, false, None)
             .unwrap();
         assert_eq!(store.photos_to_purge(NOW).unwrap(), vec![(old, 1)]);
         store.forget_photos(old).unwrap();
@@ -1319,7 +1684,7 @@ mod tests {
         let d = draft(vec![line("LAIT", 100, Some("p1"))]);
         let r = add(&pantry, jpeg(2), d).await.unwrap();
         let validated = pantry
-            .validate_receipt(r.id, "Sam", NOW - 91 * DAY, false)
+            .validate_receipt(r.id, "Sam", NOW - 91 * DAY, false, None)
             .await
             .unwrap();
         assert_eq!(validated.photos, 2, "not old yet when it was validated");
@@ -1337,7 +1702,7 @@ mod tests {
         let d = draft(vec![line("LAIT", 100, Some("p1"))]);
         let r = add(&pantry, jpeg(1), d).await.unwrap();
         pantry
-            .validate_receipt(r.id, "Sam", NOW - 91 * DAY, false)
+            .validate_receipt(r.id, "Sam", NOW - 91 * DAY, false, None)
             .await
             .unwrap();
         // A non-empty folder where the photo should be: removing it as a file fails.
@@ -1363,7 +1728,7 @@ mod tests {
         let d = draft(vec![line("LAIT", 100, Some("p1"))]);
         let r = add(&pantry, jpeg(1), d).await.unwrap();
         pantry
-            .validate_receipt(r.id, "Sam", 1_000, false)
+            .validate_receipt(r.id, "Sam", 1_000, false, None)
             .await
             .unwrap();
         drop(pantry);

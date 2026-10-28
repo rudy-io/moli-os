@@ -890,9 +890,10 @@ impl MoliMcp {
             let Some(basket) = args.basket else {
                 return Ok(fail("basket is required to confirm purchases"));
             };
+            let lines: Vec<Purchase> = args.lines.into_iter().map(unattached).collect();
             return reply(
                 pantry
-                    .confirm_purchases(basket, &args.lines)
+                    .confirm_purchases(basket, &lines)
                     .await
                     .map(|()| json!({ "ok": true, "confirmed": count })),
             );
@@ -913,12 +914,25 @@ impl MoliMcp {
                     .map(|r| json!({ "ok": true, "recorded": count, "receipt": r.id })),
             );
         }
+        // Only a receipt recorded here holds lines: a line cannot attach
+        // itself to an existing one.
+        let lines: Vec<Purchase> = lines.into_iter().map(unattached).collect();
         reply(
             pantry
                 .record_purchases(&lines)
                 .await
                 .map(|()| json!({ "ok": true, "recorded": count })),
         )
+    }
+}
+
+/// A line as an agent may record it outside a receipt: no row id, no
+/// receipt.
+fn unattached(line: Purchase) -> Purchase {
+    Purchase {
+        id: None,
+        receipt: None,
+        ..line
     }
 }
 

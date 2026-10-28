@@ -16,6 +16,7 @@ use crate::model::{
     ProviderSettings, Purchase, Reading,
 };
 use crate::providers::PROVIDERS;
+use crate::receipts::link_label;
 use crate::store::{NOT_IN_A_CART, PantryError, Store, confirm_offer_in, ms, now_ms, ts};
 
 /// A price older than this (12 h, in ms) is "unknown", never used.
@@ -630,7 +631,9 @@ impl Store {
 
     /// Corrects a purchase from the purchases page: quantity, unit price,
     /// cost of the line (recomputed from the quantity, the price and the
-    /// recorded discount when `None`) and product.
+    /// recorded discount when `None`) and product. A receipt line moved to
+    /// another product teaches its printed label that product, as a
+    /// validation does.
     pub fn update_purchase(
         &self,
         id: i64,
@@ -639,14 +642,16 @@ impl Store {
         line_cents: Option<i64>,
         product: &str,
     ) -> Result<Purchase, PantryError> {
-        let conn = self.lock();
-        let mut line = load_purchase(&conn, id)?;
+        let mut conn = self.lock();
+        let tx = conn.transaction()?;
+        let mut line = load_purchase(&tx, id)?;
+        let before = line.product.clone();
         line.qty = qty;
         line.price_cents = price_cents;
         line.line_cents = line_cents;
         product.trim().clone_into(&mut line.product);
         check_purchase(&line)?;
-        let known: bool = conn.query_row(
+        let known: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM products WHERE id = ?1)",
             [&line.product],
             |r| r.get(0),
@@ -654,12 +659,17 @@ impl Store {
         if !known {
             return Err(PantryError::NotFound(format!("product {}", line.product)));
         }
-        conn.execute(
+        tx.execute(
             "UPDATE purchases SET qty = ?2, price_cents = ?3, line_cents = ?4, product = ?5
              WHERE id = ?1",
             params![id, qty, price_cents, line_cost(&line), line.product],
         )?;
-        load_purchase(&conn, id)
+        if line.product != before && line.receipt.is_some() {
+            link_label(&tx, &line.provider, &line.label, &line.product)?;
+        }
+        let updated = load_purchase(&tx, id)?;
+        tx.commit()?;
+        Ok(updated)
     }
 
     /// Removes a purchase recorded by mistake.

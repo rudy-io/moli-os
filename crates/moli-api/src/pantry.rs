@@ -16,9 +16,11 @@
 //!   base64) of one receipt and keep the reading as a draft.
 //! - `GET /api/cellier/receipts?status=` (without the raw reading),
 //!   `GET|PUT|DELETE /api/cellier/receipts/{id}`: the receipts, a draft
-//!   corrected or dropped.
-//! - `POST /api/cellier/receipts/{id}/validate {force}`: a person (a human
-//!   session) records the draft: its kept lines become purchases.
+//!   corrected (`{...draft, version?}`) or dropped.
+//! - `POST /api/cellier/receipts/{id}/validate {force, version?}`: a person
+//!   (a human session) records the draft: its kept lines become purchases.
+//!   With the `version` the page loaded, a draft saved elsewhere since is
+//!   refused with `409`.
 //! - `GET /api/cellier/receipts/{id}/photos/{n}`: a photo kept.
 //! - `GET /api/cellier/purchases?from=&to=`, `PUT|DELETE
 //!   /api/cellier/purchases/{id}`: what was bought, corrected or dropped.
@@ -110,6 +112,7 @@ fn failed(e: &PantryError) -> Response {
     let status = match e {
         PantryError::NotFound(_) => StatusCode::NOT_FOUND,
         PantryError::Invalid(_) => StatusCode::BAD_REQUEST,
+        PantryError::Conflict(_) => StatusCode::CONFLICT,
         PantryError::Db(_) | PantryError::Internal(_) => {
             tracing::error!(error = %e, "pantry");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -386,8 +389,10 @@ pub(crate) async fn read_receipt(
     let draft = match serde_json::from_value::<ReceiptDraft>(read.clone()) {
         Ok(draft) => draft,
         Err(e) => {
-            // The schema keeps card numbers out of a reading: it is safe to log.
-            tracing::warn!(error = %e, reading = %read, "the receipt reading does not fit a draft");
+            // Never the reading itself: a model that strays from the schema
+            // may have copied a card number into it.
+            let fields = read.as_object().map_or(0, serde_json::Map::len);
+            tracing::warn!(error = %e, fields, "the receipt reading does not fit a draft");
             return error(
                 StatusCode::BAD_GATEWAY,
                 "the reading of the receipt is not usable",
@@ -442,15 +447,24 @@ pub(crate) async fn show_receipt(
     json_or(pantry.receipt(id).await)
 }
 
+/// A corrected draft, with the version of the receipt the page loaded.
+#[derive(Deserialize)]
+pub(crate) struct SavedDraft {
+    #[serde(flatten)]
+    draft: ReceiptDraft,
+    #[serde(default)]
+    version: Option<u64>,
+}
+
 pub(crate) async fn save_receipt(
     Extension(Cellier(pantry)): Extension<Cellier>,
     Path(id): Path<i64>,
-    Json(draft): Json<ReceiptDraft>,
+    Json(body): Json<SavedDraft>,
 ) -> Response {
     let Some(pantry) = pantry else {
         return absent();
     };
-    json_or(pantry.save_draft(id, &draft).await)
+    json_or(pantry.save_draft(id, &body.draft, body.version).await)
 }
 
 #[derive(Deserialize)]
@@ -458,6 +472,9 @@ pub(crate) async fn save_receipt(
 pub(crate) struct Validation {
     #[serde(default)]
     force: bool,
+    /// The version of the receipt the page loaded.
+    #[serde(default)]
+    version: Option<u64>,
 }
 
 pub(crate) async fn validate_receipt(
@@ -471,7 +488,13 @@ pub(crate) async fn validate_receipt(
     };
     json_or(
         pantry
-            .validate_receipt(id, &actor(&caller), moli_core::now_ms(), body.force)
+            .validate_receipt(
+                id,
+                &actor(&caller),
+                moli_core::now_ms(),
+                body.force,
+                body.version,
+            )
             .await,
     )
 }

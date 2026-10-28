@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use jiff::tz::TimeZone;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::model::{Flexibility, Item, Offer, OfferStatus, Product, ProviderSettings, Reading};
@@ -132,7 +133,8 @@ CREATE TABLE IF NOT EXISTS receipts (
     validated_by TEXT,
     reader       TEXT NOT NULL DEFAULT '',
     draft        TEXT NOT NULL,   -- JSON
-    read         TEXT NOT NULL    -- JSON
+    read         TEXT NOT NULL,   -- JSON
+    version      INTEGER NOT NULL DEFAULT 1   -- moves on at every save
 );
 -- What a receipt label of a chain is, learnt at each validation.
 CREATE TABLE IF NOT EXISTS label_links (
@@ -143,13 +145,14 @@ CREATE TABLE IF NOT EXISTS label_links (
 );
 ";
 
-/// Columns added to `purchases` after the first version: (name, definition).
-const PURCHASE_ADDED_COLUMNS: [(&str, &str); 5] = [
-    ("receipt", "INTEGER"),
-    ("label", "TEXT NOT NULL DEFAULT ''"),
-    ("line_cents", "INTEGER"),
-    ("discount_cents", "INTEGER NOT NULL DEFAULT 0"),
-    ("unit", "TEXT"),
+/// Columns added after a table was first created: (table, name, definition).
+const ADDED_COLUMNS: [(&str, &str, &str); 6] = [
+    ("purchases", "receipt", "INTEGER"),
+    ("purchases", "label", "TEXT NOT NULL DEFAULT ''"),
+    ("purchases", "line_cents", "INTEGER"),
+    ("purchases", "discount_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("purchases", "unit", "TEXT"),
+    ("receipts", "version", "INTEGER NOT NULL DEFAULT 1"),
 ];
 
 /// Brings an older database up to the current schema: adds the missing
@@ -157,14 +160,15 @@ const PURCHASE_ADDED_COLUMNS: [(&str, &str); 5] = [
 /// on every open.
 fn migrate(conn: &Connection) -> Result<(), PantryError> {
     let tx = conn.unchecked_transaction()?;
-    let present: Vec<String> = tx
-        .prepare("SELECT name FROM pragma_table_info('purchases')")?
-        .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    for (name, definition) in PURCHASE_ADDED_COLUMNS {
-        if !present.iter().any(|c| c == name) {
+    for (table, name, definition) in ADDED_COLUMNS {
+        let present: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            params![table, name],
+            |r| r.get(0),
+        )?;
+        if !present {
             tx.execute(
-                &format!("ALTER TABLE purchases ADD COLUMN {name} {definition}"),
+                &format!("ALTER TABLE {table} ADD COLUMN {name} {definition}"),
                 [],
             )?;
         }
@@ -200,6 +204,9 @@ pub enum PantryError {
     NotFound(String),
     #[error("{0}")]
     Invalid(String),
+    /// Changed by someone else since it was read.
+    #[error("conflict: {0}")]
+    Conflict(String),
     /// A blocking task that did not finish (it panicked).
     #[error("internal: {0}")]
     Internal(String),
@@ -208,6 +215,8 @@ pub enum PantryError {
 pub struct Store {
     path: PathBuf,
     conn: Mutex<Connection>,
+    /// The house's time zone: where its days begin and end.
+    tz: TimeZone,
 }
 
 impl std::fmt::Debug for Store {
@@ -222,6 +231,20 @@ pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// The day around `at` in `tz`, as `[start, end)` in ms.
+pub(crate) fn day_of(tz: &TimeZone, at: u64) -> Option<(u64, u64)> {
+    let date = jiff::Timestamp::from_millisecond(i64::try_from(at).ok()?)
+        .ok()?
+        .to_zoned(tz.clone())
+        .date();
+    let edge = |d: jiff::civil::Date| {
+        d.to_zoned(tz.clone())
+            .ok()
+            .and_then(|z| u64::try_from(z.timestamp().as_millisecond()).ok())
+    };
+    Some((edge(date)?, edge(date.tomorrow().ok()?)?))
 }
 
 pub(crate) fn ts(ms: u64) -> i64 {
@@ -353,7 +376,13 @@ pub(crate) fn confirm_offer_in(conn: &Connection, id: i64, by: &str) -> Result<(
 }
 
 impl Store {
+    /// Opens a store whose days are UTC days (see [`Store::open_in`]).
     pub fn open(path: &Path) -> Result<Self, PantryError> {
+        Self::open_in(path, TimeZone::UTC)
+    }
+
+    /// Opens (or creates) the database at `path`, for a house in `tz`.
+    pub fn open_in(path: &Path, tz: TimeZone) -> Result<Self, PantryError> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| {
                 PantryError::Invalid(format!("cannot create {}: {e}", dir.display()))
@@ -368,7 +397,13 @@ impl Store {
         Ok(Self {
             path: path.to_path_buf(),
             conn: Mutex::new(conn),
+            tz,
         })
+    }
+
+    /// The house's time zone.
+    pub(crate) fn tz(&self) -> &TimeZone {
+        &self.tz
     }
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, Connection> {

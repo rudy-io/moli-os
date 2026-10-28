@@ -35,7 +35,7 @@ use crate::store::now_ms;
 
 pub use basket::{BasketOptions, Choice, Line, Terms, compute};
 pub use model::{
-    AgentReceipt, Basket, BasketStatus, Deviation, DraftLine, Flexibility, Item, Offer,
+    AgentReceipt, Basket, BasketStatus, Deviation, DraftLine, DriveTwin, Flexibility, Item, Offer,
     OfferStatus, Product, ProviderInfo, ProviderKind, ProviderSettings, Purchase, Reading, Receipt,
     ReceiptDraft, ReceiptStatus,
 };
@@ -50,7 +50,12 @@ pub const FILE: &str = "pantry.db";
 /// switches the pantry on.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {}
+pub struct Config {
+    /// The house's time zone (`[server] timezone`), given when the
+    /// configuration is read; empty for UTC. Where a receipt's day begins.
+    #[serde(skip)]
+    pub timezone: String,
+}
 
 /// Cheap handle used by the surfaces: the store, and the hub it announces
 /// its changes on.
@@ -62,11 +67,22 @@ pub struct Pantry {
 }
 
 impl Pantry {
+    /// Opens (or creates) `data_dir/pantry.db` for a house on UTC (see
+    /// [`Pantry::open_with`]).
+    pub fn open(hub: &Hub, data_dir: &Path) -> Result<Self, PantryError> {
+        Self::open_with(hub, data_dir, &Config::default())
+    }
+
     /// Opens (or creates) `data_dir/pantry.db`, and erases the receipt photos
     /// that are past their keeping time.
-    pub fn open(hub: &Hub, data_dir: &Path) -> Result<Self, PantryError> {
+    pub fn open_with(hub: &Hub, data_dir: &Path, config: &Config) -> Result<Self, PantryError> {
+        let tz = match config.timezone.trim() {
+            "" => jiff::tz::TimeZone::UTC,
+            name => jiff::tz::TimeZone::get(name)
+                .map_err(|e| PantryError::Invalid(format!("time zone {name}: {e}")))?,
+        };
         let pantry = Self {
-            store: Arc::new(Store::open(&data_dir.join(FILE))?),
+            store: Arc::new(Store::open_in(&data_dir.join(FILE), tz)?),
             hub: hub.clone(),
             data_dir: data_dir.to_path_buf(),
         };
@@ -333,9 +349,15 @@ impl Pantry {
         self.read(move |s| s.receipts(status)).await
     }
 
-    pub async fn save_draft(&self, id: i64, draft: &ReceiptDraft) -> Result<Receipt, PantryError> {
+    /// Saves a draft (see [`Store::save_draft`]).
+    pub async fn save_draft(
+        &self,
+        id: i64,
+        draft: &ReceiptDraft,
+        version: Option<u64>,
+    ) -> Result<Receipt, PantryError> {
         let draft = draft.clone();
-        self.write(move |s| s.save_draft(id, &draft)).await
+        self.write(move |s| s.save_draft(id, &draft, version)).await
     }
 
     /// Validates a receipt (see [`Store::validate_receipt`]), then erases the
@@ -346,10 +368,11 @@ impl Pantry {
         by: &str,
         now: u64,
         force: bool,
+        version: Option<u64>,
     ) -> Result<Receipt, PantryError> {
         let by = by.to_owned();
         let receipt = self
-            .write(move |s| s.validate_receipt(id, &by, now, force))
+            .write(move |s| s.validate_receipt(id, &by, now, force, version))
             .await?;
         if let Err(e) = self.purge_photos(now).await {
             tracing::warn!(error = %e, "cannot erase the old receipt photos");

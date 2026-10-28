@@ -286,6 +286,9 @@ impl Config {
         if let Some(assistant) = &mut config.assistant {
             assistant.timezone.clone_from(&zone);
         }
+        if let Some(pantry) = &mut config.pantry {
+            pantry.timezone.clone_from(&zone);
+        }
         if let Some(quiet) = &mut config.guard.quiet_hours {
             quiet.timezone = Some(zone);
         }
@@ -420,10 +423,12 @@ mod tests {
             "[server]\ntimezone = \"Indian/Reunion\"\n\
              [assistant]\n\
              [energy]\n\
+             [pantry]\n\
              [guard.quiet_hours]\nfrom = \"21:00\"\nto = \"07:30\"",
         )
         .unwrap();
         assert_eq!(config.zone.source, crate::timezone::Source::Server);
+        assert_eq!(config.pantry.as_ref().unwrap().timezone, "Indian/Reunion");
         assert_eq!(config.automations.timezone, "Indian/Reunion");
         assert_eq!(config.energy.unwrap().timezone, "Indian/Reunion");
         assert_eq!(config.assistant.unwrap().timezone, "Indian/Reunion");

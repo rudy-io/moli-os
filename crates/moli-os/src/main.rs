@@ -479,10 +479,8 @@ fn new_weather(config: &Config) -> Option<moli_weather::Weather> {
 /// demo house. A database that cannot be opened is logged, and the house
 /// starts without it.
 fn pantry(config: &Config, hub: &Hub) -> Option<moli_pantry::Pantry> {
-    if config.pantry.is_none() || config.server.demo {
-        return None;
-    }
-    moli_pantry::Pantry::open(hub, &config.server.data_dir)
+    let pantry = config.pantry.as_ref().filter(|_| !config.server.demo)?;
+    moli_pantry::Pantry::open_with(hub, &config.server.data_dir, pantry)
         .inspect_err(|e| tracing::error!(error = %e, "cannot open the pantry, started without it"))
         .ok()
 }

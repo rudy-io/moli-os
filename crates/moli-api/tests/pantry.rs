@@ -630,12 +630,16 @@ async fn mcp_purchases_provisional_then_confirmed_once() {
     assert_eq!(view["basket"]["status"], "ordered", "{view}");
     assert_eq!(view["items"][0]["basket"], id, "{view}");
 
-    // The pick-up, sent twice (a lost answer): the corrected line, once.
+    // The pick-up, sent twice (a lost answer): the corrected line, once. A
+    // receipt it claims is not kept: only a receipt recorded with its lines
+    // holds lines.
+    let mut corrected = line(115, "confirmed");
+    corrected["receipt"] = json!(7);
     for _ in 0..2 {
         let (failed, said) = tool(
             &addr,
             "pantry_record_purchases",
-            &json!({ "basket": id, "lines": [line(115, "confirmed")], "confirm": true }),
+            &json!({ "basket": id, "lines": [corrected], "confirm": true }),
         )
         .await;
         assert!(!failed, "{said}");
@@ -645,13 +649,16 @@ async fn mcp_purchases_provisional_then_confirmed_once() {
     assert_eq!(view["basket"], Json::Null, "the basket is done: {view}");
     assert_eq!(view["items"], json!([]), "{view}");
     let store = moli_pantry::Store::open(&dir.join(moli_pantry::FILE)).unwrap();
-    let bought: Vec<(String, i64, String)> = store
+    let bought: Vec<(String, i64, String, Option<i64>)> = store
         .purchases(0, u64::MAX / 4)
         .unwrap()
         .into_iter()
-        .map(|p| (p.source, p.price_cents, p.status))
+        .map(|p| (p.source, p.price_cents, p.status, p.receipt))
         .collect();
-    assert_eq!(bought, vec![("drive".into(), 115, "confirmed".into())]);
+    assert_eq!(
+        bought,
+        vec![("drive".into(), 115, "confirmed".into(), None)]
+    );
     drop(store);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1363,5 +1370,162 @@ async fn only_a_person_validates_a_receipt() {
     let cookie = owner(&addr).await;
     let (status, body) = call(&addr, "POST", &path, &json!({}), &cookie).await;
     assert_eq!(status, 200, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_draft_changed_elsewhere_is_a_conflict() {
+    let (addr, dir, _pantry, id) = with_draft("receipt-version").await;
+    let path = format!("/api/cellier/receipts/{id}");
+    let cookie = owner(&addr).await;
+    // Two pages load the draft.
+    let (_, loaded) = call(&addr, "GET", &path, &Json::Null, "").await;
+    let version = loaded["version"].clone();
+    assert!(version.is_u64(), "{loaded}");
+    let mut first = loaded["draft"].clone();
+    first["store"] = json!("Ville-B");
+    first["version"] = version.clone();
+    let (status, saved) = call(&addr, "PUT", &path, &first, "").await;
+    assert_eq!(status, 200, "{saved}");
+    assert_ne!(saved["version"], version);
+    // The other page saves, then validates, what it loaded: 409.
+    let mut second = loaded["draft"].clone();
+    second["version"] = version.clone();
+    let (status, body) = call(&addr, "PUT", &path, &second, "").await;
+    assert_eq!(status, 409, "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("changed elsewhere"),
+        "{body}"
+    );
+    let validate = format!("{path}/validate");
+    let (status, body) = call(
+        &addr,
+        "POST",
+        &validate,
+        &json!({ "version": version }),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    let (_, shown) = call(&addr, "GET", &path, &Json::Null, "").await;
+    assert_eq!(shown["draft"]["store"], "Ville-B", "the first save is kept");
+    // Keeping its version: sent again with the new one.
+    second["version"] = saved["version"].clone();
+    let (status, kept) = call(&addr, "PUT", &path, &second, "").await;
+    assert_eq!(status, 200, "{kept}");
+    let (status, done) = call(
+        &addr,
+        "POST",
+        &validate,
+        &json!({ "version": kept["version"] }),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_label_matched_by_a_person_fills_the_next_reading() {
+    // What the reader gives for a product the pantry does not know: a
+    // product to create, every time.
+    let reading = json!({
+        "provider": "enseigne-x", "store": "Ville-A", "at_local": "2026-10-28 12:37",
+        "total_cents": 300, "unreadable": false,
+        "lines": [{
+            "label": "CHOCO CEREAL 430G", "name": "Céréales choco", "qty": 1, "unit": null,
+            "price_cents": 300, "discount_cents": 0, "line_cents": 300, "vat": 5.5,
+            "aisle": null, "keep": true, "reason": "", "product": null,
+            "new_product": "Céréales choco"
+        }],
+    });
+    let (addr, dir, pantry, _, cookie) = reading_house("receipt-learn", &reading.to_string()).await;
+    let cereal = moli_pantry::Product {
+        id: "cereales".into(),
+        name: "Céréales".into(),
+        ..moli_pantry::Product::default()
+    };
+    pantry.save_product(&cereal).await.unwrap();
+    let photos = json!({ "photos": [encoded(&jpeg())] });
+
+    // Ticket 1: the person points the line to the existing product.
+    let (status, first) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 201, "{first}");
+    assert_eq!(first["draft"]["lines"][0]["product"], Json::Null);
+    let path = format!("/api/cellier/receipts/{}", first["id"]);
+    let mut corrected = first["draft"].clone();
+    corrected["lines"][0]["product"] = json!("cereales");
+    corrected["lines"][0]["new_product"] = Json::Null;
+    let (status, saved) = call(&addr, "PUT", &path, &corrected, "").await;
+    assert_eq!(status, 200, "{saved}");
+    let (status, done) = call(
+        &addr,
+        "POST",
+        &format!("{path}/validate"),
+        &json!({}),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+
+    // Ticket 2, read the same way: the line comes pre-filled.
+    let (status, second) = call(&addr, "POST", "/api/cellier/receipts", &photos, &cookie).await;
+    assert_eq!(status, 201, "{second}");
+    let line = &second["draft"]["lines"][0];
+    assert_eq!(line["product"], "cereales", "{second}");
+    assert_eq!(line["new_product"], Json::Null, "{second}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn the_settings_say_where_receipt_photos_go() {
+    let (addr, dir, _, _, _) = reading_house("receipt-where", "{}").await;
+    let (status, body) = call(&addr, "GET", "/api/cellier/reader", &Json::Null, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["host"], "127.0.0.1", "{body}");
+    assert_eq!(body["at_home"], true, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn mcp_lines_cannot_attach_themselves_to_a_receipt() {
+    let (addr, dir) = house("mcp-attach", true, false).await;
+    let now = moli_core::now_ms();
+    let line = json!({
+        "product": "lait", "provider": "enseigne-x", "store": "Ville-A", "qty": 1,
+        "price_cents": 100, "at": now - HOUR, "source": "ticket", "status": "confirmed",
+        "label": "LAIT",
+    });
+    let header = json!({ "provider": "enseigne-x", "store": "Ville-A", "at": now - HOUR });
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "lines": [line], "receipt": header }),
+    )
+    .await;
+    assert!(!failed, "{said}");
+    let receipt = said["receipt"].as_i64().unwrap();
+
+    // A line sent later, claiming that receipt (and a row id): recorded alone.
+    let mut stray = line.clone();
+    stray["receipt"] = json!(receipt);
+    stray["id"] = json!(1);
+    stray["price_cents"] = json!(150);
+    let (failed, said) = tool(
+        &addr,
+        "pantry_record_purchases",
+        &json!({ "lines": [stray] }),
+    )
+    .await;
+    assert!(!failed, "{said}");
+    let (_, bought) = tool(&addr, "pantry_purchases", &json!({})).await;
+    let lines = bought["purchases"].as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{bought}");
+    let attached: Vec<&Json> = lines.iter().filter(|p| p["receipt"] == receipt).collect();
+    assert_eq!(attached.len(), 1, "{bought}");
+    assert_eq!(attached[0]["price_cents"], 100);
     let _ = std::fs::remove_dir_all(dir);
 }

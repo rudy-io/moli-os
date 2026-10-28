@@ -265,7 +265,8 @@ pub struct Purchase {
     pub basket: Option<i64>,
     /// `provisional` at the order, `confirmed` once collected (or from a receipt).
     pub status: String,
-    /// The receipt this line was read from.
+    /// The receipt this line was read from. Filled when read; ignored when
+    /// recorded (a line is attached only to the receipt recorded with it).
     #[serde(default)]
     pub receipt: Option<i64>,
     /// The label as printed on the receipt (empty when unknown).
@@ -391,4 +392,21 @@ pub struct Receipt {
     /// A validated receipt of the same chain, minute and total: this one is
     /// probably recorded already. Only looked for on a draft.
     pub duplicate_of: Option<i64>,
+    /// A drive basket of the same chain, collected the same day for about
+    /// the same total: the paper receipt of a drive order would count it
+    /// twice. A warning only, looked for on a draft.
+    pub drive_twin: Option<DriveTwin>,
+    /// Moves on at every save: an edit or a validation sent with an older
+    /// one was made on a page that did not see the latest changes.
+    pub version: u64,
+}
+
+/// A confirmed drive basket a receipt draft may repeat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DriveTwin {
+    pub basket: i64,
+    /// When its first line was bought, in ms.
+    pub at: u64,
+    /// What its lines cost together, in cents.
+    pub total_cents: i64,
 }
