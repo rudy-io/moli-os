@@ -9,6 +9,12 @@
   "cellier.onglet.stats": "Stats",
   "cellier.onglet.reglages": "Settings",
   "cellier.erreur": "The pantry is not answering ({status}).",
+  "cellier.reessayer": "Try again",
+  "cellier.erreurs.connexion": "Moli is not answering: check the connection, then try again.",
+  "cellier.erreurs.refus": "The Pantry refused this change.",
+  "cellier.erreurs.achat": "This purchase no longer exists: the page was just updated.",
+  "cellier.erreurs.produit": "The product “{id}” no longer exists: choose another one.",
+  "cellier.erreurs.ligne": "Line {n}: to check.",
   "cellier.absent.titre": "The pantry is not switched on",
   "cellier.absent.texte": "To start it, add a [pantry] section to moli.toml, then restart Moli.",
   "cellier.liste.ajouter_label": "Add an item to the list",
@@ -160,7 +166,7 @@
   "cellier.ticket.deja_valide": "This receipt is validated already: its lines are in the purchases.",
   "cellier.ticket.lignes": "Lines",
   "cellier.ticket.gardees": "{n} of {total} kept · {montant}",
-  "cellier.ticket.lignes_aide": "Untick what does not belong in the Cellier (what is not eaten nor bought again). Each kept line needs a product.",
+  "cellier.ticket.lignes_aide": "What lasts (furniture, decoration, toys…) does not belong in the Pantry: untick it. Each kept line needs a product.",
   "cellier.ticket.garder": "Keep {nom}",
   "cellier.ticket.produit_de": "Product for {nom}",
   "cellier.ticket.choisir_produit": "Choose a product…",
@@ -193,5 +199,8 @@
   "cellier.reglages.lecteur": "Receipts are read by {lecteur}.",
   "cellier.reglages.photos_partent": "The photos go to this provider, and are erased from Moli 90 days after validation.",
   "cellier.reglages.lecteur_refuse": "Receipts cannot be read for now.",
-  "cellier.stats.bientot": "Coming soon: the shopping statistics."
+  "cellier.stats.bientot": "Coming soon: the shopping statistics.",
+  "cellier.ticket.connexion_lecture": "Connection lost during the reading, try again.",
+  "cellier.ticket.retour": "Back to purchases",
+  "cellier.ticket.quitter_confirmer": "The corrections of this receipt are not saved. Leave anyway?"
 }

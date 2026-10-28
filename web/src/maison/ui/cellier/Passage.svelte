@@ -1,8 +1,8 @@
 <script>
   import Icon from '../Icon.svelte';
-  import { cellier, euros, providerName, photoUrl, updatePurchase, deletePurchase } from '../../lib/cellier.svelte.js';
+  import { cellier, euros, providerName, photoUrl, updatePurchase, deletePurchase, explain } from '../../lib/cellier.svelte.js';
   import { cost } from '../../lib/cellier/passages.js';
-  import { toCents, parseAmount, centsText, qtyText } from '../../lib/cellier/draft.js';
+  import { toCents, parseAmount, centsText, qtyText, qtyPrice, dots } from '../../lib/cellier/draft.js';
   import { clock, note } from '../../lib/home.svelte.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
 
@@ -15,6 +15,8 @@
   /** The line being corrected: `{id, product, qty, price}` (typed text). */
   let editing = $state(null);
   let busy = $state(false);
+  /** Why the last correction failed: `{text, detail}`, or null. */
+  let failure = $state(null);
 
   const products = $derived([...cellier.products].sort((a, b) => a.name.localeCompare(b.name, locale())));
   const productName = (id) => cellier.products.find((p) => p.id === id)?.name ?? id;
@@ -31,9 +33,10 @@
     e.preventDefault();
     const qty = parseAmount(editing.qty);
     const price = toCents(editing.price);
-    if (!qty || qty <= 0) return note(t('cellier.achats.quantite_invalide'), 'error');
-    if (price == null) return note(t('cellier.achats.prix_invalide'), 'error');
+    if (!qty || qty <= 0) return (failure = { text: t('cellier.achats.quantite_invalide'), detail: '' });
+    if (price == null) return (failure = { text: t('cellier.achats.prix_invalide'), detail: '' });
     busy = true;
+    failure = null;
     try {
       // The cost the line had stays when only its product changes; otherwise
       // the server works it out again (quantity, price, discount).
@@ -42,7 +45,7 @@
       editing = null;
       note(t('cellier.achats.corrige', { nom: productName(line.product) }));
     } catch (err) {
-      note(err.message, 'error');
+      failure = explain(err);
     } finally {
       busy = false;
     }
@@ -51,25 +54,18 @@
   async function remove(line) {
     if (!confirm(t('cellier.achats.supprimer_confirmer', { nom: productName(line.product) }))) return;
     busy = true;
+    failure = null;
     try {
       await deletePurchase(line.id);
       note(t('cellier.achats.supprime', { nom: productName(line.product) }));
     } catch (err) {
-      note(err.message, 'error');
+      failure = explain(err);
     } finally {
       busy = false;
     }
   }
 
-  /** The parts that exist, « a · b · c ». */
-  const dots = (parts) => parts.filter(Boolean).join(' · ');
-
-  /** « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg », « 1,29 € ». */
-  function detail(line) {
-    const unit = line.unit ? ` ${line.unit}` : '';
-    const price = `${euros(line.price_cents)}${line.unit ? `/${line.unit}` : ''}`;
-    return line.qty === 1 && !line.unit ? price : `${qtyText(line.qty, locale())}${unit} × ${price}`;
-  }
+  const detail = (line) => qtyPrice(line, euros, locale());
 </script>
 
 <details class="passage" bind:open>
@@ -104,6 +100,13 @@
         </div>
       {/if}
 
+      {#if failure}
+        <p class="error" role="alert">
+          <Icon name="alert" size={18} />
+          <span>{failure.text}{#if failure.detail}<small>{failure.detail}</small>{/if}</span>
+        </p>
+      {/if}
+
       <ul class="lines">
         {#each passage.lines as line (line.id)}
           <li>
@@ -124,7 +127,15 @@
                   <input bind:value={editing.price} inputmode="decimal" autocomplete="off" />
                 </label>
                 <div class="actions">
-                  <button type="button" class="ghost" disabled={busy} onclick={() => (editing = null)}>{t('cellier.achats.annuler')}</button>
+                  <button
+                    type="button"
+                    class="ghost"
+                    disabled={busy}
+                    onclick={() => {
+                      editing = null;
+                      failure = null;
+                    }}
+                  >{t('cellier.achats.annuler')}</button>
                   <button class="primary" disabled={busy}>{t('cellier.achats.enregistrer')}</button>
                 </div>
               </form>
@@ -252,6 +263,35 @@
     object-position: top;
     border-radius: var(--r-sm);
     background: var(--surface-2);
+  }
+
+  .error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 10px 14px;
+    border-radius: var(--r-sm);
+    background: var(--alert-soft);
+    color: var(--alert);
+    font-weight: 600;
+  }
+
+  .error :global(svg) {
+    margin-top: 2px;
+  }
+
+  .error span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .error small {
+    font-size: 12.5px;
+    font-weight: 500;
+    opacity: 0.8;
+    overflow-wrap: anywhere;
   }
 
   .lines {

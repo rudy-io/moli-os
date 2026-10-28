@@ -1,7 +1,7 @@
 <script>
   import Icon from '../Icon.svelte';
   import { cellier, saveProduct, confirmOffer, providerName, euros } from '../../lib/cellier.svelte.js';
-  import { qtyText } from '../../lib/cellier/draft.js';
+  import { qtyPrice } from '../../lib/cellier/draft.js';
   import { note } from '../../lib/home.svelte.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
 
@@ -28,11 +28,7 @@
     return by;
   });
   const day = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' });
-  /** « 1,29 € », « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg ». */
-  function price(p) {
-    const each = `${euros(p.price_cents)}${p.unit ? `/${p.unit}` : ''}`;
-    return p.qty === 1 && !p.unit ? each : `${qtyText(p.qty, locale())}${p.unit ? ` ${p.unit}` : ''} × ${each}`;
-  }
+  const price = (p) => qtyPrice(p, euros, locale());
 
   async function act(run, done) {
     try {

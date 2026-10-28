@@ -1,6 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineCost, gapOf, parseAmount, toCents, centsText, qtyText, draftProblems, listMatches, toLocalInput, fromLocalInput } from './draft.js';
+import {
+  lineCost,
+  gapOf,
+  parseAmount,
+  toCents,
+  centsText,
+  qtyText,
+  draftProblems,
+  listMatches,
+  pruneItemsDone,
+  dots,
+  qtyPrice,
+  toLocalInput,
+  fromLocalInput,
+} from './draft.js';
 
 const line = (over) => ({
   label: 'LAIT 1L',
@@ -85,6 +99,30 @@ test('the list lines a receipt may settle share a kept product', () => {
     listMatches(draft, items).map((i) => i.id),
     [1, 4],
   );
+});
+
+test('a list item ticked stays only while a kept line has its product', () => {
+  const items = [
+    { id: 1, product: 'milk' },
+    { id: 2, product: 'eggs' },
+    { id: 3, product: 'bread' },
+  ];
+  const draft = { items_done: [1, 2, 3, 9], lines: [line(), line({ product: 'eggs', keep: false }), line({ product: 'flour' })] };
+  assert.deepEqual(pruneItemsDone(draft, items), [1], 'eggs unticked, bread re-pointed to flour, 9 closed elsewhere');
+  draft.lines[1].keep = true;
+  assert.deepEqual(pruneItemsDone(draft, items), [1, 2]);
+});
+
+test('dots join the parts that exist', () => {
+  assert.equal(dots(['Ville-A', null, '', 'lundi', false, '3 lignes']), 'Ville-A · lundi · 3 lignes');
+  assert.equal(dots([]), '');
+});
+
+test('quantity times price, the unit when weighed', () => {
+  const money = (c) => `${(c / 100).toFixed(2)} €`;
+  assert.equal(qtyPrice({ qty: 1, unit: null, price_cents: 129 }, money, 'en'), '1.29 €');
+  assert.equal(qtyPrice({ qty: 2, unit: null, price_cents: 129 }, money, 'en'), '2 × 1.29 €');
+  assert.equal(qtyPrice({ qty: 0.532, unit: 'kg', price_cents: 1299 }, money, 'fr-FR'), '0,532 kg × 12.99 €/kg');
 });
 
 test('a datetime-local value round-trips to the minute', () => {

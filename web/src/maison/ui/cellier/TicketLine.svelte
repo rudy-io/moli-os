@@ -1,6 +1,6 @@
 <script>
   import { euros } from '../../lib/cellier.svelte.js';
-  import { lineCost, parseAmount, toCents, centsText, qtyText } from '../../lib/cellier/draft.js';
+  import { lineCost, parseAmount, toCents, centsText, qtyText, qtyPrice, dots } from '../../lib/cellier/draft.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
 
   /** One line of a receipt draft. The usual corrections take one gesture:
@@ -53,14 +53,8 @@
     input.value = centsText(line[field], locale());
   }
 
-  /** The parts that exist, « a · b ». */
-  const dots = (parts) => parts.filter(Boolean).join(' · ');
-
-  /** « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg ». */
-  const detail = $derived.by(() => {
-    const price = `${euros(line.price_cents)}${line.unit ? `/${line.unit}` : ''}`;
-    return `${qtyText(line.qty, locale())}${line.unit ? ` ${line.unit}` : ''} × ${price}`;
-  });
+  /** « 1,29 € », « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg ». */
+  const detail = $derived(qtyPrice(line, euros, locale()));
 </script>
 
 <li {id} class:off={!line.keep} class:bad={problem}>

@@ -9,7 +9,7 @@
   import Produits from '../ui/cellier/Produits.svelte';
   import Stats from '../ui/cellier/Stats.svelte';
   import Reglages from '../ui/cellier/Reglages.svelte';
-  import { cellier, loadCellier, loadPurchases, loadReader } from '../lib/cellier.svelte.js';
+  import { cellier, loadCellier, loadPurchases, loadReader, reloadCellier } from '../lib/cellier.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
 
   /** « Le Cellier »: the household's shopping list, the drives' basket and
@@ -32,6 +32,15 @@
     loadPurchases();
     loadReader();
   });
+
+  // Every read that failed, once each.
+  const errors = $derived([...new Set([cellier.error, cellier.purchasesError, cellier.readerError].filter(Boolean))]);
+  let retrying = $state(false);
+  async function retry() {
+    retrying = true;
+    await Promise.all([reloadCellier(), loadReader()]);
+    retrying = false;
+  }
 
   // Small cues on the pages: what is on the list, a basket waiting for a
   // choice, receipts read and not yet checked, sheets an agent found that
@@ -65,7 +74,13 @@
       </div>
     </section>
   {:else}
-    {#if cellier.error}<p class="error" role="alert"><Icon name="alert" size={18} />{cellier.error}</p>{/if}
+    {#if errors.length}
+      <div class="error" role="alert">
+        <Icon name="alert" size={18} />
+        <span>{errors.join(' ')}</span>
+        <button disabled={retrying} onclick={retry}>{t('cellier.reessayer')}</button>
+      </div>
+    {/if}
 
     <nav class="tabs" aria-label={t('cellier.vues')}>
       {#each PAGES as id (id)}
@@ -135,6 +150,22 @@
     background: var(--alert-soft);
     color: var(--alert);
     font-weight: 550;
+  }
+
+  .error span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .error button {
+    flex: none;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--alert);
+    font-weight: 650;
   }
 
   .tabs {

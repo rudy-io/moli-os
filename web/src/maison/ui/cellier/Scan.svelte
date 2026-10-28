@@ -52,6 +52,8 @@
   const more = () => (source === 'camera' ? cameraInput : galleryInput)?.click();
 
   let timer;
+  /** The page was left during the read: the draft still lands in « À valider ». */
+  let left = false;
   async function read() {
     if (busy || !photos.length) return;
     busy = true;
@@ -60,9 +62,11 @@
     timer = setInterval(() => (seconds += 1), 1000);
     try {
       const receipt = await scanReceipt(photos.map((p) => p.file));
-      location.hash = `#/cellier/achats/ticket/${receipt.id}`;
+      // Elsewhere by now: no jump back here (`scanReceipt` already re-read
+      // the drafts, so the new one shows on the Achats page).
+      if (!left) location.hash = `#/cellier/achats/ticket/${receipt.id}`;
     } catch (err) {
-      error = err.message;
+      if (!left) error = err.message;
     } finally {
       clearInterval(timer);
       busy = false;
@@ -70,6 +74,7 @@
   }
 
   onDestroy(() => {
+    left = true;
     clearInterval(timer);
     for (const p of photos) URL.revokeObjectURL(p.url);
   });

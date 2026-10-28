@@ -1,6 +1,7 @@
 // Editing a receipt draft before it is validated: amounts typed by a person,
-// the gap with the printed total, what would stop the validation. Pure
-// functions (no `$state`), so node:test can import them.
+// the gap with the printed total, what would stop the validation; and the
+// small formatting shared by the Cellier's pages. Pure functions (no
+// `$state`), so node:test can import them.
 
 /** What a line costs: quantity times unit price, rounded half away from zero
  *  as the server does, less the discount. */
@@ -69,6 +70,24 @@ export function draftProblems(draft) {
 export function listMatches(draft, items) {
   const bought = new Set(draft.lines.filter((l) => l.keep && l.product).map((l) => l.product));
   return items.filter((i) => i.product && bought.has(i.product));
+}
+
+/** The ticked shopping-list lines that still match a kept line: a line
+ *  unticked or moved to another product no longer settles its item. */
+export function pruneItemsDone(draft, items) {
+  const open = new Set(listMatches(draft, items).map((i) => i.id));
+  return draft.items_done.filter((id) => open.has(id));
+}
+
+/** The parts that exist, « a · b · c ». */
+export const dots = (parts) => parts.filter(Boolean).join(' · ');
+
+/** What was bought, with `money(cents)` for the amounts: « 1,29 € » for one,
+ *  « 2 × 1,29 € », « 0,532 kg × 12,99 €/kg ». */
+export function qtyPrice(line, money, locale = 'fr-FR') {
+  const price = `${money(line.price_cents)}${line.unit ? `/${line.unit}` : ''}`;
+  if (line.qty === 1 && !line.unit) return price;
+  return `${qtyText(line.qty, locale)}${line.unit ? ` ${line.unit}` : ''} × ${price}`;
 }
 
 /** An instant (ms) as a `datetime-local` value, in this browser's time zone. */

@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
   import TicketLine from './TicketLine.svelte';
   import {
@@ -10,8 +11,19 @@
     saveDraft,
     validateReceipt,
     abandonReceipt,
+    explain,
   } from '../../lib/cellier.svelte.js';
-  import { gapOf, draftProblems, listMatches, toCents, centsText, toLocalInput, fromLocalInput } from '../../lib/cellier/draft.js';
+  import {
+    gapOf,
+    draftProblems,
+    listMatches,
+    pruneItemsDone,
+    toCents,
+    centsText,
+    toLocalInput,
+    fromLocalInput,
+  } from '../../lib/cellier/draft.js';
+  import { holdLeave } from '../../../lib/leave.js';
   import { home, note, relative } from '../../lib/home.svelte.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
 
@@ -29,26 +41,47 @@
   let missing = $state(false);
   let busy = $state(false);
   let error = $state('');
+  /** The server's own words under `error`, when they say more. */
+  let detail = $state('');
   /** The problems show once a validation was tried. */
   let checked = $state(false);
 
   function take(r) {
     receipt = r;
-    draft = structuredClone($state.snapshot(r.draft));
+    draft = $state.snapshot(r.draft);
     dirty = false;
   }
 
+  let loading = $state(false);
   async function load() {
     const known = cellier.receipts.find((r) => r.id === id);
     if (known) return take(known);
+    loading = true;
+    error = '';
     try {
       take(await loadReceipt(id));
     } catch (e) {
       if (e.status === 404) missing = true;
       else error = e.message;
+    } finally {
+      loading = false;
     }
   }
   load();
+
+  // Edits not saved: leaving asks first (in-app links, the back button,
+  // closing the tab).
+  onMount(() => {
+    const lift = holdLeave(() => !dirty || confirm(t('cellier.ticket.quitter_confirmer')));
+    const unload = (e) => {
+      if (dirty) e.preventDefault();
+    };
+    addEventListener('beforeunload', unload);
+    return () => {
+      lift();
+      removeEventListener('beforeunload', unload);
+    };
+  });
 
   const products = $derived([...cellier.products].sort((a, b) => a.name.localeCompare(b.name, locale())));
   const gap = $derived(draft ? gapOf(draft) : null);
@@ -58,12 +91,25 @@
   const matches = $derived(draft ? listMatches(draft, cellier.items) : []);
   const twin = $derived(receipt?.duplicate_of != null ? cellier.receipts.find((r) => r.id === receipt.duplicate_of) : null);
   const photos = $derived(receipt?.photos ? Array.from({ length: receipt.photos }, (_, i) => i + 1) : []);
-  /** Validated or abandoned elsewhere while open. */
+  /** Validated or abandoned elsewhere while open: only concluded from a
+   *  purchases read that succeeded. */
   const gone = $derived(
-    receipt?.status === 'draft' && cellier.purchasesLoaded && !busy && !cellier.receipts.some((r) => r.id === id && r.status === 'draft'),
+    receipt?.status === 'draft' &&
+      cellier.purchasesLoaded &&
+      !cellier.purchasesError &&
+      !busy &&
+      !cellier.receipts.some((r) => r.id === id && r.status === 'draft'),
   );
 
-  const touched = () => (dirty = true);
+  /** A line changed: a list item ticked for it may no longer be settled. */
+  function touched() {
+    dirty = true;
+    prune();
+  }
+  function prune() {
+    const kept = pruneItemsDone(draft, cellier.items);
+    if (kept.length !== draft.items_done.length) draft.items_done = kept;
+  }
   function set(field, value) {
     draft[field] = value;
     dirty = true;
@@ -86,18 +132,25 @@
     if (busy) return;
     busy = true;
     error = '';
+    detail = '';
     try {
       await task();
     } catch (err) {
-      error = err.message;
+      ({ text: error, detail } = explain(err));
     } finally {
       busy = false;
     }
   }
 
+  /** Saves the draft as edited, without list items it no longer settles. */
+  async function store() {
+    prune();
+    take(await saveDraft(id, draft));
+  }
+
   const save = () =>
     run(async () => {
-      take(await saveDraft(id, draft));
+      await store();
       note(t('cellier.ticket.enregistre'));
     });
 
@@ -105,12 +158,14 @@
     checked = true;
     if (problems.size) {
       error = t('cellier.ticket.a_corriger', { count: problems.size });
+      detail = '';
       document.getElementById(`cellier-line-${[...problems.keys()][0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     if (!kept.length && !confirm(t('cellier.ticket.aucune_ligne_confirmer'))) return;
     run(async () => {
-      if (dirty) take(await saveDraft(id, draft));
+      if (dirty) await store();
+      else if (pruneItemsDone(draft, cellier.items).length !== draft.items_done.length) await store();
       let force = false;
       if (receipt.duplicate_of != null) {
         if (!confirm(t('cellier.ticket.doublon_confirmer'))) return;
@@ -120,7 +175,7 @@
         await validateReceipt(id, force);
       } catch (err) {
         // Recorded elsewhere in the meantime: the same question, then force.
-        if (force || err.status !== 400 || !/already recorded/i.test(err.message)) throw err;
+        if (force || err.status !== 400 || !/already recorded/i.test(err.detail ?? '')) throw err;
         if (!confirm(t('cellier.ticket.doublon_confirmer'))) return;
         await validateReceipt(id, true);
       }
@@ -133,18 +188,28 @@
     if (!confirm(t('cellier.ticket.abandonner_confirmer'))) return;
     run(async () => {
       await abandonReceipt(id);
+      // The edits went with the draft: nothing left to keep.
+      dirty = false;
       note(t('cellier.ticket.abandonne'));
       location.hash = '#/cellier/achats';
     });
   }
 </script>
 
-<a class="back" href="#/cellier/achats"><Icon name="arrow-left" size={20} />{t('cellier.scan.retour')}</a>
+<a class="back" href="#/cellier/achats"><Icon name="arrow-left" size={20} />{t('cellier.ticket.retour')}</a>
 
 {#if missing}
   <section class="card"><p class="muted">{t('cellier.ticket.introuvable')}</p></section>
 {:else if !draft}
-  {#if error}<p class="error" role="alert"><Icon name="alert" size={18} />{error}</p>{:else}<p class="muted">…</p>{/if}
+  {#if error}
+    <div class="error" role="alert">
+      <Icon name="alert" size={18} />
+      <span>{error}</span>
+      <button disabled={loading} onclick={load}>{t('cellier.reessayer')}</button>
+    </div>
+  {:else}
+    <p class="muted">…</p>
+  {/if}
 {:else if receipt.status === 'validated'}
   <section class="card"><p class="muted">{t('cellier.ticket.deja_valide')}</p></section>
 {:else}
@@ -236,7 +301,12 @@
       </section>
     {/if}
 
-    {#if error}<p class="error" role="alert"><Icon name="alert" size={18} />{error}</p>{/if}
+    {#if error}
+      <div class="error" role="alert">
+        <Icon name="alert" size={18} />
+        <span>{error}{#if detail}<small>{detail}</small>{/if}</span>
+      </div>
+    {/if}
 
     <div class="actions">
       <button class="ghost danger" disabled={busy || gone} onclick={abandon}><Icon name="trash" size={20} />{t('cellier.ticket.abandonner')}</button>
@@ -286,6 +356,31 @@
   .banner :global(svg),
   .error :global(svg) {
     margin-top: 2px;
+  }
+
+  .error span {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .error small {
+    font-size: 12.5px;
+    font-weight: 500;
+    opacity: 0.8;
+    overflow-wrap: anywhere;
+  }
+
+  .error button {
+    flex: none;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--alert);
+    font-weight: 650;
   }
 
   .banner.warm {

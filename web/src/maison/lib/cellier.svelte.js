@@ -6,6 +6,7 @@
 import { t } from '../../lib/i18n.svelte.js';
 import { money } from '../../lib/energy.js';
 import { shrink, toBase64 } from './cellier/photo.js';
+import { knownRefusal } from './cellier/errors.js';
 
 export const cellier = $state({
   loaded: false,
@@ -26,21 +27,47 @@ export const cellier = $state({
   purchasesLoaded: false,
   /** Who reads receipts: `{provider, model, allowed, reason}`, null until read. */
   reader: null,
+  /** Why the last read failed, one field per read so that one succeeding
+   *  does not hide another failing: the pantry, the purchases, the reader. */
   error: '',
+  purchasesError: '',
+  readerError: '',
 });
 
 const headers = { 'content-type': 'application/json', 'x-moli-origin': 'ui' };
 
+/** Throws an error with the HTTP `status` (0 when Moli could not be
+ *  reached) and the server's own words in `detail`. */
 async function call(method, path, body) {
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch {
+    // No answer at all: the Wi-Fi dropped, Moli restarted...
+    const err = new Error(t('cellier.erreurs.connexion'));
+    err.status = 0;
+    throw err;
+  }
   if (res.status === 204) return null;
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(json.error ?? t('cellier.erreur', { status: res.status }));
     err.status = res.status;
+    err.detail = json.error ?? '';
     throw err;
   }
   return json;
+}
+
+/** A failed write said to a person: `{text, detail}`. The pantry's own
+ *  refusals (in English) become the house's words, the known ones exactly,
+ *  the others generically with the server's words as `detail`; what the
+ *  server already says in the house's language (a guest, the demo house) is
+ *  kept as it is. */
+export function explain(err) {
+  if (![400, 404, 500].includes(err?.status) || !err.detail) return { text: err?.message ?? String(err), detail: '' };
+  const known = knownRefusal(err.detail);
+  return known ? { text: t(known.key, known.params), detail: '' } : { text: t('cellier.erreurs.refus'), detail: err.detail };
 }
 
 export async function loadCellier() {
@@ -113,9 +140,9 @@ export async function loadPurchases(from, to) {
   const suffix = query.toString() ? `?${query}` : '';
   try {
     const all = await call('GET', `/api/cellier/purchases${suffix}`);
-    Object.assign(cellier, { purchases: all.purchases, receipts: all.receipts, error: '' });
+    Object.assign(cellier, { purchases: all.purchases, receipts: all.receipts, purchasesError: '' });
   } catch (e) {
-    cellier.error = e.message;
+    cellier.purchasesError = e.message;
   } finally {
     cellier.purchasesLoaded = true;
   }
@@ -135,9 +162,10 @@ export const loadReceipt = (id) => call('GET', `/api/cellier/receipts/${id}`);
 export async function loadReader() {
   try {
     cellier.reader = await call('GET', '/api/cellier/reader');
+    cellier.readerError = '';
   } catch (e) {
     cellier.reader = null;
-    cellier.error = e.status === 404 ? '' : e.message;
+    cellier.readerError = e.status === 404 ? '' : e.message;
   }
 }
 
@@ -194,10 +222,13 @@ async function scanError(e) {
       return t('cellier.ticket.occupe');
     case 413:
       return t('cellier.ticket.trop_lourd');
+    case 0:
+      // The read takes long: a phone leaving the Wi-Fi meanwhile is likely.
+      return t('cellier.ticket.connexion_lecture');
     case 400:
       // The assistant's own refusals say « invalid request: ... »; the
       // others come from the photos' checks.
-      return /^invalid request/i.test(e.message) ? t('cellier.ticket.demande_refusee') : t('cellier.ticket.photos_refusees');
+      return /^invalid request/i.test(e.detail ?? '') ? t('cellier.ticket.demande_refusee') : t('cellier.ticket.photos_refusees');
     default:
       return e.message;
   }

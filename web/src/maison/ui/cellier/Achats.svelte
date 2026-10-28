@@ -3,6 +3,7 @@
   import Passage from './Passage.svelte';
   import { cellier, euros, providerName, readerWhy } from '../../lib/cellier.svelte.js';
   import { passages, byMonth } from '../../lib/cellier/passages.js';
+  import { dots } from '../../lib/cellier/draft.js';
   import { home, relative } from '../../lib/home.svelte.js';
   import { t, locale } from '../../../lib/i18n.svelte.js';
 
@@ -24,8 +25,6 @@
   }
 
   const day = (ms) => new Date(ms).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short' });
-  /** The parts that exist, « a · b · c ». */
-  const dots = (parts) => parts.filter(Boolean).join(' · ');
   const chain = (id) => (id ? providerName(id) : t('cellier.achats.enseigne_inconnue'));
 </script>
 

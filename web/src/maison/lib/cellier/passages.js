@@ -1,14 +1,13 @@
 // The purchases grouped by passage: one trip to a shop, one drive basket.
 // Pure functions (no `$state`), so node:test can import them.
+import { lineCost } from './draft.js';
 
 const MINUTE = 60_000;
 
 /** What a purchase line cost: the server's figure, else quantity times price
  *  less the discount (rounded half away from zero, as the server does). */
 export function cost(p) {
-  if (p.line_cents != null) return p.line_cents;
-  const gross = p.qty * p.price_cents;
-  return Math.sign(gross) * Math.round(Math.abs(gross)) - (p.discount_cents ?? 0);
+  return p.line_cents ?? lineCost(p.qty, p.price_cents, p.discount_cents ?? 0);
 }
 
 /** Group purchases by receipt, else by basket, else by (chain, store, minute).
