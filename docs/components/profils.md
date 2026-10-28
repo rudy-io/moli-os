@@ -64,7 +64,7 @@ Il n'y a pas de transport « https » séparé : HTTP ou HTTPS dépend de `[prof
 | `values` | valeurs de l'enum (obligatoires pour `enum`, distinctes, non vides) |
 | `map` | valeur brute (en texte) → sens, appliqué **avant** tout le reste ; chaque valeur doit coller au `kind` |
 | `unit` | unité (voir ci-dessous) |
-| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`, `smoke`, `tamper`, `config`, `other`. Par défaut : déduite de la clé et de l'unité |
+| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`, `smoke`, `tamper`, `config`, `other`. Par défaut : déduite de la clé et de l'unité (sauf `position`, à déclarer explicitement) |
 | `scale` | multiplicateur (numérique seulement ; fini, non nul, \|s\| ≤ 1e9) |
 | `round` | décimales gardées après `scale` (numérique seulement, 6 au plus) |
 | `min`, `max` | bornes d'une commande (numérique seulement, finies, `min < max`) : le hub refuse un ordre hors bornes. Les lectures ne sont pas bornées |

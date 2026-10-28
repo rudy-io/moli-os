@@ -148,6 +148,11 @@ pub enum Semantic {
     BatteryLow,
     SignalStrength,
     Contact,
+    /// How far a shutter, blind or curtain is open, in %: 100 = fully open,
+    /// 0 = fully closed (the convention of Zigbee2MQTT and of the dashboard).
+    /// Never deduced from a name (a `position` can be a servo or a playback
+    /// position): a driver that knows the point is an opening sets it itself.
+    Position,
     Occupancy,
     WaterLeak,
     Smoke,
@@ -311,6 +316,11 @@ mod tests {
             Semantic::SignalStrength
         );
         assert_eq!(Semantic::infer("color.x", None), Semantic::Color);
+        assert_eq!(
+            Semantic::infer("position", Some(&Unit::Percent)),
+            Semantic::Other,
+            "a position is never deduced to be a shutter's opening"
+        );
         assert_eq!(Semantic::infer("whatever", None), Semantic::Other);
     }
 

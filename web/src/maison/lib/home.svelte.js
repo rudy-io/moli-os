@@ -115,9 +115,25 @@ export function nameOf(id, fallback) {
   return fallback || d?.label?.name || d?.native_name || t('commun.appareil');
 }
 
+/** How far a shutter is open: the point of the `position` sense (Zigbee2MQTT). */
+export function positionPoint(d) {
+  return d?.points.find((p) => p.semantic === 'position') ?? null;
+}
+
+/** The point that orders a shutter to open, stop or close: a writable enum
+ *  that offers both « open » and « close » (`OPEN` / `CLOSE` on Zigbee2MQTT),
+ *  whatever the case. It also tells a plain open / close / stop motor, which
+ *  has no `position`, from a switch. */
+export function coverOrder(d) {
+  const offers = (p, word) => p.kind.values?.some((v) => v.toLowerCase() === word);
+  return d?.points.find((p) => p.access?.write && p.kind.type === 'enum' && offers(p, 'open') && offers(p, 'close')) ?? null;
+}
+
 /** The point that switches the device on and off. */
 export function powerKey(d) {
   if (!d) return null;
+  // A shutter is not a switch: its `state` is an order, never « on ».
+  if (positionPoint(d) || coverOrder(d)) return null;
   const writable = d.points.filter((p) => p.access?.write);
   const p =
     writable.find((p) => p.semantic === 'on_off' && p.kind.type === 'binary') ??
@@ -228,7 +244,15 @@ export function deviceKind(d) {
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
+  // A shutter is recognised by the `position` sense, or by its open / close
+  // order (a plain motor has no position). Tuya's own names stay until that
+  // driver labels its opening point with the sense.
+  if (
+    has(d, 'percent_control') ||
+    positionPoint(d) ||
+    coverOrder(d) ||
+    (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open'))
+  )
     return 'cover';
   if (powerKey(d)) {
     if (isGroup(d)) return 'group';
