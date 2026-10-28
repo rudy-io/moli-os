@@ -24,8 +24,7 @@ const FRESH_MS: u64 = 43_200_000;
 const REFUSAL_LIMIT: i64 = 2;
 const BASKET_COLUMNS: &str =
     "id, created_at, created_by, status, options, deviations, chosen, accepted, chosen_by";
-const PURCHASE_COLUMNS: &str =
-    "product, provider, store, qty, price_cents, at, source, basket, status";
+const PURCHASE_COLUMNS: &str = "product, provider, store, qty, price_cents, at, source, basket,      status, id, receipt, label, line_cents, discount_cents, unit";
 const SOURCES: [&str; 2] = ["drive", "ticket"];
 const PURCHASE_STATUSES: [&str; 2] = ["provisional", "confirmed"];
 
@@ -74,6 +73,12 @@ fn purchase_row(r: &Row<'_>) -> rusqlite::Result<Purchase> {
         source: r.get(6)?,
         basket: r.get(7)?,
         status: r.get(8)?,
+        id: r.get(9)?,
+        receipt: r.get(10)?,
+        label: r.get(11)?,
+        line_cents: r.get(12)?,
+        discount_cents: r.get(13)?,
+        unit: r.get(14)?,
     })
 }
 
@@ -155,7 +160,19 @@ fn check_purchase(p: &Purchase) -> Result<(), PantryError> {
             p.status
         )));
     }
+    if p.discount_cents < 0 {
+        return Err(PantryError::Invalid(
+            "a purchase discount cannot be negative".into(),
+        ));
+    }
     Ok(())
+}
+
+/// What a line cost: the stated amount, or `round(qty * price) - discount`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn line_cost(p: &Purchase) -> i64 {
+    p.line_cents
+        .unwrap_or_else(|| (p.qty * p.price_cents as f64).round() as i64 - p.discount_cents)
 }
 
 fn insert_purchase(
@@ -164,8 +181,9 @@ fn insert_purchase(
     basket: Option<i64>,
 ) -> Result<(), PantryError> {
     conn.execute(
-        "INSERT INTO purchases(product, provider, store, qty, price_cents, at, source, basket, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO purchases(product, provider, store, qty, price_cents, at, source, basket,
+                               status, receipt, label, line_cents, discount_cents, unit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             p.product,
             p.provider,
@@ -175,7 +193,12 @@ fn insert_purchase(
             ts(p.at),
             p.source,
             basket,
-            p.status
+            p.status,
+            p.receipt,
+            p.label,
+            line_cost(p),
+            p.discount_cents,
+            p.unit
         ],
     )?;
     Ok(())
@@ -706,6 +729,17 @@ mod tests {
             source: "drive".into(),
             basket,
             status: status.into(),
+            ..Purchase::default()
+        }
+    }
+
+    /// A line of the `purchase` helper (quantity 2) as read back: the row id
+    /// and the computed cost are filled.
+    fn stored(p: &Purchase, id: i64) -> Purchase {
+        Purchase {
+            id: Some(id),
+            line_cents: Some(2 * p.price_cents - p.discount_cents),
+            ..p.clone()
         }
     }
 
@@ -1163,6 +1197,37 @@ mod tests {
     }
 
     #[test]
+    fn line_cents_defaults_from_qty_price_and_discount() {
+        let (store, dir, _, _, _) = two_drives("line-default");
+        let mut p = purchase("fromage", None, "confirmed", 1299);
+        p.source = "ticket".into();
+        p.qty = 0.532;
+        p.discount_cents = 50;
+        p.label = "FROMAGE AU LAIT".into();
+        p.unit = Some("kg".into());
+        store.record_purchases(&[p]).unwrap();
+        let read = store.purchases(0, u64::MAX / 4).unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].line_cents, Some(641));
+        assert_eq!(read[0].discount_cents, 50);
+        assert_eq!(read[0].label, "FROMAGE AU LAIT");
+        assert_eq!(read[0].unit.as_deref(), Some("kg"));
+        assert!(read[0].id.is_some());
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn an_explicit_line_cents_is_kept() {
+        let (store, dir, _, _, _) = two_drives("line-explicit");
+        let mut p = purchase("pain", None, "confirmed", 100);
+        p.line_cents = Some(500);
+        store.record_purchases(&[p]).unwrap();
+        let read = store.purchases(0, u64::MAX / 4).unwrap();
+        assert_eq!(read[0].line_cents, Some(500));
+        cleanup(store, dir);
+    }
+
+    #[test]
     fn purchases_are_filtered_by_time_and_validated() {
         let (store, dir, _, _, _) = two_drives("range");
         let mut early = purchase("lait", None, "confirmed", 100);
@@ -1173,8 +1238,11 @@ mod tests {
         store
             .record_purchases(&[early.clone(), late.clone()])
             .unwrap();
-        assert_eq!(store.purchases(0, 2_000).unwrap(), vec![early.clone()]);
-        assert_eq!(store.purchases(1_000, 5_000).unwrap(), vec![early, late]);
+        assert_eq!(store.purchases(0, 2_000).unwrap(), vec![stored(&early, 1)]);
+        assert_eq!(
+            store.purchases(1_000, 5_000).unwrap(),
+            vec![stored(&early, 1), stored(&late, 2)]
+        );
         assert!(store.purchases(6_000, 9_000).unwrap().is_empty());
 
         let mut bad = purchase("lait", None, "payé", 100);

@@ -246,8 +246,11 @@ pub struct Basket {
 
 /// A line bought. Never paid by the agent: the human pays, the line is recorded
 /// from the order confirmation (`drive`) or the receipt (`ticket`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Purchase {
+    /// Row id. Filled when read, ignored when recorded.
+    #[serde(default)]
+    pub id: Option<i64>,
     /// Product id.
     pub product: String,
     pub provider: String,
@@ -262,4 +265,20 @@ pub struct Purchase {
     pub basket: Option<i64>,
     /// `provisional` at the order, `confirmed` once collected (or from a receipt).
     pub status: String,
+    /// The receipt this line was read from.
+    #[serde(default)]
+    pub receipt: Option<i64>,
+    /// The label as printed on the receipt (empty when unknown).
+    #[serde(default)]
+    pub label: String,
+    /// What the line really cost, discount deducted. When omitted at
+    /// recording it is `round(qty * price_cents) - discount_cents`.
+    #[serde(default)]
+    pub line_cents: Option<i64>,
+    /// Discount taken off the line, in cents (0 when none).
+    #[serde(default)]
+    pub discount_cents: i64,
+    /// Unit of a weighed product (`kg`, `l`...).
+    #[serde(default)]
+    pub unit: Option<String>,
 }

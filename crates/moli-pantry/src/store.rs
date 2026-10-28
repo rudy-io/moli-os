@@ -9,10 +9,11 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::model::{Flexibility, Item, Offer, OfferStatus, Product, ProviderSettings, Reading};
 use crate::providers::PROVIDERS;
 
-/// The whole V1 schema, created at once: the offers, readings, baskets and
-/// purchases tables are filled by later features, but exist from day one so no
-/// migration is ever needed between them. Money is `INTEGER` cents, times are
-/// milliseconds since the Unix epoch.
+/// The whole schema for a new database. The offers, readings, baskets and
+/// purchases tables are filled by later features but exist from day one.
+/// A column added after a database was first created is also declared here,
+/// and added to older databases by [`migrate`]. Money is `INTEGER` cents,
+/// times are milliseconds since the Unix epoch.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS products (
     id             TEXT PRIMARY KEY,
@@ -108,9 +109,50 @@ CREATE TABLE IF NOT EXISTS purchases (
     at          INTEGER NOT NULL,
     source      TEXT NOT NULL,
     basket      INTEGER,
-    status      TEXT NOT NULL DEFAULT 'confirmed'
+    status      TEXT NOT NULL DEFAULT 'confirmed',
+    receipt        INTEGER,
+    label          TEXT NOT NULL DEFAULT '',
+    line_cents     INTEGER,
+    discount_cents INTEGER NOT NULL DEFAULT 0,
+    unit           TEXT
 );
 ";
+
+/// Columns added to `purchases` after the first version: (name, definition).
+const PURCHASE_ADDED_COLUMNS: [(&str, &str); 5] = [
+    ("receipt", "INTEGER"),
+    ("label", "TEXT NOT NULL DEFAULT ''"),
+    ("line_cents", "INTEGER"),
+    ("discount_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("unit", "TEXT"),
+];
+
+/// Brings an older database up to the current schema: adds the missing
+/// columns, then fills the cost of the lines that predate them. Safe to run
+/// on every open.
+fn migrate(conn: &Connection) -> Result<(), PantryError> {
+    let tx = conn.unchecked_transaction()?;
+    let present: Vec<String> = tx
+        .prepare("SELECT name FROM pragma_table_info('purchases')")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    for (name, definition) in PURCHASE_ADDED_COLUMNS {
+        if !present.iter().any(|c| c == name) {
+            tx.execute(
+                &format!("ALTER TABLE purchases ADD COLUMN {name} {definition}"),
+                [],
+            )?;
+        }
+    }
+    tx.execute(
+        "UPDATE purchases
+         SET line_cents = CAST(ROUND(qty * price_cents) AS INTEGER) - discount_cents
+         WHERE line_cents IS NULL",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
 
 const ITEM_COLUMNS: &str = "id, product, text, qty, added_by, channel, added_at, basket";
 const OFFER_COLUMNS: &str = "id, product, provider, reference, label, ean, unit_qty, unit, status";
@@ -272,6 +314,7 @@ impl Store {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             path: path.to_path_buf(),
             conn: Mutex::new(conn),
@@ -661,6 +704,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("pantry.db");
         (Store::open(&path).unwrap(), dir)
+    }
+
+    /// The `purchases` table as the first version created it.
+    const V1_PURCHASES: &str = "
+        CREATE TABLE purchases (
+            id          INTEGER PRIMARY KEY,
+            product     TEXT NOT NULL,
+            offer       INTEGER,
+            provider    TEXT NOT NULL,
+            store       TEXT NOT NULL,
+            qty         REAL NOT NULL,
+            price_cents INTEGER NOT NULL,
+            at          INTEGER NOT NULL,
+            source      TEXT NOT NULL,
+            basket      INTEGER,
+            status      TEXT NOT NULL DEFAULT 'confirmed'
+        );
+        INSERT INTO purchases(product, provider, store, qty, price_cents, at, source, status)
+        VALUES ('lait', 'carrefour', 'Ville-A', 2.0, 399, 1000, 'ticket', 'confirmed');";
+
+    #[test]
+    fn an_old_database_is_migrated_once() {
+        let dir = std::env::temp_dir().join(format!("moli-pantry-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pantry.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(V1_PURCHASES)
+            .unwrap();
+        for _ in 0..2 {
+            let store = Store::open(&path).unwrap();
+            let lines = store.purchases(0, u64::MAX / 4).unwrap();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].line_cents, Some(798));
+            assert_eq!(lines[0].discount_cents, 0);
+            assert_eq!(lines[0].label, "");
+            assert_eq!(lines[0].receipt, None);
+            assert_eq!(lines[0].unit, None);
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
