@@ -282,3 +282,99 @@ pub struct Purchase {
     #[serde(default)]
     pub unit: Option<String>,
 }
+
+/// Where a receipt stands: read and waiting for a human, or recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiptStatus {
+    /// Read from the photos, editable, not yet part of the purchases.
+    Draft,
+    /// A human validated it: its lines are purchases, it is frozen.
+    Validated,
+}
+
+impl ReceiptStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Validated => "validated",
+        }
+    }
+
+    pub(crate) fn parse(s: &str) -> Option<Self> {
+        match s {
+            "draft" => Some(Self::Draft),
+            "validated" => Some(Self::Validated),
+            _ => None,
+        }
+    }
+}
+
+/// One line of a receipt draft, as read and as corrected by a human.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DraftLine {
+    /// The label as printed on the receipt.
+    pub label: String,
+    /// The label in plain words.
+    pub name: String,
+    pub qty: f64,
+    /// Unit of a weighed product (`kg`, `l`...).
+    pub unit: Option<String>,
+    /// Unit price, in cents.
+    pub price_cents: i64,
+    /// Discount taken off the line, in cents.
+    pub discount_cents: i64,
+    /// What the line cost, discount deducted, in cents.
+    pub line_cents: i64,
+    /// VAT rate printed, in percent.
+    pub vat: Option<f64>,
+    pub aisle: Option<String>,
+    /// Becomes a purchase on validation (false for a bag, a deposit...).
+    pub keep: bool,
+    /// Why the reading is unsure or the line is not kept.
+    pub reason: String,
+    /// Id of an existing product.
+    pub product: Option<String>,
+    /// Name of a product to create on validation (never with `product`).
+    pub new_product: Option<String>,
+}
+
+/// What was read on a receipt, before a human validates it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ReceiptDraft {
+    pub provider: String,
+    pub store: String,
+    /// When the receipt was issued, in ms.
+    pub at: Option<u64>,
+    /// The total printed, in cents.
+    pub total_cents: Option<i64>,
+    pub lines: Vec<DraftLine>,
+    /// The photos could not be read.
+    pub unreadable: bool,
+    /// Shopping-list lines this receipt settles.
+    #[serde(default)]
+    pub items_done: Vec<i64>,
+}
+
+/// A receipt: its draft, and what is known around it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Receipt {
+    pub id: i64,
+    pub status: ReceiptStatus,
+    /// Photos still kept (they are erased 90 days after validation).
+    pub photos: usize,
+    pub sent_at: u64,
+    pub sent_by: String,
+    pub validated_at: Option<u64>,
+    pub validated_by: Option<String>,
+    /// Who read the photos (a model's name, or a person).
+    pub reader: String,
+    pub draft: ReceiptDraft,
+    /// The model's raw reading, kept as received.
+    pub read: serde_json::Value,
+    /// `total_cents` minus the sum of every line's cost, when the total is known.
+    pub gap_cents: Option<i64>,
+    /// A validated receipt of the same chain, minute and total: this one is
+    /// probably recorded already. Only looked for on a draft.
+    pub duplicate_of: Option<i64>,
+}

@@ -116,6 +116,31 @@ CREATE TABLE IF NOT EXISTS purchases (
     discount_cents INTEGER NOT NULL DEFAULT 0,
     unit           TEXT
 );
+-- A receipt read from photos. `draft` is the editable reading, `read` the model's raw answer;
+-- provider, store, at and total_cents are copies of the draft's, to find a duplicate.
+CREATE TABLE IF NOT EXISTS receipts (
+    id           INTEGER PRIMARY KEY,
+    status       TEXT NOT NULL CHECK (status IN ('draft', 'validated')),
+    provider     TEXT NOT NULL,
+    store        TEXT NOT NULL,
+    at           INTEGER,
+    total_cents  INTEGER,
+    photos       INTEGER NOT NULL DEFAULT 0,
+    sent_at      INTEGER NOT NULL,
+    sent_by      TEXT NOT NULL,
+    validated_at INTEGER,
+    validated_by TEXT,
+    reader       TEXT NOT NULL DEFAULT '',
+    draft        TEXT NOT NULL,   -- JSON
+    read         TEXT NOT NULL    -- JSON
+);
+-- What a receipt label of a chain is, learnt at each validation.
+CREATE TABLE IF NOT EXISTS label_links (
+    provider TEXT NOT NULL,
+    label    TEXT NOT NULL,
+    product  TEXT NOT NULL,
+    PRIMARY KEY (provider, label)
+);
 ";
 
 /// Columns added to `purchases` after the first version: (name, definition).
@@ -225,6 +250,31 @@ fn item_row(r: &Row<'_>) -> rusqlite::Result<Item> {
         added_at: ms(r.get(6)?),
         basket: r.get(7)?,
     })
+}
+
+/// [`Store::save_product`] on a connection (or a transaction) already held.
+pub(crate) fn save_product_in(conn: &Connection, p: &Product) -> Result<(), PantryError> {
+    if p.id.trim().is_empty() || p.name.trim().is_empty() {
+        return Err(PantryError::Invalid(
+            "a product needs an id and a name".into(),
+        ));
+    }
+    conn.execute(
+        "INSERT INTO products(id, name, detail, flexibility, fixed_provider, aisle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, detail = excluded.detail,
+             flexibility = excluded.flexibility, fixed_provider = excluded.fixed_provider,
+             aisle = excluded.aisle",
+        params![
+            p.id,
+            p.name,
+            p.detail,
+            p.flexibility.as_str(),
+            p.fixed_provider,
+            p.aisle
+        ],
+    )?;
+    Ok(())
 }
 
 fn product_row(r: &Row<'_>) -> rusqlite::Result<Product> {
@@ -452,27 +502,7 @@ impl Store {
 
     /// Creates a product, or replaces the one with the same id.
     pub fn save_product(&self, p: &Product) -> Result<(), PantryError> {
-        if p.id.trim().is_empty() || p.name.trim().is_empty() {
-            return Err(PantryError::Invalid(
-                "a product needs an id and a name".into(),
-            ));
-        }
-        self.lock().execute(
-            "INSERT INTO products(id, name, detail, flexibility, fixed_provider, aisle)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, detail = excluded.detail,
-                 flexibility = excluded.flexibility, fixed_provider = excluded.fixed_provider,
-                 aisle = excluded.aisle",
-            params![
-                p.id,
-                p.name,
-                p.detail,
-                p.flexibility.as_str(),
-                p.fixed_provider,
-                p.aisle
-            ],
-        )?;
-        Ok(())
+        save_product_in(&self.lock(), p)
     }
 
     pub fn products(&self) -> Result<Vec<Product>, PantryError> {

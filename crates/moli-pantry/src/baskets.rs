@@ -31,13 +31,13 @@ const PURCHASE_STATUSES: [&str; 2] = ["provisional", "confirmed"];
 /// The sheet bought for an item in a store, as priced in a basket's options.
 type Used = (i64, String, i64);
 
-fn json_col<T: DeserializeOwned>(r: &Row<'_>, idx: usize) -> rusqlite::Result<T> {
+pub(crate) fn json_col<T: DeserializeOwned>(r: &Row<'_>, idx: usize) -> rusqlite::Result<T> {
     let text: String = r.get(idx)?;
     serde_json::from_str(&text)
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, Type::Text, Box::new(e)))
 }
 
-fn json_text<T: serde::Serialize>(value: &T) -> Result<String, PantryError> {
+pub(crate) fn json_text<T: serde::Serialize>(value: &T) -> Result<String, PantryError> {
     serde_json::to_string(value).map_err(|e| PantryError::Invalid(format!("cannot encode: {e}")))
 }
 
@@ -80,6 +80,16 @@ fn purchase_row(r: &Row<'_>) -> rusqlite::Result<Purchase> {
         discount_cents: r.get(13)?,
         unit: r.get(14)?,
     })
+}
+
+fn load_purchase(conn: &Connection, id: i64) -> Result<Purchase, PantryError> {
+    conn.query_row(
+        &format!("SELECT {PURCHASE_COLUMNS} FROM purchases WHERE id = ?1"),
+        [id],
+        purchase_row,
+    )
+    .optional()?
+    .ok_or_else(|| PantryError::NotFound(format!("purchase {id}")))
 }
 
 fn load_basket(conn: &Connection, id: i64) -> Result<Basket, PantryError> {
@@ -137,7 +147,7 @@ fn close_if_settled(conn: &Connection, id: i64) -> Result<(), PantryError> {
     Ok(())
 }
 
-fn check_purchase(p: &Purchase) -> Result<(), PantryError> {
+pub(crate) fn check_purchase(p: &Purchase) -> Result<(), PantryError> {
     if p.product.trim().is_empty() || p.provider.trim().is_empty() {
         return Err(PantryError::Invalid(
             "a purchase needs a product and a provider".into(),
@@ -175,7 +185,7 @@ fn line_cost(p: &Purchase) -> i64 {
         .unwrap_or_else(|| (p.qty * p.price_cents as f64).round() as i64 - p.discount_cents)
 }
 
-fn insert_purchase(
+pub(crate) fn insert_purchase(
     conn: &Connection,
     p: &Purchase,
     basket: Option<i64>,
@@ -609,6 +619,51 @@ impl Store {
         Ok(stmt
             .query_map([ts(from), ts(to)], purchase_row)?
             .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Corrects a purchase from the purchases page: quantity, unit price,
+    /// cost of the line (recomputed from the quantity, the price and the
+    /// recorded discount when `None`) and product.
+    pub fn update_purchase(
+        &self,
+        id: i64,
+        qty: f64,
+        price_cents: i64,
+        line_cents: Option<i64>,
+        product: &str,
+    ) -> Result<Purchase, PantryError> {
+        let conn = self.lock();
+        let mut line = load_purchase(&conn, id)?;
+        line.qty = qty;
+        line.price_cents = price_cents;
+        line.line_cents = line_cents;
+        product.trim().clone_into(&mut line.product);
+        check_purchase(&line)?;
+        let known: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM products WHERE id = ?1)",
+            [&line.product],
+            |r| r.get(0),
+        )?;
+        if !known {
+            return Err(PantryError::NotFound(format!("product {}", line.product)));
+        }
+        conn.execute(
+            "UPDATE purchases SET qty = ?2, price_cents = ?3, line_cents = ?4, product = ?5
+             WHERE id = ?1",
+            params![id, qty, price_cents, line_cost(&line), line.product],
+        )?;
+        load_purchase(&conn, id)
+    }
+
+    /// Removes a purchase recorded by mistake.
+    pub fn delete_purchase(&self, id: i64) -> Result<(), PantryError> {
+        let n = self
+            .lock()
+            .execute("DELETE FROM purchases WHERE id = ?1", [id])?;
+        if n == 0 {
+            return Err(PantryError::NotFound(format!("purchase {id}")));
+        }
+        Ok(())
     }
 
     /// The latest basket that is neither done nor dropped.
@@ -1194,6 +1249,45 @@ mod tests {
         );
         cleanup(store, dir);
         cleanup(store2, dir2);
+    }
+
+    #[test]
+    fn a_purchase_can_be_corrected_or_deleted() {
+        let (store, dir, _, _, _) = two_drives("correct");
+        product(&store, "lait");
+        product(&store, "beurre");
+        let mut p = purchase("lait", None, "confirmed", 100);
+        p.discount_cents = 20;
+        store.record_purchases(&[p]).unwrap();
+        let id = store.purchases(0, u64::MAX / 4).unwrap()[0].id.unwrap();
+
+        // The cost is recomputed from the new quantity and price, discount kept.
+        let fixed = store.update_purchase(id, 3.0, 110, None, "beurre").unwrap();
+        assert_eq!(fixed.product, "beurre");
+        assert_eq!(fixed.qty, 3.0);
+        assert_eq!(fixed.line_cents, Some(310));
+        let fixed = store
+            .update_purchase(id, 3.0, 110, Some(300), "beurre")
+            .unwrap();
+        assert_eq!(fixed.line_cents, Some(300));
+
+        assert!(store.update_purchase(id, 0.0, 110, None, "beurre").is_err());
+        assert!(matches!(
+            store.update_purchase(id, 1.0, 110, None, "nope"),
+            Err(PantryError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.update_purchase(id + 9, 1.0, 110, None, "lait"),
+            Err(PantryError::NotFound(_))
+        ));
+
+        store.delete_purchase(id).unwrap();
+        assert!(store.purchases(0, u64::MAX / 4).unwrap().is_empty());
+        assert!(matches!(
+            store.delete_purchase(id),
+            Err(PantryError::NotFound(_))
+        ));
+        cleanup(store, dir);
     }
 
     #[test]

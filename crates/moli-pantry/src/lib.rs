@@ -20,21 +20,27 @@ mod basket;
 mod baskets;
 mod model;
 mod providers;
+mod receipts;
 mod store;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use moli_runtime::Hub;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::receipts::{purge_old_photos, remove_photos, write_photos};
+use crate::store::now_ms;
+
 pub use basket::{BasketOptions, Choice, Line, Terms, compute};
 pub use model::{
-    Basket, BasketStatus, Deviation, Flexibility, Item, Offer, OfferStatus, Product, ProviderInfo,
-    ProviderKind, ProviderSettings, Purchase, Reading,
+    Basket, BasketStatus, Deviation, DraftLine, Flexibility, Item, Offer, OfferStatus, Product,
+    ProviderInfo, ProviderKind, ProviderSettings, Purchase, Reading, Receipt, ReceiptDraft,
+    ReceiptStatus,
 };
 pub use providers::PROVIDERS;
+pub use receipts::MAX_PHOTOS;
 pub use store::{PantryError, Store};
 
 /// The database's file in the data folder.
@@ -52,15 +58,32 @@ pub struct Config {}
 pub struct Pantry {
     store: Arc<Store>,
     hub: Hub,
+    data_dir: PathBuf,
 }
 
 impl Pantry {
-    /// Opens (or creates) `data_dir/pantry.db`.
+    /// Opens (or creates) `data_dir/pantry.db`, and erases the receipt photos
+    /// that are past their keeping time.
     pub fn open(hub: &Hub, data_dir: &Path) -> Result<Self, PantryError> {
-        Ok(Self {
+        let pantry = Self {
             store: Arc::new(Store::open(&data_dir.join(FILE))?),
             hub: hub.clone(),
-        })
+            data_dir: data_dir.to_path_buf(),
+        };
+        if let Err(e) = purge_old_photos(&pantry.store, &pantry.receipts_dir(), now_ms()) {
+            tracing::warn!(error = %e, "cannot erase the old receipt photos");
+        }
+        Ok(pantry)
+    }
+
+    /// The folder holding the photos of the receipts.
+    pub fn receipts_dir(&self) -> PathBuf {
+        self.data_dir.join("receipts")
+    }
+
+    /// Where shot `n` (1 to [`MAX_PHOTOS`]) of a receipt is kept.
+    pub fn photo_path(&self, id: i64, n: usize) -> PathBuf {
+        receipts::photo_file(&self.receipts_dir(), id, n)
     }
 
     /// Everything a dashboard or an agent needs at once: the open list, the
@@ -227,6 +250,123 @@ impl Pantry {
 
     pub async fn open_basket(&self) -> Result<Option<Basket>, PantryError> {
         self.read(Store::open_basket).await
+    }
+
+    /// Corrects a purchase (see [`Store::update_purchase`]).
+    pub async fn update_purchase(
+        &self,
+        id: i64,
+        qty: f64,
+        price_cents: i64,
+        line_cents: Option<i64>,
+        product: &str,
+    ) -> Result<Purchase, PantryError> {
+        let product = product.to_owned();
+        self.write(move |s| s.update_purchase(id, qty, price_cents, line_cents, &product))
+            .await
+    }
+
+    pub async fn delete_purchase(&self, id: i64) -> Result<(), PantryError> {
+        self.write(move |s| s.delete_purchase(id)).await
+    }
+
+    // ---- receipts ------------------------------------------------------------
+
+    /// Stores a freshly read receipt as a draft, **then** writes its photos
+    /// (1 to [`MAX_PHOTOS`]); if they cannot be written the draft is removed
+    /// again. `read` is the model's raw answer, `reader` who or what read it.
+    pub async fn add_receipt(
+        &self,
+        photos: Vec<Vec<u8>>,
+        draft: ReceiptDraft,
+        read: serde_json::Value,
+        reader: String,
+        by: String,
+    ) -> Result<Receipt, PantryError> {
+        if photos.is_empty() || photos.len() > MAX_PHOTOS || photos.iter().any(Vec::is_empty) {
+            return Err(PantryError::Invalid(format!(
+                "a receipt needs 1 to {MAX_PHOTOS} photos"
+            )));
+        }
+        let count = photos.len();
+        let id = self
+            .read(move |s| s.create_receipt(&draft, &read, &reader, count, &by, now_ms()))
+            .await?;
+        let dir = self.receipts_dir();
+        let written = tokio::task::spawn_blocking(move || write_photos(&dir, id, &photos))
+            .await
+            .map_err(|e| PantryError::Internal(e.to_string()))?;
+        if let Err(e) = written {
+            let _ = self.read(move |s| s.abandon_receipt(id)).await;
+            return Err(PantryError::Internal(format!(
+                "cannot save the photos: {e}"
+            )));
+        }
+        self.hub.pantry_changed();
+        self.read(move |s| s.receipt(id)).await
+    }
+
+    pub async fn receipt(&self, id: i64) -> Result<Receipt, PantryError> {
+        self.read(move |s| s.receipt(id)).await
+    }
+
+    pub async fn receipts(
+        &self,
+        status: Option<ReceiptStatus>,
+    ) -> Result<Vec<Receipt>, PantryError> {
+        self.read(move |s| s.receipts(status)).await
+    }
+
+    pub async fn save_draft(&self, id: i64, draft: &ReceiptDraft) -> Result<Receipt, PantryError> {
+        let draft = draft.clone();
+        self.write(move |s| s.save_draft(id, &draft)).await
+    }
+
+    /// Validates a receipt (see [`Store::validate_receipt`]), then erases the
+    /// photos that are past their keeping time.
+    pub async fn validate_receipt(
+        &self,
+        id: i64,
+        by: &str,
+        now: u64,
+        force: bool,
+    ) -> Result<Receipt, PantryError> {
+        let by = by.to_owned();
+        let receipt = self
+            .write(move |s| s.validate_receipt(id, &by, now, force))
+            .await?;
+        if let Err(e) = self.purge_photos(now).await {
+            tracing::warn!(error = %e, "cannot erase the old receipt photos");
+        }
+        Ok(receipt)
+    }
+
+    /// Deletes a draft and its photo files.
+    pub async fn abandon_receipt(&self, id: i64) -> Result<(), PantryError> {
+        self.write(move |s| s.abandon_receipt(id)).await?;
+        let dir = self.receipts_dir();
+        tokio::task::spawn_blocking(move || remove_photos(&dir, id))
+            .await
+            .map_err(|e| PantryError::Internal(e.to_string()))
+    }
+
+    pub async fn photos_to_purge(&self, now: u64) -> Result<Vec<(i64, usize)>, PantryError> {
+        self.read(move |s| s.photos_to_purge(now)).await
+    }
+
+    pub async fn forget_photos(&self, id: i64) -> Result<(), PantryError> {
+        self.write(move |s| s.forget_photos(id)).await
+    }
+
+    /// Erases the photos of the receipts validated over 90 days before
+    /// `now`; returns how many receipts had some.
+    pub async fn purge_photos(&self, now: u64) -> Result<usize, PantryError> {
+        let dir = self.receipts_dir();
+        let purged = self.read(move |s| purge_old_photos(s, &dir, now)).await?;
+        if purged > 0 {
+            self.hub.pantry_changed();
+        }
+        Ok(purged)
     }
 
     // ---- internals -----------------------------------------------------------
