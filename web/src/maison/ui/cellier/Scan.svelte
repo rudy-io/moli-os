@@ -1,6 +1,9 @@
 <script>
   import { onDestroy } from 'svelte';
   import Icon from '../Icon.svelte';
+  import CodeGate from './CodeGate.svelte';
+  import { hub } from '../../../lib/hub.svelte.js';
+  import { needsCode } from '../../lib/cellier/errors.js';
   import { cellier, scanReceipt, readerWhy } from '../../lib/cellier.svelte.js';
   import { t } from '../../../lib/i18n.svelte.js';
 
@@ -29,6 +32,12 @@
   let cameraInput = $state();
   let galleryInput = $state();
 
+  /** A code is set and nobody typed it: Moli would refuse the photos. */
+  const codeNeeded = $derived(needsCode(hub.session));
+  // The code was typed: the refusal that asked for it no longer applies.
+  $effect(() => {
+    if (!codeNeeded && error === t('cellier.code.requis')) error = '';
+  });
   const refused = $derived(cellier.reader && !cellier.reader.allowed ? readerWhy(cellier.reader) : '');
 
   function add(e, from) {
@@ -55,7 +64,7 @@
   /** The page was left during the read: the draft still lands in « À valider ». */
   let left = false;
   async function read() {
-    if (busy || !photos.length) return;
+    if (busy || !photos.length || codeNeeded) return;
     busy = true;
     error = '';
     seconds = 0;
@@ -123,8 +132,9 @@
   {#if error}<p class="error" role="alert"><Icon name="alert" size={18} />{error}</p>{/if}
 
   {#if photos.length}
+    <CodeGate />
     <div class="go">
-      <button class="primary big" disabled={busy || !!refused} onclick={read}>
+      <button class="primary big" disabled={busy || !!refused || codeNeeded} onclick={read}>
         <Icon name="receipt" size={22} />
         {busy ? t('cellier.scan.lecture') : t('cellier.scan.lire')}
       </button>

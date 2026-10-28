@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
   import TicketLine from './TicketLine.svelte';
+  import CodeGate from './CodeGate.svelte';
+  import { hub } from '../../../lib/hub.svelte.js';
+  import { needsCode } from '../../lib/cellier/errors.js';
   import {
     cellier,
     euros,
@@ -49,6 +52,12 @@
   /** The server refused a save or a validation: the draft was saved
    *  elsewhere since it was loaded here. */
   let conflict = $state(false);
+  /** A code is set and nobody typed it: Moli refuses to record a receipt. */
+  const codeNeeded = $derived(needsCode(hub.session));
+  // The code was typed: the refusal that asked for it no longer applies.
+  $effect(() => {
+    if (!codeNeeded && error === t('cellier.code.requis')) error = '';
+  });
 
   function take(r) {
     receipt = r;
@@ -187,6 +196,7 @@
     });
 
   function validate() {
+    if (codeNeeded) return;
     checked = true;
     if (changedElsewhere) return;
     if (noProvider) {
@@ -375,11 +385,13 @@
       </div>
     {/if}
 
+    <CodeGate />
+
     <div class="actions">
       <button class="ghost danger" disabled={busy || gone} onclick={abandon}><Icon name="trash" size={20} />{t('cellier.ticket.abandonner')}</button>
       <span class="grow"></span>
       <button class="ghost" disabled={busy || gone || changedElsewhere || !dirty} onclick={save}><Icon name="save" size={20} />{t('cellier.ticket.enregistrer')}</button>
-      <button class="primary" disabled={busy || gone || changedElsewhere} onclick={validate}><Icon name="ok" size={20} />{t('cellier.ticket.valider')}</button>
+      <button class="primary" disabled={busy || gone || changedElsewhere || codeNeeded} onclick={validate}><Icon name="ok" size={20} />{t('cellier.ticket.valider')}</button>
     </div>
   </div>
 {/if}

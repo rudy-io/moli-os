@@ -211,5 +211,8 @@
   "cellier.stats.bientot": "Bientôt : les statistiques des courses.",
   "cellier.ticket.connexion_lecture": "Connexion perdue pendant la lecture, réessayez.",
   "cellier.ticket.retour": "Retour aux achats",
-  "cellier.ticket.quitter_confirmer": "Les corrections de ce ticket ne sont pas enregistrées. Quitter quand même ?"
+  "cellier.ticket.quitter_confirmer": "Les corrections de ce ticket ne sont pas enregistrées. Quitter quand même ?",
+  "cellier.code.requis": "Pour envoyer un ticket à Moli, dites-lui que c’est vous : tapez votre code.",
+  "cellier.code.libelle": "Votre code",
+  "cellier.code.valider": "C’est moi"
 }

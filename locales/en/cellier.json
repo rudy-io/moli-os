@@ -211,5 +211,8 @@
   "cellier.stats.bientot": "Coming soon: the shopping statistics.",
   "cellier.ticket.connexion_lecture": "Connection lost during the reading, try again.",
   "cellier.ticket.retour": "Back to purchases",
-  "cellier.ticket.quitter_confirmer": "The corrections of this receipt are not saved. Leave anyway?"
+  "cellier.ticket.quitter_confirmer": "The corrections of this receipt are not saved. Leave anyway?",
+  "cellier.code.requis": "To send a receipt to Moli, tell it it is you: type your code.",
+  "cellier.code.libelle": "Your code",
+  "cellier.code.valider": "It is me"
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { knownRefusal } from './errors.js';
+import { knownRefusal, isHumanOnly, needsCode } from './errors.js';
 
 test('a receipt gone or validated elsewhere', () => {
   assert.deepEqual(knownRefusal('not found: receipt 12'), { key: 'cellier.ticket.parti' });
@@ -23,4 +23,18 @@ test('anything else is said generically', () => {
   assert.equal(knownRefusal('database: locked'), null);
   assert.equal(knownRefusal(''), null);
   assert.equal(knownRefusal(undefined), null);
+});
+
+test('the server\'s « only a person » refusal asks for the code', () => {
+  assert.deepEqual(knownRefusal('seule une personne (code) envoie ceci'), { key: 'cellier.code.requis' });
+  assert.deepEqual(knownRefusal('only a person (with the code) can send this'), { key: 'cellier.code.requis' });
+  assert.equal(isHumanOnly('database: locked'), false);
+  assert.equal(isHumanOnly(undefined), false);
+});
+
+test('the code is needed once one is set and nobody is recognised', () => {
+  assert.equal(needsCode({ pin_configured: true, human: false, trusted: true }), true);
+  assert.equal(needsCode({ pin_configured: true, human: true }), false);
+  assert.equal(needsCode({ pin_configured: false, human: false }), false);
+  assert.equal(needsCode(undefined), false);
 });

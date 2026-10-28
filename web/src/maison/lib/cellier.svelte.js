@@ -6,7 +6,8 @@
 import { t } from '../../lib/i18n.svelte.js';
 import { money } from '../../lib/energy.js';
 import { shrink, toBase64 } from './cellier/photo.js';
-import { knownRefusal } from './cellier/errors.js';
+import { knownRefusal, isHumanOnly, needsCode } from './cellier/errors.js';
+import { hub, refreshSession } from '../../lib/hub.svelte.js';
 
 export const cellier = $state({
   loaded: false,
@@ -66,6 +67,7 @@ async function call(method, path, body) {
  *  server already says in the house's language (a guest, the demo house) is
  *  kept as it is. */
 export function explain(err) {
+  if (err?.status === 403 && isHumanOnly(err.detail)) return { text: t('cellier.code.requis'), detail: '' };
   if (![400, 404, 500].includes(err?.status) || !err.detail) return { text: err?.message ?? String(err), detail: '' };
   const known = knownRefusal(err.detail);
   return known ? { text: t(known.key, known.params), detail: '' } : { text: t('cellier.erreurs.refus'), detail: err.detail };
@@ -223,7 +225,13 @@ async function scanError(e) {
       return t('cellier.ticket.occupe');
     case 413:
       return t('cellier.ticket.trop_lourd');
+    case 403:
+      return isHumanOnly(e.detail) ? t('cellier.code.requis') : e.message;
     case 0:
+      // Refused before the photos were read (the server answers 403 and
+      // closes the connection): no code typed, then say so.
+      await refreshSession();
+      if (needsCode(hub.session)) return t('cellier.code.requis');
       // The read takes long: a phone leaving the Wi-Fi meanwhile is likely.
       return t('cellier.ticket.connexion_lecture');
     case 400:
