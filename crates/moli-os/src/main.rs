@@ -380,6 +380,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     );
 
     let saver = housekeeping(&hub, &cancel);
+    let purger = pantry.as_ref().map(|p| pantry_upkeep(p, &cancel));
     let shutdown = cancel.clone();
     // Given, even empty: the house is set up (its vault is wrong); absent:
     // a new house, which may ask for its installation.
@@ -422,6 +423,9 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         let _ = task.await;
     }
     let _ = saver.await;
+    if let Some(purger) = purger {
+        let _ = purger.await;
+    }
     let _ = automating.await;
     if let Some(recorder) = recorder {
         let _ = recorder.await; // flushes its last batch
@@ -481,6 +485,31 @@ fn pantry(config: &Config, hub: &Hub) -> Option<moli_pantry::Pantry> {
     moli_pantry::Pantry::open(hub, &config.server.data_dir)
         .inspect_err(|e| tracing::error!(error = %e, "cannot open the pantry, started without it"))
         .ok()
+}
+
+/// How often the pantry erases the receipt photos past their keeping time.
+const PHOTO_PURGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Receipt photos are kept 90 days after their receipt is validated: erased
+/// at start, then every day, whether or not another receipt is validated.
+fn pantry_upkeep(
+    pantry: &moli_pantry::Pantry,
+    cancel: &CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    let (pantry, cancel) = (pantry.clone(), cancel.clone());
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(PHOTO_PURGE);
+        loop {
+            tokio::select! {
+                () = cancel.cancelled() => break,
+                // The first tick is immediate: the purge at start.
+                _ = tick.tick() => {}
+            }
+            if let Err(e) = pantry.purge_photos(moli_core::now_ms()).await {
+                tracing::warn!(error = %e, "cannot erase the old receipt photos");
+            }
+        }
+    })
 }
 
 /// The automations engine, and Moli (who drafts them and writes their

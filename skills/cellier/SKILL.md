@@ -155,11 +155,12 @@ panier qui l'achète.
 
 ## Tickets de caisse
 
-Le foyer scanne ses tickets lui-même : dans le tableau de bord, page **Achats**, il photographie le
-ticket, Moli en tire un **brouillon** (enseigne, date, total, lignes) et c'est un humain qui le
+Le foyer peut scanner ses tickets lui-même : dans le tableau de bord, page **Achats**, il photographie
+le ticket, Moli en tire un **brouillon** (enseigne, date, total, lignes) et c'est un humain qui le
 vérifie et le **valide** : rien ne devient un achat avant. Ce chemin n'est pas celui de l'agent (la
-lecture et la validation sont réservées au tableau de bord) ; s'il s'agit de saisir un ticket, le dire
-et renvoyer le foyer vers la page Achats.
+lecture par Moli et la validation sont réservées au tableau de bord) : si le foyer a **une photo à
+faire lire par Moli**, le renvoyer vers la page Achats. Si l'humain montre le ticket à l'agent, c'est
+l'agent qui l'enregistre lui-même, comme ci-dessous.
 
 Quand l'humain montre un ticket **à l'agent** (photo ou texte lu par l'agent lui-même) :
 
@@ -177,7 +178,9 @@ Quand l'humain montre un ticket **à l'agent** (photo ou texte lu par l'agent lu
    prochain ticket : le donner tel qu'imprimé. Les montants sont toujours en centimes. Un produit
    inconnu passe d'abord par `pantry_save_product`.
 4. Un ticket déjà enregistré (même enseigne, même minute, même total) est refusé : ne pas le
-   renvoyer en changeant un détail, le dire. Un nouvel essai après une erreur ne compte pas deux fois.
+   renvoyer en changeant un détail, le dire. Un nouvel essai après une erreur ne compte pas deux fois,
+   mais seulement si `total_cents` est donné : **toujours le passer** quand le ticket affiche son
+   total (sans lui, la garde contre les doublons ne joue pas).
 5. Dire ce qui a été enregistré (nombre de lignes, total) et ce qui reste douteux.
 
 Pour **répondre à une question sur ce qui a été acheté** (« combien on a dépensé en lait ce mois-ci ? »,

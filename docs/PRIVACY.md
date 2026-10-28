@@ -24,7 +24,9 @@ transmettre au service de reconnaissance vocale que vous avez choisi.
 **Appareil photo.** Il n'est utilisé que lorsque vous scannez un ticket de caisse dans le Cellier.
 La photo va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, la transmettre
 au service de lecture que vous avez choisi. Elle y est effacée 90 jours après la validation du
-ticket.
+ticket (Moli y veille au démarrage puis chaque jour). La photo d'un brouillon que personne n'a validé
+reste sur votre serveur jusqu'à ce que quelqu'un le supprime ; le supprimer efface aussitôt ses
+photos.
 
 **Notifications.** Si vous les autorisez, votre maison peut vous en envoyer, par le service de
 notifications d'Expo et d'Apple. Le jeton de notification n'est envoyé qu'à votre serveur Moli.
@@ -57,7 +59,9 @@ service you chose.
 
 **Camera.** Used only when you scan a till receipt in the Cellier. The photo goes to your Moli
 server, which may, depending on how you set it up, pass it to the reading service you chose. It is
-erased there 90 days after the receipt is validated.
+erased there 90 days after the receipt is validated (Moli checks at startup, then every day). The
+photo of a draft nobody has validated stays on your server until someone deletes the draft; deleting
+it erases its photos right away.
 
 **Notifications.** If you allow them, your house can send you notifications through Expo's and
 Apple's notification services. The notification token is only sent to your Moli server.
