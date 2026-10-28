@@ -92,5 +92,10 @@
   "cellier.reglages.frais": "Frais (€)",
   "cellier.reglages.enregistrer": "Enregistrer",
   "cellier.reglages.enregistre": "Enregistré : {nom}",
-  "cellier.reglages.seuil_enregistre": "Seuil enregistré : {pct} %."
+  "cellier.reglages.seuil_enregistre": "Seuil enregistré : {pct} %.",
+  "cellier.ticket.illisible": "Le ticket est illisible : refaites la photo, bien à plat et bien éclairée.",
+  "cellier.ticket.pas_assistant": "Aucun assistant n’est configuré pour lire les tickets.",
+  "cellier.ticket.refuse": "La lecture des tickets n’est pas autorisée avec cet assistant (voir les réglages de l’assistant).",
+  "cellier.ticket.lecture_inutilisable": "La lecture du ticket n’a pas donné un résultat utilisable : réessayez.",
+  "cellier.ticket.photos_refusees": "Les photos sont refusées : de 1 à 4 images JPEG sont attendues."
 }

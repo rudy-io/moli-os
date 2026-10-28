@@ -92,5 +92,10 @@
   "cellier.reglages.frais": "Fee (€)",
   "cellier.reglages.enregistrer": "Save",
   "cellier.reglages.enregistre": "Saved: {nom}",
-  "cellier.reglages.seuil_enregistre": "Threshold saved: {pct} %."
+  "cellier.reglages.seuil_enregistre": "Threshold saved: {pct} %.",
+  "cellier.ticket.illisible": "The receipt is unreadable: take the photo again, flat and well lit.",
+  "cellier.ticket.pas_assistant": "No assistant is set up to read receipts.",
+  "cellier.ticket.refuse": "Reading receipts is not allowed with this assistant (see the assistant settings).",
+  "cellier.ticket.lecture_inutilisable": "The reading of the receipt gave no usable result: try again.",
+  "cellier.ticket.photos_refusees": "The photos were refused: 1 to 4 JPEG images are expected."
 }
