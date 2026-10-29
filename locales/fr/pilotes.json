@@ -538,17 +538,5 @@
   "pilotes.zwave.point_lu_seul": "le point {point} est en lecture seule",
   "pilotes.zwave.point_sans_cible": "le point {point} n'a pas de cible d'écriture",
   "pilotes.zwave.niveau_attend_nombre": "le point niveau attend un nombre",
-  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen",
-  "pilotes.zwave.attente_gateway": "en attente du pont Z-Wave : le broker répond, mais Z-Wave JS UI n'a pas encore donné la liste des nœuds",
-  "pilotes.zwave.pont_injoignable": "pont Z-Wave injoignable",
-  "pilotes.zwave.point_non_ecrivable": "ce point ne s'écrit pas sur cet appareil Z-Wave",
-  "pilotes.zwave.occupe": "appareil occupé : une écriture vers ce point est déjà en cours",
-  "pilotes.zwave.sans_accuse": "envoyé, mais le pont n'a pas confirmé à temps",
-  "pilotes.zwave.ecriture_refusee": "écriture refusée par Z-Wave : {detail}",
-  "pilotes.zwave.marche": "Marche",
-  "pilotes.zwave.luminosite": "Luminosité",
-  "pilotes.zwave.batterie": "Batterie",
-  "pilotes.zwave.batterie_faible": "Batterie faible",
-  "pilotes.zwave.verrou": "Verrou",
-  "pilotes.zwave.etat_verrou": "État du verrou"
+  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen"
 }

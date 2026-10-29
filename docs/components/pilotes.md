@@ -148,7 +148,8 @@ base_topic = "zigbee2mqtt"  # défaut
   capteurs sur pile) ; on/off et niveau écrivables, tout le reste en lecture seule ; aucun
   code par marque.
 - **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées
-  sur `{base}/{nom}/{cc}/{endpoint}/{prop}/set` (payload JSON brut : `true`, `80`) ;
+  sur `{base}/{nom}/{cc}/{endpoint}/{prop}/set` (payload JSON brut : CC 37 boolean
+  `true`/`false`, CC 32/38 nombre `0`–`255` sur `targetValue`) ;
   les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la passerelle,
   déballées par le pilote) ; disponibilité sur `{base}/{nom}/status` (`true`/`false`) ;
   bootstrap par l'API `getNodes` du gateway (topic `{base}/_CLIENTS/ZWAVE_GATEWAY-{mqtt_name}/api/getNodes/set`, payload
@@ -163,7 +164,7 @@ kind = "zwave"
 host = "127.0.0.1"          # défaut
 port = 1883                 # défaut
 base_topic = "zwave"        # défaut
-# mqtt_name = "zwave-js-ui" # défaut Moli : "default" — nom MQTT de la passerelle (champ Name, onglet Gateway)
+# mqtt_name = "default"     # défaut — nom du client MQTT de la passerelle (champ Name, onglet Gateway)
 # username
 # password_env = "MOLI_ZWAVE_PASSWORD"   # NOM de la variable, jamais le mot de passe
 # client_id
@@ -172,15 +173,23 @@ base_topic = "zwave"        # défaut
 - **Secrets** : mot de passe broker éventuel dans la variable d'environnement nommée par
   `password_env` ; jamais dans `moli.toml`.
 - **Points** : `on` (CC 32 Basic, 37 Switch Binary, 38 Switch Multilevel : le number de
-  CC 38 est décodé en booléen) et `level` (CC 38 `targetValue`, 0-100 %, sémantique
-  brightness) **écrivables** ; `battery` (CC 53 `batteryLevel` ou CC 128 `level`, %),
-  `temperature` / `humidity` (CC 31/49 : « Air temperature », « Relative humidity »),
-  `power` (CC 50, clé 66049, W) en lecture ; un (cc, property) inconnu est ignoré proprement.
+  CC 38 est décodé en booléen) et `level` (CC 38 `targetValue`, 0-100 %) **écrivables** ;
+  `battery` (CC 53 `batteryLevel` ou CC 128 `level`, %), `temperature` / `humidity`
+  (CC 31/49 : « Air temperature », « Relative humidity »), `power` (CC 50, clé 66049, W) en
+  lecture ; un (cc, property) inconnu est ignoré proprement. Sémantique du `level` :
+  `Brightness` uniquement si la classe de device du nœud est Multilevel Switch (generic
+  0x11) avec specific 0x01/0x02 — sinon `Other`, sinon la garde ne traite pas le nœud
+  comme une lumière (un module de volet CC 38 nommé « Portail » doit rester
+  vérifiable par le nom). `native_name` conserve le nom brut du gateway (accents et
+  espaces intacts) ; seul le sujet MQTT est assaini.
 - **Identité** : `nodeId` zwave (`<instance>:<nodeId>`), jamais le nom ; le nom et la
   localisation zwave-js servent de suggestions (`native_name`, `native_room`).
 - **Pièges** : le gateway ne rejoue pas les états sans le flag retain → bootstrap `getNodes`
-  à chaque connexion (délai 15 s), avec un fallback tolérant par accumulation des topics
-  vus (identité par nom de nœud, temporaire, corrigée au prochain `getNodes`) ; un nœud
+  à chaque connexion (fenêtre initiale de 15 s), puis réessai toutes les 30 s jusqu'à
+  la première réponse acceptée, puis rafraîchissement périodique toutes les 300 s (les
+  nœuds appairés ou renommés ensuite apparaissent sans redémarrage) ; le fallback tolérant par
+  accumulation des topics vus n'est armé qu'après cette première fenêtre (pas de fantômes
+  `zwave:<nom>` si la réponse arrive après quelques secondes) ; un nœud
   n'est marqué hors ligne que sur `status` `false` après avoir été vu en ligne (un capteur
   sur pile jamais vu reste disponible) ; le shape de `getNodes` et la sérialisation des
   propertyKeys (CC 49) sont confirmés sur la cible (capture réelle + test
@@ -190,9 +199,11 @@ base_topic = "zwave"        # défaut
   les mises à jour d'état arrivent enveloppées `{"time", "value"}` (défaut de la passerelle,
   déballées par le pilote) ; ne jamais
   journaliser les `MqttOptions` (le `Debug` affiche le mot de passe) ; une commande avant
-  `ConnAck` est refusée (`broker injoignable`), jamais acquittée puis perdue.
+  `ConnAck` est refusée (`broker injoignable`), jamais acquittée puis perdue ; le succès
+  d'une écriture n'est pas vérifié (la passerelle n'acquitte pas les commandes).
 - **Tests** : `src/catalog.rs` sur les fixtures `integrations/zwave/fixtures/get_nodes.json`
-  (5 nœuds synthétiques), `value_messages.json` et `get_nodes_real.json` (capture réelle
+  (6 nœuds synthétiques, dont un moteur de volet CC 38), `value_messages.json` et
+  `get_nodes_real.json` (capture réelle
   anonymisée) : découverte, typage, décodage, encodage on/niveau, tolérance
   (enveloppe, propertyKey, bornes), règles de disponibilité et de config.
 

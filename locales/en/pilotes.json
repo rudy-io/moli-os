@@ -538,17 +538,5 @@
   "pilotes.zwave.point_lu_seul": "point {point} is read-only",
   "pilotes.zwave.point_sans_cible": "point {point} has no write target",
   "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
-  "pilotes.zwave.on_attend_booleen": "point on expects a boolean",
-  "pilotes.zwave.attente_gateway": "waiting for the Z-Wave bridge: the broker answers, but Z-Wave JS UI has not handed over its nodes yet",
-  "pilotes.zwave.pont_injoignable": "the Z-Wave bridge is unreachable",
-  "pilotes.zwave.point_non_ecrivable": "this point cannot be written on this Z-Wave device",
-  "pilotes.zwave.occupe": "device busy: a write to this point is already in flight",
-  "pilotes.zwave.sans_accuse": "sent, but the bridge did not confirm in time",
-  "pilotes.zwave.ecriture_refusee": "write refused by Z-Wave: {detail}",
-  "pilotes.zwave.marche": "On",
-  "pilotes.zwave.luminosite": "Brightness",
-  "pilotes.zwave.batterie": "Battery",
-  "pilotes.zwave.batterie_faible": "Low battery",
-  "pilotes.zwave.verrou": "Lock",
-  "pilotes.zwave.etat_verrou": "Lock state"
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
 }

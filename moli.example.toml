@@ -84,7 +84,7 @@ base_topic = "zigbee2mqtt"
 # host = "127.0.0.1"
 # port = 1883
 # base_topic = "zwave"       # the gateway's MQTT topic prefix
-# mqtt_name = "zwave-js-ui"  # the gateway's client name (its MQTT "Name")
+# mqtt_name = "default"      # nom du client MQTT de la passerelle (champ "Name", défaut "default")
 # username = "moli-os"
 # password_env = "MOLI_ZWAVE_PASSWORD"
 
