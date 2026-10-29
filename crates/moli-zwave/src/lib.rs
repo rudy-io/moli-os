@@ -1,13 +1,18 @@
 //! Z-Wave driver (zwave-js-ui MQTT gateway).
 //!
 //! Subscribes to `{base}/#` and builds its catalog from the gateway's
-//! `getNodes` API. When the answer does not arrive within
-//! `GET_NODES_TIMEOUT_SECS`, the driver accumulates devices from the value
-//! topics it observes (tolerant fallback). Value topics update typed
-//! points, `{base}/status` drives availability (a node never seen online
-//! never goes offline), and commands are published to
-//! `{base}/{cc}/{endpoint}/{property}/set` — where `{base}` is the node's
-//! topic base, `[loc/]name` (the gateway's own sanitization).
+//! `getNodes` API. The request is re-sent every `GET_NODES_RETRY_SECS`
+//! until the first accepted answer, and every `GET_NODES_REFRESH_SECS`
+//! afterwards, so nodes paired or renamed later appear without a driver
+//! restart. If the first answer is not received within
+//! `GET_NODES_TIMEOUT_SECS`, the driver starts accumulating devices from
+//! the value topics it observes (tolerant fallback — armed only after that
+//! first window, so a late answer never leaves ghost `zwave:<name>`
+//! devices behind). Value topics update typed points, `{base}/status`
+//! drives availability (a node never seen online never goes offline), and
+//! commands are published to `{base}/{cc}/{endpoint}/{property}/set` —
+//! where `{base}` is the node's topic base, `[loc/]name` (the gateway's
+//! own sanitization).
 
 mod catalog;
 
@@ -36,8 +41,9 @@ pub struct Config {
     /// The gateway's MQTT base topic.
     #[serde(default = "default_base_topic")]
     pub base_topic: String,
-    /// The gateway name registered with zwave-js-ui (`default` unless the
-    /// house runs several gateways).
+    /// The gateway's MQTT client name (the `Name` field of the gateway's
+    /// MQTT settings; zwave-js-ui defaults to `default` unless the house
+    /// runs several gateways with distinct names).
     #[serde(default = "default_mqtt_name")]
     pub mqtt_name: String,
     #[serde(default)]
@@ -92,9 +98,16 @@ impl Driver for Zwave {
 /// Payload of the `getNodes` request.
 const GET_NODES_REQUEST: &str = r#"{"args":[]}"#;
 
-/// How long to wait for the `getNodes` answer before falling back to
-/// accumulating devices from the value topics.
+/// How long to wait for the first `getNodes` answer before the value
+/// topics start accumulating devices (tolerant fallback).
 const GET_NODES_TIMEOUT_SECS: u64 = 15;
+
+/// How often to re-request `getNodes` until the first accepted answer.
+const GET_NODES_RETRY_SECS: u64 = 30;
+
+/// How often to re-request `getNodes` once bootstrapped, so nodes paired
+/// or renamed later appear without a driver restart.
+const GET_NODES_REFRESH_SECS: u64 = 300;
 
 /// Mutable state of one driver run.
 #[derive(Debug, Default)]
@@ -102,6 +115,11 @@ struct ZwaveState {
     catalog: Catalog,
     /// `true` once a `getNodes` answer has rebuilt the catalog.
     bootstrapped: bool,
+    /// Value topics accumulate devices only after the first
+    /// `GET_NODES_TIMEOUT_SECS` window has passed (a `getNodes` answer in
+    /// the meantime wins, and no ghost `zwave:<name>` device is created).
+    /// Reset on each connect while not bootstrapped.
+    accumulation_armed: bool,
     /// Node ids already seen online: a node never seen online never goes
     /// offline (battery sensors sleep for days).
     seen_online: HashMap<DeviceId, bool>,
@@ -132,8 +150,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // queue, be acknowledged, and be lost (or sent much later): refuse it.
     // Any poll error ends the run, so the flag never outlives a connection.
     let mut connected = false;
-    // Deadline for the `getNodes` answer, once the request is sent.
-    let mut bootstrap_deadline: Option<Instant> = None;
+    // Deadline of the next `getNodes` request. 15 s after connect (first
+    // window), then 30 s retries until the first accepted answer, 300 s
+    // refresh cycles afterwards.
+    let mut next_request_at: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -144,12 +164,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     ctx.ready();
                     tracing::info!(instance = %ctx.instance(), "connected to zwave gateway");
                     if !state.bootstrapped {
-                        let bootstrap_topic =
-                            format!("{base}/_CLIENTS/ZWAVE_GATEWAY-{}/api/getNodes/set", config.mqtt_name);
-                        client.try_publish(bootstrap_topic, QoS::AtLeastOnce, false, GET_NODES_REQUEST.to_owned())?;
-                        bootstrap_deadline = Some(
-                            Instant::now() + Duration::from_secs(GET_NODES_TIMEOUT_SECS),
-                        );
+                        request_get_nodes(&client, base, &config.mqtt_name)?;
+                        state.accumulation_armed = false;
+                        next_request_at =
+                            Some(Instant::now() + Duration::from_secs(GET_NODES_TIMEOUT_SECS));
                     }
                 }
                 Event::Incoming(Packet::Publish(publish)) => {
@@ -159,17 +177,26 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     // never match and the `getNodes` answer would be dropped).
                     let bootstrap_response_suffix =
                         format!("_CLIENTS/ZWAVE_GATEWAY-{}/api/getNodes", config.mqtt_name);
-                    on_publish(ctx, base, &bootstrap_response_suffix, &mut state, &publish);
+                    on_publish(ctx, base, &bootstrap_response_suffix, &mut state, &mut next_request_at, &publish);
                 }
                 _ => {}
             },
-            () = sleep_until(bootstrap_deadline), if bootstrap_deadline.is_some() && !state.bootstrapped => {
-                bootstrap_deadline = None;
-                tracing::warn!(
-                    instance = %ctx.instance(),
-                    "zwave getNodes answer not received in {GET_NODES_TIMEOUT_SECS}s: \
-                    accumulating devices from the value topics"
-                );
+            () = sleep_until(next_request_at), if next_request_at.is_some() => {
+                if state.bootstrapped {
+                    // Periodic refresh: nodes paired or renamed since the last
+                    // answer must appear without a driver restart.
+                    request_get_nodes(&client, base, &config.mqtt_name)?;
+                    next_request_at =
+                        Some(Instant::now() + Duration::from_secs(GET_NODES_REFRESH_SECS));
+                } else {
+                    // First 15 s window (or retry) elapsed without an accepted
+                    // answer: from now on value topics accumulate devices, and
+                    // `getNodes` is re-requested every 30 s until accepted.
+                    state.accumulation_armed = true;
+                    request_get_nodes(&client, base, &config.mqtt_name)?;
+                    next_request_at =
+                        Some(Instant::now() + Duration::from_secs(GET_NODES_RETRY_SECS));
+                }
             },
             command = ctx.next_command() => {
                 let Some(command) = command else {
@@ -194,11 +221,18 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     }
 }
 
-/// Awaits until the bootstrap deadline (resolves immediately if `None`).
+/// Awaits until the next request deadline (resolves immediately if `None`).
 async fn sleep_until(deadline: Option<Instant>) {
     if let Some(deadline) = deadline {
         tokio::time::sleep_until(deadline).await;
     }
+}
+
+/// Publishes the `getNodes` request to the gateway's per-client API topic.
+fn request_get_nodes(client: &AsyncClient, base: &str, mqtt_name: &str) -> anyhow::Result<()> {
+    let topic = format!("{base}/_CLIENTS/ZWAVE_GATEWAY-{mqtt_name}/api/getNodes/set");
+    client.try_publish(topic, QoS::AtLeastOnce, false, GET_NODES_REQUEST.to_owned())?;
+    Ok(())
 }
 
 /// The decision for one command: refuse it, or publish it.
@@ -280,16 +314,27 @@ fn route_topic(topic: &str, base: &str, bootstrap_response_suffix: &str) -> Rout
 }
 
 /// Routes one gateway message: the `getNodes` answer, `{name}/status`, or a
-/// value topic.
+/// value topic. On a `getNodes` answer, reschedules the next request: an
+/// accepted answer switches to the 300 s refresh cadence, a refused one
+/// (malformed, or empty while devices are accumulated) to a 30 s retry.
 fn on_publish(
     ctx: &DriverCtx,
     base: &str,
     bootstrap_response_suffix: &str,
     state: &mut ZwaveState,
+    next_request_at: &mut Option<Instant>,
     publish: &Publish,
 ) {
     match route_topic(&publish.topic, base, bootstrap_response_suffix) {
-        Routed::GetNodes => handle_get_nodes(ctx, state, &publish.payload),
+        Routed::GetNodes => {
+            let accepted = handle_get_nodes(ctx, state, &publish.payload);
+            let after_secs = if accepted {
+                GET_NODES_REFRESH_SECS
+            } else {
+                GET_NODES_RETRY_SECS
+            };
+            *next_request_at = Some(Instant::now() + Duration::from_secs(after_secs));
+        }
         Routed::Status { base } => handle_status(ctx, state, &base, &publish.payload),
         Routed::Value { rest } => handle_value(ctx, state, &rest, &publish.payload),
         Routed::Ignored => {}
@@ -304,11 +349,14 @@ fn replaces_catalog(fresh: &Catalog, current: &Catalog) -> bool {
     !fresh.is_empty() || current.is_empty()
 }
 
-/// Rebuilds the catalog from the `getNodes` answer; a late or malformed
-/// answer keeps the accumulated catalog.
-fn handle_get_nodes(ctx: &DriverCtx, state: &mut ZwaveState, payload: &[u8]) {
+/// Rebuilds the catalog from the `getNodes` answer; a late, malformed or
+/// empty answer keeps the accumulated catalog. Returns `true` when the
+/// answer was accepted (catalog rebuilt, or the driver was already
+/// bootstrapped) so the caller schedules the 300 s refresh cadence;
+/// `false` otherwise (retry in 30 s).
+fn handle_get_nodes(ctx: &DriverCtx, state: &mut ZwaveState, payload: &[u8]) -> bool {
     if state.bootstrapped {
-        return;
+        return true;
     }
     match Catalog::from_get_nodes(ctx.instance(), payload) {
         Ok(fresh) if !replaces_catalog(&fresh, &state.catalog) => {
@@ -318,13 +366,16 @@ fn handle_get_nodes(ctx: &DriverCtx, state: &mut ZwaveState, payload: &[u8]) {
                 "zwave getNodes returned an empty node list while devices are already accumulated; \
                  keeping the accumulated catalog and waiting for a populated answer"
             );
+            false
         }
         Ok(fresh) => {
             apply_catalog(ctx, &mut state.catalog, fresh);
             state.bootstrapped = true;
+            true
         }
         Err(e) => {
             tracing::warn!(error = %e, "zwave getNodes answer unusable; keeping the accumulated catalog");
+            false
         }
     }
 }
@@ -352,7 +403,11 @@ fn handle_status(ctx: &DriverCtx, state: &mut ZwaveState, base: &str, payload: &
 
 /// One value topic: `{base}/{cc}/{endpoint}/{property}[/{propertyKey}]`.
 /// After the `getNodes` answer, the entry is resolved by its topic base
-/// (which may carry a `{loc}/` prefix); before it, known
+/// (which may carry a `{loc}/` prefix). Before it, value topics are ignored
+/// until the first `GET_NODES_TIMEOUT_SECS` window has elapsed (the
+/// `accumulation_armed` flag, set by the timer): accumulating from the first
+/// message would create ghost `zwave:<name>` devices with retain when the
+/// `getNodes` answer arrives seconds later. Once armed, known
 /// `(cc, property[, key])` tuples accumulate devices under the first topic
 /// segment (the base cannot be known yet).
 fn handle_value(ctx: &DriverCtx, state: &mut ZwaveState, rest: &str, payload: &[u8]) {
@@ -362,6 +417,9 @@ fn handle_value(ctx: &DriverCtx, state: &mut ZwaveState, rest: &str, payload: &[
                 ctx.set_state(&entry.device.id, &key, value);
             }
         }
+        return;
+    }
+    if !state.accumulation_armed {
         return;
     }
     // Tolerant accumulation: only known `(cc, property)` pairs create a
@@ -570,13 +628,14 @@ mod tests {
             }
         );
 
-        // Multilevel lamp: `on` goes to `38/0/targetValue/set`.
+        // Multilevel lamp: `on` goes to `38/0/targetValue/set` with a numeric
+        // payload (CC 38 targetValue takes 0-255, not a boolean).
         let decision = decide_command(true, &catalog, &lamp, "on", &Value::Bool(true));
         assert_eq!(
             decision,
             CommandDecision::Publish {
                 topic: "bureau_lamp/38/0/targetValue/set".into(),
-                payload: "true".into(),
+                payload: "255".into(),
             }
         );
 
