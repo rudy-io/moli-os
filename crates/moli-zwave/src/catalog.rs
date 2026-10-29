@@ -217,7 +217,13 @@ impl Catalog {
                     write: false,
                 },
                 unit: kind.unit(),
-                semantic: kind.semantic(),
+                // No device class is available in accumulation mode, so the
+                // level point can never be called a light: keep it neutral.
+                semantic: if matches!(kind, PointKind::Level) {
+                    Semantic::Other
+                } else {
+                    kind.semantic()
+                },
             });
         }
         match kind {
@@ -343,13 +349,20 @@ impl Entry {
                 }
             }
         } else {
-            match value {
-                Value::Bool(b) => b.to_string(),
-                _ => {
-                    return Err(anyhow::anyhow!(moli_i18n::tr!(
-                        "pilotes.zwave.on_attend_booleen"
-                    )));
-                }
+            let Value::Bool(on) = value else {
+                return Err(anyhow::anyhow!(moli_i18n::tr!(
+                    "pilotes.zwave.on_attend_booleen"
+                )));
+            };
+            // Switch Binary (37) takes a boolean; Basic (32) and Multilevel
+            // (38) `targetValue` take a number — `true` alone would be
+            // refused or misinterpreted at the gateway: send 0/255.
+            if target.cc == 37 {
+                on.to_string()
+            } else if *on {
+                "255".to_string()
+            } else {
+                "0".to_string()
             }
         };
         Ok((
@@ -449,6 +462,23 @@ impl PointKind {
     }
 }
 
+/// The semantic of a CC 38 `level` point, from the gateway's device class:
+/// `Brightness` only when the node is declared a light — generic
+/// "Multilevel Switch" (0x11) with specific "Multilevel Power Switch"
+/// (0x01, Light Dimmer) or "Tunable Color Switch" (0x02, Color Switch).
+/// Shutter, gate and motor modules also expose CC 38 but are not lights: a
+/// `Brightness` point would make the guard treat the device as a light and
+/// skip its name check entirely, so unknown, absent or non-light classes
+/// stay neutral (`Other`) and the name check still applies.
+fn level_semantic(device_class: Option<&RawDeviceClass>) -> Semantic {
+    match device_class {
+        Some(dc) if dc.generic == 0x11 && matches!(dc.specific, 0x01 | 0x02) => {
+            Semantic::Brightness
+        }
+        _ => Semantic::Other,
+    }
+}
+
 /// The v1 mapping — the single source of point shapes and writeability:
 /// only `on` and `level` are writable. Everything else is ignored.
 fn map_value(cc: u8, property: &str, property_key: Option<&str>) -> Option<PointKind> {
@@ -472,18 +502,18 @@ fn map_value(cc: u8, property: &str, property_key: Option<&str>) -> Option<Point
     }
 }
 
-/// The write target for `on`, per command class: Basic writes
-/// `currentValue` directly, Switch Binary/Multilevel write `targetValue`.
-const fn switch_target_property(cc: u8) -> &'static str {
-    if cc == 32 {
-        "currentValue"
-    } else {
-        "targetValue"
-    }
+/// `on` is always written to `targetValue` (the switch target of any CC):
+/// zwave-js exposes `currentValue` as read-only on Basic (32) and the
+/// multilevel `targetValue` accepts 0-255, so a boolean `true` would be a
+/// refused or misrouted payload at the gateway.
+const fn switch_target_property(_cc: u8) -> &'static str {
+    "targetValue"
 }
 
 /// Mirrors the gateway's topic sanitization: whitespace becomes `_`, and
-/// characters outside `[A-Za-z0-9-_À-ÖØ-öø-ÿ/]` are dropped.
+/// characters outside `[A-Za-z0-9-_/]` plus the Latin-1 accented letters
+/// (`À-Ö`, `Ø-ö`, `ø-ÿ`) are dropped. zwave-js-ui keeps these accented
+/// letters in its topics, so they must survive here for bases to match.
 fn sanitize(part: &str) -> String {
     part.chars()
         .map(|c| if c.is_whitespace() { '_' } else { c })
@@ -496,7 +526,7 @@ fn is_topic_char(c: char) -> bool {
         || matches!(c, '_' | '-' | '/')
         || matches!(
             c,
-            '\u{00C0}'..='\u{00D6}' | '\u{00D8}' | '\u{00F6}' | '\u{00F8}' | '\u{00FF}'
+            '\u{00C0}'..='\u{00D6}' | '\u{00D8}'..='\u{00F6}' | '\u{00F8}'..='\u{00FF}'
         )
 }
 
@@ -525,11 +555,12 @@ fn property_key_as_str(key: &Json) -> Option<String> {
 /// when the node has no mappable point (dead node, configuration-only
 /// device): it never becomes a device.
 fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option<Entry> {
-    // Unnamed nodes route through the gateway's own fallback: `nodeID_<id>`
-    // (its NODE_PREFIX).
-    let name = raw
-        .name
-        .as_deref()
+    // Raw gateway name (trimmed) — kept verbatim for `native_name`, which the
+    // guard reads lock/gate words from (a sanitized name would break the
+    // "Gâche" → lock match). Unnamed nodes route through the gateway's own
+    // fallback `nodeID_<id>` (its NODE_PREFIX).
+    let raw_name = raw.name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let name = raw_name
         .map(sanitize)
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| format!("nodeID_{node_id}"));
@@ -553,7 +584,9 @@ fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option
     let device = Device {
         id: DeviceId::new(instance, &node_id.to_string()),
         instance: instance.clone(),
-        native_name: name.clone().into(),
+        // Raw gateway name for the guard (accents/spaces intact); the
+        // sanitized form stays in `Entry.name` for topic routing only.
+        native_name: raw_name.unwrap_or(name.as_str()).to_owned().into(),
         manufacturer: raw
             .manufacturer
             .clone()
@@ -630,7 +663,14 @@ fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>) {
                 write: false,
             },
             unit,
-            semantic: kind.semantic(),
+            // A CC 38 `level` is only a light level when the node's device
+            // class says so (see `level_semantic`); otherwise it stays
+            // neutral so the guard's name check still applies.
+            semantic: if matches!(kind, PointKind::Level) {
+                level_semantic(raw.device_class.as_ref())
+            } else {
+                kind.semantic()
+            },
         });
         if matches!(kind, PointKind::Level) {
             level_target = Some(SetTarget {
@@ -725,6 +765,10 @@ struct RawNode {
     virtual_node: bool,
     #[serde(default)]
     failed: bool,
+    /// Z-Wave+ device class, raw protocol values (absent on some gateways —
+    /// `level` then stays neutral, never `Brightness`).
+    #[serde(rename = "deviceClass", alias = "device_class", default)]
+    device_class: Option<RawDeviceClass>,
     #[serde(default)]
     manufacturer: Option<String>,
     #[serde(rename = "productLabel", default)]
@@ -757,6 +801,18 @@ struct RawValue {
     maximum: Option<f64>,
     #[serde(default)]
     metadata: Option<RawMetadata>,
+}
+
+/// Raw Z-Wave+ device class as reported by the gateway (`getNodes`):
+/// protocol values, all optional (a missing field means "unknown" = 0).
+/// Only `generic` + `specific` drive the `level` semantic — `basic`
+/// (e.g. "Routing End Node") carries no dimmer information.
+#[derive(Debug, Default, Deserialize)]
+struct RawDeviceClass {
+    #[serde(default)]
+    generic: u8,
+    #[serde(default)]
+    specific: u8,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -799,10 +855,10 @@ mod tests {
     }
 
     #[test]
-    fn get_nodes_builds_five_devices() {
+    fn get_nodes_builds_six_devices() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 5);
-        for node_id in [2u32, 3, 5, 7, 9] {
+        assert_eq!(catalog.len(), 6);
+        for node_id in [2u32, 3, 5, 7, 9, 11] {
             let id = DeviceId::new(&instance(), &node_id.to_string());
             assert!(
                 id.as_str().starts_with("zwave:"),
@@ -868,11 +924,12 @@ mod tests {
         assert_eq!(level.semantic, Semantic::Brightness);
         assert!(level.access.read && level.access.write);
 
-        // cuisine_plug (CC 32): `on` writable via 32/currentValue; `power` RO.
+        // cuisine_plug (CC 32): `on` writable via 32/targetValue (numbers);
+        // `power` RO.
         let plug = catalog.by_base("cuisine_plug").unwrap();
         let on = plug.device.point("on").unwrap();
         assert_eq!(on.kind, Kind::Binary);
-        assert!(on.access.write, "Basic 32 is writable via currentValue/set");
+        assert!(on.access.write, "Basic 32 is writable via targetValue/set");
         let power = plug.device.point("power").unwrap();
         assert_eq!(power.unit, Some(Unit::Watt));
         assert_eq!(power.semantic, Semantic::Power);
@@ -939,6 +996,17 @@ mod tests {
         let dimmer = catalog.by_base("kitchen_dimmer").unwrap();
         assert!(dimmer.device.point("on").is_some_and(|p| p.access.write));
         assert!(dimmer.device.point("level").is_some_and(|p| p.access.write));
+
+        // volet_garage (CC 38, device class "Motor Control"): `level` exists
+        // but must stay neutral — a Brightness semantic would hide the
+        // device from the guard's name check (gate/garage).
+        let shutter = catalog.by_base("volet_garage").unwrap();
+        assert_eq!(
+            shutter.device.point("level").unwrap().semantic,
+            Semantic::Other,
+            "non-dimmer CC 38 must not be Brightness (guard)"
+        );
+        assert!(shutter.device.point("on").is_some_and(|p| p.access.write));
     }
 
     #[test]
@@ -980,8 +1048,17 @@ mod tests {
             lamp.encode("on", &Value::Bool(true)).unwrap(),
             (
                 "bureau_lamp/38/0/targetValue/set".to_owned(),
-                "true".to_owned()
-            )
+                "255".to_owned()
+            ),
+            "CC 38 on → numeric 255 (multilevel targetValue is a number)"
+        );
+        assert_eq!(
+            lamp.encode("on", &Value::Bool(false)).unwrap(),
+            (
+                "bureau_lamp/38/0/targetValue/set".to_owned(),
+                "0".to_owned()
+            ),
+            "CC 38 off → numeric 0"
         );
         assert_eq!(
             lamp.encode("level", &Value::Float(80.0)).unwrap(),
@@ -995,9 +1072,17 @@ mod tests {
         assert_eq!(
             plug.encode("on", &Value::Bool(true)).unwrap(),
             (
-                "cuisine_plug/32/0/currentValue/set".to_owned(),
-                "true".to_owned()
-            )
+                "cuisine_plug/32/0/targetValue/set".to_owned(),
+                "255".to_owned()
+            ),
+            "CC 32 targetValue is numeric (currentValue is read-only in zwave-js)"
+        );
+        assert_eq!(
+            plug.encode("on", &Value::Bool(false)).unwrap(),
+            (
+                "cuisine_plug/32/0/targetValue/set".to_owned(),
+                "0".to_owned()
+            ),
         );
         let switch = catalog.by_base("couloir_switch").unwrap();
         assert_eq!(
@@ -1042,7 +1127,7 @@ mod tests {
         let bare = serde_json::to_vec(&json["result"]).unwrap();
         assert_eq!(
             Catalog::from_get_nodes(&instance(), &bare).unwrap().len(),
-            5
+            6
         );
 
         // A node without nodeId is skipped, never a parse failure.
@@ -1080,7 +1165,7 @@ mod tests {
             Some(SetTarget {
                 cc: 32,
                 endpoint: 1,
-                property: "currentValue"
+                property: "targetValue"
             })
         );
         assert_eq!(
@@ -1094,8 +1179,8 @@ mod tests {
         assert_eq!(
             entry.encode("on", &Value::Bool(true)).unwrap(),
             (
-                "atelier/double_switch/32/1/currentValue/set".to_owned(),
-                "true".to_owned()
+                "atelier/double_switch/32/1/targetValue/set".to_owned(),
+                "255".to_owned()
             ),
             "the topic base carries the location segment"
         );
@@ -1284,6 +1369,133 @@ mod tests {
             catalog
                 .entry_for_value_topic("inconnu/99/0/quelque_chose")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn accented_names_survive_topic_sanitization() {
+        // Review guard: the gateway keeps Latin-1 accented letters in its
+        // topics; the topic base must match for value routing to work.
+        let nodes = json!([{
+            "nodeId": 33,
+            "name": "Gâche entrée",
+            "values": [
+                { "commandClass": 37, "endpointIndex": 0, "property": "currentValue", "value": false },
+                { "commandClass": 37, "endpointIndex": 0, "property": "targetValue", "value": false }
+            ]
+        }]);
+        let payload = serde_json::to_vec(&nodes).unwrap();
+        let catalog = Catalog::from_get_nodes(&instance(), &payload).unwrap();
+        let entry = catalog.by_id(&DeviceId::new(&instance(), "33")).unwrap();
+        assert_eq!(&*entry.name, "Gâche_entrée");
+        assert_eq!(
+            &*entry.device.native_name, "Gâche entrée",
+            "native_name keeps the raw gateway name (spaces and accents intact)"
+        );
+        assert_eq!(
+            entry.decode("Gâche_entrée/37/0/currentValue", b"true"),
+            vec![("on".into(), Value::Bool(true))]
+        );
+        assert_eq!(
+            entry.encode("on", &Value::Bool(true)).unwrap(),
+            (
+                "Gâche_entrée/37/0/targetValue/set".to_owned(),
+                "true".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn level_is_brightness_only_for_dimmer_device_classes() {
+        let make = |device_class: Option<Json>| -> Json {
+            let mut node = json!([
+                {
+                "nodeId": 44,
+                "name": "module_cc38",
+                "values": [
+                    { "commandClass": 38, "endpointIndex": 0, "property": "currentValue",
+                      "minimum": 0, "maximum": 100, "value": 50 },
+                    { "commandClass": 38, "endpointIndex": 0, "property": "targetValue", "value": 50 }
+                ]
+            }]);
+            if let Some(dc) = device_class {
+                node[0]["deviceClass"] = dc;
+            }
+            node
+        };
+
+        // Multilevel Switch / Multilevel Power Switch → a real dimmer.
+        let catalog = Catalog::from_get_nodes(
+            &instance(),
+            &serde_json::to_vec(&make(Some(
+                json!({"basic": 4, "generic": 17, "specific": 1}),
+            )))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            catalog
+                .by_id(&DeviceId::new(&instance(), "44"))
+                .unwrap()
+                .device
+                .point("level")
+                .unwrap()
+                .semantic,
+            Semantic::Brightness
+        );
+
+        // Same CC 38 on a Motor Control node: `level` must stay neutral,
+        // otherwise the guard would treat the gate as a light.
+        let catalog = Catalog::from_get_nodes(
+            &instance(),
+            &serde_json::to_vec(&make(Some(
+                json!({"basic": 4, "generic": 17, "specific": 5}),
+            )))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            catalog
+                .by_id(&DeviceId::new(&instance(), "44"))
+                .unwrap()
+                .device
+                .point("level")
+                .unwrap()
+                .semantic,
+            Semantic::Other,
+            "shutter motor CC 38 must not be Brightness (guard)"
+        );
+
+        // No device class at all: neutral.
+        let catalog =
+            Catalog::from_get_nodes(&instance(), &serde_json::to_vec(&make(None)).unwrap())
+                .unwrap();
+        assert_eq!(
+            catalog
+                .by_id(&DeviceId::new(&instance(), "44"))
+                .unwrap()
+                .device
+                .point("level")
+                .unwrap()
+                .semantic,
+            Semantic::Other,
+            "absent device class must not grant Brightness (guard)"
+        );
+    }
+
+    #[test]
+    fn accumulated_level_point_is_neutral() {
+        // Without getNodes there is no device class: an accumulated CC 38
+        // `level` must never be Brightness.
+        let mut catalog =
+            Catalog::from_get_nodes(&instance(), &serde_json::to_vec(&json!([])).unwrap()).unwrap();
+        let entry = catalog
+            .upsert_accumulated(&instance(), "volet_accu", 38, 0, "targetValue", None)
+            .unwrap();
+        assert_eq!(
+            entry.device.point("level").unwrap().semantic,
+            Semantic::Other,
+            "accumulation mode has no device class → neutral semantic"
         );
     }
 }

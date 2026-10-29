@@ -16,6 +16,7 @@
       "productType": "ZWL",
       "productIdVersion": "02",
       "productLabel": "ZWL-02",
+      "deviceClass": { "basic": 4, "generic": 17, "specific": 1 },
       "interviewStage": "Finished",
       "commandClasses": [32, 38, 114, 132, 133, 134],
       "commandClassesAvailable": [32, 38, 114, 132, 133, 134],
@@ -78,6 +79,7 @@
       "productType": "ZWP",
       "productIdVersion": "03",
       "productLabel": "ZWP-03",
+      "deviceClass": { "basic": 4, "generic": 16, "specific": 1 },
       "interviewStage": "Finished",
       "commandClasses": [32, 50, 114, 133, 134],
       "commandClassesAvailable": [32, 50, 114, 133, 134],
@@ -104,6 +106,25 @@
             "description": "Current state of the basic command class"
           },
           "value": true
+        },
+        {
+          "id": "32-0-targetValue",
+          "commandClassName": "Basic",
+          "commandClass": 32,
+          "endpointIndex": 0,
+          "property": "targetValue",
+          "propertyKey": null,
+          "label": "Target value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": true,
+            "description": "Target state of the basic command class"
+          },
+          "minimum": 0,
+          "maximum": 255,
+          "value": 255
         },
         {
           "id": "50-0-power",
@@ -136,6 +157,7 @@
       "productType": "ZWS",
       "productIdVersion": "05",
       "productLabel": "ZWS-05",
+      "deviceClass": { "basic": 4, "generic": 32, "specific": 1 },
       "interviewStage": "Finished",
       "commandClasses": [31, 49, 53, 114, 133, 134],
       "commandClassesAvailable": [31, 49, 53, 114, 133, 134],
@@ -213,6 +235,7 @@
       "productType": "ZWT",
       "productIdVersion": "07",
       "productLabel": "ZWT-07",
+      "deviceClass": { "basic": 4, "generic": 16, "specific": 1 },
       "interviewStage": "Finished",
       "commandClasses": [37, 114, 133, 134],
       "commandClassesAvailable": [37, 114, 133, 134],
@@ -271,6 +294,7 @@
       "productType": "ZWD",
       "productIdVersion": "09",
       "productLabel": "ZWD-09",
+      "deviceClass": { "basic": 4, "generic": 17, "specific": 1 },
       "interviewStage": "Finished",
       "commandClasses": [38, 114, 133, 134],
       "commandClassesAvailable": [38, 114, 133, 134],
@@ -318,6 +342,69 @@
           "minimum": 0,
           "maximum": 100,
           "value": 0
+        }
+      ]
+    },
+    {
+      "nodeId": 11,
+      "ready": true,
+      "name": "volet_garage",
+      "zwaveVersion": "4.72",
+      "firmwareVersion": "1.0",
+      "manufacturer": "Synthetic",
+      "manufacturerId": 0,
+      "productId": 11,
+      "productType": "ZWC",
+      "productIdVersion": "0B",
+      "productLabel": "ZWC-11",
+      "interviewStage": "Finished",
+      "commandClasses": [38, 114, 133, 134],
+      "commandClassesAvailable": [38, 114, 133, 134],
+      "isListening": true,
+      "isFrequentListening": false,
+      "isSleeping": false,
+      "isRouting": false,
+      "isController": false,
+      "neighbors": [],
+      "deviceClass": { "basic": 4, "generic": 17, "specific": 5 },
+      "values": [
+        {
+          "id": "38-0-currentValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "currentValue",
+          "propertyKey": null,
+          "label": "Current value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": false,
+            "description": "Current value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 50
+        },
+        {
+          "id": "38-0-targetValue",
+          "commandClassName": "Switch Multilevel",
+          "commandClass": 38,
+          "endpointIndex": 0,
+          "property": "targetValue",
+          "propertyKey": null,
+          "label": "Target value",
+          "unit": "",
+          "metadata": {
+            "type": "number",
+            "readable": true,
+            "writeable": true,
+            "description": "Target value of the multilevel switch"
+          },
+          "minimum": 0,
+          "maximum": 100,
+          "value": 50
         }
       ]
     }
