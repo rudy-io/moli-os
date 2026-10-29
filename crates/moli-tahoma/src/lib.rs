@@ -150,10 +150,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         apply(ctx, &index, &raw);
                     }
                     Err(e) if is_pin_mismatch(&e) => {
+                        // The last positions are now stale: a frozen value must not
+                        // drive an automation while the driver is parked.
+                        mark_offline(ctx, &index);
                         let reason = certificate_changed(host, ctx, &gateway);
                         return park(ctx, reason).await;
                     }
                     Err(e) if is_token_refused(&e) => {
+                        mark_offline(ctx, &index);
                         let reason = moli_i18n::tr!("pilotes.tahoma.jeton_refuse", host = host);
                         return park(ctx, reason).await;
                     }

@@ -270,6 +270,7 @@
   "pilotes.dirigera.bouton": "Button",
   "pilotes.tahoma.ouverture": "Opening",
   "pilotes.tahoma.commande": "Command",
+  "pilotes.tahoma.position_preferee": "Favourite position",
   "pilotes.tahoma.jeton_absent": "TaHoma: no token for gateway {host}. Generate one in the Somfy app (developer mode), store it with “secrets set <instance> token”, then restart Moli.",
   "pilotes.tahoma.jeton_refuse": "TaHoma: gateway {host} rejects the token. It may have been regenerated or lost (firmware update, clock change). Generate a new one in the Somfy app, replace it in the vault, then restart.",
   "pilotes.tahoma.epinglage_impossible": "TaHoma: can't pin the gateway's certificate ({problem}). Set cert_sha256 or the master key.",

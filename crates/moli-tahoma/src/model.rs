@@ -12,9 +12,18 @@ use serde_json::Value as Json;
 /// Overkiz counts a closure from the open end: 0 = open, 100 = closed.
 const FULLY_CLOSED: f64 = 100.0;
 
-/// Overkiz reports these in `core:ClosureState` when it has no position:
-/// 108 is « my » (a stored favourite), 124 is unknown.
-const NOT_A_POSITION: [i64; 2] = [108, 124];
+/// Overkiz sends 108 when the cover sits at its stored favourite (« my ») and
+/// 124 when it does not know where it is: read the fallback state.
+const AT_MY_POSITION: i64 = 108;
+const POSITION_UNKNOWN: i64 = 124;
+
+/// Where the gateway keeps a cover's stored favourite position.
+const MEMORIZED_1: &str = "core:Memorized1PositionState";
+
+/// How a device recalls (« my ») and stores its favourite position. The
+/// gateway names the same intent differently on io and RTS motors.
+const RECALL_FAVOURITE: [&str; 2] = ["goToMemorized1Position", "my"];
+const STORE_FAVOURITE: &str = "setMemorized1Position";
 
 /// The classes this driver treats as covers (the ones Overkiz reports as
 /// `uiClass`, awning included: see [`RawDevice::family`] for the split).
@@ -160,7 +169,13 @@ struct Entry {
     family: Family,
     /// `setClosure` / `setDeployment` is available.
     position: bool,
-    /// The buttons this device declares, in display order.
+    /// The command that recalls the stored favourite position, if the device
+    /// has one (`goToMemorized1Position` on io motors, `my` on RTS).
+    favourite: Option<&'static str>,
+    /// `setMemorized1Position` is available.
+    store_favourite: bool,
+    /// The buttons this device declares, in display order (`favourite` is a
+    /// Moli name, translated to the gateway's own command on the way out).
     controls: Vec<&'static str>,
 }
 
@@ -203,7 +218,17 @@ impl Load {
                 Family::Deployment => commands.contains("setDeployment"),
             };
             let controls = controls(&commands);
-            let points = points(&controls, position);
+            let favourite = RECALL_FAVOURITE
+                .iter()
+                .copied()
+                .find(|command| commands.contains(command));
+            let store_favourite = commands.contains(STORE_FAVOURITE);
+            let points = points(
+                &controls,
+                position,
+                device.state(MEMORIZED_1).is_some(),
+                store_favourite,
+            );
             if points.is_empty() {
                 skipped.push(Skipped {
                     class: device.class().into(),
@@ -236,6 +261,8 @@ impl Load {
                     url: device.url.clone(),
                     family,
                     position,
+                    favourite,
+                    store_favourite,
                     controls,
                 },
             );
@@ -250,7 +277,6 @@ impl Load {
     }
 }
 
-/// The buttons a device declares, in the order Moli shows them.
 fn controls(commands: &HashSet<&str>) -> Vec<&'static str> {
     ["open", "stop", "close"]
         .into_iter()
@@ -260,7 +286,12 @@ fn controls(commands: &HashSet<&str>) -> Vec<&'static str> {
 
 /// What the house can see and do with one cover. A device with neither
 /// buttons nor a position (an unpaired motor, say) is left out.
-fn points(controls: &[&str], position: bool) -> Vec<PointSpec> {
+fn points(
+    controls: &[&str],
+    position: bool,
+    has_memorized: bool,
+    store_favourite: bool,
+) -> Vec<PointSpec> {
     let mut points = Vec::new();
     if !controls.is_empty() {
         points.push(PointSpec {
@@ -289,6 +320,25 @@ fn points(controls: &[&str], position: bool) -> Vec<PointSpec> {
             access: Access {
                 read: true,
                 write: true,
+            },
+            unit: Some(Unit::Percent),
+            semantic: Semantic::Other,
+        });
+    }
+    // The stored favourite is shown as a point only when the device exposes
+    // it; `favourite` is still callable via the control enum when present.
+    if has_memorized {
+        points.push(PointSpec {
+            key: "favourite_position".into(),
+            label: moli_i18n::tr!("pilotes.tahoma.position_preferee").into(),
+            kind: Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0),
+            },
+            access: Access {
+                read: true,
+                write: store_favourite,
             },
             unit: Some(Unit::Percent),
             semantic: Semantic::Other,
@@ -329,6 +379,9 @@ impl Index {
             let mut values: Vec<(Arc<str>, Value)> = Vec::new();
             if let Some(percent) = position(device, entry.family) {
                 values.push(("percent_control".into(), Value::Int(percent)));
+            }
+            if let Some(fav) = favourite(device, entry.family) {
+                values.push(("favourite_position".into(), Value::Int(fav)));
             }
             if let Some(state) = device.state("core:OpenClosedState").and_then(Json::as_str) {
                 let control = match state {
@@ -381,6 +434,17 @@ impl Index {
             }
             ("control", Value::Text(command)) => {
                 let command = command.as_ref();
+                if command == "favourite" {
+                    let name = entry.favourite?;
+                    return Some((
+                        entry.url.clone(),
+                        vec![Json::Object(
+                            [("name".to_owned(), Json::String(name.to_owned()))]
+                                .into_iter()
+                                .collect(),
+                        )],
+                    ));
+                }
                 if !entry.controls.contains(&command) {
                     return None;
                 }
@@ -390,6 +454,26 @@ impl Index {
                         [("name".to_owned(), Json::String(command.to_owned()))]
                             .into_iter()
                             .collect(),
+                    )],
+                ))
+            }
+            ("favourite_position", v) if entry.store_favourite => {
+                let percent = v.as_f64()?.clamp(0.0, 100.0).round();
+                let raw = match entry.family {
+                    Family::Closure => FULLY_CLOSED - percent,
+                    Family::Deployment => percent,
+                };
+                #[allow(clippy::cast_possible_truncation)]
+                let raw = raw as i64;
+                Some((
+                    entry.url.clone(),
+                    vec![Json::Object(
+                        [
+                            ("name".to_owned(), Json::String(STORE_FAVOURITE.to_owned())),
+                            ("parameters".to_owned(), Json::Array(vec![Json::from(raw)])),
+                        ]
+                        .into_iter()
+                        .collect(),
                     )],
                 ))
             }
@@ -405,10 +489,25 @@ fn position(device: &RawDevice, family: Family) -> Option<i64> {
         Family::Deployment => ("core:DeploymentState", false),
     };
     let raw = device.state(name)?.as_i64()?;
-    if NOT_A_POSITION.contains(&raw) || !(0..=100).contains(&raw) {
+    if raw == AT_MY_POSITION {
+        return favourite(device, family);
+    }
+    if raw == POSITION_UNKNOWN || !(0..=100).contains(&raw) {
         return None;
     }
     Some(if invert { 100 - raw } else { raw })
+}
+
+/// The stored favourite position, 0 = closed, 100 = open.
+fn favourite(device: &RawDevice, family: Family) -> Option<i64> {
+    let raw = device.state(MEMORIZED_1)?.as_i64()?;
+    if raw == POSITION_UNKNOWN || !(0..=100).contains(&raw) {
+        return None;
+    }
+    Some(match family {
+        Family::Closure => 100 - raw,
+        Family::Deployment => raw,
+    })
 }
 
 #[cfg(test)]

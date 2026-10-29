@@ -330,7 +330,7 @@ host = "192.168.1.x"
   n'exposent que les boutons. Pas encore : éclairages et prises io, lames orientables,
   scènes.
 - **Protocole** : API locale Overkiz, HTTPS sur **8443**, `Authorization: Bearer <jeton>`,
-  base `/enduser-mobile-web/1/enduserAPI`. Le certificat est auto-signé (autorité Overkiz) :
+  base `/enduser-mobile-web/1/enduserAPI`. Le certificat est signé par l'autorité Overkiz,
   épinglé au premier contact, **avant** le jeton. Relevé complet `GET /setup/devices` toutes
   les 5 s ; commandes par `POST /exec/apply` avec les commandes que l'appareil déclare
   (`open`, `stop`, `close`, `setClosure`, `setDeployment`). Un `execId` accepté vaut
@@ -359,7 +359,7 @@ host = "192.168.1.x"
   compte une fermeture depuis l'ouvert (`core:ClosureState`, 108 et 124 = pas de position) :
   le pilote inverse dans les deux sens. Un store banne compte son déploiement
   (`core:DeploymentState`), déjà une ouverture.
-- **Vérifié** (23 octobre 2026) : une passerelle TaHoma `2030` et deux volets io — épinglage,
+- **Vérifié** (23 octobre 2026) : une passerelle TaHoma et deux volets io — épinglage,
   relevé des positions, boutons ouvrir/stop/fermer depuis le tableau de bord, position qui
   suit. Pas encore vu : coupure de la passerelle, jeton régénéré, changement de certificat,
   et les volets RTS ou stores bannes sur du vrai matériel.
@@ -796,7 +796,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
-| `tahoma` | `moli-tahoma` | HTTPS 8443, API locale Overkiz, épinglé | oui : positions et boutons des volets et stores | TaHoma `2030` (2026.4.5-7), deux volets io : positions et boutons testés sur le vrai matériel ; volets RTS et stores bannes : mapping sur fixture seulement |
+| `tahoma` | `moli-tahoma` | HTTPS 8443, API locale Overkiz, épinglé | oui : positions et boutons des volets et stores | TaHoma (2026.4.5-7), deux volets io : positions et boutons testés sur le vrai matériel ; volets RTS et stores bannes : mapping sur fixture seulement |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |

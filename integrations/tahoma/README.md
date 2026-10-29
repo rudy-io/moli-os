@@ -4,8 +4,8 @@
   comportement est recoupé avec le client communautaire `python-overkiz-api` et l'intégration
   `overkiz` de Home Assistant. Aucun code repris.
 - Transport : HTTPS sur **8443**, `Authorization: Bearer <jeton>`, base
-  `/enduser-mobile-web/1/enduserAPI`. Le certificat de la passerelle est **auto-signé**
-  (autorité Overkiz) : Moli l'épingle au premier contact, avant tout jeton.
+  `/enduser-mobile-web/1/enduserAPI`. Le certificat de la passerelle est **signé par
+  l'autorité Overkiz** : Moli l'épingle au premier contact, avant tout jeton.
 - **Pas de `POST /login` en local** : le jeton se génère dans l'appli Somfy (mode développeur),
   il ne s'expire pas en principe, mais il est perdu à la mise à jour du firmware et à un
   changement d'heure. Le pilote ne l'écrit jamais sur le disque : il est dans le coffre.
@@ -26,7 +26,7 @@
 - Reste : éclairages et prises Somfy io (le même `exec/apply` les commande), lames
   orientables (`setOrientation`), scènes et tableaux de bord de la passerelle, écoute des
   événements (`/events/register`) au lieu du relevé périodique.
-- **Vérifié sur du vrai matériel** (23 octobre 2026) : une passerelle TaHoma `2030`
+- **Vérifié sur du vrai matériel** (23 octobre 2026) : une passerelle TaHoma
   (`apiVersion` 2026.4.5-7) et deux volets roulants io
   (`io:RollerShutterWithLowSpeedManagementIOComponent`). Épinglage du certificat au premier
   contact, relevé des positions, boutons ouvrir/stop/fermer depuis le tableau de bord, et la

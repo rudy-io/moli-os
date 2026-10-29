@@ -270,6 +270,7 @@
   "pilotes.dirigera.bouton": "Bouton",
   "pilotes.tahoma.ouverture": "Ouverture",
   "pilotes.tahoma.commande": "Commande",
+  "pilotes.tahoma.position_preferee": "Position préférée",
   "pilotes.tahoma.jeton_absent": "TaHoma : aucun jeton pour la passerelle {host}. Génère-le dans l'appli Somfy (mode développeur), range-le avec « secrets set <instance> token », puis redémarre Moli.",
   "pilotes.tahoma.jeton_refuse": "TaHoma : la passerelle {host} refuse le jeton. Il a peut-être été régénéré ou perdu (mise à jour du firmware, changement d'heure). Génères-en un nouveau dans l'appli Somfy, remplace-le dans le coffre, puis redémarre.",
   "pilotes.tahoma.epinglage_impossible": "TaHoma : impossible d'épingler le certificat de la passerelle ({problem}). Renseigne cert_sha256 ou la clé maître.",
