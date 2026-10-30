@@ -94,19 +94,44 @@ pub struct Region {
     pub mq: &'static str,
 }
 
+/// The regions a person may name in `cloud_region`.
+const REGIONS: [(&str, Region); 6] = [
+    ("eu", Region::at("openapi.tuyaeu.com", "mqe.tuyaeu.com")),
+    (
+        "eu-west",
+        Region::at("openapi-weaz.tuyaeu.com", "mqe-weaz.tuyaeu.com"),
+    ),
+    ("us", Region::at("openapi.tuyaus.com", "mqe.tuyaus.com")),
+    (
+        "us-east",
+        Region::at("openapi-ueaz.tuyaus.com", "mqe-ueaz.tuyaus.com"),
+    ),
+    ("in", Region::at("openapi.tuyain.com", "mqe.tuyain.com")),
+    ("cn", Region::at("openapi.tuyacn.com", "mqe.tuyacn.com")),
+];
+
 impl Region {
+    const fn at(api: &'static str, mq: &'static str) -> Self {
+        Self { api, mq }
+    }
+
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        let (api, mq) = match name {
-            "eu" => ("openapi.tuyaeu.com", "mqe.tuyaeu.com"),
-            "eu-west" => ("openapi-weaz.tuyaeu.com", "mqe-weaz.tuyaeu.com"),
-            "us" => ("openapi.tuyaus.com", "mqe.tuyaus.com"),
-            "us-east" => ("openapi-ueaz.tuyaus.com", "mqe-ueaz.tuyaus.com"),
-            "in" => ("openapi.tuyain.com", "mqe.tuyain.com"),
-            "cn" => ("openapi.tuyacn.com", "mqe.tuyacn.com"),
-            _ => return None,
-        };
-        Some(Self { api, mq })
+        // Tests: this very machine, never Tuya.
+        #[cfg(test)]
+        if name == "test" {
+            return Some(Self::at("127.0.0.1", "127.0.0.1"));
+        }
+        REGIONS
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, region)| *region)
+    }
+
+    /// The names [`Region::named`] knows, for a person who typed another.
+    #[must_use]
+    pub fn names() -> String {
+        REGIONS.map(|(name, _)| name).join(", ")
     }
 }
 

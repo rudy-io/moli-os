@@ -270,6 +270,7 @@
   "pilotes.dirigera.bouton": "Bouton",
   "pilotes.tuya.aucun_appareil": "aucun appareil Tuya pour l'instant : lancer `moli-os tuya import` (fichier attendu : {file})",
   "pilotes.tuya.cles_cloud": "clés du cloud Tuya reçues : redémarrage pour les prendre en compte",
+  "pilotes.tuya.region_inconnue": "région du cloud Tuya inconnue (`cloud_region = \"{region}\"`, connues : {known}) : la corriger, puis redémarrer Moli. D'ici là, le cloud Tuya ne suit aucun appareil",
   "pilotes.tuya.lecture_seule_cloud": "lecture seule : cet appareil est vu à travers le cloud Tuya",
   "pilotes.tuya.appareil_inconnu": "appareil inconnu",
   "pilotes.tuya.ne_se_regle_pas": "{point} ne peut pas être réglé",

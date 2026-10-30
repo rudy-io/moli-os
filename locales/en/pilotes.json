@@ -270,6 +270,7 @@
   "pilotes.dirigera.bouton": "Button",
   "pilotes.tuya.aucun_appareil": "no Tuya devices yet: run `moli-os tuya import` (expected file: {file})",
   "pilotes.tuya.cles_cloud": "Tuya cloud keys received: restarting to use them",
+  "pilotes.tuya.region_inconnue": "unknown Tuya cloud region (`cloud_region = \"{region}\"`, known: {known}): fix it, then restart Moli. Until then, the Tuya cloud follows no device",
   "pilotes.tuya.lecture_seule_cloud": "read-only: this device is seen through the Tuya cloud",
   "pilotes.tuya.appareil_inconnu": "unknown device",
   "pilotes.tuya.ne_se_regle_pas": "{point} cannot be set",

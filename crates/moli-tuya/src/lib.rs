@@ -211,16 +211,42 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // Apart from the links: what the cloud says of a sub-device is used
     // only while its gateway is out of reach.
     let (cloud_tx, mut cloud_up) = mpsc::channel::<Up>(256);
-    if let Some(keys) = keys {
-        start_cloud(config, keys, watched, cloud_tx, &mut tasks);
-    }
+    // The devices the cloud alone speaks for (not the sub-devices a local
+    // gateway carries).
+    let cloud_only: Vec<usize> = watched
+        .values()
+        .map(|(index, _)| *index)
+        .filter(|index| !fallback.gateway.contains_key(index))
+        .collect();
+    let cloud = keys.map_or(Cloud::Idle, |keys| {
+        start_cloud(config, keys, watched, &cloud_tx, &mut tasks)
+    });
+    // Kept here while no task holds it: the cloud's channel then closes
+    // only if the cloud stops, never because it did not start.
+    let idle_cloud = (!matches!(cloud, Cloud::Started)).then_some(cloud_tx);
     drop(up_tx);
     if missing_keys > 0 {
         tracing::warn!(instance = %ctx.instance(), missing_keys, "tuya devices without a local key are skipped (re-run the import)");
     }
     locate(config, &devices, addresses, wanted, &mut tasks);
+    let refused = if let Cloud::Refused(why) = cloud {
+        // No cloud: what it alone reads is offline (before `ready`, which
+        // would bring back what a previous run showed), and a gateway out of
+        // reach has nothing to fall back on.
+        for index in cloud_only {
+            ctx.set_availability(&devices[index].0, false);
+        }
+        fallback = Fallback::default();
+        Some(why)
+    } else {
+        None
+    };
     ctx.ready();
     tracing::info!(instance = %ctx.instance(), devices = devices.len(), "tuya devices loaded");
+    if let Some(why) = refused {
+        // The local devices go on; the house is told what to fix.
+        ctx.wait_for(why);
+    }
 
     let mut sources = Sources {
         links: &mut up,
@@ -228,6 +254,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         fallback,
     };
     let keys_came = serve(ctx, &mut sources, &orders, &devices, await_keys).await;
+    drop(idle_cloud);
     tasks.abort_all();
     if keys_came {
         anyhow::bail!(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
@@ -385,8 +412,8 @@ async fn serve(
     let mut look = tokio::time::interval(std::time::Duration::from_secs(20));
     // A channel closes once its senders are gone: the links' when no link
     // is left (none at all in a house the cloud alone speaks for), the
-    // cloud's when it stops (never without keys: its sender lives until the
-    // end). The driver goes on while either is open.
+    // cloud's when its task stops (never if none started: `run` keeps its
+    // sender). The driver goes on while either is open.
     let (mut links_open, mut cloud_open) = (true, true);
     while links_open || cloud_open {
         tokio::select! {
@@ -440,22 +467,37 @@ fn set_states(ctx: &DriverCtx, id: &DeviceId, values: Vec<(String, moli_core::Va
     }
 }
 
+/// What became of the cloud.
+enum Cloud {
+    /// A task follows the devices.
+    Started,
+    /// No keys, or nothing to follow.
+    Idle,
+    /// It cannot follow them: why, for the house to see.
+    Refused(String),
+}
+
 /// Follows, through the cloud, the devices that never speak on the LAN.
 fn start_cloud(
     config: &Config,
     keys: cloud::Keys,
     watched: cloud::Watched,
-    up: mpsc::Sender<Up>,
+    up: &mpsc::Sender<Up>,
     tasks: &mut tokio::task::JoinSet<()>,
-) {
+) -> Cloud {
     if watched.is_empty() {
-        return;
+        return Cloud::Idle;
     }
-    if let Some(region) = cloud::Region::named(&config.cloud_region) {
-        tasks.spawn(cloud::watch(keys, region, watched, up));
-    } else {
+    let Some(region) = cloud::Region::named(&config.cloud_region) else {
         tracing::warn!(region = %config.cloud_region, "tuya cloud: unknown region");
-    }
+        return Cloud::Refused(moli_i18n::tr!(
+            "pilotes.tuya.region_inconnue",
+            region = config.cloud_region,
+            known = cloud::Region::names()
+        ));
+    };
+    tasks.spawn(cloud::watch(keys, region, watched, up.clone()));
+    Cloud::Started
 }
 
 /// Starts what finds the devices' addresses: their broadcasts, and the
@@ -720,22 +762,24 @@ mod tests {
         assert_eq!(fallback.cloud(1, true), Some(true));
     }
 
-    /// Only cloud-read devices (here a battery door sensor), nothing on the
-    /// LAN: the driver keeps running, it is not restarted in a loop.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_house_read_only_through_the_cloud_keeps_its_driver_running() {
-        use moli_core::{DriverStatus, InstanceId};
+    /// The driver's statuses over 1.5 s, for `devices` (a `tuya.json` list)
+    /// and cloud keys, its cloud in `region`; then whether each device is
+    /// online.
+    async fn statuses(
+        name: &str,
+        devices: serde_json::Value,
+        region: &str,
+    ) -> (Vec<Option<moli_core::DriverStatus>>, Vec<Option<bool>>) {
+        use moli_core::InstanceId;
         use moli_runtime::{Hub, HubOptions, spawn_driver};
         use std::time::Duration;
         use tokio_util::sync::CancellationToken;
 
-        let dir = std::env::temp_dir().join(format!("moli-tuya-cloud-only-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moli-tuya-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let devices_file = dir.join("tuya.json");
-        let file = serde_json::json!({ "devices": [
-            { "id": "bf00000000000000door", "name": "Porte", "category": "mcs" }
-        ]});
+        let file = serde_json::json!({ "devices": devices });
         std::fs::write(&devices_file, file.to_string()).unwrap();
         let cloud_keys = dir.join("tuya-cloud");
         std::fs::write(
@@ -748,7 +792,7 @@ mod tests {
             discovery: false,
             seek: false,
             cloud_keys,
-            cloud_region: "eu".into(),
+            cloud_region: region.into(),
         };
         let hub = Hub::new(HubOptions::default()).unwrap();
         let tuya = InstanceId::from("tuya");
@@ -774,13 +818,58 @@ mod tests {
                 seen.push(now);
             }
         }
+        let online = hub.snapshot().devices.iter().map(|d| d.online).collect();
         cancel.cancel();
+        let _ = std::fs::remove_dir_all(&dir);
+        (seen, online)
+    }
+
+    fn never_restarted(seen: &[Option<moli_core::DriverStatus>]) {
         assert!(
             seen.iter()
-                .all(|s| !matches!(s, Some(DriverStatus::Backoff { .. }))),
+                .all(|s| !matches!(s, Some(moli_core::DriverStatus::Backoff { .. }))),
             "the driver stopped: {seen:?}"
         );
-        assert_eq!(seen.last(), Some(&Some(DriverStatus::Running)));
+    }
+
+    /// A battery door sensor the cloud alone speaks for.
+    fn door() -> serde_json::Value {
+        serde_json::json!([{ "id": "bf00000000000000door", "name": "Porte", "category": "mcs" }])
+    }
+
+    /// Only cloud-read devices, nothing on the LAN: the driver keeps
+    /// running, it is not restarted in a loop. Its cloud is this very
+    /// machine: nothing goes to Tuya.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_house_read_only_through_the_cloud_keeps_its_driver_running() {
+        let (seen, _) = statuses("cloud-only", door(), "test").await;
+        never_restarted(&seen);
+        assert_eq!(seen.last(), Some(&Some(moli_core::DriverStatus::Running)));
+    }
+
+    /// Its cloud never starts: the house is told why, the door is offline
+    /// (not shown as it last was), and the driver is not restarted in a loop.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unknown_cloud_region_is_told_not_restarted() {
+        let (seen, online) = statuses("unknown-region", door(), "eu-central").await;
+        never_restarted(&seen);
+        let Some(Some(moli_core::DriverStatus::Waiting { reason })) = seen.last() else {
+            panic!("the house is not told: {seen:?}");
+        };
+        assert!(
+            reason.contains("\"eu-central\"") && reason.contains(&cloud::Region::names()),
+            "{reason}"
+        );
+        assert_eq!(online, [Some(false)]);
+    }
+
+    /// Cloud keys, nothing for the cloud nor for a link (no device yet):
+    /// the driver keeps running.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cloud_keys_without_devices_keep_the_driver_running() {
+        let (seen, _) = statuses("no-device", serde_json::json!([]), "test").await;
+        never_restarted(&seen);
+        assert_eq!(seen.last(), Some(&Some(moli_core::DriverStatus::Running)));
     }
 
     #[test]
