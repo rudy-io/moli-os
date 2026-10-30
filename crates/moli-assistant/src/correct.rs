@@ -200,12 +200,15 @@ pub(crate) fn numbered_call(
 }
 
 impl Assistant {
-    /// Puts back what the orders of a turn replaced (once).
+    /// Puts back what the orders of a turn replaced (once). `asker`: who
+    /// asks, as the house knows them: what is held is theirs
+    /// (`Hub::command_from`).
     pub async fn undo_turn(
         &self,
         id: u64,
         origin: Origin,
         actor: Option<String>,
+        asker: Option<&str>,
     ) -> Result<String, CorrectionError> {
         human(origin)?;
         let (_question, undo) = {
@@ -255,15 +258,10 @@ impl Assistant {
                 continue;
             }
             let by = actor.clone().or_else(|| Some("Moli".into()));
-            match self
-                .0
-                .hub
-                .command(
-                    &order.point,
-                    Value::from_json(&order.before),
-                    Origin::Assistant,
-                    by,
-                )
+            let before = Value::from_json(&order.before);
+            let hub = &self.0.hub;
+            match hub
+                .command_from(&order.point, before, Origin::Assistant, by, asker)
                 .await
             {
                 Ok(()) => done += 1,
@@ -429,7 +427,8 @@ impl Assistant {
     }
 
     /// Carries out what was meant instead, and keeps it (journal; a rule too when asked, unless the
-    /// sentence only makes sense with what came before).
+    /// sentence only makes sense with what came before). `asker`: who corrects, as the house knows
+    /// them: what is held is theirs (`Hub::command_from`).
     pub async fn correct(
         &self,
         id: u64,
@@ -437,8 +436,9 @@ impl Assistant {
         remember: bool,
         origin: Origin,
         actor: Option<String>,
+        asker: Option<&str>,
     ) -> Result<Corrected, CorrectionError> {
-        self.correct_many(id, vec![choice], remember, origin, actor)
+        self.correct_many(id, vec![choice], remember, origin, actor, asker)
             .await
     }
 
@@ -451,6 +451,7 @@ impl Assistant {
         remember: bool,
         origin: Origin,
         actor: Option<String>,
+        asker: Option<&str>,
     ) -> Result<Corrected, CorrectionError> {
         human(origin)?;
         let turned = self.turn_of(id).ok_or(CorrectionError::Unknown)?;
@@ -490,19 +491,22 @@ impl Assistant {
                 "this device is not there any more".into(),
             ));
         }
-        let mut run = Run::default();
+        let mut run = Run {
+            asker: asker.unwrap_or_default().to_owned(),
+            ..Run::default()
+        };
         let mut said = Vec::new();
         for (c, call) in calls.iter().zip(numbered.into_iter().flatten()) {
             let words = if c.tool == "nothing" {
                 moli_i18n::tr!("assistant.house.rule_nothing")
             } else {
                 // The person picked it: what the sentence said (a delay, another room) no longer decides.
-                let asked = if c.tool == "get_device" {
+                let question = if c.tool == "get_device" {
                     turned.question.as_str()
                 } else {
                     ""
                 };
-                self.house_call(&call, &layout, false, &aliases, asked, &mut run)
+                self.house_call(&call, &layout, false, &aliases, question, &mut run)
                     .await
             };
             if !words.is_empty() {
@@ -820,14 +824,14 @@ mod tests {
         };
         assert_eq!(on(), Some(Value::Bool(true)));
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, None)
             .await
             .unwrap();
         assert_eq!(on(), Some(Value::Bool(false)));
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
         // once: the turn has nothing left to put back
         let again = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, None)
             .await
             .unwrap();
         assert_eq!(again, moli_i18n::tr!("assistant.correct.nothing_to_undo"));
@@ -846,13 +850,13 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    moli.undo_turn(reply.turn_id, origin, None).await,
+                    moli.undo_turn(reply.turn_id, origin, None, None).await,
                     Err(CorrectionError::HumanOnly)
                 ),
                 "{origin:?}"
             );
             assert!(matches!(
-                moli.correct(reply.turn_id, json!({}), true, origin, None)
+                moli.correct(reply.turn_id, json!({}), true, origin, None, None)
                     .await,
                 Err(CorrectionError::HumanOnly)
             ));
@@ -866,7 +870,7 @@ mod tests {
             ));
         }
         assert!(matches!(
-            moli.undo_turn(12345, Origin::Ui, None).await,
+            moli.undo_turn(12345, Origin::Ui, None, None).await,
             Err(CorrectionError::Unknown)
         ));
         assert!(matches!(
@@ -928,7 +932,7 @@ mod tests {
             json!({}),
         ] {
             let done = moli
-                .correct(reply.turn_id, choice.clone(), true, Origin::Ui, None)
+                .correct(reply.turn_id, choice.clone(), true, Origin::Ui, None, None)
                 .await;
             assert!(matches!(done, Err(CorrectionError::NotOffered)), "{choice}");
         }
@@ -943,7 +947,14 @@ mod tests {
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
         let done = moli
-            .correct(reply.turn_id, choice, true, Origin::Ui, Some("test".into()))
+            .correct(
+                reply.turn_id,
+                choice,
+                true,
+                Origin::Ui,
+                Some("test".into()),
+                None,
+            )
             .await
             .unwrap();
         assert!(done.remembered);
@@ -978,7 +989,7 @@ mod tests {
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": false } });
         let done = moli
-            .correct(reply.turn_id, choice, true, Origin::Ui, None)
+            .correct(reply.turn_id, choice, true, Origin::Ui, None, None)
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -998,7 +1009,7 @@ mod tests {
         let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
-        moli.correct(reply.turn_id, choice, true, Origin::Ui, None)
+        moli.correct(reply.turn_id, choice, true, Origin::Ui, None, None)
             .await
             .unwrap();
         let listed = moli.rules_view();
@@ -1046,7 +1057,7 @@ mod tests {
         // the value before the first.
         let reply = moli.turn(ask("Allume puis éteins")).await.unwrap();
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, None)
             .await
             .unwrap();
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
@@ -1055,7 +1066,7 @@ mod tests {
         let reply = moli.turn(ask("Allume")).await.unwrap();
         assert_eq!(on(), Some(Value::Bool(true)));
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, None)
             .await
             .unwrap();
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
@@ -1066,7 +1077,7 @@ mod tests {
         set(false).await;
         let sent_before = moli.0.hub.journal(100).len();
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, None)
             .await
             .unwrap();
         assert_eq!(
@@ -1091,14 +1102,14 @@ mod tests {
             }],
             at: std::time::Instant::now(),
         });
-        let said = moli.undo_turn(stuck, Origin::Ui, None).await.unwrap();
+        let said = moli.undo_turn(stuck, Origin::Ui, None, None).await.unwrap();
         assert_eq!(
             said,
             moli_i18n::tr!("assistant.correct.undone", count = 0)
                 + " "
                 + &moli_i18n::tr!("assistant.correct.undo_failed", count = 1)
         );
-        let again = moli.undo_turn(stuck, Origin::Ui, None).await.unwrap();
+        let again = moli.undo_turn(stuck, Origin::Ui, None, None).await.unwrap();
         assert_ne!(
             again,
             moli_i18n::tr!("assistant.correct.nothing_to_undo"),
@@ -1114,7 +1125,7 @@ mod tests {
         let off =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": false } });
         let done = moli
-            .correct(reply.turn_id, off.clone(), true, Origin::Ui, None)
+            .correct(reply.turn_id, off.clone(), true, Origin::Ui, None, None)
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -1126,7 +1137,7 @@ mod tests {
         // naming the device (« lampe » is « lamp » by its stem), or asking for the time, is kept
         let reply = moli.turn(ask("Éteins la lampe")).await.unwrap();
         assert!(
-            moli.correct(reply.turn_id, off, true, Origin::Ui, None)
+            moli.correct(reply.turn_id, off, true, Origin::Ui, None, None)
                 .await
                 .unwrap()
                 .remembered
@@ -1134,7 +1145,7 @@ mod tests {
         let reply = moli.turn(ask("Il est quelle heure")).await.unwrap();
         let now = json!({ "tool": "now", "arguments": {} });
         assert!(
-            moli.correct(reply.turn_id, now, true, Origin::Ui, None)
+            moli.correct(reply.turn_id, now, true, Origin::Ui, None, None)
                 .await
                 .unwrap()
                 .remembered
@@ -1149,7 +1160,7 @@ mod tests {
         let level =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/brightness", "value": 25 } });
         let done = moli
-            .correct(reply.turn_id, level, true, Origin::Ui, None)
+            .correct(reply.turn_id, level, true, Origin::Ui, None, None)
             .await
             .unwrap();
         assert!(
@@ -1170,7 +1181,7 @@ mod tests {
         let on = json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
         assert!(
             !moli
-                .correct(reply.turn_id, on, true, Origin::Ui, None)
+                .correct(reply.turn_id, on, true, Origin::Ui, None, None)
                 .await
                 .unwrap()
                 .remembered
@@ -1278,6 +1289,7 @@ mod tests {
                 false,
                 Origin::Ui,
                 None,
+                None,
             )
             .await;
         assert!(matches!(refused, Err(CorrectionError::NotOffered)));
@@ -1292,6 +1304,7 @@ mod tests {
                 vec![on("Ruban1"), on("Ruban2")],
                 false,
                 Origin::Ui,
+                None,
                 None,
             )
             .await
@@ -1316,6 +1329,7 @@ mod tests {
                 vec![on("Ruban1"), on("Ruban2")],
                 true,
                 Origin::Ui,
+                None,
                 None,
             )
             .await
@@ -1359,7 +1373,7 @@ mod tests {
         let one =
             json!({ "tool": "set", "arguments": { "point": "fake:Ruban1/state", "value": false } });
         let done = moli
-            .correct(reply.turn_id, one, true, Origin::Ui, None)
+            .correct(reply.turn_id, one, true, Origin::Ui, None, None)
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -1371,7 +1385,7 @@ mod tests {
         let reply = moli.turn(ask("Éteins la cuisine")).await.unwrap();
         let all = json!({ "tool": "set_all", "arguments": { "kind": "lumières", "room": "Cuisine", "value": false } });
         assert!(
-            moli.correct(reply.turn_id, all, true, Origin::Ui, None)
+            moli.correct(reply.turn_id, all, true, Origin::Ui, None, None)
                 .await
                 .unwrap()
                 .remembered

@@ -96,6 +96,7 @@
   "serveur.garde.code_partout": "code required for every command (pin mode)",
   "serveur.garde.en_attente": "awaiting human approval #{id}: {reason}",
   "serveur.garde.remplacee": "replaced by a more recent request",
+  "serveur.garde.cedee": "gave way to a more recent request: too many waiting",
   "serveur.garde.expiree": "expired",
   "serveur.garde.expiree_sans_decision": "expired with no decision",
   "serveur.garde.appareil_sans_piece": "device with no room",

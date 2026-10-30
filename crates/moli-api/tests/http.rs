@@ -1397,3 +1397,182 @@ async fn an_invited_person_reaches_the_house_from_the_internet() {
     assert_eq!(status, 401);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A lamp that dims: something for an ambiance to set.
+struct Dimmer;
+
+impl Driver for Dimmer {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("dimmer");
+            let point = |key: &str, kind: Kind, semantic: Semantic| PointSpec {
+                key: key.into(),
+                label: key.into(),
+                kind,
+                access: Access {
+                    read: true,
+                    write: true,
+                },
+                unit: None,
+                semantic,
+            };
+            let level = Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: None,
+            };
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "dimmer".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    point("on", Kind::Binary, Semantic::OnOff),
+                    point("brightness", level, Semantic::Brightness),
+                ],
+            });
+            ctx.set_state(&id, "on", Value::Bool(false));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Under the code everywhere (`dashboard = "pin"`), a lamp and a dimmer,
+/// and Sam, a member who signed in from the Internet: the address, the hub
+/// and her cookie.
+async fn pin_house_with_sam(dir: &std::path::Path) -> (String, Hub, String) {
+    let hub = Hub::new(HubOptions {
+        secrets: Some((
+            dir.join("secrets.enc"),
+            moli_runtime::MasterKey::generate().unwrap(),
+        )),
+        guard: moli_runtime::guard::GuardPolicy {
+            dashboard: moli_runtime::guard::Dashboard::Pin,
+            ..moli_runtime::guard::GuardPolicy::default()
+        },
+        ..HubOptions::default()
+    })
+    .unwrap();
+    for (instance, driver) in [
+        ("fake", Arc::new(Lamp) as Arc<dyn Driver>),
+        ("dim", Arc::new(Dimmer)),
+    ] {
+        spawn_driver(
+            &hub,
+            InstanceId::from(instance),
+            driver,
+            CancellationToken::new(),
+        );
+    }
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let pin = pin_session(&addr, "482915").await;
+    let sam = json!({ "name": "Sam", "role": "member" });
+    let (status, body) = request_with(&addr, "POST", "/api/people", Some(&sam), &pin).await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/people/sam/invite", None, &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let code = serde_json::from_str::<Json>(&body).unwrap()["code"].clone();
+    let (status, cookie, body) = request_cookie(
+        &addr,
+        "POST",
+        "/api/invitation",
+        &json!({ "code": code, "password": "une valise bleue" }),
+        "X-Forwarded-For: 203.0.113.9\r\n",
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    (addr, hub, cookie.unwrap())
+}
+
+/// This machine and Sam ask for the same thing: two requests, each replaced
+/// by its own caller's newer one only. Sam is Sam wherever she asks from
+/// (this machine, then the Internet), and this machine is not Sam when she
+/// asks from it. Over REST, ambiances and MCP: the caller is who the house
+/// recognized, never the `actor` declared.
+#[tokio::test]
+async fn a_held_order_is_replaced_by_its_own_callers_only() {
+    let dir = std::env::temp_dir().join(format!("moli-http-held-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (addr, hub, cookie) = pin_house_with_sam(&dir).await;
+    // This machine; Sam on this machine (its address, but she is Sam); Sam away.
+    let here = format!("Cookie: {cookie}\r\n");
+    let away = format!("X-Forwarded-For: 203.0.113.9\r\n{here}");
+    let callers = [("", true), (here.as_str(), true), (away.as_str(), false)];
+    let pending = |origin: moli_core::Origin, point: &str| -> Vec<u64> {
+        hub.approvals()
+            .iter()
+            .filter(|r| r.origin == origin && r.point.as_str() == point)
+            .map(|r| r.id)
+            .collect()
+    };
+    let newest =
+        |origin: moli_core::Origin, point: &str| -> u64 { *pending(origin, point).last().unwrap() };
+    let (api, mcp) = (moli_core::Origin::Api, moli_core::Origin::Mcp);
+
+    let order =
+        |value: bool| json!({ "point": "fake:lamp/state", "value": value, "actor": "same-agent" });
+    let mut ids = Vec::new();
+    for (who, value) in callers {
+        let (status, body) =
+            request_with(&addr, "POST", "/api/command", Some(&order(value)), who).await;
+        assert_eq!(status, 202, "{body}");
+        ids.push(newest(api, "fake:lamp/state"));
+    }
+    assert_eq!(
+        pending(api, "fake:lamp/state"),
+        [ids[0], ids[2]],
+        "this machine's request stays; Sam's newer one replaced hers"
+    );
+
+    let look = json!({ "lights": ["dim:dimmer"], "ambiance": "lecture", "actor": "same-agent" });
+    let mut ids = Vec::new();
+    for (who, _) in callers {
+        let (status, body) = request_with(&addr, "POST", "/api/ambiance", Some(&look), who).await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("\"held\":[{"), "{body}");
+        ids.push(newest(api, "dim:dimmer/on"));
+    }
+    assert_eq!(pending(api, "dim:dimmer/on"), [ids[0], ids[2]]);
+
+    let call = |value: bool| {
+        rpc(
+            1,
+            "tools/call",
+            &json!({"name": "send_command", "arguments": {"point": "fake:lamp/state", "value": value, "actor": "same-agent"}}),
+        )
+    };
+    let mut ids = Vec::new();
+    for (who, value) in callers {
+        let (status, body) = request_with(&addr, "POST", "/mcp", Some(&call(value)), who).await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("awaiting_human_approval"), "{body}");
+        ids.push(newest(mcp, "fake:lamp/state"));
+    }
+    assert_eq!(pending(mcp, "fake:lamp/state"), [ids[0], ids[2]]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -41,8 +41,21 @@ Détails transverses :
 - **Débit** (`limit.rs`), par appelant et par tranche de 10 s, sur ce qui écrit seulement :
   `POST /api/command` et `PUT /api/labels/*` 30 (100 depuis le dashboard, un curseur envoie
   beaucoup de valeurs), `POST /api/approvals/*` 30, `POST /mcp` 120. Au-delà : `429`.
-- Demandes d'autorisation : 50 en attente au plus ; une nouvelle demande pour le même point
-  et la même origine remplace l'ancienne (la carte affichée est toujours la dernière).
+- Demandes d'autorisation : 50 en attente au plus (`MAX_PENDING`), 32 par appelant
+  (`MAX_PENDING_PER_CALLER`, une ambiance sur 32 lampes y tient). Une nouvelle demande ne
+  remplace que celle du **même appelant**, pour le même point et la même origine (la carte
+  affichée est toujours sa dernière) : deux personnes qui demandent la même chose gardent
+  chacune la sienne. L'appelant est celui que la maison a reconnu (`Caller::asker` : la
+  personne quand elle est connue, sinon la clé de l'appelant, voir 1.2 bis), jamais l'`actor`
+  déclaré ; il est gardé à côté de la demande, jamais diffusé (ni `/api/events`, ni
+  `/api/approvals`). Au-delà de 32, la plus ancienne de cet appelant cède sa place ; au-delà
+  de 50, celle de l'appelant qui en tient le plus, la nouvelle comptée (à égalité, celle qui
+  attend depuis le plus longtemps) : un flot ne chasse jamais la demande d'un autre qui en
+  tient moins que lui. Une demande expirée part avant d'être comptée. Les ordres dont
+  l'appelant est inconnu (ceux que la maison donne d'elle-même) comptent comme un seul
+  appelant, sans limite propre : entre eux, la règle d'avant (même point et même origine, la
+  plus ancienne cède au-delà de 50). Journal : `remplacée par une demande plus récente`, ou
+  `cédée à une demande plus récente : trop de demandes en attente`.
 - À l'arrêt (SIGTERM / Ctrl-C), les flux SSE se ferment : l'arrêt n'attend jamais un
   tableau de bord ouvert.
 - Il n'y a **pas d'authentification en lecture** : tout client qui passe la garde `Host`
@@ -237,6 +250,8 @@ Chemin d'une commande (`Hub::command`, `crates/moli-runtime/src/hub.rs`) :
    - `expires` = +10 minutes ;
    - nom de l'appareil, nom natif et pièces **figés au moment de la demande** (renommer
      l'appareil ensuite ne déguise pas ce que l'humain approuve) ;
+   - l'appelant (`Hub::command_from`) gardé à côté : la demande ne remplace que la sienne,
+     pour le même point et la même origine (limites en 1.1) ;
    - événement `approval_requested`, entrée de journal au résultat `pending`.
 
    Réponse REST : **`202 Accepted`** `{"ok": false, "pending": <id>, "reason": "..."}`.

@@ -1668,11 +1668,12 @@ impl Assistant {
             if let Err(why) = self
                 .0
                 .hub
-                .command(
+                .command_from(
                     &say,
                     Value::Text(message.into()),
                     Origin::Assistant,
                     Some("Moli".into()),
+                    Some(asker),
                 )
                 .await
             {
@@ -1814,11 +1815,12 @@ impl Assistant {
         let result = self
             .0
             .hub
-            .command(
+            .command_from(
                 &point,
                 Value::from_json(value),
                 Origin::Assistant,
                 Some("Moli".into()),
+                run.caller(),
             )
             .await;
         let mut action = Action {
@@ -1895,6 +1897,7 @@ impl Assistant {
             &lights,
             Origin::Assistant,
             Some("Moli".into()),
+            run.caller(),
         )
         .await;
         let name = |id: &DeviceId| {
@@ -2024,6 +2027,14 @@ struct Run {
     delegations: usize,
     /// The outside agent's words were read in this turn (`tools_for`).
     heard_agent: bool,
+}
+
+impl Run {
+    /// Who asks, when the house knows: what Moli's orders leave waiting
+    /// for a person is theirs (`Hub::command_from`).
+    fn caller(&self) -> Option<&str> {
+        Some(self.asker.as_str()).filter(|asker| !asker.is_empty())
+    }
 }
 
 /// A stoppable turn's entry, removed by the turn itself when it ends,

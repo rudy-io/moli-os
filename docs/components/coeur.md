@@ -77,6 +77,9 @@ un humain.**
 - Les autres (`api`, `mcp`, `cli`, `assistant`) dans une pièce protégée ou en heures calmes :
   l'ordre **n'est pas exécuté**, il devient une **demande d'approbation** (202 + id), qui
   expire en 10 min. Seul un humain la libère (`/api/approvals/{id}`, en nommant le point).
+  Une demande n'est remplacée que par une plus récente du **même appelant** (même point,
+  même origine) ; 32 par appelant, 50 en tout, et c'est l'appelant qui en tient le plus qui
+  cède sa plus ancienne (`api.md`, 1.1).
 - Une pièce protégée qui ne correspond plus à aucun appareil (renommée) est **signalée**
   (dashboard, santé, MCP, log) : une protection qui ne s'applique plus ne doit pas passer
   inaperçue.

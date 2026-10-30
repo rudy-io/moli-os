@@ -908,8 +908,14 @@ impl Assistant {
         Some(gone.text)
     }
 
-    /// `schedule`: an order sent in `minutes`, under the guard as if said then.
-    pub(crate) fn schedule(&self, point: Option<String>, args: &Json) -> String {
+    /// `schedule`: an order sent in `minutes`, under the guard as if said then
+    /// by `asker` (`Hub::command_from`).
+    pub(crate) fn schedule(
+        &self,
+        point: Option<String>,
+        args: &Json,
+        asker: Option<&str>,
+    ) -> String {
         let (Some(point), Some(minutes), Some(value)) =
             (point, minutes_of(args), args.get("value").cloned())
         else {
@@ -957,16 +963,18 @@ impl Assistant {
         let name = name_of(&v).to_owned();
         let hub = self.0.hub.clone();
         let target = moli_core::PointId::from(point.clone());
+        let asker = asker.map(str::to_owned);
         // The time is counted from now, not from when the task first runs.
         let due = tokio::time::Instant::now() + std::time::Duration::from_secs(minutes * 60);
         let order = async move {
             tokio::time::sleep_until(due).await;
             let done = hub
-                .command(
+                .command_from(
                     &target,
                     Value::from_json(&value),
                     Origin::Assistant,
                     Some("Moli".into()),
+                    asker.as_deref(),
                 )
                 .await;
             if let Err(e) = done {
@@ -984,8 +992,9 @@ impl Assistant {
         }
     }
 
-    /// `remind`: a word on the dashboards and the household's phones in `minutes`.
-    pub(crate) fn remind(&self, args: &Json) -> String {
+    /// `remind`: a word on the dashboards and the household's phones in `minutes`,
+    /// sent as `asker`'s (`Hub::command_from`).
+    pub(crate) fn remind(&self, args: &Json, asker: Option<&str>) -> String {
         let text = args["text"]
             .as_str()
             .map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -999,6 +1008,7 @@ impl Assistant {
         };
         let hub = self.0.hub.clone();
         let said = text.clone();
+        let asker = asker.map(str::to_owned);
         let due = tokio::time::Instant::now() + std::time::Duration::from_secs(minutes * 60);
         let reminder = async move {
             tokio::time::sleep_until(due).await;
@@ -1011,11 +1021,12 @@ impl Assistant {
             });
             for phone in hub.writable_points("push") {
                 let _ = hub
-                    .command(
+                    .command_from(
                         &phone,
                         Value::Text(said.clone().into()),
                         Origin::Assistant,
                         Some("Moli".into()),
+                        asker.as_deref(),
                     )
                     .await;
             }

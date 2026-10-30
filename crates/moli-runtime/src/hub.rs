@@ -101,8 +101,13 @@ pub enum ApprovalError {
 /// How long a held order waits for a human.
 const APPROVAL_TTL_MS: u64 = 10 * 60 * 1000;
 /// Orders waiting for a human, at most: a flood of requests must not bury
-/// the dashboard (the oldest gives way, and one per point and origin).
-const MAX_PENDING: usize = 50;
+/// the dashboard. Past it, whoever holds the most, the new request counted,
+/// gives way (their oldest): a flood never pushes out the request of someone
+/// holding fewer.
+pub const MAX_PENDING: usize = 50;
+/// Orders one known caller leaves waiting, at most (a look for 32 lights
+/// fits): past it, the caller's own oldest gives way.
+pub const MAX_PENDING_PER_CALLER: usize = 32;
 /// A point id is `<instance>:<native id>/<key>`: anything longer is noise.
 const MAX_POINT: usize = 256;
 /// Who acts, as declared by an agent: a name, not a message.
@@ -129,10 +134,85 @@ struct Prepared {
     commands: mpsc::Sender<CommandRequest>,
 }
 
+/// An order held for a human, and who asked for it.
+#[derive(Debug)]
+struct Held {
+    request: Arc<ApprovalRequest>,
+    /// Who asked, as the house established it ([`Hub::command_from`]): kept
+    /// beside the request, never in it (every screen receives the request).
+    caller: Option<String>,
+}
+
 #[derive(Debug, Default)]
 struct Approvals {
     next_id: u64,
-    pending: BTreeMap<u64, Arc<ApprovalRequest>>,
+    /// Oldest first: ids grow with time.
+    pending: BTreeMap<u64, Held>,
+}
+
+impl Approvals {
+    fn take(&mut self, id: u64) -> Option<Arc<ApprovalRequest>> {
+        self.pending.remove(&id).map(|held| held.request)
+    }
+
+    /// Makes room for a request of `caller` on `point` from `origin`: what
+    /// it replaces (that caller's own older request for the same point and
+    /// origin: the card shown is always the latest, and never in place of
+    /// someone else's), then what gives way to the limits. Requests whose
+    /// caller is unknown count as one caller, with no limit of their own.
+    fn make_room(
+        &mut self,
+        point: &PointId,
+        origin: Origin,
+        caller: Option<&str>,
+    ) -> (Vec<Arc<ApprovalRequest>>, Vec<Arc<ApprovalRequest>>) {
+        let mine = |held: &Held| held.caller.as_deref() == caller;
+        let older: Vec<u64> = self
+            .pending
+            .values()
+            .filter(|h| mine(h) && &h.request.point == point && h.request.origin == origin)
+            .map(|h| h.request.id)
+            .collect();
+        let replaced = older.into_iter().filter_map(|id| self.take(id)).collect();
+        let mut gave_way = Vec::new();
+        if caller.is_some() {
+            let own: Vec<u64> = self
+                .pending
+                .values()
+                .filter(|h| mine(h))
+                .map(|h| h.request.id)
+                .collect();
+            let over = (own.len() + 1).saturating_sub(MAX_PENDING_PER_CALLER);
+            gave_way.extend(own.into_iter().take(over).filter_map(|id| self.take(id)));
+        }
+        while self.pending.len() >= MAX_PENDING {
+            let Some(oldest) = self.oldest_of_the_biggest_holder(caller) else {
+                break;
+            };
+            gave_way.extend(self.take(oldest));
+        }
+        (replaced, gave_way)
+    }
+
+    /// The oldest request of the caller holding the most, counting the
+    /// request `caller` is adding; on a tie, of the one waiting the longest.
+    fn oldest_of_the_biggest_holder(&self, caller: Option<&str>) -> Option<u64> {
+        let mut holders: HashMap<Option<&str>, (usize, u64)> = HashMap::new();
+        for held in self.pending.values() {
+            holders
+                .entry(held.caller.as_deref())
+                .or_insert((0, held.request.id))
+                .0 += 1;
+        }
+        // A caller holding nothing yet ties at best, and has nothing to give.
+        if let Some(mine) = holders.get_mut(&caller) {
+            mine.0 += 1;
+        }
+        holders
+            .into_values()
+            .max_by_key(|&(count, oldest)| (count, std::cmp::Reverse(oldest)))
+            .map(|(_, oldest)| oldest)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -468,13 +548,30 @@ impl Hub {
     // ---- writing (surfaces) --------------------------------------------------
 
     /// Validates a write, routes it to the owning driver, waits for its answer
-    /// and journals the attempt — successful or not.
+    /// and journals the attempt — successful or not. Who asks is unknown
+    /// here: [`Hub::command_from`] when the house knows.
     pub async fn command(
         &self,
         point: &PointId,
         value: Value,
         origin: Origin,
         actor: Option<String>,
+    ) -> Result<(), CommandError> {
+        self.command_from(point, value, origin, actor, None).await
+    }
+
+    /// [`Hub::command`], for a caller the house knows: `caller` is who asks,
+    /// as the house established it (a person, an address), never what a
+    /// client declares (`actor`). An order held for a human is then replaced
+    /// by that caller's newer one only, and the caller keeps
+    /// [`MAX_PENDING_PER_CALLER`] waiting at most.
+    pub async fn command_from(
+        &self,
+        point: &PointId,
+        value: Value,
+        origin: Origin,
+        actor: Option<String>,
+        caller: Option<&str>,
     ) -> Result<(), CommandError> {
         let started = Instant::now();
         // Absurd inputs are refused before anything, and journaled without
@@ -501,7 +598,7 @@ impl Hub {
             Ok(prepared) => match self.verdict_for(point, &value, origin) {
                 Verdict::Allow => self.send(prepared).await,
                 Verdict::Approval(reason) => {
-                    let id = self.hold(point, &value, origin, actor.clone(), &reason);
+                    let id = self.hold(point, &value, origin, actor.clone(), caller, &reason);
                     Err(CommandError::NeedsApproval { id, reason })
                 }
             },
@@ -683,8 +780,11 @@ impl Hub {
         value: &Value,
         origin: Origin,
         actor: Option<String>,
+        caller: Option<&str>,
         reason: &str,
     ) -> u64 {
+        // A request past its time is gone before it counts against anyone.
+        self.expire_approvals();
         let now = now_ms();
         let (device_name, native_name, rooms) = point
             .split()
@@ -705,8 +805,7 @@ impl Hub {
                 )
             })
             .unwrap_or_default();
-        let replaced;
-        let request = {
+        let (request, replaced, gave_way) = {
             let mut approvals = self
                 .0
                 .approvals
@@ -715,26 +814,7 @@ impl Hub {
             // Ids never repeat across restarts: a card left on a screen can
             // never approve a different, newer request.
             approvals.next_id = approvals.next_id.max(now).saturating_add(1);
-            // A newer request for the same point, from the same origin,
-            // replaces the older one; past the cap, the oldest gives way.
-            let mut superseded: Vec<Arc<ApprovalRequest>> = approvals
-                .pending
-                .values()
-                .filter(|r| &r.point == point && r.origin == origin)
-                .cloned()
-                .collect();
-            for r in &superseded {
-                approvals.pending.remove(&r.id);
-            }
-            while approvals.pending.len() >= MAX_PENDING {
-                let Some((&oldest, _)) = approvals.pending.iter().next() else {
-                    break;
-                };
-                if let Some(r) = approvals.pending.remove(&oldest) {
-                    superseded.push(r);
-                }
-            }
-            replaced = superseded;
+            let (replaced, gave_way) = approvals.make_room(point, origin, caller);
             let request = Arc::new(ApprovalRequest {
                 id: approvals.next_id,
                 ts: now,
@@ -748,19 +828,30 @@ impl Hub {
                 native_name,
                 rooms,
             });
-            approvals.pending.insert(request.id, Arc::clone(&request));
-            request
+            let held = Held {
+                request: Arc::clone(&request),
+                caller: caller.map(str::to_owned),
+            };
+            approvals.pending.insert(request.id, held);
+            (request, replaced, gave_way)
         };
         let id = request.id;
-        for old in replaced {
+        let close = |old: &ApprovalRequest, why: String| {
+            let outcome = Outcome::Err(why);
             self.resolved(
-                &old,
+                old,
                 Decision::Expired,
                 Origin::System,
                 None,
-                Outcome::Err(moli_i18n::tr!("serveur.garde.remplacee")),
+                outcome,
                 Instant::now(),
             );
+        };
+        for old in &replaced {
+            close(old, moli_i18n::tr!("serveur.garde.remplacee"));
+        }
+        for old in &gave_way {
+            close(old, moli_i18n::tr!("serveur.garde.cedee"));
         }
         self.emit(Event::ApprovalRequested { request });
         id
@@ -775,7 +866,7 @@ impl Hub {
             .unwrap_or_else(PoisonError::into_inner)
             .pending
             .values()
-            .cloned()
+            .map(|held| Arc::clone(&held.request))
             .collect()
     }
 
@@ -802,11 +893,10 @@ impl Hub {
                 .unwrap_or_else(PoisonError::into_inner);
             match approvals.pending.get(&id) {
                 None => return Err(ApprovalError::Unknown),
-                Some(r) if &r.point != expected_point => return Err(ApprovalError::Mismatch),
-                Some(_) => approvals
-                    .pending
-                    .remove(&id)
-                    .ok_or(ApprovalError::Unknown)?,
+                Some(held) if &held.request.point != expected_point => {
+                    return Err(ApprovalError::Mismatch);
+                }
+                Some(_) => approvals.take(id).ok_or(ApprovalError::Unknown)?,
             }
         };
         if request.expires <= now_ms() {
@@ -852,11 +942,11 @@ impl Hub {
             let ids: Vec<u64> = approvals
                 .pending
                 .values()
-                .filter(|r| r.expires <= now)
-                .map(|r| r.id)
+                .filter(|held| held.request.expires <= now)
+                .map(|held| held.request.id)
                 .collect();
-            ids.iter()
-                .filter_map(|id| approvals.pending.remove(id))
+            ids.into_iter()
+                .filter_map(|id| approvals.take(id))
                 .collect()
         };
         for request in expired {

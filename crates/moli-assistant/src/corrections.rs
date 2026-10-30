@@ -224,7 +224,11 @@ impl crate::Assistant {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .find(question, &self.house_names(layout))
             .cloned()?;
-        let mut run = crate::Run::default();
+        // Whoever asks, a rule acts for them as the model would (what it leaves waiting is theirs).
+        let mut run = crate::Run {
+            asker: turn.asker.clone().unwrap_or_default(),
+            ..crate::Run::default()
+        };
         let said = match &rule.action {
             RuleAction::Nothing => moli_i18n::tr!("assistant.house.rule_nothing"),
             RuleAction::Call { tool, arguments } => {
@@ -827,6 +831,52 @@ mod applied_tests {
         let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
         assert!(asked.lock().unwrap().is_empty());
         assert_eq!(reply.actions[0].status, "held");
+    }
+
+    /// What Moli leaves waiting belongs to whoever asked, whether a rule, the model or a correction
+    /// acts: two people keep a request each, the same person replaces their own.
+    #[tokio::test]
+    async fn what_moli_leaves_waiting_belongs_to_whoever_asked() {
+        let guard = moli_runtime::guard::GuardPolicy {
+            protect_unassigned: true,
+            ..Default::default()
+        };
+        let askers = ["person:alex", "person:sam", "person:sam"];
+        let by = |who: &str| {
+            let mut turn = ask("Allume la lampe");
+            turn.asker = Some(who.to_owned());
+            turn
+        };
+        let hub = crate::tests::lamp_hub_guarded(false, guard.clone()).await;
+        let (moli, _) = house_model_over(hub, vec![]).await;
+        teach(&moli, "Allume la lampe", lamp_on());
+        for who in askers {
+            assert_eq!(moli.turn(by(who)).await.unwrap().actions[0].status, "held");
+        }
+        assert_eq!(moli.0.hub.approvals().len(), 2, "a rule");
+
+        let set = call("set", r#"{"point":"d1/on","value":true}"#);
+        let hub = crate::tests::lamp_hub_guarded(false, guard.clone()).await;
+        let (moli, _) = house_model_over(hub, vec![&set, &set, &set]).await;
+        for who in askers {
+            assert_eq!(moli.turn(by(who)).await.unwrap().actions[0].status, "held");
+        }
+        assert_eq!(moli.0.hub.approvals().len(), 2, "the model");
+
+        let unsure = words("Je ne sais pas.");
+        let hub = crate::tests::lamp_hub_guarded(false, guard).await;
+        let (moli, _) = house_model_over(hub, vec![&unsure]).await;
+        let turn = moli.turn(ask("Allume la lampe")).await.unwrap().turn_id;
+        let on = json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
+        for who in askers {
+            let origin = moli_core::Origin::Ui;
+            let done = moli
+                .correct(turn, on.clone(), false, origin, None, Some(who))
+                .await
+                .unwrap();
+            assert_eq!(done.reply.actions[0].status, "held");
+        }
+        assert_eq!(moli.0.hub.approvals().len(), 2, "a correction");
     }
 
     #[tokio::test]

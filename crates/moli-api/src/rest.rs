@@ -120,7 +120,13 @@ pub(crate) async fn command(
     }
     let origin = origin(&hub, &headers, &humans, &caller);
     let actor = journal_actor(origin, body.actor, &caller);
-    match hub.command(&body.point, body.value, origin, actor).await {
+    // Who asks, as the house knows them: what they leave waiting for a
+    // person is theirs, replaced by nobody else's order.
+    let asker = caller.asker();
+    match hub
+        .command_from(&body.point, body.value, origin, actor, Some(&asker))
+        .await
+    {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         // Accepted, not executed: a human decides.
         Err(CommandError::NeedsApproval { id, reason }) => (
@@ -194,7 +200,8 @@ pub(crate) async fn ambiance(
     }
     let origin = origin(&hub, &headers, &humans, &caller);
     let actor = journal_actor(origin, body.actor, &caller);
-    let report = moli_ambiance::apply(&hub, look, &body.lights, origin, actor).await;
+    let asker = caller.asker();
+    let report = moli_ambiance::apply(&hub, look, &body.lights, origin, actor, Some(&asker)).await;
     Json(report).into_response()
 }
 

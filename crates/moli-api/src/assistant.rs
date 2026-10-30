@@ -137,7 +137,11 @@ pub(crate) async fn undo_turn(
         return not_configured();
     };
     let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
-    match moli.undo_turn(id, origin, Some(caller.describe())).await {
+    let asker = caller.asker();
+    match moli
+        .undo_turn(id, origin, Some(caller.describe()), Some(&asker))
+        .await
+    {
         Ok(said) => axum::Json(json!({ "ok": true, "said": said })).into_response(),
         Err(e) => corrections_failure(&e),
     }
@@ -183,8 +187,9 @@ pub(crate) async fn correct_turn(
     };
     let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
     let choices: Vec<serde_json::Value> = body.choice.into_iter().chain(body.choices).collect();
+    let (actor, asker) = (Some(caller.describe()), caller.asker());
     match moli
-        .correct_many(id, choices, body.remember, origin, Some(caller.describe()))
+        .correct_many(id, choices, body.remember, origin, actor, Some(&asker))
         .await
     {
         Ok(done) => axum::Json(done).into_response(),

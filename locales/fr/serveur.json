@@ -96,6 +96,7 @@
   "serveur.garde.code_partout": "code demandé pour chaque commande (mode pin)",
   "serveur.garde.en_attente": "en attente d'autorisation humaine #{id} : {reason}",
   "serveur.garde.remplacee": "remplacée par une demande plus récente",
+  "serveur.garde.cedee": "cédée à une demande plus récente : trop de demandes en attente",
   "serveur.garde.expiree": "expirée",
   "serveur.garde.expiree_sans_decision": "expirée sans décision",
   "serveur.garde.appareil_sans_piece": "appareil sans pièce",

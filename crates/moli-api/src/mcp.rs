@@ -9,12 +9,14 @@ use moli_core::{DeviceId, Origin, PointId, Value};
 use moli_history::History;
 use moli_runtime::{CommandError, DeviceView, Hub, LabelPatch};
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock};
+use rmcp::model::{CallToolResult, ContentBlock, Extensions};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
+
+use crate::caller::Caller;
 
 pub(crate) fn service(
     hub: Hub,
@@ -261,12 +263,19 @@ impl MoliMcp {
     async fn send_command(
         &self,
         Parameters(args): Parameters<CommandArgs>,
+        request: Extensions,
     ) -> Result<CallToolResult, McpError> {
         let point = PointId::from(args.point);
         let value = Value::from_json(&args.value);
+        // Who asks, as `identify` established it for this HTTP request (not
+        // the `actor` the agent declares): a held order is theirs.
+        let asker = request
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<Caller>())
+            .map(Caller::asker);
         match self
             .hub
-            .command(&point, value, Origin::Mcp, args.actor)
+            .command_from(&point, value, Origin::Mcp, args.actor, asker.as_deref())
             .await
         {
             Ok(()) => ok(&json!({ "ok": true, "point": point })),
