@@ -99,6 +99,17 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 
+# Somfy TaHoma (Overkiz gateway, local API). Developer mode must be enabled
+# in the Somfy app (tap the gateway PIN seven times) and a token generated
+# there: moli-os secrets set <id> token. The gateway certificate is pinned on
+# first contact, before the token is used.
+# [[driver]]
+# id = "somfy"
+# kind = "tahoma"
+#
+# [driver.options]
+# host = "192.168.0.x"
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
