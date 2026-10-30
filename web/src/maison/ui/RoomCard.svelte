@@ -1,11 +1,12 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, coverPosition } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
   import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
+  import ShutterIcon from './ShutterIcon.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
@@ -200,7 +201,7 @@
 
   function stateOf(d, point, outlets, isCover) {
     if (isCover) {
-      const pct = value(d.id, 'percent_control');
+      const pct = coverPosition(d.id);
       if (pct == null) return '';
       return t('commun.volet.ouvert_a', { pct: num(Math.max(0, Math.min(100, Math.round(Number(pct))))) });
     }
@@ -215,9 +216,11 @@
 
   function tap(d, point, outlets, name, isCover) {
     if (isCover) {
-      const pct = value(d.id, 'percent_control');
+      const pct = coverPosition(d.id);
       const isOpen = pct != null && pct >= 50;
       const cmd = isOpen ? 'close' : 'open';
+      const offers = hub.devices[d.id]?.points.find((p) => p.key === 'control')?.kind.values ?? [];
+      if (!offers.includes(cmd)) return;
       const action = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
       act(`${d.id}/control`, cmd, t('commun.action', { label: nameOf(d.id), action }));
       return;
@@ -287,7 +290,7 @@
   {#if pads.length}
     <div class="pads" class:icons>
       {#each pads as { d, point, link, outlets, name, isCover } (`${d.id}/${point}`)}
-        {@const lit = isCover ? (value(d.id, 'percent_control') ?? 0) >= 50 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
+        {@const lit = isCover ? (coverPosition(d.id) ?? 0) >= 50 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
         {@const cut = unpowered(d.id) && !isFixture(d)}
         {@const more = isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
         {@const label = name ?? nameOf(d.id)}
@@ -295,14 +298,22 @@
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
               <span class="ico">
-                <Icon name={isCover ? 'shutter' : padIcon(d)} size={icons ? 22 : 18} />
+                {#if isCover}
+                  <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
+                {:else}
+                  <Icon name={padIcon(d)} size={icons ? 22 : 18} />
+                {/if}
               </span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
             <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} onclick={() => tap(d, point, outlets, name, isCover)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico">
-                <Icon name={isCover ? 'shutter' : (outlets ? 'power' : padIcon(d))} size={icons ? 22 : 18} />
+                {#if isCover}
+                  <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
+                {:else}
+                  <Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} />
+                {/if}
               </span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
             </button>

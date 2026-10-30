@@ -1,38 +1,33 @@
 <script>
-  import { onDestroy } from 'svelte';
   import { mdiSpeedometerMedium, mdiSpeedometerSlow } from '@mdi/js';
-  import { device, value, act, nameOf, num, pending, reachable } from '../lib/home.svelte.js';
+  import { device, value, act, nameOf, num, pending, reachable, coverPosition, coverPositionKey } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import { hub } from '../../lib/hub.svelte.js';
   import Icon from './Icon.svelte';
-  import { canWrite, quantize, positionPoint } from '../lib/capabilities.js';
+  import ShutterIcon from './ShutterIcon.svelte';
+  import Slider from './Slider.svelte';
   import { coverCommands, coverPositionTarget, hasSlowCoverControl } from '../lib/cover-controls.js';
-  import { completionGuard } from '../lib/completion-guard.js';
+  import { canWrite } from '../lib/capabilities.js';
 
-  /** A shutter: advertised actions, with optional icons-only room presentation. */
-  let { id, name = null, standalone = false, icons = false } = $props();
+  /** A shutter: tap to toggle open/close, advanced controls for precise positioning. */
+  let { id, name = null, compact = false } = $props();
 
   const d = $derived(device(id));
   const available = $derived(!!d && d.online !== false);
   const connected = $derived(hub.connected === true);
   const live = $derived(available && connected);
   const ok = $derived(reachable(id));
+  const label = $derived(nameOf(id, name));
 
   // Speed control
   let speedChoice = $state(null);
   const speed = $derived(speedChoice?.id === id ? speedChoice.speed : 'normal');
   const hasSlow = $derived(hasSlowCoverControl(d));
 
-  const label = $derived(nameOf(id, name));
-  const posPoint = $derived(positionPoint(d, true));
-  const reported = $derived(posPoint ? value(id, posPoint.key) : null);
-  const pos = $derived(posPoint?.kind?.type === 'numeric' && Number.isFinite(reported) && reported >= 0 && reported <= 100 ? reported : null);
-
-  const actions = $derived(coverCommands(d, speed).map((action) => ({ ...action, ...BUTTONS[action.command] })));
-  const writableActions = $derived(actions.filter(({ key, value }) => value && connected && canWrite(d, key)));
-  const positionTarget = $derived(coverPositionTarget(d, speed));
-  const range = $derived(positionTarget?.range);
-  const positionWritable = $derived(connected && !!positionTarget && canWrite(d, positionTarget.point.key));
+  const pos = $derived(coverPosition(id));
+  const posKey = $derived(coverPositionKey(id));
+  const busy = $derived(pending(id, posKey) || pending(id, 'control'));
+  const offers = $derived(d?.points.find((p) => p.key === 'control')?.kind.values ?? []);
 
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
@@ -41,33 +36,13 @@
         : moving && String(moving).toLowerCase() !== 'stop' ? t('commun.volet.mouvement') : '',
   );
 
-  const busy = $derived(pending(id, posPoint?.key) || !!sending);
-
-  // Position dragging
-  let draggingValue = $state(null);
-  const shown = $derived(draggingValue ?? pos);
-
-  // Feedback state
-  let sending = $state(null);
-  let feedback = $state('');
-  const completion = completionGuard();
-
-  onDestroy(() => completion.change());
-
-  $effect(() => {
-    void id;
-    completion.change();
-    sending = null;
-    feedback = '';
+  const isOpen = $derived(pos != null && pos >= 50);
+  const status = $derived.by(() => {
+    const parts = [];
+    if (pos != null) parts.push(t('commun.volet.ouvert_a', { pct: num(pos) }));
+    if (going) parts.push(going);
+    return parts.join(' · ');
   });
-
-  const status = $derived([
-    shown != null ? t('commun.volet.ouvert_a', { pct: num(shown) }) : t('commun.volet.position_inconnue'),
-    going
-  ].filter(Boolean).join(' · '));
-
-  const accessReason = $derived(!connected ? 'reconnexion' : !available ? 'injoignable'
-    : !writableActions.length && !positionWritable ? 'lecture_seule' : null);
 
   function selectSpeed(next) {
     if (next === 'normal' || next === 'slow' && hasSlow) {
@@ -75,290 +50,204 @@
     }
   }
 
-  function previewPosition(event) {
-    if (positionWritable && pos != null) {
-      draggingValue = quantize(Number(event.currentTarget.value), range);
-    }
-  }
-
-  function setPosition(event) {
-    draggingValue = null;
-    if (!positionWritable || pos == null) return;
-    const next = quantize(Number(event.currentTarget.value), range);
-    if (next != null && next !== pos) {
-      submit(positionTarget.point.key, next, t('commun.action', { label, action: t('commun.volet.position') }));
-    }
+  function tap() {
+    const cmd = isOpen ? 'close' : 'open';
+    if (!offers.includes(cmd)) return;
+    const action = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
+    act(`${id}/control`, cmd, t('commun.action', { label, action }));
   }
 
   function sendOrder(command, key) {
-    const choice = coverCommands(d, speed).find((item) => item.command === command);
-    if (choice?.value && connected && canWrite(d, choice.key)) {
-      submit(choice.key, choice.value, t('commun.action', { label, action: t(key).toLowerCase() }));
-    }
+    if (!offers.includes(command)) return;
+    act(`${id}/control`, command, t('commun.action', { label, action: t(key).toLowerCase() }));
   }
 
-  async function submit(key, next, description) {
-    if (!connected || !canWrite(d, key)) return;
-    if (sending?.key === key && sending.value === next) return;
-
-    completion.change();
-    const owns = completion.capture();
-    sending = { key, value: next };
-    feedback = 'sending';
-
-    const result = await act(`${id}/${key}`, next, description);
-
-    if (!owns()) return;
-    sending = null;
-    feedback = result === 'ok' ? 'sent' : result;
-  }
-
-  const BUTTONS = {
-    open: { labelKey: 'commun.volet.ouvrir', icon: 'chevron-up' },
-    stop: { labelKey: 'commun.volet.stop', icon: 'stop' },
-    close: { labelKey: 'commun.volet.fermer', icon: 'chevron-down' },
-    cycle: { labelKey: 'commun.volet.impulsion', icon: 'repeat' },
-  };
+  // [command sent to the device, catalogue key of its button, its icon]
+  const BUTTONS = [
+    ['open', 'commun.volet.ouvrir', 'chevron-up'],
+    ['stop', 'commun.volet.stop', 'stop'],
+    ['close', 'commun.volet.fermer', 'chevron-down'],
+    ['cycle', 'commun.volet.impulsion', 'power'],
+  ];
 </script>
 
-<div class="cover" class:standalone class:icons class:busy class:off-grid={!ok} title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
-  <div class="heading">
-    <span class="device-icon" class:open={live && pos > 0} class:moving={live && !!going}>
-      <Icon name={live ? 'shutter' : 'offline'} size={24} />
+<div class="tile" class:open={isOpen} class:busy class:off-grid={!ok || !d} class:compact>
+  <button class="hit" onclick={tap} disabled={!d || !ok} aria-pressed={isOpen} aria-label={t('commun.action', { label, action: status })}>
+    <ShutterIcon {id} size={compact ? 40 : 46} />
+    <span class="text">
+      <b>{label}</b>
+      <small>{status}</small>
     </span>
-    {#if !icons}<span class="name">{label}<small>{status}</small></span>{/if}
-  </div>
-
-  {#if accessReason}
-    {@const accessLabel = t(accessReason === 'injoignable' ? 'commun.piece.injoignable' : `commun.volet.${accessReason}`)}
-    <details class="access">
-      <summary title={icons ? accessLabel : undefined} aria-label={icons ? accessLabel : undefined}>
-        {#if icons}<Icon name={accessReason === 'lecture_seule' ? 'lock' : 'offline'} size={20} />{:else}{accessLabel}{/if}
-      </summary>
-      <p>{t(!connected ? 'commun.hors_ligne' : available ? 'commun.volet.lecture_seule_aide' : 'commun.volet.connexion_aide')}
-        <a href="#/systeme">{t('commun.volet.voir_connexion')}</a></p>
-    </details>
-  {/if}
-
-  {#if actions.length}
-    <div class="actions" role="group" aria-label={t('commun.volet.commandes_de', { label })}>
-      {#each actions as action (action.command)}
-        <button type="button" data-cover-command={action.command}
-          title={icons ? t(action.labelKey) : undefined} aria-label={icons ? t(action.labelKey) : undefined}
-          disabled={!live || !action.value || !canWrite(d, action.key) || sending?.key === action.key && sending.value === action.value}
-          onclick={() => sendOrder(action.command, action.labelKey)}>
-          <Icon name={action.icon} size={20} />
-          {#if !icons}<span>{t(action.labelKey)}</span>{/if}
-        </button>
-      {/each}
-    </div>
-  {/if}
+    <span class="switch" aria-hidden="true"><i></i></span>
+  </button>
 
   {#if hasSlow || speed === 'slow'}
     <div class="speed" role="group" aria-label={t('commun.volet.vitesse_prochaine')}>
-      {#if !icons}<span>{t('commun.volet.vitesse')}</span>{/if}
+      <span class="speed-label">{t('commun.volet.vitesse')}</span>
       <div class="segments">
-        <button type="button" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}
-          title={icons ? t('commun.volet.vitesse_normale') : undefined} aria-label={icons ? t('commun.volet.vitesse_normale') : undefined}>
-          {#if icons}<Icon path={mdiSpeedometerMedium} size={20} />{:else}{t('commun.volet.vitesse_normale')}{/if}
+        <button type="button" class="speed-btn" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}
+          title={t('commun.volet.vitesse_normale')} aria-label={t('commun.volet.vitesse_normale')}>
+          <Icon path={mdiSpeedometerMedium} size={18} />
         </button>
-        <button type="button" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}
-          title={icons ? t('commun.volet.vitesse_lente') : undefined} aria-label={icons ? t('commun.volet.vitesse_lente') : undefined}>
-          {#if icons}<Icon path={mdiSpeedometerSlow} size={20} />{:else}{t('commun.volet.vitesse_lente')}{/if}
+        <button type="button" class="speed-btn" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}
+          title={t('commun.volet.vitesse_lente')} aria-label={t('commun.volet.vitesse_lente')}>
+          <Icon path={mdiSpeedometerSlow} size={18} />
         </button>
       </div>
     </div>
   {/if}
 
-  {#if positionWritable}
-    <label class="position">
-      {#if !icons}<span>{t('commun.volet.position')}</span>{/if}
-      <input type="range" min={range.first} max={range.last} step={range.step} value={shown ?? range.first} disabled={pos == null} oninput={previewPosition} onchange={setPosition} aria-label={t('commun.volet.position_label', { label })} />
-    </label>
-  {/if}
-
-  {#if feedback}
-    <p class="feedback" role="status" title={icons ? t(`commun.volet.feedback.${feedback}`) : undefined} aria-label={icons ? t(`commun.volet.feedback.${feedback}`) : undefined}>
-      {#if icons}<Icon name={feedback === 'sending' ? 'clock' : feedback === 'sent' ? 'ok' : feedback === 'held' ? 'lock' : 'warning'} size={20} />{:else}{t(`commun.volet.feedback.${feedback}`)}{/if}
-    </p>
+  {#if posKey}
+    <div class="controls">
+      <Slider
+        min={0}
+        max={100}
+        step={1}
+        value={pos ?? 0}
+        label={t('commun.volet.position_label', { label })}
+        oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
+      {#each BUTTONS.filter(([cmd]) => offers.includes(cmd)) as [cmd, key, ico] (cmd)}
+        <button class="action-btn" onclick={() => sendOrder(cmd, key)} title={t(key)} aria-label={t(key)}>
+          <Icon name={ico} size={18} />
+        </button>
+      {/each}
+    </div>
   {/if}
 </div>
 
 <style>
-  .cover {
-    display: grid;
-    gap: 12px;
-    min-width: 0;
-    padding: 14px;
-    background: var(--surface-2);
+  .tile {
+    position: relative;
     border-radius: var(--r-md);
-    color: var(--ink-2);
+    background: var(--surface-2);
+    transition: background 0.35s var(--ease), box-shadow 0.35s var(--ease);
+    overflow: hidden;
   }
 
-  .cover.busy {
-    opacity: 0.7;
+  .tile.open {
+    background: linear-gradient(155deg, var(--warm-soft) 0%, var(--surface) 70%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 25%, transparent);
   }
 
-  .cover.off-grid {
-    opacity: 0.5;
-  }
-
-  .heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .device-icon {
+  .hit {
+    all: unset;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 112px;
+    padding: 16px;
     display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    flex: none;
-    border-radius: var(--r-sm);
-    background: var(--surface-3);
-    color: var(--ink-2);
-  }
-
-  .device-icon.open {
-    background: var(--warm-soft);
-    color: var(--warm-ink);
-  }
-
-  .device-icon.moving {
-    animation: moving 1.6s ease-in-out infinite alternate;
-  }
-
-  .name {
-    flex: 1;
-    display: grid;
-    font-weight: 650;
-    color: var(--ink);
-    min-width: 0;
-    overflow-wrap: anywhere;
-    line-height: 1.35;
-    gap: 2px;
-  }
-
-  .standalone {
-    background: var(--surface);
-    border: 1px solid var(--line);
-  }
-
-  small {
-    font-weight: 500;
-    color: var(--ink-2);
-    font-size: 13px;
-  }
-
-  .access {
-    font-size: 13px;
-    max-width: 100%;
-  }
-
-  .access summary {
-    cursor: pointer;
-    color: var(--ink-2);
-    min-height: 44px;
-    line-height: 24px;
-    padding: 10px 0;
-  }
-
-  .access p {
-    max-width: 38ch;
-    margin: 8px 0 0;
-    line-height: 1.5;
-  }
-
-  .access a {
-    color: inherit;
-    text-underline-offset: 3px;
-  }
-
-  .feedback {
-    margin: 0;
-    color: var(--ink-2);
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .actions {
-    display: flex;
-    gap: 6px;
-  }
-
-  .actions button {
-    flex: 1;
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 2px;
-    min-width: 0;
-    min-height: 52px;
-  }
-
-  button {
-    border: 1px solid var(--line);
-    background: var(--surface);
-    color: var(--ink);
-    border-radius: var(--r-sm);
-    padding: 6px 8px;
-    font-size: 13px;
-    font-weight: 650;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 10px 12px;
     cursor: pointer;
     touch-action: manipulation;
     transition: background-color 160ms ease, transform 160ms ease;
   }
 
-  button:disabled {
-    color: var(--ink-2);
-    background: var(--surface-2);
-    cursor: default;
+  .compact .hit {
+    min-height: 76px;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto;
+    align-items: center;
   }
 
-  button:not(:disabled):active {
-    transform: scale(0.97);
-    background: var(--surface-3);
-  }
-
-  button:focus-visible,
-  summary:focus-visible {
+  .hit:focus-visible {
     outline: 3px solid var(--cool);
-    outline-offset: 3px;
+    outline-offset: -3px;
+    border-radius: var(--r-md);
   }
 
-  @media (hover: hover) {
-    button:not(:disabled):hover {
-      background: var(--surface-3);
+  .text {
+    grid-column: 1 / -1;
+    align-self: end;
+    display: grid;
+    gap: 2px;
+  }
+
+  .compact .text {
+    grid-column: auto;
+    align-self: center;
+  }
+
+  .text b {
+    font-weight: 650;
+    font-size: 16px;
+  }
+
+  .text small {
+    color: var(--ink-3);
+    font-size: 13px;
+    font-weight: 550;
+  }
+
+  .open .text small {
+    color: var(--warm-ink);
+  }
+
+  /* Toggle switch top right */
+  .switch {
+    position: absolute;
+    top: 18px;
+    right: 16px;
+    width: 40px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    transition: background 0.3s var(--ease);
+  }
+
+  .compact .switch {
+    position: relative;
+    top: auto;
+    right: auto;
+  }
+
+  .switch i {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+    transition: transform 0.3s var(--ease);
+  }
+
+  .open .switch {
+    background: var(--warm);
+  }
+
+  .open .switch i {
+    transform: translateX(16px);
+  }
+
+  .busy :global(.shutter-icon) {
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    50% {
+      opacity: 0.55;
     }
   }
 
-  .position {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-  }
-
-  .position input {
-    flex: 1;
-    min-width: 0;
-    min-height: 44px;
-    accent-color: var(--cool);
+  .off-grid {
+    opacity: 0.55;
   }
 
   .speed {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    margin: 0 16px 12px;
   }
 
-  .speed > span {
+  .speed-label {
     font-size: 12px;
     color: var(--ink-2);
+    font-weight: 550;
   }
 
   .segments {
@@ -369,76 +258,73 @@
     background: var(--surface-3);
   }
 
-  .segments button {
-    min-height: 44px;
-    min-width: 60px;
-    border-color: transparent;
-    background: transparent;
+  .speed-btn {
+    all: unset;
+    box-sizing: border-box;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    border-radius: var(--r-xs);
+    transition: all 0.2s var(--ease);
   }
 
-  .segments button[aria-pressed="true"] {
+  .speed-btn[aria-pressed="true"] {
     background: var(--surface);
     box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
   }
 
-  /* Room preference: compact icons without shrinking the touch targets. */
-  .icons {
+  .speed-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .controls {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    padding: 8px 10px;
-    gap: 8px;
+    gap: 12px;
+    margin: -6px 16px 16px;
   }
 
-  .icons .actions {
-    flex-wrap: wrap;
-  }
-
-  .icons button {
+  .action-btn {
+    all: unset;
+    box-sizing: border-box;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--ink-2);
     display: grid;
     place-items: center;
-    flex: 0 0 44px;
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
   }
 
-  .icons .access summary {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    padding: 0;
-    list-style: none;
+  .action-btn:hover {
+    background: var(--surface-3);
+    transform: scale(1.05);
   }
 
-  .icons .access summary::-webkit-details-marker {
-    display: none;
+  .action-btn:active {
+    transform: scale(0.98);
   }
 
-  .icons .access[open] {
-    flex-basis: 100%;
-  }
-
-  .icons .position {
-    flex: 1 1 110px;
-    width: auto;
-  }
-
-  @keyframes moving {
-    to {
-      opacity: 0.6;
-    }
+  .action-btn:focus-visible {
+    outline: 3px solid var(--cool);
+    outline-offset: 2px;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    button {
+    .hit,
+    .switch,
+    .switch i,
+    .action-btn,
+    .speed-btn {
       transition: none;
     }
-    button:not(:disabled):active {
-      transform: none;
-    }
-    .device-icon.moving {
+    .busy :global(.shutter-icon) {
       animation: none;
     }
   }
