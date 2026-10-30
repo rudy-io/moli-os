@@ -81,6 +81,19 @@ base_topic = "zigbee2mqtt"
 # username = "moli-os"
 # password_env = "MOLI_Z2M_PASSWORD"
 
+# Z-Wave, through an existing Z-Wave JS UI bridge (its MQTT gateway).
+# [[driver]]
+# id = "zwave"
+# kind = "zwave"
+#
+# [driver.options]
+# host = "127.0.0.1"
+# port = 1883
+# base_topic = "zwave"       # the gateway's MQTT topic prefix
+# mqtt_name = "default"      # nom du client MQTT de la passerelle (champ "Name", défaut "default")
+# username = "moli-os"
+# password_env = "MOLI_ZWAVE_PASSWORD"
+
 # Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
 # keep the pairing key encrypted; press the link button when asked.
 # [[driver]]

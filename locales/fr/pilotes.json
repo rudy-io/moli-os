@@ -532,5 +532,11 @@
   "pilotes.solarman.lecture_seule": "l'onduleur se lit seulement, il ne se commande pas",
   "pilotes.solarman.fuseau_inconnu": "fuseau horaire inconnu : « {timezone} » (exemple : Europe/Paris)",
   "pilotes.solarman.numero_inconnu": "numéro de série de l'enregistreur inconnu : {host} ne répond pas à la découverte (de nuit, l'onduleur dort) ; le donner dans l'option « serial » (étiquette de l'enregistreur ou application Solarman)",
-  "pilotes.solarman.pas_un_micro": "l'appareil derrière cet enregistreur n'est pas un micro-onduleur Deye : pas encore pris en charge"
+  "pilotes.solarman.pas_un_micro": "l'appareil derrière cet enregistreur n'est pas un micro-onduleur Deye : pas encore pris en charge",
+  "pilotes.zwave.broker_injoignable": "le broker Z-Wave est injoignable",
+  "pilotes.zwave.appareil_inconnu": "appareil inconnu",
+  "pilotes.zwave.point_lu_seul": "le point {point} est en lecture seule",
+  "pilotes.zwave.point_sans_cible": "le point {point} n'a pas de cible d'écriture",
+  "pilotes.zwave.niveau_attend_nombre": "le point niveau attend un nombre",
+  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen"
 }

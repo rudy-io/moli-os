@@ -532,5 +532,11 @@
   "pilotes.solarman.lecture_seule": "the inverter is read only, it takes no orders",
   "pilotes.solarman.fuseau_inconnu": "unknown time zone: \"{timezone}\" (for example Europe/Paris)",
   "pilotes.solarman.numero_inconnu": "the logger's serial number is unknown: {host} does not answer discovery (at night the inverter sleeps); give it in the \"serial\" option (logger sticker or Solarman app)",
-  "pilotes.solarman.pas_un_micro": "the device behind this logger is not a Deye micro-inverter: not supported yet"
+  "pilotes.solarman.pas_un_micro": "the device behind this logger is not a Deye micro-inverter: not supported yet",
+  "pilotes.zwave.broker_injoignable": "the Z-Wave broker is unreachable",
+  "pilotes.zwave.appareil_inconnu": "unknown device",
+  "pilotes.zwave.point_lu_seul": "point {point} is read-only",
+  "pilotes.zwave.point_sans_cible": "point {point} has no write target",
+  "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
 }

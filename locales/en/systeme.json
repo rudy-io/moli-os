@@ -355,5 +355,7 @@
   "systeme.alexa.connecter": "Connect",
   "systeme.alexa.verification": "Connecting…",
   "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
-  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice."
+  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice.",
+  "systeme.pilotes.zwave.nom": "Z-Wave",
+  "systeme.pilotes.zwave.desc": "The Z-Wave nodes (switches, dimmers, sensors), through Z-Wave JS UI's MQTT gateway."
 }

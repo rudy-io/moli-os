@@ -15,6 +15,7 @@ moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
 moli-announce = { path = "crates/moli-announce" }
 moli-z2m = { path = "crates/moli-z2m" }
+moli-zwave = { path = "crates/moli-zwave" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-dirigera = { path = "crates/moli-dirigera" }
