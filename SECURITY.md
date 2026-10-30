@@ -40,6 +40,18 @@ Moli runs a home: knowing its trust model helps you install it safely and find w
   its answers (« Pas ça »), and the rules it learns from that, are a person's too (the code); a
   learned rule answers through the same guard as the model, and what people corrected stays in
   the house (`docs/PRIVACY.md`).
+- **Per-caller limits count each address of the home network as a caller.** Write budgets,
+  live streams (8 per caller, 64 in all) and orders waiting for a person (32 per caller, 50 in
+  all) are counted per caller: on the home network, its address (for waiting orders, the person
+  when Moli knows them). A machine there that takes several addresses (any free one on the
+  network; many more over IPv6 if Moli listens on it) counts as that many callers: its write
+  budgets add up, it can take every live stream (dashboards then go without live updates) and
+  push out the orders others left waiting, never approve one. Guessing the code gains nothing
+  from it: the home network, this machine and Cloudflare Access share one budget of 20 wrong
+  codes an hour. A few addresses do spend that budget, and codes are then off for the household
+  for the hour (sessions already open keep working; the house is told). These limits tame a
+  misbehaving client, not a hostile one: a malicious device on the home network is out of scope
+  (below).
 - **Browsers**: a write sent from another site's page (by its `Origin` or `Sec-Fetch-Site`) is
   refused, and no page can show the dashboard inside a frame.
 - **A demo house** (`[server] demo = true`) lets anyone play with it, from anywhere, and keeps

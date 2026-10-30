@@ -273,6 +273,13 @@ impl MoliMcp {
             .get::<axum::http::request::Parts>()
             .and_then(|parts| parts.extensions.get::<Caller>())
             .map(Caller::asker);
+        if asker.is_none() {
+            // `identify` runs before `/mcp`: never seen unless a change of
+            // route or of rmcp drops it. The held order would then be counted
+            // with the house's own, and any agent's newer one replace it.
+            // (Not the point: unchecked yet, it can be as long as the body.)
+            tracing::warn!("MCP order without its caller");
+        }
         match self
             .hub
             .command_from(&point, value, Origin::Mcp, args.actor, asker.as_deref())

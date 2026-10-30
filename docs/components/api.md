@@ -55,7 +55,12 @@ Détails transverses :
   l'appelant est inconnu (ceux que la maison donne d'elle-même) comptent comme un seul
   appelant, sans limite propre : entre eux, la règle d'avant (même point et même origine, la
   plus ancienne cède au-delà de 50). Journal : `remplacée par une demande plus récente`, ou
-  `cédée à une demande plus récente : trop de demandes en attente`.
+  `cédée à une demande plus récente : trop de demandes en attente`. Sur le réseau local, la
+  clé est l'adresse : une machine qui en prend plusieurs (toute adresse libre du réseau ; en
+  IPv6, si Moli y écoute, bien davantage) compte pour autant d'appelants, ici comme pour le
+  débit et les flux en direct (`SECURITY.md`). Un ordre MCP arrivé sans son appelant (jamais
+  par la route `/mcp`, où `identify` passe avant) laisse un avertissement dans les logs du
+  serveur : `MCP order without its caller`.
 - À l'arrêt (SIGTERM / Ctrl-C), les flux SSE se ferment : l'arrêt n'attend jamais un
   tableau de bord ouvert.
 - Il n'y a **pas d'authentification en lecture** : tout client qui passe la garde `Host`
