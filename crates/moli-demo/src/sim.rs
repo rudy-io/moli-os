@@ -418,9 +418,18 @@ impl World {
                 let state = if *b { "playing" } else { "paused" };
                 Self::set(ctx, live, "state", Value::Text(state.into()));
             }
+            // Cover position update (percent_control): already set by the generic code above.
             ("control", Value::Text(t)) => {
                 let t = t.to_ascii_lowercase();
-                if t.contains("pause") {
+                // Cover control (shutters): open, close, stop
+                if live.has("percent_control") {
+                    if t.contains("open") {
+                        Self::set(ctx, live, "percent_control", Value::Float(100.0));
+                    } else if t.contains("close") {
+                        Self::set(ctx, live, "percent_control", Value::Float(0.0));
+                    }
+                    // stop: keep current position
+                } else if t.contains("pause") {
                     Self::set(ctx, live, "printing", Value::Bool(false));
                     if live.has("state") {
                         Self::set(ctx, live, "state", Value::Text("paused".into()));
