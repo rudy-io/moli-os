@@ -151,6 +151,15 @@ impl Airzone {
             current.members == command.device.members,
             moli_i18n::tr!("airzone.stale")
         );
+        // The raw value retains the unit used at admission, even when the new
+        // range overlaps. Never reinterpret it under a refreshed unit.
+        ensure!(
+            current
+                .point(&command.key)
+                .zip(command.device.point(&command.key))
+                .is_some_and(|(current, admitted)| current.unit == admitted.unit),
+            moli_i18n::tr!("airzone.stale")
+        );
         let body = snapshot.encode(
             ctx.instance(),
             mac,
@@ -265,13 +274,19 @@ mod lifecycle_tests {
         delay: Arc<Mutex<u64>>,
     }
     async fn start() -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
+        start_with_zones(
+            serde_json::from_str(include_str!(
+                "../../../integrations/airzone/fixtures/zones.json"
+            ))
+            .unwrap(),
+        )
+        .await
+    }
+    async fn start_with_zones(
+        zones: Json,
+    ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
         let sim = Sim {
-            zones: Arc::new(Mutex::new(
-                serde_json::from_str(include_str!(
-                    "../../../integrations/airzone/fixtures/zones.json"
-                ))
-                .unwrap(),
-            )),
+            zones: Arc::new(Mutex::new(zones)),
             mac: Arc::new(Mutex::new("aa:bb:cc:dd:ee:ff".into())),
             writes: Arc::default(),
             reject: Arc::default(),
@@ -368,6 +383,87 @@ mod lifecycle_tests {
             .is_err()
         );
         assert_eq!(sim.writes.lock().unwrap().len(), 1);
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn changed_temperature_unit_refuses_write_before_put() {
+        let mut zones: Json = serde_json::from_str(include_str!(
+            "../../../integrations/airzone/fixtures/zones.json"
+        ))
+        .unwrap();
+        let zone = &mut zones["systems"][0]["data"][0];
+        zone["minTemp"] = json!(5.);
+        zone["maxTemp"] = json!(50.);
+        zone["temp_step"] = json!(1.);
+        let (hub, cancel, sim, server) = start_with_zones(zones).await;
+        {
+            let mut zones = sim.zones.lock().unwrap();
+            let zone = &mut zones["systems"][0]["data"][0];
+            zone["units"] = json!(1);
+            zone["minTemp"] = json!(41.);
+            zone["maxTemp"] = json!(122.);
+            zone["temp_step"] = json!(1.);
+            zone["roomTemp"] = json!(70.);
+            zone["setpoint"] = json!(72.);
+        }
+        // 45 is valid in both ranges, but the admitted Celsius command cannot
+        // be reinterpreted as Fahrenheit by the preflight snapshot.
+        let result = hub
+            .command(
+                &point("az:aabbccddeeff_s1_z2", "target_temperature"),
+                Value::Float(45.),
+                Origin::Ui,
+                None,
+            )
+            .await;
+        assert!(sim.writes.lock().unwrap().is_empty());
+        assert!(result.is_err());
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn missing_temperature_unit_refuses_write_before_put() {
+        let (hub, cancel, sim, server) = start().await;
+        sim.zones.lock().unwrap()["systems"][0]["data"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("units");
+        assert!(
+            hub.command(
+                &point("az:aabbccddeeff_s1_z2", "target_temperature"),
+                Value::Float(25.),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert!(sim.writes.lock().unwrap().is_empty());
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn unchanged_temperature_unit_allows_refreshed_range() {
+        let (hub, cancel, sim, server) = start().await;
+        {
+            let mut zones = sim.zones.lock().unwrap();
+            let zone = &mut zones["systems"][0]["data"][0];
+            zone["minTemp"] = json!(5.);
+            zone["maxTemp"] = json!(50.);
+        }
+        hub.command(
+            &point("az:aabbccddeeff_s1_z2", "target_temperature"),
+            Value::Float(25.),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *sim.writes.lock().unwrap(),
+            vec![json!({"systemID":1,"zoneID":2,"setpoint":25.})]
+        );
         cancel.cancel();
         server.abort();
     }
