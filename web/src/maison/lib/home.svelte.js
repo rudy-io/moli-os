@@ -162,6 +162,23 @@ export function pending(id, point = null) {
   return key ? `${id}/${key}` in hub.pending : false;
 }
 
+/** A cover's position: percent_control or position (0-100), whichever is available. */
+export function coverPosition(id) {
+  const pct = value(id, 'percent_control');
+  if (pct != null) return pct;
+  return value(id, 'position');
+}
+
+/** The point a cover's position can be written to, if any. */
+export function coverPositionKey(id) {
+  const d = device(id);
+  if (!d) return null;
+  const p = d.points.find((p) => p.key === 'percent_control' && p.access?.write);
+  if (p) return 'percent_control';
+  const pos = d.points.find((p) => p.key === 'position' && p.access?.write);
+  return pos ? 'position' : null;
+}
+
 // ---- rooms ---------------------------------------------------------------------
 
 const norm = (s) =>
@@ -232,7 +249,7 @@ export function deviceKind(d) {
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
+  if (has(d, 'percent_control') || has(d, 'position') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
     return 'cover';
   if (powerKey(d)) {
     if (isGroup(d)) return 'group';
@@ -274,6 +291,10 @@ export function roomList() {
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        opened: by('cover').filter((d) => {
+          const pct = coverPosition(d.id);
+          return pct != null && pct >= 50;
+        }).length,
       };
     });
 }
