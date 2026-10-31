@@ -1,0 +1,21 @@
+{
+  "airzone.invalid": "Invalid Airzone response or command.",
+  "airzone.request_failed": "Airzone request failed; check the state before trying again.",
+  "airzone.expired": "Airzone command expired.",
+  "airzone.bad_config": "Invalid Airzone configuration: check host, port, interval and MAC.",
+  "airzone.identity": "Airzone controller identity missing or changed.",
+  "airzone.stale": "Airzone state unavailable or too old.",
+  "airzone.control": "Shared control: {name}",
+  "airzone.on": "On",
+  "airzone.temperature": "Temperature",
+  "airzone.target_temperature": "Target temperature",
+  "airzone.humidity": "Humidity",
+  "airzone.mode": "Mode",
+  "airzone.fan_speed": "Fan speed",
+  "airzone.problem": "Problem",
+  "airzone.detail": "Detail",
+  "airzone.air_demand": "Air demand",
+  "airzone.floor_demand": "Floor demand",
+  "airzone.cold_demand": "Cooling demand",
+  "airzone.heat_demand": "Heating demand"
+}
