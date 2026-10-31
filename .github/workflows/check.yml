@@ -4,7 +4,7 @@ name: check
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'fork/**', 'feature/**', 'update/**']
   pull_request:
 
 permissions:
@@ -52,6 +52,7 @@ jobs:
       # runner's own Python is enough, nothing to install.
       - run: python3 --version && python3 -m unittest discover -s tests -t .
         working-directory: tools/model
+      - run: python3 -m unittest discover -s scripts/tests -v
 
   image:
     runs-on: ubuntu-latest
