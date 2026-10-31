@@ -1,4 +1,8 @@
 {
+  "commun.volet.impulsion": "Impulse",
+  "commun.clim.mode.auxiliaire": "Auxiliary heat",
+  "commun.clim.ventilation": "Fan speed",
+  "commun.volet.position": "Position",
   "commun.annuler": "Cancel",
   "commun.valider": "Confirm",
   "commun.fermer": "Close",

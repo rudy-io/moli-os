@@ -1,0 +1,21 @@
+{
+  "airzone.invalid": "Réponse ou commande Airzone invalide.",
+  "airzone.request_failed": "La requête Airzone a échoué ; vérifier l’état avant de recommencer.",
+  "airzone.expired": "Commande Airzone expirée.",
+  "airzone.bad_config": "Configuration Airzone invalide : vérifier hôte, port, intervalle et MAC.",
+  "airzone.identity": "Identité de la passerelle Airzone absente ou différente.",
+  "airzone.stale": "État Airzone indisponible ou trop ancien.",
+  "airzone.control": "Commande commune : {name}",
+  "airzone.on": "Marche",
+  "airzone.temperature": "Température",
+  "airzone.target_temperature": "Consigne",
+  "airzone.humidity": "Humidité",
+  "airzone.mode": "Mode",
+  "airzone.fan_speed": "Vitesse de ventilation",
+  "airzone.problem": "Problème",
+  "airzone.detail": "Détail",
+  "airzone.air_demand": "Demande air",
+  "airzone.floor_demand": "Demande plancher",
+  "airzone.cold_demand": "Demande froid",
+  "airzone.heat_demand": "Demande chauffage"
+}

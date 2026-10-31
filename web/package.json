@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test \"src/maison/lib/voice/*.test.js\""
+    "test": "node --test \"src/maison/lib/voice/*.test.js\" \"src/maison/lib/*.test.js\""
   },
   "devDependencies": {
     "@fontsource-variable/figtree": "^5.3.0",

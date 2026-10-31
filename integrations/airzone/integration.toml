@@ -1,0 +1,25 @@
+[integration]
+id = "airzone"
+name = "Airzone Local API"
+brands = ["Airzone"]
+models = ["Local API Webserver"]
+transport = "http"
+driver = "airzone"
+crate = "moli-airzone"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [3000]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "Independent implementation from Airzone Local API 1.78 and aioairzone v1.0.5 protocol behaviour; synthetic fixtures only, no copied code."
+author = "human"
+
+[[fixture]]
+file = "fixtures/zones.json"
