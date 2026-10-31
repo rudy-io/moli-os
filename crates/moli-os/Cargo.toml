@@ -31,6 +31,7 @@ moli-frigate.workspace = true
 moli-philips.workspace = true
 moli-tapo.workspace = true
 moli-shelly.workspace = true
+moli-airzone.workspace = true
 moli-izypower.workspace = true
 moli-solarman.workspace = true
 moli-igd.workspace = true
