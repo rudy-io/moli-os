@@ -620,7 +620,7 @@ async fn apply(
             )
             .await?;
         }
-        ("key", Value::Text(key)) if KEYS.contains(&&**key) => match android.press(key) {
+        ("key", Value::Text(key)) if KEYS.contains(&&**key) => match android::press(android, key) {
             Some(sent) => sent?,
             None => {
                 tv.press(key).await?;
