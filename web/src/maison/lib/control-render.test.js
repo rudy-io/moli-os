@@ -78,6 +78,16 @@ test('read-only shutter shows position without command buttons', () => {
   assert.equal(inputs(html).length, 0);
 });
 
+test('partial RTS shutter retains close and stop without inventing position or open', () => {
+  const points = [point('control', enumeration('close', 'stop'))];
+  const html = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
+  assert.equal(buttons(html).length, 2);
+  assert.equal(inputs(html).length, 0);
+  const offline = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter', online: false });
+  assert.equal(buttons(offline).length, 0);
+});
+
 test('shutter only exposes advertised actions and measured position setting', () => {
   const html = show('CoverTile', [point('percent_control', number(0, 100, 1)), point('control', enumeration('close', 'stop'))], { percent_control: 42 });
   assert.equal(buttons(html).length, 2);

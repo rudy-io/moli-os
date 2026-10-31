@@ -231,6 +231,7 @@ impl Entry {
                 .into(),
             manufacturer: Some("Somfy / Overkiz".into()),
             model: match self.raw["definition"]["uiClass"].as_str() {
+                Some("RollerShutter") => Some("Overkiz RollerShutter".into()),
                 Some("Gate") => Some("Overkiz Gate".into()),
                 Some("Window") => Some("Overkiz Window".into()),
                 _ => None,
@@ -383,6 +384,26 @@ mod tests {
                 .apply("percent_control", &Value::Float(30.0))
                 .is_err()
         );
+    }
+    #[test]
+    fn partial_rts_shutter_retains_its_display_family_without_inventing_capabilities() {
+        let raw = entry(
+            "rts",
+            "RollerShutter",
+            json!([
+                {"commandName":"down","nparams":1},
+                {"commandName":"stop","nparams":1}
+            ]),
+            json!([]),
+        );
+        let entries = parse(&json!([raw])).unwrap();
+        let device = entries[0].device(&InstanceId::from("test"));
+        assert_eq!(device.model.as_deref(), Some("Overkiz RollerShutter"));
+        assert!(device.point("percent_control").is_none());
+        assert_eq!(entries[0].position(), Value::Null);
+        assert!(entries[0].apply("control", &Value::from("open")).is_err());
+        assert!(entries[0].apply("control", &Value::from("close")).is_ok());
+        assert!(entries[0].apply("control", &Value::from("stop")).is_ok());
     }
     fn reviewed(url: &str, class: &str) -> crate::ReviewedOpener {
         crate::ReviewedOpener {

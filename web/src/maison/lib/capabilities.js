@@ -40,6 +40,7 @@ export function powerPoint(device, writable = true) {
 
 const BRIDGE_KINDS = new Map([
   ['Airzone system', 'climate'],
+  ['Overkiz RollerShutter', 'cover'],
   ['Overkiz Gate', 'cover'],
   ['Overkiz Window', 'cover'],
   ['Home Assistant light', 'light'],

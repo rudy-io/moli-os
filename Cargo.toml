@@ -19,6 +19,7 @@ moli-airplay = { path = "crates/moli-airplay" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
+moli-homeassistant = { path = "crates/moli-homeassistant" }
 moli-dirigera = { path = "crates/moli-dirigera" }
 moli-overkiz = { path = "crates/moli-overkiz" }
 moli-host = { path = "crates/moli-host" }
