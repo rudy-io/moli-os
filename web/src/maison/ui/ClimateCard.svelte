@@ -6,6 +6,7 @@
   import Icon from './Icon.svelte';
   import { pointOf, canWrite, numericRange, quantize, writableChoices } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
+  import { climateMode as modeStyle } from '../lib/climate.js';
 
   let { id, name } = $props();
 
@@ -162,21 +163,6 @@
   }
   const setMode = (key) => modes.includes(key) && act(`${id}/mode`, key, t('commun.action', { label: name, action: modeLabel(key).toLowerCase() }));
 
-  // The keys are the unit's modes (sent as they are); `label` is a catalogue key.
-  const MODES = {
-    froid: { label: 'commun.clim.mode.froid', icon: 'snowflake', tone: 'cool' },
-    chaud: { label: 'commun.clim.mode.chaud', icon: 'fire', tone: 'warm' },
-    auto: { label: 'commun.clim.mode.auto', icon: 'air-conditioner', tone: 'good' },
-    déshumidification: { label: 'commun.clim.mode.deshumidification', icon: 'humidity', tone: 'cool' },
-    ventilation: { label: 'commun.clim.mode.ventilation', icon: 'fan', tone: 'good' },
-    off: { label: 'commun.clim.eteinte', icon: 'power', tone: 'good' },
-    aux_heat: { label: 'commun.clim.mode.auxiliaire', icon: 'fire', tone: 'warm' },
-  };
-  const MODE_ALIASES = { cool: 'froid', heat: 'chaud', dry: 'déshumidification', fan: 'ventilation', fan_only: 'ventilation', heat_cool: 'auto' };
-  const modeStyle = (key) => {
-    const canonical = Object.hasOwn(MODE_ALIASES, key) ? MODE_ALIASES[key] : key;
-    return Object.hasOwn(MODES, canonical) ? MODES[canonical] : null;
-  };
   /** A mode said in the house's language (an unknown one: as the unit says it). */
   const modeLabel = (key) => (modeStyle(key) ? t(modeStyle(key).label) : (key ?? '—'));
   const m = $derived(modeStyle(mode) ? { ...modeStyle(mode), label: modeLabel(mode) } : { label: mode ?? '—', icon: 'air-conditioner', tone: 'good' });
@@ -269,14 +255,16 @@
           </select>
         </label>
       {/if}
+    {#if pointOf(d, 'outdoor_temperature') || (draw != null && draw >= 5)}
     <p class="muted">
-      {t('commun.clim.dehors', { temp: num(outdoor, 0) })}
+      {#if pointOf(d, 'outdoor_temperature')}{t('commun.clim.dehors', { temp: num(outdoor, 0) })}{/if}
       {#if draw != null && draw >= 5}
         <span class="draw num" title={t('commun.clim.mesure_tableau', { name: feeder.name })}>
-          · {watts(draw)}{#if shared}<small> {t('commun.clim.circuit_partage_paren')}</small>{/if}
+          {#if pointOf(d, 'outdoor_temperature')}· {/if}{watts(draw)}{#if shared}<small> {t('commun.clim.circuit_partage_paren')}</small>{/if}
         </span>
       {/if}
     </p>
+    {/if}
     {#if energy.summary}
       <p class="costs">
         {#if feeder}

@@ -114,3 +114,12 @@ primary sources consulted 2026-10-31:
 These links describe upstream schemas, not proof of a particular installation's
 capabilities or absence of hidden effects. Synthetic fixtures and loopback tests
 cover this driver's contract without contacting a real home.
+
+## Validation status
+
+2026-10-31: the bridge was also observed against a real Home Assistant installation
+with every configured point read-only, including climate readings using HA's
+global temperature unit. No service commands were sent to that installation.
+Hardware models and firmware versions were not recorded for this observation;
+it does not qualify physical write behaviour or the native Airzone/Overkiz drivers.
+Their hardware validation remains outstanding.
