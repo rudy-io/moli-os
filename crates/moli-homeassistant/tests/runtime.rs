@@ -24,6 +24,7 @@ struct Fixture {
     server: tokio::task::JoinHandle<()>,
     requests: mpsc::UnboundedReceiver<String>,
     raw: Arc<Mutex<(u16, Json)>>,
+    configuration: Arc<Mutex<(u16, Json)>>,
     path: std::path::PathBuf,
     latency: Arc<AtomicU64>,
     supervisor: tokio::task::JoinHandle<()>,
@@ -63,6 +64,25 @@ async fn start_with_source(
     command_timeout: Duration,
     source: Json,
 ) -> Fixture {
+    start_with_configuration(
+        writable,
+        endpoint_ok,
+        status,
+        command_timeout,
+        source,
+        (200, json!({})),
+    )
+    .await
+}
+
+async fn start_with_configuration(
+    writable: &[&str],
+    endpoint_ok: bool,
+    status: u16,
+    command_timeout: Duration,
+    source: Json,
+    configuration: (u16, Json),
+) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let entity_id = source["entity_id"].as_str().unwrap();
     let domain = entity_id.split_once('.').unwrap().0;
@@ -72,7 +92,14 @@ async fn start_with_source(
     let response = Arc::clone(&raw);
     let latency = Arc::new(AtomicU64::new(0));
     let server_latency = Arc::clone(&latency);
-    let server = launch_server(listener, response, server_latency, tx);
+    let configuration = Arc::new(Mutex::new(configuration));
+    let server = launch_server(
+        listener,
+        response,
+        server_latency,
+        tx,
+        Arc::clone(&configuration),
+    );
     let path = std::env::temp_dir().join(format!(
         "moli-ha-test-{}-{}",
         std::process::id(),
@@ -116,6 +143,7 @@ async fn start_with_source(
         server,
         requests,
         raw,
+        configuration,
         path,
         latency,
         supervisor,
@@ -127,6 +155,7 @@ fn launch_server(
     response: Arc<Mutex<(u16, Json)>>,
     server_latency: Arc<AtomicU64>,
     tx: mpsc::UnboundedSender<String>,
+    configuration: Arc<Mutex<(u16, Json)>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -136,6 +165,7 @@ fn launch_server(
             let tx = tx.clone();
             let response = Arc::clone(&response);
             let latency = Arc::clone(&server_latency);
+            let configuration = Arc::clone(&configuration);
             tokio::spawn(async move {
                 let mut buf = vec![0; 8192];
                 let mut used = 0;
@@ -159,7 +189,12 @@ fn launch_server(
                     assert!(n > 0 && used < 8192);
                 }
                 let text = String::from_utf8(buf[..used].to_vec()).unwrap();
-                let (status, body) = {
+                let (status, body) = if text.starts_with("GET /api/config HTTP/1.1\r\n") {
+                    {
+                        let guard = configuration.lock().unwrap();
+                        (guard.0, guard.1.to_string())
+                    }
+                } else {
                     let guard = response.lock().unwrap();
                     (
                         guard.0,
@@ -494,4 +529,168 @@ async fn light_missing_invalid_and_null_readings_replace_previous_available_valu
     wait_reading(&f, "brightness", Value::Float(0.0)).await;
     wait_reading(&f, "color", Value::from("#000000")).await;
     wait_reading(&f, "color_temp", Value::Float(4000.0)).await;
+}
+
+#[tokio::test]
+async fn climate_uses_global_temperature_unit_without_enabling_commands() {
+    let mut f = start_with_configuration(
+        &[],
+        true,
+        200,
+        Duration::from_secs(5),
+        json!({"entity_id":"climate.example","state":"heat","attributes":{
+            "current_temperature":20,"temperature":22,"min_temp":7,"max_temp":35,
+            "target_temp_step":0.5,"supported_features":1,"hvac_modes":["off","heat"]
+        }}),
+        (200, json!({"unit_system":{"temperature":"°C"}})),
+    )
+    .await;
+    wait_reading(&f, "temperature", Value::Float(20.0)).await;
+    wait_reading(&f, "target_temperature", Value::Float(22.0)).await;
+    assert!(
+        f.hub.snapshot().devices[0]
+            .device
+            .points
+            .iter()
+            .all(|point| !point.access.write)
+    );
+    let config = f.requests.recv().await.unwrap();
+    assert!(config.starts_with("GET /api/config HTTP/1.1\r\n"));
+    assert!(
+        config
+            .to_ascii_lowercase()
+            .contains("authorization: bearer synthetic-private-token")
+    );
+    next_poll(&mut f).await;
+    assert!(
+        f.hub
+            .command(
+                &PointId::from("bridge:stable/target_temperature"),
+                Value::Float(23.0),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), f.requests.recv())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn climate_refreshes_global_unit_and_removes_temperatures_when_it_becomes_invalid() {
+    let mut f = start_with_configuration(
+        &[],
+        true,
+        200,
+        Duration::from_secs(5),
+        json!({"entity_id":"climate.example","state":"heat","attributes":{
+            "current_temperature":20,"temperature":22,"min_temp":7,"max_temp":35}}),
+        (200, json!({"unit_system":{"temperature":"°C"}})),
+    )
+    .await;
+    wait_reading(&f, "temperature", Value::Float(20.0)).await;
+    f.requests.recv().await.unwrap();
+    next_poll(&mut f).await;
+    f.configuration.lock().unwrap().1 = json!({"unit_system":{"temperature":"°F"}});
+    f.raw.lock().unwrap().1["attributes"] =
+        json!({"current_temperature":77,"temperature":68,"min_temp":50,"max_temp":86});
+    let config = tokio::time::timeout(Duration::from_secs(6), f.requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(config.starts_with("GET /api/config HTTP/1.1\r\n"));
+    next_poll(&mut f).await;
+    wait_reading(&f, "temperature", Value::Float(25.0)).await;
+    f.configuration.lock().unwrap().1 = json!({"unit_system":{"temperature":"K"}});
+    let config = tokio::time::timeout(Duration::from_secs(6), f.requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(config.starts_with("GET /api/config HTTP/1.1\r\n"));
+    next_poll(&mut f).await;
+    for _ in 0..200 {
+        if !f.hub.snapshot().devices[0]
+            .device
+            .points
+            .iter()
+            .any(|p| p.key.as_ref() == "temperature")
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("invalid global unit retained temperature points");
+}
+
+#[tokio::test]
+async fn climate_config_auth_rejection_parks_without_polling_entity_states() {
+    for status in [401, 403] {
+        let mut f = start_with_configuration(
+            &[],
+            true,
+            200,
+            Duration::from_secs(5),
+            json!({"entity_id":"climate.example","state":"heat","attributes":{}}),
+            (status, json!({"unit_system":{"temperature":"°C"}})),
+        )
+        .await;
+        let request = tokio::time::timeout(Duration::from_secs(2), f.requests.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(request.starts_with("GET /api/config HTTP/1.1\r\n"));
+        for _ in 0..200 {
+            if matches!(
+                f.hub.snapshot().drivers[0].status,
+                DriverStatus::Waiting { .. }
+            ) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(matches!(
+            f.hub.snapshot().drivers[0].status,
+            DriverStatus::Waiting { .. }
+        ));
+        assert!(f.hub.snapshot().devices.is_empty());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(80), f.requests.recv())
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn climate_config_failure_keeps_explicit_entity_unit_without_guessing_missing_units() {
+    for explicit in [false, true] {
+        let mut source = json!({"entity_id":"climate.example","state":"heat","attributes":{"current_temperature":21}});
+        if explicit {
+            source["attributes"]["temperature_unit"] = json!("°C");
+        }
+        let f = start_with_configuration(
+            &[],
+            true,
+            200,
+            Duration::from_secs(5),
+            source,
+            (503, json!({})),
+        )
+        .await;
+        wait_value(&f).await;
+        if explicit {
+            wait_reading(&f, "temperature", Value::Float(21.0)).await;
+        } else {
+            assert!(
+                f.hub
+                    .state(&PointId::from("bridge:stable/temperature"))
+                    .is_none()
+            );
+        }
+        assert_eq!(f.hub.snapshot().devices[0].online, Some(true));
+    }
 }

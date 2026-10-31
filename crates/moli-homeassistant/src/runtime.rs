@@ -74,6 +74,8 @@ async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> 
         / u32::try_from(config.entities.len()).expect("validated entity count");
     let mut ticks = tokio::time::interval(period);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let has_climate = config.entities.iter().any(|e| e.domain == "climate");
+    let mut global_unit = None;
     let mut cursor = 0;
     let mut transport_failures = 0;
     ctx.ready();
@@ -88,6 +90,30 @@ async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> 
                 }
             }
             _=ticks.tick()=> {
+                // One bounded configuration read per sweep, never per entity.
+                // Other domains do not need or fetch climate unit metadata.
+                if cursor == 0 && has_climate {
+                    let response=tokio::select! {
+                        ()=ctx.cancelled()=>return Ok(()),
+                        response=client.call(http::Method::GET,"/api/config",None,Instant::now()+POLL_BUDGET)=>response,
+                    };
+                    let unit=match response {
+                        Ok((401|403,_))=>return park(ctx,"homeassistant.auth").await,
+                        Ok((200,body))=>serde_json::from_slice(&body).ok().and_then(|raw|model::TemperatureUnit::from_config(&raw)),
+                        _=>None,
+                    };
+                    if unit != global_unit {
+                        // A changed or lost unit invalidates cached command
+                        // conversions until each climate has a fresh snapshot.
+                        for (entry, entity) in live.iter_mut().zip(&config.entities) {
+                            if entity.domain == "climate" {
+                                *entry=None;
+                                ctx.set_availability(&ctx.device_id(&entity.native_id),false);
+                            }
+                        }
+                    }
+                    global_unit=unit;
+                }
                 let index=cursor;cursor=(cursor+1)%config.entities.len();
                 let e=&config.entities[index];let id=ctx.device_id(&e.native_id);
                 let path=format!("/api/states/{}",e.entity_id);
@@ -99,7 +125,7 @@ async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> 
                     Ok((401|403,_))=>return park(ctx,"homeassistant.auth").await,
                     Ok((200,body))=> {
                         transport_failures=0;
-                        let snapshot=serde_json::from_slice(&body).ok().and_then(|raw|model::decode(e,&raw).ok());
+                        let snapshot=serde_json::from_slice(&body).ok().and_then(|raw|model::decode(e,&raw,global_unit).ok());
                         if let Some(snapshot)=snapshot {
                             ctx.upsert_device(Device{id:id.clone(),instance:ctx.instance().clone(),native_name:e.native_id.as_str().into(),
                                 manufacturer:Some("Home Assistant".into()),model:Some(format!("Home Assistant {}",e.domain).into()),description:None,
@@ -175,7 +201,7 @@ mod tests {
         let raw = json!({"entity_id":"switch.example","state":"off","attributes":{}});
         let now = Instant::now();
         let live = Live {
-            snapshot: model::decode(&entity, &raw).unwrap(),
+            snapshot: model::decode(&entity, &raw, None).unwrap(),
             received: now,
         };
         assert!(

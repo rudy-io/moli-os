@@ -2,6 +2,10 @@ use super::*;
 use moli_core::{Kind, Semantic};
 use serde_json::json;
 
+fn decode(e: &Entity, raw: &Json) -> anyhow::Result<Snapshot> {
+    super::decode(e, raw, None)
+}
+
 fn entity(domain: &str, writable: &[&str]) -> Entity {
     serde_json::from_value(
         json!({"native_id":"stable-1","entity_id":format!("{domain}.example"),
@@ -353,4 +357,62 @@ fn declared_readings_are_explicitly_unknown_when_missing_or_invalid() {
     let e = entity("vacuum", &["control"]);
     let snapshot = decode(&e, &state(&e, "docked", json!({"supported_features":8192}))).unwrap();
     assert!(!snapshot.values.contains_key("control"));
+}
+
+#[test]
+fn global_climate_unit_converts_fahrenheit_and_preserves_entity_precedence() {
+    let e = entity("climate", &["target_temperature"]);
+    let mut raw = state(
+        &e,
+        "heat",
+        json!({
+            "current_temperature":68,"temperature":70,"min_temp":50,"max_temp":86,
+            "target_temp_step":1,"supported_features":1,"hvac_modes":["off","heat"]
+        }),
+    );
+    let global = TemperatureUnit::from_config(&json!({"unit_system":{"temperature":"°F"}}));
+    let snapshot = super::decode(&e, &raw, global).unwrap();
+    assert_eq!(snapshot.values["temperature"], Value::Float(20.0));
+    assert_eq!(
+        command(&e, &snapshot, "target_temperature", &Value::Float(20.0))
+            .unwrap()
+            .body,
+        json!({"entity_id":"climate.example","temperature":68.0})
+    );
+    raw["attributes"]["temperature_unit"] = json!("°C");
+    raw["attributes"]["current_temperature"] = json!(21);
+    let snapshot = super::decode(&e, &raw, global).unwrap();
+    assert_eq!(snapshot.values["temperature"], Value::Float(21.0));
+}
+
+#[test]
+fn absent_or_invalid_climate_units_never_infer_celsius() {
+    let mut e = entity("climate", &[]);
+    e.safety = crate::Safety::Unknown;
+    let mut raw = state(
+        &e,
+        "heat",
+        json!({"current_temperature":21,"temperature":22,
+        "min_temp":7,"max_temp":35,"target_temp_step":0.5,"supported_features":1}),
+    );
+    for config in [
+        json!({}),
+        json!({"unit_system":null}),
+        json!({"unit_system":{"temperature":"K"}}),
+        json!({"unit_system":{"temperature":true}}),
+    ] {
+        let snapshot = super::decode(&e, &raw, TemperatureUnit::from_config(&config)).unwrap();
+        assert!(!snapshot.values.contains_key("temperature"));
+        assert!(!snapshot.values.contains_key("target_temperature"));
+    }
+    let global = TemperatureUnit::from_config(&json!({"unit_system":{"temperature":"°C"}}));
+    let snapshot = super::decode(&e, &raw, global).unwrap();
+    assert_eq!(snapshot.values["temperature"], Value::Float(21.0));
+    assert!(snapshot.points.iter().all(|p| !p.access.write));
+    for unit in [json!("K"), Json::Null, json!(false)] {
+        raw["attributes"]["temperature_unit"] = unit;
+        let snapshot = super::decode(&e, &raw, global).unwrap();
+        assert!(!snapshot.values.contains_key("temperature"));
+        assert!(!snapshot.values.contains_key("target_temperature"));
+    }
 }

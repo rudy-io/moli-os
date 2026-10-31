@@ -7,6 +7,25 @@ use serde_json::{Map, Value as Json, json};
 
 use crate::{Entity, Safety};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TemperatureUnit {
+    Celsius,
+    Fahrenheit,
+}
+impl TemperatureUnit {
+    fn parse(raw: &Json) -> Option<Self> {
+        match raw.as_str()? {
+            "°C" => Some(Self::Celsius),
+            "°F" => Some(Self::Fahrenheit),
+            _ => None,
+        }
+    }
+
+    pub fn from_config(raw: &Json) -> Option<Self> {
+        Self::parse(raw.get("unit_system")?.get("temperature")?)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Snapshot {
     pub points: Vec<PointSpec>,
@@ -142,7 +161,11 @@ fn ha_mode(moli: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn decode(e: &Entity, raw: &Json) -> anyhow::Result<Snapshot> {
+pub(crate) fn decode(
+    e: &Entity,
+    raw: &Json,
+    global_unit: Option<TemperatureUnit>,
+) -> anyhow::Result<Snapshot> {
     ensure!(
         raw.get("entity_id").and_then(Json::as_str) == Some(&e.entity_id),
         "entity mismatch"
@@ -180,7 +203,7 @@ pub(crate) fn decode(e: &Entity, raw: &Json) -> anyhow::Result<Snapshot> {
         "sensor" => sensor(e, &mut s, state, a)?,
         "binary_sensor" => binary(e, &mut s, state, a)?,
         "light" | "switch" => light(e, &mut s, state, a)?,
-        "climate" => climate(e, &mut s, state, a, features)?,
+        "climate" => climate(e, &mut s, state, a, features, global_unit)?,
         "cover" => cover(e, &mut s, state, a, features)?,
         "vacuum" => vacuum(e, &mut s, state, a, features)?,
         "media_player" => media(e, &mut s, state, a, features)?,
@@ -467,6 +490,7 @@ fn climate(
     state: &str,
     a: &Map<String, Json>,
     features: u64,
+    global_unit: Option<TemperatureUnit>,
 ) -> anyhow::Result<()> {
     ensure!(
         matches!(
@@ -499,11 +523,15 @@ fn climate(
             mode(state).map(Value::from),
         );
     }
-    let unit = a.get("temperature_unit").and_then(Json::as_str);
-    if !matches!(unit, Some("°C" | "°F")) {
+    // HA normally reports the display unit in /api/config. An explicit
+    // entity unit takes precedence, including invalid values (fail closed).
+    let Some(unit) = a
+        .get("temperature_unit")
+        .map_or(global_unit, TemperatureUnit::parse)
+    else {
         return Ok(());
-    }
-    s.fahrenheit = unit == Some("°F");
+    };
+    s.fahrenheit = unit == TemperatureUnit::Fahrenheit;
     if let Some(n) = number(a, "current_temperature")
         .map(|n| celsius(n, s.fahrenheit))
         .filter(|n| (-100.0..=100.0).contains(n))

@@ -41,8 +41,10 @@ Simulator tests do not establish compatibility with hardware.
 Only feature-advertised operations are writable. Missing or invalid readings on declared readable points are explicit `null`,
 replacing previous samples; write-only controls never get a fabricated state. Binary HA door/window/opening `on` means open; Moli `contact`
 is **true when closed**. Unknown binary classes have `Other` meaning. Text state
-never infers OnOff. Climate temperatures need an explicit °C/°F unit; °F is
-converted both ways. Writable single setpoints need explicit valid min/max/step
+never infers OnOff. Climate temperatures need an explicit °C/°F unit from the entity
+or, when absent, HA’s global `unit_system.temperature` from `/api/config`; °F is converted
+both ways. An invalid explicit entity unit is never hidden by the global fallback.
+Writable single setpoints need explicit valid min/max/step
 and the TARGET_TEMPERATURE feature; heat_cool range operation is excluded.
 Known modes use the existing Moli keys chaud/froid/déshumidification/ventilation/
 auto. `on` needs an explicit supported `turn_on_mode` and advertised off mode.
@@ -65,7 +67,13 @@ addition to `token`, the operator provides `token_endpoint`, the exact endpoint
 binding described in onboarding. Changing host/port/transport/pin parks the driver
 until the token is explicitly rebound; no credential automatically follows edits.
 
-Only `/api/states/<exact_entity_id>` is polled. Commands select one hardcoded
+Only `/api/states/<exact_entity_id>` is polled for entity state. Instances with
+climate entities also read `/api/config` once per sweep, using the same bounded,
+endpoint-bound client. Only the global temperature unit is retained; other core
+configuration is discarded. Missing/invalid metadata or a failed read disables
+the fallback until a later successful sweep. A changed or lost global unit
+invalidates cached climate command snapshots until their next state poll.
+Commands select one hardcoded
 `/api/services/<domain>/<service>` and a JSON body with that exact entity only.
 They never POST synthetic state. A successful response means dispatch accepted;
 state is confirmed by a subsequent poll, without optimistic value changes.
