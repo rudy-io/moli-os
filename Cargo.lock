@@ -1383,6 +1383,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-homeassistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "moli-host"
 version = "0.1.0"
 dependencies = [
@@ -1544,6 +1560,7 @@ dependencies = [
  "moli-frigate",
  "moli-helpers",
  "moli-history",
+ "moli-homeassistant",
  "moli-host",
  "moli-hue",
  "moli-i18n",
