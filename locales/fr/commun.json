@@ -1,4 +1,8 @@
 {
+  "commun.volet.impulsion": "Impulsion",
+  "commun.clim.mode.auxiliaire": "Chauffage auxiliaire",
+  "commun.clim.ventilation": "Ventilation",
+  "commun.volet.position": "Position",
   "commun.annuler": "Annuler",
   "commun.valider": "Valider",
   "commun.fermer": "Fermer",
