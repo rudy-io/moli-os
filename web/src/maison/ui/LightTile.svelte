@@ -4,6 +4,7 @@
   import Icon from './Icon.svelte';
   import Slider from './Slider.svelte';
   import LightTile from './LightTile.svelte';
+  import { pointOf } from '../lib/capabilities.js';
 
   /** A light (or any on/off thing): tap to switch. With `dimmer`, dimmable
    *  lights show their level and a slider, colour lamps a palette (whites
@@ -14,6 +15,7 @@
   let { id, name = null, icon = 'light', dimmer = false, compact = false, point = null, members = null, also = [] } = $props();
 
   const d = $derived(device(id));
+  const switchable = $derived(pointOf(d, point ?? powerKey(d))?.access?.write || also.some((a) => pointOf(device(a), powerKey(device(a)))?.access?.write));
   const ok = $derived(reachable(id) || also.some(reachable));
   const on = $derived((reachable(id) && isOn(id, point)) || also.some((a) => reachable(a) && isOn(a)));
   const busy = $derived(pending(id, point));
@@ -40,6 +42,7 @@
   );
 
   function tap() {
+    if (!switchable) return;
     if (cut && !also.length) {
       note(t('commun.lampe.coupee_note', { label }));
       return;
@@ -187,7 +190,7 @@
 </script>
 
 <div class="tile" class:on class:busy class:off-grid={!ok || !d || cut} class:compact>
-  <button class="hit" onclick={tap} disabled={!d || (!ok && !cut)} aria-pressed={on} aria-label={t('commun.action', { label, action: state })}>
+  <button class="hit" onclick={tap} disabled={!d || !switchable || (!ok && !cut)} aria-pressed={on} aria-label={t('commun.action', { label, action: state })}>
     <span class="bulb" style:background={tint} style:color={tintInk} style:--glow={tint && `${tint}66`}><Icon name={icon} size={compact ? 22 : 26} /></span>
     <span class="text">
       <b>{label}</b>

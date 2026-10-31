@@ -10,6 +10,7 @@ repository = "https://github.com/rudy-io/moli-os"
 rust-version = "1.88"
 
 [workspace.dependencies]
+moli-airzone = { path = "crates/moli-airzone" }
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
@@ -18,7 +19,9 @@ moli-airplay = { path = "crates/moli-airplay" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
+moli-homeassistant = { path = "crates/moli-homeassistant" }
 moli-dirigera = { path = "crates/moli-dirigera" }
+moli-overkiz = { path = "crates/moli-overkiz" }
 moli-host = { path = "crates/moli-host" }
 moli-history = { path = "crates/moli-history" }
 moli-profile = { path = "crates/moli-profile" }
