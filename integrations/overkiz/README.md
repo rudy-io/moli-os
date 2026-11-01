@@ -52,8 +52,10 @@ when no state is reported, including stateless RTS gates. Unknown classes never 
 
 Windows and gates default to read-only. An explicit `writable_openers` entry
 reviewing the **exact native device URL** and expected `ui_class` (`Gate` or
-`Window` only) enables only its individually advertised open/close/stop and io
-`setClosure` capabilities. An advertised zero-argument `cycle` is a distinct
+`Window` only) enables its individually advertised, validated bindings: open/close/stop,
+qualified io percentage control through `setClosure` or `setDeployment` according to
+the established family conversion, and qualified favourite recall and memorisation.
+An advertised zero-argument `cycle` is a distinct
 `control = "cycle"` impulse: it never becomes open or close. Other cycle arities
 are unsupported. Reviewed openers do not use up/down aliases. Every writable
 point of a reviewed opener, including percentage and favourite writes, has `Semantic::Control`.
