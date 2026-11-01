@@ -235,10 +235,10 @@ impl Api {
     }
 }
 
-/// One device's readings as Moli values (unknown codes skipped).
-/// What the cloud says of a device. Never a press: for a scene switch it
-/// only knows the last one, maybe hours old, and naming it as the cloud
-/// does (`click`, not `single_click`) would look like a new press.
+/// One device's readings as Moli values (unknown codes skipped). Never a
+/// press: for a scene switch the cloud only knows the last one, maybe hours
+/// old, and naming it as the cloud does (`click`, not `single_click`) would
+/// look like a new press.
 fn readings(device: &TuyaDevice, status: &Json) -> Vec<(String, Value)> {
     status
         .as_array()

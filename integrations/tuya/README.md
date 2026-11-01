@@ -65,11 +65,20 @@
   d'une seconde, `switch_mode1` vaut `single_click`, `double_click` ou `long_press`.
   Chaque appui que l'interrupteur pousse (trame `STATUS`) est un événement (`pulse_state`) :
   deux simples appuis de suite déclenchent deux fois un automatisme, même si la lumière a
-  été éteinte entre-temps depuis le tableau de bord. Ce qui arrive dans les 5 s qui suivent
-  la connexion à la passerelle n'est qu'un état, même poussé de la même façon (elle répond
-  ainsi pour ses sous-appareils) : une reconnexion ne rejoue pas le dernier appui, mais un
-  appui fait pendant ces 5 s est perdu. Le cloud ne rapporte jamais un appui (il ne connaît
-  que le dernier, et le nomme autrement : `click` pour `single_click`).
+  été éteinte entre-temps depuis le tableau de bord. Ce qui répond à la requête d'état de la
+  connexion n'est qu'un état, même poussé de la même façon (une passerelle répond ainsi pour
+  ses sous-appareils) : tout ce qui arrive dans les 5 s qui suivent la connexion, puis le
+  premier message de chaque sous-appareil, même tardif (passerelle lente), au plus 30 s
+  après la connexion. Une reconnexion ne rejoue donc pas le dernier appui ; un appui fait
+  dans ce délai est perdu ; au-delà des 30 s, un interrupteur qui n'a jamais répondu redevient
+  actif (sans ce plafond, il resterait muet pour toujours). Le cloud ne rapporte jamais un
+  appui (il ne connaît que le dernier, et le nomme autrement : `click` pour `single_click`) :
+  pendant le repli vers le cloud, un interrupteur à scènes ne déclenche donc rien.
+  **Vérifié sur du vrai matériel** (31 octobre 2026, passerelle `wg2` en 3.4, interrupteur
+  `wxkg`) : Moli redémarré après un appui qui allume, lumière éteinte entre-temps depuis le
+  tableau de bord, elle reste éteinte ; un appui une dizaine de secondes après la
+  reconnexion de la passerelle déclenche, et les appuis suivants aussi, chacun. Le
+  plafond de 30 s pour un interrupteur qui ne répond jamais n'est vérifié que par un test.
 - Ordre vers un sous-appareil, essayé sur le point `mode` d'un `wxkg` (passerelle en 3.4) :
   la passerelle accuse l'ordre, et quand la valeur demandée est déjà la bonne, elle renvoie
   l'état de ce `cid` dans les 100 ms ; une autre valeur (`remote_control`) n'est pas
