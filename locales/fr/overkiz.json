@@ -1,0 +1,13 @@
+{
+  "overkiz.invalid": "Configuration Overkiz invalide.",
+  "overkiz.auth": "Jeton Overkiz absent ou refusé : renseigner le secret token puis redémarrer.",
+  "overkiz.vault": "Coffre nécessaire pour conserver le certificat Overkiz.",
+  "overkiz.cert": "Certificat Overkiz changé : vérifier son identité avant de renouveler son empreinte.",
+  "overkiz.network": "Échec de connexion Overkiz.",
+  "overkiz.response": "Réponse Overkiz invalide.",
+  "overkiz.refused": "Commande Overkiz refusée.",
+  "overkiz.timeout": "Échéance de commande Overkiz dépassée.",
+  "overkiz.position": "Position ouverte",
+  "overkiz.command": "Mouvement",
+  "overkiz.state": "État d’ouverture"
+}
