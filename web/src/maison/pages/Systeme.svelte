@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import DriverWarnings from '../../components/DriverWarnings.svelte';
+  import SomfyCloud from '../ui/SomfyCloud.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
@@ -180,6 +181,8 @@
   <AlexaAccount />
 
   <TuyaCloudKeys />
+
+  <SomfyCloud />
 
   <!-- Only where a host script measures Moli against a Home Assistant. -->
   {#if sys && last?.ha}
