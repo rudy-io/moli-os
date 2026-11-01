@@ -109,6 +109,10 @@
   "commun.volet.stop": "Stop",
   "commun.volet.fermer": "Close",
   "commun.volet.ouvert_a": "{pct}% open",
+  "commun.volet.ouverture": "{label} opening",
+  "commun.volet.monte": "opening",
+  "commun.volet.descend": "closing",
+  "commun.volet.mouvement": "moving",
 
   "commun.lampe.introuvable": "Not found",
   "commun.lampe.coupee": "Switched off at the wall",

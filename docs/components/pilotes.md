@@ -137,11 +137,11 @@ base_topic = "zigbee2mqtt"  # défaut
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
-- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (7 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
+- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (8 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
 
 ## `zwave` : Z-Wave via zwave-js-ui (`crates/moli-zwave`)
 
@@ -245,8 +245,9 @@ host = "192.168.1.x"
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
   puissance, courant, tension, énergie), capteurs (température, humidité, PM2,5, COV, CO₂,
-  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis) et batteries.
-  Pas encore : stores, purificateurs, enceintes, pièces et scènes IKEA.
+  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis), stores
+  (position, ouvrir / stop / fermer, mouvement ; non vérifiés sur un vrai store) et batteries.
+  Pas encore : purificateurs, enceintes, pièces et scènes IKEA.
 - **Protocole** : API locale **non officielle**, HTTPS sur **8443**, certificat épinglé (un
   certificat d'usine P-384 valable jusqu'en 2071). Chargement complet `GET /v1/home`, puis
   WebSocket `wss://<hub>:8443/v1` (événements `deviceStateChanged`, `remotePressEvent`…), un
@@ -290,7 +291,12 @@ host = "192.168.1.x"
   `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
   Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
   `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
-  (`single`, `double`, `long`, en `pulse`). `battery` partout où il y a une pile.
+  (`single`, `double`, `long`, en `pulse`). Store : `position` ✎ (sens `position`, 0-100 %,
+  100 = ouvert ; le hub compte à l'envers, 0 = en haut : lue dans `blindsCurrentLevel`,
+  envoyée en `blindsTargetLevel`, inversée), `control` ✎ (`open` / `stop` / `close`, un ordre
+  jamais relu, envoyé en `blindsState` `up` / `stopped` / `down`), `moving` (`UP` / `DOWN` /
+  `STOP` depuis `blindsState`, `null` pour une valeur inconnue) ; reconnu comme volet par le
+  tableau de bord et l'assistant. `battery` partout où il y a une pile.
   Disponibilité : `isReachable` (aussi dans chaque événement).
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
@@ -312,7 +318,8 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
+  inversé, couleur partielle, store (points et sens, position inversée dans les deux sens,
+  ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
@@ -745,7 +752,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
-| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
+| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
