@@ -1110,7 +1110,10 @@ name = "moli-androidtv"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "moli-core",
+ "moli-i18n",
  "moli-net",
+ "moli-runtime",
  "serde_json",
  "tokio",
  "tracing",
