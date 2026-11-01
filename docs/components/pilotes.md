@@ -150,8 +150,9 @@ base_topic = "zigbee2mqtt"  # défaut
   code par marque.
 - **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées
   sur `{base}/{nom}/{cc}/{endpoint}/{prop}/set` (payload JSON brut : `true`/`false` pour
-  CC 32 sur `currentValue` et CC 37 sur `targetValue`, nombre `0`–`255` pour CC 38 sur
-  `targetValue`) ; les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la
+  CC 32 sur `currentValue` et CC 37 sur `targetValue`, nombre pour CC 38 sur
+  `targetValue` : le niveau `0`–`99`, ou `255` pour `on`, qui rallume au niveau
+  précédent) ; les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la
   passerelle, déballées par le pilote) ; disponibilité sur `{base}/{nom}/status`
   (`true`/`false`) ; bootstrap par l'API `getNodes` du gateway (topic
   `{base}/_CLIENTS/ZWAVE_GATEWAY-{mqtt_name}/api/getNodes/set`, payload `{"args":[]}`,
@@ -176,12 +177,19 @@ base_topic = "zwave"        # défaut
 - **Secrets** : mot de passe broker éventuel dans la variable d'environnement nommée par
   `password_env` ; jamais dans `moli.toml`.
 - **Points** : `on` (CC 32 Basic, 37 Switch Binary, 38 Switch Multilevel : le number de
-  CC 38 est décodé en booléen) et, écrivables, le niveau CC 38 `targetValue` (0-100 %) —
-  exposé sous la clé `brightness` (la clé standard des lumières, celle que l'interface
-  « maison » et les ambiances cherchent, comme Hue et Dirigera) quand la classe de
-  device est un vrai variateur, sinon `level` (volets, et le mode accumulation sans
-  `getNodes`) ; `battery` (CC 53 `batteryLevel` ou CC 128 `level`, %),
-  `temperature` / `humidity` (CC 31/49 : « Air temperature », « Relative humidity »),
+  CC 38 est décodé en booléen) et, écrivable, le niveau CC 38 — lu sur `currentValue`, le
+  vrai niveau (`targetValue` ne garde que le dernier ordre, `255` après un `on`, et un
+  appareil qui ne rapporte pas sa cible le laisse là), écrit sur `targetValue`, et pris sur
+  le seul endpoint où il s'écrit. Il est exposé sous la clé `brightness` (la clé standard
+  des lumières, celle que l'interface « maison » et les ambiances cherchent, comme Hue et
+  Dirigera) quand la classe de device est un vrai variateur : le niveau Z-Wave (0–99)
+  y est en % (0–100, unité `%`), comme les autres pilotes ; arrondi vers le bas à la
+  lecture et vers le haut à l'envoi, chaque pourcentage revient tel quel sauf 99 % (relu
+  100 %), et un variateur allumé n'est jamais affiché à 0 %. Sinon `level`, à l'échelle
+  de l'appareil (0–99 ; volets, et le mode accumulation sans `getNodes`, où le premier
+  `currentValue` CC 38 suffit à créer `on` et `level`) ; `battery` (CC 53 `batteryLevel`
+  ou CC 128 `level`, %), `temperature` / `humidity` (CC 31/49 : « Air temperature »,
+  « Relative humidity »),
   `power` (CC 50, clé 66049, W) en lecture ; un (cc, property) inconnu est ignoré proprement.
   Sémantique du point de niveau : `Brightness` uniquement si la classe de device du
   nœud est Multilevel Switch (generic 0x11) avec specific 0x01/0x02 — sinon `Other`,

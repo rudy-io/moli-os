@@ -7,6 +7,6 @@
   "garage_sensor/49/0/Relative_humidity/0": "45",
   "garage_sensor/53/0/batteryLevel": "87",
   "couloir_switch/37/0/currentValue": "false",
-  "kitchen_dimmer/38/0/targetValue": "40",
+  "kitchen_dimmer/38/0/currentValue": "40",
   "inconnu/99/0/quelque_chose": "42"
 }
