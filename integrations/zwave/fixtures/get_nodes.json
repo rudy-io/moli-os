@@ -43,7 +43,7 @@
             "description": "Current value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 65
         },
         {
@@ -62,7 +62,7 @@
             "description": "Target value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 65
         }
       ]
@@ -321,7 +321,7 @@
             "description": "Current value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 0
         },
         {
@@ -340,7 +340,7 @@
             "description": "Target value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 0
         }
       ]
@@ -384,7 +384,7 @@
             "description": "Current value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 50
         },
         {
@@ -403,7 +403,7 @@
             "description": "Target value of the multilevel switch"
           },
           "minimum": 0,
-          "maximum": 100,
+          "maximum": 99,
           "value": 50
         }
       ]
