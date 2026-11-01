@@ -40,6 +40,7 @@ Le contexte est limité à **sa** instance : un appareil d'une autre instance es
 | `set_availability(device, online)` | en ligne / hors ligne |
 | `next_command()` | prochaine commande (annulable) ; `None` à l'arrêt |
 | `ready()` / `wait_for(reason)` | « opérationnel » / « bloqué sur une action humaine » (affiché partout) |
+| `warn(message)` / `clear_warning()` | avertissement non bloquant du pilote, indépendant du statut et des droits ; effacé à l’arrêt ou au redémarrage |
 | `secret(name)`, `store_secret`, `forget_secret`, `can_store_secrets()`, `secrets_problem()` | coffre chiffré, rangé par instance |
 | `provide_snapshots(device, source)` | l'appareil sait produire une image à la demande (caméras) |
 | `cancelled()` | se résout à l'arrêt du système |

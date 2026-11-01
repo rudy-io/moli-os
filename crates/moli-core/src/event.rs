@@ -31,6 +31,9 @@ pub enum Event {
     DriverStatus {
         instance: InstanceId,
         status: DriverStatus,
+        /// Non-blocking information about this run, independent of its status.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        warning: Option<String>,
     },
     LabelChanged {
         device: DeviceId,
