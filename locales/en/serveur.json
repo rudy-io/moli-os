@@ -16,9 +16,12 @@
   "serveur.machine.distance_humain": "only a person (with the house code) can open the PC remotely",
 
   "serveur.telephone.foyer_seulement": "only the household can pair a phone",
+  "serveur.telephone.personne_seulement": "only a person of the house pairs a phone: enter the code first",
   "serveur.telephone.retrait_humain": "only a person (with the code) can remove a phone",
   "serveur.telephone.inconnu": "unknown phone",
   "serveur.telephone.jeton_refuse": "unknown phone or token refused: pair the app again",
+  "serveur.telephone.notice_titre": "New phone",
+  "serveur.telephone.notice_appaire": "A phone ({id}) has just been paired from {by}: it will receive the house’s notifications. Name given: {name}",
 
   "serveur.plan.fichier_illisible": "plan.json: {error}",
   "serveur.plan.humain_arrange": "only a person (with the code) can rearrange the plan",
@@ -90,8 +93,10 @@
   "serveur.garde.sans_piece_connue": "device with no known room",
   "serveur.garde.heures_calmes": "quiet hours ({from} → {to})",
   "serveur.garde.machine": "command to a machine (printer, computer): a human decides",
+  "serveur.garde.code_partout": "code required for every command (pin mode)",
   "serveur.garde.en_attente": "awaiting human approval #{id}: {reason}",
   "serveur.garde.remplacee": "replaced by a more recent request",
+  "serveur.garde.cedee": "gave way to a more recent request: too many waiting",
   "serveur.garde.expiree": "expired",
   "serveur.garde.expiree_sans_decision": "expired with no decision",
   "serveur.garde.appareil_sans_piece": "device with no room",
@@ -109,6 +114,10 @@
 
   "serveur.config.depart_ecrite": "first start: starter configuration written",
   "serveur.config.depart_non_ecrite": "starter configuration not written: default settings, in memory",
+  "serveur.fuseau.section": "{section} timezone: per-section setting accepted but deprecated; write it once for the whole house, in [server]: timezone = \"{zone}\"",
+  "serveur.fuseau.systeme": "no time zone written: the system's is used ({zone}). Write it in [server] timezone so it no longer depends on the machine",
+  "serveur.fuseau.systeme_utc": "no time zone written, and the system says {zone}: in a container this is almost never the house's. Automations, energy days and quiet hours follow that clock: write [server] timezone",
+  "serveur.fuseau.inconnu": "no time zone written, and the system gives none: UTC is used. Write [server] timezone (e.g. \"Europe/Paris\")",
 
   "serveur.energie.lecture_seule": "read-only",
   "serveur.energie.appareil": "Energy",
@@ -122,6 +131,17 @@
   "serveur.energie.point.projection_kwh": "Usage this month at the current pace",
   "serveur.energie.point.bill_projection": "Bill this month at the current pace (plan fee included)",
   "serveur.energie.point.over_budget": "Estimated bill over budget",
+  "serveur.energie.charge.modele": "Driven load",
+  "serveur.energie.charge.mode": "Mode",
+  "serveur.energie.charge.raison": "What Moli is doing",
+  "serveur.energie.charge.duree": "Run time this cycle",
+  "serveur.energie.point.today_production_kwh": "Solar production today",
+  "serveur.energie.point.today_export_kwh": "Sent to the grid today",
+  "serveur.energie.point.today_self_consumed_kwh": "Solar used at home today",
+  "serveur.energie.point.today_self_consumption_rate": "Self-consumption today",
+  "serveur.energie.point.today_self_sufficiency": "Self-sufficiency today",
+  "serveur.energie.point.month_production_kwh": "Solar production this month",
+  "serveur.energie.point.month_self_consumption_rate": "Self-consumption this month",
   "serveur.demo.reserve": "not in the demo: this change would stay for the next visitors",
 
   "serveur.personnes.mot_de_passe_court": "a password of {min} characters at least",
@@ -150,5 +170,7 @@
   "serveur.personnes.point_depuis": "In this zone since",
   "serveur.personnes.point_nombre": "People at home",
   "serveur.personnes.point_quelquun": "Someone at home",
-  "serveur.personnes.point_tous_partis": "Everyone has left"
+  "serveur.personnes.point_tous_partis": "Everyone has left",
+  "serveur.garde.ouverture": "opening a lock, a garage door or a gate: a person approves",
+  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen"
 }

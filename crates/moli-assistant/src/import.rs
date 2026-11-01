@@ -107,6 +107,7 @@ impl Assistant {
             }
             tracing::info!(done, failed, left, "Home Assistant automations imported");
             this.0.hub.notice(Notice {
+                to: None,
                 title: Some(moli_i18n::tr!("assistant.import.title")),
                 message: summary(done, failed, left),
                 from: Some("Moli".into()),

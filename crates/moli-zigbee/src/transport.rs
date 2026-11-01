@@ -146,7 +146,11 @@ impl SerialPort {
                 return Err(error).with_context(|| format!("configuring serial port {path}"));
             }
         }
-        let fd = tokio::io::unix::AsyncFd::new(file)
+        // SAFETY: the descriptor belongs to `file`, which the `AsyncFd` owns:
+        // it stays open, and the same, for as long as it is registered.
+        #[allow(unsafe_code)]
+        let fd = unsafe { tokio::io::unix::AsyncFd::register(file) }
+            .map_err(io::Error::from)
             .with_context(|| format!("registering serial port {path}"))?;
         Ok(Self { fd })
     }

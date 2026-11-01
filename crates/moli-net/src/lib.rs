@@ -8,6 +8,7 @@
 pub mod lan;
 mod legacy;
 pub mod proto;
+pub mod raop;
 pub mod upnp;
 pub mod wol;
 pub mod ws;

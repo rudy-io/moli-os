@@ -14,15 +14,23 @@
 //!   commands its rooms only, until it expires: nothing of the rest of the
 //!   house, nobody's whereabouts).
 //! - Signing in: Cloudflare Access's verified e-mail names the person who has
-//!   it (no password then); otherwise a password, from anywhere (a session
-//!   bound to the person, not to an address: a phone changes address); a new
-//!   person sets theirs with an invitation code.
+//!   it (no password then), behind `[server.access]` only: without Access an
+//!   e-mail opens nothing, and an owner who has only an e-mail does not count
+//!   as an owner who can sign in; otherwise a password, from anywhere (a
+//!   session bound to the person, not to an address: a phone changes
+//!   address); a new person sets theirs with an invitation code. The e-mail
+//!   of someone no longer of the house (a guest whose stay is over, a person
+//!   removed) is a stranger's, whatever Access's rule still says: removed
+//!   e-mails are kept in `data/former-emails.json` (0600 too), apart so that
+//!   an older version still reads `people.json`.
 //! - The e-mails of `[server.access] owners` become owners at the first start:
-//!   a house that had owners keeps them, nothing to do.
+//!   a house that had owners keeps them, nothing to do; one an owner removed
+//!   is not added back.
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use axum::http::HeaderMap;
@@ -38,6 +46,9 @@ use crate::caller::Caller;
 use crate::session::{LoginError, Sessions};
 
 pub(crate) const FILE: &str = "people.json";
+/// The e-mails of people no longer of the house, beside `people.json` (not
+/// in it: a version before this one would refuse the whole file).
+const FORMER_FILE: &str = "former-emails.json";
 const COOKIE_NAME: &str = "moli_person";
 const SESSIONS_KEY: &str = "person_sessions";
 const SESSION_MAX_AGE_S: u64 = 30 * 24 * 3600;
@@ -130,6 +141,25 @@ pub(crate) struct Book {
     pub(crate) zones: Vec<Zone>,
     #[serde(default)]
     invites: Vec<Invite>,
+    /// E-mails of people no longer of the house (removed, or taken off
+    /// their card): Cloudflare Access may still let them in, Moli does not.
+    /// Kept for good, in [`FORMER_FILE`]: dropping one would let its person
+    /// back in. One given back to someone stays (that person wins).
+    #[serde(skip)]
+    former_emails: Vec<String>,
+}
+
+/// What an e-mail Cloudflare Access vouched for is to the house.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Vouched {
+    /// One of its people.
+    Person(PersonRef),
+    /// An e-mail the house never had: the household, as Access let them in.
+    Household,
+    /// Someone no longer of the house (a guest whose stay is over, a person
+    /// removed, an e-mail taken off a card), or, with `known_only`, anyone
+    /// the house does not know: a stranger.
+    Stranger,
 }
 
 /// Who a request comes from, when it is a person.
@@ -230,6 +260,12 @@ pub(crate) struct People {
     book: Mutex<Book>,
     sessions: Mutex<HashMap<String, PersonSession>>,
     write: tokio::sync::Mutex<()>,
+    /// Cloudflare Access fronts the house (`[server.access]`): only then
+    /// does an e-mail let someone in.
+    behind_access: AtomicBool,
+    /// [`FORMER_FILE`] exists but cannot be read: nobody it might name is
+    /// let in (as with `known_only`), and it is never written over.
+    former_lost: bool,
 }
 
 impl std::fmt::Debug for People {
@@ -412,6 +448,35 @@ fn active(p: &Person) -> bool {
     p.expires.is_none_or(|end| now_ms() < end)
 }
 
+/// `emails` are no longer anyone's: kept as former ones.
+fn retire(book: &mut Book, emails: impl IntoIterator<Item = String>) {
+    for email in emails {
+        if !book.former_emails.contains(&email) {
+            book.former_emails.push(email);
+        }
+    }
+}
+
+/// The e-mails of [`FORMER_FILE`] (none yet: none), and whether the file
+/// exists but cannot be read.
+fn read_former(path: Option<&Path>) -> (Vec<String>, bool) {
+    let Some(path) = path else {
+        return (Vec::new(), false);
+    };
+    let read = match std::fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), false),
+        Err(e) => Err(e.to_string()),
+        Ok(raw) => serde_json::from_slice(&raw).map_err(|e| e.to_string()),
+    };
+    read.map_or_else(
+        |e| {
+            tracing::error!(error = %e, "former-emails.json unreadable: Cloudflare Access lets in the people only until it is fixed");
+            (Vec::new(), true)
+        },
+        |former| (former, false),
+    )
+}
+
 impl People {
     /// Reads `people.json` (none: nobody yet) and makes `owners` (Access
     /// e-mails of `[server.access]`) owners if nobody has their e-mail.
@@ -428,10 +493,17 @@ impl People {
                 }
             })
             .unwrap_or_default();
+        let (former, former_lost) = read_former(data_dir.map(|d| d.join(FORMER_FILE)).as_deref());
+        book.former_emails = former;
         let mut changed = false;
         for email in owners {
             let email = email.trim().to_lowercase();
             if email.is_empty() || book.people.iter().any(|p| p.emails.contains(&email)) {
+                continue;
+            }
+            // Removed by an owner: the configuration does not bring them back.
+            if book.former_emails.contains(&email) {
+                tracing::warn!(%email, "an owner of [server.access] was removed from the people: not added back (take them out of moli.toml)");
                 continue;
             }
             let local = email.split('@').next().unwrap_or("proprietaire");
@@ -480,6 +552,9 @@ impl People {
             book: Mutex::new(book),
             sessions: Mutex::new(sessions),
             write: tokio::sync::Mutex::new(()),
+            // Access owners mean Access; the surfaces say it for sure.
+            behind_access: AtomicBool::new(!owners.is_empty()),
+            former_lost,
         };
         if changed && let Err(e) = people.save_now() {
             tracing::error!(error = %e, "people.json not written");
@@ -491,7 +566,23 @@ impl People {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        let json = serde_json::to_vec_pretty(&*lock(&self.book)).unwrap_or_default();
+        let (json, former) = {
+            let book = lock(&self.book);
+            let former = (!book.former_emails.is_empty())
+                .then(|| serde_json::to_vec_pretty(&book.former_emails).unwrap_or_default());
+            (
+                serde_json::to_vec_pretty(&*book).unwrap_or_default(),
+                former,
+            )
+        };
+        // The former e-mails first: they only ever grow, so a failure past
+        // this point leaves one more of them, never one less.
+        if let Some(former) = former.filter(|_| !self.former_lost) {
+            let target = path.with_file_name(FORMER_FILE);
+            let tmp = target.with_extension("json.tmp");
+            write_private(&tmp, &former)?;
+            std::fs::rename(&tmp, &target)?;
+        }
         let tmp = path.with_extension("json.tmp");
         write_private(&tmp, &json)?;
         std::fs::rename(&tmp, path)
@@ -520,13 +611,36 @@ impl People {
 
     /// Whether an owner can sign in (a password set, or an e-mail Access
     /// vouches for): until then, the house's code manages the people (else
-    /// the first owner, created but not yet invited, could never be).
+    /// the first owner, created but not yet invited, could never be). An
+    /// e-mail counts only behind Access: without it, nothing vouches for it.
     pub(crate) fn has_owner(&self) -> bool {
+        let access = self.behind_access.load(Ordering::Relaxed);
         lock(&self.book).people.iter().any(|p| {
             p.role == Role::Owner
                 && active(p)
-                && (!p.emails.is_empty() || self.hub.core_secret(&password_key(&p.id)).is_some())
+                && ((access && !p.emails.is_empty())
+                    || self.hub.core_secret(&password_key(&p.id)).is_some())
         })
+    }
+
+    /// Whether Cloudflare Access fronts the house (`[server.access]`).
+    pub(crate) fn set_behind_access(&self, yes: bool) {
+        self.behind_access.store(yes, Ordering::Relaxed);
+    }
+
+    /// The active owners who have an e-mail but no password: without Access,
+    /// none of them can sign in, so the house's code manages the people.
+    pub(crate) fn email_only_owners(&self) -> usize {
+        lock(&self.book)
+            .people
+            .iter()
+            .filter(|p| {
+                p.role == Role::Owner
+                    && active(p)
+                    && !p.emails.is_empty()
+                    && self.hub.core_secret(&password_key(&p.id)).is_none()
+            })
+            .count()
     }
 
     fn reference(p: &Person) -> PersonRef {
@@ -554,6 +668,26 @@ impl People {
             .iter()
             .find(|p| active(p) && p.emails.contains(&email))
             .map(Self::reference)
+    }
+
+    /// Who an e-mail Cloudflare Access vouched for is: Access's rule may
+    /// still name someone whose stay is over or who was removed, and they
+    /// must not come back as the household. `known_only` (or the former
+    /// e-mails lost to an unreadable file): once the house has people, an
+    /// e-mail none of them has is a stranger too.
+    pub(crate) fn vouched(&self, email: &str, known_only: bool) -> Vouched {
+        if let Some(person) = self.by_email(email) {
+            return Vouched::Person(person);
+        }
+        let email = email.trim().to_lowercase();
+        let book = lock(&self.book);
+        let former = book.people.iter().any(|p| p.emails.contains(&email))
+            || book.former_emails.contains(&email);
+        if former || ((known_only || self.former_lost) && !book.people.is_empty()) {
+            Vouched::Stranger
+        } else {
+            Vouched::Household
+        }
     }
 
     /// The person signed in by this request's cookie.
@@ -818,6 +952,12 @@ impl People {
                 if p.role == Role::Owner && draft.role != Role::Owner && owners_left == 0 {
                     return Err(Refused::LastOwner);
                 }
+                let dropped: Vec<String> = p
+                    .emails
+                    .iter()
+                    .filter(|e| !draft.emails.contains(e))
+                    .cloned()
+                    .collect();
                 p.name = draft.name;
                 p.role = draft.role;
                 p.emails = draft.emails;
@@ -825,10 +965,55 @@ impl People {
                 p.rooms = draft.rooms;
                 p.expires = draft.expires;
                 p.macs = draft.macs;
-                Ok(p.clone())
+                let p = p.clone();
+                retire(book, dropped);
+                Ok(p)
             })
             .await?;
         Ok(out)
+    }
+
+    /// Takes back an addition nothing was built on: the same member, as named when
+    /// added, with no e-mail, device address, room, colour, end, password or
+    /// invitation. Checked and removed under the same lock, so a screen that sets
+    /// them up at the same moment wins. Anything else is the owner's to remove.
+    pub(crate) async fn remove_unused(&self, id: &str, name: &str) -> Result<(), Refused> {
+        let (gone, named) = (id.to_owned(), name.to_owned());
+        let has_password = self.has_password(id);
+        self.change(move |book| {
+            let unused = !has_password
+                && !book.invites.iter().any(|i| i.person == gone)
+                && book.people.iter().any(|p| {
+                    p.id == gone
+                        && p.name == named
+                        && p.role == Role::Member
+                        && p.emails.is_empty()
+                        && p.macs.is_empty()
+                        && p.rooms.is_empty()
+                        && p.color.is_none()
+                        && p.expires.is_none()
+                });
+            if !unused {
+                return Err(Refused::Invalid(moli_i18n::tr!(
+                    "serveur.personnes.deja_configuree"
+                )));
+            }
+            book.people.retain(|p| p.id != gone);
+            Ok(())
+        })
+        .await?;
+        self.end_sessions(id).await;
+        let _ = self.hub.forget_core_secret(&password_key(id)).await;
+        Ok(())
+    }
+
+    /// Who lives here, by name.
+    pub(crate) fn names(&self) -> Vec<String> {
+        lock(&self.book)
+            .people
+            .iter()
+            .map(|p| p.name.clone())
+            .collect()
     }
 
     pub(crate) async fn remove(&self, id: &str) -> Result<(), Refused> {
@@ -847,8 +1032,10 @@ impl People {
             {
                 return Err(Refused::LastOwner);
             }
+            let emails = p.emails.clone();
             book.people.retain(|p| p.id != gone);
             book.invites.retain(|i| i.person != gone);
+            retire(book, emails);
             Ok(())
         })
         .await?;
@@ -1064,6 +1251,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_an_addition_nobody_built_on_is_taken_back() {
+        let p = People::open(hub_with_store(), None, &["a@example.org".to_owned()]);
+        let lea = p.create(draft("Léa", Role::Member)).await.unwrap();
+        assert!(
+            p.remove_unused(&lea.id, "Léo").await.is_err(),
+            "renamed since"
+        );
+        p.remove_unused(&lea.id, "Léa").await.unwrap();
+        assert!(p.get(&lea.id).is_none());
+
+        let mut with_mail = draft("Max", Role::Member);
+        with_mail.emails = vec!["max@example.org".into()];
+        let max = p.create(with_mail).await.unwrap();
+        assert!(p.remove_unused(&max.id, "Max").await.is_err());
+
+        let eve = p.create(draft("Ève", Role::Member)).await.unwrap();
+        p.set_password(&eve.id, "correct horse battery")
+            .await
+            .unwrap();
+        assert!(p.remove_unused(&eve.id, "Ève").await.is_err());
+
+        let mut coloured = draft("Zoé", Role::Member);
+        coloured.color = Some("#ff0000".into());
+        let zoe = p.create(coloured).await.unwrap();
+        assert!(p.remove_unused(&zoe.id, "Zoé").await.is_err());
+
+        let boss = p.create(draft("Chef", Role::Owner)).await.unwrap();
+        assert!(
+            p.remove_unused(&boss.id, "Chef").await.is_err(),
+            "an owner is never undone"
+        );
+        assert_eq!(p.names().len(), 5);
+    }
+
+    #[tokio::test]
     async fn the_last_owner_stays() {
         let p = People::open(hub(), None, &["a@example.org".to_owned()]);
         assert_eq!(p.remove("a").await, Err(Refused::LastOwner));
@@ -1074,6 +1296,21 @@ mod tests {
         let b = p.create(draft("B", Role::Owner)).await.unwrap();
         p.remove("a").await.unwrap();
         assert!(p.get(&b.id).is_some());
+    }
+
+    #[tokio::test]
+    async fn an_owner_e_mail_opens_nothing_without_access() {
+        let p = People::open(hub_with_store(), None, &[]);
+        let mut d = draft("A", Role::Owner);
+        d.emails = vec!["a@example.org".into()];
+        let a = p.create(d).await.unwrap();
+        assert!(!p.has_owner(), "the house's code may still invite them");
+        assert_eq!(p.email_only_owners(), 1);
+        p.set_behind_access(true);
+        assert!(p.has_owner(), "Access vouches for the e-mail");
+        p.set_behind_access(false);
+        p.set_password(&a.id, "un mot de passe long").await.unwrap();
+        assert!(p.has_owner(), "a password lets them in");
     }
 
     #[tokio::test]
@@ -1144,6 +1381,92 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Access's rule may outlive a stay, a removal or an e-mail taken off a
+    /// card: the house remembers whom it no longer has, across restarts.
+    #[tokio::test]
+    async fn an_e_mail_no_longer_of_the_house_is_a_stranger() {
+        fn card(name: &str, role: Role, email: &str) -> Draft {
+            Draft {
+                emails: vec![email.to_owned()],
+                ..draft(name, role)
+            }
+        }
+        let dir = folder("former");
+        let owners = ["moi@example.org".to_owned()];
+        let p = People::open(hub(), Some(&dir), &owners);
+        let mut passage = card("Passage", Role::Guest, "guest@example.com");
+        passage.expires = Some(1);
+        p.create(passage).await.unwrap();
+        assert_eq!(p.vouched("Guest@Example.com ", false), Vouched::Stranger);
+
+        let sam = p
+            .create(card("Sam", Role::Member, "sam@example.com"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            p.vouched("sam@example.com", false),
+            Vouched::Person(r) if r.id == sam.id
+        ));
+        p.remove(&sam.id).await.unwrap();
+        assert_eq!(p.vouched("sam@example.com", false), Vouched::Stranger);
+
+        let lea = p
+            .create(card("Léa", Role::Member, "lea@example.com"))
+            .await
+            .unwrap();
+        p.update(&lea.id, card("Léa", Role::Member, "lea@example.org"))
+            .await
+            .unwrap();
+        assert_eq!(p.vouched("lea@example.com", false), Vouched::Stranger);
+
+        // An e-mail the house never had: as Access's rule says, unless the
+        // house wants its people only.
+        assert_eq!(p.vouched("ami@example.com", false), Vouched::Household);
+        assert_eq!(p.vouched("ami@example.com", true), Vouched::Stranger);
+
+        // An owner of the configuration, removed by another owner.
+        p.create(card("Chef", Role::Owner, "chef@example.org"))
+            .await
+            .unwrap();
+        p.remove("moi").await.unwrap();
+
+        // Kept apart: `people.json` stays readable by an older version.
+        let book = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(!book.contains("former") && !book.contains("sam@"), "{book}");
+
+        drop(p);
+        let p = People::open(hub(), Some(&dir), &owners);
+        assert_eq!(p.vouched("sam@example.com", false), Vouched::Stranger);
+        assert_eq!(p.vouched("lea@example.com", false), Vouched::Stranger);
+        // The configuration does not bring a removed owner back.
+        assert!(p.get("moi").is_none());
+        assert_eq!(p.vouched("moi@example.org", false), Vouched::Stranger);
+        // Given back to someone: theirs again.
+        let back = p
+            .create(card("Sam", Role::Member, "sam@example.com"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            p.vouched("sam@example.com", true),
+            Vouched::Person(r) if r.id == back.id
+        ));
+        drop(p);
+
+        // The former e-mails unreadable: nobody the house does not know gets
+        // in, and the file is left for a person to mend.
+        let former = dir.join(FORMER_FILE);
+        std::fs::write(&former, "not json").unwrap();
+        let p = People::open(hub(), Some(&dir), &owners);
+        assert_eq!(p.vouched("ami@example.com", false), Vouched::Stranger);
+        p.remove(&back.id).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&former).unwrap(), "not json");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A house nobody is in yet: `known_only` cannot lock its owner out.
+        let empty = People::open(hub(), None, &[]);
+        assert_eq!(empty.vouched("moi@example.org", true), Vouched::Household);
     }
 
     #[tokio::test]

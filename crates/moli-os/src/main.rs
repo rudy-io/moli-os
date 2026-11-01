@@ -3,6 +3,7 @@
 mod backup;
 mod catalogue;
 mod config;
+mod timezone;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -61,6 +62,9 @@ enum Command {
     /// Native Zigbee (EZSP coordinator).
     #[command(subcommand)]
     Zigbee(ZigbeeCommand),
+    /// The house model's contract and training prompts (for the data generator).
+    #[command(subcommand, hide = true)]
+    Model(ModelCommand),
     /// Copy everything Moli knows into a new folder (safe while it runs).
     Backup { dir: PathBuf },
     /// Put a backup back into the data directory (moli-os stopped).
@@ -182,6 +186,27 @@ enum SecretsCommand {
     Set { instance: String, name: String },
 }
 
+#[derive(Subcommand)]
+enum ModelCommand {
+    /// Print the frozen tools (JSON).
+    Tools,
+    /// Read a house (JSON) on standard input and print the model's system prompt.
+    Prompt,
+}
+
+/// `moli-os model …`: no configuration needed.
+fn model_command(command: &ModelCommand) -> anyhow::Result<()> {
+    match command {
+        ModelCommand::Tools => print!("{}", moli_assistant::MODEL_TOOLS_JSON),
+        ModelCommand::Prompt => {
+            let mut house = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut house)?;
+            print!("{}", moli_assistant::render_model_prompt(&house)?.to_json());
+        }
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let boot = Instant::now();
     tracing_subscriber::fmt()
@@ -204,6 +229,9 @@ fn main() -> anyhow::Result<()> {
     if let Some(Command::Catalogue(CatalogueCommand::Check { dir })) = &cli.command {
         return catalogue::run(dir, KINDS);
     }
+    if let Some(Command::Model(command)) = &cli.command {
+        return model_command(command);
+    }
     // A new house starts without a configuration: `serve` writes a minimal
     // one; every other command needs the real thing.
     let serving = matches!(cli.command, None | Some(Command::Serve));
@@ -213,7 +241,7 @@ fn main() -> anyhow::Result<()> {
         Config::load(&cli.config)?
     };
     match cli.command.unwrap_or(Command::Serve) {
-        Command::Profile(_) | Command::Catalogue(_) | Command::Health => {
+        Command::Profile(_) | Command::Catalogue(_) | Command::Health | Command::Model(_) => {
             unreachable!("handled above")
         }
         Command::Backup { dir } => backup::backup(&config.server.data_dir, &dir),
@@ -225,13 +253,7 @@ fn main() -> anyhow::Result<()> {
         Command::Zigbee(command) => zigbee_command(&config, command),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
-        Command::CheckConfig => {
-            for driver in &config.drivers {
-                build_driver(driver, &config.server.data_dir)?;
-            }
-            println!("configuration OK ({} driver(s))", config.drivers.len());
-            Ok(())
-        }
+        Command::CheckConfig => check_config(&config),
         Command::Secrets(SecretsCommand::Forget { instance, name }) => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
@@ -339,16 +361,25 @@ fn demo_fresh(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
-    // Before anything opens the data directory.
-    demo_fresh(&config)?;
-    // The house's language: the one chosen at the installation, else the
-    // configuration's.
+/// The house's language (the one chosen at the installation, else the
+/// configuration's), then its time zone, said in that language: where it
+/// came from, and what should be written instead of guessed.
+fn speak_and_tell_the_time(config: &Config) {
     let language = moli_api::settings::language(&config.server.data_dir)
         .unwrap_or_else(|| config.server.language.clone());
     if !moli_i18n::set_language(&language) {
         tracing::warn!(%language, "unknown language: Moli speaks {}", moli_i18n::FALLBACK);
     }
+    tracing::info!(timezone = %config.zone.name, from = %config.zone.origin(), "the house's time zone");
+    for warning in config.zone.warnings() {
+        tracing::warn!("{warning}");
+    }
+}
+
+async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
+    // Before anything opens the data directory.
+    demo_fresh(&config)?;
+    speak_and_tell_the_time(&config);
     // The master key comes from the environment (a secrets manager), or a
     // new house's key file.
     let secrets = master_key(&config.server.data_dir, true)?
@@ -424,6 +455,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         phones: gates.phones,
         machines: gates.machines,
         weather: weather(&config),
+        timezone: Some(config.zone.name.clone()),
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(
@@ -455,8 +487,15 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
 }
 
 /// The sky over the house (the dashboard's forecast and weather map):
-/// where the assistant places it, else the automations (for the sun).
+/// where the assistant places it, else the automations (for the sun). One for
+/// the dashboard and for « actualise la météo » (what the one keeps, the other
+/// refreshes).
 fn weather(config: &Config) -> Option<moli_weather::Weather> {
+    static SKY: std::sync::OnceLock<Option<moli_weather::Weather>> = std::sync::OnceLock::new();
+    SKY.get_or_init(|| new_weather(config)).clone()
+}
+
+fn new_weather(config: &Config) -> Option<moli_weather::Weather> {
     let assistant = config.assistant.as_ref();
     let latitude = assistant
         .and_then(|a| a.latitude)
@@ -464,12 +503,22 @@ fn weather(config: &Config) -> Option<moli_weather::Weather> {
     let longitude = assistant
         .and_then(|a| a.longitude)
         .or(config.automations.longitude);
+    // The position a person chose from the conversation wins (`home.json`).
+    let chosen = moli_assistant::saved_place(&config.server.data_dir.join("home.json"));
+    let (latitude, longitude) = match chosen {
+        Some(p) => (Some(p.latitude), Some(p.longitude)),
+        None => (latitude, longitude),
+    };
     // The demo house sits nowhere: no sky from the outside world.
     if config.server.demo {
         return None;
     }
-    latitude.zip(longitude).map(|(lat, lon)| {
-        moli_weather::Weather::new(lat, lon, Some(config.server.data_dir.clone()))
+    // Unplaced, it is still there: a position chosen from the conversation
+    // places it for the dashboard and the assistant alike, without a restart.
+    let data_dir = Some(config.server.data_dir.clone());
+    Some(match latitude.zip(longitude) {
+        Some((lat, lon)) => moli_weather::Weather::new(lat, lon, data_dir),
+        None => moli_weather::Weather::unplaced(data_dir),
     })
 }
 
@@ -486,9 +535,15 @@ async fn start_brains(
     moli_automation::Automations,
     tokio::task::JoinHandle<()>,
 )> {
+    // The sun rises where the house is: the position a person chose from the
+    // conversation (`home.json`) wins over `moli.toml`'s.
+    let mut sun = config.automations.clone();
+    if let Some(p) = moli_assistant::saved_place(&config.server.data_dir.join("home.json")) {
+        (sun.latitude, sun.longitude) = (Some(p.latitude), Some(p.longitude));
+    }
     let (automations, task) = moli_automation::Automations::start(
         hub,
-        config.automations.clone(),
+        sun,
         Some(&config.server.data_dir),
         cancel.clone(),
     )
@@ -505,6 +560,22 @@ async fn start_brains(
     Ok((assistant, automations, task))
 }
 
+/// `moli-os check-config`: every driver builds, the assistant's providers hold together.
+fn check_config(config: &Config) -> anyhow::Result<()> {
+    for driver in &config.drivers {
+        build_driver(driver, &config.server.data_dir)?;
+    }
+    if let Some(assistant) = &config.assistant {
+        assistant.check().context("[assistant]")?;
+    }
+    println!("time zone: {} ({})", config.zone.name, config.zone.origin());
+    for warning in config.zone.warnings() {
+        println!("  ! {warning}");
+    }
+    println!("configuration OK ({} driver(s))", config.drivers.len());
+    Ok(())
+}
+
 /// The home's own assistant: always there (without `[assistant]`, with its
 /// defaults), waiting for a key given from the dashboard if it has none.
 fn start_assistant(
@@ -514,6 +585,8 @@ fn start_assistant(
     history: Option<&moli_history::History>,
 ) -> anyhow::Result<Option<moli_assistant::Assistant>> {
     let mut settings = config.assistant.clone().unwrap_or_default();
+    // Without [assistant], its defaults: but the house's clock, always.
+    settings.timezone.clone_from(&config.zone.name);
     // The forecast's location: the one the automations already know.
     if settings.latitude.zip(settings.longitude).is_none() {
         settings.latitude = config.automations.latitude;
@@ -530,6 +603,12 @@ fn start_assistant(
     moli.load_voice_prefs(config.server.data_dir.join("assistant.json"));
     moli.open_exchanges(config.server.data_dir.join("assistant-exchanges.jsonl"));
     moli.open_recordings(config.server.data_dir.join("recordings"));
+    if let Some(sky) = weather(config) {
+        moli.set_weather(sky);
+    }
+    // The house model reads its prompt now, not at the first question.
+    let warming = moli.clone();
+    tokio::spawn(async move { warming.warm_up().await });
     Ok(Some(moli))
 }
 
@@ -1011,6 +1090,9 @@ fn print_profile(compiled: &moli_profile::Compiled, file: Option<&moli_profile::
             p.spec.kind
         );
     }
+    if let Some(path) = &compiled.meta.snapshot {
+        println!("  image   on demand           GET {path}");
+    }
     if compiled.writes.is_empty() {
         println!("  writes: none (read-only)");
         return;
@@ -1085,15 +1167,22 @@ fn start_history(
 const KINDS: &[&str] = &[
     "z2m",
     "zigbee",
+    "zwave",
     "hue",
+    "dirigera",
+    "homeassistant",
     "igd",
     "tapo",
+    "shelly",
+    "izypower",
+    "solarman",
     "philips",
     "frigate",
     "bambu",
     "esphome",
     "alexa",
     "sonos",
+    "airplay",
     "reolink",
     "tuya",
     "helpers",
@@ -1136,6 +1225,22 @@ fn spawn_house_drivers(
             Arc::new(moli_energy::points::Points::new(energy.clone())),
             cancel.clone(),
         ));
+        let energy_config = energy.config();
+        if !energy_config.loads.is_empty()
+            && let Ok(tz) = jiff::tz::TimeZone::get(&energy_config.timezone)
+        {
+            tasks.push(spawn_driver(
+                hub,
+                InstanceId::from(moli_energy::load::INSTANCE),
+                Arc::new(moli_energy::load::Loads::new(
+                    hub.clone(),
+                    energy_config.loads.clone(),
+                    tz,
+                    energy_config.tariff.as_ref().map(|t| t.period.clone()),
+                )),
+                cancel.clone(),
+            ));
+        }
     }
     tasks
 }
@@ -1227,13 +1332,29 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
             data_dir,
         )),
+        "zwave" => Arc::new(moli_zwave::Zwave::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "hue" => Arc::new(moli_hue::Hue::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
+        "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "tapo" => Arc::new(moli_tapo::Tapo::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "shelly" => Arc::new(moli_shelly::Shelly::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "izypower" => Arc::new(moli_izypower::Izypower::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "solarman" => Arc::new(moli_solarman::Solarman::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "philips" => Arc::new(moli_philips::Philips::new(
@@ -1263,15 +1384,16 @@ fn build_driver(
         "sonos" => Arc::new(moli_sonos::Sonos::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "airplay" => Arc::new(moli_airplay::Airplay::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "reolink" => Arc::new(moli_reolink::Reolink::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "tuya" => Arc::new(moli_tuya::Tuya::new(
             config.options.clone().try_into().with_context(context)?,
         )),
-        "presence" => Arc::new(moli_presence::Presence::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "presence" => configured_driver(config, moli_presence::Presence::new)?,
         "phones" => Arc::new(
             moli_phones::open(
                 config.options.clone().try_into().with_context(context)?,
@@ -1279,21 +1401,29 @@ fn build_driver(
             )?
             .1,
         ),
-        "telegram" => Arc::new(moli_telegram::Telegram::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "helpers" => Arc::new(moli_helpers::Helpers::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "demo" => Arc::new(moli_demo::Demo::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
+        "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,
             data_dir.join(moli_profile::TRUST_FILE),
         )?),
         other => bail!("driver kind {other:?} is in KINDS but never built"),
     })
+}
+
+/// Drivers with validated constructors share option decoding and error context.
+fn configured_driver<C, D>(
+    config: &DriverConfig,
+    create: fn(C) -> anyhow::Result<D>,
+) -> anyhow::Result<Arc<dyn Driver>>
+where
+    C: serde::de::DeserializeOwned,
+    D: Driver,
+{
+    let context = || format!("driver {:?} options", config.id);
+    let options = config.options.clone().try_into().with_context(context)?;
+    Ok(Arc::new(create(options).with_context(context)?))
 }
 
 /// `moli-os health`: the local instance answers, quickly.
@@ -1683,6 +1813,14 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
         assert!(names.iter().all(|n| !n.contains(".tmp")), "{names:?}");
+    }
+
+    #[test]
+    fn check_config_validates_the_assistant_providers() {
+        let bad: moli_assistant::Config = toml::from_str("[routes]\nchat = \"local\"\n").unwrap();
+        assert!(bad.check().is_err());
+        let good: moli_assistant::Config = toml::from_str("").unwrap();
+        assert!(good.check().is_ok());
     }
 
     #[test]

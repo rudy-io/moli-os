@@ -3,3 +3,15 @@
 web/node_modules
 web/dist
 *.bak-*
+__pycache__/
+# What the house-model scripts produce: data (a set drawn from a real house's corrections among
+# them), runs, merged weights, GGUF files, results and logs never go in the repository.
+/tools/model/data/
+/tools/model/train/data/
+/tools/model/train/runs/
+/tools/model/train/merged/
+/tools/model/train/clean/
+/tools/model/train/gguf/
+/tools/model/train/results/
+/tools/model/train/logs-*.log
+/tools/model/train/*.jsonl

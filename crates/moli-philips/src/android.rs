@@ -37,6 +37,39 @@ const SETTLE: Duration = Duration::from_secs(1);
 /// The hub's patience ends at the order's deadline: answered a little before.
 const BEFORE_DEADLINE: Duration = Duration::from_millis(300);
 
+/// The Android key of a JointSpace key: the same press through the remote's
+/// session, open as long as the TV is, where JointSpace goes away for half a
+/// minute at times (an app starting…) while the TV plays on.
+fn android_key(name: &str) -> Option<u32> {
+    Some(match name {
+        "CursorUp" => 19,
+        "CursorDown" => 20,
+        "CursorLeft" => 21,
+        "CursorRight" => 22,
+        "Confirm" => 23,
+        "Back" => 4,
+        "Home" => 3,
+        "Options" => 82,
+        "Info" => 165,
+        "PlayPause" => 85,
+        "Play" => 126,
+        "Pause" => 127,
+        "Stop" => 86,
+        "Next" => 87,
+        "Previous" => 88,
+        "FastForward" => 90,
+        "Rewind" => 89,
+        "VolumeUp" => 24,
+        "VolumeDown" => 25,
+        "Mute" => 164,
+        "ChannelStepUp" => 166,
+        "ChannelStepDown" => 167,
+        "Source" => 178,
+        "WatchTV" => 170,
+        _ => return None,
+    })
+}
+
 /// One app link to the TV.
 fn send_link(side: Option<&Side<remote::Order>>, link: &str) -> anyhow::Result<()> {
     let side = side.with_context(|| moli_i18n::tr!("pilotes.philips.pas_de_telecommande"))?;
@@ -123,6 +156,8 @@ pub(crate) struct Android {
     sent: Option<Sent>,
     /// When the remote last came up.
     ready_at: Option<Instant>,
+    /// On or off, as the remote last said (nothing while it is down).
+    power: Option<bool>,
     /// The TV answered JointSpace at the last poll; when the connections were
     /// last nudged (once on the TV's return, then once a minute at most: a
     /// remote that keeps failing must keep its slower pace).
@@ -186,6 +221,7 @@ impl Android {
                 pending: None,
                 sent: None,
                 ready_at: None,
+                power: None,
                 tv_was_online: false,
                 nudged: None,
             },
@@ -196,6 +232,22 @@ impl Android {
     /// The remote says which app is on screen: JointSpace's word is not needed.
     pub(crate) fn knows_the_app(&self) -> bool {
         self.remote.is_some()
+    }
+
+    /// The remote is up and says the TV is on: JointSpace not answering is
+    /// JointSpace's own outage, not the TV gone.
+    pub(crate) fn says_on(&self) -> bool {
+        self.remote.as_ref().is_some_and(|s| s.up) && self.power == Some(true)
+    }
+
+    /// A remote key through the Android remote while it is up; `None` when
+    /// it is not (or the key has no Android twin): JointSpace takes it then.
+    pub(crate) fn press(&self, name: &str) -> Option<anyhow::Result<()>> {
+        let code = android_key(name)?;
+        let side = self.remote.as_ref().filter(|s| s.up)?;
+        Some(side.orders.try_send(remote::Order::Key(code)).map_err(|_| {
+            anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas"))
+        }))
     }
 
     /// Paired: an app can be opened (worth waking the TV for).
@@ -438,15 +490,23 @@ impl Android {
                         self.ready_at = Some(Instant::now());
                         self.flush();
                     }
-                    remote::Event::Lost => side.up = false,
+                    remote::Event::Lost => {
+                        side.up = false;
+                        self.power = None;
+                    }
                     remote::Event::Refused(what) => self.refused(&what),
                     remote::Event::App(app) => {
                         self.opened(&app);
                         ctx.set_state(id, "app", Value::Text(app.into()));
                     }
-                    remote::Event::Power(false) => ctx.set_state(id, "app", Value::Null),
-                    // JointSpace says these already.
-                    remote::Event::Power(true) | remote::Event::Volume { .. } => {}
+                    remote::Event::Power(on) => {
+                        self.power = Some(on);
+                        if !on {
+                            ctx.set_state(id, "app", Value::Null);
+                        }
+                    }
+                    // JointSpace says it already.
+                    remote::Event::Volume { .. } => {}
                 }
             }
             Up::Cast(event) => {
@@ -630,6 +690,7 @@ mod tests {
             pending: None,
             sent: None,
             ready_at: None,
+            power: None,
             tv_was_online: true,
             nudged: None,
         }
@@ -698,6 +759,42 @@ mod tests {
         android.settle();
         assert_eq!(outcome.await.unwrap(), Ok(()));
         assert!(android.due().is_none());
+    }
+
+    #[test]
+    fn every_remote_key_has_its_android_key() {
+        for key in crate::KEYS {
+            assert!(android_key(key).is_some(), "{key}");
+        }
+        assert_eq!(android_key("CursorDown"), Some(20));
+        assert_eq!(android_key("Confirm"), Some(23));
+        assert_eq!(android_key("Standby"), None);
+    }
+
+    #[tokio::test]
+    async fn keys_go_through_the_android_remote_while_it_is_up() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        assert!(android.press("Back").is_some_and(|r| r.is_ok()));
+        assert_eq!(orders.recv().await, Some(Order::Key(4)));
+        // Down: JointSpace takes the key.
+        android.remote.as_mut().unwrap().up = false;
+        assert!(android.press("Back").is_none());
+        assert!(orders.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_android_remote_says_whether_the_tv_is_on() {
+        let (tx, _orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        assert!(!android.says_on(), "nothing said yet");
+        android.power = Some(true);
+        assert!(android.says_on());
+        android.remote.as_mut().unwrap().up = false;
+        assert!(!android.says_on(), "a remote that is down says nothing");
+        android.remote.as_mut().unwrap().up = true;
+        android.power = Some(false);
+        assert!(!android.says_on());
     }
 
     #[tokio::test]

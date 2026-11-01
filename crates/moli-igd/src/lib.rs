@@ -416,7 +416,8 @@ mod tests {
 
     #[test]
     fn line_speeds_in_mbits() {
-        assert_eq!(mbps(1_048_576_000), 1048.6);
+        let mbits = mbps(1_048_576_000);
+        assert!((mbits - 1048.6).abs() < 1e-9, "mbits={mbits}");
     }
 
     #[test]

@@ -26,6 +26,12 @@ pub struct AccessConfig {
     /// as Access proves it): the house's owners. Nobody when empty.
     #[serde(default)]
     pub owners: Vec<String>,
+    /// Once the house has people, only their e-mails are let in: anyone
+    /// else Access lets through is a stranger. Off by default, where the
+    /// household is whoever Access's rule lets in, minus the people no
+    /// longer of the house.
+    #[serde(default)]
+    pub known_only: bool,
 }
 
 /// Keys rotate rarely (weeks) and overlap: refreshed hourly at most…
@@ -426,5 +432,112 @@ mod tests {
             assert_eq!(b64url(&b64(sample)).unwrap(), sample);
         }
         assert!(b64url("a+b/").is_none(), "standard alphabet refused");
+    }
+
+    /// The house behind its tunnel: the caller check in front of one route.
+    async fn behind_the_tunnel(gate: crate::caller::Gate) -> String {
+        let app = axum::Router::new()
+            .route("/api/devices", axum::routing::get(|| async { "the house" }))
+            .layer(axum::middleware::from_fn_with_state(
+                gate,
+                crate::caller::identify,
+            ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        addr
+    }
+
+    /// What the house answers a request Cloudflare Access let through.
+    async fn through_access(addr: &str, assertion: &str) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let head = format!(
+            "GET /api/devices HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+             cf-ray: 8c-CDG\r\ncf-connecting-ip: 203.0.113.7\r\n\
+             cf-access-jwt-assertion: {assertion}\r\n\r\n"
+        );
+        stream.write_all(head.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        String::from_utf8_lossy(&raw)[9..12].parse().unwrap()
+    }
+
+    /// Access's rule outlives a stay, or a person: whoever it still lets in
+    /// but the house no longer has opens nothing, instead of coming back as
+    /// the household.
+    #[tokio::test]
+    async fn access_cannot_bring_back_someone_no_longer_of_the_house() {
+        use crate::people::{Draft, People, Role};
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let people = std::sync::Arc::new(People::open(hub, None, &["moi@example.org".into()]));
+        let card = |name: &str, role, email: &str, expires| Draft {
+            name: name.into(),
+            role,
+            emails: vec![email.into()],
+            color: None,
+            rooms: Vec::new(),
+            expires,
+            macs: Vec::new(),
+        };
+        people
+            .create(card("Passage", Role::Guest, "guest@example.com", Some(1)))
+            .await
+            .unwrap();
+        let sam = people
+            .create(card("Sam", Role::Member, "sam@example.com", None))
+            .await
+            .unwrap();
+        people.remove(&sam.id).await.unwrap();
+
+        let config: AccessConfig =
+            serde_json::from_value(serde_json::json!({ "team": "maison", "aud": AUD })).unwrap();
+        let verifier = Verifier::new(&config);
+        {
+            let mut keys = verifier.keys.write().unwrap();
+            keys.by_kid.insert("k1".into(), signer().1);
+            keys.fetched = Some(Instant::now());
+        }
+        let verifier = std::sync::Arc::new(verifier);
+        let gate = |known_only| crate::caller::Gate {
+            access: Some(verifier.clone()),
+            demo: false,
+            people: people.clone(),
+            known_only,
+        };
+        let (pair, _) = signer();
+        let assertion =
+            |email: &str| token(&pair, HEADER, &claims(AUD, ISS, now_s() + 3600, email));
+
+        let house = behind_the_tunnel(gate(false)).await;
+        // A guest whose stay is over, a person removed: strangers.
+        assert_eq!(
+            through_access(&house, &assertion("guest@example.com")).await,
+            403
+        );
+        assert_eq!(
+            through_access(&house, &assertion("sam@example.com")).await,
+            403
+        );
+        // The house's people, and an e-mail it never had (Access's rule is the household's).
+        assert_eq!(
+            through_access(&house, &assertion("moi@example.org")).await,
+            200
+        );
+        assert_eq!(
+            through_access(&house, &assertion("ami@example.com")).await,
+            200
+        );
+        // `known_only`: only its people.
+        let strict = behind_the_tunnel(gate(true)).await;
+        assert_eq!(
+            through_access(&strict, &assertion("ami@example.com")).await,
+            403
+        );
+        assert_eq!(
+            through_access(&strict, &assertion("moi@example.org")).await,
+            200
+        );
     }
 }

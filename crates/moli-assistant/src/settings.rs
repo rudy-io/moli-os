@@ -157,7 +157,7 @@ impl Assistant {
             ),
         };
         json!({
-            "key": self.0.hub.secret(&InstanceId::from("assistant"), "api_key").is_some(),
+            "key": self.0.hub.secret(&InstanceId::from("assistant"), &self.key_name()).is_some(),
             "local_model": self.0.endpoint.is_local(),
             "model": c.model,
             "cloud_voice": !c.speech_model.is_empty(),
@@ -250,7 +250,7 @@ impl Assistant {
         }
         self.0
             .hub
-            .store_secret(&InstanceId::from("assistant"), "api_key", key)
+            .store_secret(&InstanceId::from("assistant"), &self.key_name(), key)
             .await
             .map_err(|e| {
                 AssistantError::Upstream(moli_i18n::tr!("assistant.settings.vault", error = e))

@@ -259,6 +259,20 @@ async fn labels_via_rest() {
 }
 
 #[tokio::test]
+async fn the_system_map_names_the_house_time_zone() {
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        timezone: Some("Indian/Reunion".into()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let (status, body) = request(&addr, "GET", "/api/system", None).await;
+    assert_eq!(status, 200, "{body}");
+    let system: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(system["timezone"], "Indian/Reunion");
+}
+
+#[tokio::test]
 async fn foreign_host_is_rejected_everywhere() {
     let (addr, _hub) = server().await;
     for path in ["/api/devices", "/mcp", "/"] {
@@ -395,6 +409,103 @@ async fn speaking_without_an_assistant_says_so() {
     assert_eq!(status, 200);
     assert!(body.contains("\"speak\":false"), "{body}");
 }
+#[tokio::test]
+async fn deciding_a_proposal_without_an_assistant_says_so() {
+    let (addr, _hub) = server().await;
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/api/assistant/proposals/1",
+        Some(&json!({ "approve": true })),
+    )
+    .await;
+    assert_eq!(status, 503, "{body}");
+}
+
+/// « Pas ça »: the corrections are a person's. Without the code, a script, an agent or the bare
+/// dashboard is refused; with it, an unknown turn or rule is simply gone.
+#[tokio::test]
+async fn only_a_person_corrects_the_assistant_and_manages_what_it_learned() {
+    let hub = lamp_hub().await;
+    let moli = moli_assistant::Assistant::new(
+        hub.clone(),
+        None,
+        None,
+        None,
+        moli_assistant::Config::default(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        assistant: Some(moli),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let correct = json!({ "choice": { "tool": "now", "arguments": {} }, "remember": true });
+    let approve = json!({ "approve": true });
+    for (method, path, body) in [
+        ("POST", "/api/assistant/proposals/7", Some(&approve)),
+        ("POST", "/api/assistant/turns/7/undo", None),
+        ("POST", "/api/assistant/turns/7/correct", Some(&correct)),
+        (
+            "PUT",
+            "/api/assistant/rules/3",
+            Some(&json!({ "enabled": false })),
+        ),
+        ("DELETE", "/api/assistant/rules/3", None),
+        // What Moli learned says who taught it: a person's to read too.
+        ("GET", "/api/assistant/rules", None),
+    ] {
+        let (status, text) = request_with(&addr, method, path, body, ui).await;
+        assert_eq!(status, 403, "{method} {path}: {text}");
+    }
+    // The dashboard of a person: the code's session, and the header that says it speaks for the screen.
+    let pin = format!("{}{ui}", pin_session(&addr, "482915").await);
+    // Another site, even with the person's session, is refused before anything runs.
+    let foreign = format!("{pin}sec-fetch-site: cross-site\r\n");
+    for (method, path, body) in [
+        ("POST", "/api/assistant/proposals/7", Some(&approve)),
+        ("POST", "/api/assistant/turns/7/correct", Some(&correct)),
+    ] {
+        let (status, text) = request_with(&addr, method, path, body, &foreign).await;
+        assert_eq!(status, 403, "{method} {path}: {text}");
+        assert!(text.contains("cross-site"), "{text}");
+    }
+    for (method, path, body) in [
+        ("POST", "/api/assistant/proposals/7", Some(&approve)),
+        ("POST", "/api/assistant/turns/7/undo", None),
+        ("POST", "/api/assistant/turns/7/correct", Some(&correct)),
+        (
+            "PUT",
+            "/api/assistant/rules/3",
+            Some(&json!({ "enabled": false })),
+        ),
+        ("DELETE", "/api/assistant/rules/3", None),
+    ] {
+        let (status, text) = request_with(&addr, method, path, body, &pin).await;
+        assert_eq!(status, 410, "{method} {path}: {text}");
+    }
+    let (status, text) =
+        request_with(&addr, "GET", "/api/assistant/turns/7/choices", None, &pin).await;
+    assert_eq!(status, 410, "{text}");
+    let (status, text) = request_with(&addr, "GET", "/api/assistant/rules", None, &pin).await;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(text.trim(), "[]");
+}
+
+#[tokio::test]
+async fn correcting_without_an_assistant_says_so() {
+    let (addr, _hub) = server().await;
+    for (method, path) in [
+        ("POST", "/api/assistant/turns/1/undo"),
+        ("GET", "/api/assistant/rules"),
+    ] {
+        let (status, body) = request(&addr, method, path, None).await;
+        assert_eq!(status, 503, "{method} {path}: {body}");
+    }
+}
+
 #[tokio::test]
 async fn only_a_person_gives_the_assistant_a_key() {
     let (addr, _hub) = server().await;
@@ -904,6 +1015,55 @@ async fn a_guest_follows_its_rooms_only_live() {
     let _ = std::fs::remove_dir_all(&house.dir);
 }
 
+/// A phone is paired without the code (a device of the home network is the
+/// household's): the house hears of each one, and from where.
+#[tokio::test]
+async fn pairing_a_phone_tells_the_house() {
+    let phones_dir = std::env::temp_dir().join(format!("moli-http-pairing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&phones_dir);
+    std::fs::create_dir_all(&phones_dir).unwrap();
+    let config = moli_phones::Config {
+        home_wifi: Vec::new(),
+        home: None,
+        radius: 150.0,
+    };
+    let (gateway, _driver) = moli_phones::open(config, &phones_dir).unwrap();
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        phones: Some(gateway),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let mut events = hub.subscribe();
+
+    // The name as the pairer typed it; the house reads it as it is kept.
+    let pairing = json!({ "name": " Téléphone\n  du   salon ", "platform": "android" });
+    let (status, body) = request(&addr, "POST", "/api/mobile/register", Some(&pairing)).await;
+    assert_eq!(status, 200, "{body}");
+    let paired: Json = serde_json::from_str(&body).unwrap();
+    let id = paired["id"].as_str().unwrap();
+    let heard = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match events.recv().await {
+                Ok(moli_core::Event::Notice { notice })
+                    if notice.message.contains("Téléphone du salon") =>
+                {
+                    return Some(notice.message);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+    .expect("the house hears of the phone");
+    assert!(heard.contains(id), "{heard}");
+    assert!(heard.contains("127.0.0.1"), "who paired it: {heard}");
+    let _ = std::fs::remove_dir_all(&phones_dir);
+}
+
 /// A phone hears every notice of the house: a guest pairs none, removing
 /// someone forgets theirs, and the phone of someone no longer of the house
 /// (a guest whose stay is over) reports nothing and is told nothing.
@@ -1045,6 +1205,51 @@ async fn live_streams_are_counted() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("the seat of a closed stream never came back");
+}
+
+/// Without Cloudflare Access, an owner who has only an e-mail cannot sign in:
+/// the house's code keeps managing the people (and can invite that owner).
+#[tokio::test]
+async fn an_owner_e_mail_without_access_leaves_the_people_to_the_code() {
+    let dir = std::env::temp_dir().join(format!("moli-http-owner-mail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let hub = Hub::new(HubOptions {
+        secrets: Some((
+            dir.join("secrets.enc"),
+            moli_runtime::MasterKey::generate().unwrap(),
+        )),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "Alex", "role": "owner", "emails": ["alex@example.org"] })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    // Alex cannot sign in yet: the code still manages the people.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/people",
+        Some(&json!({ "name": "Sam", "role": "member" })),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/people/alex/invite", None, &pin).await;
+    assert_eq!(status, 200, "the code invites the owner: {body}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Élodie, from the Internet: nothing until she is invited, then the house.
@@ -1193,4 +1398,245 @@ async fn an_invited_person_reaches_the_house_from_the_internet() {
     .await;
     assert_eq!(status, 401);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A lamp that dims: something for an ambiance to set.
+struct Dimmer;
+
+impl Driver for Dimmer {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("dimmer");
+            let point = |key: &str, kind: Kind, semantic: Semantic| PointSpec {
+                key: key.into(),
+                label: key.into(),
+                kind,
+                access: Access {
+                    read: true,
+                    write: true,
+                },
+                unit: None,
+                semantic,
+            };
+            let level = Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: None,
+            };
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "dimmer".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    point("on", Kind::Binary, Semantic::OnOff),
+                    point("brightness", level, Semantic::Brightness),
+                ],
+            });
+            ctx.set_state(&id, "on", Value::Bool(false));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Under the code everywhere (`dashboard = "pin"`), a lamp and a dimmer,
+/// and Sam, a member who signed in from the Internet: the address, the hub
+/// and her cookie.
+async fn pin_house_with_sam(dir: &std::path::Path) -> (String, Hub, String) {
+    let hub = Hub::new(HubOptions {
+        secrets: Some((
+            dir.join("secrets.enc"),
+            moli_runtime::MasterKey::generate().unwrap(),
+        )),
+        guard: moli_runtime::guard::GuardPolicy {
+            dashboard: moli_runtime::guard::Dashboard::Pin,
+            ..moli_runtime::guard::GuardPolicy::default()
+        },
+        ..HubOptions::default()
+    })
+    .unwrap();
+    for (instance, driver) in [
+        ("fake", Arc::new(Lamp) as Arc<dyn Driver>),
+        ("dim", Arc::new(Dimmer)),
+    ] {
+        spawn_driver(
+            &hub,
+            InstanceId::from(instance),
+            driver,
+            CancellationToken::new(),
+        );
+    }
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(dir.join("home.json")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let pin = pin_session(&addr, "482915").await;
+    let sam = json!({ "name": "Sam", "role": "member" });
+    let (status, body) = request_with(&addr, "POST", "/api/people", Some(&sam), &pin).await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/people/sam/invite", None, &pin).await;
+    assert_eq!(status, 200, "{body}");
+    let code = serde_json::from_str::<Json>(&body).unwrap()["code"].clone();
+    let (status, cookie, body) = request_cookie(
+        &addr,
+        "POST",
+        "/api/invitation",
+        &json!({ "code": code, "password": "une valise bleue" }),
+        "X-Forwarded-For: 203.0.113.9\r\n",
+        "moli_person",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    (addr, hub, cookie.unwrap())
+}
+
+/// This machine and Sam ask for the same thing: two requests, each replaced
+/// by its own caller's newer one only. Sam is Sam wherever she asks from
+/// (this machine, then the Internet), and this machine is not Sam when she
+/// asks from it. Over REST, ambiances and MCP: the caller is who the house
+/// recognized, never the `actor` declared.
+#[tokio::test]
+async fn a_held_order_is_replaced_by_its_own_callers_only() {
+    let dir = std::env::temp_dir().join(format!("moli-http-held-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (addr, hub, cookie) = pin_house_with_sam(&dir).await;
+    // This machine; Sam on this machine (its address, but she is Sam); Sam away.
+    let here = format!("Cookie: {cookie}\r\n");
+    let away = format!("X-Forwarded-For: 203.0.113.9\r\n{here}");
+    let callers = [("", true), (here.as_str(), true), (away.as_str(), false)];
+    let pending = |origin: moli_core::Origin, point: &str| -> Vec<u64> {
+        hub.approvals()
+            .iter()
+            .filter(|r| r.origin == origin && r.point.as_str() == point)
+            .map(|r| r.id)
+            .collect()
+    };
+    let newest =
+        |origin: moli_core::Origin, point: &str| -> u64 { *pending(origin, point).last().unwrap() };
+    let (api, mcp) = (moli_core::Origin::Api, moli_core::Origin::Mcp);
+
+    let order =
+        |value: bool| json!({ "point": "fake:lamp/state", "value": value, "actor": "same-agent" });
+    let mut ids = Vec::new();
+    for (who, value) in callers {
+        let (status, body) =
+            request_with(&addr, "POST", "/api/command", Some(&order(value)), who).await;
+        assert_eq!(status, 202, "{body}");
+        ids.push(newest(api, "fake:lamp/state"));
+    }
+    assert_eq!(
+        pending(api, "fake:lamp/state"),
+        [ids[0], ids[2]],
+        "this machine's request stays; Sam's newer one replaced hers"
+    );
+
+    let look = json!({ "lights": ["dim:dimmer"], "ambiance": "lecture", "actor": "same-agent" });
+    let mut ids = Vec::new();
+    for (who, _) in callers {
+        let (status, body) = request_with(&addr, "POST", "/api/ambiance", Some(&look), who).await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("\"held\":[{"), "{body}");
+        ids.push(newest(api, "dim:dimmer/on"));
+    }
+    assert_eq!(pending(api, "dim:dimmer/on"), [ids[0], ids[2]]);
+
+    let call = |value: bool| {
+        rpc(
+            1,
+            "tools/call",
+            &json!({"name": "send_command", "arguments": {"point": "fake:lamp/state", "value": value, "actor": "same-agent"}}),
+        )
+    };
+    let mut ids = Vec::new();
+    for (who, value) in callers {
+        let (status, body) = request_with(&addr, "POST", "/mcp", Some(&call(value)), who).await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("awaiting_human_approval"), "{body}");
+        ids.push(newest(mcp, "fake:lamp/state"));
+    }
+    assert_eq!(pending(mcp, "fake:lamp/state"), [ids[0], ids[2]]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
+    struct WarningDriver(Arc<tokio::sync::Notify>);
+    impl Driver for WarningDriver {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.ready();
+                ctx.warn("Connection uses HTTP; prefer pinned HTTPS.");
+                self.0.notified().await;
+                ctx.clear_warning();
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let clear = Arc::new(tokio::sync::Notify::new());
+    let cancel = CancellationToken::new();
+    let supervisor = spawn_driver(
+        &hub,
+        "bridge".into(),
+        Arc::new(WarningDriver(clear.clone())),
+        cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.snapshot().drivers[0].warning.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let expected = hub.snapshot().drivers[0]
+        .warning
+        .clone()
+        .expect("driver warning");
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    for path in ["/api/devices", "/api/health", "/api/system"] {
+        let (status, body) = request(&addr, "GET", path, None).await;
+        assert_eq!(status, 200, "{body}");
+        let data: Json = serde_json::from_str(&body).unwrap();
+        assert_eq!(data["drivers"][0]["warning"], expected, "{path}");
+        assert_eq!(data["drivers"][0]["status"]["state"], "running", "{path}");
+    }
+    let (status, mut events) = live(&addr, "/api/events", "").await;
+    assert_eq!(status, 200);
+    let (name, snapshot) = events.next().await;
+    assert_eq!(name, "snapshot");
+    assert_eq!(snapshot["drivers"][0]["warning"], expected);
+    clear.notify_one();
+    let (_, event) = events.next().await;
+    assert_eq!(event["type"], "driver_status");
+    assert_eq!(event["instance"], "bridge");
+    assert_eq!(event["status"]["state"], "running");
+    assert!(event["warning"].is_null());
+    let (_, body) = request(&addr, "GET", "/api/system", None).await;
+    assert!(serde_json::from_str::<Json>(&body).unwrap()["drivers"][0]["warning"].is_null());
+    cancel.cancel();
+    supervisor.await.unwrap();
 }

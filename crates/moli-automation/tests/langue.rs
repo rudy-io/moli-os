@@ -165,6 +165,15 @@ async fn the_engine_speaks_the_language_of_the_house() {
         json!({ "type": "when_threshold", "point": "fake:room/temperature", "above": 26.5, "for_s": 600 }),
         json!({ "type": "notify", "message": "Hot", "channels": ["maison", "voix", "telegram"] }),
     );
+    let silent_thermometer = json!({
+        "nodes": [
+            { "id": "t", "type": "every", "minutes": 15 },
+            { "id": "c", "type": "if", "rules": [
+                { "kind": "stale", "point": "fake:room/temperature", "for_s": 7200 } ] },
+            { "id": "n", "type": "notify", "message": "Cold?", "channels": ["maison"] }
+        ],
+        "edges": [{ "from": "t", "to": "c" }, { "from": "c", "port": "yes", "to": "n" }]
+    });
     let evening = json!({
         "nodes": [
             { "id": "t", "type": "when_state", "point": "fake:door/contact", "to": false },
@@ -198,6 +207,11 @@ async fn the_engine_speaks_the_language_of_the_house() {
         say(hot),
         "When the temperature of room goes above 26.5 °C for 10 min, \
          notify the house, out loud and Telegram: “Hot”."
+    );
+    assert_eq!(
+        say(silent_thermometer),
+        "Every 15 min, if room (temperature) has not reported for 2 h: \
+         notify the house: “Cold?”."
     );
     assert_eq!(
         say(evening.clone()),

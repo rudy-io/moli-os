@@ -69,4 +69,45 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
 - Surfaces : `/api/energy` (en direct, aujourd'hui, hier, mois + projection, mois dernier,
   part non mesurée), `/api/energy/series?step=hour|day|month`, outil MCP `energy`, page
   Énergie, carte Accueil ; la ligne « Électricité en direct » du prompt de Moli.
-- **Brique future : production** (panneaux solaires, injection, batterie).
+- **Production solaire** : rôles `solar` (index de production à vie d'un onduleur, sans prix) et
+  `export` (index de ce que la maison injecte, par exemple `energy_returned` d'une pince Shelly
+  Pro 3EM ; `price` = ce que la revente rapporte). Chaque période donne alors `production`,
+  `export`, `self_consumed` (production − injection, jamais négatif ni au-delà de la
+  production), `consumption` (acheté + autoconsommé : ce que la maison a vraiment utilisé),
+  `self_consumption_rate` (autoconsommation) et `self_sufficiency` (autoproduction). `total`
+  reste ce qui a été **acheté** (la facture). Avec des panneaux, « le reste de la maison »
+  (pince − circuits) compte aussi l'autoconsommé, sans coût (les circuits ont tourné en
+  partie au solaire). `/api/energy` ajoute `flows` : `production_w` (puissance des compteurs
+  `solar`), `grid_w` (puissance signée du compteur `total` : > 0 achat, < 0 injection),
+  `consumption_w`. L'appareil `energie:maison` gagne `today_production_kwh`,
+  `today_export_kwh`, `today_self_consumed_kwh`, `today_self_consumption_rate`,
+  `today_self_sufficiency`, `month_production_kwh`, `month_self_consumption_rate` (%).
+  Pas encore : batterie.
+- **Charges pilotées** (`[[energy.load]]`, `crates/moli-energy/src/load.rs`) : un chauffe-eau
+  (ou toute charge qui stocke) sur un relais, mis en marche sur le surplus solaire et complété
+  en heures creuses. Logique **déterministe** (jamais de modèle dans la boucle), testée, un tour
+  toutes les 15 s ; ordres au relais par le hub en origine `system` (garde, journal
+  « charge « Nom » »). Chaque charge est un appareil `charges:<id>` : `mode` ✎ (`auto`,
+  `heures_creuses`, `marche`, `arret`, gardé entre deux démarrages), `reason` (ce que fait
+  Moli : `surplus_solaire`, `achat_reseau`, `complement_heures_creuses`, `attente_surplus`,
+  `compteur_absent`, `duree_minimale`…), `ran_minutes` (temps de marche du cycle).
+
+```toml
+[[energy.load]]
+id = "chauffe_eau"                       # jamais renommé
+name = "Chauffe-eau"
+switch = "relais:aabbccddeeff_switch_0/on"
+grid = "pince:aabbccddeeff/power"        # puissance signée à l'arrivée (W)
+power_w = 2400                           # ce que la charge tire en chauffe
+offpeak = ["22:00-06:00"]                # sinon : la période du tarif (« HC… »)
+daily_minutes = 120                      # au moins, par cycle, complété en heures creuses
+# min_on_minutes = 10 ; min_off_minutes = 10
+```
+
+  En `auto` : marche quand la maison injecte au moins 90 % de `power_w` depuis 3 min, arrêt
+  quand elle achète plus d'un quart de `power_w` depuis 3 min (jamais avant les durées
+  minimales) ; un cycle va de la fin d'une plage creuse à la fin de la suivante ; en heures
+  creuses, tant que le cycle n'a pas atteint `daily_minutes`, la charge tourne. Sans lecture
+  de la pince : comportement « heures creuses ». Un relais bougé à la main recommence la
+  durée minimale. Une charge dont le relais commande la bobine d'un contacteur (sur « Auto »)
+  convient telle quelle.

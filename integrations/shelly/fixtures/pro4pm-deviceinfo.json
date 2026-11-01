@@ -1,0 +1,14 @@
+{
+ "name": null,
+ "id": "shellypro4pm-aabbccddee01",
+ "mac": "AABBCCDDEE01",
+ "slot": 0,
+ "model": "SPSW-204PE16EU",
+ "gen": 2,
+ "fw_id": "20260311-095905/1.7.5-g9979d16",
+ "ver": "1.7.5",
+ "app": "Pro4PM",
+ "auth_en": false,
+ "auth_domain": null,
+ "provision": "complete"
+}

@@ -1,7 +1,8 @@
 //! A minimal WebSocket client (RFC 6455) over TLS, pinned for appliances
 //! that speak JSON over a websocket (Sonos audio clips), public CAs for
-//! cloud feeds (Tuya's message service). Text messages only; pings are
-//! answered; anything else ends the conversation.
+//! cloud feeds (Tuya's message service), or in the clear on the home network
+//! for devices that offer nothing else (Shelly's RPC). Text messages only;
+//! pings are answered; anything else ends the conversation.
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -12,10 +13,9 @@ use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
-use tokio_rustls::client::TlsStream;
 
 use crate::{PinnedTls, TIMEOUT, public_tls};
 
@@ -23,8 +23,12 @@ const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_HANDSHAKE: usize = 16 * 1024;
 const MAX_MESSAGE: usize = 1024 * 1024;
 
+/// What a websocket runs over: TLS, or plain TCP on the home network.
+trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
+
 pub struct WebSocket {
-    stream: TlsStream<TcpStream>,
+    stream: Box<dyn Io>,
     /// Bytes read but not yet consumed (a frame split across reads).
     buf: Vec<u8>,
 }
@@ -45,7 +49,7 @@ impl WebSocket {
         headers: &[(&str, &str)],
         tls: &PinnedTls,
     ) -> anyhow::Result<Self> {
-        Self::open(host, port, path, headers, Arc::clone(&tls.config)).await
+        Self::open(host, port, path, headers, Some(Arc::clone(&tls.config))).await
     }
 
     /// Same, to a service with a public certificate.
@@ -55,7 +59,18 @@ impl WebSocket {
         path: &str,
         headers: &[(&str, &str)],
     ) -> anyhow::Result<Self> {
-        Self::open(host, port, path, headers, public_tls()).await
+        Self::open(host, port, path, headers, Some(public_tls())).await
+    }
+
+    /// Same, in the clear (`ws://`): only for a device of the home network
+    /// that offers nothing else.
+    pub async fn connect_plain(
+        host: &str,
+        port: u16,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> anyhow::Result<Self> {
+        Self::open(host, port, path, headers, None).await
     }
 
     async fn open(
@@ -63,18 +78,24 @@ impl WebSocket {
         port: u16,
         path: &str,
         headers: &[(&str, &str)],
-        config: Arc<ClientConfig>,
+        tls: Option<Arc<ClientConfig>>,
     ) -> anyhow::Result<Self> {
         let tcp = tokio::time::timeout(TIMEOUT, TcpStream::connect((host, port)))
             .await
             .context("connect timeout")?
             .with_context(|| format!("cannot reach {host}:{port}"))?;
-        let name = ServerName::try_from(host.to_owned()).context("host name")?;
-        let mut stream =
-            tokio::time::timeout(TIMEOUT, TlsConnector::from(config).connect(name, tcp))
-                .await
-                .context("tls handshake timeout")?
-                .context("tls handshake")?;
+        let mut stream: Box<dyn Io> = match tls {
+            Some(config) => {
+                let name = ServerName::try_from(host.to_owned()).context("host name")?;
+                Box::new(
+                    tokio::time::timeout(TIMEOUT, TlsConnector::from(config).connect(name, tcp))
+                        .await
+                        .context("tls handshake timeout")?
+                        .context("tls handshake")?,
+                )
+            }
+            None => Box::new(tcp),
+        };
 
         let mut raw = [0u8; 16];
         SystemRandom::new()

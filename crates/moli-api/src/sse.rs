@@ -94,6 +94,7 @@ pub(crate) async fn events(
         return full(&caller.key);
     };
     let mut view = View {
+        asker: caller.asker(),
         guest: caller.person.filter(PersonRef::is_guest),
         sight: HashSet::new(),
     };
@@ -131,6 +132,9 @@ pub(crate) async fn events(
 
 /// What one subscriber may see: the whole house, or a guest's rooms.
 struct View {
+    /// Who this subscriber is (`Caller::asker`): an answer meant for
+    /// someone else is not shown here.
+    asker: String,
     guest: Option<PersonRef>,
     /// The devices the guest saw in its last snapshot.
     sight: HashSet<DeviceId>,
@@ -161,6 +165,11 @@ impl View {
 
     /// Whether `event` goes to this subscriber.
     fn pass(&self, hub: &Hub, event: &Event) -> Pass {
+        if let Event::Notice { notice } = event
+            && notice.to.as_ref().is_some_and(|to| *to != self.asker)
+        {
+            return Pass::Drop;
+        }
         let Some(guest) = &self.guest else {
             return Pass::Event;
         };
@@ -193,6 +202,39 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answer_for_one_person_is_shown_to_them_only() {
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let view = |asker: &str| View {
+            asker: asker.into(),
+            guest: None,
+            sight: HashSet::new(),
+        };
+        let notice = |to: Option<&str>| Event::Notice {
+            notice: moli_core::Notice {
+                title: None,
+                message: "Le vol part à 7 h.".into(),
+                from: None,
+                ts: 0,
+                to: to.map(str::to_owned),
+            },
+        };
+        let claire = Some("person:claire");
+        assert!(matches!(
+            view("person:claire").pass(&hub, &notice(claire)),
+            Pass::Event
+        ));
+        assert!(matches!(
+            view("person:thomas").pass(&hub, &notice(claire)),
+            Pass::Drop
+        ));
+        // For the whole house, as before.
+        assert!(matches!(
+            view("person:thomas").pass(&hub, &notice(None)),
+            Pass::Event
+        ));
+    }
 
     #[test]
     fn streams_are_counted_per_caller_and_in_all() {

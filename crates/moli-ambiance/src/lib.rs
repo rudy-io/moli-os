@@ -393,12 +393,14 @@ const PARALLEL: usize = 3;
 
 /// Puts these lights (a group stands for its members) in the look. Each
 /// lamp's orders go one after the other; it stops at its first refusal.
+/// `caller`: who asks, as the house knows them ([`Hub::command_from`]).
 pub async fn apply(
     hub: &Hub,
     look: Look<'_>,
     targets: &[DeviceId],
     origin: Origin,
     actor: Option<String>,
+    caller: Option<&str>,
 ) -> Report {
     let mut ids: Vec<DeviceId> = Vec::new();
     for id in targets {
@@ -431,7 +433,8 @@ pub async fn apply(
                     return (lamp.id, None);
                 }
                 for (point, value) in orders {
-                    if let Err(e) = hub.command(&point, value, origin, actor.cloned()).await {
+                    let sent = hub.command_from(&point, value, origin, actor.cloned(), caller);
+                    if let Err(e) = sent.await {
                         return (lamp.id, Some(Err((point, e))));
                     }
                 }

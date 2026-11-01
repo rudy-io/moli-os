@@ -15,8 +15,13 @@ use crate::import::HaAutomation;
 /// conversation answers in one short sentence and nothing more, without
 /// cards; the cheerful voice speaks faster; a question about a state is
 /// never an order; an app opens on the TV by its name; 11 Oct.: music
-/// plays on a speaker of the room, by a search).
-const REWORDED: [(&str, &str); 7] = [
+/// plays on a speaker of the room, by a search; 22 Oct.: the automation
+/// builder knows when a sensor stops reporting).
+const REWORDED: [(&str, &str); 8] = [
+    (
+        "sun (is day|night)",
+        "sun (is day|night) ; stale (point, for_s entier de 1 à 86400 secondes, jamais null)\nLa règle stale est vraie si aucun relevé n'a jamais été reçu ou si le dernier date d'au moins for_s secondes. Une valeur identique fraîchement reçue remet le délai à zéro. Dans les autres règles, for_s = null. Pour surveiller ce silence périodiquement : every → if stale.",
+    ),
     (
         "Pour la télé, appuie sur une touche avec `key`.",
         "Pour la télé, appuie sur une touche avec `key` ; pour ouvrir une appli, `set` sur `<id de la télé>/app` avec le nom de l'appli (« YouTube », « Netflix », « Disney+ »), même télé éteinte. Pour de la musique, `set` sur le `play` d'une enceinte de la pièce, avec ce qu'on cherche (un genre, un artiste, une playlist, une radio) ; pour l'arrêter, `playing` à false.",
@@ -424,6 +429,8 @@ pub(crate) fn meters(s: &moli_energy::Summary) -> String {
             moli_energy::Role::Grid => "compteur Linky, index au kWh",
             moli_energy::Role::Circuit => "un circuit",
             moli_energy::Role::Appliance => "un appareil (prise mesurée)",
+            moli_energy::Role::Solar => "production des panneaux solaires, index à vie",
+            moli_energy::Role::Export => "injection sur le réseau, index",
         };
         let _ = match &m.power {
             Some(power) => writeln!(out, "- {} ({role}) : puissance en W = {power}", m.name),

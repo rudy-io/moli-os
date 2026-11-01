@@ -1,0 +1,540 @@
+{
+  "date": "2026-10-17",
+  "layout": {
+    "rooms": [
+      {
+        "name": "Salon"
+      },
+      {
+        "name": "Cuisine"
+      },
+      {
+        "name": "Chambre 1"
+      }
+    ]
+  },
+  "protected": [
+    "Chambre 1"
+  ],
+  "devices": [
+    {
+      "id": "z2m:plafonnier_salon_1",
+      "instance": "z2m",
+      "native_name": "Plafonnier",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "state",
+          "label": "state",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "on_off"
+        },
+        {
+          "key": "brightness",
+          "label": "brightness",
+          "kind": {
+            "type": "numeric",
+            "min": 0.0,
+            "max": 100.0
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "unit": "%",
+          "semantic": "brightness"
+        }
+      ],
+      "state": {
+        "state": {
+          "value": false,
+          "ts": 1
+        },
+        "brightness": {
+          "value": 60,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:clim_salon_1",
+      "instance": "z2m",
+      "native_name": "Climatisation",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "mode",
+          "label": "mode",
+          "kind": {
+            "type": "enum",
+            "values": [
+              "auto",
+              "froid",
+              "chaud"
+            ]
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "config"
+        },
+        {
+          "key": "temperature",
+          "label": "temperature",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "unit": "°C",
+          "semantic": "temperature"
+        }
+      ],
+      "state": {
+        "mode": {
+          "value": "froid",
+          "ts": 1
+        },
+        "temperature": {
+          "value": 22.5,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:prise_cuisine_1",
+      "instance": "z2m",
+      "native_name": "Machine à café",
+      "native_room": "Cuisine",
+      "online": false,
+      "points": [
+        {
+          "key": "state",
+          "label": "state",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "on_off"
+        }
+      ],
+      "state": {
+        "state": {
+          "value": true,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:plafonnier_chambre_1",
+      "instance": "z2m",
+      "native_name": "Plafonnier",
+      "native_room": "Chambre 1",
+      "points": [
+        {
+          "key": "state",
+          "label": "state",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "on_off"
+        }
+      ],
+      "state": {
+        "state": {
+          "value": false,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:capteur_sans_piece",
+      "instance": "z2m",
+      "native_name": "Capteur",
+      "points": [
+        {
+          "key": "humidity",
+          "label": "humidity",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "unit": "%",
+          "semantic": "humidity"
+        }
+      ],
+      "state": {
+        "humidity": {
+          "value": 63,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:camera_salon_1",
+      "instance": "z2m",
+      "native_name": "Caméra",
+      "native_room": "Salon",
+      "camera": true,
+      "points": [
+        {
+          "key": "motion",
+          "label": "motion",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "occupancy"
+        }
+      ],
+      "state": {
+        "motion": {
+          "value": false,
+          "ts": 1
+        }
+      }
+    },
+    {
+      "id": "z2m:lustre_salon",
+      "instance": "z2m",
+      "native_name": "Lustre",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "state",
+          "label": "state",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "on_off"
+        }
+      ],
+      "state": {},
+      "model": "Luminaire",
+      "members": [
+        "z2m:lustre_ampoule_1",
+        "z2m:lustre_ampoule_2"
+      ]
+    },
+    {
+      "id": "z2m:lustre_ampoule_1",
+      "instance": "z2m",
+      "native_name": "Ampoule 1",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "brightness",
+          "label": "brightness",
+          "kind": {
+            "type": "numeric",
+            "min": 0.0,
+            "max": 100.0
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "brightness",
+          "unit": "%"
+        }
+      ],
+      "state": {}
+    },
+    {
+      "id": "z2m:lustre_ampoule_2",
+      "instance": "z2m",
+      "native_name": "Ampoule 2",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "brightness",
+          "label": "brightness",
+          "kind": {
+            "type": "numeric",
+            "min": 0.0,
+            "max": 100.0
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "brightness",
+          "unit": "%"
+        }
+      ],
+      "state": {}
+    },
+    {
+      "id": "z2m:groupe_cuisine",
+      "instance": "z2m",
+      "native_name": "Lumières cuisine",
+      "native_room": "Cuisine",
+      "points": [
+        {
+          "key": "state",
+          "label": "state",
+          "kind": {
+            "type": "binary"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "on_off"
+        }
+      ],
+      "state": {},
+      "model": "room",
+      "members": [
+        "z2m:machine_cafe"
+      ]
+    },
+    {
+      "id": "z2m:ruban_cuisine",
+      "instance": "z2m",
+      "native_name": "Ruban",
+      "native_room": "Cuisine",
+      "points": [
+        {
+          "key": "effect",
+          "label": "effect",
+          "kind": {
+            "type": "enum",
+            "values": [
+              "effet_01",
+              "effet_02",
+              "effet_03",
+              "effet_04",
+              "effet_05",
+              "effet_06",
+              "effet_07",
+              "effet_08",
+              "effet_09",
+              "effet_10",
+              "effet_11",
+              "effet_12",
+              "effet_13",
+              "effet_14",
+              "effet_15",
+              "effet_16",
+              "effet_17",
+              "effet_18",
+              "effet_19",
+              "effet_20",
+              "effet_21",
+              "effet_22",
+              "effet_23",
+              "effet_24",
+              "effet_25",
+              "effet_26",
+              "effet_27",
+              "effet_28",
+              "effet_29",
+              "effet_30",
+              "effet_31",
+              "effet_32",
+              "effet_33",
+              "effet_34",
+              "effet_35"
+            ]
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "other"
+        }
+      ],
+      "state": {}
+    },
+    {
+      "id": "z2m:station_salon",
+      "instance": "z2m",
+      "native_name": "Station",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "mode",
+          "label": "mode",
+          "kind": {
+            "type": "enum",
+            "values": [
+              "eco",
+              "confort"
+            ]
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "other"
+        },
+        {
+          "key": "mesure_1",
+          "label": "mesure_1",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_2",
+          "label": "mesure_2",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_3",
+          "label": "mesure_3",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_4",
+          "label": "mesure_4",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_5",
+          "label": "mesure_5",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_6",
+          "label": "mesure_6",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_7",
+          "label": "mesure_7",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_8",
+          "label": "mesure_8",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        },
+        {
+          "key": "mesure_9",
+          "label": "mesure_9",
+          "kind": {
+            "type": "numeric"
+          },
+          "access": {
+            "read": true,
+            "write": false
+          },
+          "semantic": "temperature",
+          "unit": "°C"
+        }
+      ],
+      "state": {}
+    },
+    {
+      "id": "z2m:enceinte_salon",
+      "instance": "z2m",
+      "native_name": "Enceinte",
+      "native_room": "Salon",
+      "points": [
+        {
+          "key": "say",
+          "label": "Phrase à dire",
+          "kind": {
+            "type": "text"
+          },
+          "access": {
+            "read": true,
+            "write": true
+          },
+          "semantic": "other"
+        }
+      ],
+      "state": {}
+    }
+  ]
+}

@@ -477,7 +477,7 @@ mod tests {
             "{}",
             s.buckets.len()
         );
-        assert_eq!(s.buckets[0].min, 0.0);
+        assert!(s.buckets[0].min.abs() < 1e-9, "min={}", s.buckets[0].min);
         assert_eq!(s.before, Some((5_000, Value::Float(-1.0))));
         drop(store);
         let _ = std::fs::remove_dir_all(dir);

@@ -1,0 +1,29 @@
+[integration]
+id = "airplay"
+name = "Récepteurs AirPlay 1 (annonces)"
+brands = ["Free"]
+# The one receiver heard so far (in the reference home), AirPlay 1 only.
+models = ["Freebox Delta Player"]
+transport = "tcp"
+driver = "airplay"
+crate = "moli-airplay"
+
+[discovery]
+# HomePods, recent Apple TVs, Macs and AirPlay 2 Sonos answer `_raop._tcp`
+# too, with 0 in `et` and `cn` like an AirPlay 1 receiver. Propose only one
+# that `moli_net::raop::plain` passes (onboarding.md, step 2): `et` and `cn`
+# hold 0, no bit 38 or 48 in `ft` (AirPlay 2), neither `pw=true` nor 0x8,
+# 0x80 or 0x200 in `sf` (password, pairing). The driver refuses the others.
+mdns = ["_raop._tcp"]
+ssdp = []
+# RTSP on 5000; the sound and the control go over UDP ports the session agrees.
+ports = [5000]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "un pont RAOP local en Python, mesuré à l'oreille sur un récepteur AirPlay 1"
+author = "agent"

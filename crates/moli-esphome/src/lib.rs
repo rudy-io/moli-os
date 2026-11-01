@@ -568,6 +568,7 @@ async fn session(
     let (mut voice, mut thoughts) = satellite::Voice::new(
         Duration::from_secs(config.window_s),
         config.media_base.clone(),
+        id.clone(),
     );
 
     let mut ping = tokio::time::interval(PING_EVERY);

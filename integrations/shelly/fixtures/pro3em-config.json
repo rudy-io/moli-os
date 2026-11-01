@@ -1,0 +1,128 @@
+{
+ "ble": {
+  "enable": false,
+  "rpc": {
+   "enable": true
+  }
+ },
+ "bthome": {},
+ "cloud": {
+  "enable": true,
+  "server": "shelly-000-eu.shelly.cloud:6022/jrpc"
+ },
+ "em:0": {
+  "id": 0,
+  "name": null,
+  "blink_mode_selector": "active_energy",
+  "phase_selector": "all",
+  "monitor_phase_sequence": false,
+  "ct_type": "120A",
+  "reverse": {}
+ },
+ "emdata:0": {},
+ "eth": {
+  "enable": true,
+  "server_mode": false,
+  "ipv4mode": "dhcp",
+  "ip": null,
+  "netmask": null,
+  "gw": null,
+  "nameserver": null
+ },
+ "modbus": {
+  "enable": true
+ },
+ "mqtt": {
+  "enable": false,
+  "server": null,
+  "client_id": "shellypro3em-aabbccddee02",
+  "user": null,
+  "ssl_ca": null,
+  "topic_prefix": "shellypro3em-aabbccddee02",
+  "rpc_ntf": true,
+  "status_ntf": false,
+  "use_client_cert": false,
+  "enable_rpc": true,
+  "enable_control": true
+ },
+ "sys": {
+  "device": {
+   "name": null,
+   "mac": "AABBCCDDEE02",
+   "fw_id": "20251218-150936/g08369d7",
+   "discoverable": true,
+   "eco_mode": false,
+   "profile": "triphase",
+   "addon_type": null,
+   "sys_btn_toggle": true
+  },
+  "location": null,
+  "debug": {
+   "level": 2,
+   "file_level": null,
+   "mqtt": {
+    "enable": false
+   },
+   "websocket": {
+    "enable": false
+   },
+   "udp": {
+    "addr": null
+   }
+  },
+  "ui_data": {},
+  "rpc_udp": {
+   "dst_addr": null,
+   "listen_port": null
+  },
+  "sntp": {
+   "server": "shelly-000-eu.shelly.cloud:6022/jrpc"
+  },
+  "cfg_rev": 9
+ },
+ "temperature:0": {
+  "id": 0,
+  "name": null,
+  "report_thr_C": 5.0,
+  "offset_C": 0.0
+ },
+ "wifi": {
+  "ap": {
+   "ssid": "maison",
+   "is_open": true,
+   "enable": false,
+   "range_extender": {
+    "enable": false
+   }
+  },
+  "sta": {
+   "ssid": "maison",
+   "is_open": false,
+   "enable": true,
+   "ipv4mode": "dhcp",
+   "ip": null,
+   "netmask": null,
+   "gw": null,
+   "nameserver": null
+  },
+  "sta1": {
+   "ssid": "maison",
+   "is_open": true,
+   "enable": false,
+   "ipv4mode": "dhcp",
+   "ip": null,
+   "netmask": null,
+   "gw": null,
+   "nameserver": null
+  },
+  "roam": {
+   "rssi_thr": -80,
+   "interval": 60
+  }
+ },
+ "ws": {
+  "enable": false,
+  "server": null,
+  "ssl_ca": "ca.pem"
+ }
+}

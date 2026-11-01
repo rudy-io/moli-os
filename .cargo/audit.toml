@@ -8,10 +8,16 @@ ignore = [
     # it in an error type and never calls it to verify anything. The MQTT over TLS link
     # (moli-bambu) hands rumqttc a rustls 0.23 config built by moli-net, whose verifier
     # checks the certificate pinned on first contact; that rustls uses rustls-webpki
-    # 0.103.15, already fixed. Moli loads no revocation list.
+    # 0.103.16, already fixed. Moli loads no revocation list.
     # To remove once rumqttc moves to rustls-webpki 0.103.
     "RUSTSEC-2026-0049", # revocation list (CRL) distribution point matching
     "RUSTSEC-2026-0098", # name constraints on URI names
     "RUSTSEC-2026-0099", # name constraints on wildcard names
     "RUSTSEC-2026-0104", # panic while parsing a revocation list
+    # The same unused 0.102.8 error-type dependency cannot build a certificate
+    # chain. All actual verification uses 0.103.16, and the public trust store
+    # is webpki-roots 1.0.10 (both pinned in Cargo.lock). This ignore is global
+    # to the advisory: scripts/audit-guard.py checks the exact exempted edge
+    # and patched active versions before cargo audit in CI.
+    "RUSTSEC-2026-0382", # distrusted intermediates (only the unused 0.102.8 copy)
 ]

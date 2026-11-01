@@ -57,6 +57,7 @@ téléphones passent sans Access, avec leur propre jeton.
 | [historique-energie.md](components/historique-energie.md) | historique SQLite, SQL pour agents, énergie (kWh, €, Tempo), import HA |
 | [automatismes.md](components/automatismes.md) | modèle de graphe, validation humaine, moteur, éditeur, import HA |
 | [moli.md](components/moli.md) | l'assistant : conversation, outils, garde, création d'automatismes, filtres |
+| [satellite-vocal.md](components/satellite-vocal.md) | l'appareil qui écoute et parle : firmware ESPHome validé, configuration, et pourquoi un seul cerveau à la fois |
 | [api.md](components/api.md) | REST, SSE, MCP, CLI, sécurité des routes |
 | [dashboard.md](components/dashboard.md) | interface Maison et Atelier (Svelte 5), carte vivante |
 | [exploitation.md](components/exploitation.md) | image Docker, clé maître, sauvegarde, mise à jour, développement |

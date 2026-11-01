@@ -22,6 +22,7 @@
   "moteur.verif.seuil_manquant": "Indique au-dessus ou en dessous de quelle valeur.",
   "moteur.verif.decalage_soleil": "Décalage de plus de 6 h par rapport au soleil.",
   "moteur.verif.intervalle": "Entre 1 minute et 24 heures.",
+  "moteur.verif.peremption": "La péremption va de 1 seconde à 24 heures.",
   "moteur.verif.condition_manquante": "Ajoute au moins une condition.",
   "moteur.verif.valeur_refusee": "Valeur refusée pour « {nom} » : {erreur}.",
   "moteur.verif.pas_bascule": "« {nom} » ne s'allume ni ne s'éteint.",
@@ -134,6 +135,7 @@
   "moteur.regle.jours_heures": "on est {jours}, {heures}",
   "moteur.regle.jour": "il fait jour",
   "moteur.regle.nuit": "il fait nuit",
+  "moteur.regle.perime": "{appareil} ({libelle}) n'a rien dit depuis {duree}",
 
   "moteur.action.allumer": "allumer {appareil}",
   "moteur.action.eteindre": "éteindre {appareil}",

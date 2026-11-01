@@ -139,7 +139,9 @@ async fn record(mut source: HubEvents, batches: mpsc::Sender<Batch>, cancel: Can
         tokio::select! {
             () = cancel.cancelled() => break,
             event = source.events.recv() => match event {
-                Ok(Event::State { point, value, ts }) => {
+                Ok(Event::State {
+                    point, value, ts, ..
+                }) => {
                     batch.push((point, value, ts));
                     if batch.len() >= BATCH_MAX {
                         hand_over(&batches, &mut batch);

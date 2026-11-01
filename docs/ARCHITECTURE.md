@@ -70,8 +70,9 @@ La carte vivante de ce schéma est dans le dashboard : `#/systeme` (« Comment �
 |---|---|---|
 | `moli-core` | domaine pur : identifiants, points, valeurs, événements, origines, journal | [coeur](components/coeur.md) |
 | `moli-runtime` | hub, garde, superviseur, journal, étiquettes, coffre, médias | [coeur](components/coeur.md) |
-| `moli-net` | HTTPS avec certificat épinglé, TLS public, HTTP, UPnP, requêtes web bornées | [pilotes](components/pilotes.md) |
-| `moli-z2m`, `moli-hue`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
+| `moli-net` | HTTPS avec certificat épinglé, TLS public, HTTP, UPnP, AirPlay 1 (RAOP), requêtes web bornées | [pilotes](components/pilotes.md) |
+| `moli-z2m`, `moli-hue`, `moli-tuya`, `moli-reolink`, `moli-sonos`, `moli-airplay`, `moli-philips`, `moli-frigate`, `moli-bambu`, `moli-tapo`, `moli-igd` | pilotes natifs | [pilotes](components/pilotes.md) |
+| `moli-announce` | annonces vocales communes aux enceintes qui parlent : file, `quiet`, `announce_volume`, synthèse Piper | [pilotes](components/pilotes.md) |
 | `moli-profile` + catalogue | moteur de profils déclaratifs (lecture **et écriture** déclarées) | [profils](components/profils.md) |
 | `moli-history` | historique SQLite, SQL en lecture seule pour agents | [historique & énergie](components/historique-energie.md) |
 | `moli-energy` | kWh et € par heure, Linky + circuits, import HA | [historique & énergie](components/historique-energie.md) |
@@ -104,7 +105,7 @@ transport. Les briques s'abonnent au bus ; aucune ne parle directement à un pil
 | `household` | le dashboard du foyer sans code | retenue en pièce protégée, sur une machine, pour sortir un appareil d'une pièce protégée ; jamais en heures calmes | en-tête `x-moli-origin: ui` depuis le foyer, sans session (mode `dashboard = "trusted"`, défaut) ; en mode `"pin"`, c'est `api` |
 | `automation` | un automatisme validé par un humain | jamais retenue | lancé par le moteur |
 | `system` | Moli lui-même | jamais retenue | interne |
-| `api`, `mcp`, `cli`, `assistant` | agents et scripts | retenue en pièce protégée, en heures calmes, sur appareil sans pièce | tout le reste |
+| `api`, `mcp`, `cli`, `assistant` | agents et scripts | retenue en pièce protégée, en heures calmes, sur appareil sans pièce ; en mode `"pin"`, toujours | tout le reste |
 
 **Le PIN** (session liée à l'adresse, 30 jours) sert à : approuver une demande retenue,
 valider / allumer / restaurer un automatisme, importer, supprimer, renommer un appareil déjà
@@ -114,6 +115,14 @@ Le mode `trusted` suppose un réseau domestique de confiance : un appareil compr
 LAN peut commander comme la famille hors des pièces protégées, mais ne peut ni y agir, ni
 valider un automatisme, ni autoriser un agent (n'importe qui peut envoyer l'en-tête `ui` :
 seule la session le prouve). Sur un réseau moins sûr : réseau IoT isolé, ou mode `pin`.
+
+Un invité n'est reconnu que connecté (mot de passe) ou par Cloudflare Access. Sur le réseau
+de la maison sans session, il est le foyer comme tout appareil du réseau. Ses limites valent
+donc pour un invité venu de l'extérieur ; à la maison, un Wi-Fi invité séparé est conseillé.
+Appairer un téléphone demande une personne : le code, ou quelqu'un que Moli connaît (Access,
+mot de passe), ou la machine elle-même ; être sur le réseau ne suffit pas, car le téléphone
+entend ensuite la maison de partout. Chaque appairage fait l'objet d'un avis à la maison (qui
+l'a appairé, ou depuis quelle adresse).
 
 ## Le paquet d'intégration
 

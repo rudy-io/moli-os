@@ -2,10 +2,11 @@
   import '@fontsource-variable/figtree';
   import './maison.css';
   import { onMount } from 'svelte';
-  import { home, hub, start, value, savePref } from './lib/home.svelte.js';
+  import { home, hub, start, value, savePref, watches, hidden } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
+  import Correct from './moli/Correct.svelte';
   import Setup from './ui/Setup.svelte';
   import Login from './ui/Login.svelte';
   import Accueil from './pages/Accueil.svelte';
@@ -52,7 +53,10 @@
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
+    // Only when something is watched: a house with nothing to watch sees no empty page.
+    { path: 'parc', label: 'commun.nav.parc', icon: 'package', shown: () => Object.values(hub.devices).some((d) => !hidden(d.id) && watches(d)) },
   ];
+  const nav = $derived(NAV.filter((item) => !item.shown || item.shown()));
 
   let moliOpen = $state(false);
   let prefersDark = $state(false);
@@ -115,7 +119,7 @@
       </svg>
     </a>
     <ul>
-      {#each NAV as item (item.path)}
+      {#each nav as item (item.path)}
         <li>
           <a href="#/{item.path}" class:active={page === item.path} aria-current={page === item.path ? 'page' : undefined}>
             <span class="glyph">
@@ -174,6 +178,9 @@
     {:else if page === 'infra'}
       <!-- The house's machines: loaded only when visited. -->
       {#await import('./pages/Infra.svelte') then { default: Infra }}<Infra />{/await}
+    {:else if page === 'parc'}
+      <!-- What the house watches beyond itself: loaded only when visited. -->
+      {#await import('./pages/Parc.svelte') then { default: Parc }}<Parc />{/await}
     {:else}
       <Accueil />
     {/if}
@@ -194,6 +201,10 @@
 
   {#if moliOpen}
     <MoliSheet onclose={() => (moliOpen = false)} />
+  {/if}
+
+  {#if moli.fix}
+    <Correct />
   {/if}
 
   {#if home.held}

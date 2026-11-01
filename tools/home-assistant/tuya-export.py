@@ -74,6 +74,39 @@ def dps_of(device):
     return sorted(dps, key=lambda d: d["id"])
 
 
+def is_hub(category):
+    """Devices that carry sub-devices: Zigbee/BLE gateways, infrared hubs."""
+    return category.startswith("wg") or category in ("wfcon", "wnykq")
+
+
+def find_parents(devices):
+    """A sub-device's gateway, when the cloud does not name it: the hub
+    sharing its local key, else the home's only hub of its kind (infrared
+    for `infrared_*`, Zigbee/BLE for the rest). A hub the cloud gives no
+    key takes its sub-devices' one: they share their gateway's key.
+    Returns the ids of hubs keyed that way."""
+    hubs = [d for d in devices if "gateway" not in d and is_hub(d["category"])]
+    for d in devices:
+        if "gateway" not in d or "parent" in d:
+            continue
+        same_key = [h for h in hubs if d["local_key"] and h["local_key"] == d["local_key"]]
+        infrared = d["category"].startswith("infrared")
+        kind = [h for h in hubs if (h["category"] == "wnykq") == infrared]
+        if len(same_key) == 1:
+            d["parent"] = same_key[0]["id"]
+        elif len(kind) == 1:
+            d["parent"] = kind[0]["id"]
+    keyed = set()
+    for h in hubs:
+        if h["local_key"]:
+            continue
+        keys = {d["local_key"] for d in devices if d.get("parent") == h["id"] and d["local_key"]}
+        if len(keys) == 1:
+            h["local_key"] = keys.pop()
+            keyed.add(h["id"])
+    return keyed
+
+
 def main(summary):
     entries = json.load(open("/config/.storage/core.config_entries"))["data"]["entries"]
     entry = next(e for e in entries if e["domain"] == "tuya")["data"]
@@ -89,13 +122,24 @@ def main(summary):
         out = {"id": d.id, "name": (d.name or d.id).strip(), "category": d.category or "",
                "product": (d.product_name or "").strip() or None, "dps": dps_of(d),
                "local_key": getattr(d, "local_key", None)}
-        if getattr(d, "sub", False) or getattr(d, "node_id", None):
+        # A gateway has a node_id too: only what is not a hub is a sub-device.
+        if (getattr(d, "sub", False) or getattr(d, "node_id", None)) \
+                and not is_hub(out["category"]):
             out["gateway"] = "tuya"
+            if getattr(d, "node_id", None):
+                out["node_id"] = str(d.node_id)
+            parent = getattr(d, "gateway_id", None) or getattr(d, "parent_id", None)
+            if parent:
+                out["parent"] = str(parent)
         devices.append(out)
+    keyed = find_parents(devices)
     if summary:
         for d in devices:
+            sub = f'sub→{d.get("parent", "?")[-6:]:6} cid:{"yes" if "node_id" in d else "no "} ' \
+                if "gateway" in d else ""
+            key = "sub" if d["id"] in keyed else "yes" if d["local_key"] else "no "
             print(f'{d["id"][-6:]:8} {d["category"]:6} {len(d["dps"]):2} DPs '
-                  f'key:{"yes" if d["local_key"] else "no "} {"sub " if "gateway" in d else "    "}{d["name"]}')
+                  f'key:{key} {sub}{d["name"]}')
         print(f"{len(devices)} devices", file=sys.stderr)
     else:
         json.dump({"devices": devices}, sys.stdout, ensure_ascii=False)

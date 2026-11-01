@@ -1,0 +1,138 @@
+{
+ "code": 200,
+ "msg": null,
+ "data": {
+  "key": "power",
+  "lineType": "line",
+  "name": "power",
+  "unit": "W",
+  "data": [
+   {
+    "extra": [
+     {
+      "dataVal": 257.4,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 270.8,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 299.7,
+      "pv": "pv3",
+      "dataFlag": "pv3_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 268.7,
+      "pv": "pv4",
+      "dataFlag": "pv4_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 300.7,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000001"
+     },
+     {
+      "dataVal": 302.8,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000001"
+     }
+    ],
+    "time": "2026-10-26 13:09:00",
+    "val": 1700.1
+   },
+   {
+    "extra": [
+     {
+      "dataVal": 273.8,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 288.2,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 316.3,
+      "pv": "pv3",
+      "dataFlag": "pv3_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 286.0,
+      "pv": "pv4",
+      "dataFlag": "pv4_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 311.7,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000001"
+     },
+     {
+      "dataVal": 314.3,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000001"
+     }
+    ],
+    "time": "2026-10-26 13:12:00",
+    "val": 1790.3
+   },
+   {
+    "extra": [
+     {
+      "dataVal": 279.4,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 288.7,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 321.4,
+      "pv": "pv3",
+      "dataFlag": "pv3_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 291.8,
+      "pv": "pv4",
+      "dataFlag": "pv4_power",
+      "deviceSn": "000000000002"
+     },
+     {
+      "dataVal": 318.6,
+      "pv": "pv1",
+      "dataFlag": "pv1_power",
+      "deviceSn": "000000000001"
+     },
+     {
+      "dataVal": 321.3,
+      "pv": "pv2",
+      "dataFlag": "pv2_power",
+      "deviceSn": "000000000001"
+     }
+    ],
+    "time": "2026-10-26 13:15:00",
+    "val": 1821.2
+   }
+  ]
+ }
+}

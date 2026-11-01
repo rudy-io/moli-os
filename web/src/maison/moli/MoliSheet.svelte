@@ -55,7 +55,11 @@
     {#if moli.status && !moli.status.ready}
       <div class="asleep">
         <p><b>{t('moli.reveil.titre')}</b></p>
-        <p class="muted">{asleep[0]}<a href="#/systeme" onclick={onclose}>{t('moli.lien_systeme')}</a>{asleep[1]}</p>
+        {#if moli.status.refused}
+          <p class="muted">{moli.status.refused}</p>
+        {:else}
+          <p class="muted">{asleep[0]}<a href="#/systeme" onclick={onclose}>{t('moli.lien_systeme')}</a>{asleep[1]}</p>
+        {/if}
       </div>
     {:else if !moli.messages.length}
       <div class="hello">

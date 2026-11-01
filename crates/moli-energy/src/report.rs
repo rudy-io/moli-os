@@ -172,6 +172,46 @@ pub struct Period {
     /// Whole-home measure minus the circuits: what no circuit explains.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unmeasured: Option<Amount>,
+    /// What the solar panels made (`solar` meters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub production: Option<Amount>,
+    /// What went to the grid (`export` meters); its cost is what it earned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export: Option<Amount>,
+    #[serde(flatten)]
+    pub solar: Option<SolarShare>,
+}
+
+/// How the home shared its own production (with `solar` and `export`
+/// meters): `total` stays what was bought, the bill.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct SolarShare {
+    /// Used at home: production − export (kWh).
+    pub self_consumed: f64,
+    /// What the home really used: bought + self-consumed (kWh).
+    pub consumption: f64,
+    /// Self-consumed / production (« autoconsommation »), 0 to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub self_consumption_rate: Option<f64>,
+    /// Self-consumed / consumption (« autoproduction »), 0 to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub self_sufficiency: Option<f64>,
+}
+
+impl SolarShare {
+    fn of(bought: f64, production: f64, export: f64) -> Self {
+        // Meters are read at different moments: never more out than made.
+        let self_consumed = (production - export).clamp(0.0, production.max(0.0));
+        let consumption = bought.max(0.0) + self_consumed;
+        let round = |v: f64| (v * 1000.0).round() / 1000.0;
+        let ratio = |part: f64, whole: f64| (whole > 0.0).then(|| round((part / whole).min(1.0)));
+        Self {
+            self_consumed: round(self_consumed),
+            consumption: round(consumption),
+            self_consumption_rate: ratio(self_consumed, production),
+            self_sufficiency: ratio(self_consumed, consumption),
+        }
+    }
 }
 
 impl Period {
@@ -203,10 +243,21 @@ impl Period {
             of_role(Role::Total),
             of_role(Role::Circuit),
         );
+        let (production, export) = (of_role(Role::Solar), of_role(Role::Export));
+        // With panels, the whole-home clamp sees only what was bought: the
+        // circuits also ran on what the home made and used.
+        let made_here = production
+            .as_ref()
+            .zip(export.as_ref())
+            .map(|(p, e)| (p.kwh - e.kwh).clamp(0.0, p.kwh.max(0.0)));
         let unmeasured = match (&whole, &circuits) {
             (Some(w), Some(c)) => Some(Amount {
-                kwh: (w.kwh - c.kwh).max(0.0),
-                cost: w.cost.zip(c.cost).map(|(w, c)| (w - c).max(0.0)),
+                kwh: (w.kwh + made_here.unwrap_or(0.0) - c.kwh).max(0.0),
+                cost: w
+                    .cost
+                    .zip(c.cost)
+                    .filter(|_| made_here.is_none())
+                    .map(|(w, c)| (w - c).max(0.0)),
             }),
             _ => None,
         };
@@ -218,12 +269,19 @@ impl Period {
         }
         .or(circuits)
         .unwrap_or_default();
+        let solar = production
+            .as_ref()
+            .zip(export.as_ref())
+            .map(|(p, e)| SolarShare::of(total.kwh, p.kwh, e.kwh));
         Self {
             from,
             to,
             total: total.rounded(),
             meters: meters.into_iter().map(|(k, a)| (k, a.rounded())).collect(),
             unmeasured: unmeasured.map(|a| a.rounded()),
+            production: production.map(|a| a.rounded()),
+            export: export.map(|a| a.rounded()),
+            solar,
         }
     }
 }
@@ -291,10 +349,18 @@ mod tests {
         ];
         let b = buckets(&rows, d1, d1 + 72 * HOUR_MS, Step::Day, &tz).unwrap();
         assert_eq!(b.len(), 3);
-        assert_eq!(b[0].meters["hp"].kwh, 1.5);
+        assert!(
+            (b[0].meters["hp"].kwh - 1.5).abs() < 1e-9,
+            "kwh={}",
+            b[0].meters["hp"].kwh
+        );
         assert_eq!(b[0].meters["hp"].cost, Some(0.3));
         assert!(b[1].meters.is_empty());
-        assert_eq!(b[2].meters["hp"].kwh, 2.0);
+        assert!(
+            (b[2].meters["hp"].kwh - 2.0).abs() < 1e-9,
+            "kwh={}",
+            b[2].meters["hp"].kwh
+        );
         assert!(buckets(&rows, 0, u64::MAX / 4, Step::Hour, &tz).is_err());
     }
 
@@ -367,6 +433,100 @@ mod tests {
         let month = Period::of(&config, &rows, 0, 2 * 24 * HOUR_MS);
         assert_eq!(projection(&month, HOUR_MS, 30 * 24 * HOUR_MS), None);
         let pace = projection(&month, 2 * 24 * HOUR_MS, 30 * 24 * HOUR_MS).unwrap();
-        assert_eq!(pace.kwh, 150.0);
+        assert!((pace.kwh - 150.0).abs() < 1e-9, "pace.kwh={}", pace.kwh);
+    }
+
+    #[test]
+    fn panels_tell_what_the_home_made_used_and_sent_out() {
+        let config: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "achat"
+            name = "Acheté"
+            point = "pince:m/energy"
+            role = "total"
+            [[meter]]
+            id = "injecte"
+            name = "Injecté"
+            point = "pince:m/energy_returned"
+            role = "export"
+            price = 0.04
+            [[meter]]
+            id = "toit"
+            name = "Toit"
+            point = "onduleur:o/total"
+            role = "solar"
+            [[meter]]
+            id = "ce"
+            name = "Chauffe-eau"
+            point = "relais:s/energy"
+            role = "circuit"
+            "#,
+        )
+        .unwrap();
+        config.check().unwrap();
+        let row = |meter: &str, kwh: f64, cost: Option<f64>| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost,
+        };
+        let rows = [
+            row("achat", 4.0, Some(0.8)),
+            row("injecte", 3.0, Some(0.12)),
+            row("toit", 10.0, None),
+            row("ce", 5.0, Some(1.0)),
+        ];
+        let p = Period::of(&config, &rows, 0, HOUR_MS);
+        // The bill stays what was bought.
+        assert!((p.total.kwh - 4.0).abs() < 1e-9, "kwh={}", p.total.kwh);
+        assert!(
+            (p.production.as_ref().unwrap().kwh - 10.0).abs() < 1e-9,
+            "kwh={}",
+            p.production.as_ref().unwrap().kwh
+        );
+        assert_eq!(p.export.as_ref().unwrap().cost, Some(0.12));
+        let share = p.solar.unwrap();
+        assert!(
+            (share.self_consumed - 7.0).abs() < 1e-9,
+            "self_consumed={}",
+            share.self_consumed
+        );
+        assert!(
+            (share.consumption - 11.0).abs() < 1e-9,
+            "consumption={}",
+            share.consumption
+        );
+        assert_eq!(share.self_consumption_rate, Some(0.7));
+        assert_eq!(share.self_sufficiency, Some(0.636));
+        // The circuits ran on the panels too: 4 bought + 7 made − 5 = 6.
+        let unmeasured_kwh = p.unmeasured.as_ref().unwrap().kwh;
+        assert!((unmeasured_kwh - 6.0).abs() < 1e-9, "kwh={unmeasured_kwh}");
+        // Meters read at different moments: never more sent out than made.
+        let skewed = [
+            row("toit", 1.0, None),
+            row("injecte", 1.2, None),
+            row("achat", 0.5, None),
+        ];
+        let share = Period::of(&config, &skewed, 0, HOUR_MS).solar.unwrap();
+        assert!(
+            (share.self_consumed - 0.0).abs() < 1e-9,
+            "self_consumed={}",
+            share.self_consumed
+        );
+        assert_eq!(share.self_consumption_rate, Some(0.0));
+        // A solar meter has no price; `period` is for billed meters.
+        let bad: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "toit"
+            name = "Toit"
+            point = "onduleur:o/total"
+            role = "solar"
+            price = 0.1
+            "#,
+        )
+        .unwrap();
+        assert!(bad.check().is_err());
     }
 }

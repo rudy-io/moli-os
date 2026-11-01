@@ -2,7 +2,8 @@
 
 - Un appareil par téléphone appairé : à la maison, batterie, en charge, Wi-Fi, latitude,
   longitude, précision, distance de la maison, version de l'appli.
-- Appairage depuis l'appli (sa vue du tableau de bord est déjà connectée) :
+- Appairage depuis l'appli, une fois une personne reconnue dans sa vue du tableau de bord
+  (le code tapé, ou connectée par Cloudflare Access ou un mot de passe) :
   `POST /api/mobile/register` → jeton montré une fois, gardé dans le trousseau du téléphone ;
   Moli ne garde que son SHA-256 (`data/phones.json`).
 - Rapports : `POST /api/phones/<id>/report` avec le jeton, sans connexion Cloudflare

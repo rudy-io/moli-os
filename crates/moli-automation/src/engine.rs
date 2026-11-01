@@ -33,7 +33,12 @@ pub(crate) async fn run(autos: Automations) {
         tokio::select! {
             () = cancel.cancelled() => break,
             event = events.recv() => match event {
-                Ok(Event::State { point, value, .. }) => on_state(&autos, &point, &value),
+                Ok(Event::State {
+                    point,
+                    value,
+                    pulse,
+                    ..
+                }) => on_state(&autos, &point, &value, pulse),
                 Ok(_) => {}
                 Err(RecvError::Lagged(missed)) => {
                     tracing::warn!(missed, "automations lagged behind the hub: some changes were not seen");
@@ -102,10 +107,12 @@ fn remember_all(autos: &Automations) {
     }
 }
 
-fn on_state(autos: &Automations, point: &PointId, value: &Value) {
+/// A change of state, or a press (`pulse`): a press counts even when it
+/// repeats the last one, or is the first one seen.
+fn on_state(autos: &Automations, point: &PointId, value: &Value, pulse: bool) {
     let key = point.to_string();
     let prev = lock(&autos.0.last).insert(key.clone(), value.clone());
-    if prev.as_ref() == Some(value) {
+    if prev.as_ref() == Some(value) && !pulse {
         return;
     }
     for a in live(autos).iter() {
@@ -121,8 +128,9 @@ fn on_state(autos: &Automations, point: &PointId, value: &Value) {
                     let from_ok = from
                         .as_ref()
                         .is_none_or(|from| prev.as_ref().is_some_and(|p| same(p, from)));
-                    // A point seen for the first time is not a change.
-                    if prev.is_none() {
+                    // A point seen for the first time is not a change; a
+                    // press is.
+                    if prev.is_none() && !pulse {
                         continue;
                     }
                     if to_ok && from_ok {
@@ -285,7 +293,7 @@ fn sun_minute(
     event: SunEvent,
     offset_min: i32,
 ) -> Option<u32> {
-    let (lat, lon) = (autos.0.config.latitude?, autos.0.config.longitude?);
+    let (lat, lon) = autos.position()?;
     let (rise, set) = crate::sun::times(now.date(), lat, lon)?;
     let at = if event == SunEvent::Rise { rise } else { set };
     let local = at.to_zoned(autos.0.tz.clone());
@@ -330,6 +338,7 @@ fn runaway(autos: &Automations, a: &Automation) -> bool {
             }
             autos2.changed(&id);
             autos2.0.hub.notice(Notice {
+                to: None,
                 title: Some(tr!("moteur.notice.boucle_titre")),
                 message: tr!("moteur.notice.boucle", nom = name),
                 from: None,

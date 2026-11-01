@@ -6,7 +6,9 @@
 //! a request a human approves or denies. The household's dashboard without
 //! a code (`Origin::Household`) sits in between: quiet hours keep agents
 //! quiet, not the family, but a protected room wants the code (anyone on the
-//! home network can claim to be the dashboard). The policy lives in the
+//! home network can claim to be the dashboard). With `dashboard = "pin"`,
+//! nothing sits in between: every order but a person's, the house's own and
+//! an approved automation's waits for the code. The policy lives in the
 //! configuration file, which only humans edit — no surface can change it.
 
 use jiff::Timestamp;
@@ -38,7 +40,8 @@ pub enum Dashboard {
     /// releasing what an agent asked for.
     #[default]
     Trusted,
-    /// Only a PIN session commands from the dashboard.
+    /// Only a PIN session commands: every other order (agents, scripts, the
+    /// command line, the dashboard without a code) waits for a person.
     Pin,
 }
 
@@ -141,6 +144,11 @@ impl GuardPolicy {
         }
         if self.protect_unassigned && rooms.is_empty() {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.sans_piece_connue"));
+        }
+        // Every order needs the code. The command line too: its header is
+        // believed from this very machine, where any program can send it.
+        if self.dashboard == Dashboard::Pin {
+            return Verdict::Approval(moli_i18n::tr!("serveur.garde.code_partout"));
         }
         // Quiet hours keep agents quiet, not the family at its dashboard.
         if origin == Origin::Household {
@@ -295,6 +303,50 @@ mod tests {
         assert!(matches!(
             unassigned.check(&[], Origin::Household, night),
             Verdict::Approval(_)
+        ));
+    }
+
+    #[test]
+    fn the_pin_mode_holds_every_order_but_a_persons() {
+        let noon = at("2026-10-03T10:00:00Z");
+        let pin = GuardPolicy {
+            protected_rooms: vec![],
+            quiet_hours: None,
+            protect_unassigned: false,
+            dashboard: Dashboard::Pin,
+        };
+        // No protected room, no quiet hours: a script, an agent, the command
+        // line and the dashboard without a code still wait for the code.
+        for origin in [
+            Origin::Api,
+            Origin::Mcp,
+            Origin::Cli,
+            Origin::Assistant,
+            Origin::Household,
+        ] {
+            assert!(
+                matches!(
+                    pin.check(&["Salon"], origin, noon),
+                    Verdict::Approval(r) if r.contains("code")
+                ),
+                "{origin:?}"
+            );
+        }
+        for origin in [Origin::Ui, Origin::System, Origin::Automation] {
+            assert_eq!(
+                pin.check(&["Salon"], origin, noon),
+                Verdict::Allow,
+                "{origin:?}"
+            );
+        }
+        // A protected room keeps its own reason.
+        let bedroom = GuardPolicy {
+            dashboard: Dashboard::Pin,
+            ..policy()
+        };
+        assert!(matches!(
+            bedroom.check(&["Petite chambre"], Origin::Api, noon),
+            Verdict::Approval(r) if r.contains("protégée")
         ));
     }
 

@@ -153,13 +153,13 @@
     if (has(d, 'water_leak') || has(d, 'watersensor_state')) return 'water';
     if (has(d, 'contact') || has(d, 'doorcontact_state')) return 'door';
     if (has(d, 'occupancy') || has(d, 'motion') || has(d, 'pir')) return 'motion';
-    if (has(d, 'temperature') || has(d, 'temp_current')) return 'thermometer';
+    if (has(d, 'temperature') || has(d, 'temp_current') || has(d, 'va_temperature')) return 'thermometer';
     return 'info';
   }
 
   /** A short reading next to the token (sensors). */
   function reading(d) {
-    const t = value(d.id, 'temperature') ?? value(d.id, 'temp_current');
+    const t = value(d.id, 'temperature') ?? value(d.id, 'temp_current') ?? value(d.id, 'va_temperature');
     if (typeof t === 'number' && deviceKind(d) !== 'climate' && !floor?.size) return `${num(t, 1)}°`;
     const p = value(d.id, 'power') ?? value(d.id, 'cur_power');
     if (typeof p === 'number' && p >= 1) return `${num(p)} W`;

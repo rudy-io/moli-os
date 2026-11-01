@@ -1,0 +1,183 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "parc:sauvegardes",
+   "instance": "parc",
+   "native_name": "Sauvegardes hors-site",
+   "manufacturer": "Kopia",
+   "model": "Storj",
+   "points": [
+    {
+     "key": "en_alerte",
+     "label": "En alerte",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "alert"
+    },
+    {
+     "key": "detail",
+     "label": "Détail",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "instantanes",
+     "label": "Instantanés",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "derniere",
+     "label": "Dernière réussite",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "en_alerte": false,
+    "detail": "Les 6 sources sont sauvegardées, la dernière il y a 3 h.",
+    "instantanes": 214,
+    "derniere": "2026-10-28T03:30:00+01:00"
+   }
+  },
+  {
+   "id": "parc:nas",
+   "instance": "parc",
+   "native_name": "Disques du NAS",
+   "manufacturer": "Scrutiny",
+   "model": "SMART",
+   "points": [
+    {
+     "key": "en_alerte",
+     "label": "En alerte",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "alert"
+    },
+    {
+     "key": "detail",
+     "label": "Détail",
+     "kind": {
+      "type": "text"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "disques",
+     "label": "Disques",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "a_surveiller",
+     "label": "À surveiller",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "state": {
+    "en_alerte": true,
+    "detail": "1 disque sur 9 a des secteurs réalloués : à remplacer.",
+    "disques": 9,
+    "a_surveiller": 1
+   }
+  },
+  {
+   "id": "parc:lien",
+   "instance": "parc",
+   "native_name": "Lien Internet",
+   "manufacturer": "Speedtest",
+   "model": "Fibre",
+   "points": [
+    {
+     "key": "en_alerte",
+     "label": "En alerte",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "alert"
+    },
+    {
+     "key": "descendant",
+     "label": "Débit descendant",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other",
+     "unit": "Mbit/s"
+    },
+    {
+     "key": "montant",
+     "label": "Débit montant",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other",
+     "unit": "Mbit/s"
+    }
+   ],
+   "state": {
+    "en_alerte": false,
+    "descendant": 912.4,
+    "montant": 604.8
+   }
+  }
+ ]
+}

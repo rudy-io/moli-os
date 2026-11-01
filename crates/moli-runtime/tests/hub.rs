@@ -1024,12 +1024,11 @@ async fn agents_name_but_never_rename() {
     );
 }
 
-#[tokio::test]
-async fn a_newer_request_replaces_the_older_one() {
-    let (hub, _cancel) = start_with(HubOptions {
+/// From midnight to midnight: the whole day is quiet for agents.
+fn quiet_all_day() -> HubOptions {
+    HubOptions {
         guard: moli_runtime::guard::GuardPolicy {
             protected_rooms: vec![],
-            // From midnight to midnight: the whole day is quiet for agents.
             quiet_hours: Some(
                 moli_runtime::guard::QuietHours::parse("00:00", "00:00", "Europe/Paris", vec![])
                     .unwrap(),
@@ -1038,8 +1037,12 @@ async fn a_newer_request_replaces_the_older_one() {
             dashboard: moli_runtime::guard::Dashboard::Trusted,
         },
         ..HubOptions::default()
-    })
-    .await;
+    }
+}
+
+#[tokio::test]
+async fn a_newer_request_replaces_the_older_one() {
+    let (hub, _cancel) = start_with(quiet_all_day()).await;
     for value in [true, false, true] {
         let held = hub
             .command(
@@ -1070,6 +1073,223 @@ async fn a_newer_request_replaces_the_older_one() {
         2,
         "another origin is another request"
     );
+}
+
+/// A board of switches: enough for a full queue of requests, each on its
+/// own point.
+struct Board;
+
+const SWITCHES: usize = moli_runtime::MAX_PENDING + 2;
+
+impl Driver for Board {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("board");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "board".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: (0..SWITCHES)
+                    .map(|n| spec(&format!("s{n}"), Kind::Binary, true, Semantic::OnOff))
+                    .collect(),
+            });
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// The board, under a guard that holds every agent all day.
+async fn board() -> (Hub, CancellationToken) {
+    let hub = Hub::new(quiet_all_day()).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(Board),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    (hub, cancel)
+}
+
+fn switch(n: usize) -> PointId {
+    PointId::from(format!("fake:board/s{n}"))
+}
+
+/// An agent's order on switch `n`, held for a person: its request id.
+async fn held(hub: &Hub, n: usize, value: bool, caller: Option<&str>) -> u64 {
+    let sent = hub
+        .command_from(&switch(n), Value::Bool(value), Origin::Mcp, None, caller)
+        .await;
+    let Err(CommandError::NeedsApproval { id, .. }) = sent else {
+        panic!("expected a held order, got {sent:?}");
+    };
+    id
+}
+
+fn pending(hub: &Hub) -> Vec<u64> {
+    hub.approvals().iter().map(|r| r.id).collect()
+}
+
+/// How the journal closed request `id`, if it did.
+fn closed(hub: &Hub, id: u64) -> Option<Outcome> {
+    hub.journal(500).iter().find_map(|e| match &e.action {
+        Action::Approval { request, .. } if *request == id => Some(e.outcome.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn a_request_is_replaced_by_its_own_callers_newer_one_only() {
+    let (hub, _cancel) = board().await;
+    let alex = held(&hub, 0, true, Some("person:alex")).await;
+    let sam = held(&hub, 0, true, Some("person:sam")).await;
+    assert_eq!(
+        pending(&hub),
+        [alex, sam],
+        "two callers, same point and origin: two requests"
+    );
+    // Alex changes her mind: her card is replaced, never Sam's.
+    let again = held(&hub, 0, false, Some("person:alex")).await;
+    assert_eq!(pending(&hub), [sam, again]);
+    assert_eq!(hub.approvals()[1].value, Value::Bool(false));
+    assert_eq!(
+        closed(&hub, alex),
+        Some(Outcome::Err(moli_i18n::tr!("serveur.garde.remplacee")))
+    );
+    // An order nobody can be named for replaces none of theirs, nor they it.
+    let unknown = held(&hub, 0, true, None).await;
+    let later = held(&hub, 0, true, Some("person:sam")).await;
+    assert_eq!(pending(&hub), [again, unknown, later]);
+}
+
+#[tokio::test]
+async fn past_its_share_a_caller_gives_way_to_itself_only() {
+    let (hub, _cancel) = board().await;
+    let share = moli_runtime::MAX_PENDING_PER_CALLER;
+    let sam = held(&hub, 0, true, Some("person:sam")).await;
+    let mut alex: Vec<u64> = Vec::new();
+    for n in 1..=share {
+        alex.push(held(&hub, n, true, Some("person:alex")).await);
+    }
+    assert_eq!(pending(&hub).len(), share + 1);
+    // One more of Alex's: her own oldest gives way, not Sam's older one.
+    let newest = held(&hub, share + 1, true, Some("person:alex")).await;
+    let now = pending(&hub);
+    assert_eq!(now.len(), share + 1);
+    assert!(now.contains(&sam), "{now:?}");
+    assert!(!now.contains(&alex[0]), "{now:?}");
+    assert!(now.contains(&alex[1]) && now.contains(&newest), "{now:?}");
+    assert_eq!(
+        closed(&hub, alex[0]),
+        Some(Outcome::Err(moli_i18n::tr!("serveur.garde.cedee")))
+    );
+}
+
+#[tokio::test]
+async fn past_the_cap_whoever_holds_the_most_gives_way() {
+    let (hub, _cancel) = board().await;
+    let share = moli_runtime::MAX_PENDING_PER_CALLER;
+    let others = moli_runtime::MAX_PENDING - share;
+    // Sam asks first; then a flood from one caller, up to its share; then
+    // as many people, one request each, as the queue still takes.
+    let sam = held(&hub, 0, true, Some("person:sam")).await;
+    let mut flood: Vec<u64> = Vec::new();
+    for n in 1..=share {
+        flood.push(held(&hub, n, true, Some("192.0.2.7")).await);
+    }
+    let mut people = vec![sam];
+    for i in 1..others {
+        people.push(held(&hub, 0, true, Some(&format!("person:p{i}"))).await);
+    }
+    assert_eq!(pending(&hub).len(), moli_runtime::MAX_PENDING);
+    // Someone new: the flood gives way (its oldest), not Sam, the oldest of all.
+    let newcomer = held(&hub, 0, true, Some("person:new")).await;
+    let now = pending(&hub);
+    assert_eq!(now.len(), moli_runtime::MAX_PENDING);
+    assert!(people.iter().all(|id| now.contains(id)), "{now:?}");
+    assert!(
+        !now.contains(&flood[0]) && now.contains(&flood[1]),
+        "{now:?}"
+    );
+    assert!(now.contains(&newcomer));
+    assert_eq!(
+        closed(&hub, flood[0]),
+        Some(Outcome::Err(moli_i18n::tr!("serveur.garde.cedee")))
+    );
+}
+
+#[tokio::test]
+async fn on_a_tie_at_the_cap_the_longest_waiting_gives_way() {
+    let (hub, _cancel) = board().await;
+    let mut ids: Vec<u64> = Vec::new();
+    for i in 0..moli_runtime::MAX_PENDING {
+        ids.push(held(&hub, 0, true, Some(&format!("person:p{i}"))).await);
+    }
+    let newcomer = held(&hub, 0, true, Some("person:new")).await;
+    let now = pending(&hub);
+    assert_eq!(now.len(), moli_runtime::MAX_PENDING);
+    assert_eq!(now[0], ids[1], "the oldest gave way");
+    assert_eq!(now.last(), Some(&newcomer));
+}
+
+#[tokio::test]
+async fn at_the_cap_the_new_request_counts_for_its_caller() {
+    let (hub, _cancel) = board().await;
+    let mut ids: Vec<u64> = Vec::new();
+    for i in 0..moli_runtime::MAX_PENDING {
+        ids.push(held(&hub, 0, true, Some(&format!("person:p{i}"))).await);
+    }
+    // p10 asks for a second thing: with it, she holds the most, so her own
+    // first request gives way, not p0's, the oldest of all.
+    let second = held(&hub, 1, true, Some("person:p10")).await;
+    let now = pending(&hub);
+    assert_eq!(now.len(), moli_runtime::MAX_PENDING);
+    assert_eq!(now[0], ids[0]);
+    assert!(!now.contains(&ids[10]), "{now:?}");
+    assert_eq!(now.last(), Some(&second));
+    assert_eq!(
+        closed(&hub, ids[10]),
+        Some(Outcome::Err(moli_i18n::tr!("serveur.garde.cedee")))
+    );
+}
+
+#[tokio::test]
+async fn orders_with_no_known_caller_keep_the_rule_among_themselves() {
+    let (hub, _cancel) = board().await;
+    // No share of their own: up to the cap, they all wait.
+    let mut ids: Vec<u64> = Vec::new();
+    for n in 0..moli_runtime::MAX_PENDING {
+        ids.push(held(&hub, n, true, None).await);
+    }
+    assert_eq!(pending(&hub), ids);
+    // The same point again: replaced. A new one past the cap: the oldest goes.
+    let replaced = held(&hub, 1, false, None).await;
+    assert!(!pending(&hub).contains(&ids[1]));
+    let past = held(&hub, moli_runtime::MAX_PENDING, true, None).await;
+    let now = pending(&hub);
+    assert_eq!(now.len(), moli_runtime::MAX_PENDING);
+    assert_eq!(now[0], ids[2], "the oldest gave way");
+    assert!(now.contains(&replaced) && now.contains(&past));
+    // Together they hold the most: a known caller's order pushes out theirs.
+    let alex = held(&hub, 0, true, Some("person:alex")).await;
+    let now = pending(&hub);
+    assert_eq!(now[0], ids[3]);
+    assert_eq!(now.last(), Some(&alex));
 }
 
 #[tokio::test]
@@ -1163,4 +1383,181 @@ async fn a_stopping_driver_may_finish_within_a_grace() {
             assert!(took < Duration::from_secs(1), "{took:?}");
         }
     }
+}
+
+#[tokio::test]
+async fn an_agent_opening_a_garage_door_or_a_lock_waits_for_a_person() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    let named = |name: &str| moli_runtime::LabelPatch {
+        name: Some(name.into()),
+        room: None,
+    };
+    hub.set_label(&plug, named("Porte de garage"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let open = hub
+        .command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await;
+    assert!(
+        matches!(open, Err(CommandError::NeedsApproval { .. })),
+        "{open:?}"
+    );
+    let close = hub
+        .command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+        .await;
+    assert!(close.is_ok(), "closing goes through: {close:?}");
+    let by_person = hub
+        .command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await;
+    assert!(by_person.is_ok(), "a person opens: {by_person:?}");
+
+    hub.set_label(&plug, named("Serrure entrée"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let lock = hub
+        .command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+        .await;
+    assert!(
+        matches!(lock, Err(CommandError::NeedsApproval { .. })),
+        "{lock:?}"
+    );
+
+    hub.set_label(&plug, named("Prise du salon"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let plain = hub
+        .command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await;
+    assert!(plain.is_ok(), "{plain:?}");
+}
+
+#[tokio::test]
+async fn a_device_only_named_after_the_garage_or_with_lock_inside_a_word_is_not_held() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    for name in [
+        "Prise garage",
+        "Lumière garage",
+        "Radiateur garage",
+        "Clock",
+    ] {
+        let patch = moli_runtime::LabelPatch {
+            name: Some(name.into()),
+            room: None,
+        };
+        hub.set_label(&plug, patch, Origin::Ui, None).await.unwrap();
+        for value in [true, false] {
+            let sent = hub
+                .command(&point("state"), Value::Bool(value), Origin::Household, None)
+                .await;
+            assert!(sent.is_ok(), "{name} {value}: {sent:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_routine_that_opens_is_held_for_the_dashboard_without_a_code() {
+    let (hub, _cancel) = start(false).await;
+    let plug = moli_core::DeviceId::from("fake:plug1");
+    let named = |name: &str| moli_runtime::LabelPatch {
+        name: Some(name.into()),
+        room: None,
+    };
+    hub.set_label(&plug, named("Porte de garage"), Origin::Ui, None)
+        .await
+        .unwrap();
+    let state = point("state");
+    let open = Value::Bool(true);
+    let close = Value::Bool(false);
+    assert!(
+        hub.would_hold(&state, Some(&open), Origin::Household)
+            .is_some()
+    );
+    assert!(
+        hub.would_hold(&state, Some(&close), Origin::Household)
+            .is_none()
+    );
+    // A toggle may open: held.
+    assert!(hub.would_hold(&state, None, Origin::Household).is_some());
+    // A person's session decides alone.
+    assert!(hub.would_hold(&state, Some(&open), Origin::Ui).is_none());
+    hub.set_label(&plug, named("Prise du salon"), Origin::Ui, None)
+        .await
+        .unwrap();
+    assert!(hub.would_hold(&state, None, Origin::Household).is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restarted_driver_does_not_keep_the_previous_runs_warning() {
+    struct WarnOnce {
+        runs: AtomicU32,
+        fail: tokio::sync::Notify,
+    }
+    impl Driver for WarnOnce {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ctx.warn("Temporary connection warning");
+                    ctx.warn("Temporary connection warning");
+                    ctx.ready();
+                    self.fail.notified().await;
+                    anyhow::bail!("synthetic failure");
+                }
+                ctx.ready();
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let mut events = hub.subscribe();
+    let driver = Arc::new(WarnOnce {
+        runs: AtomicU32::new(0),
+        fail: tokio::sync::Notify::new(),
+    });
+    let cancel = CancellationToken::new();
+    let supervisor = spawn_driver(&hub, "warning".into(), driver.clone(), cancel.clone());
+    wait_running(&hub).await;
+    assert_eq!(
+        hub.snapshot().drivers[0].warning.as_deref(),
+        Some("Temporary connection warning")
+    );
+    let initial: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert_eq!(
+        initial
+            .iter()
+            .filter(|event| matches!(
+                event,
+                Event::DriverStatus {
+                    status: DriverStatus::Starting,
+                    warning: Some(_),
+                    ..
+                }
+            ))
+            .count(),
+        1,
+        "repeated warnings should not flood SSE"
+    );
+    driver.fail.notify_one();
+    loop {
+        if let Event::DriverStatus {
+            status: DriverStatus::Backoff { .. },
+            warning,
+            ..
+        } = events.recv().await.unwrap()
+        {
+            assert!(warning.is_none());
+            break;
+        }
+    }
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_running(&hub).await;
+    assert_eq!(driver.runs.load(Ordering::SeqCst), 2);
+    assert!(hub.snapshot().drivers[0].warning.is_none());
+    cancel.cancel();
+    supervisor.await.unwrap();
 }

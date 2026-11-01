@@ -13,3 +13,9 @@ crates/moli-zigbee (frame IDs, statuses, coordinator configuration values,
 the coordinator endpoint, APS and ZDO frame layouts).
 Copyright (c) 2019 Jack Wu, Simen Li, Hedy Wang and Koen Kanters.
 Licensed under the MIT License; see licenses/zigbee-herdsman-MIT.txt.
+
+This product includes data derived from ha-solarman
+(https://github.com/davidrapan/ha-solarman): the Deye micro-inverter
+register map in crates/moli-solarman/src/deye.rs.
+Copyright (c) 2024 David Rapan and Contributors. Licensed under the MIT
+License; see licenses/ha-solarman-MIT.txt.

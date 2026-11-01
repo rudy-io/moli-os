@@ -269,11 +269,19 @@ pub(crate) async fn run(
 }
 
 /// Whether each order of the routine would go through from the dashboard
-/// without a code (nothing in a protected room, no machine at work).
+/// without a code (nothing in a protected room, no machine at work, nothing
+/// that opens a lock, a garage door or a gate).
 fn household_may_run(hub: &Hub, graph: &Graph) -> bool {
     graph.nodes.iter().all(|node| match &node.step {
-        Step::Set { point, .. } | Step::Toggle { point } => hub
-            .would_hold(&PointId::from(point.as_str()), Origin::Household)
+        Step::Set { point, value } => hub
+            .would_hold(
+                &PointId::from(point.as_str()),
+                Some(&moli_core::Value::from_json(value)),
+                Origin::Household,
+            )
+            .is_none(),
+        Step::Toggle { point } => hub
+            .would_hold(&PointId::from(point.as_str()), None, Origin::Household)
             .is_none(),
         _ => true,
     })

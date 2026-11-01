@@ -64,6 +64,13 @@ impl Endpoint {
         !self.tls
     }
 
+    /// Whether the host is at home: a loopback or private address,
+    /// `localhost`, a bare name (a container, a machine of the LAN) or a
+    /// `.local` / `.lan` name. The address says it, not the lack of TLS.
+    pub(crate) fn at_home(&self) -> bool {
+        host_at_home(&self.host)
+    }
+
     fn request(
         &self,
         key: Option<&str>,
@@ -335,6 +342,54 @@ fn speech_body(
     body.to_string().into_bytes()
 }
 
+/// Whether `host` is at home (see [`Endpoint::at_home`]): the same rule for
+/// every address Moli judges, whoever read it.
+pub(crate) fn host_at_home(host: &str) -> bool {
+    // An IPv6 literal keeps its brackets in the parsed host.
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    // A name without a dot made only of digits is an IPv4 address for the
+    // resolver (`134744072`, `0x08080808` = 8.8.8.8): judged as one.
+    let number = legacy_ipv4(host).map(std::net::IpAddr::V4);
+    if let Some(ip) = number.or_else(|| host.parse::<std::net::IpAddr>().ok()) {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => {
+                let first = v6.segments()[0];
+                v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+            }
+        };
+    }
+    let host = host.to_ascii_lowercase();
+    host == "localhost"
+        || !host.contains('.')
+        || matches!(host.rsplit_once('.'), Some((_, "local" | "lan")))
+}
+
+/// A dotless IPv4 address as `inet_aton` reads it: decimal, octal (`0…`) or
+/// hexadecimal (`0x…`). `None` for a name. A number too big for an address
+/// gives `0.0.0.0`: a number is never taken for a name at home.
+fn legacy_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    let lower = host.to_ascii_lowercase();
+    let value = if let Some(hex) = lower.strip_prefix("0x") {
+        if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        if lower.is_empty() || !lower.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        match lower.strip_prefix('0') {
+            Some(octal) if !octal.is_empty() => u32::from_str_radix(octal, 8).ok(),
+            _ => lower.parse::<u32>().ok(),
+        }
+    };
+    Some(value.map_or(std::net::Ipv4Addr::UNSPECIFIED, std::net::Ipv4Addr::from))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{Endpoint, Method};
@@ -533,6 +588,48 @@ pub(crate) mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("HTTP 500 boom"), "{err}");
+    }
+
+    #[test]
+    fn at_home_is_a_private_address_not_just_the_lack_of_tls() {
+        let home = |url: &str| Endpoint::parse(url).unwrap().at_home();
+        assert!(home("http://127.0.0.1:11434/v1"));
+        assert!(home("http://192.168.0.20:11434/v1"));
+        assert!(home("http://10.1.2.3/v1"));
+        assert!(home("http://localhost:11434/v1"));
+        assert!(
+            home("http://ollama:11434/v1"),
+            "a container name has no dot"
+        );
+        // A dotless number is an IPv4 address for the resolver, not a name.
+        assert!(!home("http://134744072/v1"), "8.8.8.8 as one number");
+        assert!(!home("http://0x08080808/v1"), "8.8.8.8 in hexadecimal");
+        assert!(!home("http://01002004010/v1"), "8.8.8.8 in octal");
+        assert!(!home("http://99999999999/v1"), "too big for an address");
+        assert!(
+            home("http://2130706433:11434/v1"),
+            "127.0.0.1 as one number"
+        );
+        assert!(home("http://0xc0a80014/v1"), "192.168.0.20 in hexadecimal");
+        assert!(home("http://cafe:11434/v1"), "a name made of hex letters");
+        assert!(home("http://llm.local:11434/v1"));
+        assert!(
+            !home("http://api.example.com/v1"),
+            "plain http to a public host"
+        );
+        assert!(!home("https://api.openai.com/v1"));
+        assert!(
+            home("https://192.168.0.20/v1"),
+            "it is the address that says it, not the TLS"
+        );
+        // IPv6 literals keep their brackets in the parsed host.
+        assert!(home("http://[::1]:11434/v1"));
+        assert!(home("http://[fd00::1]:11434/v1"));
+        assert!(home("http://[fe80::1]:11434/v1"));
+        assert!(
+            !home("http://[2001:db8::1]:11434/v1"),
+            "a public IPv6 address is not at home"
+        );
     }
 
     #[test]

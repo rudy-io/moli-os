@@ -61,6 +61,10 @@ const UI: &str = "X-Moli-Origin: ui\r\n";
 
 /// A hub whose lamp sleeps in a protected bedroom (the bulb has no room).
 async fn bedroom(dir: &std::path::Path) -> Hub {
+    bedroom_with(dir, Dashboard::Trusted).await
+}
+
+async fn bedroom_with(dir: &std::path::Path, dashboard: Dashboard) -> Hub {
     std::fs::create_dir_all(dir).unwrap();
     let hub = Hub::new(HubOptions {
         secrets: Some((
@@ -71,7 +75,7 @@ async fn bedroom(dir: &std::path::Path) -> Hub {
             protected_rooms: vec!["Chambre".into()],
             quiet_hours: None,
             protect_unassigned: false,
-            dashboard: Dashboard::Trusted,
+            dashboard,
         },
         ..HubOptions::default()
     })
@@ -186,6 +190,39 @@ async fn the_dashboard_without_a_code_stops_at_protected_rooms() {
     let (status, _, body) = request(&addr, "POST", "/api/command", &on, &person).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(lamp(&hub), Value::Bool(true));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `[guard] dashboard = "pin"`: the code for every command, not only in the
+/// bedroom, whatever the client claims to be.
+#[tokio::test]
+async fn the_pin_mode_wants_the_code_for_every_command() {
+    let dir = std::env::temp_dir().join(format!("moli-household-pin-{}", std::process::id()));
+    let hub = bedroom_with(&dir, Dashboard::Pin).await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new(PIN)),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let bulb = json!({ "point": "fake:bulb/state", "value": true });
+    let bulb_state = || hub.state(&"fake:bulb/state".into()).unwrap().value;
+
+    // No room, no quiet hours: a script, the dashboard without a code and
+    // the command line of this very machine all wait.
+    for claim in ["", UI, "X-Moli-Origin: cli\r\n"] {
+        let (status, _, body) = request(&addr, "POST", "/api/command", &bulb, claim).await;
+        assert_eq!(status, 202, "{claim:?}: {body}");
+    }
+    assert_eq!(bulb_state(), Value::Bool(false));
+
+    // The code makes it a person: obeyed.
+    let pin = json!({ "pin": PIN });
+    let (status, cookie, _) = request(&addr, "POST", "/api/session", &pin, "").await;
+    assert_eq!(status, 200);
+    let person = format!("{UI}Cookie: {}\r\n", cookie.unwrap());
+    let (status, _, body) = request(&addr, "POST", "/api/command", &bulb, &person).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(bulb_state(), Value::Bool(true));
     let _ = std::fs::remove_dir_all(dir);
 }
 

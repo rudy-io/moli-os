@@ -1,9 +1,10 @@
 [integration]
 id = "klipper"
 name = "Imprimante 3D Klipper (Moonraker), pilote complet"
-# Any printer running Klipper with the Moonraker API; seen on a Snapmaker U1.
+# Any printer running Klipper with the Moonraker API; seen on a Snapmaker U1
+# and a Creality K2 Combo. The Creality K1 series reads the same, not tried yet.
 brands = ["Snapmaker", "Voron", "Prusa", "Creality"]
-models = ["U1"]
+models = ["U1", "K2", "K1 (non essayé)"]
 transport = "http"
 driver = "moonraker"
 crate = "moli-moonraker"
@@ -24,3 +25,6 @@ author = "agent"
 
 [[fixture]]
 file = "fixtures/u1.json"
+
+[[fixture]]
+file = "fixtures/k2.json"

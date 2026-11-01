@@ -4,6 +4,10 @@ data
 web/node_modules
 web/dist
 docs
-tools
+# tools/ is not shipped, except the house-model contract the assistant compiles in (include_str!).
+tools/*
+!tools/model
+tools/model/*
+!tools/model/contract
 agent
 mobile/

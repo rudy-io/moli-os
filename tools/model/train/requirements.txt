@@ -1,0 +1,6 @@
+# torch: the build for your card (ROCm or CUDA, see README); the v4 model was trained with PyTorch 2.9.1 (ROCm).
+# Minimums: Qwen3 needs transformers 4.51; the v4 adapter was made with PEFT 0.21.2. `run.sh` writes the exact
+# versions of a run next to its adapter (`<run>.pip-freeze.txt`).
+transformers>=4.51
+peft>=0.21.2
+accelerate>=1.0

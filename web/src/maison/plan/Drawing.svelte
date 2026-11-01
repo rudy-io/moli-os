@@ -230,7 +230,7 @@
   function tempOf(id) {
     const d = id ? hub.devices[id] : null;
     if (!d || d.online === false) return null;
-    for (const key of ['temperature', 'temp_current']) {
+    for (const key of ['temperature', 'temp_current', 'va_temperature']) {
       const v = value(id, key);
       if (typeof v === 'number') return v;
     }

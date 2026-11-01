@@ -41,8 +41,26 @@ Détails transverses :
 - **Débit** (`limit.rs`), par appelant et par tranche de 10 s, sur ce qui écrit seulement :
   `POST /api/command` et `PUT /api/labels/*` 30 (100 depuis le dashboard, un curseur envoie
   beaucoup de valeurs), `POST /api/approvals/*` 30, `POST /mcp` 120. Au-delà : `429`.
-- Demandes d'autorisation : 50 en attente au plus ; une nouvelle demande pour le même point
-  et la même origine remplace l'ancienne (la carte affichée est toujours la dernière).
+- Demandes d'autorisation : 50 en attente au plus (`MAX_PENDING`), 32 par appelant
+  (`MAX_PENDING_PER_CALLER`, une ambiance sur 32 lampes y tient). Une nouvelle demande ne
+  remplace que celle du **même appelant**, pour le même point et la même origine (la carte
+  affichée est toujours sa dernière) : deux personnes qui demandent la même chose gardent
+  chacune la sienne. L'appelant est celui que la maison a reconnu (`Caller::asker` : la
+  personne quand elle est connue, sinon la clé de l'appelant, voir 1.2 bis), jamais l'`actor`
+  déclaré ; il est gardé à côté de la demande, jamais diffusé (ni `/api/events`, ni
+  `/api/approvals`). Au-delà de 32, la plus ancienne de cet appelant cède sa place ; au-delà
+  de 50, celle de l'appelant qui en tient le plus, la nouvelle comptée (à égalité, celle qui
+  attend depuis le plus longtemps) : un flot ne chasse jamais la demande d'un autre qui en
+  tient moins que lui. Une demande expirée part avant d'être comptée. Les ordres dont
+  l'appelant est inconnu (ceux que la maison donne d'elle-même) comptent comme un seul
+  appelant, sans limite propre : entre eux, la règle d'avant (même point et même origine, la
+  plus ancienne cède au-delà de 50). Journal : `remplacée par une demande plus récente`, ou
+  `cédée à une demande plus récente : trop de demandes en attente`. Sur le réseau local, la
+  clé est l'adresse : une machine qui en prend plusieurs (toute adresse libre du réseau ; en
+  IPv6, si Moli y écoute, bien davantage) compte pour autant d'appelants, ici comme pour le
+  débit et les flux en direct (`SECURITY.md`). Un ordre MCP arrivé sans son appelant (jamais
+  par la route `/mcp`, où `identify` passe avant) laisse un avertissement dans les logs du
+  serveur : `MCP order without its caller`.
 - À l'arrêt (SIGTERM / Ctrl-C), les flux SSE se ferment : l'arrêt n'attend jamais un
   tableau de bord ouvert.
 - Il n'y a **pas d'authentification en lecture** : tout client qui passe la garde `Host`
@@ -79,6 +97,11 @@ qui est au bout du fil (`Caller`) :
 | `access` | requête venue par le tunnel (en-têtes `cf-ray` / `cf-connecting-ip` **depuis la machine elle-même**) **et** assertion `Cf-Access-Jwt-Assertion` valide : signature RS256 vérifiée contre les clés publiques de l'équipe (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, rafraîchies au plus une fois par minute, gardées si Cloudflare est injoignable), audience = l'application, émetteur = l'équipe, non expirée (60 s de tolérance), e-mail présent | `access:<e-mail>` |
 | `outside` | tout le reste : tunnel sans assertion valide, adresse publique, appareil du réseau qui imite Cloudflare. **Refusé (403) sur toutes les routes.** | `cf:<ip>` ou l'adresse réelle |
 
+Un appareil relié au réseau de la maison par un VPN (WireGuard, par exemple) arrive avec
+une adresse privée : c'est un appelant `lan`, du foyer, sans Cloudflare ni aucun tiers.
+C'est le cas, par exemple, d'un téléphone hors de la maison. Donner l'accès au VPN,
+c'est donc donner l'accès du foyer.
+
 Le tunnel se termine sur la machine elle-même : sans assertion valide, une requête venue
 par Cloudflare est une **inconnue**, jamais `local` ni `cli`. Sans `[server.access]`
 dans `moli.toml`, personne n'est reconnu par Cloudflare. Les en-têtes de Cloudflare ne
@@ -86,6 +109,18 @@ comptent que venus de la machine elle-même (le tunnel) : un appareil du réseau
 en ajoute est une inconnue, refusée, et sa clé reste son adresse réelle (il ne peut pas
 s'en choisir une pour échapper au blocage du PIN). Exemple : `maison.example.org`, une
 application Access dont la politique n'admet que les e-mails du foyer.
+
+La règle Access peut survivre à un séjour ou à une personne. Une assertion valide dont
+l'e-mail est celui d'une personne **qui n'est plus de la maison** (invité dont le séjour
+est fini, personne retirée, e-mail retiré de sa fiche) devient `outside` : refusée, jamais
+le foyer. Moli garde pour cela les e-mails retirés dans `data/former-emails.json`, à part
+pour qu'une version antérieure lise toujours `people.json` ; un e-mail redonné à quelqu'un
+lui revient, et un propriétaire de `[server.access] owners` qu'on a retiré n'est pas recréé
+au démarrage. Si ce fichier est illisible, Moli fait comme avec `known_only` et ne le
+réécrit pas. Un e-mail que la maison n'a jamais eu reste le
+foyer, comme la règle Access le dit, sauf avec `[server.access] known_only = true` : dès
+que la maison a des personnes, seuls leurs e-mails entrent. Les e-mails retirés avant
+cette version ne sont pas connus : les ôter de la règle Access, ou passer `known_only`.
 
 ### 1.3 Origine d'une action
 
@@ -138,8 +173,12 @@ dashboard commande sans code), `via` et `who` (l'e-mail reconnu par Access).
   maison (6 chiffres au moins sans propriétaire Access, 4 sinon) et ouvre la session ; la
   maison en est avertie. Une maison qui a perdu son code ne se rouvre jamais ainsi.
 - Changer le code (`PUT /api/session/pin {pin, current?}`) : le propriétaire Access librement ;
-  dans une maison sans propriétaire, quiconque prouve le code actuel (mêmes verrous). La
-  maison en est avertie, toutes les sessions se ferment.
+  dans une maison sans propriétaire qui puisse se connecter (mot de passe, ou e-mail derrière
+  Access), quiconque prouve le code actuel (mêmes verrous). La maison en est avertie, toutes
+  les sessions se ferment. Sans `[server.access]`, un e-mail n'ouvre rien : un propriétaire
+  qui n'a qu'un e-mail ne compte pas, le code garde la main (avertissement au démarrage).
+  Retirer Access d'une maison dont les propriétaires n'ont pas de mot de passe rend donc la
+  gestion des personnes au code.
 - Cookie `moli_session` : `HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000` (30 jours),
   lié à la clé de l'appelant qui l'a ouvert : son adresse sur le réseau local, son e-mail
   à travers Access (l'adresse publique d'un téléphone change sans arrêt). Un cookie volé
@@ -178,8 +217,14 @@ Règles, dans l'ordre :
    Raison affichée : `pièce protégée (<pièce>)`.
 2. **Appareil sans pièce** (`protect_unassigned = true`) : raison `appareil sans pièce
    connue`.
-3. **Heures calmes** (`quiet_hours` : `from`, `to` en `HH:MM`, `timezone` IANA, `rooms`
-   facultatif ; liste vide = toute la maison) : la fenêtre peut passer minuit, `from == to`
+3. **Mode `pin`** (`dashboard = "pin"`) : tout ordre est retenu, quels que soient la pièce
+   et l'heure. Raison `code demandé pour chaque commande (mode pin)`. `cli` n'y échappe
+   pas : son en-tête n'est cru que depuis la machine elle-même, mais tout programme de la
+   machine peut l'envoyer ; qui l'administre vraiment change `moli.toml`. `assistant` non
+   plus : les messages de Moli (récapitulatif, message à la porte, « dis à la maison »)
+   attendent eux aussi le code, comme aux heures calmes.
+4. **Heures calmes** (`quiet_hours` : `from`, `to` en `HH:MM` dans le fuseau de la maison
+   (`[server] timezone`), `rooms` facultatif ; liste vide = toute la maison) : la fenêtre peut passer minuit, `from == to`
    = toute la journée, l'heure d'été est suivie. Raison `heures calmes (21:00 → 07:30)`.
 
 Règles annexes :
@@ -210,6 +255,8 @@ Chemin d'une commande (`Hub::command`, `crates/moli-runtime/src/hub.rs`) :
    - `expires` = +10 minutes ;
    - nom de l'appareil, nom natif et pièces **figés au moment de la demande** (renommer
      l'appareil ensuite ne déguise pas ce que l'humain approuve) ;
+   - l'appelant (`Hub::command_from`) gardé à côté : la demande ne remplace que la sienne,
+     pour le même point et la même origine (limites en 1.1) ;
    - événement `approval_requested`, entrée de journal au résultat `pending`.
 
    Réponse REST : **`202 Accepted`** `{"ok": false, "pending": <id>, "reason": "..."}`.
@@ -282,7 +329,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
 | GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
-| GET | `/api/system` | libre | aucune | `{version, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
+| GET | `/api/system` | libre | aucune | `{version, timezone, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
 | GET | `/api/bench` | libre | aucune | `data/bench.json` tel quel (comparaison avec Home Assistant, écrite par un script côté hôte, hors de ce dépôt) | `404` no comparison available yet |
 
 **Commandes, étiquettes, approbations, journal**
@@ -323,7 +370,15 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
 |---|---|---|---|---|---|
 | GET | `/api/assistant` | libre | aucune | `{ready, model, listen}` ; non configuré : `{ready:false, listen:false, configured:false}` | aucune |
-| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page"}`, dernier message = utilisateur | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}}` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page", id?}`, dernier message = utilisateur ; `id` (1 à 64 lettres, chiffres, `-`, `_`, unique parmi les tours en cours) permet d'arrêter le tour | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}, interrupted?}` ; `interrupted:true` : tour arrêté avant de répondre, `reply` vide, les ordres déjà donnés restent dans `actions` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| POST | `/api/assistant/stop` | libre | `{id}` : l'`id` donné au tour | `{stopped}` : un tour de cet `id` tournait et s'arrête. Seule l'attente du modèle est coupée : un outil, un ordre ou un brouillon commencé va au bout, et le coût des étapes faites reste compté | `503` |
+| POST | `/api/assistant/proposals/{id}` | **humain** | `{approve: bool}` | `{ok, said}` : la proposition du modèle maison est appliquée (ou annulée) | `403` pas une personne ; `409` refusée par la garde ; `410` inconnue, déjà décidée ou expirée (10 min) ; `500` écriture impossible (la proposition reste) ; `503` sans assistant |
+| POST | `/api/assistant/turns/{id}/undo` | **humain**, celui qui a posé le tour | aucune | `{ok, said}` : les ordres du tour remis à leur valeur d'avant (ce qui a changé depuis est laissé) | `403` ; `410` tour inconnu, expiré ou d'un autre ; `503` |
+| GET | `/api/assistant/turns/{id}/choices` | celui qui a posé le tour | aucune | ce que le tour aurait pu vouloir dire : pièces, appareils, actions | `410` ; `503` |
+| POST | `/api/assistant/turns/{id}/correct` | **humain**, celui qui a posé le tour | `{choice}` ou `{choices:[…]}`, `remember?` | la bonne réponse exécutée sous la garde ; une règle si `remember` | `403` ; `410` ; `422` choix non proposé ; `503` |
+| GET | `/api/assistant/rules` | **humain** | aucune | les règles apprises (avec qui les a apprises) | `403` ; `503` |
+| PUT · DELETE | `/api/assistant/rules/{id}` | **humain** | `{enabled}` (PUT) | `{ok}` | `403` ; `410` ; `503` |
+| GET | `/api/assistant/exchanges?hours=` | libre (pas les invités) | aucune | `{exchanges:[…], recording_until}` : ce qui a été dit à Moli (720 h au plus). Ce qui est commun (satellites, portes, échanges plus anciens) pour tout le foyer, et **seulement ses propres questions** posées depuis le tableau de bord ; qui a demandé n'y figure jamais | `503` |
 | POST | `/api/assistant/listen` | libre | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text}` (transcription) | `400` pas de l'audio / trop court ; `429` ; `502` ; `503` voix désactivée |
 | PUT | `/api/assistant/recording` | **humain** | `{days}` (7 au plus, 0 = arrêt) | `{recording_until}` : ce qu'entendent les boîtiers est gardé jusque-là | `403` ; `503` |
 | GET | `/api/assistant/recordings/{name}` | **humain** | aucune | le WAV d'un boîtier (gardé 7 jours) | `403` ; `404` |
@@ -368,7 +423,7 @@ Limites de `Turn` : 14 derniers messages renvoyés au modèle, 2 000 caractères
 |---|---|---|---|
 | GET | `/api/plan` | libre | `{ skin?, floors: [...] }`. Étage **image** : `{ id, name, image, devices: [{ id, x, y }] }`, coordonnées 0–1 sur l'image. Étage **dessiné** : `{ id, name, size: [l, h], elevation?, offset?: [x, y], height?, roof?: { ridge: "x"|"y", rise }, walls: [{ x, y, w, h, r?, height? }], rooms: [{ id, name, kind, room?, poly: [[x, y]…] }], openings: [{ kind, x, y, w, h }], items: [{ kind, x, y, w, h, r?, height?, label? }], devices: [{ id, x, y }] }`, tout en **cm** (`room` = la pièce Moli, pour le halo des lumières et « poser par pièce » ; `height` d'étage = ses murs en 3D, 250 par défaut ; `height` d'un mur ou d'un élément = sa hauteur (muret, garde-corps) ; `r` = rotation en degrés autour du centre, un mur peut être de biais ; `roof` = toit à deux pans au-dessus des murs de l'étage, faîtage le long de x ou y, `rise` cm au-dessus des égouts : regarder cet étage en 3D montre la maison de dehors ; un élément a son dos (tête de lit, dossier, écran) sur son bord haut) |
 | PUT | `/api/plan` | **session humaine** | même forme ; 8 étages, 400 appareils, 400 murs/ouvertures/éléments, 100 pièces (3 à 64 points) par étage au plus ; tout dans l'étage (100 cm de marge), 100 m de côté au plus ; types connus (`skin` : plan, blueprint, nuit, aquarelle ; `kind` de pièce, d'ouverture, d'élément : listes de `plan.rs`) ; ids `[a-z0-9-]`, noms ≤ 60 ; image connue ; écriture atomique (nom temporaire unique) de `data/plan.json` |
-| POST | `/api/mobile/register` | **le foyer** (LAN, ou Cloudflare Access : la vue web de l'appli), jamais un invité | appairage d'un téléphone (`{ name, platform: ios|android, model, push_token? }`) → `{ id, token, home }` ; le jeton n'est montré qu'ici, Moli n'en garde que le SHA-256 (`data/phones.json`) ; 20 téléphones au plus |
+| POST | `/api/mobile/register` | **une personne** : une session avec le code, ou quelqu'un que Moli connaît (Cloudflare Access, mot de passe), ou la machine elle-même ; jamais un invité. Sinon `403` (« entrer le code d'abord ») | appairage d'un téléphone (`{ name, platform: ios|android, model, push_token? }`) → `{ id, token, home }` ; le jeton n'est montré qu'ici, Moli n'en garde que le SHA-256 (`data/phones.json`) ; 20 téléphones au plus. La maison reçoit un avis à chaque appairage (le nom du téléphone, son id, et qui l'a appairé : la personne, l'e-mail Access ou l'adresse) |
 | POST | `/api/phones/{id}/report` | **jeton du téléphone** (`Authorization: Bearer`) ; seule route joignable sans réseau de la maison ni Access (`Via::Phone`, application Access « bypass » sur `/api/phones`) | `{ battery?, charging?, latitude?, longitude?, accuracy?, wifi?, app?, reason?, push_token? }` bornés → `{ home }` (la maison, apprise sur son Wi-Fi) ; 401 = jeton refusé, l'appli se réappaire ; 403 = sa personne n'est plus de la maison (retirée, séjour d'invité terminé), qui ne lui envoie plus de notification non plus. Retirer une personne oublie ses téléphones |
 | DELETE | `/api/phones/{id}` | **session humaine** | oublie un téléphone (perdu, vendu) : son jeton cesse de marcher |
 | POST | `/api/plan/images` | **session humaine** | corps = l'image (PNG, JPEG, WebP, SVG ; 8 Mo au plus) ; réponse `{ image: "<16 hex>.<ext>" }` (nom tiré du contenu) |
@@ -402,8 +457,8 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
   `ppm`, `s`, `min`, `h`, ou tout autre texte).
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
-  `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`,
-  `smoke`, `tamper`, `config`, `other`.
+  `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`,
+  `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose ne va pas), `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
 
@@ -462,6 +517,8 @@ status:"done"|"failed"|"simulated"|"yes"|"no"|"timeout"|"waiting", detail?}]}`.
 
 Description du système tel qu'il tourne (rien n'est écrit à la main) :
 
+- `timezone` : le fuseau de la maison tel que Moli l'a retenu au démarrage (`[server] timezone`,
+  sinon celui des sections qui en écrivent encore un, sinon celui du système, sinon `UTC`) ;
 - `drivers` : `[{instance, kind, integration, status, devices, points, offline, cameras}]` ;
   `integration` = le paquet du catalogue qu'il exécute (`integrations/<id>/`) : le `kind`
   d'un pilote natif, l'id du profil intégré, `profile` pour un profil fichier ;
@@ -558,7 +615,7 @@ rend sa place.
 |---|---|---|
 | `device_upserted` | `device` : l'appareil (`id`, `instance`, `native_name`, `manufacturer?`, `model?`, `description?`, `native_room?`, `members?`, `points`) | appareil publié ou redéfini par son pilote |
 | `device_removed` | `device` : device_id | appareil retiré |
-| `state` | `point`, `value`, `ts` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence) ; aussi à la restauration du cache |
+| `state` | `point`, `value`, `ts`, `pulse?` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence, alors avec `pulse: true`) ; aussi à la restauration du cache |
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |
 | `driver_status` | `instance`, `status` (`DriverStatus`, § 2.2) | état d'un pilote |
 | `label_changed` | `device`, `label` `{name?, room?}` | étiquette modifiée (label complet après fusion) |
@@ -693,7 +750,7 @@ La configuration est chargée et validée pour toutes les commandes **sauf** `pr
 | Commande | Arguments | Effet |
 |---|---|---|
 | *(aucune)* ou `serve` | aucun | lance le hub, les pilotes, l'historique, l'énergie, les automatismes, Moli et toutes les surfaces |
-| `check-config` | aucun | valide la configuration et chaque pilote, affiche `configuration OK (N driver(s))` |
+| `check-config` | aucun | valide la configuration et chaque pilote ; affiche le fuseau retenu et d'où il vient (`time zone: …`), les avertissements qui l'accompagnent, puis `configuration OK (N driver(s))`. Échoue si deux fuseaux se contredisent, en les nommant |
 | `secrets set <instance> <name>` | instance de pilote (ou `assistant`, `automations`), nom du secret | lit la valeur sur **l'entrée standard**, refuse un terminal interactif et une valeur vide, chiffre dans `data/secrets.enc`, n'affiche que la longueur |
 | `secrets forget <instance> <name>` | idem | supprime le secret, affiche `forgotten` ou `not found` ; redémarrer ensuite |
 | `profile check <profile>` | fichier de profil ou id intégré | valide un profil déclaratif et affiche variables, requêtes et points (la porte que tout profil écrit par un agent doit passer) ; sans configuration |

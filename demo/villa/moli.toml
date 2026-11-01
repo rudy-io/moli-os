@@ -14,6 +14,8 @@ allowed_hosts = []
 history_days = 7
 demo_seed = "seed"
 demo = true
+# The house's one time zone: automations, energy, quiet hours and Moli follow it.
+timezone = "Europe/Paris"
 
 [guard]
 protected_rooms = ["Chambre de Léa", "Chambre de Hugo", "Sécurité"]
@@ -21,7 +23,6 @@ protected_rooms = ["Chambre de Léa", "Chambre de Hugo", "Sécurité"]
 [guard.quiet_hours]
 from = "22:00"
 to = "07:30"
-timezone = "Europe/Paris"
 rooms = ["Chambre de Léa", "Chambre de Hugo"]
 
 [[driver]]
@@ -83,6 +84,12 @@ id = "meteo"
 kind = "demo"
 [driver.options]
 fixture = "devices/meteo.json"
+
+[[driver]]
+id = "parc"
+kind = "demo"
+[driver.options]
+fixture = "devices/parc.json"
 
 [[driver]]
 id = "piscine"
@@ -181,7 +188,6 @@ bulbs = ["hue:suspension-1", "hue:suspension-2", "hue:suspension-3"]
 power = "tuya:relais-suspensions/switch_1"
 
 [energy]
-timezone = "Europe/Paris"
 currency = "€"
 monthly_fee = 24.0
 budget = "maison:budget_elec_mensuel/value"

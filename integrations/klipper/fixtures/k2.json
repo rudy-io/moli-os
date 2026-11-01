@@ -1,0 +1,123 @@
+{
+  "objects": [
+    "webhooks",
+    "configfile",
+    "mcu",
+    "mcu nozzle_mcu",
+    "mcu rpi",
+    "gcode_move",
+    "print_stats",
+    "fan_feedback",
+    "custom_macro",
+    "filament_rack",
+    "box",
+    "load_ai",
+    "motor_control",
+    "idle_timeout",
+    "virtual_sdcard",
+    "heaters",
+    "temperature_sensor mcu_temp",
+    "tmc2208 stepper_z",
+    "heater_bed",
+    "pause_resume",
+    "filament_switch_sensor filament_sensor",
+    "heater_fan hotend_fan",
+    "output_pin fan0_en",
+    "output_pin fan0",
+    "output_pin fan2",
+    "output_pin fan1",
+    "temperature_sensor chamber_temp",
+    "output_pin board_dissipation_fan",
+    "temperature_fan chamber_fan",
+    "output_pin LED",
+    "output_pin extruder_fan",
+    "output_pin power",
+    "output_pin ptc_power",
+    "axis_twist_compensation",
+    "probe",
+    "prtouch_v3",
+    "bed_mesh",
+    "display_status",
+    "exclude_object",
+    "z_align",
+    "belt_mdl mdlx",
+    "belt_mdl mdly",
+    "motion_report",
+    "query_endstops",
+    "system_stats",
+    "manual_probe",
+    "toolhead",
+    "extruder"
+  ],
+  "query": {
+    "result": {
+      "eventtime": 11877.408381538,
+      "status": {
+        "print_stats": {
+          "filename": "Exemple_PLA_6h13m43s.gcode",
+          "total_duration": 10883.089763064,
+          "print_duration": 10835.765761999999,
+          "filament_used": 9967.447549166092,
+          "state": "printing",
+          "message": "",
+          "info": {
+            "total_layer": null,
+            "current_layer": null
+          },
+          "power_loss": 0,
+          "z_pos": 35.10314923383968
+        },
+        "virtual_sdcard": {
+          "file_path": "/mnt/UDISK/printer_data/gcodes/Exemple_PLA_6h13m43s.gcode",
+          "progress": 0.4396639846475555,
+          "is_active": true,
+          "file_position": 12048598,
+          "file_size": 27404105,
+          "first_layer_stop": false,
+          "layer": 353,
+          "layer_count": 1092,
+          "cur_print_data": {
+            "end_time": 1793305401.7910576,
+            "filament_used": 9905.753048888506,
+            "filename": "Exemple_PLA_6h13m43s.gcode",
+            "metadata": {
+              "size": 27404105,
+              "modified": 1793294203.3272202,
+              "slicer": "Creality",
+              "slicer_version": "7.3.0.6157",
+              "gcode_start_byte": 30195,
+              "gcode_end_byte": 27367109,
+              "layer_count": 1092,
+              "object_height": 109.74,
+              "estimated_time": 22423,
+              "layer_height": 0.1,
+              "first_layer_height": 0.2,
+              "filament_type": "PLA"
+            },
+            "print_duration": 10738.394561453999,
+            "start_time": 1793294615.876742,
+            "status": "in_progress",
+            "total_duration": 10785.718562517999
+          }
+        },
+        "display_status": {
+          "progress": 0.19,
+          "message": null
+        }
+      }
+    }
+  },
+  "metadata": {
+    "result": {
+      "size": 27404105,
+      "modified": 1793294203.3272202,
+      "slicer": "Unknown",
+      "gcode_start_byte": 30195,
+      "gcode_end_byte": 27367109,
+      "object_height": 109.74,
+      "first_layer_height": 0.3,
+      "print_start_time": 1793294616.2642632,
+      "filename": "Exemple_PLA_6h13m43s.gcode"
+    }
+  }
+}

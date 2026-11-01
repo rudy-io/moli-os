@@ -205,14 +205,16 @@
       <Routines />
     </div>
 
-    <section class="card climate">
-      <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
-      <div class="clims">
-        {#each cfg.favorites?.climate ?? [] as c (c.id)}
-          <ClimateCard id={c.id} name={c.name} />
-        {/each}
-      </div>
-    </section>
+    {#if (cfg.favorites?.climate ?? []).length}
+      <section class="card climate">
+        <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
+        <div class="clims">
+          {#each cfg.favorites?.climate ?? [] as c (c.id)}
+            <ClimateCard id={c.id} name={c.name} />
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     {#if bell}
       <section class="card doorbell">
@@ -243,7 +245,9 @@
         <div><small>{t('maison.accueil.air')}</small><b>{aqiWord}</b></div>
         <div><small>UV</small><b class="num">{num(value(out.air, 'uv_index'), 0)}</b></div>
         <div><small>{t('maison.accueil.humidite')}</small><b class="num">{value(out.weather, 'humidity') != null ? `${num(value(out.weather, 'humidity'))} %` : '—'}</b></div>
-        <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
+        {#if out.pool}
+          <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
+        {/if}
       </div>
     </a>
   </div>
@@ -492,7 +496,7 @@
 
   .facts {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -506,6 +510,32 @@
   .facts b {
     font-size: 17px;
     font-weight: 650;
+  }
+
+  /* Without the air-conditioning card the twelve-column grid no longer tiles:
+     a row is as tall as its tallest card (the energy side, the doorbell over
+     two rows) and leaves empty space under the short ones. On a wide screen
+     the cards then stack in columns, which leaves no hole whichever cards
+     the house has. */
+  @media (min-width: 1181px) {
+    .grid:not(:has(.climate)) {
+      display: block;
+      columns: 420px 3;
+      column-gap: 20px;
+    }
+
+    .grid:not(:has(.climate)) > * {
+      width: 100%;
+      margin: 0 0 20px;
+      break-inside: avoid;
+    }
+
+    /* Out of a grid, a card that is a link turns inline again and loses its
+       background. Block it, with no specificity, so a card that declares its
+       own display (the remote) keeps it. */
+    :where(.grid:not(:has(.climate))) > :where(a) {
+      display: block;
+    }
   }
 
   @media (max-width: 1180px) {

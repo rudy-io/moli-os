@@ -3,7 +3,8 @@
 //! - the home network or this very machine: the household (and, for this
 //!   machine only, the CLI);
 //! - through Cloudflare (the tunnel) with a valid Access assertion: the
-//!   person Access let in, by e-mail;
+//!   person Access let in, by e-mail, unless that e-mail is of someone no
+//!   longer of the house (then a stranger);
 //! - anything else (Internet without proof, public address): a stranger;
 //! - except on a demo house (`[server] demo = true`, a house without real
 //!   devices): there, a stranger is a visitor, let in like the household,
@@ -24,7 +25,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::access::Verifier;
-use crate::people::{People, PersonRef};
+use crate::people::{People, PersonRef, Vouched};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -52,6 +53,9 @@ pub(crate) struct Gate {
     pub(crate) access: Option<Arc<Verifier>>,
     pub(crate) demo: bool,
     pub(crate) people: Arc<People>,
+    /// `[server.access] known_only`: an e-mail none of the people has is a
+    /// stranger's.
+    pub(crate) known_only: bool,
 }
 
 /// What a guest may reach: the dashboard, what it reads of its rooms (the
@@ -140,6 +144,14 @@ impl Caller {
     /// This very machine, not through the tunnel (which also ends here).
     pub(crate) fn is_local_machine(&self) -> bool {
         self.via == Via::Loopback
+    }
+
+    /// Who asks, for what is kept per person: the person when the house
+    /// knows them (`person:<id>`), else this caller's own key.
+    pub(crate) fn asker(&self) -> String {
+        self.person
+            .as_ref()
+            .map_or_else(|| self.key.clone(), |p| format!("person:{}", p.id))
     }
 
     /// For the journal: who clicked.
@@ -254,6 +266,20 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
     }
 }
 
+/// Who an Access assertion names. Access's rule may still let in someone
+/// no longer of the house (a guest whose stay is over, a person removed):
+/// a stranger then, never the household.
+fn vouch(gate: &Gate, caller: &mut Caller) {
+    let Via::Access { email } = &caller.via else {
+        return;
+    };
+    match gate.people.vouched(email, gate.known_only) {
+        Vouched::Person(person) => caller.person = Some(person),
+        Vouched::Household => {}
+        Vouched::Stranger => caller.via = Via::Outside,
+    }
+}
+
 /// `/api/phones/<id>/report` → the phone's id.
 fn phone_report(path: &str) -> Option<&str> {
     let id = path.strip_prefix("/api/phones/")?.strip_suffix("/report")?;
@@ -281,6 +307,8 @@ pub(crate) async fn identify(
         _ => None,
     };
     let mut caller = classify(peer, request.headers(), email);
+    // The person Access vouched for, or a stranger if no longer of the house.
+    vouch(&gate, &mut caller);
     // A phone's report carries its own token (checked by the route): the
     // one way in without the home network or Cloudflare Access.
     if caller.via == Via::Outside
@@ -295,11 +323,8 @@ pub(crate) async fn identify(
             person: None,
         };
     }
-    // Who it is, when Moli knows: the person Access vouched for, else the
-    // person signed in on this browser (from anywhere: a phone moves).
-    if let Via::Access { email } = &caller.via {
-        caller.person = gate.people.by_email(email);
-    }
+    // Who it is, when Access named nobody: the person signed in on this
+    // browser (from anywhere: a phone moves).
     if caller.person.is_none()
         && let Some(person) = gate.people.signed_in(request.headers())
     {
@@ -403,6 +428,11 @@ mod tests {
             (Method::POST, "/api/automations/draft"),
             (Method::PUT, "/api/assistant/recording"),
             (Method::POST, "/api/assistant/recap"),
+            (Method::POST, "/api/assistant/proposals/3"),
+            (Method::POST, "/api/assistant/turns/3/undo"),
+            (Method::POST, "/api/assistant/turns/3/correct"),
+            (Method::PUT, "/api/assistant/rules/3"),
+            (Method::DELETE, "/api/assistant/rules/3"),
             (Method::PUT, "/api/session/pin"),
             (Method::POST, "/api/session/setup"),
             (Method::POST, "/api/machines/pc/remote"),
@@ -476,6 +506,8 @@ mod tests {
             "/api/assistant",
             "/api/assistant/exchanges",
             "/api/assistant/recordings/1-1.wav",
+            "/api/assistant/rules",
+            "/api/assistant/turns/3/choices",
             "/api/machines/machines:pc",
             "/api/energy",
             "/api/energy/series",

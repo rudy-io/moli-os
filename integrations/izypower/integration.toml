@@ -1,0 +1,37 @@
+[integration]
+id = "izypower"
+name = "IzyPower (micro-onduleurs, via le cloud)"
+brands = ["IzyPower"]
+# Seen so far (in the reference installation): 2 and 4 input micro-inverters.
+models = ["VMP2", "VMP4"]
+transport = "https"
+driver = "izypower"
+crate = "moli-izypower"
+
+[discovery]
+# Cloud only: the micro-inverters keep no port open on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["username", "password"]
+vars = []
+options = []
+
+[origin]
+reused = "aucun code repris : points d'accès de l'API observés (et lus dans l'intégration HACS izypower_cloud de StefanPlizga, licence MIT) ; réponses réelles capturées puis anonymisées"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-izypower/src/model.rs).
+[[fixture]]
+file = "fixtures/stations.json"
+
+[[fixture]]
+file = "fixtures/station-info.json"
+
+[[fixture]]
+file = "fixtures/devices.json"
+
+[[fixture]]
+file = "fixtures/layout-power.json"

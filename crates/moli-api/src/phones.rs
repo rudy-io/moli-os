@@ -1,22 +1,23 @@
 //! The Moli app on the household's phones (crate `moli-phones`).
 //!
-//! - `POST /api/mobile/register` (the household: LAN or Cloudflare Access,
-//!   which is how the app's own web view is signed in; never a guest):
-//!   `{ name, platform, model, push_token? }` → `{ id, token, home }`; the
-//!   token is shown once.
+//! - `POST /api/mobile/register` (a person of the house: the code, or someone
+//!   Moli knows by Cloudflare Access or a password, never a guest; this very
+//!   machine too): `{ name, platform, model, push_token? }` → `{ id, token,
+//!   home }`; the token is shown once. The house hears of every phone paired.
 //! - `POST /api/phones/<id>/report` (`Authorization: Bearer <token>`, no
 //!   Cloudflare login needed: see `caller.rs`): a `Report` → `{ home }`;
 //!   refused from the phone of someone no longer of the house (removed, a
 //!   guest whose stay ended).
 
 use axum::Extension;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use moli_runtime::Hub;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::caller::Caller;
+use crate::caller::{Caller, Via};
 
 #[derive(Clone)]
 pub(crate) struct PhonesGate(pub(crate) Option<moli_phones::Gateway>);
@@ -36,9 +37,31 @@ pub(crate) struct Pairing {
     push_token: Option<String>,
 }
 
+/// Who paired a phone, for the house: the person, else the e-mail Access
+/// vouched for, else the address.
+fn paired_by(caller: &Caller) -> String {
+    if let Some(person) = &caller.person {
+        return person.name.clone();
+    }
+    match &caller.via {
+        Via::Access { email } => email.clone(),
+        _ => caller.key.clone(),
+    }
+}
+
+/// Whether `caller` may pair a phone. A paired phone hears the house from
+/// anywhere: being on the home network is not enough, a person must stand
+/// behind it (`human`: the code), or Moli must know who it is.
+fn may_pair(caller: &Caller, human: bool) -> bool {
+    human || caller.person.is_some() || caller.is_local_machine()
+}
+
 pub(crate) async fn register(
+    State(hub): State<Hub>,
     Extension(PhonesGate(gate)): Extension<PhonesGate>,
+    Extension(humans): Extension<std::sync::Arc<crate::session::Sessions>>,
     caller: Caller,
+    headers: HeaderMap,
     axum::Json(p): axum::Json<Pairing>,
 ) -> Response {
     let Some(gate) = gate else {
@@ -64,6 +87,12 @@ pub(crate) async fn register(
             &moli_i18n::tr!("serveur.personnes.invite_limite"),
         );
     }
+    if !may_pair(&caller, humans.is_human(&headers, &caller.key)) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.telephone.personne_seulement"),
+        );
+    }
     // Paired from a person's session: the phone is theirs.
     let person = caller.person.as_ref().map(|p| p.id.as_str());
     match gate.register(
@@ -73,7 +102,30 @@ pub(crate) async fn register(
         p.push_token.as_deref(),
         person,
     ) {
-        Ok(paired) => axum::Json(paired).into_response(),
+        Ok(paired) => {
+            // It will hear every notice of the house: the house hears of it.
+            // Its name as kept, last: the pairer chose it, it says nothing
+            // for sure.
+            let name = gate
+                .list()
+                .into_iter()
+                .find(|phone| phone.id == paired.id)
+                .map(|phone| phone.name)
+                .unwrap_or_default();
+            hub.notice(moli_core::Notice {
+                title: Some(moli_i18n::tr!("serveur.telephone.notice_titre")),
+                message: moli_i18n::tr!(
+                    "serveur.telephone.notice_appaire",
+                    by = paired_by(&caller),
+                    id = paired.id,
+                    name = name
+                ),
+                from: Some("Moli".into()),
+                ts: moli_core::now_ms(),
+                to: None,
+            });
+            axum::Json(paired).into_response()
+        }
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &format!("{e:#}")),
     }
 }
@@ -203,5 +255,41 @@ pub(crate) async fn assign(
             &moli_i18n::tr!("serveur.telephone.inconnu"),
         ),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e:#}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::people::{PersonRef, Role};
+
+    fn caller(via: Via, person: bool) -> Caller {
+        Caller {
+            via,
+            key: "10.0.0.30".into(),
+            person: person.then(|| PersonRef {
+                id: "sam".into(),
+                name: "Sam".into(),
+                role: Role::Member,
+                rooms: Vec::new(),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_phone_is_paired_by_a_person() {
+        // A device of the home network, nobody known: not without the code.
+        assert!(!may_pair(&caller(Via::Lan, false), false));
+        assert!(may_pair(&caller(Via::Lan, false), true));
+        // Signed in with a password, or a person Access vouched for.
+        assert!(may_pair(&caller(Via::Lan, true), false));
+        let access = Via::Access {
+            email: "sam@example.com".into(),
+        };
+        assert!(may_pair(&caller(access.clone(), true), false));
+        // An e-mail Access let in but the house does not know: the code.
+        assert!(!may_pair(&caller(access, false), false));
+        // This very machine.
+        assert!(may_pair(&caller(Via::Loopback, false), false));
     }
 }

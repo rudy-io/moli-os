@@ -6,20 +6,27 @@
 //! The printer's certificate is pinned on first contact, before the access
 //! code is sent. Reports are deltas: they are merged into the last known
 //! state, and a full report (`pushall`) is asked for every few minutes.
+//!
+//! A printer given another address by the box is followed by its own
+//! announcements ([`find`]), once its pinned certificate answers there; the
+//! address is remembered (`data/addresses.json`) for the next start.
 
 mod ams;
+mod find;
 
 use std::collections::HashSet;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use moli_core::{Access, Device, Kind, PointSpec, Semantic, Unit, Value};
 use moli_net::{PinnedHttps, PinnedTls};
-use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
+use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, TlsConfiguration, Transport};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json, json};
+use tokio::sync::watch;
 
 const ACCESS_CODE: &str = "access_code";
 const CERT: &str = "cert";
@@ -252,11 +259,11 @@ fn values(report: &Map<String, Json>) -> Vec<(&'static str, Value)> {
     out
 }
 
-async fn first_pin(config: &Config, ctx: &DriverCtx) -> anyhow::Result<String> {
+async fn first_pin(host: &str, ctx: &DriverCtx) -> anyhow::Result<String> {
     if !ctx.can_store_secrets() {
         bail!("cannot pin the printer's certificate: the secret store is unavailable");
     }
-    let probe = PinnedHttps::new(&config.host, PORT, None)?;
+    let probe = PinnedHttps::new(host, PORT, None)?;
     probe.handshake().await.context("first contact")?;
     let seen = probe.seen_fingerprint().context("no certificate seen")?;
     ctx.store_secret(CERT, &seen).await?;
@@ -281,8 +288,8 @@ async fn idle(ctx: &mut DriverCtx, delay: Duration) -> bool {
 
 /// MQTT options with the access code. `MqttOptions`'s `Debug` prints the
 /// password: never log these.
-fn mqtt_options(ctx: &DriverCtx, config: &Config, code: String, tls: &PinnedTls) -> MqttOptions {
-    let mut options = MqttOptions::new(format!("moli-{}", ctx.instance()), &config.host, PORT);
+fn mqtt_options(ctx: &DriverCtx, host: &str, code: String, tls: &PinnedTls) -> MqttOptions {
+    let mut options = MqttOptions::new(format!("moli-{}", ctx.instance()), host, PORT);
     options.set_credentials("bblp", code);
     options.set_keep_alive(Duration::from_secs(30));
     options.set_max_packet_size(256 * 1024, 16 * 1024);
@@ -306,24 +313,78 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     ctx.upsert_device(device(ctx, config));
     ctx.set_availability(&id, false);
     ctx.ready();
+    let mut host = start_host(ctx, config);
+    let (seen_tx, mut seen) = watch::channel(None);
+    let listening = find::listen(config.serial.clone(), seen_tx);
+    let result = follow(config, ctx, &id, &code, &mut host, &mut seen).await;
+    listening.abort();
+    result
+}
+
+/// Where to reach the printer first: where it answered last, unless the
+/// configured address changed since (a person's word wins).
+fn start_host(ctx: &DriverCtx, config: &Config) -> String {
+    ctx.known_address()
+        .filter(|k| {
+            k.configured == config.host && k.identity.as_deref() == Some(config.serial.as_str())
+        })
+        .map_or_else(|| config.host.clone(), |k| k.host)
+}
+
+/// An address the printer announced, other than `host`, not refused lately.
+fn elsewhere(
+    seen: &watch::Receiver<Option<Ipv4Addr>>,
+    host: &str,
+    refused: Option<(Ipv4Addr, tokio::time::Instant)>,
+) -> Option<Ipv4Addr> {
+    let ip = (*seen.borrow())?;
+    let lately = refused.is_some_and(|(r, at)| r == ip && at.elapsed() < RECHECK_REFUSED);
+    (ip.to_string() != host && !lately).then_some(ip)
+}
+
+/// An announced address whose certificate was not the pinned one is not
+/// checked again before this.
+const RECHECK_REFUSED: Duration = Duration::from_secs(600);
+
+/// The printer's pinned certificate answers at `ip`: it is there (an
+/// announcement alone is no proof).
+async fn answers_at(ip: Ipv4Addr, pin: &str) -> bool {
+    match PinnedHttps::new(&ip.to_string(), PORT, Some(pin.to_owned())) {
+        Ok(probe) => probe.handshake().await.is_ok(),
+        Err(_) => false,
+    }
+}
+
+#[allow(clippy::too_many_lines)] // one loop: orders, refreshes, reports, moves
+async fn follow(
+    config: &Config,
+    ctx: &mut DriverCtx,
+    id: &moli_core::DeviceId,
+    code: &str,
+    host: &mut String,
+    seen: &mut watch::Receiver<Option<Ipv4Addr>>,
+) -> anyhow::Result<()> {
     // The certificate is pinned at first contact: wait for the printer
     // (often switched off on a smart plug) instead of failing.
     let pin = loop {
         if let Some(pin) = ctx.secret(CERT) {
             break pin;
         }
-        match first_pin(config, ctx).await {
+        match first_pin(host, ctx).await {
             Ok(pin) => break pin,
             Err(e) => {
                 tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "printer not reachable yet");
                 if !idle(ctx, Duration::from_secs(60)).await {
                     return Ok(());
                 }
+                // Nothing pinned yet: where the printer says it is.
+                if let Some(ip) = elsewhere(seen, host, None) {
+                    *host = ip.to_string();
+                }
             }
         }
     };
-    let tls = PinnedTls::new(Some(pin))?;
-    let (client, mut events) = AsyncClient::new(mqtt_options(ctx, config, code, &tls), 16);
+    let tls = PinnedTls::new(Some(pin.clone()))?;
     let report_topic = format!("device/{}/report", config.serial);
     let request_topic = format!("device/{}/request", config.serial);
     let pushall = json!({"pushing": {"sequence_id": "0", "command": "pushall"}}).to_string();
@@ -331,55 +392,85 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // AMS units and the external spool, declared when first reported.
     let mut filament: HashSet<moli_core::DeviceId> = HashSet::new();
     let printer = printer_name(config);
-    let mut refresh = tokio::time::interval(PUSHALL_EVERY);
-    let mut connected = false;
-    let mut last_error: Option<String> = None;
-    let mut paused_until: Option<tokio::time::Instant> = None;
-    loop {
-        tokio::select! {
-            command = ctx.next_command() => {
-                let Some(command) = command else { return Ok(()) };
-                if connected {
-                    reply(&client, &request_topic, command);
-                } else {
-                    // Queued now, sent when the printer comes back: refuse.
-                    command.reply(Err(moli_i18n::tr!("pilotes.bambu.injoignable")));
-                }
-            }
-            _ = refresh.tick(), if connected => {
-                let _ = client.try_publish(&request_topic, QoS::AtMostOnce, false, pushall.clone());
-            }
-            () = async { tokio::time::sleep_until(paused_until.unwrap_or_else(tokio::time::Instant::now)).await }, if paused_until.is_some() => {
-                paused_until = None;
-            }
-            event = events.poll(), if paused_until.is_none() => match event {
-                Ok(Event::Incoming(Packet::ConnAck(_))) => {
-                    connected = true;
-                    last_error = None;
-                    if let Err(e) = client.try_subscribe(&report_topic, QoS::AtMostOnce) {
-                        tracing::warn!(instance = %ctx.instance(), error = %e, "printer subscription not sent");
+    let mut refused: Option<(Ipv4Addr, tokio::time::Instant)> = None;
+    'host: loop {
+        let (client, mut events) =
+            AsyncClient::new(mqtt_options(ctx, host, code.to_owned(), &tls), 16);
+        let mut refresh = tokio::time::interval(PUSHALL_EVERY);
+        let mut connected = false;
+        let mut last_error: Option<String> = None;
+        let mut paused_until: Option<tokio::time::Instant> = None;
+        loop {
+            tokio::select! {
+                // Unreachable where it was: it says where it is now.
+                Ok(()) = seen.changed(), if !connected => {
+                    let Some(ip) = elsewhere(seen, host, refused) else { continue };
+                    if !answers_at(ip, &pin).await {
+                        tracing::warn!(instance = %ctx.instance(), %ip, "printer announced at another address, its certificate does not answer there");
+                        refused = Some((ip, tokio::time::Instant::now()));
+                        continue;
                     }
+                    let from = std::mem::replace(host, ip.to_string());
+                    tracing::info!(instance = %ctx.instance(), %from, to = %host, "printer found at another address");
+                    ctx.moved(
+                        Some(id.clone()),
+                        &from,
+                        KnownAddress {
+                            configured: config.host.clone(),
+                            host: host.clone(),
+                            mac: None,
+                            identity: Some(config.serial.clone()),
+                        },
+                    )
+                    .await;
+                    continue 'host;
+                }
+                command = ctx.next_command() => {
+                    let Some(command) = command else { return Ok(()) };
+                    if connected {
+                        reply(&client, &request_topic, command);
+                    } else {
+                        // Queued now, sent when the printer comes back: refuse.
+                        command.reply(Err(moli_i18n::tr!("pilotes.bambu.injoignable")));
+                    }
+                }
+                _ = refresh.tick(), if connected => {
                     let _ = client.try_publish(&request_topic, QoS::AtMostOnce, false, pushall.clone());
-                    online(ctx, &id, &filament, true);
                 }
-                Ok(Event::Incoming(Packet::Publish(publish))) if publish.topic == report_topic => {
-                    let Ok(Json::Object(report)) = serde_json::from_slice::<Json>(&publish.payload) else { continue };
-                    if let Some(Json::Object(print)) = report.get("print") {
-                        on_report(ctx, &config.serial, &printer, &id, &mut state, &mut filament, print);
+                () = async { tokio::time::sleep_until(paused_until.unwrap_or_else(tokio::time::Instant::now)).await }, if paused_until.is_some() => {
+                    paused_until = None;
+                }
+                event = events.poll(), if paused_until.is_none() => match event {
+                    Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                        connected = true;
+                        last_error = None;
+                        if let Err(e) = client.try_subscribe(&report_topic, QoS::AtMostOnce) {
+                            tracing::warn!(instance = %ctx.instance(), error = %e, "printer subscription not sent");
+                        }
+                        let _ = client.try_publish(&request_topic, QoS::AtMostOnce, false, pushall.clone());
+                        online(ctx, id, &filament, true);
                     }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    connected = false;
-                    online(ctx, &id, &filament, false);
-                    if stopped_by(ctx, &format!("{e:#}"), &mut last_error) {
-                        ctx.cancelled().await;
-                        return Ok(());
+                    Ok(Event::Incoming(Packet::Publish(publish))) if publish.topic == report_topic => {
+                        let Ok(Json::Object(report)) = serde_json::from_slice::<Json>(&publish.payload) else { continue };
+                        if let Some(Json::Object(print)) = report.get("print") {
+                            on_report(ctx, &config.serial, &printer, id, &mut state, &mut filament, print);
+                        }
                     }
-                    // Printer off: rumqttc reconnects on the next poll.
-                    paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(30));
-                }
-            },
+                    Ok(_) => {}
+                    Err(e) => {
+                        connected = false;
+                        online(ctx, id, &filament, false);
+                        // Where it is now, if it said so already.
+                        seen.mark_changed();
+                        if stopped_by(ctx, &format!("{e:#}"), &mut last_error) {
+                            ctx.cancelled().await;
+                            return Ok(());
+                        }
+                        // Printer off: rumqttc reconnects on the next poll.
+                        paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(30));
+                    }
+                },
+            }
         }
     }
 }

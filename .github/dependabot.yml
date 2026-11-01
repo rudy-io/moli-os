@@ -1,0 +1,33 @@
+# Updates proposed as pull requests, reviewed like any other: the CI actions
+# (pinned by commit), the Rust crates, the dashboard's packages and the Docker
+# base images. Minor and patch updates come grouped, one PR per ecosystem (they
+# would otherwise fight over the same lock file); a major version comes alone.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      crates:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

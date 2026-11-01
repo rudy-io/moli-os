@@ -1,0 +1,3 @@
+# Contrat du modèle maison : une ligne par version, `v<N> <sha256>` de `moli-os model tools` et de
+# `moli-os model prompt` (maison fictive fixture_house.json). Jamais réécrite : on ajoute une version.
+v4 ee4e5d53254c704593e2226a949d341d79afdb68fd597a3dc7a55f00ed90cda9

@@ -82,6 +82,11 @@ pub struct Meta {
     /// (MAC, serial…). Without it, the host is the identity.
     #[serde(default)]
     pub identity: Option<String>,
+    /// `GET` path answering with one image (a camera still, a screen
+    /// preview). Declared here, the device makes images on demand: the hub
+    /// asks only when a surface wants one, and nothing is ever polled.
+    #[serde(default)]
+    pub snapshot: Option<String>,
     /// `request.path` of the device's own MAC address. The driver finds a
     /// device whose address changed by its MAC: given here, it is known even
     /// before the device answered (when it is also the identity); otherwise
@@ -335,6 +340,22 @@ impl Profile {
         }
         if self.requests.is_empty() {
             return Err(fail("at least one [[request]] is required".into()));
+        }
+        if let Some(path) = &self.profile.snapshot {
+            // Asked outside the guard (a dashboard tile in a loop, the MCP
+            // `camera_snapshot` tool): a read, so it may change nothing.
+            check_shape(path)
+                .and_then(|()| check_read_query(path))
+                .and_then(|()| {
+                    // Sent as written, never rendered: a `{var}` or `{secret}` would
+                    // leave as is.
+                    if path.contains('{') {
+                        Err("no {…} placeholder: the path is sent as written".into())
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
         }
         let secrets = Secrets {
             declared: self.profile.secret.is_some(),
@@ -736,6 +757,9 @@ fn compile_point(
     let semantic = p
         .semantic
         .unwrap_or_else(|| Semantic::infer(&p.key, unit.as_ref()));
+    if semantic == Semantic::Alert && kind != Kind::Binary {
+        return Err("semantic alert is a binary point (true: something is wrong)".into());
+    }
     Ok(CompiledPoint {
         spec: PointSpec {
             key: p.key.as_str().into(),
@@ -1185,6 +1209,28 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_snapshot_path_is_checked_like_any_other() {
+        let with = |path: &str| {
+            builtin("iopool").unwrap().replace(
+                "[profile]",
+                &format!(
+                    "[profile]
+snapshot = \"{path}\""
+                ),
+            )
+        };
+        assert!(try_compile(&with("/apercu.jpg")).is_ok());
+        let err = try_compile(&with("apercu.jpg")).unwrap_err();
+        assert!(err.message.contains("snapshot"), "{}", err.message);
+        // A GET with parameters can change the device: not as an image either.
+        let err = try_compile(&with("/relay/0?turn=on")).unwrap_err();
+        assert!(err.message.contains("snapshot"), "{}", err.message);
+        // Never rendered: a placeholder would leave as written.
+        let err = try_compile(&with("/{secret}/image.jpg")).unwrap_err();
+        assert!(err.message.contains("placeholder"), "{}", err.message);
+    }
+
     fn compile(id: &str) -> Compiled {
         Profile::parse(builtin(id).unwrap())
             .unwrap()
@@ -1194,6 +1240,21 @@ mod tests {
 
     fn try_compile(text: &str) -> Result<Compiled, ProfileError> {
         Profile::parse(text).and_then(|p| p.compile(Source::Builtin))
+    }
+
+    #[test]
+    fn an_alert_is_a_binary_point() {
+        let with = |kind: &str| {
+            format!(
+                "[profile]\nid = \"veille\"\nname = \"Veille\"\n\
+                 [[request]]\nid = \"s\"\npath = \"/etat\"\nformat = \"json\"\nevery = \"5m\"\n\
+                 [[point]]\nkey = \"en_alerte\"\nlabel = \"En alerte\"\nfrom = \"s.ko\"\nkind = \"{kind}\"\nsemantic = \"alert\"\n"
+            )
+        };
+        let compiled = try_compile(&with("binary")).unwrap();
+        assert_eq!(compiled.points[0].spec.semantic, Semantic::Alert);
+        let err = try_compile(&with("numeric")).unwrap_err();
+        assert!(err.message.contains("alert"), "{}", err.message);
     }
 
     #[test]

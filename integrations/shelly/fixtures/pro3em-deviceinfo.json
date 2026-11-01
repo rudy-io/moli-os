@@ -1,0 +1,14 @@
+{
+ "name": null,
+ "id": "shellypro3em-aabbccddee02",
+ "mac": "AABBCCDDEE02",
+ "slot": 1,
+ "model": "SPEM-003CEBEU",
+ "gen": 2,
+ "fw_id": "20251218-150936/g08369d7",
+ "ver": "1.7.1-pro3emmprod0",
+ "app": "Pro3EMM",
+ "auth_en": false,
+ "auth_domain": null,
+ "profile": "triphase"
+}

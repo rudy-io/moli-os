@@ -20,6 +20,9 @@ use crate::api::{self, VoiceEvent, VoiceRequest};
 use crate::{Outbox, sound};
 use moli_audio::vad::{self, Edge, Vad};
 
+#[cfg(test)]
+mod tests;
+
 const RATE: u32 = 16_000;
 /// A request longer than this is cut and heard as it is.
 const MAX_UTTERANCE: Duration = Duration::from_secs(20);
@@ -73,6 +76,8 @@ impl Run {
 /// The voice of one satellite.
 #[derive(Debug)]
 pub(crate) struct Voice {
+    /// The satellite this voice is: who asks, for the assistant.
+    device: DeviceId,
     window: Duration,
     media_base: Option<String>,
     run: Option<Run>,
@@ -95,9 +100,14 @@ pub(crate) type Thoughts = mpsc::Receiver<(u64, Thought)>;
 type Sent = anyhow::Result<()>;
 
 impl Voice {
-    pub(crate) fn new(window: Duration, media_base: Option<String>) -> (Self, Thoughts) {
+    pub(crate) fn new(
+        window: Duration,
+        media_base: Option<String>,
+        device: DeviceId,
+    ) -> (Self, Thoughts) {
         let (thoughts_tx, thoughts) = mpsc::channel(8);
         let voice = Self {
+            device,
             window,
             media_base: media_base.map(|b| b.trim_end_matches('/').to_owned()),
             run: None,
@@ -228,6 +238,7 @@ impl Voice {
         let generation = self.generation;
         let conversation = self.conversation.clone();
         let tx = self.thoughts_tx.clone();
+        let device = self.device.clone();
         tokio::spawn(async move {
             let started = Instant::now();
             let text = match brain.hear(wav).await {
@@ -247,7 +258,7 @@ impl Voice {
                 who: Speaker::Person,
                 text,
             });
-            let thought = match brain.answer(lines).await {
+            let thought = match brain.answer(&device, lines).await {
                 Ok(answer) => Thought::Answered(answer),
                 Err(e) => Thought::Failed(e),
             };
@@ -300,7 +311,9 @@ impl Voice {
                     return self.end(ctx, id, tx, false).await;
                 }
                 let url = match (ctx.voice_brain(), &self.media_base) {
-                    (Some(brain), Some(base)) => brain.voice_url(base, &reply),
+                    // TTS_END uses the firmware's announcement player too;
+                    // a conversation does not give it a separate WAV decoder.
+                    (Some(brain), Some(base)) => brain.announcement_url(base, &reply),
                     _ => None,
                 };
                 let Some(url) = url else {
@@ -418,9 +431,9 @@ impl Voice {
         .await?;
         let chime = self.media_base.as_ref().and_then(|base| {
             let name = ctx.media_publisher().publish(
-                "wav",
+                "flac",
                 Image {
-                    content_type: "audio/wav".into(),
+                    content_type: "audio/flac".into(),
                     bytes: sound::chime(),
                 },
             )?;

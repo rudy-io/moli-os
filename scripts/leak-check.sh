@@ -33,8 +33,9 @@ eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
 [0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}
 [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}
 EOF
-# Examples everyone may write: documentation MACs and addresses, placeholders.
-allowed='sk-(proj-)?abcdefghij|aa[:-]?bb[:-]?cc[:-]?dd[:-]?ee[:-]?[0-9a-f]{2}|00([:-]00){5}|ff([:-]ff){5}|02([:-]00){4}[:-][0-9a-f]{2}|@(example|exemple)\.(com|org|net|fr)|@localhost|@test([^a-z.]|$)|noreply@anthropic\.com|git@github\.com|testrealm@host\.com'
+# Examples everyone may write: documentation MACs and addresses, placeholders;
+# and the authors' addresses in the third-party licences we must keep (licenses/).
+allowed='sk-(proj-)?abcdefghij|aa[:-]?bb[:-]?cc[:-]?dd[:-]?ee[:-]?[0-9a-f]{2}|00([:-]00){5}|ff([:-]ff){5}|02([:-]00){4}[:-][0-9a-f]{2}|@(example|exemple)\.(com|org|net|fr)|@localhost|@test([^a-z.]|$)|noreply@anthropic\.com|git@github\.com|testrealm@host\.com|david@rapan\.cz'
 
 denylist=${MOLI_DENYLIST:-../moli-maison/leak-denylist.txt}
 : >"$tmp/private"

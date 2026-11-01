@@ -5,7 +5,7 @@
   "personnes.role.guest": "Guest",
   "personnes.role.owner_aide": "Everything, people, the house's code and integrations included.",
   "personnes.role.member_aide": "Controls the whole house and approves automations with the code.",
-  "personnes.role.guest_aide": "Controls their rooms only, until the chosen date. No cameras, no settings.",
+  "personnes.role.guest_aide": "Controls their rooms only, until the chosen date. No cameras, no settings. On the home Wi-Fi without signing in, anyone has the household's rights: a separate guest Wi-Fi is advised.",
   "personnes.connexion.titre": "Welcome",
   "personnes.connexion.intro": "Sign in to open the house.",
   "personnes.connexion.titre_invitation": "Your invitation",

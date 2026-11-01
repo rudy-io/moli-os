@@ -1,7 +1,8 @@
 //! Philips Android TVs, through the JointSpace API (HTTPS 1926, digest
 //! authentication with the pairing credentials): power, volume, mute,
 //! current app. Turning on from standby also sends a Wake-on-LAN packet.
-//! Their Android side ([`android`]) opens apps and says what plays.
+//! Their Android side ([`android`]) opens apps, says what plays, and takes
+//! the remote's keys while it is up (JointSpace when it is not).
 
 mod android;
 
@@ -619,9 +620,12 @@ async fn apply(
             )
             .await?;
         }
-        ("key", Value::Text(key)) if KEYS.contains(&&**key) => {
-            tv.press(key).await?;
-        }
+        ("key", Value::Text(key)) if KEYS.contains(&&**key) => match android.press(key) {
+            Some(sent) => sent?,
+            None => {
+                tv.press(key).await?;
+            }
+        },
         ("text", Value::Text(text)) => android.write(text)?,
         ("ambilight", Value::Bool(on)) => {
             tv.request(
@@ -768,7 +772,12 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         ctx.cancelled().await;
                         return Ok(());
                     }
-                    if online != Some(false) {
+                    if android.says_on() {
+                        // JointSpace away while the TV plays on (it does,
+                        // for half a minute at times): the remote, still
+                        // there, is believed; keys go through it.
+                        tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "jointspace not answering, the android remote says the tv is on");
+                    } else if online != Some(false) {
                         online = Some(false);
                         // Deep standby: the API sleeps with the TV.
                         ctx.set_availability(&id, false);

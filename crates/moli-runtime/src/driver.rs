@@ -100,6 +100,18 @@ impl DriverCtx {
             .set_driver_status(&self.instance, DriverStatus::Running);
     }
 
+    /// Publishes a non-blocking warning without changing status or permissions.
+    /// Cleared automatically when this run stops or the supervisor restarts it.
+    pub fn warn(&self, message: impl Into<String>) {
+        self.hub
+            .set_driver_warning(&self.instance, Some(message.into()));
+    }
+
+    /// Removes a warning once its cause has been resolved during this run.
+    pub fn clear_warning(&self) {
+        self.hub.set_driver_warning(&self.instance, None);
+    }
+
     /// Signals that the driver is blocked on a human action (shown on every
     /// surface, so an agent can relay it). `ready()` clears it.
     pub fn wait_for(&self, reason: impl Into<String>) {
@@ -304,6 +316,7 @@ impl MediaPublisher {
     /// background did not happen (the command itself already answered).
     pub fn tell(&self, from: &str, message: String) {
         self.0.notice(moli_core::Notice {
+            to: None,
             title: None,
             message,
             from: Some(from.to_owned()),

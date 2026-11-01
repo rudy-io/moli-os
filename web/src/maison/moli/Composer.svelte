@@ -1,5 +1,5 @@
 <script>
-  import { moli, ask, canRecord, voiceUnavailable, startRecording, stopRecording } from '../lib/moli.svelte.js';
+  import { moli, arreter, ask, canRecord, voiceUnavailable, startRecording, stopRecording } from '../lib/moli.svelte.js';
   import { note } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
@@ -67,6 +67,16 @@
       title={voiceHint || t('moli.composer.parler_avec')}
       aria-label={t('moli.composer.parler_avec')}>
       <Icon name="talk" size={big ? 24 : 20} />
+    </button>
+  {/if}
+  {#if moli.busy}
+    <button
+      type="button"
+      class="stop"
+      onclick={arreter}
+      title={t('moli.composer.arreter_reflexion')}
+      aria-label={t('moli.composer.arreter_reflexion')}>
+      <Icon name="stop" size={big ? 24 : 20} />
     </button>
   {/if}
   {#if moli.status?.listen}
@@ -166,6 +176,12 @@
 
   .talk {
     background: color-mix(in srgb, var(--cool) 18%, var(--surface-2));
+    color: var(--ink);
+  }
+
+  /* While Moli thinks: warm, so it reads apart from the buttons that start something. */
+  .stop {
+    background: color-mix(in srgb, var(--warm) 22%, var(--surface-2));
     color: var(--ink);
   }
 

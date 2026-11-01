@@ -16,9 +16,12 @@
   "serveur.machine.distance_humain": "seule une personne (code PIN) ouvre le PC à distance",
 
   "serveur.telephone.foyer_seulement": "seul le foyer appaire un téléphone",
+  "serveur.telephone.personne_seulement": "seule une personne de la maison appaire un téléphone : entrer le code d'abord",
   "serveur.telephone.retrait_humain": "seule une personne (code) retire un téléphone",
   "serveur.telephone.inconnu": "téléphone inconnu",
   "serveur.telephone.jeton_refuse": "téléphone inconnu ou jeton refusé : réappairer l'appli",
+  "serveur.telephone.notice_titre": "Nouveau téléphone",
+  "serveur.telephone.notice_appaire": "Un téléphone ({id}) vient d'être appairé depuis {by} : il recevra les notifications de la maison. Nom donné : {name}",
 
   "serveur.plan.fichier_illisible": "plan.json : {error}",
   "serveur.plan.humain_arrange": "seule une personne (code) arrange le plan",
@@ -90,8 +93,10 @@
   "serveur.garde.sans_piece_connue": "appareil sans pièce connue",
   "serveur.garde.heures_calmes": "heures calmes ({from} → {to})",
   "serveur.garde.machine": "ordre à une machine (imprimante, ordinateur) : un humain décide",
+  "serveur.garde.code_partout": "code demandé pour chaque commande (mode pin)",
   "serveur.garde.en_attente": "en attente d'autorisation humaine #{id} : {reason}",
   "serveur.garde.remplacee": "remplacée par une demande plus récente",
+  "serveur.garde.cedee": "cédée à une demande plus récente : trop de demandes en attente",
   "serveur.garde.expiree": "expirée",
   "serveur.garde.expiree_sans_decision": "expirée sans décision",
   "serveur.garde.appareil_sans_piece": "appareil sans pièce",
@@ -109,6 +114,10 @@
 
   "serveur.config.depart_ecrite": "première mise en route : configuration de départ écrite",
   "serveur.config.depart_non_ecrite": "configuration de départ non écrite : réglages par défaut, en mémoire",
+  "serveur.fuseau.section": "{section} timezone : réglage par section accepté mais déprécié ; écris-le une fois pour toute la maison, dans [server] : timezone = \"{zone}\"",
+  "serveur.fuseau.systeme": "aucun fuseau écrit : celui du système est pris ({zone}). Écris-le dans [server] timezone pour qu'il ne dépende plus de la machine",
+  "serveur.fuseau.systeme_utc": "aucun fuseau écrit, et le système dit {zone} : dans un conteneur, ce n'est presque jamais celui de la maison. Les automatismes, les jours d'énergie et les heures calmes suivent cette heure-là : écris [server] timezone",
+  "serveur.fuseau.inconnu": "aucun fuseau écrit, et le système n'en donne aucun : UTC est utilisé. Écris [server] timezone (par exemple \"Europe/Paris\")",
 
   "serveur.energie.lecture_seule": "lecture seule",
   "serveur.energie.appareil": "Énergie",
@@ -122,6 +131,17 @@
   "serveur.energie.point.projection_kwh": "Conso du mois au rythme actuel",
   "serveur.energie.point.bill_projection": "Facture du mois au rythme actuel (abonnement compris)",
   "serveur.energie.point.over_budget": "Facture estimée au-dessus du budget",
+  "serveur.energie.charge.modele": "Charge pilotée",
+  "serveur.energie.charge.mode": "Mode",
+  "serveur.energie.charge.raison": "Ce que fait Moli",
+  "serveur.energie.charge.duree": "Temps de marche du cycle",
+  "serveur.energie.point.today_production_kwh": "Production solaire aujourd'hui",
+  "serveur.energie.point.today_export_kwh": "Injecté sur le réseau aujourd'hui",
+  "serveur.energie.point.today_self_consumed_kwh": "Solaire consommé sur place aujourd'hui",
+  "serveur.energie.point.today_self_consumption_rate": "Autoconsommation aujourd'hui",
+  "serveur.energie.point.today_self_sufficiency": "Autoproduction aujourd'hui",
+  "serveur.energie.point.month_production_kwh": "Production solaire du mois",
+  "serveur.energie.point.month_self_consumption_rate": "Autoconsommation du mois",
   "serveur.demo.reserve": "pas dans la démo : ce changement resterait pour les visiteurs suivants",
 
   "serveur.personnes.mot_de_passe_court": "un mot de passe de {min} caractères au moins",
@@ -150,5 +170,7 @@
   "serveur.personnes.point_depuis": "Dans cette zone depuis",
   "serveur.personnes.point_nombre": "Personnes à la maison",
   "serveur.personnes.point_quelquun": "Quelqu'un à la maison",
-  "serveur.personnes.point_tous_partis": "Tout le monde est parti"
+  "serveur.personnes.point_tous_partis": "Tout le monde est parti",
+  "serveur.garde.ouverture": "ouvrir une serrure, une porte de garage ou un portail : une personne valide",
+  "serveur.personnes.deja_configuree": "cette personne est déjà configurée : à retirer depuis l’écran Personnes"
 }

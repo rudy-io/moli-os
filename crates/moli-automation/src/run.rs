@@ -506,6 +506,14 @@ pub(crate) fn holds(autos: &Automations, rule: &Rule) -> bool {
             let day = autos.is_day();
             if *is == DayNight::Day { day } else { !day }
         }
+        Rule::Stale { point, for_s } => {
+            let Some(sample) = autos.0.hub.state(&PointId::from(point.as_str())) else {
+                // Nothing ever arrived: nothing to trust.
+                return true;
+            };
+            let age = moli_core::now_ms().saturating_sub(sample.ts);
+            age >= for_s.saturating_mul(1000)
+        }
     }
 }
 
@@ -529,7 +537,7 @@ impl Automations {
     /// Sun up, from the house's position, else from a weather `daylight`.
     pub(crate) fn is_day(&self) -> bool {
         let now = jiff::Timestamp::now();
-        if let (Some(lat), Some(lon)) = (self.0.config.latitude, self.0.config.longitude) {
+        if let Some((lat, lon)) = self.position() {
             let date = now.to_zoned(self.0.tz.clone()).date();
             return crate::sun::times(date, lat, lon)
                 .is_some_and(|(rise, set)| rise <= now && now < set);
@@ -629,6 +637,7 @@ async fn notify(
     let messengers = autos.messengers();
     if channels.contains(&Channel::Maison) || messengers.is_empty() {
         autos.0.hub.notice(Notice {
+            to: None,
             title: title.clone(),
             message: message.to_owned(),
             from: Some(a.name.clone()),

@@ -21,6 +21,12 @@ de votre Wi-Fi**.
 Ce que vous dites va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, le
 transmettre au service de reconnaissance vocale que vous avez choisi.
 
+**Corrections de l'assistant.** Quand vous corrigez une réponse de Moli (« Pas ça »), la phrase et
+la bonne action sont notées sur votre serveur Moli (`assistant-corrections.jsonl`, les deux derniers
+mégaoctets au plus, avec les règles apprises dans `assistant-rules.json`, qui se lisent avec le code de la
+maison). Elles ne sont envoyées nulle part : elles ne quittent la maison
+que si vous les exportez vous-même, à la main, par exemple pour réentraîner votre modèle.
+
 **Notifications.** Si vous les autorisez, votre maison peut vous en envoyer, par le service de
 notifications d'Expo et d'Apple. Le jeton de notification n'est envoyé qu'à votre serveur Moli.
 
@@ -49,6 +55,11 @@ devices to answer ("someone is home"), **never your precise location or your Wi-
 **Microphone.** Used only when you tap the button to talk to Moli, the assistant. What you say goes
 to your Moli server, which may, depending on how you set it up, pass it to the speech recognition
 service you chose.
+
+**Assistant corrections.** When you correct one of Moli's answers ("Not that"), the sentence and the
+right action are written on your Moli server (`assistant-corrections.jsonl`, the last two megabytes at
+most, with the rules learned in `assistant-rules.json`, read with the house code). They are sent nowhere: they only leave the house if you export them yourself,
+by hand, for instance to retrain your model.
 
 **Notifications.** If you allow them, your house can send you notifications through Expo's and
 Apple's notification services. The notification token is only sent to your Moli server.

@@ -1,9 +1,10 @@
 <script>
   import { tick } from 'svelte';
-  import { moli } from '../lib/moli.svelte.js';
+  import { moli, openCorrection } from '../lib/moli.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Actions from './Actions.svelte';
   import MoliCards from './MoliCards.svelte';
+  import Proposals from './Proposals.svelte';
   import Orb from './Orb.svelte';
   import Icon from '../ui/Icon.svelte';
 
@@ -30,6 +31,18 @@
         <div class="body">
           <p>{m.content}</p>
           <Actions actions={m.actions ?? []} />
+          <Proposals proposals={m.proposals ?? []} />
+          {#if m.house && m.turn_id && !m.fixed}
+            <p class="notit">
+              {#if m.rule}<small>{t('moli.correction.appris')}</small>{/if}
+              <button onclick={() => openCorrection(i)} aria-label={t('moli.correction.pas_ca_pour', { text: m.content.slice(0, 40) })}>{t('moli.correction.pas_ca')}</button>
+            </p>
+          {/if}
+          {#if m.remembered}
+            <p class="notit"><small>{t('moli.correction.retenu')}</small></p>
+          {:else if m.note}
+            <p class="notit"><small>{m.note}</small></p>
+          {/if}
           {#if m.cards?.length}
             {#if inline && i === moli.messages.length - 1}
               <div class="cards"><MoliCards cards={m.cards} compact /></div>
@@ -154,5 +167,28 @@
       opacity: 0;
       transform: translateY(6px);
     }
+  }
+
+  .notit {
+    margin: 4px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .notit button {
+    border: 0;
+    background: transparent;
+    padding: 2px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-3);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .notit small {
+    font-size: 12px;
+    color: var(--ink-3);
   }
 </style>

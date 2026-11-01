@@ -152,7 +152,7 @@
               <span class="what">
                 <span class="q">{e.question}</span>
                 <span class="a">
-                  {#if e.kind === 'failed'}{t('moli.echanges.echec', { error: e.reply })}{:else if e.kind === 'door'}{e.question ? t('moli.echanges.transmis') : t('moli.echanges.sonne')}{:else if e.reply}{e.reply}{:else}{t('moli.echanges.fin')}{/if}
+                  {#if e.kind === 'failed'}{t('moli.echanges.echec', { error: e.reply })}{:else if e.kind === 'interrupted'}{t('moli.echanges.interrompu')}{:else if e.kind === 'door'}{e.question ? t('moli.echanges.transmis') : t('moli.echanges.sonne')}{:else if e.reply}{e.reply}{:else}{t('moli.echanges.fin')}{/if}
                 </span>
                 {#if e.orders?.length || e.tools?.includes('web_search')}
                   <span class="tags">

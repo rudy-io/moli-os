@@ -24,6 +24,7 @@
   import { ico } from '../ui/solar/solar-icons.js';
   import { pct, pts, eur, kwhs, perKwh, dayName, skyName, skyKind, ideaWords } from '../ui/solar/format.js';
   import SolarFlow from '../ui/solar/SolarFlow.svelte';
+  import SolarReal from '../ui/solar/SolarReal.svelte';
   import SolarDay from '../ui/solar/SolarDay.svelte';
   import SolarMonth from '../ui/solar/SolarMonth.svelte';
   import SolarAutopilot from '../ui/solar/SolarAutopilot.svelte';
@@ -104,6 +105,8 @@
   // ---- the simulation ------------------------------------------------------------
 
   const s = $derived(energy.summary);
+  // Real panels (`solar` meters): measured first, the simulation imagines more.
+  const realPanels = $derived(s?.meters?.some((m) => m.role === 'solar') ?? false);
   const weather = $derived(home.config?.outdoor?.weather);
   const cloud = $derived.by(() => {
     const v = weather ? value(weather, 'cloud_cover') : null;
@@ -225,16 +228,20 @@
     <a class="back" href="#/energie"><Icon name="arrow-left" size={18} />{t('energie.titre')}</a>
     <div class="title">
       <h1 class="page-title">{t('energie.solaire.titre')}</h1>
-      <span class="chip demo"><Icon path={ico('flask')} size={15} />{t('energie.solaire.demo')}</span>
+      {#if !realPanels}<span class="chip demo"><Icon path={ico('flask')} size={15} />{t('energie.solaire.demo')}</span>{/if}
     </div>
-    <p class="page-sub">{t('energie.solaire.sous_titre')}</p>
+    <p class="page-sub">{t(realPanels ? 'energie.solaire.sous_titre_reel' : 'energie.solaire.sous_titre')}</p>
   </header>
+
+  {#if realPanels}
+    <SolarReal summary={s} />
+  {/if}
 
   <section class="banner" aria-label={t('energie.solaire.simulation')}>
     <span class="banner-icon"><Icon path={ico('flask')} size={22} /></span>
     <p>
       <b>{t('energie.solaire.banner.simulation')}</b>
-      {t('energie.solaire.banner.debut', {
+      {t(realPanels ? 'energie.solaire.banner.debut_reel' : 'energie.solaire.banner.debut', {
         kwc,
         orientation: ORIENTATION[azimuth] ? t(ORIENTATION[azimuth]) : '',
         battery: battery ? ` ${t('energie.solaire.banner.avec_batterie', { n: battery })}` : '',

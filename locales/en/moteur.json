@@ -22,6 +22,7 @@
   "moteur.verif.seuil_manquant": "Enter the value it should go above or below.",
   "moteur.verif.decalage_soleil": "The offset from sunrise or sunset is more than 6 h.",
   "moteur.verif.intervalle": "Between 1 minute and 24 hours.",
+  "moteur.verif.peremption": "Staleness goes from 1 second to 24 hours.",
   "moteur.verif.condition_manquante": "Add at least one condition.",
   "moteur.verif.valeur_refusee": "Value refused for “{nom}”: {erreur}.",
   "moteur.verif.pas_bascule": "“{nom}” can’t be turned on or off.",
@@ -134,6 +135,7 @@
   "moteur.regle.jours_heures": "it is {heures} {jours}",
   "moteur.regle.jour": "it is daytime",
   "moteur.regle.nuit": "it is nighttime",
+  "moteur.regle.perime": "{appareil} ({libelle}) has not reported for {duree}",
 
   "moteur.action.allumer": "turn on {appareil}",
   "moteur.action.eteindre": "turn off {appareil}",

@@ -1,8 +1,9 @@
 <script>
-  import { home, value, reachable, nameOf, act, since, clock } from '../lib/home.svelte.js';
+  import { home, hub, value, reachable, nameOf, act, since, clock } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import Remote from '../ui/Remote.svelte';
+  import CameraTile from '../ui/CameraTile.svelte';
   import LightTile from '../ui/LightTile.svelte';
   import SpeakerCard from '../ui/SpeakerCard.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
@@ -11,6 +12,27 @@
   const tv = $derived(s.tv);
   const sp = $derived(s.speaker);
   const tvOn = $derived(value(tv, 'power') === true);
+  const tvPoints = $derived(hub.devices[tv]?.points ?? []);
+  // A TV that can give an image of its screen (a profile's `snapshot`).
+  const tvScreen = $derived(hub.devices[tv]?.camera === true);
+  /** The screen preview costs the TV a capture a second: off by default,
+   *  and this device's choice, not the house's. */
+  let preview = $state((() => {
+    try {
+      return localStorage.getItem('salon-preview') === 'on';
+    } catch {
+      return false;
+    }
+  })());
+
+  function togglePreview() {
+    preview = !preview;
+    try {
+      localStorage.setItem('salon-preview', preview ? 'on' : 'off');
+    } catch {
+      /* private browsing: the preview starts off again, nothing more */
+    }
+  }
   const app = $derived(value(tv, 'app'));
 
   const APPS = {
@@ -104,13 +126,31 @@
         </div>
       </section>
 
+      {#if tvScreen}
+        <section class="card preview">
+          <div class="card-head">
+            <h2><Icon name="tv" size={18} />{t('salon.apercu')}</h2>
+            <button class="toggle" onclick={togglePreview} aria-pressed={preview}>
+              {preview ? t('salon.apercu_masquer') : t('salon.apercu_montrer')}
+            </button>
+          </div>
+          {#if preview && tvOn}
+            <CameraTile id={tv} name={t('salon.apercu')} refresh={1} big />
+          {:else}
+            <p class="muted small">{tvOn ? t('salon.apercu_aide') : t('salon.apercu_veille')}</p>
+          {/if}
+        </section>
+      {/if}
+
       {#if sp}<SpeakerCard id={sp} name={nameOf(sp, t('salon.barre_de_son'))} />{/if}
 
       <section class="card ambiance">
         <div class="card-head"><h2><Icon name="light-group" size={18} />{t('salon.ambiance')}</h2></div>
         <div class="amb">
           {#if s.room_light}<LightTile id={s.room_light} name={t('salon.tout_le_salon')} icon="sofa" dimmer members={s.lamps ?? []} />{/if}
-          {#if tv}<LightTile id={tv} point="ambilight" name="Ambilight" icon="ambilight" />{/if}
+          {#if tv && tvPoints.some((p) => p.key === 'ambilight')}
+            <LightTile id={tv} point="ambilight" name="Ambilight" icon="ambilight" />
+          {/if}
         </div>
         <AmbiancePicker lights={s.lamps ?? []} label={t('salon.titre')} />
         <div class="lamps">
@@ -124,6 +164,33 @@
 </div>
 
 <style>
+  .preview .card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .preview .toggle {
+    margin-left: auto;
+    flex: none;
+    border: 0;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: none;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .preview .toggle[aria-pressed='true'] {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+
   .salon {
     display: grid;
     gap: 22px;

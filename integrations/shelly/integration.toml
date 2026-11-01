@@ -1,0 +1,49 @@
+[integration]
+id = "shelly"
+name = "Shelly (Plus, Pro, Gen3, Gen4)"
+brands = ["Shelly"]
+# Seen so far (in the reference installation): the output module and the
+# clamp meter of the energy kit.
+models = ["Pro 4PM", "Pro 3EM"]
+transport = "http"
+driver = "shelly"
+crate = "moli-shelly"
+
+[discovery]
+# No discovery yet: the instance gives the device's address. Shellys
+# announce themselves as _shelly._tcp (mDNS) for the day Moli discovers.
+mdns = ["_shelly._tcp"]
+ssdp = []
+ports = [80]
+
+[needs]
+# Only if the device has a password (recommended once installed).
+secrets = ["password"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code repris : API Gen2 publique de Shelly (JSON-RPC 2.0 sur websocket, notifications, authentification digest SHA-256) ; captures réelles d'un Pro 4PM et d'un Pro 3EM"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-shelly/src/model.rs).
+[[fixture]]
+file = "fixtures/pro4pm-deviceinfo.json"
+
+[[fixture]]
+file = "fixtures/pro4pm-config.json"
+
+[[fixture]]
+file = "fixtures/pro4pm-status.json"
+
+[[fixture]]
+file = "fixtures/pro3em-deviceinfo.json"
+
+[[fixture]]
+file = "fixtures/pro3em-config.json"
+
+[[fixture]]
+file = "fixtures/pro3em-status.json"
+
+[[fixture]]
+file = "fixtures/pro3em-notify-status.json"

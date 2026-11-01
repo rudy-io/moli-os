@@ -8,6 +8,7 @@
 
 pub mod config;
 mod estimate;
+pub mod load;
 pub mod meter;
 pub mod points;
 pub mod report;
@@ -27,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use config::{Config, MeterConfig, Reset, Role, Tariff};
 use meter::{Integral, Outcome, Reading, Tracker};
-pub use report::{Amount, Bucket, Period, Step};
+pub use report::{Amount, Bucket, Period, SolarShare, Step};
 pub use store::EnergyError;
 use store::{HourRow, Store};
 
@@ -87,6 +88,46 @@ pub struct LiveInfo {
     pub ts: Option<u64>,
 }
 
+/// The power right now, with panels (W).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Flows {
+    /// What the panels make (the `solar` meters' power).
+    pub production_w: f64,
+    /// At the main feed, signed: positive when the home buys, negative when
+    /// it sends out (the `total` meter's power, a clamp that sees both ways).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_w: Option<f64>,
+    /// What the home uses: bought + made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumption_w: Option<f64>,
+}
+
+impl Flows {
+    /// From the meters' live powers (`None` without a solar power).
+    #[must_use]
+    pub fn of(meters: &[MeterInfo]) -> Option<Self> {
+        let solar: Vec<f64> = meters
+            .iter()
+            .filter(|m| m.role == Role::Solar)
+            .filter_map(|m| m.power_w)
+            .collect();
+        if solar.is_empty() {
+            return None;
+        }
+        // A sleeping inverter may read a few negative watts: none made.
+        let production_w = solar.iter().map(|w| w.max(0.0)).sum::<f64>();
+        let grid_w = meters
+            .iter()
+            .find(|m| m.role == Role::Total)
+            .and_then(|m| m.power_w);
+        Some(Self {
+            production_w,
+            grid_w,
+            consumption_w: grid_w.map(|g| (g + production_w).max(0.0)),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Summary {
     pub currency: String,
@@ -105,6 +146,9 @@ pub struct Summary {
     pub meters: Vec<MeterInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<LiveInfo>,
+    /// Where the power goes right now, with solar meters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flows: Option<Flows>,
     pub today: Period,
     pub yesterday: Period,
     pub month: Period,
@@ -246,6 +290,7 @@ impl Energy {
         let config = &self.inner.config;
         let month_period = Period::of(config, &rows, month, month_end);
         let period = self.period_now();
+        let meters = self.meters();
         Ok(Summary {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
@@ -253,7 +298,8 @@ impl Energy {
             price_now: period.as_deref().and_then(|p| config.period_price(p)),
             period_point: config.tariff.as_ref().map(|t| t.period.clone()),
             period,
-            meters: self.meters(),
+            flows: Flows::of(&meters),
+            meters,
             live: self.live(),
             today: Period::of(config, &rows, today, tomorrow),
             yesterday: Period::of(config, &rows, yesterday, today),
@@ -383,7 +429,9 @@ pub fn import(
     let priced: Vec<HourRow> = valid
         .iter()
         .map(|(m, r)| {
+            // Production is never billed; exports earn their own price only.
             let price = m.price.or_else(|| {
+                m.role.consumes().then_some(())?;
                 billed
                     .get(&r.hour)
                     .copied()
@@ -553,7 +601,9 @@ impl Recorder {
                         // A light without power draws nothing; back, it draws again.
                         self.on_estimate(&device, now_ms()).await;
                     }
-                    Ok(Event::State { point, value, ts }) => {
+                    Ok(Event::State {
+                        point, value, ts, ..
+                    }) => {
                         self.on_state(point.as_str(), &value, ts).await;
                         if let Some(device) = device_of(point.as_str()) {
                             self.on_estimate(&device, ts).await;
@@ -673,7 +723,11 @@ impl Recorder {
             return;
         };
         let meter = self.config.meters[index].clone();
-        if self.config.tariff.is_some() && meter.price.is_none() && self.periods.0.is_empty() {
+        if meter.role.consumes()
+            && self.config.tariff.is_some()
+            && meter.price.is_none()
+            && self.periods.0.is_empty()
+        {
             // No price yet: counters are cumulative, file it later.
             return;
         }
@@ -770,6 +824,7 @@ impl Recorder {
                 // The price in the middle of the slice's own time.
                 let middle = hour.max(from) / 2 + (hour + meter::HOUR_MS).min(to) / 2;
                 let price = meter.price.or_else(|| {
+                    meter.role.consumes().then_some(())?;
                     self.periods
                         .at(middle)
                         .and_then(|p| self.config.period_price(p))

@@ -19,6 +19,10 @@ pub enum Event {
         point: PointId,
         value: Value,
         ts: u64,
+        /// An occurrence (a button press): a new event even when its value
+        /// repeats the last one.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pulse: bool,
     },
     Availability {
         device: DeviceId,
@@ -27,6 +31,9 @@ pub enum Event {
     DriverStatus {
         instance: InstanceId,
         status: DriverStatus,
+        /// Non-blocking information about this run, independent of its status.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        warning: Option<String>,
     },
     LabelChanged {
         device: DeviceId,
@@ -59,6 +66,10 @@ pub struct Notice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     pub ts: u64,
+    /// For whoever asked only (`person:<id>`, or the caller that asked),
+    /// not the whole house: the answer to one person's request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
 }
 
 /// An order an agent (or script) gave that only a human may release.

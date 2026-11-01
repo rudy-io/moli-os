@@ -15,8 +15,13 @@ use serde_json::{Value as Json, json};
 use crate::automations::Autos;
 use crate::rest::{BenchFile, Metered, Recorded, read_bench};
 
+/// The house's time zone, as resolved at start.
+#[derive(Clone)]
+pub(crate) struct HouseZone(pub(crate) Option<String>);
+
 pub(crate) async fn system(
     State(hub): State<Hub>,
+    Extension(HouseZone(timezone)): Extension<HouseZone>,
     Extension(BenchFile(bench_path)): Extension<BenchFile>,
     Extension(Recorded(history)): Extension<Recorded>,
     Extension(Metered(energy)): Extension<Metered>,
@@ -78,6 +83,7 @@ pub(crate) async fn system(
 
     axum::Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "timezone": timezone,
         "stats": hub.stats(),
         "drivers": drivers,
         "bricks": bricks,
@@ -115,6 +121,7 @@ fn drivers(snapshot: &Snapshot) -> (Vec<Json>, usize) {
                 "kind": d.kind,
                 "integration": d.integration,
                 "status": d.status,
+                "warning": d.warning,
                 "devices": devices,
                 "points": points,
                 "offline": offline,

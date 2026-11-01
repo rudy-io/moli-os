@@ -8,14 +8,23 @@ data_dir = "/data"
 worker_threads = 2
 # Names/IPs this instance is reached by, besides localhost (DNS-rebinding guard).
 allowed_hosts = ["192.168.0.10", "moli.local"]
+# The house's time zone (IANA), for everything that tells the time: when
+# automations fire, where energy days are cut, the assistant's clock, the
+# quiet hours. Absent: the system's, named at start; in a container it is
+# usually UTC, so write it.
+timezone = "Europe/Paris"
 
 # Reached from the Internet through a Cloudflare tunnel behind Cloudflare
 # Access: Moli checks Access's signed assertion itself and recognizes the
 # person by e-mail. Without this section, nobody coming through Cloudflare
 # is recognized (a stranger, never the household).
+# A guest whose stay is over, or a person removed, is a stranger even if the
+# Access rule still lets their e-mail in. known_only = true: once there are
+# people, an e-mail none of them has is a stranger too.
 # [server.access]
 # team = "myteam"        # https://myteam.cloudflareaccess.com
 # aud = "<application audience tag>"
+# known_only = false
 
 # Guard: where and when agents (MCP), scripts (API) and the CLI must ask a
 # human (approval from the dashboard). The household in the dashboard is
@@ -23,7 +32,9 @@ allowed_hosts = ["192.168.0.10", "moli.local"]
 # and people Access let in), except in protected rooms and on machines, where
 # the PIN is needed (anyone on the network can claim to be the dashboard); the
 # PIN also approves automations and releases what an agent asked for.
-# dashboard = "pin": every command needs a PIN session.
+# dashboard = "pin": every command needs a PIN session; from agents, scripts,
+# the CLI or the dashboard without a code, it waits for a human (approved
+# automations still run).
 # [guard]
 # dashboard = "trusted"
 # protected_rooms = ["Chambre", "Chambre des enfants"]
@@ -31,14 +42,12 @@ allowed_hosts = ["192.168.0.10", "moli.local"]
 # [guard.quiet_hours]
 # from = "21:00"
 # to = "07:30"
-# timezone = "Europe/Paris"
 # rooms = []            # empty = the whole home
 
 # Energy: cumulative counters (Wh or kWh) become kWh and cost per hour,
 # kept forever in data/energy.db. Roles: grid (billed: the reference),
 # total (whole home, fine), circuit (part of the total).
 # [energy]
-# timezone = "Europe/Paris"
 # [energy.tariff]
 # period = "z2m:linky/active_register_tier_delivered"
 # prices = { "HP" = 0.17, "HC" = 0.14 }
@@ -87,11 +96,33 @@ base_topic = "zigbee2mqtt"
 # flow = "software"       # "hardware" or "none"
 # channel = 15            # a new network's channel, 11 to 26 (default 15)
 
+# Z-Wave, through an existing Z-Wave JS UI bridge (its MQTT gateway).
+# [[driver]]
+# id = "zwave"
+# kind = "zwave"
+#
+# [driver.options]
+# host = "127.0.0.1"
+# port = 1883
+# base_topic = "zwave"       # the gateway's MQTT topic prefix
+# mqtt_name = "zwave-js-ui"  # the gateway's MQTT client name (its MQTT "Name" field; default "zwave-js-ui")
+# username = "moli-os"
+# password_env = "MOLI_ZWAVE_PASSWORD"
+
 # Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
 # keep the pairing key encrypted; press the link button when asked.
 # [[driver]]
 # id = "hue"
 # kind = "hue"
+#
+# [driver.options]
+# host = "192.168.0.x"
+
+# IKEA, through a Dirigera hub (local API). Needs the master key: the driver
+# keeps its token encrypted; press the action button under the hub when asked.
+# [[driver]]
+# id = "ikea"
+# kind = "dirigera"
 #
 # [driver.options]
 # host = "192.168.0.x"
@@ -106,3 +137,23 @@ base_topic = "zigbee2mqtt"
 # local_speech = "127.0.0.1:10200"              # Piper (Wyoming), repli de la voix ; "" = aucun
 # local_voice = "fr_FR-siwis-medium"
 # local_listen = "127.0.0.1:10300"              # Whisper (Wyoming), repli de l'écoute ; "" = aucun
+
+# Plusieurs fournisseurs, chacun avec le niveau de données le plus sensible qu'il peut recevoir
+# (1 = un modèle chez soi, 2 = un cloud qui ne voit que la structure pseudonymisée, 3 = un cloud libre).
+# Sans `tier`, un fournisseur ne reçoit rien. Sans `[[assistant.provider]]`, le réglage ci-dessus s'applique.
+# Avec des fournisseurs, `base_url`, `model` et `builder_model` de `[assistant]` sont remplacés par ceux du
+# fournisseur de la route `chat`, et la recherche web est coupée. Clé du fournisseur :
+# `moli-os secrets set assistant api_key.<id>`.
+# [[assistant.provider]]
+# id = "local"
+# base_url = "http://127.0.0.1:11434/v1"   # Ollama
+# model = "un-modele-local"
+# tier = 1
+# contract = "moli-v4"   # optionnel : le modèle maison, entraîné sur ce contrat (docs/components/moli.md).
+#                        # Prompt statique (appareils numérotés), 25 outils figés ; Moli traduit les numéros,
+#                        # lit les valeurs et formule la réponse. Un autre contrat est refusé.
+#
+# [assistant.routes]
+# chat = "local"        # la conversation (obligatoire avec des fournisseurs)
+# # voice, builder : le même fournisseur que chat pour l'instant
+# # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)

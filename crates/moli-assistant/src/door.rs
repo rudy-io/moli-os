@@ -74,6 +74,7 @@ impl Assistant {
                 0.0,
                 0.0,
             ),
+            asker: None,
         });
         tracing::info!(
             door,

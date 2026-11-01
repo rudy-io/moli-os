@@ -52,6 +52,16 @@ export async function start() {
   }
 }
 
+/** The layout again (/api/home): after a change of rooms or of hidden devices. */
+export async function reloadLayout() {
+  try {
+    const res = await fetch('/api/home');
+    if (res.ok) home.config = await res.json();
+  } catch {
+    /* keep the layout known */
+  }
+}
+
 export function note(text, tone = 'info') {
   const id = Date.now() + Math.random();
   home.notes = [...home.notes, { id, text, tone }];
@@ -105,9 +115,25 @@ export function nameOf(id, fallback) {
   return fallback || d?.label?.name || d?.native_name || t('commun.appareil');
 }
 
+/** How far a shutter is open: the point of the `position` sense (Zigbee2MQTT). */
+export function positionPoint(d) {
+  return d?.points.find((p) => p.semantic === 'position') ?? null;
+}
+
+/** The point that orders a shutter to open, stop or close: a writable enum
+ *  that offers both « open » and « close » (`OPEN` / `CLOSE` on Zigbee2MQTT),
+ *  whatever the case. It also tells a plain open / close / stop motor, which
+ *  has no `position`, from a switch. */
+export function coverOrder(d) {
+  const offers = (p, word) => p.kind.values?.some((v) => v.toLowerCase() === word);
+  return d?.points.find((p) => p.access?.write && p.kind.type === 'enum' && offers(p, 'open') && offers(p, 'close')) ?? null;
+}
+
 /** The point that switches the device on and off. */
 export function powerKey(d) {
   if (!d) return null;
+  // A shutter is not a switch: its `state` is an order, never « on ».
+  if (positionPoint(d) || coverOrder(d)) return null;
   const writable = d.points.filter((p) => p.access?.write);
   const p =
     writable.find((p) => p.semantic === 'on_off' && p.kind.type === 'binary') ??
@@ -183,6 +209,10 @@ export const protectedRoom = (name) =>
     ),
   );
 
+/** A device the house watches: it has an `alert` point and says itself
+ *  whether it is well (the « Parc » page). */
+export const watches = (d) => (d?.points ?? []).some((p) => p.semantic === 'alert');
+
 export function hidden(id) {
   return (home.config?.hidden ?? []).includes(id);
 }
@@ -204,7 +234,7 @@ export function outletsOf(id) {
     .map(([key, name]) => ({ key, name }));
 }
 
-const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge/i;
+const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge|éclairage|eclairage|néon|neon|\bleds?\b|veilleuse|guirlande|phare/i;
 /** On/off things that are not lights, whatever their bridge calls them. */
 const NOT_LIGHT = /vmc|ventil|pompe|prise|chauffe|\bfan\b|pump|heater|outlet|socket/i;
 const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!write || p.access?.write));
@@ -213,18 +243,28 @@ const has = (d, key, write = false) => d.points.some((p) => p.key === key && (!w
 export function deviceKind(d) {
   if (!d) return 'unknown';
   if (has(d, 'progress') && has(d, 'nozzle_temperature')) return 'printer';
+  // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
+  if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
   if (has(d, 'target_temperature')) return 'climate';
-  if (has(d, 'key', true)) return 'tv';
   if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  if (has(d, 'percent_control') || (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open')))
+  // A shutter is recognised by the `position` sense, or by its open / close
+  // order (a plain motor has no position). Tuya's own names stay until that
+  // driver labels its opening point with the sense.
+  if (
+    has(d, 'percent_control') ||
+    positionPoint(d) ||
+    coverOrder(d) ||
+    (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open'))
+  )
     return 'cover';
   if (powerKey(d)) {
     if (isGroup(d)) return 'group';
     if (isFixture(d)) return 'light';
     const name = d.label?.name || d.native_name;
     if (NOT_LIGHT.test(name) || /plug/i.test(d.model ?? '')) return 'plug';
-    if (d.id.startsWith('hue:') || LIGHTISH.test(name)) return 'light';
+    // Dimming or colour is what makes a light (a « Ruban led » is no plug, whatever its name).
+    if (d.id.startsWith('hue:') || LIGHTISH.test(name) || ['brightness', 'color_temp', 'color'].some((k) => has(d, k, true))) return 'light';
     return 'plug';
   }
   return 'sensor';
@@ -373,7 +413,13 @@ export async function confirmHeld(pin) {
   const held = home.held;
   if (!held) return null;
   const error = await login(pin);
-  if (error) return /verrou|locked/i.test(error) ? t('commun.trop_d_essais') : t('commun.code_incorrect');
+  // The server's words, told apart: a locked device must not read « incorrect code »
+  // (it refuses every attempt, the right code included), and any other failure
+  // is shown as it is.
+  if (error) {
+    if (/essais|attempts|verrou|locked/i.test(error)) return t('commun.trop_d_essais');
+    return /incorrect/i.test(error) ? t('commun.code_incorrect') : error;
+  }
   if (held.custom) {
     home.held = null;
     await held.custom();

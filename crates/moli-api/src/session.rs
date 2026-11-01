@@ -528,6 +528,7 @@ impl Sessions {
     /// Tells the house (its notices: dashboard, Telegram…).
     fn tell(&self, message: String) {
         self.hub.notice(moli_core::Notice {
+            to: None,
             title: Some(moli_i18n::tr!("serveur.code.notice_titre")),
             message,
             from: Some("Moli".into()),
@@ -561,6 +562,7 @@ impl Sessions {
                 ),
             };
             self.hub.notice(moli_core::Notice {
+                to: None,
                 title: Some(moli_i18n::tr!("serveur.code.notice_titre")),
                 message,
                 from: Some("Moli".into()),

@@ -1,0 +1,138 @@
+{
+ "code": 200,
+ "msg": null,
+ "data": {
+  "current": 1,
+  "pages": 1,
+  "records": [
+   {
+    "deviceType": "vm",
+    "device": "VMP2",
+    "online": true,
+    "onlineState": 1,
+    "pvNum": 2,
+    "rssi": -77,
+    "runningState": 0,
+    "status": 1,
+    "lastUpdate": "2026-10-26 20:17:45",
+    "lastOnlineTime": "2026-10-26 20:18:47",
+    "alarm": "warn1=0,warn2=0",
+    "hardwareVersion": "VMP20101,WIFI0101",
+    "softwareVersion": "01.02.0016,1.7.3",
+    "protocolVersion": "0.7",
+    "sn": "000000000001",
+    "deviceName": "000000000001",
+    "deviceId": 20001,
+    "powerId": 10001,
+    "stationName": "Centrale",
+    "mac": "aa:bb:cc:dd:ee:01",
+    "dataDtos": [
+     {
+      "color": null,
+      "key": "deviceType",
+      "name": "Type d'appareil",
+      "remark": null,
+      "show": true,
+      "value": "vm"
+     },
+     {
+      "color": null,
+      "key": "sn",
+      "name": "SN",
+      "remark": null,
+      "show": true,
+      "value": "000000000001"
+     },
+     {
+      "color": null,
+      "key": "rate power",
+      "name": "Puissance nominale",
+      "remark": null,
+      "show": true,
+      "value": "1000W"
+     },
+     {
+      "color": null,
+      "key": "dayEnergy",
+      "name": "Production quotidienne",
+      "remark": null,
+      "show": true,
+      "value": "1.75KWh"
+     },
+     {
+      "color": null,
+      "key": "alarm",
+      "name": "alarm",
+      "remark": null,
+      "show": false,
+      "value": []
+     }
+    ]
+   },
+   {
+    "deviceType": "vm",
+    "device": "VMP4",
+    "online": true,
+    "onlineState": 1,
+    "pvNum": 4,
+    "rssi": -90,
+    "runningState": 0,
+    "status": 1,
+    "lastUpdate": "2026-10-26 20:17:21",
+    "lastOnlineTime": "2026-10-26 20:18:43",
+    "alarm": "warn1=0,warn2=0",
+    "hardwareVersion": "VMP40102,WIFI0101",
+    "softwareVersion": "01.04.0002,1.7.3",
+    "protocolVersion": "0.7",
+    "sn": "000000000002",
+    "deviceName": "000000000002",
+    "deviceId": 20002,
+    "powerId": 10001,
+    "stationName": "Centrale",
+    "mac": "aa:bb:cc:dd:ee:02",
+    "dataDtos": [
+     {
+      "color": null,
+      "key": "deviceType",
+      "name": "Type d'appareil",
+      "remark": null,
+      "show": true,
+      "value": "vm"
+     },
+     {
+      "color": null,
+      "key": "sn",
+      "name": "SN",
+      "remark": null,
+      "show": true,
+      "value": "000000000002"
+     },
+     {
+      "color": null,
+      "key": "rate power",
+      "name": "Puissance nominale",
+      "remark": null,
+      "show": true,
+      "value": "2000W"
+     },
+     {
+      "color": null,
+      "key": "dayEnergy",
+      "name": "Production quotidienne",
+      "remark": null,
+      "show": true,
+      "value": "3.85KWh"
+     },
+     {
+      "color": null,
+      "key": "alarm",
+      "name": "alarm",
+      "remark": null,
+      "show": false,
+      "value": []
+     }
+    ]
+   }
+  ]
+ }
+}

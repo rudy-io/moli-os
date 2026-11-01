@@ -50,8 +50,8 @@ export function jobName(raw) {
   if (!raw) return '';
   const name = String(raw)
     .replace(/\.(gcode|3mf)$/i, '')
-    .replace(/_(PLA|PETG|ABS|ASA|TPU|PA|PC|PVA|HIPS)[^_]*_\d+h\d*m?$/i, '')
-    .replace(/_\d+h\d*m$/i, '');
+    .replace(/_(PLA|PETG|ABS|ASA|TPU|PA|PC|PVA|HIPS)[^_]*_\d+h\d*m?(\d+s)?$/i, '')
+    .replace(/_\d+h\d*m(\d+s)?$/i, '');
   return name.replace(/_/g, ' ').trim();
 }
 

@@ -34,6 +34,7 @@
   "salon.enceinte.arret": "À l’arrêt",
   "salon.enceinte.son_tele": "Le son de la télé",
   "salon.enceinte.rien": "Rien en cours",
+  "salon.enceinte.volume_annonce": "Pendant une annonce",
 
   "salon.tele.label": "Télécommande",
   "salon.tele.eteindre": "Éteindre la TV",
@@ -190,5 +191,10 @@
   "salon.papier.partiel_other": "{count} pages envoyées sur {total}, la suite non : {message}",
   "salon.papier.page_impossible": "page impossible à préparer",
   "salon.papier.choisir": "Choisis une photo ou un PDF.",
-  "salon.papier.erreur": "erreur {status}"
+  "salon.papier.erreur": "erreur {status}",
+  "salon.apercu": "Aperçu de l’écran",
+  "salon.apercu_aide": "Une image par seconde, prise seulement pendant qu’elle est affichée.",
+  "salon.apercu_veille": "La télé est en veille : rien à montrer.",
+  "salon.apercu_montrer": "Afficher",
+  "salon.apercu_masquer": "Masquer"
 }

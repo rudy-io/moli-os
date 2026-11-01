@@ -33,6 +33,8 @@
         : t('commun.code.seconde_fois')
       : /automatisme|automation/i.test(home.held?.reason ?? '')
         ? t('commun.code.raison_automatisme')
+        : /configuration/i.test(home.held?.reason ?? '')
+          ? t('commun.code.raison_configuration')
         : /calme|quiet/i.test(home.held?.reason ?? '')
           ? t('commun.code.raison_calme')
           : /prot/i.test(home.held?.reason ?? '')

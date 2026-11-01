@@ -1,0 +1,66 @@
+[
+ {
+  "src": "shellypro3em-aabbccddee02",
+  "dst": "moli-capture",
+  "method": "NotifyStatus",
+  "params": {
+   "ts": 1800000000,
+   "em:0": {
+    "a_act_power": 0.0,
+    "a_aprt_power": 0.0,
+    "a_current": 0.028,
+    "a_freq": 0.0,
+    "a_pf": 0.0,
+    "a_voltage": 0.0,
+    "b_act_power": 0.0,
+    "b_aprt_power": 0.0,
+    "b_current": 0.027,
+    "b_freq": 0.0,
+    "b_pf": 0.0,
+    "b_voltage": 0.0,
+    "c_act_power": 917.9,
+    "c_aprt_power": 1152.7,
+    "c_current": 4.95,
+    "c_freq": 50.0,
+    "c_pf": 0.8,
+    "c_voltage": 232.6,
+    "n_current": null,
+    "total_act_power": 917.858,
+    "total_aprt_power": 1152.685,
+    "total_current": 5.006
+   }
+  }
+ },
+ {
+  "src": "shellypro3em-aabbccddee02",
+  "dst": "moli-capture",
+  "method": "NotifyStatus",
+  "params": {
+   "ts": 1800000000,
+   "em:0": {
+    "a_act_power": 0.0,
+    "a_aprt_power": 0.0,
+    "a_current": 0.029,
+    "a_freq": 0.0,
+    "a_pf": 0.0,
+    "a_voltage": 0.0,
+    "b_act_power": 0.0,
+    "b_aprt_power": 0.0,
+    "b_current": 0.027,
+    "b_freq": 0.0,
+    "b_pf": 0.0,
+    "b_voltage": 0.0,
+    "c_act_power": 869.1,
+    "c_aprt_power": 1112.0,
+    "c_current": 4.782,
+    "c_freq": 50.0,
+    "c_pf": 0.79,
+    "c_voltage": 232.3,
+    "n_current": null,
+    "total_act_power": 869.106,
+    "total_aprt_power": 1112.041,
+    "total_current": 4.838
+   }
+  }
+ }
+]

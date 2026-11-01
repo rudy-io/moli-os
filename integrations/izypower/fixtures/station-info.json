@@ -1,0 +1,25 @@
+{
+ "code": 200,
+ "msg": null,
+ "data": {
+  "allSum": 2130.8,
+  "deviceCount": 2,
+  "hasBattery": false,
+  "hasMeter": false,
+  "installedCapacity": 6000,
+  "lastUpdate": "2026-10-26 20:14:45",
+  "lastUpdateStr": "2026-10-26 13:14:45 UTC+01:00",
+  "monthSum": 230.15,
+  "onlineState": 1,
+  "operatingState": 0,
+  "power": 1821.0,
+  "signal": -89,
+  "status": "online",
+  "timezone": 1,
+  "todaySum": 5.6,
+  "yearSum": 2130.8,
+  "minRssi": -89,
+  "stationsId": 10001,
+  "stationName": "Centrale"
+ }
+}

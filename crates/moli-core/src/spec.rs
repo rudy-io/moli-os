@@ -148,6 +148,11 @@ pub enum Semantic {
     BatteryLow,
     SignalStrength,
     Contact,
+    /// How far a shutter, blind or curtain is open, in %: 100 = fully open,
+    /// 0 = fully closed (the convention of Zigbee2MQTT and of the dashboard).
+    /// Never deduced from a name (a `position` can be a servo or a playback
+    /// position): a driver that knows the point is an opening sets it itself.
+    Position,
     Occupancy,
     WaterLeak,
     Smoke,
@@ -156,6 +161,12 @@ pub enum Semantic {
     /// An order to a machine at work (pause or cancel a print): an agent
     /// asking gets a human's approval first.
     Control,
+    /// A lock's state (true: locked).
+    Lock,
+    /// Something the house watches says it is not well (binary, true:
+    /// something is wrong): a backup, a disk, a link. A device with one is
+    /// shown on the dashboard's « Parc » page; a text point `detail` words it.
+    Alert,
     Other,
 }
 
@@ -289,6 +300,16 @@ mod tests {
     }
 
     #[test]
+    fn alert_is_declared_never_guessed() {
+        assert_eq!(
+            serde_json::to_string(&Semantic::Alert).unwrap(),
+            "\"alert\""
+        );
+        // No magic key: a point named so is not an alert until it says it is.
+        assert_eq!(Semantic::infer("alert", None), Semantic::Other);
+    }
+
+    #[test]
     fn semantic_inference() {
         assert_eq!(Semantic::infer("state", None), Semantic::OnOff);
         assert_eq!(Semantic::infer("state_l1", None), Semantic::OnOff);
@@ -309,6 +330,11 @@ mod tests {
             Semantic::SignalStrength
         );
         assert_eq!(Semantic::infer("color.x", None), Semantic::Color);
+        assert_eq!(
+            Semantic::infer("position", Some(&Unit::Percent)),
+            Semantic::Other,
+            "a position is never deduced to be a shutter's opening"
+        );
         assert_eq!(Semantic::infer("whatever", None), Semantic::Other);
     }
 

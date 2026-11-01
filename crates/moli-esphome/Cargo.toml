@@ -19,6 +19,8 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+symphonia-bundle-flac.workspace = true
+symphonia-core.workspace = true
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tokio-util.workspace = true
 

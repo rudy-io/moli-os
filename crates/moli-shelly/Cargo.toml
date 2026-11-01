@@ -1,0 +1,22 @@
+[package]
+name = "moli-shelly"
+description = "Moli OS driver for Shelly Gen2+ devices (Plus, Pro, Gen3, Gen4): local JSON-RPC over a websocket, pushed status."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

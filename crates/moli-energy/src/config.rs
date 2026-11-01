@@ -34,6 +34,9 @@ pub struct Config {
     pub live: Option<Live>,
     #[serde(default, rename = "meter")]
     pub meters: Vec<MeterConfig>,
+    /// Loads Moli switches on the panels' surplus and in off-peak hours.
+    #[serde(default, rename = "load")]
+    pub loads: Vec<crate::load::LoadConfig>,
 }
 
 fn default_timezone() -> String {
@@ -146,6 +149,21 @@ pub enum Role {
     /// One appliance (a plug, a machine's own meter): shown on its own,
     /// never added to the total nor taken from what circuits leave over.
     Appliance,
+    /// What solar panels produce (an inverter's lifetime index): never
+    /// billed; with `export`, tells what the home used of it.
+    Solar,
+    /// What the home sends to the grid (the returned energy of a clamp on
+    /// the main feed, a Linky injection index): `price` is what it earns.
+    Export,
+}
+
+impl Role {
+    /// Meters that count energy the home takes (grid, whole home, circuits,
+    /// appliances), as opposed to what it makes or sends out.
+    #[must_use]
+    pub fn consumes(self) -> bool {
+        !matches!(self, Self::Solar | Self::Export)
+    }
 }
 
 /// What a decrease of the counter means.
@@ -200,6 +218,18 @@ impl Config {
                     ));
                 }
             }
+            if !m.role.consumes() && m.period.is_some() {
+                return Err(format!(
+                    "meter {:?}: `period` is for a meter the supplier bills",
+                    m.id
+                ));
+            }
+            if m.role == Role::Solar && m.price.is_some() {
+                return Err(format!(
+                    "meter {:?}: solar production has no price (an `export` meter's price is what selling earns)",
+                    m.id
+                ));
+            }
             if m.estimate && (m.role != Role::Appliance || m.integrate || m.power.is_some()) {
                 return Err(format!(
                     "meter {:?}: `estimate` is for an appliance, without `integrate` nor `power`",
@@ -208,6 +238,13 @@ impl Config {
             }
             if let Some(price) = m.price {
                 check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
+            }
+        }
+        let mut load_ids = HashSet::new();
+        for load in &self.loads {
+            load.check()?;
+            if !load_ids.insert(&load.id) {
+                return Err(format!("duplicate load id {:?}", load.id));
             }
         }
         if let Some(live) = &self.live {

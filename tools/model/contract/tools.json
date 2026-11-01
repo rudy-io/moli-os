@@ -1,0 +1,546 @@
+{
+  "version": 4,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "set",
+        "description": "Commande un point d'un appareil (point = appareil/clé, par exemple d3/state ; une couleur se dit par son nom).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "string",
+              "description": "appareil/clé, par exemple d3/state"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "point",
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "set_all",
+        "description": "Commande tous les appareils d'un type, dans une pièce ou toute la maison.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "lumières",
+                "volets",
+                "prises",
+                "climatisation",
+                "médias",
+                "tout"
+              ]
+            },
+            "room": {
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "adjust",
+        "description": "Règle une valeur un peu plus ou un peu moins (by : écart signé, par exemple 1 ou -20).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "string"
+            },
+            "by": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "point",
+            "by"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_device",
+        "description": "Lit les valeurs d'un appareil (son numéro, par exemple d3).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "device"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "find",
+        "description": "Quels appareils sont dans un état (allumés, ouverts, injoignables…).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "lumières",
+                "volets",
+                "prises",
+                "climatisation",
+                "médias",
+                "tout"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "allumé",
+                "éteint",
+                "ouvert",
+                "fermé",
+                "injoignable",
+                "batterie_faible"
+              ]
+            },
+            "room": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "problems",
+        "description": "Ce qui ne va pas dans la maison : alertes, appareils injoignables, batteries faibles.",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "energy",
+        "description": "Consommation électrique de la maison.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "string",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "history",
+        "description": "Historique d'une valeur.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "string"
+            },
+            "hours": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "point"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "last_change",
+        "description": "Depuis quand un appareil a changé, et qui l'a commandé.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "device"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "now",
+        "description": "L'heure et la date.",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "weather",
+        "description": "Prévision météo d'un jour (day : 0 aujourd'hui, 1 demain…).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "day": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "refresh_weather",
+        "description": "Actualise la météo.",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ambiance",
+        "description": "Ambiance lumineuse d'une pièce (look : feu, bougies, fin-de-journee, cocooning, fete, ocean, foret, aurore, romantique, cinema, lecture, veilleuse) ou couleur nommée.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "room": {
+              "type": "string"
+            },
+            "look": {
+              "type": "string"
+            },
+            "color": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "room"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "schedule",
+        "description": "Programme un ordre dans quelques minutes.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1440
+            },
+            "point": {
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "minutes",
+            "point",
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remind",
+        "description": "Rappel ou minuteur : prévient dans quelques minutes.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1440
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "minutes",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "rename_device",
+        "description": "Propose de renommer un appareil.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string"
+            },
+            "new_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "device",
+            "new_name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "move_device",
+        "description": "Propose de déplacer un appareil dans une autre pièce.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string"
+            },
+            "room": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "device",
+            "room"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "set_device_enabled",
+        "description": "Propose d'activer (montrer) ou de désactiver (masquer) un appareil.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "device",
+            "enabled"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "rename_room",
+        "description": "Propose de renommer une pièce.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "room": {
+              "type": "string"
+            },
+            "new_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "room",
+            "new_name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "add_person",
+        "description": "Propose d'ajouter une personne au foyer.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "set_home_location",
+        "description": "Propose de régler la position de la maison, au niveau d'une ville.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "place"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "undo",
+        "description": "Annule la dernière modification de la maison que la personne a confirmée (annule, fais l'inverse, reviens en arrière, remets comme avant).",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "draft_automation",
+        "description": "Demande d'automatisme (« quand…, alors… ») transmise à l'agent qui les rédige.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "request_driver",
+        "description": "Transmet à l'agent externe une demande de pilote ou de code ; rien n'est exécuté ici.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "Demande qui sort du cadre de la maison (conversation, explication, avis, culture, calcul) : transmise à un autre assistant.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "la demande, telle que la personne l'a dite"
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
+      }
+    }
+  ]
+}

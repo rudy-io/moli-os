@@ -333,6 +333,15 @@ pub enum Rule {
     },
     /// Day (sun up) or night.
     Sun { is: DayNight },
+    /// A point that stopped moving: no fresh value for `for_s` seconds.
+    /// What a threshold cannot see — a measurement that stops arriving keeps
+    /// its last value, plausible and frozen.
+    Stale {
+        point: String,
+        /// Seconds without news. 0: stale as soon as nothing recent arrived.
+        #[serde(default)]
+        for_s: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -417,5 +426,46 @@ mod tests {
         assert_eq!(minutes_of("07:30"), Some(450));
         assert_eq!(minutes_of("24:00"), None);
         assert_eq!(minutes_of("7h"), None);
+    }
+
+    #[test]
+    fn a_stale_rule_reads_from_the_graph() {
+        let a: Automation = serde_json::from_value(serde_json::json!({
+            "id": "g", "name": "Garde-fou", "enabled": true,
+            "graph": {
+                "nodes": [
+                    { "id": "t", "type": "every", "minutes": 15 },
+                    { "id": "c", "type": "if", "all": true, "rules": [
+                        { "kind": "stale", "point": "hue:2/temperature", "for_s": 7200 }
+                    ]}
+                ],
+                "edges": [{ "from": "t", "to": "c" }]
+            }
+        }))
+        .unwrap();
+        let Step::If { rules, .. } = &a.graph.nodes[1].step else {
+            panic!("expected an if node, got {:?}", a.graph.nodes[1].step);
+        };
+        assert_eq!(
+            rules[0],
+            Rule::Stale {
+                point: "hue:2/temperature".into(),
+                for_s: 7200,
+            }
+        );
+    }
+
+    #[test]
+    fn a_stale_rule_says_how_long() {
+        let rule = Rule::Stale {
+            point: "hue:2/temperature".into(),
+            for_s: 7200,
+        };
+        assert_eq!(
+            serde_json::to_value(&rule).unwrap(),
+            serde_json::json!({
+                "kind": "stale", "point": "hue:2/temperature", "for_s": 7200
+            })
+        );
     }
 }

@@ -44,6 +44,8 @@ pub(crate) async fn forecast(Extension(Sky(weather)): Extension<Sky>) -> Respons
     };
     match weather.forecast().await {
         Ok(f) => axum::Json(f).into_response(),
+        // Not placed yet (a position chosen later places it, no restart needed).
+        Err(e) if e.is::<moli_weather::Unplaced>() => unplaced(),
         Err(e) => error(StatusCode::BAD_GATEWAY, &format!("{e:#}")),
     }
 }
@@ -54,6 +56,8 @@ pub(crate) async fn map(Extension(Sky(weather)): Extension<Sky>) -> Response {
     };
     match weather.map().await {
         Ok(m) => axum::Json(m).into_response(),
+        // Not placed yet (a position chosen later places it, no restart needed).
+        Err(e) if e.is::<moli_weather::Unplaced>() => unplaced(),
         Err(e) => error(StatusCode::BAD_GATEWAY, &format!("{e:#}")),
     }
 }

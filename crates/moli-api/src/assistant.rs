@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use axum::Extension;
 use axum::body::Bytes;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use moli_assistant::{Assistant, AssistantError, Speech, Turn};
+use moli_assistant::{Assistant, AssistantError, CorrectionError, ProposalError, Speech, Turn};
+use moli_runtime::Hub;
 use serde_json::json;
 
 use crate::caller::Caller;
@@ -29,14 +31,231 @@ pub(crate) async fn status(Extension(Moli(moli)): Extension<Moli>) -> Response {
 
 pub(crate) async fn turn(
     Extension(Moli(moli)): Extension<Moli>,
-    axum::Json(turn): axum::Json<Turn>,
+    caller: Caller,
+    axum::Json(mut turn): axum::Json<Turn>,
 ) -> Response {
     let Some(moli) = moli else {
         return not_configured();
     };
+    // Who asked, as the server knows it: the person when the house knows
+    // them, else the device asking. What « annule » may take back is theirs,
+    // and so is the task « my request » means.
+    turn.asker = Some(caller.asker());
     match moli.turn(turn).await {
         Ok(reply) => axum::Json(reply).into_response(),
         Err(e) => failure(&e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Stop {
+    /// The `id` the dashboard gave its turn.
+    id: String,
+}
+
+/// `POST /api/assistant/stop`: stops the dashboard's turn of that `id`.
+/// `{stopped}` says whether one was running.
+pub(crate) async fn stop(
+    Extension(Moli(moli)): Extension<Moli>,
+    axum::Json(stop): axum::Json<Stop>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    axum::Json(json!({ "stopped": moli.stop(&stop.id) })).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Decision {
+    approve: bool,
+}
+
+/// A person's answer to a change the conversation proposed. Only the
+/// dashboard's person decides (a human session: the household alone is not
+/// enough): a script or an agent is refused whatever it claims, and the
+/// proposal waits for a person.
+#[allow(clippy::too_many_arguments)] // axum extractors
+pub(crate) async fn decide_proposal(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(persons): Extension<Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+    axum::Json(body): axum::Json<Decision>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    let owner = crate::people_api::is_owner(&caller, &humans, &persons, &headers);
+    match moli
+        .decide_proposal_by(id, body.approve, origin, Some(caller.describe()), owner)
+        .await
+    {
+        Ok(said) => axum::Json(json!({ "ok": true, "said": said })).into_response(),
+        Err(e) => {
+            let status = match e {
+                ProposalError::Unknown => StatusCode::GONE,
+                // 403: not a person (the dashboard asks for the code); 409: the house's guard refused.
+                ProposalError::HumanOnly | ProposalError::OwnersOnly => StatusCode::FORBIDDEN,
+                ProposalError::Refused(_) => StatusCode::CONFLICT,
+                ProposalError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            if status == StatusCode::INTERNAL_SERVER_ERROR {
+                tracing::warn!(error = %e, "proposal could not be applied");
+            }
+            (status, axum::Json(json!({ "error": e.to_string() }))).into_response()
+        }
+    }
+}
+
+fn corrections_failure(e: &CorrectionError) -> Response {
+    let status = match e {
+        CorrectionError::HumanOnly => StatusCode::FORBIDDEN,
+        CorrectionError::Unknown => StatusCode::GONE,
+        CorrectionError::NotOffered => StatusCode::UNPROCESSABLE_ENTITY,
+        CorrectionError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if status == StatusCode::INTERNAL_SERVER_ERROR {
+        tracing::warn!(error = %e, "correction failed");
+    }
+    (status, axum::Json(json!({ "error": e.to_string() }))).into_response()
+}
+
+/// « Défaire »: puts back what the orders of a turn replaced. A person's only.
+pub(crate) async fn undo_turn(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    let asker = caller.asker();
+    match moli
+        .undo_turn(id, origin, Some(caller.describe()), Some(&asker))
+        .await
+    {
+        Ok(said) => axum::Json(json!({ "ok": true, "said": said })).into_response(),
+        Err(e) => corrections_failure(&e),
+    }
+}
+
+/// What a turn could have meant: rooms, devices and what each can do.
+pub(crate) async fn turn_choices(
+    Extension(Moli(moli)): Extension<Moli>,
+    caller: Caller,
+    Path(id): Path<u64>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    // Only the one who asked sees what their turn could have meant.
+    match moli.choices(id, Some(&caller.asker())).await {
+        Ok(choices) => axum::Json(choices).into_response(),
+        Err(e) => corrections_failure(&e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct Correction {
+    /// One thing meant, or several devices that share a command (`choices`).
+    #[serde(default)]
+    choice: Option<serde_json::Value>,
+    #[serde(default)]
+    choices: Vec<serde_json::Value>,
+    #[serde(default)]
+    remember: bool,
+}
+
+/// The right answer to a turn, picked among what the house offered; kept as a rule when asked.
+pub(crate) async fn correct_turn(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+    axum::Json(body): axum::Json<Correction>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    let choices: Vec<serde_json::Value> = body.choice.into_iter().chain(body.choices).collect();
+    let (actor, asker) = (Some(caller.describe()), caller.asker());
+    match moli
+        .correct_many(id, choices, body.remember, origin, actor, Some(&asker))
+        .await
+    {
+        Ok(done) => axum::Json(done).into_response(),
+        Err(e) => corrections_failure(&e),
+    }
+}
+
+/// What Moli learned, and who taught it: a person's to read (the code), as to change.
+pub(crate) async fn list_rules(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    match moli.rules_view(origin) {
+        Ok(list) => axum::Json(list).into_response(),
+        Err(e) => corrections_failure(&e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct RuleSwitch {
+    enabled: bool,
+}
+
+pub(crate) async fn switch_rule(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+    axum::Json(body): axum::Json<RuleSwitch>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    match moli.set_rule_enabled(id, body.enabled, origin).await {
+        Ok(()) => axum::Json(json!({ "ok": true })).into_response(),
+        Err(e) => corrections_failure(&e),
+    }
+}
+
+pub(crate) async fn delete_rule(
+    State(hub): State<Hub>,
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Path(id): Path<u64>,
+) -> Response {
+    let Some(moli) = moli else {
+        return not_configured();
+    };
+    let origin = crate::rest::origin(&hub, &headers, &humans, &caller);
+    match moli.delete_rule(id, origin).await {
+        Ok(()) => axum::Json(json!({ "ok": true })).into_response(),
+        Err(e) => corrections_failure(&e),
     }
 }
 
@@ -147,13 +366,16 @@ fn a_day() -> u32 {
 }
 
 /// What the house asked Moli lately, newest first (at most 30 days).
+/// What was said to Moli: the shared exchanges (satellites, doors), and the caller's own from the
+/// dashboard, not the questions of the rest of the household.
 pub(crate) async fn exchanges(
     Extension(Moli(moli)): Extension<Moli>,
+    caller: Caller,
     axum::extract::Query(since): axum::extract::Query<Since>,
 ) -> Response {
     match moli {
         Some(moli) => axum::Json(json!({
-            "exchanges": moli.exchanges(since.hours.min(720)),
+            "exchanges": moli.exchanges_for(since.hours.min(720), &caller.asker()),
             "recording_until": moli.recording_until(),
         }))
         .into_response(),

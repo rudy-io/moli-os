@@ -29,6 +29,7 @@
   function ruleOf(kind) {
     if (kind === 'sun') return { kind: 'sun', is: 'night' };
     if (kind === 'time') return { kind: 'time', after: '22:00', before: '06:00', days: [] };
+    if (kind === 'stale') return { kind: 'stale', point: '', for_s: 7200 };
     return { kind: 'state', point: '', op: 'eq', value: true };
   }
   const OPS = [
@@ -44,7 +45,7 @@
 {#snippet rule(r, change)}
   <div class="rule">
     <div class="seg small">
-      {#each ['state', 'time', 'sun'] as k (k)}
+      {#each ['state', 'time', 'sun', 'stale'] as k (k)}
         <button class:on={r.kind === k} onclick={() => change(ruleOf(k), true)}>{t('automatismes.inspecteur.regle.' + k)}</button>
       {/each}
     </div>
@@ -73,6 +74,11 @@
         <Fields kind="time" value={r.before} onchange={(v) => change({ before: v })} />
       </div>
       <Fields kind="days" value={r.days} onchange={(v) => change({ days: v })} />
+    {:else if r.kind === 'stale'}
+      <PointPicker point={r.point} onpick={(p) => change({ point: p })} />
+      {#if r.point}
+        <Fields kind="duration" value={r.for_s || 7200} onchange={(v) => change({ for_s: v })} />
+      {/if}
     {:else}
       <div class="seg">
         <button class:on={r.is === 'day'} onclick={() => change({ is: 'day' })}><Icon name="sun" size={16} />{t('automatismes.inspecteur.il_fait_jour')}</button>

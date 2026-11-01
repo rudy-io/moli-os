@@ -1,4 +1,4 @@
-//! 3D printers running Klipper with the Moonraker API (Snapmaker U1, Voron,
+//! 3D printers running Klipper with the Moonraker API (Snapmaker U1, Creality K2, Voron,
 //! Prusa with Klipper…), over its local HTTP API (no auth on a trusted LAN).
 //!
 //! Reads the print (state, progress, time left, layers, every tool head and
@@ -150,12 +150,17 @@ async fn meet(
         serde_json::from_value(api.get("/printer/objects/list").await?["objects"].clone())
             .context("Moonraker: no object list")?;
     let shape = Shape::of(&objects);
-    // Snapmaker says what machine it is; others may not.
-    let machine = api.get("/machine/system_info").await.ok().and_then(|s| {
-        s["system_info"]["product_info"]["machine_type"]
-            .as_str()
-            .map(str::to_owned)
-    });
+    // Snapmaker says what machine it is; Creality names its host after it.
+    let machine = api
+        .get("/machine/system_info")
+        .await
+        .ok()
+        .and_then(|s| {
+            s["system_info"]["product_info"]["machine_type"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .or_else(|| shape.creality.then(|| model::creality_machine(&host)));
     let id = ctx.device_id(&host);
     let name = config
         .name
@@ -216,8 +221,19 @@ async fn poll(
                     model::encode(&file)
                 ))
                 .await
-                .unwrap_or_default();
-            Some(Job::from_metadata(&file, &meta))
+                .unwrap_or_else(|e| {
+                    tracing::debug!(error = %e.root_cause(), "no metadata for the print");
+                    Json::Null
+                });
+            let job = Job::from_metadata(&file, &meta);
+            if job.estimated.is_none() || job.thumbnail.is_none() {
+                tracing::debug!(
+                    estimated = job.estimated.is_some(),
+                    thumbnail = job.thumbnail.is_some(),
+                    "the print's metadata is incomplete"
+                );
+            }
+            Some(job)
         };
         if let Ok(mut path) = thumb.lock() {
             *path = printer.job.as_ref().and_then(|j| j.thumbnail.clone());

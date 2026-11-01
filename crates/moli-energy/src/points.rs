@@ -134,6 +134,23 @@ fn device(id: &DeviceId, instance: &InstanceId, config: &crate::Config) -> Devic
             money(),
         ),
     ];
+    if config.meters.iter().any(|m| m.role == crate::Role::Solar) {
+        for (key, unit) in [
+            ("today_production_kwh", Unit::KiloWattHour),
+            ("today_export_kwh", Unit::KiloWattHour),
+            ("today_self_consumed_kwh", Unit::KiloWattHour),
+            ("today_self_consumption_rate", Unit::Percent),
+            ("today_self_sufficiency", Unit::Percent),
+            ("month_production_kwh", Unit::KiloWattHour),
+            ("month_self_consumption_rate", Unit::Percent),
+        ] {
+            points.push(number(
+                key,
+                &moli_i18n::tr!(&format!("serveur.energie.point.{key}")),
+                unit,
+            ));
+        }
+    }
     if config.budget.is_some() {
         points.push(PointSpec {
             key: "over_budget".into(),
@@ -220,6 +237,8 @@ fn readings(
         summary.month.total.kwh,
         summary.month.total.cost,
     );
+    solar(&mut out, &summary.today, "today");
+    solar(&mut out, &summary.month, "month");
     let bill = summary.month_projection.as_ref().and_then(|p| {
         out.push(("projection_kwh", Value::Float(round2(p.kwh))));
         p.cost.map(|c| c + fee.unwrap_or(0.0))
@@ -238,6 +257,43 @@ fn readings(
     out
 }
 
+/// Production, export and how much of it the home used, for a period
+/// (keys the device does not have are ignored by the hub).
+fn solar(out: &mut Vec<(&'static str, Value)>, period: &crate::Period, when: &str) {
+    let keys: [&'static str; 5] = if when == "today" {
+        [
+            "today_production_kwh",
+            "today_export_kwh",
+            "today_self_consumed_kwh",
+            "today_self_consumption_rate",
+            "today_self_sufficiency",
+        ]
+    } else {
+        [
+            "month_production_kwh",
+            "month_export_kwh",
+            "month_self_consumed_kwh",
+            "month_self_consumption_rate",
+            "month_self_sufficiency",
+        ]
+    };
+    if let Some(p) = &period.production {
+        out.push((keys[0], Value::Float(round2(p.kwh))));
+    }
+    if let Some(e) = &period.export {
+        out.push((keys[1], Value::Float(round2(e.kwh))));
+    }
+    if let Some(share) = &period.solar {
+        out.push((keys[2], Value::Float(round2(share.self_consumed))));
+        if let Some(rate) = share.self_consumption_rate {
+            out.push((keys[3], Value::Float(round2(rate * 100.0))));
+        }
+        if let Some(rate) = share.self_sufficiency {
+            out.push((keys[4], Value::Float(round2(rate * 100.0))));
+        }
+    }
+}
+
 fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
@@ -254,6 +310,9 @@ mod tests {
             total: Amount { kwh, cost },
             meters: std::collections::BTreeMap::new(),
             unmeasured: None,
+            production: None,
+            export: None,
+            solar: None,
         }
     }
 
@@ -267,6 +326,7 @@ mod tests {
             period_point: None,
             meters: Vec::new(),
             live: None,
+            flows: None,
             today: period(month_from, 9.876, Some(1.5)),
             yesterday: period(month_from, 12.0, None),
             month: period(month_from, 120.0, Some(20.0)),

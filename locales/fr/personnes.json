@@ -5,7 +5,7 @@
   "personnes.role.guest": "Invité",
   "personnes.role.owner_aide": "Tout, y compris les personnes, le code de la maison et les intégrations.",
   "personnes.role.member_aide": "Commande toute la maison et valide les automatismes avec le code.",
-  "personnes.role.guest_aide": "Commande seulement ses pièces, jusqu'à la date choisie. Ni caméras ni réglages.",
+  "personnes.role.guest_aide": "Commande seulement ses pièces, jusqu'à la date choisie. Ni caméras ni réglages. Sur le Wi-Fi de la maison sans se connecter, on a les droits du foyer : un Wi-Fi invité séparé est conseillé.",
   "personnes.connexion.titre": "Bienvenue",
   "personnes.connexion.intro": "Connecte-toi pour ouvrir la maison.",
   "personnes.connexion.titre_invitation": "Ton invitation",

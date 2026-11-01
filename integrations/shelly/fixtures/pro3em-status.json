@@ -1,0 +1,99 @@
+{
+ "ble": {},
+ "bthome": {
+  "errors": [
+   "bluetooth_disabled"
+  ]
+ },
+ "cloud": {
+  "connected": true
+ },
+ "em:0": {
+  "id": 0,
+  "a_current": 0.029,
+  "a_voltage": 0.0,
+  "a_act_power": 0.0,
+  "a_aprt_power": 0.0,
+  "a_pf": 0.0,
+  "a_freq": 0.0,
+  "b_current": 0.028,
+  "b_voltage": 0.0,
+  "b_act_power": 0.0,
+  "b_aprt_power": 0.0,
+  "b_pf": 0.0,
+  "b_freq": 0.0,
+  "c_current": 5.857,
+  "c_voltage": 231.8,
+  "c_act_power": 1216.7,
+  "c_aprt_power": 1359.0,
+  "c_pf": 0.9,
+  "c_freq": 50.0,
+  "n_current": null,
+  "total_current": 5.914,
+  "total_act_power": 1216.678,
+  "total_aprt_power": 1359.014,
+  "user_calibrated_phase": []
+ },
+ "emdata:0": {
+  "id": 0,
+  "a_total_act_energy": 0.1,
+  "a_total_act_ret_energy": 0.0,
+  "b_total_act_energy": 0.03,
+  "b_total_act_ret_energy": 0.0,
+  "c_total_act_energy": 1394188.75,
+  "c_total_act_ret_energy": 1190614.31,
+  "total_act": 1394188.88,
+  "total_act_ret": 1190614.31
+ },
+ "eth": {
+  "ip": null,
+  "ip6": null
+ },
+ "modbus": {},
+ "mqtt": {
+  "connected": false
+ },
+ "sys": {
+  "mac": "AABBCCDDEE02",
+  "restart_required": false,
+  "time": "13:06",
+  "unixtime": 1800000000,
+  "last_sync_ts": 1800000000,
+  "uptime": 3537157,
+  "ram_size": 244256,
+  "ram_free": 99876,
+  "ram_min_free": 76756,
+  "fs_size": 524288,
+  "fs_free": 196608,
+  "cfg_rev": 9,
+  "kvs_rev": 0,
+  "schedule_rev": 0,
+  "webhook_rev": 0,
+  "btrelay_rev": 0,
+  "available_updates": {
+   "stable": {
+    "version": "2.1.0"
+   }
+  },
+  "reset_reason": 1,
+  "utc_offset": 3600
+ },
+ "temperature:0": {
+  "id": 0,
+  "tC": 45.8,
+  "tF": 114.4
+ },
+ "wifi": {
+  "sta_ip": "192.168.1.x",
+  "status": "got ip",
+  "ssid": "maison",
+  "bssid": "aa:bb:cc:dd:ee:ff",
+  "rssi": -61,
+  "sta_ip6": [
+   "fe80::1"
+  ]
+ },
+ "ws": {
+  "connected": false
+ }
+}

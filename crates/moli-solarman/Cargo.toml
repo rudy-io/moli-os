@@ -1,0 +1,24 @@
+[package]
+name = "moli-solarman"
+description = "Moli OS driver for Solarman Wi-Fi loggers (protocol V5 over TCP 8899) and the Deye micro-inverters behind them."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

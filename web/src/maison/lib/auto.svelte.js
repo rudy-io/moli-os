@@ -238,6 +238,7 @@ export function nodeText(node) {
 const OPS = { eq: '=', ne: '≠', gt: '>', ge: '≥', lt: '<', le: '≤' };
 export function ruleText(r) {
   if (r.kind === 'sun') return t(r.is === 'day' ? 'automatismes.regle.jour' : 'automatismes.regle.nuit');
+  if (r.kind === 'stale') return t('automatismes.regle.perime', { appareil: pointName(r.point), duree: duration(r.for_s) });
   if (r.kind === 'time') {
     const h =
       r.after && r.before

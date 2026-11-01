@@ -34,6 +34,7 @@
   "salon.enceinte.arret": "Stopped",
   "salon.enceinte.son_tele": "TV sound",
   "salon.enceinte.rien": "Nothing playing",
+  "salon.enceinte.volume_annonce": "While announcing",
 
   "salon.tele.label": "Remote",
   "salon.tele.eteindre": "Turn the TV off",
@@ -190,5 +191,10 @@
   "salon.papier.partiel_other": "{count} of {total} pages sent, the rest didn’t go through: {message}",
   "salon.papier.page_impossible": "couldn’t prepare the page",
   "salon.papier.choisir": "Choose a photo or a PDF.",
-  "salon.papier.erreur": "error {status}"
+  "salon.papier.erreur": "error {status}",
+  "salon.apercu": "Screen preview",
+  "salon.apercu_aide": "One image a second, taken only while it is on screen.",
+  "salon.apercu_veille": "The TV is in standby: nothing to show.",
+  "salon.apercu_montrer": "Show",
+  "salon.apercu_masquer": "Hide"
 }

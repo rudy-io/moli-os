@@ -54,7 +54,13 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// One spoken turn: Moli may act (under the guard, like any spoken
     /// order) and answers in one short sentence, or closes the conversation
     /// when asked. The last line is the person's.
-    fn answer(&self, conversation: Vec<Said>) -> BoxFuture<'_, Result<Answer, String>>;
+    /// `satellite` is the device asking: what is kept per asker is kept per
+    /// satellite.
+    fn answer(
+        &self,
+        satellite: &moli_core::DeviceId,
+        conversation: Vec<Said>,
+    ) -> BoxFuture<'_, Result<Answer, String>>;
 
     /// An address under `base` the satellite plays: `text` in Moli's voice,
     /// streamed while it is made. `None` when no voice can say it.

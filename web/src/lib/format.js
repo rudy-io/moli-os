@@ -21,13 +21,14 @@ const BINARY_ALARM = {
   smoke: true,
   battery_low: true,
   tamper: true,
+  alert: true,
 };
 
 /** Semantics shown on the card face; everything else goes under « détails ». */
 const PRIMARY = new Set([
   'on_off', 'brightness', 'power', 'apparent_power', 'energy', 'temperature',
   'humidity', 'pressure', 'illuminance', 'contact', 'occupancy', 'water_leak',
-  'smoke', 'current',
+  'smoke', 'current', 'alert',
 ]);
 
 export function isPrimary(point) {

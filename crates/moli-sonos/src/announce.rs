@@ -1,19 +1,19 @@
-//! Spoken announcements: text → speech (a local Piper server) → a sound Moli
-//! publishes for a few minutes → played by the speaker as an *audio clip*,
-//! over what it was playing (the music dips, then comes back by itself).
+//! Spoken announcements on a Sonos (the queue, the silence, the level and
+//! the speech are `moli-announce`'s): the sound Moli publishes for a few
+//! minutes, played by the speaker as an *audio clip*, over what it was
+//! playing (the music dips, then comes back by itself).
 //!
 //! The audio clip goes through the speaker's local WebSocket API (port 1443,
 //! the public key every local client uses): the household id, then the group
 //! list to find this player, then `loadAudioClip`.
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context as _, bail, ensure};
+use anyhow::{Context as _, bail};
+use moli_announce::Speech;
 use moli_net::PinnedTls;
 use moli_net::ws::WebSocket;
-use moli_runtime::MediaPublisher;
-use moli_runtime::media::Image;
+use moli_runtime::{BoxFuture, MediaPublisher};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -22,8 +22,6 @@ const WS_PATH: &str = "/websocket/api";
 /// The local API's public key (the same for every local client).
 const API_KEY: &str = "123e4567-e89b-12d3-a456-426655440000";
 const PROTOCOL: &str = "v1.api.smartspeaker.audio";
-/// An announcement is a sentence or two, not a speech.
-pub const MAX_TEXT: usize = 500;
 
 /// `[driver.options.announce]`
 #[derive(Clone, Debug, Deserialize)]
@@ -33,142 +31,56 @@ pub struct Config {
     /// speaker fetches the sound from there.
     pub media_base: String,
     /// The Wyoming speech server (Piper), `host:port`.
-    #[serde(default = "default_tts")]
+    #[serde(default = "moli_announce::default_tts")]
     pub tts: String,
     /// Piper voice (default: the server's).
     #[serde(default)]
     pub voice: Option<String>,
     /// Volume of the announcement, 0–100 (the speaker's own volume comes
-    /// back afterwards). Home Assistant's script used 35.
+    /// back afterwards). Home Assistant's script used 35. Where the
+    /// `announce_volume` point starts; once written, the point is kept.
     #[serde(default = "default_volume")]
     pub volume: u8,
-}
-
-fn default_tts() -> String {
-    "127.0.0.1:10200".into()
 }
 
 fn default_volume() -> u8 {
     35
 }
 
-#[derive(Debug)]
-pub struct Announcer {
-    host: String,
-    /// This player's id (`RINCON_…`, the UDN).
-    player: String,
-    config: Config,
-    /// The speaker's certificate, pinned at first contact.
-    pin: Option<String>,
-    publisher: MediaPublisher,
-    /// One announcement at a time, in order.
-    turn: tokio::sync::Mutex<()>,
-    /// Announcements waiting or playing.
-    waiting: std::sync::atomic::AtomicUsize,
+impl Config {
+    /// Where the speech is made.
+    pub fn speech(&self) -> Speech {
+        Speech {
+            tts: self.tts.clone(),
+            voice: self.voice.clone(),
+        }
+    }
 }
 
-/// Announcements waiting at most: past it, a new one is refused (a burst
-/// of alerts must not keep the speaker talking for minutes).
-pub const MAX_WAITING: usize = 3;
-/// An announcement that could not start within this delay is dropped: it
-/// is no longer news.
-pub const STALE_AFTER: Duration = Duration::from_secs(30);
+/// A Sonos as `moli-announce` sees it: a speaker that fetches the sound.
+#[derive(Debug)]
+pub struct Clip {
+    pub host: String,
+    /// This player's id (`RINCON_…`, the UDN).
+    pub player: String,
+    /// Moli as the speaker reaches it.
+    pub media_base: String,
+    /// The speaker's certificate, pinned at first contact.
+    pub pin: Option<String>,
+    pub publisher: MediaPublisher,
+}
 
-impl Announcer {
-    pub fn new(
-        host: &str,
-        player: &str,
-        config: Config,
-        pin: Option<String>,
-        publisher: MediaPublisher,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            host: host.to_owned(),
-            player: player.to_owned(),
-            config,
-            pin,
-            publisher,
-            turn: tokio::sync::Mutex::new(()),
-            waiting: std::sync::atomic::AtomicUsize::new(0),
+impl moli_announce::Speaker for Clip {
+    fn play(&self, wav: Vec<u8>, level: u8) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            let url = moli_announce::publish_sound(&self.publisher, &self.media_base, wav)?;
+            self.clip(&url, level).await
         })
     }
+}
 
-    /// Queues `text` and answers at once: the announcement itself takes
-    /// seconds (speech, then the clip). Refused when too many are waiting;
-    /// dropped if it could not start in time; the house is told of a failure.
-    pub fn enqueue(self: &Arc<Self>, text: String) -> Result<(), String> {
-        use std::sync::atomic::Ordering;
-        if self.waiting.fetch_add(1, Ordering::SeqCst) >= MAX_WAITING {
-            self.waiting.fetch_sub(1, Ordering::SeqCst);
-            return Err(moli_i18n::tr!(
-                "pilotes.sonos.file_pleine",
-                count = MAX_WAITING
-            ));
-        }
-        let this = Arc::clone(self);
-        tokio::spawn(async move {
-            let since = tokio::time::Instant::now();
-            let outcome = {
-                let _turn = this.turn.lock().await;
-                if since.elapsed() > STALE_AFTER {
-                    Err(anyhow::anyhow!(moli_i18n::tr!(
-                        "pilotes.sonos.trop_tard",
-                        seconds = STALE_AFTER.as_secs()
-                    )))
-                } else {
-                    this.announce(&text).await
-                }
-            };
-            this.waiting.fetch_sub(1, Ordering::SeqCst);
-            if let Err(e) = outcome {
-                tracing::warn!(error = %format!("{e:#}"), "announcement not played");
-                this.publisher.tell(
-                    &moli_i18n::tr!("pilotes.sonos.annonce_vocale"),
-                    moli_i18n::tr!(
-                        "pilotes.sonos.non_annoncee",
-                        text = short(&text),
-                        error = format!("{e:#}")
-                    ),
-                );
-            }
-        });
-        Ok(())
-    }
-
-    /// Says `text` on this speaker (the caller holds the turn).
-    async fn announce(&self, text: &str) -> anyhow::Result<()> {
-        let (tts_host, tts_port) = self
-            .config
-            .tts
-            .rsplit_once(':')
-            .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))
-            .context("tts must be host:port")?;
-        let wav = moli_net::wyoming::synthesize(
-            tts_host,
-            tts_port,
-            self.config.voice.as_deref(),
-            text,
-            Duration::from_secs(30),
-        )
-        .await?;
-        let name = self
-            .publisher
-            .publish(
-                "wav",
-                Image {
-                    content_type: "audio/wav".into(),
-                    bytes: wav,
-                },
-            )
-            .context("no random name for the sound")?;
-        let url = format!(
-            "{}/api/media/{name}",
-            self.config.media_base.trim_end_matches('/')
-        );
-        self.play(&url).await
-    }
-
-    async fn play(&self, url: &str) -> anyhow::Result<()> {
+impl Clip {
+    async fn clip(&self, url: &str, level: u8) -> anyhow::Result<()> {
         let tls = PinnedTls::new(self.pin.clone())?;
         let mut ws = WebSocket::connect(
             &self.host,
@@ -213,7 +125,7 @@ impl Announcer {
                     "name": "Moli",
                     "appId": "local.moli.os",
                     "streamUrl": url,
-                    "volume": self.config.volume.min(100),
+                    "volume": level,
                 }
             ]),
         )
@@ -314,29 +226,6 @@ fn player_id(groups: &Value, udn: &str, host: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// What an announcement may say.
-/// The start of an announcement, for a message about it.
-fn short(text: &str) -> String {
-    let mut s: String = text.chars().take(60).collect();
-    if text.chars().count() > 60 {
-        s.push('…');
-    }
-    s
-}
-
-pub fn check_text(text: &str) -> anyhow::Result<&str> {
-    let text = text.trim();
-    ensure!(
-        !text.is_empty(),
-        moli_i18n::tr!("pilotes.sonos.rien_a_dire")
-    );
-    ensure!(
-        text.chars().count() <= MAX_TEXT,
-        moli_i18n::tr!("pilotes.sonos.annonce_longueur", max = MAX_TEXT)
-    );
-    Ok(text)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,8 +251,5 @@ mod tests {
             &json!({"_objectType": "globalError", "errorCode": "ERROR_INVALID_PARAMETER"}),
         );
         assert!(format!("{no:?}").contains("ERROR_INVALID_PARAMETER"));
-        assert!(check_text("  ").is_err());
-        assert!(check_text(&"a".repeat(MAX_TEXT + 1)).is_err());
-        assert_eq!(check_text(" Quelqu'un sonne ").unwrap(), "Quelqu'un sonne");
     }
 }

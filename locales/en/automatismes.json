@@ -151,6 +151,7 @@
   "automatismes.regle.apres": "after {heure}",
   "automatismes.regle.avant": "before {heure}",
   "automatismes.regle.toute_heure": "at any time",
+  "automatismes.regle.perime": "{appareil} has not reported for {duree}",
 
   "automatismes.champ.valeur": "Value",
   "automatismes.champ.jours": "Days",
@@ -191,6 +192,7 @@
   "automatismes.inspecteur.regle.state": "Device",
   "automatismes.inspecteur.regle.time": "Time",
   "automatismes.inspecteur.regle.sun": "Day / night",
+  "automatismes.inspecteur.regle.stale": "Silence",
   "automatismes.inspecteur.comparaison": "Comparison",
   "automatismes.inspecteur.est": "is",
   "automatismes.inspecteur.nest_pas": "is not",

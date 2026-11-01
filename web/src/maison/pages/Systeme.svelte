@@ -1,13 +1,15 @@
 <script>
   import { onMount, tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import DriverWarnings from '../../components/DriverWarnings.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
+  import Rules from '../moli/Rules.svelte';
   import AlexaAccount from '../ui/AlexaAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
-  import { hub, home } from '../lib/home.svelte.js';
+  import { hub, home, hidden, watches } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
   // « Comment ça marche » : the system as it runs, drawn from /api/system and
@@ -96,7 +98,7 @@
   // ---- words ------------------------------------------------------------------
   // Driver kinds: their name and description are in the catalog
   // (systeme.pilotes.<kind>.nom / .desc); a kind not listed shows as it is.
-  const KINDS = ['z2m', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'igd', 'presence', 'telegram', 'phones', 'profile'];
+  const KINDS = ['z2m', 'zwave', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'shelly', 'igd', 'presence', 'telegram', 'phones', 'profile', 'izypower', 'solarman'];
   const kindWord = (kind, part) => (KINDS.includes(kind) ? t(`systeme.pilotes.${kind}.${part}`) : null);
   const driverName = (d) => (d.kind === 'profile' ? d.instance.charAt(0).toUpperCase() + d.instance.slice(1) : (kindWord(d.kind, 'nom') ?? d.kind));
 
@@ -105,12 +107,20 @@
   const brickWord = (id) => (Object.hasOwn(BRICKS, id) ? t(`systeme.briques.${id}.desc`) : '');
   const SURFACES = { maison: 'home', atelier: 'atelier', mcp: 'robot', rest: 'branch' };
 
-  // Commandable devices in no room: nobody can tell whether they sit in a
-  // bedroom. (Weather, tariffs, the house's own helpers belong to no room.)
+  // Devices in no room appear in no room's page. The commandable ones
+  // first (in bold): nobody can tell whether they sit in a bedroom, so the
+  // guard cannot protect them. Not listed: what was hidden on purpose, and
+  // what has a page of its own: the house's helpers, the « Parc » page,
+  // what the layout puts outside (weather, air, pool), and the devices Moli
+  // runs itself for its people and its energy (reserved instances).
+  const outside = $derived(
+    new Set(Object.values(home.config?.outdoor ?? {}).flatMap((v) => (Array.isArray(v) ? v.map((x) => x?.id ?? x) : [v]))),
+  );
+  const OWN = ['personnes:', 'energie:'];
   const roomless = $derived(
     Object.values(hub.devices)
       .filter((d) => !d.label?.room && !d.native_room && d.model !== 'Aide')
-      .filter((d) => d.points.some((p) => p.access?.write))
+      .filter((d) => !hidden(d.id) && !watches(d) && !outside.has(d.id) && !OWN.some((p) => d.id.startsWith(p)))
       .map((d) => ({ id: d.id, name: d.label?.name || d.native_name, writable: d.points.some((p) => p.access?.write) }))
       .sort((a, b) => Number(b.writable) - Number(a.writable) || a.name.localeCompare(b.name, locale()))
   );
@@ -165,6 +175,7 @@
   <AssistantSettings />
 
   <AssistantExchanges />
+  <Rules />
 
   <AlexaAccount />
 
@@ -205,7 +216,10 @@
         </div>
       {/if}
     </section>
+  {/if}
 
+  <!-- The map needs only the system itself, measured against Home Assistant or not. -->
+  {#if sys}
     {#if roomless.length}
       <section class="roomless">
         <p><Icon name="info" size={16} /><b>{t('systeme.page.sans_piece', { count: roomless.length })}</b>
@@ -215,6 +229,8 @@
         </p>
       </section>
     {/if}
+
+    <DriverWarnings drivers={hub.drivers} />
 
     <div class="map" bind:this={map}>
       <svg class="links" aria-hidden="true">

@@ -1,0 +1,26 @@
+[package]
+name = "moli-airplay"
+description = "Moli OS driver for AirPlay 1 receivers (RAOP): spoken announcements, no pairing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-announce.workspace = true
+moli-audio.workspace = true
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

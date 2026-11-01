@@ -1,15 +1,18 @@
 //! Sonos players, through their local UPnP API (HTTP 1400): play/pause,
 //! volume, mute, what is playing. Polled every two seconds. With
-//! `[driver.options.announce]`, spoken announcements too (`announce.rs`),
-//! and `quiet`: while on, no announcement is said (whoever asks), until it
-//! is switched off or [`QUIET_FOR`] has passed (a silence forgotten on).
+//! `[driver.options.announce]`, spoken announcements too (`moli-announce`,
+//! played here as an audio clip: `announce.rs`), said at `announce_volume`
+//! (the configured `volume` to start with), and `quiet`: while on, no
+//! announcement is said (whoever asks), until it is switched off or
+//! [`QUIET_FOR`] has passed (a silence forgotten on).
 
 mod announce;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
+pub use moli_announce::QUIET_FOR;
+use moli_announce::{Announcements, Announcer};
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_net::upnp::{tag, unescape};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
@@ -17,8 +20,6 @@ use serde::Deserialize;
 
 const PORT: u16 = 1400;
 const POLL: Duration = Duration::from_secs(2);
-/// A silence ends by itself after this long.
-pub const QUIET_FOR: Duration = Duration::from_secs(4 * 3600);
 const AV: (&str, &str) = (
     "/MediaRenderer/AVTransport/Control",
     "urn:schemas-upnp-org:service:AVTransport:1",
@@ -90,7 +91,13 @@ fn point(
 }
 
 #[allow(clippy::too_many_lines)] // one entry per point
-fn device(ctx: &DriverCtx, id: &DeviceId, room: &str, model: &str, speaks: bool) -> Device {
+fn device(
+    ctx: &DriverCtx,
+    id: &DeviceId,
+    room: &str,
+    model: &str,
+    announcements: &Announcements,
+) -> Device {
     let mut device = Device {
         id: id.clone(),
         instance: ctx.instance().clone(),
@@ -165,46 +172,7 @@ fn device(ctx: &DriverCtx, id: &DeviceId, room: &str, model: &str, speaks: bool)
             ),
         ],
     };
-    if speaks {
-        device.points.push(PointSpec {
-            key: "quiet".into(),
-            label: moli_i18n::tr!("pilotes.sonos.annonces_coupees").into(),
-            kind: Kind::Binary,
-            access: Access {
-                read: true,
-                write: true,
-            },
-            unit: None,
-            semantic: Semantic::Other,
-        });
-        device.points.push(PointSpec {
-            key: "quiet_until".into(),
-            label: moli_i18n::tr!("pilotes.sonos.annonces_coupees_jusqua").into(),
-            kind: Kind::Numeric {
-                min: None,
-                max: None,
-                step: None,
-            },
-            access: Access {
-                read: true,
-                write: false,
-            },
-            unit: None,
-            semantic: Semantic::Other,
-        });
-        device.points.push(PointSpec {
-            key: "announce".into(),
-            label: moli_i18n::tr!("pilotes.sonos.annonce").into(),
-            kind: Kind::Text,
-            // Words to say, not a state: nothing to read back.
-            access: Access {
-                read: false,
-                write: true,
-            },
-            unit: None,
-            semantic: Semantic::Other,
-        });
-    }
+    device.points.extend(announcements.points());
     device
 }
 
@@ -334,48 +302,33 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("sonos {host}"))?;
     let id = ctx.device_id(&udn);
-    let announcer = match &config.announce {
-        Some(settings) => Some(announce::Announcer::new(
-            host,
-            &udn,
-            settings.clone(),
-            speaker_pin(host, ctx).await,
+    let mut announcements = Announcements::new(match &config.announce {
+        Some(settings) => Some(Announcer::new(
+            announce::Clip {
+                host: host.to_owned(),
+                player: udn.clone(),
+                media_base: settings.media_base.clone(),
+                pin: speaker_pin(host, ctx).await,
+                publisher: ctx.media_publisher(),
+            },
+            settings.speech(),
+            settings.volume,
             ctx.media_publisher(),
         )),
         None => None,
-    };
-    ctx.upsert_device(device(ctx, &id, &room, &model, announcer.is_some()));
+    });
+    ctx.upsert_device(device(ctx, &id, &room, &model, &announcements));
+    announcements.start(ctx, &id);
     ctx.ready();
     let mut tick = tokio::time::interval(POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut online = None;
-    // A silence survives a restart (the hub keeps the last values).
-    let mut quiet_until = match (ctx.current(&id, "quiet"), ctx.current(&id, "quiet_until")) {
-        (Some(Value::Bool(true)), Some(Value::Int(until))) => u64::try_from(until).ok(),
-        _ => None,
-    }
-    .filter(|u| *u > moli_core::now_ms());
-    set_quiet(ctx, &id, quiet_until);
     loop {
         tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
-                if &*command.key == "announce" {
-                    let result = if quiet_until.is_some_and(|u| u > moli_core::now_ms()) {
-                        // Silenced: nothing said, nobody bothered with an error.
-                        tracing::info!("announcement not said: announcements are silenced");
-                        Ok(())
-                    } else {
-                        speak(announcer.as_ref(), &command.value)
-                    };
+                if let Some(result) = announcements.command(ctx, &id, &command) {
                     command.reply(result);
-                    continue;
-                }
-                if &*command.key == "quiet" {
-                    let on = matches!(command.value, Value::Bool(true));
-                    quiet_until = on.then(|| moli_core::now_ms() + u64::try_from(QUIET_FOR.as_millis()).unwrap_or(u64::MAX));
-                    set_quiet(ctx, &id, quiet_until);
-                    command.reply(Ok(()));
                     continue;
                 }
                 let result = apply(host, &command).await.map_err(|e| format!("{e:#}"));
@@ -385,11 +338,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 command.reply(result);
             }
             _ = tick.tick() => {
-                if quiet_until.is_some_and(|u| u <= moli_core::now_ms()) {
-                    // Forgotten on: the house speaks again.
-                    quiet_until = None;
-                    set_quiet(ctx, &id, None);
-                }
+                announcements.tick(ctx, &id);
                 match poll(host).await {
                 Ok(values) => {
                     if online != Some(true) {
@@ -411,27 +360,6 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             }
         }
     }
-}
-
-/// The silence's two points (until: ms since epoch, 0 when not silenced).
-fn set_quiet(ctx: &DriverCtx, id: &DeviceId, until: Option<u64>) {
-    ctx.set_state(id, "quiet", Value::Bool(until.is_some()));
-    let until = i64::try_from(until.unwrap_or(0)).unwrap_or(i64::MAX);
-    ctx.set_state(id, "quiet_until", Value::Int(until));
-}
-
-/// Queues an announcement (it takes seconds: speech, then the clip) and
-/// answers at once; a failure later is told to the house.
-fn speak(announcer: Option<&Arc<announce::Announcer>>, value: &Value) -> Result<(), String> {
-    let announcer =
-        announcer.ok_or_else(|| moli_i18n::tr!("pilotes.sonos.annonces_non_configurees"))?;
-    let Value::Text(text) = value else {
-        return Err(moli_i18n::tr!("pilotes.sonos.annonce_texte"));
-    };
-    let text = announce::check_text(text)
-        .map_err(|e| e.to_string())?
-        .to_owned();
-    announcer.enqueue(text)
 }
 
 /// The fingerprint of the speaker's local API certificate: pinned at first

@@ -246,6 +246,12 @@ impl Ctx<'_> {
                 self.days(days);
             }
             Rule::Sun { .. } => {}
+            Rule::Stale { point, for_s } => {
+                self.need(point, false);
+                if *for_s == 0 || *for_s > MAX_WAIT_S {
+                    self.push(Level::Error, tr!("moteur.verif.peremption"));
+                }
+            }
         }
     }
 
@@ -788,6 +794,19 @@ pub(crate) fn rule_words(rule: &Rule, hub: &Hub) -> String {
         } else {
             "moteur.regle.nuit"
         }),
+        Rule::Stale { point, for_s } => {
+            let s = said(hub, point);
+            let label = s.spec.as_ref().map_or_else(
+                || point.rsplit('/').next().unwrap_or_default().to_owned(),
+                |p| p.label.to_lowercase(),
+            );
+            tr!(
+                "moteur.regle.perime",
+                libelle = label,
+                appareil = s.device,
+                duree = duration(*for_s)
+            )
+        }
     }
 }
 

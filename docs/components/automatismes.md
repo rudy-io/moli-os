@@ -50,7 +50,7 @@ Une automatisation = un **graphe** de nœuds reliés (comme n8n), stocké dans
 | | `at_sun` | `event` rise/set, `offset_min`, `days` |
 | | `every` | `minutes` |
 | | `on_start`, `manual` | — |
-| Logique | `if` | `rules[]` (état / plage horaire / jour-nuit), `all` (ET) ou OU |
+| Logique | `if` | `rules[]` (état / plage horaire / jour-nuit / silence du capteur), `all` (ET) ou OU |
 | Actions | `set` | `point`, `value` |
 | | `toggle` | `point` |
 | | `wait` | `seconds` |
@@ -64,6 +64,12 @@ de Moli, `{{heure}}`.
 Modes (comme HA) : `restart` (défaut : minuteries « mouvement → lumière 5 min »), `single`,
 `queued`.
 
+La règle `stale` (`point`, `for_s` entier de 1 à 86 400 secondes) est utilisable dans
+`if.rules[]` et `wait_for.rule`. Elle est vraie si aucun relevé du point n'a jamais été
+reçu, ou si le dernier remonte à au moins `for_s` secondes. Chaque nouveau relevé remet
+le délai à zéro, même si sa valeur reste identique. Pour vérifier régulièrement ce
+silence, relier un déclencheur `every` à un `if` contenant la règle `stale`.
+
 ## Journal et coupure
 
 Chaque modification d'un automatisme entre au journal du hub (`Action::Automation` :
@@ -76,6 +82,8 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
 ## Moteur
 
 - Abonné au bus du hub : changements d'état (le hub n'émet qu'en cas de changement),
+  et appuis (`pulse`, `pulse_state` d'un pilote) : un appui déclenche même s'il répète le
+  précédent ou s'il est le premier vu depuis le démarrage,
   valeur précédente gardée pour `from` et les franchissements de seuil. `for_s` = minuterie
   annulée si la valeur repart (sans `to` : chaque nouveau changement relance la minuterie).
 - Horloge : un tic par seconde en heure locale (jiff, fuseau de la config) ; chaque

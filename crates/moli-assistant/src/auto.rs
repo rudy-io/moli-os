@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
 use crate::house::{self, Layout};
-use crate::{Assistant, AssistantError, is_reasoning, pricing};
+use crate::{Assistant, AssistantError, is_reasoning, pricing, takes_temperature};
 
 /// What Moli proposes.
 #[derive(Clone, Debug)]
@@ -43,16 +43,17 @@ fn rule_schema() -> Json {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "point", "op", "value", "after", "before", "days", "is"],
+        "required": ["kind", "point", "op", "value", "after", "before", "days", "is", "for_s"],
         "properties": {
-            "kind": { "type": "string", "enum": ["state", "time", "sun"] },
+            "kind": { "type": "string", "enum": ["state", "time", "sun", "stale"] },
             "point": nullable("string"),
             "op": { "type": ["string", "null"], "enum": ["eq", "ne", "gt", "ge", "lt", "le", null] },
             "value": any_value(),
             "after": nullable("string"),
             "before": nullable("string"),
             "days": { "type": ["array", "null"], "items": { "type": "integer" } },
-            "is": { "type": ["string", "null"], "enum": ["day", "night", null] }
+            "is": { "type": ["string", "null"], "enum": ["day", "night", null] },
+            "for_s": nullable("integer")
         }
     })
 }
@@ -229,7 +230,9 @@ impl Assistant {
                 body["max_completion_tokens"] = json!(8_000);
                 body["reasoning_effort"] = json!("low");
             } else {
-                body["temperature"] = json!(0.2);
+                if takes_temperature(model) {
+                    body["temperature"] = json!(0.2);
+                }
                 body["max_tokens"] = json!(3_000);
             }
             let answer = self
@@ -317,7 +320,9 @@ impl Assistant {
             body["max_completion_tokens"] = json!(3_000);
             body["reasoning_effort"] = json!("low");
         } else {
-            body["temperature"] = json!(0.6);
+            if takes_temperature(&self.0.config.model) {
+                body["temperature"] = json!(0.6);
+            }
             body["max_tokens"] = json!(400);
         }
         let answer = self
@@ -438,6 +443,8 @@ fn meters_text(s: &moli_energy::Summary) -> String {
             moli_energy::Role::Grid => moli_i18n::tr!("assistant.auto.role_grid"),
             moli_energy::Role::Circuit => moli_i18n::tr!("assistant.auto.role_circuit"),
             moli_energy::Role::Appliance => moli_i18n::tr!("assistant.auto.role_appliance"),
+            moli_energy::Role::Solar => moli_i18n::tr!("assistant.auto.role_solar"),
+            moli_energy::Role::Export => moli_i18n::tr!("assistant.auto.role_export"),
         };
         let line = match &m.power {
             Some(power) => moli_i18n::tr!(
@@ -578,7 +585,7 @@ mod tests {
                   "seconds": null, "timeout_s": null, "all": null, "rules": null, "rule": null, "title": null, "message": null,
                   "channels": null, "prompt": null },
                 { "id": "c1", "type": "if", "rules": [{ "kind": "sun", "is": "night", "point": null, "op": null, "value": null,
-                  "after": null, "before": null, "days": null }], "all": true, "point": null },
+                  "after": null, "before": null, "days": null, "for_s": null }], "all": true, "point": null },
                 { "id": "a1", "type": "set", "point": "hue:2/on", "value": true }
             ],
             "edges": [{ "from": "t1", "port": "out", "to": "c1" }, { "from": "c1", "port": "yes", "to": "a1" }]
@@ -589,6 +596,81 @@ mod tests {
         assert_eq!(d.graph.nodes[0].step.kind(), "when_state");
         assert_eq!(d.graph.next("c1", "yes")[0].id, "a1");
         assert!(d.note.is_none());
+    }
+
+    /// Both rule slots must let the model return silence checks unchanged,
+    /// including when it reworks an existing graph.
+    #[test]
+    fn stale_rules_can_be_drafted_and_reworked() {
+        let s = schema();
+        let properties = &s["properties"]["nodes"]["items"]["properties"];
+        let stale = json!({
+            "kind": "stale", "point": "sensor:1/temperature", "for_s": 7200,
+            "op": null, "value": null, "after": null, "before": null,
+            "days": null, "is": null
+        });
+        for rule in [
+            &properties["rules"]["items"],
+            &properties["rule"]["anyOf"][0],
+        ] {
+            assert!(
+                rule["properties"]["kind"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&stale["kind"]),
+                "the model must be allowed to generate a stale rule"
+            );
+            assert_eq!(
+                rule["properties"]["for_s"],
+                json!({ "type": ["integer", "null"] }),
+                "fine-tuned builders reject numeric bounds in strict schemas; the engine enforces them"
+            );
+            assert_eq!(rule["additionalProperties"], false);
+            let required = rule["required"].as_array().unwrap();
+            let fields = rule["properties"].as_object().unwrap();
+            assert_eq!(required.len(), fields.len());
+            for key in stale.as_object().unwrap().keys() {
+                assert!(fields.contains_key(key), "undeclared rule field: {key}");
+                assert!(required.contains(&json!(key)), "optional field: {key}");
+            }
+        }
+
+        let content = json!({
+            "name": "Silent sensor", "mode": "single", "note": null,
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "c", "type": "if", "all": true, "rules": [stale.clone()] },
+                { "id": "w", "type": "wait_for", "rule": stale, "timeout_s": 60 }
+            ],
+            "edges": [
+                { "from": "t", "port": "out", "to": "c" },
+                { "from": "c", "port": "yes", "to": "w" }
+            ]
+        })
+        .to_string();
+        let draft = parse(&content, None).unwrap();
+        let mut current: Automation = serde_json::from_value(json!({
+            "name": draft.name, "mode": "single", "author": "assistant", "graph": draft.graph
+        }))
+        .unwrap();
+        current.graph.nodes[1].x = 120.0;
+        let request = request_message("Keep the silence checks", Some(&current));
+        assert!(request.contains(r#""kind":"stale""#));
+        assert!(request.contains(r#""for_s":7200"#));
+        let revised = parse(&content, Some(&current)).unwrap();
+        for graph in [&current.graph, &revised.graph] {
+            let nodes = serde_json::to_value(&graph.nodes).unwrap();
+            let expected = json!({
+                "kind": "stale", "point": "sensor:1/temperature", "for_s": 7200
+            });
+            assert_eq!(nodes[1]["rules"][0], expected);
+            assert_eq!(nodes[2]["rule"], expected);
+            assert!(
+                (graph.nodes[1].x - 120.0).abs() < 1e-9,
+                "x={}",
+                graph.nodes[1].x
+            );
+        }
     }
 
     /// A « Moli écrit » prompt never carries a position or a Wi-Fi either.
@@ -621,14 +703,17 @@ mod tests {
 
     #[test]
     fn the_french_drafting_prompts_are_what_they_always_were() {
-        assert_eq!(moli_i18n::tr!("assistant.auto.guide"), before::GUIDE);
+        assert_eq!(
+            moli_i18n::tr!("assistant.auto.guide"),
+            before::reworded(before::GUIDE)
+        );
         let inventory = "## Salon\n- hue:1 · Lampe · on✎=true\n## Sans pièce\n- x:1 · Truc\n";
         let meters = "Électricité (pour « la consommation ») :\n- Maison (toute la maison) : puissance en W = t/p\n";
         let date = "samedi 3 octobre 2026, 21h05";
         for protected in ["Chambre des enfants, Bureau", ""] {
             assert_eq!(
                 builder_prompt(date, protected, inventory, meters),
-                before::builder_prompt(date, protected, inventory, meters)
+                before::reworded(&before::builder_prompt(date, protected, inventory, meters))
             );
         }
         for power in ["Électricité en direct : 940 W.", ""] {

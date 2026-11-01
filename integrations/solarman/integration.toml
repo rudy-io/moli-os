@@ -1,0 +1,32 @@
+[integration]
+id = "solarman"
+name = "Solarman (enregistreurs Wi-Fi) et micro-onduleurs Deye"
+brands = ["Deye", "Solarman"]
+# Seen so far (in the reference installation): Deye micro-inverters with
+# 2 and 4 inputs and their built-in logger.
+models = ["micro-onduleur 2 entrées (1 kW)", "micro-onduleur 4 entrées (2 kW)"]
+transport = "tcp"
+driver = "solarman"
+crate = "moli-solarman"
+
+[discovery]
+# The logger answers WIFIKIT-214028-READ on UDP 48899 with ip,MAC,serial.
+mdns = []
+ssdp = []
+ports = [8899]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "carte de registres de ha-solarman (deye_micro.yaml, licence MIT, voir NOTICE) ; protocole V5 écrit d'après sa description publique (pysolarmanv5, MIT) ; valeurs vérifiées une à une contre Home Assistant au même instant"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-solarman/src/v5.rs, deye.rs).
+[[fixture]]
+file = "fixtures/micro-2-inputs.json"
+
+[[fixture]]
+file = "fixtures/micro-4-inputs.json"

@@ -1,0 +1,503 @@
+{
+  "hub": {
+    "id": "00000000-0000-4000-8000-000000000001_1",
+    "relationId": "00000000-0000-4000-8000-000000000001",
+    "type": "gateway",
+    "deviceType": "gateway",
+    "createdAt": "2000-01-01T00:00:00.000Z",
+    "isReachable": true,
+    "lastSeen": "2000-01-01T00:00:00.000Z",
+    "attributes": {
+      "customName": "Maison",
+      "model": "DIRIGERA Hub for smart products",
+      "manufacturer": "IKEA of Sweden",
+      "firmwareVersion": "2.975.3",
+      "hardwareVersion": "P2.5",
+      "serialNumber": "00000000-0000-4000-8000-000000000002",
+      "identifyStarted": "2000-01-01T00:00:00.000Z",
+      "identifyPeriod": 0,
+      "otaStatus": "upToDate",
+      "otaState": "readyToCheck",
+      "otaProgress": 100,
+      "otaPolicy": "autoDownload",
+      "otaScheduleStart": "00:00",
+      "otaScheduleEnd": "00:00",
+      "permittingJoin": false,
+      "backendConnected": true,
+      "backendConnectionPersistent": true,
+      "backendOnboardingComplete": true,
+      "backendRegion": "eu-central-1",
+      "backendCountryCode": "FR",
+      "userConsents": [
+        {
+          "name": "analytics",
+          "value": "disabled"
+        },
+        {
+          "name": "diagnostics",
+          "value": "enabled"
+        }
+      ],
+      "logLevel": 3,
+      "coredump": false,
+      "timezone": "Europe/Paris",
+      "nextSunSet": "2000-01-01T00:00:00.000Z",
+      "nextSunRise": "2000-01-01T00:00:00.000Z",
+      "sunPosition": "sunUnknown",
+      "homestate": "home",
+      "countryCode": "XZ",
+      "isOn": false
+    },
+    "capabilities": {
+      "canSend": [],
+      "canReceive": [
+        "customName",
+        "permittingJoin",
+        "userConsents",
+        "logLevel",
+        "time",
+        "timezone",
+        "countryCode",
+        "coordinates"
+      ]
+    },
+    "deviceSet": [],
+    "remoteLinks": [],
+    "dynamicFeatures": [
+      {
+        "type": "matterControllerEnabled",
+        "enabled": true,
+        "featureVersion": "26.4.0"
+      }
+    ],
+    "environment": "prod"
+  },
+  "devices": [
+    {
+      "id": "00000000-0000-4000-8000-000000000003_1",
+      "type": "light",
+      "deviceType": "light",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": true,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "customName": "Lampe 1",
+        "model": "TRADFRI Driver 30W",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.0.4",
+        "hardwareVersion": "1",
+        "serialNumber": "00000000-0000-4000-8000-000000000006",
+        "productCode": "ICPSHC2430EUIL2",
+        "isOn": false,
+        "startupOnOff": "startPrevious",
+        "lightLevel": 100,
+        "startUpCurrentLevel": -1,
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "permittingJoin": false,
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "deviceOnBehavior": {
+          "behavior": "lastValue",
+          "profileId": ""
+        }
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "isOn",
+          "lightLevel"
+        ]
+      },
+      "room": {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "name": "Chambre ",
+        "color": "ikea_yellow_no_24",
+        "icon": "rooms_bed"
+      },
+      "deviceSet": [],
+      "remoteLinks": [
+        "00000000-0000-4000-8000-000000000004_2"
+      ],
+      "isHidden": false,
+      "adaptiveProfile": {}
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004_1",
+      "relationId": "00000000-0000-4000-8000-000000000004",
+      "type": "unknown",
+      "deviceType": "lightSensor",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": false,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "illuminance": 0,
+        "maxIlluminance": 40001,
+        "minIlluminance": 1,
+        "customName": "Luminosité 1",
+        "model": "MYGGSPRAY wrlss mtn sensor",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.1.4",
+        "hardwareVersion": "P2.0",
+        "serialNumber": "00000000-0000-4000-8000-000000000007",
+        "productCode": "E2494",
+        "permittingJoin": false,
+        "windowOpen": false,
+        "setupCode": "",
+        "discriminator": -1,
+        "qrCode": "",
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "batteryPercentage": 96
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "windowOpen"
+        ]
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "isHidden": false
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004_2",
+      "relationId": "00000000-0000-4000-8000-000000000004",
+      "type": "sensor",
+      "deviceType": "occupancySensor",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": false,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "isDetected": false,
+        "customName": "Présence 1",
+        "model": "MYGGSPRAY wrlss mtn sensor",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.1.4",
+        "hardwareVersion": "P2.0",
+        "serialNumber": "00000000-0000-4000-8000-000000000007",
+        "productCode": "E2494",
+        "permittingJoin": false,
+        "windowOpen": false,
+        "setupCode": "",
+        "discriminator": -1,
+        "qrCode": "",
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "batteryPercentage": 96,
+        "sensorConfig": {
+          "scheduleOn": false,
+          "onDuration": 0,
+          "schedule": {
+            "onCondition": {
+              "time": "22:00"
+            },
+            "offCondition": {
+              "time": "06:00"
+            }
+          }
+        }
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "windowOpen"
+        ]
+      },
+      "room": {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "name": "Chambre ",
+        "color": "ikea_yellow_no_24",
+        "icon": "rooms_bed"
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "isHidden": false
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000008_1",
+      "type": "light",
+      "deviceType": "light",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": true,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "customName": "Lampe 2",
+        "model": "TRADFRI bulb E27 CWS globe 806lm",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.0.38",
+        "hardwareVersion": "1",
+        "serialNumber": "00000000-0000-4000-8000-000000000010",
+        "productCode": "LED2109G6",
+        "isOn": false,
+        "startupOnOff": "startPrevious",
+        "lightLevel": 55,
+        "startUpCurrentLevel": -1,
+        "colorHue": 29.759664114960344,
+        "colorSaturation": 0.47158419872571256,
+        "colorTemperature": 2450,
+        "colorTemperatureMin": 4000,
+        "colorTemperatureMax": 2202,
+        "startupTemperature": -1,
+        "colorMode": "color",
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "permittingJoin": false,
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "deviceOnBehavior": {
+          "behavior": "lastValue",
+          "profileId": "00000000-0000-4000-8000-000000000009"
+        }
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "isOn",
+          "lightLevel",
+          "colorTemperature",
+          "colorHue",
+          "colorSaturation"
+        ]
+      },
+      "room": {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "name": "Chambre ",
+        "color": "ikea_yellow_no_24",
+        "icon": "rooms_bed"
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "isHidden": false,
+      "adaptiveProfile": {}
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011_1",
+      "type": "light",
+      "deviceType": "light",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": true,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "customName": "Lampe 3",
+        "model": "ORMANAS LED Strip",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.1.10",
+        "hardwareVersion": "1",
+        "serialNumber": "00000000-0000-4000-8000-000000000013",
+        "productCode": "L2112",
+        "isOn": true,
+        "startupOnOff": "startPrevious",
+        "lightLevel": 67,
+        "startUpCurrentLevel": -1,
+        "colorHue": 29.947206127571746,
+        "colorSaturation": 0.7157064162209652,
+        "colorTemperature": 2444,
+        "colorTemperatureMin": 4000,
+        "colorTemperatureMax": 2202,
+        "startupTemperature": -1,
+        "colorMode": "color",
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "permittingJoin": false,
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "deviceOnBehavior": {
+          "behavior": "lastValue",
+          "profileId": ""
+        }
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "isOn",
+          "lightLevel",
+          "colorTemperature",
+          "colorHue",
+          "colorSaturation"
+        ]
+      },
+      "room": {
+        "id": "00000000-0000-4000-8000-000000000012",
+        "name": "Salon",
+        "color": "ikea_green_no_65",
+        "icon": "rooms_sofa"
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "isHidden": false,
+      "adaptiveProfile": {}
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001_1",
+      "relationId": "00000000-0000-4000-8000-000000000001",
+      "type": "gateway",
+      "deviceType": "gateway",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": true,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "customName": "Maison",
+        "model": "DIRIGERA Hub for smart products",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "2.975.3",
+        "hardwareVersion": "P2.5",
+        "serialNumber": "00000000-0000-4000-8000-000000000002",
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 100,
+        "otaPolicy": "autoDownload",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "permittingJoin": false,
+        "backendConnected": true,
+        "backendConnectionPersistent": true,
+        "backendOnboardingComplete": true,
+        "backendRegion": "eu-central-1",
+        "backendCountryCode": "FR",
+        "userConsents": [
+          {
+            "name": "analytics",
+            "value": "disabled"
+          },
+          {
+            "name": "diagnostics",
+            "value": "enabled"
+          }
+        ],
+        "logLevel": 3,
+        "coredump": false,
+        "timezone": "Europe/Paris",
+        "nextSunSet": "2000-01-01T00:00:00.000Z",
+        "nextSunRise": "2000-01-01T00:00:00.000Z",
+        "sunPosition": "sunUnknown",
+        "homestate": "home",
+        "countryCode": "XZ",
+        "isOn": false
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "permittingJoin",
+          "userConsents",
+          "logLevel",
+          "time",
+          "timezone",
+          "countryCode",
+          "coordinates"
+        ]
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "dynamicFeatures": [
+        {
+          "type": "matterControllerEnabled",
+          "enabled": true,
+          "featureVersion": "26.4.0"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014_1",
+      "type": "light",
+      "deviceType": "light",
+      "createdAt": "2000-01-01T00:00:00.000Z",
+      "isReachable": true,
+      "lastSeen": "2000-01-01T00:00:00.000Z",
+      "attributes": {
+        "customName": "Lampe 4",
+        "model": "TRADFRI Driver 30W",
+        "manufacturer": "IKEA of Sweden",
+        "firmwareVersion": "1.0.4",
+        "hardwareVersion": "1",
+        "serialNumber": "00000000-0000-4000-8000-000000000015",
+        "productCode": "ICPSHC2430EUIL2",
+        "isOn": true,
+        "startupOnOff": "startPrevious",
+        "lightLevel": 67,
+        "startUpCurrentLevel": -1,
+        "identifyStarted": "2000-01-01T00:00:00.000Z",
+        "identifyPeriod": 0,
+        "permittingJoin": false,
+        "otaStatus": "upToDate",
+        "otaState": "readyToCheck",
+        "otaProgress": 0,
+        "otaPolicy": "autoUpdate",
+        "otaScheduleStart": "00:00",
+        "otaScheduleEnd": "00:00",
+        "deviceOnBehavior": {
+          "behavior": "lastValue",
+          "profileId": ""
+        }
+      },
+      "capabilities": {
+        "canSend": [],
+        "canReceive": [
+          "customName",
+          "isOn",
+          "lightLevel"
+        ]
+      },
+      "room": {
+        "id": "00000000-0000-4000-8000-000000000012",
+        "name": "Salon",
+        "color": "ikea_green_no_65",
+        "icon": "rooms_sofa"
+      },
+      "deviceSet": [],
+      "remoteLinks": [],
+      "isHidden": false,
+      "adaptiveProfile": {}
+    }
+  ],
+  "rooms": [
+    {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "name": "Chambre ",
+      "color": "ikea_yellow_no_24",
+      "icon": "rooms_bed"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "name": "Salon",
+      "color": "ikea_green_no_65",
+      "icon": "rooms_sofa"
+    }
+  ],
+  "deviceSets": [],
+  "scenes": [],
+  "users": [],
+  "music": {}
+}
