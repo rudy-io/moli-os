@@ -140,6 +140,38 @@ impl DriverCtx {
         self.hub.store_secret(&self.instance, name, value).await
     }
 
+    /// Atomically fills an empty encrypted slot belonging to this instance.
+    pub async fn insert_secret_if_absent(&self, name: &str, value: &str) -> std::io::Result<bool> {
+        self.hub
+            .insert_secret_if_absent(&self.instance, name, value)
+            .await
+    }
+
+    /// Durably consumes one encrypted input belonging to this instance.
+    pub async fn take_secret(&self, name: &str) -> std::io::Result<Option<String>> {
+        self.hub.take_secret(&self.instance, name).await
+    }
+
+    /// Starts sequential scoped writes without retaining a borrow of the controller.
+    /// The caller must track and abort/join the job. This is not a multi-key transaction;
+    /// cancelling stops later writes, while an already started transaction completes.
+    #[must_use]
+    pub fn store_secrets_job(
+        &self,
+        values: Vec<(String, String)>,
+    ) -> tokio::task::JoinHandle<std::io::Result<()>> {
+        self.hub.store_secrets_job(&self.instance, values)
+    }
+
+    /// Starts a scoped durable consume. The caller must track the job to completion.
+    #[must_use]
+    pub fn take_secret_job(
+        &self,
+        name: &str,
+    ) -> tokio::task::JoinHandle<std::io::Result<Option<String>>> {
+        self.hub.take_secret_job(&self.instance, name)
+    }
+
     /// Deletes a secret of this instance (revoked key…).
     pub async fn forget_secret(&self, name: &str) -> std::io::Result<bool> {
         self.hub.forget_secret(&self.instance, name).await

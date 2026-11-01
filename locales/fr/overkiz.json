@@ -20,5 +20,7 @@
   "overkiz.cloud_discovery": "La découverte des sites cloud Somfy dépasse les limites prévues.",
   "overkiz.cloud_scope": "La sélection du site cloud Somfy n’a pas pu être vérifiée.",
   "overkiz.cloud_forbidden": "Accès cloud Somfy refusé.",
-  "overkiz.cloud_rate": "Limite de requêtes cloud Somfy : réessayez plus tard."
+  "overkiz.cloud_rate": "Limite de requêtes cloud Somfy : réessayez plus tard.",
+  "overkiz.cloud_summary": "Observation cloud Somfy",
+  "overkiz.cloud_status": "État des observations cloud"
 }

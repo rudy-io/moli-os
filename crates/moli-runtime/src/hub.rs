@@ -1413,6 +1413,75 @@ impl Hub {
         store.set(&format!("{instance}/{name}"), value).await
     }
 
+    /// Atomically queues one encrypted value; false means an existing slot is busy.
+    /// Same-process serialization only: one active writer per vault.
+    pub async fn insert_secret_if_absent(
+        &self,
+        instance: &InstanceId,
+        name: &str,
+        value: &str,
+    ) -> std::io::Result<bool> {
+        self.0
+            .secrets
+            .as_ref()
+            .ok_or_else(|| {
+                std::io::Error::other("no secret store: MOLI_MASTER_KEY is not configured")
+            })?
+            .insert_if_absent(&format!("{instance}/{name}"), value)
+            .await
+    }
+
+    /// Consumes an instance-scoped value only after its encrypted deletion commits.
+    pub async fn take_secret(
+        &self,
+        instance: &InstanceId,
+        name: &str,
+    ) -> std::io::Result<Option<String>> {
+        self.0
+            .secrets
+            .as_ref()
+            .ok_or_else(|| {
+                std::io::Error::other("no secret store: MOLI_MASTER_KEY is not configured")
+            })?
+            .take(&format!("{instance}/{name}"))
+            .await
+    }
+
+    pub(crate) fn store_secrets_job(
+        &self,
+        instance: &InstanceId,
+        values: Vec<(String, String)>,
+    ) -> tokio::task::JoinHandle<std::io::Result<()>> {
+        let store = self.0.secrets.clone();
+        let instance = instance.clone();
+        tokio::spawn(async move {
+            let store = store.ok_or_else(|| {
+                std::io::Error::other("no secret store: MOLI_MASTER_KEY is not configured")
+            })?;
+            for (name, value) in values {
+                store.set(&format!("{instance}/{name}"), &value).await?;
+            }
+            Ok(())
+        })
+    }
+
+    pub(crate) fn take_secret_job(
+        &self,
+        instance: &InstanceId,
+        name: &str,
+    ) -> tokio::task::JoinHandle<std::io::Result<Option<String>>> {
+        let store = self.0.secrets.clone();
+        let key = format!("{instance}/{name}");
+        tokio::spawn(async move {
+            store
+                .ok_or_else(|| {
+                    std::io::Error::other("no secret store: MOLI_MASTER_KEY is not configured")
+                })?
+                .take(&key)
+                .await
+        })
+    }
+
     // ---- writing (drivers, via DriverCtx) -----------------------------------
 
     pub(crate) fn register_driver(

@@ -11,7 +11,8 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 fn config() -> Config {
     Config {
-        host: "gateway-example.local".into(),
+        host: Some("gateway-example.local".into()),
+        cloud: None,
         port: 8443,
         poll_secs: 5,
         cert_sha256: None,
@@ -32,7 +33,7 @@ fn construction_is_pure_and_rejects_invalid_config() {
     ] {
         assert!(
             Overkiz::new(Config {
-                host: host.into(),
+                host: Some(host.into()),
                 ..config()
             })
             .is_err()
@@ -60,7 +61,7 @@ fn construction_is_pure_and_rejects_invalid_config() {
         .is_err()
     );
 }
-async fn fixture_server(
+pub(super) async fn fixture_server(
     hub: &Hub,
     instance: &InstanceId,
     posts: Arc<AtomicUsize>,
@@ -157,7 +158,8 @@ async fn real_driver_pins_before_token_and_refreshes_before_every_write() {
         instance.clone(),
         Arc::new(
             Overkiz::new(Config {
-                host: "localhost".into(),
+                host: Some("localhost".into()),
+                cloud: None,
                 port,
                 poll_secs: 300,
                 cert_sha256: None,
@@ -826,13 +828,18 @@ impl Driver for StalePublicationProbe {
     }
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
-            let probe = PinnedHttps::new(&self.config.host, self.config.port, None)?;
+            let probe =
+                PinnedHttps::new(self.config.host.as_deref().unwrap(), self.config.port, None)?;
             probe.handshake().await?;
             let pin = probe.pinned_fingerprint().unwrap();
             drop(probe);
             ctx.store_secret("cert_sha256", &pin).await?;
             let client = Client::new(
-                PinnedHttps::new(&self.config.host, self.config.port, Some(pin))?,
+                PinnedHttps::new(
+                    self.config.host.as_deref().unwrap(),
+                    self.config.port,
+                    Some(pin),
+                )?,
                 "synthetic-test-token".into(),
             );
             for entry in model::parse(&self.snapshot)? {

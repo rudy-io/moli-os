@@ -1,11 +1,9 @@
 //! Optional independent Somfy cloud observation, with a closed provider protocol.
-#[allow(dead_code, reason = "Actor wiring is the next isolated task.")]
 pub(crate) mod client;
-#[allow(dead_code, reason = "Actor wiring is the next isolated task.")]
 mod protocol;
-#[allow(dead_code, reason = "Actor wiring is the next isolated task.")]
 pub(crate) mod session;
 mod types;
+pub(crate) mod worker;
 pub use session::{SessionBinding, SessionPhase, read_session_binding};
 pub use types::*;
 
@@ -21,3 +19,15 @@ pub(super) fn bounded_text(s: &str, max: usize) -> bool {
 }
 #[cfg(test)]
 mod tests;
+
+/// Reserved native namespace for observation-only cloud publications.
+pub const SUMMARY_NATIVE: &str = "cloud:summary";
+#[must_use]
+pub fn summary_device_id(instance: &moli_core::InstanceId) -> moli_core::DeviceId {
+    moli_core::DeviceId::new(instance, SUMMARY_NATIVE)
+}
+pub(crate) fn owns_device(id: &moli_core::DeviceId) -> bool {
+    id.as_str()
+        .split_once(':')
+        .is_some_and(|(_, native)| native.starts_with("cloud:"))
+}

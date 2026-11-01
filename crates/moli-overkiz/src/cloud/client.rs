@@ -412,6 +412,7 @@ impl<T: Transport> CloudClient<T> {
                 .as_ref()
                 .is_none_or(|s| s.phase != Phase::Ready)
     }
+    #[cfg(test)]
     pub(crate) async fn refresh(&mut self, sink: &mut impl SessionSink) -> Result<(), Error> {
         self.check_rate()?;
         let site = self
@@ -841,6 +842,7 @@ fn now_ms() -> i64 {
     )
     .unwrap_or(i64::MAX)
 }
+#[cfg(test)]
 pub(super) fn retry_after(value: Option<&str>, now: i64) -> u64 {
     parse_retry_after(value, now).unwrap_or(60)
 }

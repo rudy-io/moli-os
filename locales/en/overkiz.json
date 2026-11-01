@@ -20,5 +20,7 @@
   "overkiz.cloud_discovery": "Somfy cloud site discovery exceeded its safe limits.",
   "overkiz.cloud_scope": "Somfy cloud site selection could not be verified.",
   "overkiz.cloud_forbidden": "Somfy cloud access was refused.",
-  "overkiz.cloud_rate": "Somfy cloud rate limit: retry later."
+  "overkiz.cloud_rate": "Somfy cloud rate limit: retry later.",
+  "overkiz.cloud_summary": "Somfy cloud observation",
+  "overkiz.cloud_status": "Cloud observation status"
 }
