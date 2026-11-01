@@ -28,6 +28,8 @@ pub struct Config {
     pub cert_sha256: Option<String>,
     #[serde(default)]
     pub writable_openers: Vec<ReviewedOpener>,
+    #[serde(default)]
+    pub read_only: bool,
 }
 fn port() -> u16 {
     8443
@@ -134,7 +136,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         PinnedHttps::new(&config.host, config.port, Some(pin))?,
         token,
     );
-    refresh(&client, ctx, &config.writable_openers).await?;
+    refresh(&client, ctx, config).await?;
     ctx.ready();
     let mut timer = tokio::time::interval(Duration::from_secs(config.poll_secs));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -144,22 +146,22 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             command=ctx.next_command()=>{
                 let Some(command)=command else {return Ok(());};
                 let deadline=command.deadline.min(Instant::now()+Duration::from_millis(4500));
-                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,&config.writable_openers)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
+                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,config)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
                 let fatal=result.is_err();
                 command.reply(result.as_ref().copied().map_err(ToString::to_string));
                 if fatal {return result;}
             },
-            _=timer.tick()=>{refresh(&client,ctx,&config.writable_openers).await?;},
+            _=timer.tick()=>{refresh(&client,ctx,config).await?;},
         }
     }
 }
 async fn refresh(
     client: &Client,
     ctx: &DriverCtx,
-    reviewed: &[ReviewedOpener],
+    config: &Config,
 ) -> anyhow::Result<Vec<model::Entry>> {
     let json = client.request(Method::GET, "/setup/devices", None).await?;
-    let entries = model::parse_reviewed(&json, reviewed)?;
+    let entries = model::parse_policy(&json, &config.writable_openers, config.read_only)?;
     let mut ids = vec![];
     for entry in &entries {
         let device = entry.device(ctx.instance());
@@ -171,6 +173,7 @@ async fn refresh(
         ctx.set_availability(&id, entry.online);
         ctx.set_state(&id, "percent_control", entry.position());
         ctx.set_state(&id, "opening_state", entry.opening());
+        ctx.set_state(&id, "favourite_position", entry.favourite());
         ids.push(id);
     }
     for old in ctx.devices() {
@@ -185,12 +188,15 @@ async fn apply(
     ctx: &DriverCtx,
     command: &CommandRequest,
     deadline: Instant,
-    reviewed: &[ReviewedOpener],
+    config: &Config,
 ) -> anyhow::Result<()> {
+    if config.read_only {
+        anyhow::bail!(moli_i18n::tr!("overkiz.refused"));
+    }
     if command.abandoned() {
         anyhow::bail!(moli_i18n::tr!("overkiz.timeout"));
     }
-    let entries = refresh(client, ctx, reviewed).await?;
+    let entries = refresh(client, ctx, config).await?;
     let entry = entries
         .iter()
         .find(|e| DeviceId::new(ctx.instance(), &e.native()) == command.device.id)

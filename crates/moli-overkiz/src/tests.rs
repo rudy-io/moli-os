@@ -16,6 +16,7 @@ fn config() -> Config {
         poll_secs: 5,
         cert_sha256: None,
         writable_openers: vec![],
+        read_only: false,
     }
 }
 #[test]
@@ -161,6 +162,7 @@ async fn real_driver_pins_before_token_and_refreshes_before_every_write() {
                 poll_secs: 300,
                 cert_sha256: None,
                 writable_openers: vec![],
+                read_only: false,
             })
             .unwrap(),
         ),
@@ -296,6 +298,30 @@ impl Rig {
         writable_openers: Vec<ReviewedOpener>,
         command_timeout: Duration,
     ) -> Self {
+        Self::start_policy(snapshot, writable_openers, command_timeout, false).await
+    }
+    async fn start_policy(
+        snapshot: serde_json::Value,
+        writable_openers: Vec<ReviewedOpener>,
+        command_timeout: Duration,
+        read_only: bool,
+    ) -> Self {
+        Self::start_mode(
+            snapshot,
+            writable_openers,
+            command_timeout,
+            read_only,
+            false,
+        )
+        .await
+    }
+    async fn start_mode(
+        snapshot: serde_json::Value,
+        writable_openers: Vec<ReviewedOpener>,
+        command_timeout: Duration,
+        read_only: bool,
+        stale_publication: bool,
+    ) -> Self {
         let (path, hub, instance) = test_vault(command_timeout).await;
         let snapshot = Arc::new(std::sync::Mutex::new(snapshot));
         let posts = Arc::new(AtomicUsize::new(0));
@@ -353,21 +379,22 @@ impl Rig {
             }
         });
         let cancel = CancellationToken::new();
-        spawn_driver(
-            &hub,
-            instance.clone(),
-            Arc::new(
-                Overkiz::new(Config {
-                    host: "localhost".into(),
-                    port,
-                    poll_secs: 300,
-                    cert_sha256: None,
-                    writable_openers,
-                })
-                .unwrap(),
-            ),
-            cancel.clone(),
-        );
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "host":"localhost","port":port,"poll_secs":300,"read_only":read_only,
+            "writable_openers":writable_openers.iter().map(|p| serde_json::json!({
+                "device_url":p.device_url,"ui_class":p.ui_class
+            })).collect::<Vec<_>>()
+        }))
+        .unwrap();
+        let driver: Arc<dyn Driver> = if stale_publication {
+            Arc::new(StalePublicationProbe {
+                config,
+                snapshot: snapshot.lock().unwrap().clone(),
+            })
+        } else {
+            Arc::new(Overkiz::new(config).unwrap())
+        };
+        spawn_driver(&hub, instance.clone(), driver, cancel.clone());
         tokio::time::timeout(Duration::from_secs(5), async {
             while hub.stats().drivers_running != 1 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -582,4 +609,398 @@ fn opener_review_configuration_is_explicit_and_bounded() {
         })
         .is_err()
     );
+}
+
+#[test]
+fn read_only_configuration_accepts_explicit_observation_policy() {
+    let legacy: Config =
+        serde_json::from_value(serde_json::json!({"host":"gateway-example.local"})).unwrap();
+    assert!(
+        !legacy.read_only,
+        "omitted policy preserves existing writable configurations"
+    );
+    let parsed = serde_json::from_value::<Config>(
+        serde_json::json!({"host":"gateway-example.local","read_only":true}),
+    );
+    assert!(
+        parsed.is_ok(),
+        "read_only is a supported observation policy: {parsed:?}"
+    );
+}
+
+fn favourite_fixture() -> serde_json::Value {
+    let mut raw = opener_fixture();
+    for index in [0, 1, 2, 3] {
+        raw[index]["definition"]["commands"] = serde_json::json!([
+            {"commandName":"goToMemorized1Position","nparams":0},
+            {"commandName":"setMemorized1Position","nparams":1},
+            {"commandName":"setClosure","nparams":1},
+            {"commandName":"open","nparams":0}
+        ]);
+        raw[index]["states"] = serde_json::json!([
+            {"name":"core:ClosureState","value":25},
+            {"name":"core:Memorized1PositionState","value":40}
+        ]);
+    }
+    raw[1]["definition"]["commands"] = serde_json::json!([
+        {"commandName":"my","nparams":1},
+        {"commandName":"setMemorized1Position","nparams":0}
+    ]);
+    raw
+}
+#[tokio::test]
+async fn favourites_through_real_hub_use_exact_payloads_without_optimistic_position() {
+    let rig = Rig::start(favourite_fixture(), vec![], Duration::from_secs(5)).await;
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "favourite_position"))
+            .unwrap()
+            .value,
+        Value::Float(60.0)
+    );
+    for (index, key, value, want) in [
+        (
+            0,
+            "control",
+            Value::from("favourite"),
+            serde_json::json!({"name":"goToMemorized1Position","parameters":[]}),
+        ),
+        (
+            0,
+            "favourite_position",
+            Value::Float(70.0),
+            serde_json::json!({"name":"setMemorized1Position","parameters":[30.0]}),
+        ),
+        (
+            1,
+            "control",
+            Value::from("favourite"),
+            serde_json::json!({"name":"my","parameters":[0]}),
+        ),
+    ] {
+        rig.hub
+            .command(&rig.point(index, key), value, Origin::Ui, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            rig.payloads.lock().unwrap().last().unwrap()["actions"][0]["commands"][0],
+            want
+        );
+    }
+    assert!(
+        rig.hub
+            .command(
+                &rig.point(1, "control"),
+                Value::from("save_favourite"),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "percent_control"))
+            .unwrap()
+            .value,
+        Value::Float(75.0)
+    );
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "favourite_position"))
+            .unwrap()
+            .value,
+        Value::Float(60.0)
+    );
+    assert!(rig.hub.state(&rig.point(1, "percent_control")).is_none());
+}
+#[tokio::test]
+async fn read_only_real_hub_refuses_every_origin_and_keeps_readings() {
+    let mut reviewed = gate_policy();
+    reviewed.push(ReviewedOpener {
+        device_url: "io://example/123#1".into(),
+        ui_class: "Window".into(),
+    });
+    let rig = Rig::start_policy(favourite_fixture(), reviewed, Duration::from_secs(5), true).await;
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "percent_control"))
+            .unwrap()
+            .value,
+        Value::Float(75.0)
+    );
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "favourite_position"))
+            .unwrap()
+            .value,
+        Value::Float(60.0)
+    );
+    for origin in [
+        Origin::Ui,
+        Origin::Household,
+        Origin::Api,
+        Origin::Mcp,
+        Origin::Cli,
+        Origin::System,
+        Origin::Assistant,
+        Origin::Automation,
+    ] {
+        for index in [0, 1, 2, 3] {
+            for (key, value) in [
+                ("control", Value::from("open")),
+                ("control", Value::from("favourite")),
+                ("control", Value::from("save_favourite")),
+                ("percent_control", Value::Float(60.0)),
+                ("favourite_position", Value::Float(60.0)),
+            ] {
+                let result = rig
+                    .hub
+                    .command(&rig.point(index, key), value, origin, None)
+                    .await;
+                assert!(
+                    matches!(
+                        result,
+                        Err(moli_runtime::CommandError::ReadOnly
+                            | moli_runtime::CommandError::UnknownPoint)
+                    ),
+                    "{origin:?} {index} {key} {result:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        rig.hub
+            .snapshot()
+            .devices
+            .iter()
+            .all(|d| d.device.points.iter().all(|p| !p.access.write))
+    );
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        rig.gets.load(Ordering::SeqCst),
+        1,
+        "Hub rejects before fresh reads or actions"
+    );
+}
+#[tokio::test]
+async fn sensitive_favourite_paths_need_human_approval() {
+    let mut policy = gate_policy();
+    policy.push(ReviewedOpener {
+        device_url: "io://example/123#1".into(),
+        ui_class: "Window".into(),
+    });
+    let rig = Rig::start(favourite_fixture(), policy, Duration::from_secs(5)).await;
+    for index in [2, 3] {
+        for (key, value) in [
+            ("control", Value::from("favourite")),
+            ("favourite_position", Value::Float(50.0)),
+        ] {
+            let result = rig
+                .hub
+                .command(&rig.point(index, key), value, Origin::Household, None)
+                .await;
+            assert!(
+                matches!(
+                    result,
+                    Err(moli_runtime::CommandError::NeedsApproval { .. })
+                ),
+                "{result:?}"
+            );
+        }
+    }
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+}
+
+// Exercises the production runtime execution function with an intentionally stale writable publication.
+// This test driver never changes production policy; it only lets the Hub route a command past publication.
+#[derive(Debug)]
+struct StalePublicationProbe {
+    config: Config,
+    snapshot: serde_json::Value,
+}
+impl Driver for StalePublicationProbe {
+    fn kind(&self) -> &'static str {
+        "overkiz"
+    }
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let probe = PinnedHttps::new(&self.config.host, self.config.port, None)?;
+            probe.handshake().await?;
+            let pin = probe.pinned_fingerprint().unwrap();
+            drop(probe);
+            ctx.store_secret("cert_sha256", &pin).await?;
+            let client = Client::new(
+                PinnedHttps::new(&self.config.host, self.config.port, Some(pin))?,
+                "synthetic-test-token".into(),
+            );
+            for entry in model::parse(&self.snapshot)? {
+                let device = entry.device(ctx.instance());
+                let id = device.id.clone();
+                ctx.upsert_device(device);
+                ctx.set_availability(&id, true);
+            }
+            ctx.ready();
+            while let Some(command) = ctx.next_command().await {
+                let result = apply(&client, ctx, &command, command.deadline, &self.config).await;
+                command.reply(result.map_err(|error| error.to_string()));
+            }
+            Ok(())
+        })
+    }
+}
+#[tokio::test]
+async fn read_only_runtime_rejects_stale_writable_publication_before_preflight() {
+    let rig = Rig::start_mode(
+        favourite_fixture(),
+        vec![],
+        Duration::from_secs(5),
+        true,
+        true,
+    )
+    .await;
+    for origin in [
+        Origin::Ui,
+        Origin::Household,
+        Origin::Api,
+        Origin::Mcp,
+        Origin::Cli,
+        Origin::System,
+        Origin::Assistant,
+        Origin::Automation,
+    ] {
+        for (key, value) in [
+            ("control", Value::from("favourite")),
+            ("percent_control", Value::Float(50.0)),
+            ("favourite_position", Value::Float(50.0)),
+        ] {
+            let result = rig
+                .hub
+                .command(&rig.point(0, key), value, origin, None)
+                .await;
+            assert_eq!(
+                result,
+                Err(moli_runtime::CommandError::Driver(moli_i18n::tr!(
+                    "overkiz.refused"
+                ))),
+                "{origin:?} {key}"
+            );
+        }
+    }
+    assert_eq!(
+        rig.gets.load(Ordering::SeqCst),
+        0,
+        "runtime policy must refuse before network preflight"
+    );
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn fresh_unknown_or_absent_readings_explicitly_clear_previous_positions() {
+    let rig = Rig::start(favourite_fixture(), vec![], Duration::from_secs(5)).await;
+    for special in [serde_json::json!(108), serde_json::json!(124)] {
+        rig.snapshot.lock().unwrap()[0]["states"][0]["value"] = special;
+        rig.hub
+            .command(
+                &rig.point(0, "control"),
+                Value::from("favourite"),
+                Origin::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            rig.hub
+                .state(&rig.point(0, "percent_control"))
+                .unwrap()
+                .value,
+            Value::Null
+        );
+        assert_eq!(
+            rig.hub
+                .state(&rig.point(0, "favourite_position"))
+                .unwrap()
+                .value,
+            Value::Float(60.0)
+        );
+    }
+    rig.snapshot.lock().unwrap()[0]["states"] = serde_json::json!([]);
+    rig.hub
+        .command(
+            &rig.point(0, "control"),
+            Value::from("favourite"),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "percent_control"))
+            .unwrap()
+            .value,
+        Value::Null
+    );
+    assert_eq!(
+        rig.hub
+            .state(&rig.point(0, "favourite_position"))
+            .unwrap()
+            .value,
+        Value::Null
+    );
+}
+#[tokio::test]
+async fn fresh_favourite_arity_or_class_conflicts_never_post() {
+    for mutation in ["recall_arity", "store_arity", "root_class"] {
+        let rig = Rig::start(favourite_fixture(), vec![], Duration::from_secs(5)).await;
+        let (key, value) = {
+            let mut raw = rig.snapshot.lock().unwrap();
+            match mutation {
+                "recall_arity" => {
+                    raw[0]["definition"]["commands"][0]["nparams"] = serde_json::json!(1);
+                    ("control", Value::from("favourite"))
+                }
+                "store_arity" => {
+                    raw[0]["definition"]["commands"][1]["nparams"] = serde_json::json!(0);
+                    ("favourite_position", Value::Float(50.0))
+                }
+                _ => {
+                    raw[0]["uiClass"] = serde_json::json!("Gate");
+                    ("control", Value::from("favourite"))
+                }
+            }
+        };
+        assert!(
+            rig.hub
+                .command(&rig.point(0, key), value, Origin::Ui, None)
+                .await
+                .is_err()
+        );
+        assert_eq!(rig.posts.load(Ordering::SeqCst), 0, "{mutation}");
+    }
+}
+
+#[tokio::test]
+async fn unreviewed_stateless_rts_gate_stays_visible_in_read_only_inventory() {
+    let raw = serde_json::json!([{
+        "deviceURL":"rts://example/gate#1","available":true,"enabled":true,"label":"Example gate",
+        "definition":{"uiClass":"Gate","commands":[{"commandName":"open","nparams":1}]},"states":[]
+    }]);
+    let rig = Rig::start_policy(raw, vec![], Duration::from_secs(5), true).await;
+    let point = rig.point(0, "opening_state");
+    let device_id = DeviceId::new(
+        &rig.instance,
+        &model::parse(&rig.snapshot.lock().unwrap()).unwrap()[0].native(),
+    );
+    let device = rig
+        .hub
+        .device(&device_id)
+        .expect("known stateless gate remains in observed inventory");
+    assert_eq!(device.device.model.as_deref(), Some("Overkiz Gate"));
+    assert!(device.device.points.iter().all(|point| !point.access.write));
+    assert!(device.device.point("percent_control").is_none());
+    assert!(device.device.point("control").is_none());
+    assert_eq!(rig.hub.state(&point).unwrap().value, Value::Null);
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
 }
