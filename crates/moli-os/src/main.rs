@@ -394,6 +394,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         addresses_path: Some(config.server.data_dir.join("addresses.json")),
         secrets,
         guard: config.guard.policy()?,
+        mirror: config.server.mirror,
         ..HubOptions::default()
     })
     .context("cannot open the data directory (labels, journal, secrets)")?;

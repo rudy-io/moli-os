@@ -45,6 +45,9 @@ pub struct HubOptions {
     pub guard: GuardPolicy,
     pub event_capacity: usize,
     pub command_timeout: Duration,
+    /// A mirror of a house that runs elsewhere: every order is journaled
+    /// and refused ([`CommandError::Mirror`]), none reaches a driver.
+    pub mirror: bool,
 }
 
 impl Default for HubOptions {
@@ -59,6 +62,7 @@ impl Default for HubOptions {
             guard: GuardPolicy::default(),
             event_capacity: 1024,
             command_timeout: Duration::from_secs(5),
+            mirror: false,
         }
     }
 }
@@ -82,6 +86,9 @@ pub enum CommandError {
     /// Held by the guard: a human must approve request `id`.
     #[error("awaiting human approval #{id}: {reason}")]
     NeedsApproval { id: u64, reason: String },
+    /// A mirror house sends no order: the house it mirrors acts.
+    #[error("mirror house: the order was not sent (the real house acts)")]
+    Mirror,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -380,6 +387,9 @@ impl Hub {
     /// A corrupt state cache is discarded (it is only a cache); corrupt
     /// labels are an error (they are user data).
     pub fn new(opts: HubOptions) -> std::io::Result<Self> {
+        if opts.mirror {
+            tracing::warn!("mirror house: devices are read, no order is sent");
+        }
         let labels = match &opts.labels_path {
             Some(path) => labels::load(path)?,
             None => BTreeMap::new(),
@@ -1282,6 +1292,10 @@ impl Hub {
 
     /// Hands a prepared order to its driver and waits for the answer.
     async fn send(&self, prepared: Prepared) -> Result<(), CommandError> {
+        // Every order ends here, approved ones too: a mirror stops them all.
+        if self.0.opts.mirror {
+            return Err(CommandError::Mirror);
+        }
         let Prepared {
             point,
             device,

@@ -259,6 +259,7 @@ pub(crate) fn command_status(e: &CommandError) -> StatusCode {
         CommandError::DriverUnavailable | CommandError::Busy => StatusCode::SERVICE_UNAVAILABLE,
         CommandError::Timeout => StatusCode::GATEWAY_TIMEOUT,
         CommandError::Driver(_) => StatusCode::BAD_GATEWAY,
+        CommandError::Mirror => StatusCode::CONFLICT,
     }
 }
 

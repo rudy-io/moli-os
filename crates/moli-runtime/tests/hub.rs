@@ -151,6 +151,38 @@ async fn command_round_trip_updates_state_and_journal() {
 }
 
 #[tokio::test]
+async fn a_mirror_house_journals_every_order_and_sends_none() {
+    let (hub, _cancel) = start_with(HubOptions {
+        mirror: true,
+        ..HubOptions::default()
+    })
+    .await;
+    let before = hub.state(&point("state")).map(|s| s.value);
+
+    // From the dashboard, an agent, an automation: none reaches the plug.
+    for origin in [Origin::Ui, Origin::Mcp, Origin::Automation] {
+        let sent = hub
+            .command(&point("state"), Value::Bool(true), origin, None)
+            .await;
+        assert_eq!(sent, Err(CommandError::Mirror), "{origin:?}");
+    }
+    assert_eq!(hub.state(&point("state")).map(|s| s.value), before);
+    // Each one is in the journal, refused as a mirror's.
+    let journal = hub.journal(10);
+    assert_eq!(journal.len(), 3);
+    assert!(journal.iter().all(|entry| matches!(
+        &entry.outcome,
+        Outcome::Err(e) if e.contains("mirror")
+    )));
+    // An invalid order is still refused for what it is.
+    assert_eq!(
+        hub.command(&point("power"), Value::Int(5), Origin::Ui, None)
+            .await,
+        Err(CommandError::ReadOnly)
+    );
+}
+
+#[tokio::test]
 async fn invalid_writes_are_refused_and_journaled() {
     let (hub, _cancel) = start(false).await;
 
