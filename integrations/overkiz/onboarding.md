@@ -15,6 +15,7 @@ kind = "overkiz"
 # enabled = false
 [driver.options]
 host = "gateway-example.local"
+read_only = true
 # port = 8443
 # poll_secs = 5
 # cert_sha256 = "<64 hexadecimal digits verified independently>"
@@ -22,9 +23,10 @@ host = "gateway-example.local"
 
 Store the token using a secret-manager pipe into
 `moli-os secrets set somfy token`. Observe states before testing any command.
-Roller shutters expose their declared writes by default; there is no global
-read-only option in this driver. For an audit requiring all command paths to be
-disabled, use an isolated read-only collector rather than starting this driver.
+Keep `read_only = true` during observation: all command origins and all write points
+are refused, including favourites. Known stateless openers remain visible with unknown
+state. The compatibility default is false if the option is omitted; always write it
+explicitly. Enable writes only after a separate review and authorized supervised test.
 With no configured/cached fingerprint the first TLS handshake trusts and persists the
 certificate before sending the token. This is **trust on first use (TOFU)**, not
 independent authentication of the gateway's identity. Use a trusted LAN for this
@@ -48,7 +50,8 @@ ui_class = "Gate"
 ```
 
 Only `Gate` and `Window` can be reviewed (maximum 128 unique entries). The current
-nested `definition.uiClass` must exactly match; labels never establish the class.
+class must exactly match, and root/nested class conflicts refuse writes; labels never
+establish the class. `read_only = true` still overrides every opener opt-in.
 All writable opener points use Control semantics: API/MCP/CLI/assistant and the
 household dashboard require human approval. Authenticated Ui, System and approved
 Automation follow the existing bypass policy; this is not a physical interlock.
