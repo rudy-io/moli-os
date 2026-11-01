@@ -12,7 +12,7 @@
   {#each collections as kind}
     {@const collection = observation.catalog.collections[kind]}
     <details class="collection">
-      <summary><b>{t(`systeme.somfy.collection.${kind}`)}</b><span>{t(`systeme.somfy.status.${collection?.status ?? 'not_observed'}`)} · {collection?.data?.definitions?.length ?? 0}</span></summary>
+      <summary><b>{t(`systeme.somfy.collection.${kind}`)}</b><span>{t(`systeme.somfy.status.${collection?.status ?? 'not_observed'}`)}{#if collection?.data}{' · '}{collection.data.definitions.length}{#if !observation.freshness.collections?.[kind]}{' · '}{t('systeme.somfy.historical_count')}{/if}{/if}</span></summary>
       <p>{t('systeme.somfy.last', { date: date(collection?.last_observation_ms) })}</p>
       <p class="muted">{t('systeme.somfy.attempt', { date: date(collection?.last_attempt_ms) })}</p>
       {#if collection?.data && !observation.freshness.collections?.[kind]}<p class="qualification">{t('systeme.somfy.stale')}</p>{/if}

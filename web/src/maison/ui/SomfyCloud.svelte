@@ -1,9 +1,10 @@
 <script>
   import { onMount } from 'svelte';
   import { home } from '../lib/home.svelte.js';
-  import { t, locale } from '../../lib/i18n.svelte.js';
-  import { createCloudObserver, retryDate } from '../lib/somfy-cloud.js';
+  import { t } from '../../lib/i18n.svelte.js';
+  import { createCloudObserver } from '../lib/somfy-cloud.js';
   import SomfyCloudCatalog from './SomfyCloudCatalog.svelte';
+  import SomfyCloudStatus from './SomfyCloudStatus.svelte';
 
   let view = $state({ loading: true, instances: [], auth: null, selected: '', pending: null, error: '', catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false });
   let observer;
@@ -17,7 +18,6 @@
   const row = $derived(view.instances.find(i => i.instance === view.selected));
   const connection = $derived(row?.state);
   const candidate = $derived(connection?.candidates?.find(c => c.site_oid === site));
-  const retry = $derived(retryDate(connection?.last_attempt_ms, connection?.retry_after_secs, locale()));
   const effectiveRegion = $derived(candidate?.region ?? region);
 
   onMount(() => {
@@ -71,9 +71,7 @@
       {#if view.instances.length > 1}
         <label>{t('systeme.somfy.instance')}<select value={view.selected} onchange={selectInstance} disabled={Boolean(view.pending)}>{#each view.instances as instance}<option value={instance.instance}>{instance.instance}</option>{/each}</select></label>
       {:else}<code>{view.selected}</code>{/if}
-      <p role="status">{t(`systeme.somfy.phase.${connection?.phase ?? 'disconnected'}`)}</p>
-      {#if connection?.failure}<p class="notice">{t(`systeme.somfy.failure.${connection.failure.kind}`)}</p>{/if}
-      {#if connection?.retry_after_secs != null}<p class="notice">{retry ? t('systeme.somfy.retry', { date: retry }) : t('systeme.somfy.retry_unknown')}</p>{/if}
+      <SomfyCloudStatus {row} />
       {#if connection?.scope}
         <p><code>{connection.scope.site_oid}</code> · <code>{connection.scope.gateway_id}</code></p>
         <p>{t('systeme.somfy.scope')}</p>

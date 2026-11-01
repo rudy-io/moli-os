@@ -518,3 +518,80 @@ async fn session_and_state_validation_do_not_release_a_previous_identity() {
         );
     }
 }
+
+#[tokio::test]
+async fn status_qualifies_historical_ready_with_authoritative_session_and_current_source() {
+    let server = Server::configured("status-binding", true).await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    let original = server
+        .hub
+        .secret(&"fixture".into(), "cloud_state_v1")
+        .unwrap();
+    for phase in ["ready", "refreshing", "login_required"] {
+        let mut session: Value = serde_json::from_str(
+            &server
+                .hub
+                .secret(&"fixture".into(), "cloud_session_v1")
+                .unwrap(),
+        )
+        .unwrap();
+        session["phase"] = json!(phase);
+        store(&server, "cloud_session_v1", &session).await;
+        let (_, _, body) = server.json("GET", ROOT, Value::Null, &pin).await;
+        let row = &body["instances"][0];
+        assert_eq!(
+            row["state"]["phase"], "ready",
+            "retain the historical state independently"
+        );
+        assert_eq!(row["session_phase"], phase);
+        assert_eq!(row["online"], false);
+        let (status, _, body) = server
+            .json("GET", &format!("{ROOT}/fixture/catalog"), Value::Null, &pin)
+            .await;
+        assert_eq!(status, 200, "same-binding history remains readable");
+        assert_eq!(body["freshness"]["current"], false);
+        assert_eq!(
+            server
+                .hub
+                .secret(&"fixture".into(), "cloud_state_v1")
+                .unwrap(),
+            original
+        );
+    }
+    let task = moli_runtime::spawn_driver(
+        &server.hub,
+        "fixture".into(),
+        std::sync::Arc::new(Summary),
+        CancellationToken::new(),
+    );
+    for _ in 0..100 {
+        if server.hub.device(&"fixture:cloud:summary".into()).is_some() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    // A live summary cannot override authoritative LoginRequired.
+    let (_, _, body) = server.json("GET", ROOT, Value::Null, &pin).await;
+    assert_eq!(body["instances"][0]["online"], false);
+    let mut session: Value = serde_json::from_str(
+        &server
+            .hub
+            .secret(&"fixture".into(), "cloud_session_v1")
+            .unwrap(),
+    )
+    .unwrap();
+    session["phase"] = json!("ready");
+    store(&server, "cloud_session_v1", &session).await;
+    let (_, _, body) = server.json("GET", ROOT, Value::Null, &pin).await;
+    assert_eq!(body["instances"][0]["online"], true);
+    assert_eq!(body["instances"][0]["session_phase"], "ready");
+    assert_eq!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_state_v1")
+            .unwrap(),
+        original
+    );
+    task.abort();
+}

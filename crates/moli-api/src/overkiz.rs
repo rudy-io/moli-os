@@ -214,7 +214,8 @@ async fn list(owner: Owner) -> Response {
                         && state.scope == b.scope
                         && b.phase == cloud::SessionPhase::Ready
                 });
-            json!({"instance":instance,"state":state,"online":online})
+            let session_phase = binding.as_ref().map(|binding| binding.phase);
+            json!({"instance":instance,"state":state,"online":online,"session_phase":session_phase})
         })
         .collect();
     Json(json!({"instances":instances})).into_response()

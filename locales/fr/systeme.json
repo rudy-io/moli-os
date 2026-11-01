@@ -430,5 +430,8 @@
   "systeme.somfy.status.unauthorized": "Connexion nécessaire",
   "systeme.somfy.status.rate_limited": "Quota atteint",
   "systeme.somfy.status.unavailable": "Indisponible",
-  "systeme.somfy.status.invalid_response": "Réponse non valide"
+  "systeme.somfy.status.invalid_response": "Réponse non valide",
+  "systeme.somfy.phase.unconfirmed": "Disponibilité non confirmée",
+  "systeme.somfy.phase.refreshing": "Connexion à vérifier",
+  "systeme.somfy.historical_count": "historique"
 }

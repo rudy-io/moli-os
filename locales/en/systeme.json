@@ -430,5 +430,8 @@
   "systeme.somfy.status.unauthorized": "Sign-in required",
   "systeme.somfy.status.rate_limited": "Rate limited",
   "systeme.somfy.status.unavailable": "Unavailable",
-  "systeme.somfy.status.invalid_response": "Invalid response"
+  "systeme.somfy.status.invalid_response": "Invalid response",
+  "systeme.somfy.phase.unconfirmed": "Availability not confirmed",
+  "systeme.somfy.phase.refreshing": "Connection needs verification",
+  "systeme.somfy.historical_count": "historical"
 }
