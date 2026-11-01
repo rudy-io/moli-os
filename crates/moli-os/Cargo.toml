@@ -15,6 +15,7 @@ moli-zwave.workspace = true
 moli-api.workspace = true
 moli-weather.workspace = true
 moli-hue.workspace = true
+moli-homeassistant.workspace = true
 moli-dirigera.workspace = true
 moli-host.workspace = true
 moli-history.workspace = true

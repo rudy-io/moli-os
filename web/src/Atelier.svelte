@@ -4,6 +4,7 @@
   import { deviceName } from './lib/format.js';
   import { t, locale } from './lib/i18n.svelte.js';
   import Header from './components/Header.svelte';
+  import DriverWarnings from './components/DriverWarnings.svelte';
   import DeviceCard from './components/DeviceCard.svelte';
   import Journal from './components/Journal.svelte';
   import Approvals from './components/Approvals.svelte';
@@ -44,6 +45,7 @@
 
 <Header />
 <Approvals />
+<DriverWarnings drivers={hub.drivers} />
 
 {#each hub.guard?.unmatched_protected_rooms ?? [] as room (room)}
   <p class="waiting" role="alert">

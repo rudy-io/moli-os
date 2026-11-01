@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import DriverWarnings from '../../components/DriverWarnings.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
@@ -228,6 +229,8 @@
         </p>
       </section>
     {/if}
+
+    <DriverWarnings drivers={hub.drivers} />
 
     <div class="map" bind:this={map}>
       <svg class="links" aria-hidden="true">

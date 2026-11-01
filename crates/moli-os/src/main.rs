@@ -942,6 +942,7 @@ const KINDS: &[&str] = &[
     "zwave",
     "hue",
     "dirigera",
+    "homeassistant",
     "igd",
     "tapo",
     "shelly",
@@ -1105,6 +1106,7 @@ fn build_driver(
         "hue" => Arc::new(moli_hue::Hue::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1159,9 +1161,7 @@ fn build_driver(
         "tuya" => Arc::new(moli_tuya::Tuya::new(
             config.options.clone().try_into().with_context(context)?,
         )),
-        "presence" => Arc::new(moli_presence::Presence::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "presence" => configured_driver(config, moli_presence::Presence::new)?,
         "phones" => Arc::new(
             moli_phones::open(
                 config.options.clone().try_into().with_context(context)?,
@@ -1169,21 +1169,29 @@ fn build_driver(
             )?
             .1,
         ),
-        "telegram" => Arc::new(moli_telegram::Telegram::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "helpers" => Arc::new(moli_helpers::Helpers::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "demo" => Arc::new(moli_demo::Demo::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
+        "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,
             data_dir.join(moli_profile::TRUST_FILE),
         )?),
         other => bail!("driver kind {other:?} is in KINDS but never built"),
     })
+}
+
+/// Drivers with validated constructors share option decoding and error context.
+fn configured_driver<C, D>(
+    config: &DriverConfig,
+    create: fn(C) -> anyhow::Result<D>,
+) -> anyhow::Result<Arc<dyn Driver>>
+where
+    C: serde::de::DeserializeOwned,
+    D: Driver,
+{
+    let context = || format!("driver {:?} options", config.id);
+    let options = config.options.clone().try_into().with_context(context)?;
+    Ok(Arc::new(create(options).with_context(context)?))
 }
 
 /// `moli-os health`: the local instance answers, quickly.

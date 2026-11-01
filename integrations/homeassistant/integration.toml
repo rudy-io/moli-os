@@ -1,0 +1,25 @@
+[integration]
+id = "homeassistant"
+name = "Home Assistant (temporary migration bridge)"
+brands = ["Home Assistant"]
+models = ["Explicit entities"]
+transport = "http"
+driver = "homeassistant"
+crate = "moli-homeassistant"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [8123]
+
+[needs]
+secrets = ["token", "token_endpoint"]
+vars = []
+options = ["host", "port", "transport", "entities"]
+
+[origin]
+reused = "No code reused; official HA REST API and HA core domain constants"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/states.json"
