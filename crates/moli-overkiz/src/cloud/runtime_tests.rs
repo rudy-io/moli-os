@@ -617,6 +617,7 @@ enum Check {
     DelayedReconnect,
     NativeAwait,
     ProviderGate,
+    QueuedQuota,
     WaitingSelection,
 }
 #[derive(Debug)]
@@ -644,7 +645,8 @@ impl Driver for CheckProbe {
                 Check::SlowDisk => self.check_slow_disk(ctx, &mut cloud).await,
                 Check::DelayedReconnect => self.check_delayed_reconnect(ctx, &mut cloud).await,
                 Check::NativeAwait => self.check_native_await(ctx, &mut cloud).await,
-                Check::ProviderGate => self.check_provider_gate(ctx, &mut cloud),
+                Check::ProviderGate => self.check_provider_gate(ctx, &mut cloud).await,
+                Check::QueuedQuota => self.check_queued_quota(ctx, &mut cloud).await,
                 Check::WaitingSelection => {
                     cloud.tick(ctx);
                     assert!(
@@ -815,13 +817,208 @@ impl CheckProbe {
         assert!(cloud.state.failure.is_none());
         assert_eq!(self.script.calls.lock().unwrap().len(), 3);
     }
-    fn check_provider_gate(&self, ctx: &DriverCtx, cloud: &mut Controller) {
-        for _ in 0..5 {
-            cloud.tick(ctx);
+    async fn check_provider_gate(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        let original_delay = cloud.state.retry_after_secs;
+        let original_attempt = cloud.state.last_attempt_ms;
+        assert!(!cloud.gate.open());
+        cloud.tick(ctx);
+        assert!(
+            cloud.job.is_some(),
+            "quota must not retain credential input forever"
+        );
+        let taken = cloud.next_event().await;
+        assert!(
+            ctx.secret(PENDING_KEY).is_none(),
+            "password deleted before terminal result"
+        );
+        // A newer owner request can arrive after the atomic take and must survive its result.
+        let next = RequestEnvelope {
+            version: 1,
+            request_id: "newer-login".into(),
+            submitted_at_ms: now_ms(),
+            request: PendingRequest::Login {
+                username: "user@example.com".into(),
+                password: "NEWER_PASSWORD_SENTINEL".into(),
+            },
+        };
+        let encoded = String::from_utf8(super::super::encode_request(&next).unwrap()).unwrap();
+        assert!(
+            self.script
+                .hub
+                .insert_secret_if_absent(&self.script.instance, PENDING_KEY, &encoded)
+                .await
+                .unwrap()
+        );
+        cloud.handle(ctx, taken);
+        while cloud.job.is_some() {
+            let event = cloud.next_event().await;
+            cloud.handle(ctx, event);
         }
-        assert!(ctx.secret(PENDING_KEY).is_some());
+        let saved = self
+            .script
+            .hub
+            .secret(&self.script.instance, STATE_KEY)
+            .unwrap();
+        let state = super::super::decode_state(saved.as_bytes()).unwrap();
+        assert_eq!(state.request_id.as_deref(), Some("login"));
+        assert_eq!(
+            state.failure,
+            Some(Error::RateLimited {
+                retry_after_secs: original_delay.unwrap()
+            })
+        );
+        assert_eq!(state.retry_after_secs, original_delay);
+        assert_eq!(
+            state.last_attempt_ms, original_attempt,
+            "rejecting input must not reset the original quota deadline"
+        );
+        assert!(!cloud.gate.open());
+        assert_eq!(ctx.secret(PENDING_KEY).as_deref(), Some(encoded.as_str()));
         assert!(self.script.calls.lock().unwrap().is_empty());
-        assert!(cloud.job.is_none());
+        let reopened = Hub::new(HubOptions {
+            secrets: Some((self.script.path.clone(), MasterKey::new("d".repeat(64)))),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        assert_eq!(
+            reopened.secret(&self.script.instance, STATE_KEY).as_deref(),
+            Some(saved.as_str())
+        );
+        assert_eq!(
+            reopened
+                .secret(&self.script.instance, PENDING_KEY)
+                .as_deref(),
+            Some(encoded.as_str()),
+            "newer input must also survive on encrypted disk"
+        );
+        let restart =
+            Controller::with_transport(ctx, &super::super::Config::default(), self.script.clone());
+        assert!(!restart.gate.open());
+        assert_eq!(restart.state.request_id.as_deref(), Some("login"));
+    }
+    async fn check_queued_quota(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        let advertised = self.script.replies.lock().unwrap()[1]
+            .1
+            .as_ref()
+            .unwrap()
+            .retry_after
+            .as_ref()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        let original_session = ctx.secret(SESSION_KEY).unwrap();
+        let original_catalog =
+            inventory::decode_catalog(ctx.secret(inventory::INVENTORY_KEY).unwrap().as_bytes())
+                .unwrap();
+        cloud.tick(ctx);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.script.calls.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let request = RequestEnvelope {
+            version: 1,
+            request_id: "queued-before-quota".into(),
+            submitted_at_ms: now_ms(),
+            request: PendingRequest::Login {
+                username: "user@example.com".into(),
+                password: "PASSWORD_SENTINEL".into(),
+            },
+        };
+        let encoded = String::from_utf8(super::super::encode_request(&request).unwrap()).unwrap();
+        assert!(
+            self.script
+                .hub
+                .insert_secret_if_absent(&self.script.instance, PENDING_KEY, &encoded)
+                .await
+                .unwrap()
+        );
+        // Start atomic take while the provider response is still pending. Both events will
+        // be ready before the next select; the reported quota must win over the take.
+        assert!(cloud.gate.open());
+        cloud.tick(ctx);
+        assert!(cloud.job.is_some());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while cloud.actor.as_ref().unwrap().events.is_empty() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let quota = cloud.next_event().await;
+        assert!(
+            matches!(quota, Some(Event::Complete { ref state, .. }) if matches!(state.failure, Some(Error::RateLimited { .. })))
+        );
+        cloud.handle(ctx, quota);
+        assert!(!cloud.gate.open());
+        let quota_anchor = match &cloud.deferred {
+            Some(Event::Complete { state, .. }) => state.last_attempt_ms,
+            _ => panic!("quota completion must remain pending until take finishes"),
+        };
+        while cloud.job.is_some() {
+            let event = cloud.next_event().await;
+            cloud.handle(ctx, event);
+        }
+        let state = super::super::decode_state(ctx.secret(STATE_KEY).unwrap().as_bytes()).unwrap();
+        assert_eq!(state.request_id.as_deref(), Some("queued-before-quota"));
+        assert_eq!(
+            state.failure,
+            Some(Error::RateLimited {
+                retry_after_secs: advertised
+            })
+        );
+        assert_eq!(state.retry_after_secs, Some(advertised));
+        assert_eq!(state.last_attempt_ms, quota_anchor);
+        assert!(!cloud.gate.open());
+        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert_eq!(
+            ctx.secret(SESSION_KEY).as_deref(),
+            Some(original_session.as_str())
+        );
+        self.check_quota_inventory(ctx, &original_catalog);
+        let reopened = Hub::new(HubOptions {
+            secrets: Some((self.script.path.clone(), MasterKey::new("d".repeat(64)))),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        let saved = super::super::decode_state(
+            reopened
+                .secret(&self.script.instance, STATE_KEY)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(saved.request_id, state.request_id);
+        assert_eq!(saved.retry_after_secs, state.retry_after_secs);
+        let restored =
+            Controller::with_transport(ctx, &super::super::Config::default(), self.script.clone());
+        assert!(!restored.gate.open());
+    }
+    fn check_quota_inventory(&self, ctx: &DriverCtx, original_catalog: &Catalog) {
+        let current =
+            inventory::decode_catalog(ctx.secret(inventory::INVENTORY_KEY).unwrap().as_bytes())
+                .unwrap();
+        assert_eq!(
+            current.collections[&CollectionKind::Scenarios].status,
+            CollectionStatus::RateLimited
+        );
+        assert_eq!(
+            current.collections[&CollectionKind::Scenarios].data,
+            original_catalog.collections[&CollectionKind::Scenarios].data
+        );
+        for kind in CollectionKind::ALL.into_iter().skip(1) {
+            assert_eq!(
+                current.collections[&kind],
+                original_catalog.collections[&kind]
+            );
+        }
+        assert_eq!(
+            self.script.calls.lock().unwrap().len(),
+            2,
+            "queued login must send no credentials or additional provider request"
+        );
     }
     fn check_warnings(&self, ctx: &DriverCtx, cloud: &mut Controller) {
         cloud.warning = Some("synthetic cloud warning".into());
@@ -1284,7 +1481,8 @@ async fn cloud_persistence_acks_are_served_during_a_native_wait_longer_than_the_
     check(&rig, Check::NativeAwait).await;
 }
 #[tokio::test]
-async fn durable_provider_gate_survives_actor_restart_without_consuming_owner_input() {
+async fn review_durable_provider_gate_rejects_login_without_retaining_password_or_losing_new_input()
+{
     for seconds in [86_400, u64::MAX] {
         let rig = Rig::new(&format!("gate-{seconds}"), login_replies());
         let state = ConnectionState {
@@ -1441,4 +1639,39 @@ async fn saved_site_choices_wait_for_owner_without_periodic_provider_discovery()
             .unwrap();
     }
     check(&rig, Check::WaitingSelection).await;
+}
+
+#[tokio::test]
+async fn review_login_queued_before_long_or_indefinite_429_is_durably_rejected_without_bypassing_quota()
+ {
+    let mut replies = login_replies();
+    replies.extend(selected_replies());
+    replies.extend(cycle_replies());
+    let seed = Rig::new("queued-quota-seed", replies);
+    let generation = seed.login().await;
+    seed.select(generation).await;
+    for seconds in [86_400, u64::MAX] {
+        let mut replies = cycle_replies();
+        replies.truncate(2);
+        let mut limited = reply(
+            Endpoint::Collection(CollectionKind::Scenarios),
+            429,
+            &serde_json::json!({}),
+        );
+        limited.1.as_mut().unwrap().retry_after = Some(seconds.to_string());
+        limited.2 = Duration::from_millis(120);
+        replies[1] = limited;
+        let rig = Rig::new(&format!("queued-quota-{seconds}"), replies);
+        for key in [SESSION_KEY, STATE_KEY, inventory::INVENTORY_KEY] {
+            rig.hub
+                .store_secret(
+                    &rig.instance,
+                    key,
+                    &seed.hub.secret(&seed.instance, key).unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        check(&rig, Check::QueuedQuota).await;
+    }
 }

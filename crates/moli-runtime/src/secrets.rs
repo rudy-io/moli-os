@@ -186,21 +186,26 @@ impl SecretStore {
         &self,
         change: impl FnOnce(&mut BTreeMap<String, String>) -> (T, bool) + Send + 'static,
     ) -> io::Result<T> {
+        self.transaction_with_sync(change, sync_parent_directory)
+            .await
+    }
+
+    async fn transaction_with_sync<T: Send + 'static>(
+        &self,
+        change: impl FnOnce(&mut BTreeMap<String, String>) -> (T, bool) + Send + 'static,
+        sync_parent: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
+    ) -> io::Result<T> {
         let guard = Arc::clone(&self.0.write).lock_owned().await;
         let data = Arc::clone(&self.0);
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
             let mut next = data.current()?;
             let (result, changed) = change(&mut next);
-            if changed && let Err(error) = data.commit(&next) {
-                // A directory sync can fail after rename. Report the failure, but
-                // keep memory aligned with the actual file rather than revive old tokens.
-                if let Ok(actual) = data.current() {
-                    *data.values.lock().unwrap_or_else(PoisonError::into_inner) = actual;
-                }
-                return Err(error);
+            if changed {
+                data.commit(next, sync_parent)?;
+            } else {
+                *data.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
             }
-            *data.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
             Ok(result)
         })
         .await
@@ -223,8 +228,12 @@ impl SecretData {
         }
     }
 
-    fn commit(&self, next: &BTreeMap<String, String>) -> io::Result<()> {
-        let bytes = encrypt(&self.key, next)?;
+    fn commit(
+        &self,
+        next: BTreeMap<String, String>,
+        sync_parent: impl FnOnce(&Path) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let bytes = encrypt(&self.key, &next)?;
         let parent = self
             .path
             .parent()
@@ -246,8 +255,10 @@ impl SecretData {
             file.sync_all()?;
             drop(file);
             std::fs::rename(&temporary, &self.path)?;
-            #[cfg(unix)]
-            std::fs::File::open(parent)?.sync_all()?;
+            // The replacement is known at rename, even if the following durability
+            // barrier fails and the file becomes unreadable. Never restore old tokens.
+            *self.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
+            sync_parent(parent)?;
             Ok(())
         })();
         if result.is_err() {
@@ -255,6 +266,15 @@ impl SecretData {
         }
         result
     }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    std::fs::File::open(parent)?.sync_all()
+}
+#[cfg(not(unix))]
+fn sync_parent_directory(_: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn encrypt(key: &LessSafeKey, values: &BTreeMap<String, String>) -> io::Result<Vec<u8>> {
@@ -490,6 +510,63 @@ mod tests {
             Some("first")
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn review_post_rename_sync_and_recovery_read_failure_never_revive_old_tokens() {
+        let dir =
+            std::env::temp_dir().join(format!("moli-secret-post-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("secrets.enc");
+        let replacement_path = dir.join("replaced.enc");
+        let key = parse_master_key(KEY).unwrap();
+        let store = SecretStore::open(path.clone(), &key).unwrap();
+        store
+            .set("cloud/session", "OLD_REFRESH_SENTINEL")
+            .await
+            .unwrap();
+        let injected_path = path.clone();
+        let injected_replacement = replacement_path.clone();
+        let result = store
+            .transaction_with_sync(
+                |next| {
+                    next.insert("cloud/session".into(), "NEW_REFRESH_SENTINEL".into());
+                    ((), true)
+                },
+                move |_| {
+                    // Called only after actual rename: ciphertext already holds the replacement.
+                    let replaced = SecretStore::open(injected_path.clone(), &key).unwrap();
+                    assert_eq!(
+                        replaced.get("cloud/session").as_deref(),
+                        Some("NEW_REFRESH_SENTINEL")
+                    );
+                    // Make the attempted recovery read fail deterministically as well.
+                    std::fs::rename(&injected_path, &injected_replacement).unwrap();
+                    std::fs::create_dir(&injected_path).unwrap();
+                    Err(io::Error::other("injected directory sync failure"))
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "no durability ACK after failed parent sync"
+        );
+        assert!(
+            std::fs::read(&path).is_err(),
+            "recovery read is unavailable"
+        );
+        assert_eq!(
+            store.get("cloud/session").as_deref(),
+            Some("NEW_REFRESH_SENTINEL"),
+            "known replacement must survive even when recovery cannot read disk"
+        );
+        assert_eq!(
+            SecretStore::open(replacement_path, &key)
+                .unwrap()
+                .get("cloud/session"),
+            store.get("cloud/session")
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

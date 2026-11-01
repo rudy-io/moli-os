@@ -235,7 +235,11 @@ impl Drop for JobTask {
 pub(crate) enum JobKind {
     Input {
         epoch: u64,
-        permit: mpsc::OwnedPermit<Work>,
+        permit: Option<mpsc::OwnedPermit<Work>>,
+    },
+    Rejected {
+        epoch: u64,
+        state: Box<ConnectionState>,
     },
     Session {
         epoch: u64,
@@ -370,11 +374,13 @@ impl Controller {
     }
     pub(crate) async fn next_event(&mut self) -> Option<Event> {
         tokio::select! {
+            biased;
+            // A quota already reported by the actor wins over a simultaneously completed take.
+            event = async { self.actor.as_mut().expect("enabled branch").events.recv().await }, if self.actor.is_some() => event,
             result = async { self.job.as_mut().expect("enabled branch").task.wait().await }, if self.job.is_some() => {
                 let job = self.job.take().expect("completed job");
                 Some(Event::JobFinished { kind: Box::new(job.kind), result })
             },
-            event = async { self.actor.as_mut().expect("enabled branch").events.recv().await }, if self.actor.is_some() => event,
             else => std::future::pending().await,
         }
     }
@@ -414,12 +420,16 @@ impl Controller {
             },
             Event::Complete {
                 epoch,
-                state,
+                mut state,
                 catalog,
                 observed,
             } => {
                 if epoch != self.epoch {
                     return;
+                }
+                if state.retry_after_secs.is_some() {
+                    state.last_attempt_ms = Some(now_ms());
+                    self.gate = Gate::restore(&state);
                 }
                 if self.job.is_some() {
                     // A cancelled sink may complete while its disk transaction is finishing.
@@ -450,6 +460,20 @@ impl Controller {
                         Ok(None) => {}
                         Err(error) => self.warning = Some(error.to_string()),
                     }
+                }
+            }
+            JobKind::Rejected { epoch, state } => {
+                if epoch == self.epoch {
+                    if result.is_ok() {
+                        self.state = *state;
+                    }
+                    self.warning = Some(
+                        result
+                            .err()
+                            .or(self.state.failure)
+                            .unwrap_or(Error::Persistence)
+                            .to_string(),
+                    );
                 }
             }
             JobKind::Session {
@@ -555,9 +579,6 @@ impl Controller {
         if observed && catalog.is_some() {
             state.last_observation_ms = Some(now_ms());
         }
-        if state.retry_after_secs.is_some() {
-            state.last_attempt_ms = Some(now_ms());
-        }
         let encoded = (|| {
             let mut values = vec![];
             if let Some(catalog) = &catalog {
@@ -629,15 +650,18 @@ impl Controller {
         if self.actor.is_none() && Instant::now() >= self.next_poll {
             self.restart(ctx, false);
         }
-        if !self.gate.open() {
-            return;
-        }
         if ctx.secret(super::PENDING_KEY).is_some() {
-            let Some(actor) = &self.actor else {
-                return;
-            };
-            let Ok(permit) = actor.commands.clone().try_reserve_owned() else {
-                return;
+            let permit = if self.gate.open() {
+                let Some(actor) = &self.actor else {
+                    return;
+                };
+                let Ok(permit) = actor.commands.clone().try_reserve_owned() else {
+                    return;
+                };
+                Some(permit)
+            } else {
+                // No actor dispatch for rejected input. The single disk job is its capacity.
+                None
             };
             self.job = Some(Job {
                 task: JobTask::Take(ctx.take_secret_job(super::PENDING_KEY)),
@@ -646,6 +670,9 @@ impl Controller {
                     permit,
                 },
             });
+            return;
+        }
+        if !self.gate.open() {
             return;
         }
         if matches!(self.state.phase, ConnectionPhase::ReconnectRequired)
@@ -662,9 +689,13 @@ impl Controller {
             self.busy = true;
         }
     }
-    fn consume(&mut self, ctx: &DriverCtx, permit: mpsc::OwnedPermit<Work>, bytes: &str) {
+    fn consume(&mut self, ctx: &DriverCtx, permit: Option<mpsc::OwnedPermit<Work>>, bytes: &str) {
         match super::decode_request(bytes.as_bytes()) {
             Ok(request) => {
+                let Some(permit) = permit.filter(|_| self.gate.open()) else {
+                    self.reject_input(ctx, request.request_id);
+                    return;
+                };
                 if let PendingRequest::Refresh { generation } = &request.request
                     && self.generation.as_ref() != Some(generation)
                 {
@@ -691,6 +722,42 @@ impl Controller {
             }
             Err(error) => self.warning = Some(error.to_string()),
         }
+    }
+    fn reject_input(&mut self, ctx: &DriverCtx, request_id: String) {
+        // If quota completed while take was pending, save that cycle's partial catalogue
+        // and this request outcome together, once; never discard its quota or observations.
+        if matches!(self.deferred, Some(Event::Complete { .. })) {
+            self.coalesced_request_id = Some(request_id);
+            return;
+        }
+        let mut state = self.state.clone();
+        state.request_id = Some(request_id);
+        state.phase = ConnectionPhase::Unavailable;
+        state.failure = Some(Error::RateLimited {
+            retry_after_secs: state.retry_after_secs.unwrap_or(u64::MAX),
+        });
+        // Keep retry_after_secs + last_attempt_ms unchanged: rejecting a request must
+        // neither bypass nor extend the original durable provider gate.
+        match super::encode_state(&state)
+            .and_then(|bytes| String::from_utf8(bytes).map_err(|_| Error::InvalidResponse))
+        {
+            Ok(value) => {
+                self.job = Some(Job {
+                    task: JobTask::Write(
+                        ctx.store_secrets_job(vec![(super::STATE_KEY.into(), value)]),
+                    ),
+                    kind: JobKind::Rejected {
+                        epoch: self.epoch,
+                        state: Box::new(state),
+                    },
+                });
+            }
+            Err(error) => self.warning = Some(error.to_string()),
+        }
+        self.live = false;
+        let summary = super::summary_device_id(ctx.instance());
+        ctx.set_state(&summary, "status", Value::from("stale"));
+        ctx.set_availability(&summary, false);
     }
     fn publish(&self, ctx: &DriverCtx, catalog: Option<&Catalog>) {
         let id = super::summary_device_id(ctx.instance());
