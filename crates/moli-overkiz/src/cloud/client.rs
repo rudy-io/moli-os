@@ -194,7 +194,7 @@ impl<T: Transport> CloudClient<T> {
         self.unrepresentable_retry = None;
         let result = tokio::time::timeout(CYCLE_LIMIT, self.login_inner(username, password, sink))
             .await
-            .map_err(|_| Error::Deadline)?;
+            .unwrap_or(Err(Error::Deadline));
         self.failure = result.as_ref().err().copied();
         result
     }
@@ -363,7 +363,7 @@ impl<T: Transport> CloudClient<T> {
             self.select_inner(generation, site_oid, gateway_id, region, sink),
         )
         .await
-        .map_err(|_| Error::Deadline)?;
+        .unwrap_or(Err(Error::Deadline));
         self.failure = result.as_ref().err().copied();
         result
     }
@@ -457,10 +457,21 @@ impl<T: Transport> CloudClient<T> {
             .await;
         let response = match response {
             Ok(r) if r.status == 200 => r,
-            _ => {
+            failed => {
+                let failure = match failed {
+                    Ok(response) if response.status == 429 => Error::RateLimited {
+                        retry_after_secs: parse_retry_after(
+                            response.retry_after.as_deref(),
+                            now_ms(),
+                        )
+                        .unwrap_or(self.backoff),
+                    },
+                    _ => Error::LoginRequired,
+                };
                 self.invalidate();
                 let _ = self.persist(sink).await;
-                return Err(Error::LoginRequired);
+                // Retire the ambiguous token, but preserve quota even when its delay is zero.
+                return Err(failure);
             }
         };
         let outcome = self.accept_token(&response.body, site);

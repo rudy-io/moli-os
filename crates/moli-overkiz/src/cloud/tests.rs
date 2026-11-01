@@ -128,6 +128,7 @@ struct Sink {
     saved: Vec<Vec<u8>>,
     fail_at: Option<usize>,
     stall_at: Option<usize>,
+    delay: std::time::Duration,
     calls: usize,
     trace: Trace,
 }
@@ -138,7 +139,11 @@ impl SessionSink for Sink {
             .push(format!("save:{}", String::from_utf8_lossy(bytes)));
         let fail = self.fail_at == Some(self.calls);
         let stall = self.stall_at == Some(self.calls);
+        let delay = self.delay;
         Box::pin(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             if stall {
                 tokio::time::sleep(std::time::Duration::from_secs(20)).await;
             }
@@ -1125,4 +1130,147 @@ async fn known_swedish_country_uses_pinned_emea_mapping() {
     ]);
     login(&mut c, &mut s).await;
     assert_eq!(c.state().candidates[0].region, Some(Region::Emea));
+}
+
+async fn oauth_refresh_quota_scenario(seconds: u64) {
+    let mut reads = cycle_empty();
+    reads.extend([
+        gate(),
+        response(401, json!({})),
+        Ok(Response {
+            status: 429,
+            retry_after: Some(seconds.to_string()),
+            body: b"{}".to_vec(),
+        }),
+    ]);
+    let (mut c, mut s, t) = scoped(reads).await;
+    let mut inventory = catalog(&c);
+    c.read_cycle(&mut inventory, &mut s).await.unwrap();
+    let prior = inventory.clone();
+    let before = t.entries().len();
+    assert_eq!(
+        c.read_cycle(&mut inventory, &mut s).await,
+        Err(Error::RateLimited {
+            retry_after_secs: seconds
+        })
+    );
+    let scenario = &inventory.collections[&CollectionKind::Scenarios];
+    assert_eq!(scenario.status, S::RateLimited);
+    assert_eq!(
+        scenario.failure,
+        Some(crate::inventory::CollectionFailure::RateLimited {
+            retry_after_secs: Some(seconds)
+        })
+    );
+    assert_eq!(
+        scenario.data,
+        prior.collections[&CollectionKind::Scenarios].data
+    );
+    assert_eq!(
+        scenario.last_observation_ms,
+        prior.collections[&CollectionKind::Scenarios].last_observation_ms
+    );
+    for kind in CollectionKind::ALL.into_iter().skip(1) {
+        assert_eq!(inventory.collections[&kind], prior.collections[&kind]);
+    }
+    let entries = t.entries();
+    let reads = entries[before..]
+        .iter()
+        .filter(|v| v.starts_with("request:"))
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 3);
+    assert!(reads[0].starts_with("request:Gateways:"));
+    assert!(reads[1].starts_with("request:Collection(Scenarios):"));
+    assert!(reads[2].starts_with("request:Refresh:"));
+    assert_eq!(
+        c.state().failure,
+        Some(Error::RateLimited {
+            retry_after_secs: seconds
+        })
+    );
+    let saved = s.saved.last().unwrap().clone();
+    assert_eq!(
+        super::read_session_binding(&saved, "synthetic")
+            .unwrap()
+            .phase,
+        super::SessionPhase::LoginRequired
+    );
+    tokio::time::advance(std::time::Duration::from_secs(seconds)).await;
+    assert_eq!(c.refresh(&mut s).await, Err(Error::LoginRequired));
+    assert_eq!(entries, t.entries());
+    let (mut restart, mut sink, trace) = client(vec![]);
+    restart.restore(&saved).unwrap();
+    assert_eq!(restart.refresh(&mut sink).await, Err(Error::LoginRequired));
+    assert!(trace.entries().is_empty());
+}
+#[tokio::test(start_paused = true)]
+async fn review_oauth_refresh_zero_quota_stops_cycle_and_preserves_unattempted_history() {
+    oauth_refresh_quota_scenario(0).await;
+}
+#[tokio::test(start_paused = true)]
+async fn review_oauth_refresh_positive_quota_preserves_qualification_and_never_replays_token() {
+    oauth_refresh_quota_scenario(120).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn review_outer_login_timeout_is_recorded_in_connection_failure() {
+    let mut replies = vec![token("account", "unused"), token("unscoped", "r1")];
+    for page in 0..10 {
+        let results=(page*20..page*20+20).map(|i|json!({"siteOID":format!("parent{i}"),"country":"FR","subSites":[{"externalOID":format!("setup{i}"),"gateways":[{"gatewayId":format!("gateway{i}")}]}]})).collect::<Vec<_>>();
+        replies.push(response(200, json!({"totalCount":200,"results":results})));
+    }
+    let mut c = CloudClient::with_transport(
+        "synthetic",
+        Script {
+            replies: replies.into(),
+            trace: Trace::default(),
+            delay: std::time::Duration::from_secs(9),
+        },
+    )
+    .unwrap();
+    let mut sink = Sink {
+        delay: std::time::Duration::from_secs(9),
+        ..Sink::default()
+    };
+    let before = tokio::time::Instant::now();
+    assert_eq!(
+        c.login("user@example.com".into(), "p".into(), &mut sink)
+            .await,
+        Err(Error::Deadline)
+    );
+    assert_eq!(before.elapsed(), std::time::Duration::from_secs(90));
+    assert_eq!(c.state().failure, Some(Error::Deadline));
+}
+#[tokio::test(start_paused = true)]
+async fn review_outer_selection_timeout_is_recorded_in_connection_failure() {
+    let (mut seed, mut saved, _) = client(vec![
+        token("account", "unused"),
+        token("unscoped", "r1"),
+        directory("FR"),
+    ]);
+    login(&mut seed, &mut saved).await;
+    let short = || {
+        response(
+            200,
+            json!({"access_token":"short","refresh_token":"new","expires_in":6}),
+        )
+    };
+    let mut c = CloudClient::with_transport(
+        "synthetic",
+        Script {
+            replies: vec![short(), short(), response(401, json!({})), short(), gate()].into(),
+            trace: Trace::default(),
+            delay: std::time::Duration::from_secs(9),
+        },
+    )
+    .unwrap();
+    c.restore(saved.saved.last().unwrap()).unwrap();
+    let mut sink = Sink {
+        delay: std::time::Duration::from_secs(9),
+        ..Sink::default()
+    };
+    let before = tokio::time::Instant::now();
+    assert_eq!(select(&mut c, &mut sink, None).await, Err(Error::Deadline));
+    assert_eq!(before.elapsed(), std::time::Duration::from_secs(90));
+    assert_eq!(c.state().failure, Some(Error::Deadline));
 }
