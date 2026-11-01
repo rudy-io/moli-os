@@ -1,5 +1,6 @@
 //! Native Somfy developer-mode local HTTPS. No cloud login, no inferred positions.
 mod client;
+pub mod inventory;
 mod model;
 use anyhow::Context as _;
 use client::{Client, Failure};

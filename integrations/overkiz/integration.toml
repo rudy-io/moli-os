@@ -19,3 +19,30 @@ reused = "Cover families and favourite design follow moli-os PR25 by ddcq; share
 author = "agent"
 [[fixture]]
 file = "fixtures/devices.json"
+
+[[fixture]]
+file = "fixtures/cloud-action-groups.json"
+
+[[fixture]]
+file = "fixtures/cloud-calendar-days.json"
+
+[[fixture]]
+file = "fixtures/cloud-calendar-rules.json"
+
+[[fixture]]
+file = "fixtures/cloud-delayed-executions.json"
+
+[[fixture]]
+file = "fixtures/cloud-empty.json"
+
+[[fixture]]
+file = "fixtures/cloud-error-object.json"
+
+[[fixture]]
+file = "fixtures/cloud-scheduled-executions.json"
+
+[[fixture]]
+file = "fixtures/cloud-triggers.json"
+
+[[fixture]]
+file = "fixtures/cloud-unknown-trigger.json"

@@ -1,0 +1,50 @@
+[
+  {
+    "ifThenSetupTrigger": {
+      "oid": "00000000-0000-4000-8000-000000000004",
+      "label": "Synthetic conditional program",
+      "mode": 2,
+      "allowExecuteOnEnabled": false,
+      "usingTriggerModeFlag": true,
+      "metadata": "{\"tahoma\":{\"synthetic\":true}}",
+      "rootConditionBlock": {
+        "andBlock": {
+          "subConditionBlocks": [
+            {
+              "staticDeviceStateCondition": {
+                "blockId": "synthetic-condition-1",
+                "deviceURL": "io://example.invalid/synthetic-sensor",
+                "stateName": "core:ContactState",
+                "operator": "EQUALS",
+                "value1": 1,
+                "type": "STATEFUL",
+                "activationDelay": 0
+              }
+            }
+          ]
+        }
+      },
+      "effects": [
+        {
+          "actionGroupEffect": {
+            "actionGroupOID": "00000000-0000-4000-8000-000000000001"
+          }
+        }
+      ],
+      "schedulingIntervals": [
+        {
+          "weekHours": {
+            "startMinutes": 420,
+            "stopMinutes": 1200,
+            "dayMask": 31
+          }
+        },
+        {
+          "weekDays": {
+            "dayMask": 64
+          }
+        }
+      ]
+    }
+  }
+]

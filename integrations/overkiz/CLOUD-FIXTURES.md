@@ -1,0 +1,1 @@
+All examples are fabricated for offline parser tests. No account, house, token, production gateway, or captured payload. These objects illustrate fields observed in the public official Classic client, not server integration fixtures. Unknown enums are intentionally marked SYNTHETIC_UNKNOWN. Actions are data only. Never send these fixtures to Somfy.
