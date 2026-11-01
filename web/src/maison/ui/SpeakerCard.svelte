@@ -2,6 +2,7 @@
   import { value, act, num, nameOf, device } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import { pointOf, canWrite, numericRange, quantize } from '../lib/capabilities.js';
 
   /** A speaker (Sonos…): what plays, play/pause, volume, mute, and the
    *  level an announcement is said at when the speaker lets it be set.
@@ -10,21 +11,31 @@
    *  has no play/pause, no mute, and never says it is stopped. */
   let { id, name = null } = $props();
 
-  const has = (key, write) => device(id)?.points.some((p) => p.key === key && (!write || p.access?.write)) ?? false;
-  const can = (key) => has(key, true);
-  const tells = $derived(has('playing') || has('state'));
+  const d = $derived(device(id));
+  const tells = $derived(pointOf(d, 'playing') || pointOf(d, 'state'));
   const playing = $derived(value(id, 'playing') === true);
   const title = $derived(value(id, 'title'));
   const artist = $derived(value(id, 'artist'));
   const volume = $derived(value(id, 'volume'));
   const muted = $derived(value(id, 'mute') === true);
   let dragging = $state(null);
-  const plays = $derived(can('playing'));
-  const sets = $derived(can('volume'));
-  const mutes = $derived(can('mute'));
-  const announces = $derived(can('announce_volume'));
+  const volumeRange = $derived(numericRange(d, 'volume', 1, { min: 0, max: 100 }));
+  const announceRange = $derived(numericRange(d, 'announce_volume', 5, { min: 0, max: 100 }));
+  const plays = $derived(canWrite(d, 'playing'));
+  const sets = $derived(canWrite(d, 'volume') && volumeRange);
+  const mutes = $derived(canWrite(d, 'mute'));
+  const announces = $derived(canWrite(d, 'announce_volume') && announceRange);
   const announceVolume = $derived(value(id, 'announce_volume'));
   let draggingAnnounce = $state(null);
+
+  function setLevel(key, event) {
+    if (!canWrite(d, key)) return;
+    const range = key === 'volume' ? volumeRange : announceRange;
+    const next = quantize(Number(event.currentTarget.value), range);
+    if (next != null && next !== value(id, key)) {
+      act(`${id}/${key}`, next, t(key === 'volume' ? 'salon.volume' : 'salon.enceinte.volume_annonce'));
+    }
+  }
 </script>
 
 <section class="card sound">
@@ -42,7 +53,7 @@
   {#if plays || sets || mutes}
     <div class="row">
       {#if plays}
-        <button class="round" onclick={() => act(`${id}/playing`, !playing, t('salon.lecture'))} aria-label={playing ? t('salon.pause') : t('salon.lecture')}>
+        <button class="round" onclick={() => plays && act(`${id}/playing`, !playing, t('salon.lecture'))} aria-label={playing ? t('salon.pause') : t('salon.lecture')}>
           <Icon name={playing ? 'pause' : 'play'} size={26} />
         </button>
       {/if}
@@ -51,14 +62,14 @@
           <Icon name="volume-minus" size={18} />
           <input
             type="range"
-            min="0"
-            max="100"
-            value={dragging ?? volume ?? 0}
+            min={volumeRange.first}
+            max={volumeRange.last}
+            step={volumeRange.step}
+            value={dragging ?? volume ?? volumeRange.first}
             oninput={(e) => (dragging = Number(e.currentTarget.value))}
             onchange={(e) => {
-              const v = Number(e.currentTarget.value);
               dragging = null;
-              act(`${id}/volume`, v, t('salon.volume'));
+              setLevel('volume', e);
             }}
             aria-label={t('salon.volume')} />
           <Icon name="volume-plus" size={18} />
@@ -66,7 +77,7 @@
         </div>
       {/if}
       {#if mutes}
-        <button class="round soft" class:active={muted} onclick={() => act(`${id}/mute`, !muted, t('salon.sourdine'))} aria-label={t('salon.couper_son')}>
+        <button class="round soft" class:active={muted} onclick={() => mutes && act(`${id}/mute`, !muted, t('salon.sourdine'))} aria-label={t('salon.couper_son')}>
           <Icon name={muted ? 'volume-off' : 'volume-high'} size={22} />
         </button>
       {/if}
@@ -77,15 +88,14 @@
       <span>{t('salon.enceinte.volume_annonce')}</span>
       <input
         type="range"
-        min="0"
-        max="100"
-        step="5"
-        value={draggingAnnounce ?? announceVolume ?? 0}
+        min={announceRange.first}
+        max={announceRange.last}
+        step={announceRange.step}
+        value={draggingAnnounce ?? announceVolume ?? announceRange.first}
         oninput={(e) => (draggingAnnounce = Number(e.currentTarget.value))}
         onchange={(e) => {
-          const v = Number(e.currentTarget.value);
           draggingAnnounce = null;
-          act(`${id}/announce_volume`, v, t('salon.enceinte.volume_annonce'));
+          setLevel('announce_volume', e);
         }} />
       <b class="num">{num(draggingAnnounce ?? announceVolume)}</b>
     </label>
