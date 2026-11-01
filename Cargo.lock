@@ -1076,6 +1076,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-airzone"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "http",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "moli-alexa"
 version = "0.1.0"
 dependencies = [
@@ -1531,6 +1548,7 @@ dependencies = [
  "http",
  "jiff",
  "moli-airplay",
+ "moli-airzone",
  "moli-alexa",
  "moli-api",
  "moli-assistant",
