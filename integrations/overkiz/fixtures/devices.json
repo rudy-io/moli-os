@@ -1,0 +1,6 @@
+[
+ {"deviceURL":"io://example/123#2","available":true,"enabled":true,"label":"Example shutter","definition":{"uiClass":"RollerShutter","commands":[{"commandName":"open","nparams":0},{"commandName":"close","nparams":0},{"commandName":"stop","nparams":0},{"commandName":"setClosure","nparams":1}]},"states":[{"name":"core:ClosureState","value":25}]},
+ {"deviceURL":"rts://example/456","available":true,"enabled":true,"label":"Example RTS","definition":{"uiClass":"RollerShutter","commands":[{"commandName":"up","nparams":1},{"commandName":"down","nparams":1},{"commandName":"stop","nparams":1}]},"states":[]},
+ {"deviceURL":"io://example/789","available":true,"enabled":true,"label":"Example gate","definition":{"uiClass":"Gate","commands":[{"commandName":"open","nparams":0}]},"states":[{"name":"core:OpenClosedState","value":"closed"}]},
+ {"deviceURL":"io://example/123#1","available":true,"enabled":true,"label":"Example window","definition":{"uiClass":"Window","commands":[{"commandName":"open","nparams":0}]},"states":[{"name":"core:ClosureState","value":100}]}
+]

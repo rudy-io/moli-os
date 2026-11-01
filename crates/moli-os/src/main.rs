@@ -941,6 +941,7 @@ const KINDS: &[&str] = &[
     "z2m",
     "zwave",
     "hue",
+    "overkiz",
     "dirigera",
     "igd",
     "tapo",
@@ -1105,6 +1106,7 @@ fn build_driver(
         "hue" => Arc::new(moli_hue::Hue::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "overkiz" => configured_driver(config, moli_overkiz::Overkiz::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1184,6 +1186,20 @@ fn build_driver(
         )?),
         other => bail!("driver kind {other:?} is in KINDS but never built"),
     })
+}
+
+/// Drivers with validated constructors share option decoding and error context.
+fn configured_driver<C, D>(
+    config: &DriverConfig,
+    create: fn(C) -> anyhow::Result<D>,
+) -> anyhow::Result<Arc<dyn Driver>>
+where
+    C: serde::de::DeserializeOwned,
+    D: Driver,
+{
+    let context = || format!("driver {:?} options", config.id);
+    let options = config.options.clone().try_into().with_context(context)?;
+    Ok(Arc::new(create(options).with_context(context)?))
 }
 
 /// `moli-os health`: the local instance answers, quickly.
