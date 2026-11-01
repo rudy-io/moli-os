@@ -21,10 +21,14 @@ host = "gateway-example.local"
 ```
 
 Store the token using a secret-manager pipe into
-`moli-os secrets set somfy token`. Start read-only observation first. With no
-configured/cached fingerprint the first TLS handshake trusts and persists the
-certificate before sending the token. Use a trusted LAN for this first contact or
-provide an independently verified fingerprint. A certificate replacement stops the
+`moli-os secrets set somfy token`. Observe states before testing any command.
+Roller shutters expose their declared writes by default; there is no global
+read-only option in this driver. For an audit requiring all command paths to be
+disabled, use an isolated read-only collector rather than starting this driver.
+With no configured/cached fingerprint the first TLS handshake trusts and persists the
+certificate before sending the token. This is **trust on first use (TOFU)**, not
+independent authentication of the gateway's identity. Use a trusted LAN for this
+first contact or provide an independently verified fingerprint. A certificate replacement stops the
 driver; verify it independently before updating `cert_sha256` or forgetting the
 cached `cert_sha256` and restarting. Do not remove a pin merely to silence a warning.
 

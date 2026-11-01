@@ -1,6 +1,6 @@
 use moli_core::{DriverStatus, InstanceId, Origin, PointId, Value};
 use moli_homeassistant::{Config, HomeAssistant};
-use moli_runtime::{Hub, HubOptions, MasterKey, spawn_driver};
+use moli_runtime::{CommandError, Hub, HubOptions, LabelPatch, MasterKey, spawn_driver};
 use serde_json::{Value as Json, json};
 use std::{
     sync::{
@@ -20,6 +20,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     hub: Hub,
+    events: tokio::sync::broadcast::Receiver<moli_core::Event>,
     cancel: CancellationToken,
     server: tokio::task::JoinHandle<()>,
     requests: mpsc::UnboundedReceiver<String>,
@@ -131,6 +132,7 @@ async fn start_with_configuration(
     .await
     .unwrap();
     let cancel = CancellationToken::new();
+    let events = hub.subscribe();
     let supervisor = spawn_driver(
         &hub,
         InstanceId::from("bridge"),
@@ -139,6 +141,7 @@ async fn start_with_configuration(
     );
     Fixture {
         hub,
+        events,
         cancel,
         server,
         requests,
@@ -693,4 +696,135 @@ async fn climate_config_failure_keeps_explicit_entity_unit_without_guessing_miss
         }
         assert_eq!(f.hub.snapshot().devices[0].online, Some(true));
     }
+}
+
+#[tokio::test]
+async fn neutral_alias_and_label_do_not_hide_an_ha_gate_from_the_hub() {
+    for (entity_id, friendly_name) in [("switch.portail", "Relay"), ("switch.relay", "Portail")] {
+        let mut f = start_with_source(
+            &["on"], true, 200, Duration::from_secs(5),
+            json!({"entity_id": entity_id, "state": "off", "attributes": {"friendly_name": friendly_name}}),
+        ).await;
+        wait_value(&f).await;
+        f.requests.recv().await.unwrap();
+        f.hub
+            .set_label(
+                &moli_core::DeviceId::from("bridge:stable"),
+                LabelPatch {
+                    name: Some("Relay".into()),
+                    room: None,
+                },
+                Origin::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+        let result = f
+            .hub
+            .command(
+                &PointId::from("bridge:stable/on"),
+                Value::Bool(true),
+                Origin::Mcp,
+                None,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(CommandError::NeedsApproval { .. })),
+            "gate hidden by neutral alias: {result:?}"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(80), f.requests.recv())
+                .await
+                .is_err(),
+            "held gate command reached the transport"
+        );
+        assert_eq!(
+            f.hub
+                .state(&PointId::from("bridge:stable/on"))
+                .unwrap()
+                .value,
+            Value::Bool(false)
+        );
+    }
+}
+
+#[tokio::test]
+async fn http_warning_is_observable_while_polling_and_clears_on_stop() {
+    let mut f = start(&[], true, 200).await;
+    wait_value(&f).await;
+    let driver = serde_json::to_value(&f.hub.snapshot().drivers[0]).unwrap();
+    let warning = driver["warning"]
+        .as_str()
+        .expect("HTTP token transport must be visible in integration status");
+    assert!(
+        warning.contains("HTTP") && warning.contains("HTTPS"),
+        "{warning}"
+    );
+    assert!(!warning.contains("synthetic-private-token"));
+    assert_eq!(driver["status"]["state"], "running");
+    assert_eq!(f.hub.snapshot().devices[0].online, Some(true));
+    let events: Vec<_> = std::iter::from_fn(|| f.events.try_recv().ok())
+        .map(|event| serde_json::to_value(event).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "driver_status" && event["warning"] == warning),
+        "warning absent from SSE event"
+    );
+    f.requests.recv().await.unwrap();
+    f.raw.lock().unwrap().1["state"] = json!("on");
+    tokio::time::timeout(Duration::from_secs(7), async {
+        loop {
+            if f.hub
+                .state(&PointId::from("bridge:stable/on"))
+                .unwrap()
+                .value
+                == Value::Bool(true)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("warning interrupted polling");
+    f.cancel.cancel();
+    (&mut f.supervisor).await.unwrap();
+    let stopped = serde_json::to_value(&f.hub.snapshot().drivers[0]).unwrap();
+    assert_eq!(stopped["status"]["state"], "stopped");
+    assert!(
+        stopped["warning"].is_null(),
+        "warning outlived its driver run"
+    );
+    let events: Vec<_> = std::iter::from_fn(|| f.events.try_recv().ok())
+        .map(|event| serde_json::to_value(event).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["status"]["state"] == "stopped" && event["warning"].is_null())
+    );
+}
+
+#[tokio::test]
+async fn an_ordinary_neutral_switch_remains_commandable_by_the_agent() {
+    let mut f = start(&["on"], true, 200).await;
+    wait_value(&f).await;
+    f.requests.recv().await.unwrap();
+    f.hub
+        .command(
+            &PointId::from("bridge:stable/on"),
+            Value::Bool(true),
+            Origin::Mcp,
+            None,
+        )
+        .await
+        .unwrap();
+    let request = f.requests.recv().await.unwrap();
+    assert!(request.starts_with("POST /api/services/switch/turn_on HTTP/1.1\r\n"));
+    assert_eq!(
+        serde_json::from_str::<Json>(request.split_once("\r\n\r\n").unwrap().1).unwrap(),
+        json!({"entity_id": "switch.example"})
+    );
 }

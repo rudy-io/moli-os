@@ -195,6 +195,8 @@
   "systeme.format.duree_secondes": "{s} s",
   "systeme.pilotes.z2m.nom": "Zigbee",
   "systeme.pilotes.z2m.desc": "The small wireless sensors and plugs, through Zigbee2MQTT.",
+  "systeme.pilotes.zwave.nom": "Z-Wave",
+  "systeme.pilotes.zwave.desc": "The Z-Wave nodes (switches, dimmers, sensors), through Z-Wave JS UI's MQTT gateway.",
   "systeme.pilotes.hue.nom": "Philips Hue",
   "systeme.pilotes.hue.desc": "Hue bulbs and rooms, through the bridge, live.",
   "systeme.pilotes.tuya.nom": "Tuya",

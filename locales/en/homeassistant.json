@@ -1,4 +1,5 @@
 {
+  "homeassistant.insecure_http": "HTTP sends the long-lived Home Assistant token unencrypted. Use HTTPS with a pinned certificate to protect it.",
   "homeassistant.on": "Power",
   "homeassistant.brightness": "Brightness",
   "homeassistant.state": "State",

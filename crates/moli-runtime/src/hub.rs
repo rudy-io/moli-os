@@ -285,6 +285,9 @@ pub struct DriverView {
     /// The catalogue package it runs (see [`crate::Driver::integration`]).
     pub integration: Arc<str>,
     pub status: DriverStatus,
+    /// A non-blocking warning for the current driver run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -362,6 +365,7 @@ struct DriverSlot {
     kind: &'static str,
     integration: Arc<str>,
     status: DriverStatus,
+    warning: Option<String>,
     commands: mpsc::Sender<CommandRequest>,
 }
 
@@ -485,6 +489,7 @@ impl Hub {
                     kind: slot.kind,
                     integration: slot.integration.clone(),
                     status: slot.status.clone(),
+                    warning: slot.warning.clone(),
                 })
                 .collect(),
             approvals,
@@ -1423,25 +1428,37 @@ impl Hub {
                 kind,
                 integration,
                 status: DriverStatus::Starting,
+                warning: None,
                 commands,
             },
         );
         self.emit(Event::DriverStatus {
             instance: instance.clone(),
             status: DriverStatus::Starting,
+            warning: None,
         });
         rx
     }
 
     pub(crate) fn set_driver_status(&self, instance: &InstanceId, status: DriverStatus) {
-        let (changed, back) = {
+        let (changed, warning, back) = {
             let mut model = self.write();
-            let changed = match model.drivers.get_mut(instance) {
-                Some(slot) if slot.status != status => {
+            let (changed, warning) = match model.drivers.get_mut(instance) {
+                Some(slot) => {
+                    let clear = matches!(
+                        status,
+                        DriverStatus::Starting
+                            | DriverStatus::Backoff { .. }
+                            | DriverStatus::Stopped
+                    );
+                    let changed = slot.status != status || (clear && slot.warning.is_some());
                     slot.status = status.clone();
-                    true
+                    if clear {
+                        slot.warning = None;
+                    }
+                    (changed, slot.warning.clone())
                 }
-                _ => false,
+                None => (false, None),
             };
             let mut back = Vec::new();
             if changed && status == DriverStatus::Running {
@@ -1465,7 +1482,7 @@ impl Hub {
                     back.push(device);
                 }
             }
-            (changed, back)
+            (changed, warning, back)
         };
         for device in back {
             self.emit(Event::Availability {
@@ -1477,8 +1494,28 @@ impl Hub {
             self.emit(Event::DriverStatus {
                 instance: instance.clone(),
                 status,
+                warning,
             });
         }
+    }
+
+    pub(crate) fn set_driver_warning(&self, instance: &InstanceId, warning: Option<String>) {
+        let status = {
+            let mut model = self.write();
+            let Some(slot) = model.drivers.get_mut(instance) else {
+                return;
+            };
+            if slot.warning == warning {
+                return;
+            }
+            slot.warning.clone_from(&warning);
+            slot.status.clone()
+        };
+        self.emit(Event::DriverStatus {
+            instance: instance.clone(),
+            status,
+            warning,
+        });
     }
 
     pub(crate) fn upsert_device(&self, device: Device) {

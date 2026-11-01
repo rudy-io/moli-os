@@ -926,6 +926,7 @@ impl Assistant {
             .map(|m| m.content.clone());
         let surface = turn.surface.clone().unwrap_or_default();
         let spoken = turn.spoken;
+        let asker = turn.asker.clone();
         let stop = CancellationToken::new();
         let result = self.converse(turn, &stop).await;
         if let Some(question) = question {
@@ -987,6 +988,7 @@ impl Assistant {
                 ms,
                 audio: heard.and_then(|h| h.audio),
                 cost,
+                asker,
             });
         }
         result
@@ -1088,6 +1090,16 @@ impl Assistant {
         all
     }
 
+    /// What `viewer` may read back of the last `hours`, newest first: the shared exchanges
+    /// (`Exchange::shared`) and their own; who asked is never in it.
+    pub fn exchanges_for(&self, hours: u32, viewer: &str) -> Vec<Exchange> {
+        self.exchanges(hours)
+            .into_iter()
+            .filter(|e| e.shared() || e.asker.as_deref() == Some(viewer))
+            .map(|e| Exchange { asker: None, ..e })
+            .collect()
+    }
+
     /// A satellite woke and heard nothing it understood: counted in the
     /// history (false activations show up there).
     pub(crate) fn heard_nothing_on(&self, surface: &str, wav: Option<&[u8]>) {
@@ -1111,6 +1123,7 @@ impl Assistant {
             ms: 0,
             audio,
             cost: exchanges::Cost::new(0.0, hear, 0.0, 0.0),
+            asker: None,
         });
     }
 
@@ -3400,6 +3413,44 @@ mod tests {
     /// What the agent said and Moli relayed comes back in the next turn, as
     /// Moli's own reply: that turn may not act either. A conversation
     /// without it still can.
+    #[tokio::test]
+    async fn each_reads_back_their_own_questions_and_what_is_shared_never_who_asked() {
+        let chat = |content: &str| {
+            json!({ "choices": [{ "message": { "role": "assistant", "content": content } }],
+                "usage": { "prompt_tokens": 10, "completion_tokens": 10 } })
+            .to_string()
+        };
+        let (url, _) = crate::llm::tests::fake_provider(vec![chat("Oui."), chat("Non.")]).await;
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        let moli = Assistant::new(hub, None, None, None, config).unwrap();
+        for (who, question) in [
+            ("person:alex", "Question d'Alex"),
+            ("person:sam", "Question de Sam"),
+        ] {
+            let mut turn: Turn = serde_json::from_value(
+                json!({ "messages": [{ "role": "user", "content": question }], "surface": "bubble" }),
+            )
+            .unwrap();
+            turn.asker = Some(who.into());
+            moli.turn(turn).await.unwrap();
+        }
+        let read = |who: &str| -> Vec<String> {
+            moli.exchanges_for(24, who)
+                .into_iter()
+                .map(|e| e.question)
+                .collect()
+        };
+        assert_eq!(read("person:alex"), vec!["Question d'Alex".to_owned()]);
+        assert_eq!(read("person:sam"), vec!["Question de Sam".to_owned()]);
+        assert!(read("client:other").is_empty());
+        assert!(
+            moli.exchanges_for(24, "person:alex")
+                .iter()
+                .all(|e| e.asker.is_none())
+        );
+    }
+
     #[tokio::test]
     async fn the_agents_words_brought_back_by_the_conversation_are_not_obeyed_either() {
         let chat = |message: Json| {

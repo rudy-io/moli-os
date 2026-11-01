@@ -939,6 +939,7 @@ fn start_history(
 /// missing here is unknown, whatever `build_driver`'s match says.
 const KINDS: &[&str] = &[
     "z2m",
+    "zwave",
     "hue",
     "dirigera",
     "overkiz",
@@ -1101,6 +1102,9 @@ fn build_driver(
         "z2m" => Arc::new(moli_z2m::Z2m::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "zwave" => Arc::new(moli_zwave::Zwave::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "hue" => Arc::new(moli_hue::Hue::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1161,9 +1165,7 @@ fn build_driver(
         "tuya" => Arc::new(moli_tuya::Tuya::new(
             config.options.clone().try_into().with_context(context)?,
         )),
-        "presence" => Arc::new(moli_presence::Presence::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "presence" => configured_driver(config, moli_presence::Presence::new)?,
         "phones" => Arc::new(
             moli_phones::open(
                 config.options.clone().try_into().with_context(context)?,
@@ -1171,15 +1173,9 @@ fn build_driver(
             )?
             .1,
         ),
-        "telegram" => Arc::new(moli_telegram::Telegram::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "helpers" => Arc::new(moli_helpers::Helpers::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
-        "demo" => Arc::new(moli_demo::Demo::new(
-            config.options.clone().try_into().with_context(context)?,
-        )?),
+        "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
+        "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,
             data_dir.join(moli_profile::TRUST_FILE),

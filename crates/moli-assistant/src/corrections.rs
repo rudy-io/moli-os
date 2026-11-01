@@ -110,8 +110,9 @@ pub(crate) struct Turned {
     pub(crate) context: Vec<(String, String)>,
     /// Each order the turn carried out: what « Défaire » may put back.
     pub(crate) undo: Vec<Undo>,
-    /// Who asked (`Turn::asker`): only they undo, correct or see the choices of this turn.
-    pub(crate) asker: String,
+    /// Who asked (`Turn::asker`): only they undo, correct or see the choices of this turn. A turn
+    /// with no asker is nobody's to correct.
+    pub(crate) asker: Option<String>,
     pub(crate) at: std::time::Instant,
 }
 
@@ -307,7 +308,7 @@ impl crate::Assistant {
             question: question.to_owned(),
             context,
             undo,
-            asker: turn.asker.clone().unwrap_or_default(),
+            asker: turn.asker.clone(),
             at: std::time::Instant::now(),
         });
         reply
@@ -315,14 +316,17 @@ impl crate::Assistant {
 
     /// A turn still open to correction.
     /// The turn `id` of `asker`, still fresh: someone else's turn is not there for them (no hint
-    /// that it exists).
-    pub(crate) fn turn_of(&self, id: u64, asker: &str) -> Option<Turned> {
+    /// that it exists), and nobody — no asker — has a turn.
+    pub(crate) fn turn_of(&self, id: u64, asker: Option<&str>) -> Option<Turned> {
+        let asker = asker?;
         self.0
             .turns
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
-            .find(|(i, t)| *i == id && t.asker == asker && t.at.elapsed() < TURN_LIFETIME)
+            .find(|(i, t)| {
+                *i == id && t.asker.as_deref() == Some(asker) && t.at.elapsed() < TURN_LIFETIME
+            })
             .map(|(_, t)| t.clone())
     }
 }
@@ -949,17 +953,30 @@ mod applied_tests {
     #[tokio::test]
     async fn a_turn_remembers_what_each_order_replaced() {
         let answer = call("set", r#"{"point":"d1/on","value":true}"#);
-        let (moli, _) = house_model_over(crate::tests::lamp_hub().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let (moli, _) =
+            house_model_over(crate::tests::lamp_hub().await, vec![&answer, &answer]).await;
+        let mut asked = ask("Allume la lampe");
+        asked.asker = Some("person:alex".into());
+        let reply = moli.turn(asked).await.unwrap();
         assert_eq!(reply.actions[0].before, Some(json!(false)));
         assert!(reply.house && reply.turn_id != 0 && reply.rule.is_none());
-        let turned = moli.turn_of(reply.turn_id, "").expect("the turn is kept");
+        let turned = moli
+            .turn_of(reply.turn_id, Some("person:alex"))
+            .expect("the turn is kept");
         assert_eq!(turned.question, "Allume la lampe");
         assert_eq!(turned.undo.len(), 1);
         assert_eq!(turned.undo[0].point.as_str(), "fake:lamp/on");
         assert_eq!(turned.undo[0].before, json!(false));
         assert_eq!(turned.undo[0].written, json!(true));
-        assert!(moli.turn_of(reply.turn_id + 12345, "").is_none());
+        assert!(
+            moli.turn_of(reply.turn_id + 12345, Some("person:alex"))
+                .is_none()
+        );
+        // Strict: no asker has no turn, and a turn asked by nobody is nobody's.
+        assert!(moli.turn_of(reply.turn_id, None).is_none());
+        let anonymous = moli.turn(ask("Allume la lampe")).await.unwrap().turn_id;
+        assert!(moli.turn_of(anonymous, None).is_none());
+        assert!(moli.turn_of(anonymous, Some("")).is_none());
     }
 
     #[tokio::test]
@@ -985,28 +1002,28 @@ mod applied_tests {
                 question: "Allume la lampe".into(),
                 context: Vec::new(),
                 undo: Vec::new(),
-                asker: who.into(),
+                asker: Some(who.into()),
                 at: std::time::Instant::now(),
             })
         };
         let mine = turn("person:alex");
-        assert!(moli.turn_of(mine, "person:alex").is_some());
+        assert!(moli.turn_of(mine, Some("person:alex")).is_some());
         assert!(
-            moli.turn_of(mine, "person:sam").is_none(),
+            moli.turn_of(mine, Some("person:sam")).is_none(),
             "someone else's turn is not there"
         );
         // An agent asks a hundred times: alex's turn stays, the agent keeps its last 50.
         let flood: Vec<u64> = (0..100).map(|_| turn("client:agent")).collect();
-        assert!(moli.turn_of(mine, "person:alex").is_some());
-        assert!(moli.turn_of(flood[0], "client:agent").is_none());
-        assert!(moli.turn_of(flood[99], "client:agent").is_some());
+        assert!(moli.turn_of(mine, Some("person:alex")).is_some());
+        assert!(moli.turn_of(flood[0], Some("client:agent")).is_none());
+        assert!(moli.turn_of(flood[99], Some("client:agent")).is_some());
         let theirs = moli
             .0
             .turns
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, t)| t.asker == "client:agent")
+            .filter(|(_, t)| t.asker.as_deref() == Some("client:agent"))
             .count();
         assert_eq!(theirs, MAX_TURNS);
     }
@@ -1021,7 +1038,7 @@ mod applied_tests {
                     question: String::new(),
                     context: Vec::new(),
                     undo: Vec::new(),
-                    asker: String::new(),
+                    asker: None,
                     at: std::time::Instant::now(),
                 })
             })

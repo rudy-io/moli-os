@@ -11,10 +11,12 @@
   let { id, name } = $props();
 
   const d = $derived(device(id));
-  const range = $derived(numericRange(d, 'target_temperature'));
-  // Without advertised limits the dial remains a reading, never a command.
-  const MIN = $derived(range?.min ?? 0);
-  const MAX = $derived(range?.max ?? 1);
+  const targetUnit = $derived(pointOf(d, 'target_temperature')?.unit);
+  // Older Celsius contracts omit limits or units. Never apply that scale to another unit.
+  const range = $derived(numericRange(d, 'target_temperature', 0.5,
+    targetUnit == null || targetUnit === '°C' ? { min: 16, max: 30 } : null));
+  const MIN = $derived(range?.first ?? 0);
+  const MAX = $derived(range?.last ?? 1);
   const STEP = $derived(range?.step ?? 0.5);
   const modes = $derived(writableChoices(d, 'mode'));
   const fans = $derived(writableChoices(d, 'fan_speed'));
@@ -182,6 +184,7 @@
 
 <div class="clim" class:on data-tone={m.tone} class:unreachable={!reachable(id)}>
   {#if pointOf(d, 'temperature') || pointOf(d, 'target_temperature')}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex (The slider role and tab stop are enabled together.) -->
   <div
     class="dial"
     class:live={writable}

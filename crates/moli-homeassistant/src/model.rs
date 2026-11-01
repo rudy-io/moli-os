@@ -28,6 +28,7 @@ impl TemperatureUnit {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Snapshot {
+    pub native_name: String,
     pub points: Vec<PointSpec>,
     pub values: BTreeMap<String, Value>,
     entity_id: String,
@@ -161,6 +162,23 @@ fn ha_mode(moli: &str) -> Option<&'static str> {
     }
 }
 
+// A neutral configured alias or UI label must not conceal an opener's source
+// identity from the hub guard. Never truncate a name and lose its gate suffix.
+fn source_name(e: &Entity, attributes: &Map<String, Json>) -> anyhow::Result<String> {
+    let name = format!("{} ({})", e.native_id, e.entity_id);
+    let Some(friendly) = attributes
+        .get("friendly_name")
+        .filter(|name| !name.is_null())
+    else {
+        return Ok(name);
+    };
+    let friendly = friendly
+        .as_str()
+        .filter(|name| name.len() <= 256 && !name.chars().any(char::is_control))
+        .ok_or_else(|| anyhow::anyhow!("invalid entity name"))?;
+    Ok(format!("{friendly} — {name}"))
+}
+
 pub(crate) fn decode(
     e: &Entity,
     raw: &Json,
@@ -189,6 +207,7 @@ pub(crate) fn decode(
             .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|xs| !xs.is_empty()))
     });
     let mut s = Snapshot {
+        native_name: source_name(e, a)?,
         points: vec![],
         values: BTreeMap::new(),
         entity_id: e.entity_id.clone(),

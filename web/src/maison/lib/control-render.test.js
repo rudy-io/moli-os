@@ -1,6 +1,7 @@
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
 
 // Render the actual Svelte controls with a synthetic hub. No API or device calls.
@@ -9,8 +10,11 @@ let hub;
 let home;
 let energy;
 let render;
+const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const components = {};
 before(async () => {
+  // Keep SSR independent from Node's optional browser-storage implementation.
+  delete globalThis.localStorage;
   // The live hub only reads the current build's script at import time.
   globalThis.document = { querySelector: () => null, documentElement: {} };
   vite = await createServer({ root: fileURLToPath(new URL('../../../', import.meta.url)), server: { middlewareMode: true, watch: null }, logLevel: 'error' });
@@ -23,7 +27,11 @@ before(async () => {
   }
 });
 beforeEach(() => { home.home.config = null; energy.summary = null; });
-after(async () => { await vite?.close(); delete globalThis.document; });
+after(async () => {
+  await vite?.close();
+  delete globalThis.document;
+  if (localStorageDescriptor) Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+});
 
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const number = (min, max, step) => ({ type: 'numeric', min, max, step });
@@ -43,12 +51,70 @@ function showRoom(entries) {
 const inputs = (html) => [...html.matchAll(/<input\b[^>]*>/g)].map(([tag]) => tag);
 const buttons = (html) => [...html.matchAll(/<button\b[^>]*>/g)].map(([tag]) => tag);
 
+test('villa Sonos and Daikin fixtures retain their working numeric controls', () => {
+  const fixture = (name) => JSON.parse(readFileSync(new URL(`../../../../demo/villa/devices/${name}.json`, import.meta.url), 'utf8')).devices;
+  const speakers = fixture('sonos');
+  const climates = fixture('daikin');
+  assert.ok(speakers.length > 0 && climates.length > 0);
+  for (const d of speakers) {
+    const html = show('SpeakerCard', d.points, d.state, { model: d.model });
+    const slider = inputs(html).find((tag) => /aria-label="Volume"/.test(tag));
+    assert.ok(slider);
+    assert.match(slider, /min="0"/);
+    assert.match(slider, /max="100"/);
+  }
+  for (const d of climates) {
+    const html = show('ClimateCard', d.points, d.state, { model: d.model });
+    assert.match(html, /role="slider"/);
+    assert.match(html, /aria-valuemin="16"/);
+    assert.match(html, /aria-valuemax="30"/);
+  }
+});
+
 test('thermostat renders its own limits, setpoint-only access and supported modes', () => {
   const html = show('ClimateCard', [point('target_temperature', number(5, 35, 0.1)), point('mode', enumeration('chaud'), false)], { temperature: 20.4, target_temperature: 21.2, mode: 'chaud' });
   assert.match(html, /aria-valuemin="5"/);
   assert.match(html, /aria-valuemax="35"/);
   assert.match(html, /20,4/);
   assert.equal(buttons(html).length, 2, 'only setpoint buttons, no power or mode write');
+});
+
+test('legacy thermostat without declared bounds retains its writable dial', () => {
+  const html = show('ClimateCard', [point('target_temperature', { type: 'numeric' })], { target_temperature: 21 });
+  assert.match(html, /role="slider"/);
+  assert.match(html, /aria-valuemin="16"/);
+  assert.match(html, /aria-valuemax="30"/);
+  assert.equal(buttons(html).length, 2);
+});
+
+test('partial numeric controls render their first and last selectable steps', () => {
+  const climate = show('ClimateCard', [point('target_temperature', number(undefined, 30, 0.3))], { target_temperature: 19.8 });
+  assert.match(climate, /aria-valuemin="16.2"/);
+  assert.match(climate, /aria-valuemax="30"/);
+  assert.match(climate, /aria-valuenow="19.8"/);
+  const speaker = show('SpeakerCard', [point('volume', number(undefined, 30.1, 0.3))], { volume: 19.8 });
+  const [slider] = inputs(speaker);
+  assert.match(slider, /min="0"/);
+  assert.match(slider, /max="30"/);
+  assert.match(slider, /step="0.3"/);
+});
+
+test('fallback thermostat limits do not grant read-only or offline access', () => {
+  const readonly = show('ClimateCard', [point('target_temperature', { type: 'numeric' }, false)], { target_temperature: 21 });
+  assert.doesNotMatch(readonly, /role="slider"/);
+  assert.equal(buttons(readonly).length, 0);
+  const offline = show('ClimateCard', [point('target_temperature', { type: 'numeric' })], { target_temperature: 21 }, { online: false });
+  assert.doesNotMatch(offline, /role="slider"/);
+  assert.equal(buttons(offline).length, 0);
+});
+
+test('the legacy Celsius range is not applied to an explicitly different unit', () => {
+  const target = { ...point('target_temperature', { type: 'numeric' }), unit: '°F' };
+  const unbounded = show('ClimateCard', [target], { target_temperature: 70 });
+  assert.doesNotMatch(unbounded, /role="slider"/);
+  const bounded = show('ClimateCard', [{ ...target, kind: number(60, 86, 1) }], { target_temperature: 70 });
+  assert.match(bounded, /aria-valuemin="60"/);
+  assert.match(bounded, /aria-valuemax="86"/);
 });
 
 test('master mode remains writable when its setpoint is read-only', () => {
@@ -115,8 +181,37 @@ test('cycle-only opener has one distinct impulse, without invented direction', (
 
 test('media partial write access does not enable playback or mute', () => {
   const html = show('SpeakerCard', [point('volume', number(0, 100, 1)), point('playing', { type: 'binary' }, false), point('mute', { type: 'binary' }, false)], { playing: true, mute: false, volume: 34 });
-  assert.ok(buttons(html).every((tag) => /disabled/.test(tag)));
+  assert.equal(buttons(html).length, 0);
   assert.doesNotMatch(inputs(html)[0], /disabled/);
+});
+
+test('speaker volume and announcement sliders respect their distinct advertised ranges', () => {
+  const html = show('SpeakerCard', [point('volume', number(5, 80, 2)), point('announce_volume', number(10, 70, 10))], { volume: 25, announce_volume: 30 });
+  const sliders = inputs(html);
+  assert.equal(sliders.length, 2);
+  assert.match(sliders[0], /min="5"/);
+  assert.match(sliders[0], /max="79"/); // Last selectable step inside the declared max of 80.
+  assert.match(sliders[0], /step="2"/);
+  assert.match(sliders[1], /min="10"/);
+  assert.match(sliders[1], /max="70"/);
+  assert.match(sliders[1], /step="10"/);
+});
+
+test('legacy and announce-only speakers keep their ranges without inventing playback', () => {
+  const legacy = show('SpeakerCard', [point('volume', { type: 'numeric' })], { volume: 30 });
+  assert.match(inputs(legacy)[0], /min="0"/);
+  assert.match(inputs(legacy)[0], /max="100"/);
+  const announce = show('SpeakerCard', [point('announce_volume', { type: 'numeric' })], { announce_volume: 35 });
+  assert.equal(inputs(announce).length, 1);
+  assert.match(inputs(announce)[0], /step="5"/);
+  assert.equal(buttons(announce).length, 0);
+  assert.doesNotMatch(announce, /Arrêt|En pause|Rien/);
+});
+
+test('offline speaker offers no playback, mute or level commands', () => {
+  const html = show('SpeakerCard', [point('playing', { type: 'binary' }), point('mute', { type: 'binary' }), point('volume', number(0, 100, 1)), point('announce_volume', number(0, 100, 5))], { playing: true, mute: false, volume: 25, announce_volume: 30 }, { online: false });
+  assert.equal(buttons(html).length, 0);
+  assert.equal(inputs(html).length, 0);
 });
 
 test('read-only light still displays its on state without a toggle', () => {

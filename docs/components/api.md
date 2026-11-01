@@ -378,6 +378,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | POST | `/api/assistant/turns/{id}/correct` | **humain**, celui qui a posé le tour | `{choice}` ou `{choices:[…]}`, `remember?` | la bonne réponse exécutée sous la garde ; une règle si `remember` | `403` ; `410` ; `422` choix non proposé ; `503` |
 | GET | `/api/assistant/rules` | **humain** | aucune | les règles apprises (avec qui les a apprises) | `403` ; `503` |
 | PUT · DELETE | `/api/assistant/rules/{id}` | **humain** | `{enabled}` (PUT) | `{ok}` | `403` ; `410` ; `503` |
+| GET | `/api/assistant/exchanges?hours=` | libre (pas les invités) | aucune | `{exchanges:[…], recording_until}` : ce qui a été dit à Moli (720 h au plus). Ce qui est commun (satellites, portes, échanges plus anciens) pour tout le foyer, et **seulement ses propres questions** posées depuis le tableau de bord ; qui a demandé n'y figure jamais | `503` |
 | POST | `/api/assistant/listen` | libre | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text}` (transcription) | `400` pas de l'audio / trop court ; `429` ; `502` ; `503` voix désactivée |
 | PUT | `/api/assistant/recording` | **humain** | `{days}` (7 au plus, 0 = arrêt) | `{recording_until}` : ce qu'entendent les boîtiers est gardé jusque-là | `403` ; `503` |
 | GET | `/api/assistant/recordings/{name}` | **humain** | aucune | le WAV d'un boîtier (gardé 7 jours) | `403` ; `404` |

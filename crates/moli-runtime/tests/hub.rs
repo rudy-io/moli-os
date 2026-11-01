@@ -1422,3 +1422,77 @@ async fn a_routine_that_opens_is_held_for_the_dashboard_without_a_code() {
         .unwrap();
     assert!(hub.would_hold(&state, None, Origin::Household).is_none());
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_restarted_driver_does_not_keep_the_previous_runs_warning() {
+    struct WarnOnce {
+        runs: AtomicU32,
+        fail: tokio::sync::Notify,
+    }
+    impl Driver for WarnOnce {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ctx.warn("Temporary connection warning");
+                    ctx.warn("Temporary connection warning");
+                    ctx.ready();
+                    self.fail.notified().await;
+                    anyhow::bail!("synthetic failure");
+                }
+                ctx.ready();
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let mut events = hub.subscribe();
+    let driver = Arc::new(WarnOnce {
+        runs: AtomicU32::new(0),
+        fail: tokio::sync::Notify::new(),
+    });
+    let cancel = CancellationToken::new();
+    let supervisor = spawn_driver(&hub, "warning".into(), driver.clone(), cancel.clone());
+    wait_running(&hub).await;
+    assert_eq!(
+        hub.snapshot().drivers[0].warning.as_deref(),
+        Some("Temporary connection warning")
+    );
+    let initial: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert_eq!(
+        initial
+            .iter()
+            .filter(|event| matches!(
+                event,
+                Event::DriverStatus {
+                    status: DriverStatus::Starting,
+                    warning: Some(_),
+                    ..
+                }
+            ))
+            .count(),
+        1,
+        "repeated warnings should not flood SSE"
+    );
+    driver.fail.notify_one();
+    loop {
+        if let Event::DriverStatus {
+            status: DriverStatus::Backoff { .. },
+            warning,
+            ..
+        } = events.recv().await.unwrap()
+        {
+            assert!(warning.is_none());
+            break;
+        }
+    }
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_running(&hub).await;
+    assert_eq!(driver.runs.load(Ordering::SeqCst), 2);
+    assert!(hub.snapshot().drivers[0].warning.is_none());
+    cancel.cancel();
+    supervisor.await.unwrap();
+}

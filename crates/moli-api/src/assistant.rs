@@ -366,13 +366,16 @@ fn a_day() -> u32 {
 }
 
 /// What the house asked Moli lately, newest first (at most 30 days).
+/// What was said to Moli: the shared exchanges (satellites, doors), and the caller's own from the
+/// dashboard, not the questions of the rest of the household.
 pub(crate) async fn exchanges(
     Extension(Moli(moli)): Extension<Moli>,
+    caller: Caller,
     axum::extract::Query(since): axum::extract::Query<Since>,
 ) -> Response {
     match moli {
         Some(moli) => axum::Json(json!({
-            "exchanges": moli.exchanges(since.hours.min(720)),
+            "exchanges": moli.exchanges_for(since.hours.min(720), &caller.asker()),
             "recording_until": moli.recording_until(),
         }))
         .into_response(),

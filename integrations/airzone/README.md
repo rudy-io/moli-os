@@ -1,7 +1,7 @@
 # Airzone Local API
 
 One native `airzone` driver instance per local Webserver, HTTP port 3000 by
- default. No Home Assistant or cloud dependency. This does not implement Aidoo
+default. No Home Assistant or cloud dependency. This does not implement Aidoo
 Cloud, DHW, energy, IAQ, double setpoints, stage configuration or schedules.
 No installation request modifies `/integration` or the controller configuration.
 
@@ -68,10 +68,22 @@ Independent Rust implementation; no upstream code copied. References:
 
 The fixture is entirely synthetic, with multiple systems, non-contiguous IDs,
 a master numbered 8, fractional measurements and Fahrenheit. Tests use pure
-parsing and loopback simulators. No real controller has been contacted or
-commanded by this implementation. In particular, Hyper transport compatibility
-is unverified: some Airzone firmware requires headers and body in one TCP
-segment, a quirk handled by aioairzone's transport. Simulator success does not
-establish support on that firmware. Validate read-only on the intended device
-first, then a human-supervised neutral-zone command with original state restored.
-Manufacturer schedules remain active and can change state independently.
+parsing and loopback simulators. No physical command has been tested.
+
+Read-only hardware validation on 2026-10-31 exercised the unmodified Hyper
+transport and snapshot parser against a Webserver reporting API type `ws_az`,
+API 1.80, Webserver firmware 4.21 and system firmware 5.34. The exact commercial
+model was not independently established. Repeated reads succeeded and preserved
+the reported temperatures, setpoints, on/off states and modes. No command
+executor was started; private captures and identifiers are not included here.
+
+This validates only the observed read path on that firmware. Some Airzone
+firmware requires headers and body in one TCP segment, a quirk handled by
+aioairzone's transport; compatibility with other firmware is not established.
+Actuation, acknowledgements, recovery and long-running operation remain to be
+qualified. Validate read-only on the intended device first, then a
+human-supervised neutral-zone command with original state restored. If the
+reported setpoint does not fit the advertised increment, resolve that
+inconsistency before a command test: this driver preserves the reading but
+refuses an off-grid write. Manufacturer schedules remain active and can change
+state independently.

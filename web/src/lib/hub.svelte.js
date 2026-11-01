@@ -1,4 +1,5 @@
 import { setLanguage, t } from './i18n.svelte.js';
+import { applyDriverStatus } from './driver-status.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -83,9 +84,7 @@ function applyEvent(e) {
       if (hub.devices[e.device]) hub.devices[e.device].label = e.label;
       break;
     case 'driver_status': {
-      const d = hub.drivers.find((x) => x.instance === e.instance);
-      if (d) d.status = e.status;
-      else hub.drivers.push({ instance: e.instance, kind: '?', status: e.status });
+      applyDriverStatus(hub.drivers, e);
       break;
     }
     case 'journal':

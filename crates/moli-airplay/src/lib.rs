@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn a_receiver_needs_only_its_address() {
         let config: Config =
-            serde_json::from_value(serde_json::json!({ "host": "192.168.1.42" })).unwrap();
+            serde_json::from_value(serde_json::json!({ "host": "10.0.0.42" })).unwrap();
         assert_eq!(
             (config.port, config.tts.as_str(), config.volume),
             (5000, "127.0.0.1:10200", 40)

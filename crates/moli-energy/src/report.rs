@@ -479,16 +479,29 @@ mod tests {
         ];
         let p = Period::of(&config, &rows, 0, HOUR_MS);
         // The bill stays what was bought.
-        assert_eq!(p.total.kwh, 4.0);
-        assert_eq!(p.production.as_ref().unwrap().kwh, 10.0);
+        assert!((p.total.kwh - 4.0).abs() < 1e-9, "kwh={}", p.total.kwh);
+        assert!(
+            (p.production.as_ref().unwrap().kwh - 10.0).abs() < 1e-9,
+            "kwh={}",
+            p.production.as_ref().unwrap().kwh
+        );
         assert_eq!(p.export.as_ref().unwrap().cost, Some(0.12));
         let share = p.solar.unwrap();
-        assert_eq!(share.self_consumed, 7.0);
-        assert_eq!(share.consumption, 11.0);
+        assert!(
+            (share.self_consumed - 7.0).abs() < 1e-9,
+            "self_consumed={}",
+            share.self_consumed
+        );
+        assert!(
+            (share.consumption - 11.0).abs() < 1e-9,
+            "consumption={}",
+            share.consumption
+        );
         assert_eq!(share.self_consumption_rate, Some(0.7));
         assert_eq!(share.self_sufficiency, Some(0.636));
         // The circuits ran on the panels too: 4 bought + 7 made − 5 = 6.
-        assert_eq!(p.unmeasured.unwrap().kwh, 6.0);
+        let unmeasured_kwh = p.unmeasured.as_ref().unwrap().kwh;
+        assert!((unmeasured_kwh - 6.0).abs() < 1e-9, "kwh={unmeasured_kwh}");
         // Meters read at different moments: never more sent out than made.
         let skewed = [
             row("toit", 1.0, None),
@@ -496,7 +509,11 @@ mod tests {
             row("achat", 0.5, None),
         ];
         let share = Period::of(&config, &skewed, 0, HOUR_MS).solar.unwrap();
-        assert_eq!(share.self_consumed, 0.0);
+        assert!(
+            (share.self_consumed - 0.0).abs() < 1e-9,
+            "self_consumed={}",
+            share.self_consumed
+        );
         assert_eq!(share.self_consumption_rate, Some(0.0));
         // A solar meter has no price; `period` is for billed meters.
         let bad: Config = toml::from_str(

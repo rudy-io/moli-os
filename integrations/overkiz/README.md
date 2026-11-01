@@ -4,6 +4,17 @@ Native local HTTPS integration, token from the encrypted vault, certificate pinn
 before credentials leave. No cloud login or Home Assistant dependency. Network-free
 construction validates configuration. Disabled instances are not started by Moli.
 
+Certificate pinning uses **trust on first use (TOFU)** when neither the
+configuration nor the encrypted vault contains `cert_sha256`. That first TLS
+handshake accepts the certificate presented by the configured gateway; it does
+not independently prove the gateway's identity. Its SHA-256 fingerprint is
+stored in the vault before the bearer token is sent. Use a trusted LAN for this
+first contact, or set an independently verified `cert_sha256` in the options.
+A configured fingerprint takes precedence over the cached one. Later certificate
+changes stop the driver and require verification before replacing the pin; they
+are never accepted automatically. This follows the shared `moli-net`/Hue TOFU
+model, not public-CA certificate verification.
+
 `RollerShutter` devices can expose `control` (open/close/stop, according to
 advertised arity) and `percent_control` (percentage open, io only). A measured io closure
 in 0–100 maps to 100−closure. Special positions, targets and malformed readings
@@ -37,9 +48,15 @@ An execution ID means accepted, not motor movement. Only snapshots publish state
 Authentication or certificate changes require human action; transient errors use
 normal supervisor recovery. No per-device tasks or event listener.
 
-Not verified on physical hardware. Gateway/firmware support, RTS stop behaviour,
-and reset/re-pair identity continuity require a controlled pilot. Snapshot polling
-has higher traffic than event listeners and state updates can lag five seconds.
+Read-only validation on 2026-10-31: a separate gateway probe verified the TLS chain
+and hostname against the official Overkiz CA, and a redacted real device inventory
+from a Home Assistant local-API diagnostic was replayed through this production
+model with networking disabled. Position, open/closed state and availability
+conversion were checked; no feedback was invented for stateless RTS gates.
+This did not exercise authenticated native Moli transport or issue any physical
+command. Full model/firmware qualification, RTS stop behaviour and reset/re-pair
+identity continuity still require a controlled pilot. Snapshot polling has higher
+traffic than event listeners and state updates can lag five seconds.
 
 Protocol sources consulted at pinned revisions (no source code copied):
 - [Somfy OpenAPI](https://github.com/Somfy-Developer/Somfy-TaHoma-Developer-Mode/blob/3eae7a51ba55eee28649319942239aab7b139eb7/docs/openapi.yaml)

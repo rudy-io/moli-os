@@ -1,11 +1,11 @@
 //! Supervised polling and the only outbound write boundary.
 use std::time::{Duration, Instant};
 
-use moli_core::{Device, Value};
+use moli_core::{Device, DeviceId, Value};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
 
 use crate::{
-    Entity, HomeAssistant,
+    Config, Entity, HomeAssistant, Transport,
     model::{self, Service, Snapshot},
     net::Client,
 };
@@ -58,16 +58,9 @@ async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> 
         ctx.set_availability(&id, false);
     }
     let config = &driver.config;
-    let Some(token) = ctx
-        .secret("token")
-        .filter(|s| !s.is_empty() && s.len() <= 8192)
-    else {
-        return park(ctx, "homeassistant.credentials").await;
+    let Some(client) = client_for(config, ctx).await? else {
+        return Ok(());
     };
-    if ctx.secret("token_endpoint").as_deref() != Some(config.token_endpoint().as_str()) {
-        return park(ctx, "homeassistant.credentials").await;
-    }
-    let client = Client::new(config, &token)?;
     let mut live: Vec<Option<Live>> = (0..config.entities.len()).map(|_| None).collect();
     let freshness = Duration::from_secs(config.poll_seconds * 2);
     let period = Duration::from_secs(config.poll_seconds)
@@ -79,74 +72,141 @@ async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> 
     let mut cursor = 0;
     let mut transport_failures = 0;
     ctx.ready();
+    if matches!(config.transport, Transport::Http) {
+        ctx.warn(moli_i18n::tr!("homeassistant.insecure_http"));
+    }
     loop {
         tokio::select! {
-            command=ctx.next_command()=> {
-                let Some(command)=command else {return Ok(())};
-                let index=config.entities.iter().position(|e| ctx.device_id(&e.native_id)==command.device.id);
-                let Some(index)=index else {command.reply(Err(moli_i18n::tr!("homeassistant.refused")));continue};
-                if execute(ctx,&client,&config.entities[index],live[index].as_ref(),freshness,command).await {
-                    return park(ctx,"homeassistant.auth").await;
+            command = ctx.next_command() => {
+                let Some(command) = command else { return Ok(()) };
+                let index = config.entities.iter().position(|e| ctx.device_id(&e.native_id) == command.device.id);
+                let Some(index) = index else {
+                    command.reply(Err(moli_i18n::tr!("homeassistant.refused")));
+                    continue;
+                };
+                if execute(ctx, &client, &config.entities[index], live[index].as_ref(), freshness, command).await {
+                    return park(ctx, "homeassistant.auth").await;
                 }
             }
-            _=ticks.tick()=> {
+            _ = ticks.tick() => {
                 // One bounded configuration read per sweep, never per entity.
                 // Other domains do not need or fetch climate unit metadata.
                 if cursor == 0 && has_climate {
-                    let response=tokio::select! {
-                        ()=ctx.cancelled()=>return Ok(()),
-                        response=client.call(http::Method::GET,"/api/config",None,Instant::now()+POLL_BUDGET)=>response,
+                    let response = tokio::select! {
+                        () = ctx.cancelled() => return Ok(()),
+                        response = client.call(http::Method::GET, "/api/config", None, Instant::now() + POLL_BUDGET) => response,
                     };
-                    let unit=match response {
-                        Ok((401|403,_))=>return park(ctx,"homeassistant.auth").await,
-                        Ok((200,body))=>serde_json::from_slice(&body).ok().and_then(|raw|model::TemperatureUnit::from_config(&raw)),
-                        _=>None,
+                    let unit = match response {
+                        Ok((401 | 403, _)) => return park(ctx, "homeassistant.auth").await,
+                        Ok((200, body)) => serde_json::from_slice(&body).ok()
+                            .and_then(|raw| model::TemperatureUnit::from_config(&raw)),
+                        _ => None,
                     };
                     if unit != global_unit {
                         // A changed or lost unit invalidates cached command
                         // conversions until each climate has a fresh snapshot.
                         for (entry, entity) in live.iter_mut().zip(&config.entities) {
                             if entity.domain == "climate" {
-                                *entry=None;
-                                ctx.set_availability(&ctx.device_id(&entity.native_id),false);
+                                *entry = None;
+                                ctx.set_availability(&ctx.device_id(&entity.native_id), false);
                             }
                         }
                     }
-                    global_unit=unit;
+                    global_unit = unit;
                 }
-                let index=cursor;cursor=(cursor+1)%config.entities.len();
-                let e=&config.entities[index];let id=ctx.device_id(&e.native_id);
-                let path=format!("/api/states/{}",e.entity_id);
-                let result=tokio::select! {
-                    ()=ctx.cancelled()=>return Ok(()),
-                    response=client.call(http::Method::GET,&path,None,Instant::now()+POLL_BUDGET)=>response,
+                let index = cursor;
+                cursor = (cursor + 1) % config.entities.len();
+                let e = &config.entities[index];
+                let id = ctx.device_id(&e.native_id);
+                let path = format!("/api/states/{}", e.entity_id);
+                let result = tokio::select! {
+                    () = ctx.cancelled() => return Ok(()),
+                    response = client.call(http::Method::GET, &path, None, Instant::now() + POLL_BUDGET) => response,
                 };
                 match result {
-                    Ok((401|403,_))=>return park(ctx,"homeassistant.auth").await,
-                    Ok((200,body))=> {
-                        transport_failures=0;
-                        let snapshot=serde_json::from_slice(&body).ok().and_then(|raw|model::decode(e,&raw,global_unit).ok());
-                        if let Some(snapshot)=snapshot {
-                            ctx.upsert_device(Device{id:id.clone(),instance:ctx.instance().clone(),native_name:e.native_id.as_str().into(),
-                                manufacturer:Some("Home Assistant".into()),model:Some(format!("Home Assistant {}",e.domain).into()),description:None,
-                                native_room:Some(e.room.as_str().into()),members:vec![],points:snapshot.points.clone()});
-                            for (key,value) in &snapshot.values {ctx.set_state(&id,key,value.clone());}
-                            ctx.set_availability(&id,true);
-                            live[index]=Some(Live{snapshot,received:Instant::now()});
-                        } else {ctx.set_availability(&id,false);live[index]=None;}
+                    Ok((401 | 403, _)) => return park(ctx, "homeassistant.auth").await,
+                    Ok((200, body)) => {
+                        transport_failures = 0;
+                        let snapshot = serde_json::from_slice(&body).ok()
+                            .and_then(|raw| model::decode(e, &raw, global_unit).ok());
+                        if let Some(snapshot) = snapshot {
+                            live[index] = Some(publish_snapshot(ctx, e, &id, snapshot));
+                        } else {
+                            ctx.set_availability(&id, false);
+                            live[index] = None;
+                        }
                     }
-                    Ok(_)=>{transport_failures=0;ctx.set_availability(&id,false);live[index]=None;}
-                    Err(_)=> {
-                        ctx.set_availability(&id,false);live[index]=None;transport_failures+=1;
-                        if transport_failures>=config.entities.len()*2 {anyhow::bail!(moli_i18n::tr!("homeassistant.network"));}
+                    Ok(_) => {
+                        transport_failures = 0;
+                        ctx.set_availability(&id, false);
+                        live[index] = None;
+                    }
+                    Err(_) => {
+                        ctx.set_availability(&id, false);
+                        live[index] = None;
+                        transport_failures += 1;
+                        if transport_failures >= config.entities.len() * 2 {
+                            anyhow::bail!(moli_i18n::tr!("homeassistant.network"));
+                        }
                     }
                 }
                 // A slow sweep must not claim restored or expired states are live.
-                for (entry,entity) in live.iter().zip(&config.entities) {
-                    if entry.as_ref().is_some_and(|s|s.received.elapsed()>=freshness) {ctx.set_availability(&ctx.device_id(&entity.native_id),false);}
-                }
+                expire_readings(ctx, &config.entities, &live, freshness);
             }
         }
+    }
+}
+
+fn expire_readings(
+    ctx: &DriverCtx,
+    entities: &[Entity],
+    live: &[Option<Live>],
+    freshness: Duration,
+) {
+    for (entry, entity) in live.iter().zip(entities) {
+        if entry
+            .as_ref()
+            .is_some_and(|s| s.received.elapsed() >= freshness)
+        {
+            ctx.set_availability(&ctx.device_id(&entity.native_id), false);
+        }
+    }
+}
+
+/// Missing or rebound credentials park without creating a network client.
+async fn client_for(config: &Config, ctx: &DriverCtx) -> anyhow::Result<Option<Client>> {
+    match (ctx.secret("token"), ctx.secret("token_endpoint")) {
+        (Some(token), Some(endpoint))
+            if !token.is_empty() && token.len() <= 8192 && endpoint == config.token_endpoint() =>
+        {
+            Ok(Some(Client::new(config, &token)?))
+        }
+        _ => {
+            park(ctx, "homeassistant.credentials").await?;
+            Ok(None)
+        }
+    }
+}
+
+fn publish_snapshot(ctx: &DriverCtx, e: &Entity, id: &DeviceId, snapshot: Snapshot) -> Live {
+    ctx.upsert_device(Device {
+        id: id.clone(),
+        instance: ctx.instance().clone(),
+        native_name: snapshot.native_name.as_str().into(),
+        manufacturer: Some("Home Assistant".into()),
+        model: Some(format!("Home Assistant {}", e.domain).into()),
+        description: None,
+        native_room: Some(e.room.as_str().into()),
+        members: vec![],
+        points: snapshot.points.clone(),
+    });
+    for (key, value) in &snapshot.values {
+        ctx.set_state(id, key, value.clone());
+    }
+    ctx.set_availability(id, true);
+    Live {
+        snapshot,
+        received: Instant::now(),
     }
 }
 
@@ -177,8 +237,8 @@ async fn execute(
         return false;
     }
     let response = tokio::select! {
-        ()=ctx.cancelled()=>Err(anyhow::anyhow!(moli_i18n::tr!("homeassistant.deadline"))),
-        response=client.call(http::Method::POST,&service.path,Some(&service.body),command.deadline)=>response,
+        () = ctx.cancelled() => Err(anyhow::anyhow!(moli_i18n::tr!("homeassistant.deadline"))),
+        response = client.call(http::Method::POST, &service.path, Some(&service.body), command.deadline) => response,
     };
     let auth = matches!(response, Ok((401 | 403, _)));
     let result = match response {

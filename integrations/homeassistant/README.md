@@ -10,6 +10,9 @@ Simulator tests do not establish compatibility with hardware.
 - List every entity with its immutable `native_id` alias, current `entity_id`,
   domain, reviewed room and safety (`unknown`, `ordinary`, `machine`). Identity is
   `instance:native_id`; changing an HA name or locator must preserve that alias.
+  The published native name retains the alias, full HA `entity_id` and optional
+  `friendly_name`, so a neutral alias or UI label cannot hide a gate from the Hub
+  guard. Malformed or oversized friendly names are rejected, never truncated.
 - `writable = []` by default. Enable exact point keys individually after reviewing
   their hardware, room and **all** HA-side automation/template/custom side effects.
   `unknown` cannot be writable. The driver cannot discover hidden external effects.
@@ -60,6 +63,10 @@ must respect each point's `access`, kind and availability independently.
 
 Configure exactly one host, port and an explicit `http` or `pinned_https` choice.
 No full URLs or path templates. HTTP is plaintext and must be chosen deliberately.
+While using HTTP, the integration publishes a non-blocking warning that its
+long-lived token travels unencrypted and recommends pinned HTTPS. The warning
+is visible in Atelier and System, REST snapshots and SSE. It does not interrupt polling.
+It is cleared when the driver stops or restarts; pinned HTTPS does not publish it.
 HTTPS requires an operator-verified 64-hex SHA-256 certificate pin before any
 credential is sent; no insecure TLS or credentialed TOFU. No redirects are
 followed. Credentials live only in the instance-scoped encrypted vault. In
@@ -79,7 +86,7 @@ They never POST synthetic state. A successful response means dispatch accepted;
 state is confirmed by a subsequent poll, without optimistic value changes.
 
 At most 128 entities, 5–300 s polling, 64 KiB accepted responses, 256-byte state
-strings, 64 attribute keys and 16-element capability lists. The reused pinned
+strings, 256-byte friendly names, 64 attribute keys and 16-element capability lists. The reused pinned
 HTTPS transport additionally caps allocation at 4 MiB before the bridge checks
 its 64 KiB parse limit; plain HTTP enforces 64 KiB while streaming.
 One entity is polled at a time, interleaved with commands. No unattended sweeps

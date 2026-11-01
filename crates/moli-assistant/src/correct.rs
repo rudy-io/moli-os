@@ -225,21 +225,7 @@ impl Assistant {
         asker: Option<&str>,
     ) -> Result<String, CorrectionError> {
         human(origin)?;
-        let (_question, undo) = {
-            let mut turns = self
-                .0
-                .turns
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let who = asker.unwrap_or_default();
-            let (_, turned) = turns
-                .iter_mut()
-                .find(|(i, t)| {
-                    *i == id && t.asker == who && t.at.elapsed() < crate::corrections::TURN_LIFETIME
-                })
-                .ok_or(CorrectionError::Unknown)?;
-            (turned.question.clone(), std::mem::take(&mut turned.undo))
-        };
+        let undo = self.take_undo(id, asker)?;
         if undo.is_empty() {
             return Ok(moli_i18n::tr!("assistant.correct.nothing_to_undo"));
         }
@@ -327,12 +313,33 @@ impl Assistant {
         Ok(said)
     }
 
+    /// The orders of turn `id` to put back, taken out (once): `asker`'s turn only.
+    fn take_undo(
+        &self,
+        id: u64,
+        asker: Option<&str>,
+    ) -> Result<Vec<crate::corrections::Undo>, CorrectionError> {
+        let who = asker.ok_or(CorrectionError::Unknown)?;
+        let mut turns = self
+            .0
+            .turns
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_, turned) = turns
+            .iter_mut()
+            .find(|(i, t)| {
+                *i == id
+                    && t.asker.as_deref() == Some(who)
+                    && t.at.elapsed() < crate::corrections::TURN_LIFETIME
+            })
+            .ok_or(CorrectionError::Unknown)?;
+        Ok(std::mem::take(&mut turned.undo))
+    }
+
     /// What the person may have meant, for a turn: the rooms, the devices with what each can do, and a few
     /// other answers. Every correction is one of these (nothing else is carried out).
     pub async fn choices(&self, id: u64, asker: Option<&str>) -> Result<Json, CorrectionError> {
-        let turned = self
-            .turn_of(id, asker.unwrap_or_default())
-            .ok_or(CorrectionError::Unknown)?;
+        let turned = self.turn_of(id, asker).ok_or(CorrectionError::Unknown)?;
         let layout = Layout::load(self.0.layout_path.as_deref()).await;
         Ok(self.choices_for(&turned, &layout))
     }
@@ -474,9 +481,7 @@ impl Assistant {
         asker: Option<&str>,
     ) -> Result<Corrected, CorrectionError> {
         human(origin)?;
-        let turned = self
-            .turn_of(id, asker.unwrap_or_default())
-            .ok_or(CorrectionError::Unknown)?;
+        let turned = self.turn_of(id, asker).ok_or(CorrectionError::Unknown)?;
         let layout = Layout::load(self.0.layout_path.as_deref()).await;
         let offered = self.choices_for(&turned, &layout);
         let calls: Vec<RuleCall> = choices
@@ -798,12 +803,21 @@ impl Assistant {
 
 #[cfg(test)]
 mod tests {
+    /// Who asks in these tests: a turn is its asker's to correct.
+    const ME: &str = "person:test";
+
+    fn asked(question: &str) -> crate::Turn {
+        let mut turn = crate::house_model::tests::ask(question);
+        turn.asker = Some(ME.into());
+        turn
+    }
+
     use moli_core::{Kind, Origin, Semantic, Value};
     use serde_json::{Value as Json, json};
 
     use crate::CorrectionError;
     use crate::corrections::RuleAction;
-    use crate::house_model::tests::{ask, call, house_model_over, with_layout, words};
+    use crate::house_model::tests::{call, house_model_over, with_layout, words};
     use crate::tests::{Fake, hub_with, point};
 
     async fn lights() -> moli_runtime::Hub {
@@ -855,7 +869,7 @@ mod tests {
     async fn undoing_a_turn_puts_back_what_its_orders_replaced() {
         let answer = call("set", r#"{"point":"d1/on","value":true}"#);
         let (moli, _) = house_model_over(crate::tests::lamp_hub().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Allume la lampe")).await.unwrap();
         let on = || {
             moli.0
                 .hub
@@ -867,14 +881,14 @@ mod tests {
         };
         assert_eq!(on(), Some(Value::Bool(true)));
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert_eq!(on(), Some(Value::Bool(false)));
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
         // once: the turn has nothing left to put back
         let again = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert_eq!(again, moli_i18n::tr!("assistant.correct.nothing_to_undo"));
@@ -884,7 +898,7 @@ mod tests {
     async fn only_a_person_corrects_and_only_a_known_turn() {
         let answer = call("set", r#"{"point":"d1/on","value":true}"#);
         let (moli, _) = house_model_over(crate::tests::lamp_hub().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Allume la lampe")).await.unwrap();
         for origin in [
             Origin::Household,
             Origin::Api,
@@ -893,13 +907,13 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    moli.undo_turn(reply.turn_id, origin, None, None).await,
+                    moli.undo_turn(reply.turn_id, origin, None, Some(ME)).await,
                     Err(CorrectionError::HumanOnly)
                 ),
                 "{origin:?}"
             );
             assert!(matches!(
-                moli.correct(reply.turn_id, json!({}), true, origin, None, None)
+                moli.correct(reply.turn_id, json!({}), true, origin, None, Some(ME))
                     .await,
                 Err(CorrectionError::HumanOnly)
             ));
@@ -913,11 +927,11 @@ mod tests {
             ));
         }
         assert!(matches!(
-            moli.undo_turn(12345, Origin::Ui, None, None).await,
+            moli.undo_turn(12345, Origin::Ui, None, Some(ME)).await,
             Err(CorrectionError::Unknown)
         ));
         assert!(matches!(
-            moli.choices(12345, None).await,
+            moli.choices(12345, Some(ME)).await,
             Err(CorrectionError::Unknown)
         ));
     }
@@ -926,8 +940,8 @@ mod tests {
     async fn the_choices_are_the_things_a_device_can_do_and_never_its_settings() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = house_model_over(lights().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Fais un truc")).await.unwrap();
-        let choices = moli.choices(reply.turn_id, None).await.unwrap();
+        let reply = moli.turn(asked("Fais un truc")).await.unwrap();
+        let choices = moli.choices(reply.turn_id, Some(ME)).await.unwrap();
         assert_eq!(choices["devices"].as_array().unwrap().len(), 1);
         assert!(
             offered(
@@ -967,7 +981,7 @@ mod tests {
     async fn a_choice_the_house_did_not_offer_is_refused() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = house_model_over(lights().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Fais un truc")).await.unwrap();
+        let reply = moli.turn(asked("Fais un truc")).await.unwrap();
         for choice in [
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/off_on_duration", "value": 10 } }),
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": "boom" } }),
@@ -975,7 +989,14 @@ mod tests {
             json!({}),
         ] {
             let done = moli
-                .correct(reply.turn_id, choice.clone(), true, Origin::Ui, None, None)
+                .correct(
+                    reply.turn_id,
+                    choice.clone(),
+                    true,
+                    Origin::Ui,
+                    None,
+                    Some(ME),
+                )
                 .await;
             assert!(matches!(done, Err(CorrectionError::NotOffered)), "{choice}");
         }
@@ -986,7 +1007,7 @@ mod tests {
     async fn a_correction_acts_is_journaled_and_kept_as_a_rule_the_model_is_not_asked_again() {
         let answer = words("Je ne sais pas.");
         let (moli, path) = with_layout(lights().await, "{}", vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Allume la lampe")).await.unwrap();
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
         let done = moli
@@ -996,7 +1017,7 @@ mod tests {
                 true,
                 Origin::Ui,
                 Some("test".into()),
-                None,
+                Some(ME),
             )
             .await
             .unwrap();
@@ -1011,7 +1032,7 @@ mod tests {
         assert_eq!(line["choice"]["arguments"]["point"], "fake:lamp/on");
         // the rule is on disk, and answers next time without asking the model (no answer is left to give)
         assert!(path.with_file_name("assistant-rules.json").exists());
-        let second = moli.turn(ask("allume la lampe")).await.unwrap();
+        let second = moli.turn(asked("allume la lampe")).await.unwrap();
         assert!(second.rule.is_some());
         assert_eq!(
             moli.0.rules.read().unwrap().list()[0].action,
@@ -1026,13 +1047,13 @@ mod tests {
     async fn a_sentence_that_leans_on_the_context_is_corrected_but_never_kept() {
         let answer = words("Je ne sais pas.");
         let (moli, path) = with_layout(lights().await, "{}", vec![&answer]).await;
-        let reply = moli.turn(ask("Éteins-la")).await.unwrap();
-        let choices = moli.choices(reply.turn_id, None).await.unwrap();
+        let reply = moli.turn(asked("Éteins-la")).await.unwrap();
+        let choices = moli.choices(reply.turn_id, Some(ME)).await.unwrap();
         assert_eq!(choices["remember_allowed"], false);
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": false } });
         let done = moli
-            .correct(reply.turn_id, choice, true, Origin::Ui, None, None)
+            .correct(reply.turn_id, choice, true, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -1049,10 +1070,10 @@ mod tests {
     async fn the_rules_can_be_listed_switched_off_and_deleted_by_a_person() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = with_layout(lights().await, "{}", vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Allume la lampe")).await.unwrap();
         let choice =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
-        moli.correct(reply.turn_id, choice, true, Origin::Ui, None, None)
+        moli.correct(reply.turn_id, choice, true, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         let listed = moli.rules_view(Origin::Ui).unwrap();
@@ -1108,29 +1129,29 @@ mod tests {
         };
         // The lamp starts off. Two orders on one point (on, then off): one order put back, to
         // the value before the first.
-        let reply = moli.turn(ask("Allume puis éteins")).await.unwrap();
+        let reply = moli.turn(asked("Allume puis éteins")).await.unwrap();
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
         assert_eq!(on(), Some(Value::Bool(false)));
         // Untouched since Moli lit it: put back off.
-        let reply = moli.turn(ask("Allume")).await.unwrap();
+        let reply = moli.turn(asked("Allume")).await.unwrap();
         assert_eq!(on(), Some(Value::Bool(true)));
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert_eq!(said, moli_i18n::tr!("assistant.correct.undone", count = 1));
         assert_eq!(on(), Some(Value::Bool(false)));
         // Moli lights it, then a person switches it off by hand: no longer what Moli wrote,
         // so « Défaire » leaves it (nothing sent) and says so.
-        let reply = moli.turn(ask("Allume")).await.unwrap();
+        let reply = moli.turn(asked("Allume")).await.unwrap();
         set(false).await;
         let sent_before = moli.0.hub.journal(100).len();
         let said = moli
-            .undo_turn(reply.turn_id, Origin::Ui, None, None)
+            .undo_turn(reply.turn_id, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert_eq!(
@@ -1148,7 +1169,7 @@ mod tests {
         let stuck = moli.remember_turn(crate::corrections::Turned {
             question: "x".into(),
             context: Vec::new(),
-            asker: String::new(),
+            asker: Some(ME.into()),
             undo: vec![crate::corrections::Undo {
                 point: "fake:ghost/on".into(),
                 before: json!(true),
@@ -1156,14 +1177,20 @@ mod tests {
             }],
             at: std::time::Instant::now(),
         });
-        let said = moli.undo_turn(stuck, Origin::Ui, None, None).await.unwrap();
+        let said = moli
+            .undo_turn(stuck, Origin::Ui, None, Some(ME))
+            .await
+            .unwrap();
         assert_eq!(
             said,
             moli_i18n::tr!("assistant.correct.undone", count = 0)
                 + " "
                 + &moli_i18n::tr!("assistant.correct.undo_failed", count = 1)
         );
-        let again = moli.undo_turn(stuck, Origin::Ui, None, None).await.unwrap();
+        let again = moli
+            .undo_turn(stuck, Origin::Ui, None, Some(ME))
+            .await
+            .unwrap();
         assert_ne!(
             again,
             moli_i18n::tr!("assistant.correct.nothing_to_undo"),
@@ -1175,11 +1202,11 @@ mod tests {
     async fn a_sentence_naming_nothing_is_not_kept_for_a_chosen_device() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = with_layout(lights().await, "{}", vec![&answer, &answer, &answer]).await;
-        let reply = moli.turn(ask("Éteins la lumière")).await.unwrap();
+        let reply = moli.turn(asked("Éteins la lumière")).await.unwrap();
         let off =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": false } });
         let done = moli
-            .correct(reply.turn_id, off.clone(), true, Origin::Ui, None, None)
+            .correct(reply.turn_id, off.clone(), true, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -1189,17 +1216,17 @@ mod tests {
         );
         assert!(moli.0.rules.read().unwrap().list().is_empty());
         // naming the device (« lampe » is « lamp » by its stem), or asking for the time, is kept
-        let reply = moli.turn(ask("Éteins la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Éteins la lampe")).await.unwrap();
         assert!(
-            moli.correct(reply.turn_id, off, true, Origin::Ui, None, None)
+            moli.correct(reply.turn_id, off, true, Origin::Ui, None, Some(ME))
                 .await
                 .unwrap()
                 .remembered
         );
-        let reply = moli.turn(ask("Il est quelle heure")).await.unwrap();
+        let reply = moli.turn(asked("Il est quelle heure")).await.unwrap();
         let now = json!({ "tool": "now", "arguments": {} });
         assert!(
-            moli.correct(reply.turn_id, now, true, Origin::Ui, None, None)
+            moli.correct(reply.turn_id, now, true, Origin::Ui, None, Some(ME))
                 .await
                 .unwrap()
                 .remembered
@@ -1210,11 +1237,11 @@ mod tests {
     async fn a_level_picked_from_steps_for_a_sentence_without_a_number_is_not_kept() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = with_layout(lights().await, "{}", vec![&answer]).await;
-        let reply = moli.turn(ask("Baisse la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Baisse la lampe")).await.unwrap();
         let level =
             json!({ "tool": "set", "arguments": { "point": "fake:lamp/brightness", "value": 25 } });
         let done = moli
-            .correct(reply.turn_id, level, true, Origin::Ui, None, None)
+            .correct(reply.turn_id, level, true, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert!(
@@ -1231,11 +1258,11 @@ mod tests {
         std::fs::create_dir(path.with_file_name("assistant-rules.json")).unwrap();
         *moli.0.rules.write().unwrap() =
             crate::corrections::Rules::load(&path.with_file_name("assistant-rules.json"));
-        let reply = moli.turn(ask("Allume la lampe")).await.unwrap();
+        let reply = moli.turn(asked("Allume la lampe")).await.unwrap();
         let on = json!({ "tool": "set", "arguments": { "point": "fake:lamp/on", "value": true } });
         assert!(
             !moli
-                .correct(reply.turn_id, on, true, Origin::Ui, None, None)
+                .correct(reply.turn_id, on, true, Origin::Ui, None, Some(ME))
                 .await
                 .unwrap()
                 .remembered
@@ -1293,8 +1320,11 @@ mod tests {
     async fn a_whole_room_is_offered_at_once_for_lights_colours_and_covers() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = house_model_over(kitchen().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Allume la cuisine en rouge")).await.unwrap();
-        let choices = moli.choices(reply.turn_id, None).await.unwrap();
+        let reply = moli
+            .turn(asked("Allume la cuisine en rouge"))
+            .await
+            .unwrap();
+        let choices = moli.choices(reply.turn_id, Some(ME)).await.unwrap();
         let group = choices["groups"]
             .as_array()
             .unwrap()
@@ -1333,7 +1363,7 @@ mod tests {
     async fn several_devices_are_corrected_in_one_go_all_or_nothing() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = house_model_over(kitchen().await, vec![&answer]).await;
-        let reply = moli.turn(ask("Allume les rubans")).await.unwrap();
+        let reply = moli.turn(asked("Allume les rubans")).await.unwrap();
         let on = |name: &str| json!({ "tool": "set", "arguments": { "point": format!("fake:{name}/state"), "value": true } });
         let bad = json!({ "tool": "set", "arguments": { "point": "fake:Ruban2/state", "value": "boom" } });
         let refused = moli
@@ -1343,7 +1373,7 @@ mod tests {
                 false,
                 Origin::Ui,
                 None,
-                None,
+                Some(ME),
             )
             .await;
         assert!(matches!(refused, Err(CorrectionError::NotOffered)));
@@ -1359,7 +1389,7 @@ mod tests {
                 false,
                 Origin::Ui,
                 None,
-                None,
+                Some(ME),
             )
             .await
             .unwrap();
@@ -1373,7 +1403,7 @@ mod tests {
         let answer = words("Je ne sais pas.");
         let (moli, _) = with_layout(kitchen().await, "{}", vec![&answer]).await;
         let reply = moli
-            .turn(ask("Allume les rubans de la cuisine"))
+            .turn(asked("Allume les rubans de la cuisine"))
             .await
             .unwrap();
         let on = |name: &str| json!({ "tool": "set", "arguments": { "point": format!("fake:{name}/state"), "value": true } });
@@ -1384,7 +1414,7 @@ mod tests {
                 true,
                 Origin::Ui,
                 None,
-                None,
+                Some(ME),
             )
             .await
             .unwrap();
@@ -1410,7 +1440,7 @@ mod tests {
             .await
             .unwrap();
         let again = moli
-            .turn(ask("allume les rubans de la cuisine"))
+            .turn(asked("allume les rubans de la cuisine"))
             .await
             .unwrap();
         assert!(again.rule.is_some());
@@ -1422,12 +1452,12 @@ mod tests {
     async fn a_group_choice_is_done_and_kept_for_a_sentence_that_only_names_the_room() {
         let answer = words("Je ne sais pas.");
         let (moli, _) = with_layout(kitchen().await, "{}", vec![&answer, &answer]).await;
-        let reply = moli.turn(ask("Éteins la cuisine")).await.unwrap();
+        let reply = moli.turn(asked("Éteins la cuisine")).await.unwrap();
         // one ribbon of two for a sentence that names the room only: not kept (it would turn off one of two)
         let one =
             json!({ "tool": "set", "arguments": { "point": "fake:Ruban1/state", "value": false } });
         let done = moli
-            .correct(reply.turn_id, one, true, Origin::Ui, None, None)
+            .correct(reply.turn_id, one, true, Origin::Ui, None, Some(ME))
             .await
             .unwrap();
         assert!(!done.remembered);
@@ -1436,10 +1466,10 @@ mod tests {
             Some(moli_i18n::tr!("assistant.correct.not_kept_unnamed").as_str())
         );
         // the whole room: kept, and it adapts to the lights the room has
-        let reply = moli.turn(ask("Éteins la cuisine")).await.unwrap();
+        let reply = moli.turn(asked("Éteins la cuisine")).await.unwrap();
         let all = json!({ "tool": "set_all", "arguments": { "kind": "lumières", "room": "Cuisine", "value": false } });
         assert!(
-            moli.correct(reply.turn_id, all, true, Origin::Ui, None, None)
+            moli.correct(reply.turn_id, all, true, Origin::Ui, None, Some(ME))
                 .await
                 .unwrap()
                 .remembered

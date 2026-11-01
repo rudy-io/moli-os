@@ -186,6 +186,7 @@ mod tests {
             ms: 1_000,
             audio: None,
             cost: crate::exchanges::Cost::new(0.001, 0.0, 0.0, 0.0),
+            asker: None,
         }
     }
 

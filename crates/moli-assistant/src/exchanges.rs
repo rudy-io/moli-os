@@ -63,6 +63,20 @@ pub struct Exchange {
     /// What it cost, estimated (dollars of the provider's credit).
     #[serde(default)]
     pub cost: Cost,
+    /// Who asked, from the dashboard (`Turn::asker`): theirs to read back. Kept in the file, never
+    /// sent (`Assistant::exchanges_for`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asker: Option<String>,
+}
+
+impl Exchange {
+    /// What everyone of the household may read back: what was said aloud to a satellite or at a
+    /// door (shared rooms), and older exchanges, noted before anyone was. The dashboard's are
+    /// their asker's.
+    #[must_use]
+    pub fn shared(&self) -> bool {
+        self.asker.is_none() || matches!(self.surface.as_str(), "satellite" | "door")
+    }
 }
 
 /// An exchange's estimated cost, in dollars, by what was paid for.
@@ -215,7 +229,32 @@ mod tests {
             ms: 1_200,
             audio: None,
             cost: Cost::default(),
+            asker: None,
         }
+    }
+
+    #[test]
+    fn the_dashboards_questions_are_their_askers_what_is_said_aloud_is_shared() {
+        let mine = Exchange {
+            asker: Some("person:alex".into()),
+            surface: "bubble".into(),
+            ..said(1, "a")
+        };
+        let satellite = Exchange {
+            asker: Some("satellite:salon".into()),
+            surface: "satellite".into(),
+            ..said(2, "b")
+        };
+        let door = Exchange {
+            surface: "door".into(),
+            ..said(3, "c")
+        };
+        let older = Exchange {
+            surface: "page".into(),
+            ..said(4, "d")
+        };
+        assert!(!mine.shared());
+        assert!(satellite.shared() && door.shared() && older.shared());
     }
 
     #[test]

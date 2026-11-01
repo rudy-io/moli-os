@@ -416,3 +416,18 @@ fn absent_or_invalid_climate_units_never_infer_celsius() {
         assert!(!snapshot.values.contains_key("target_temperature"));
     }
 }
+
+#[test]
+fn invalid_source_names_are_rejected_without_truncating_safety_information() {
+    let e = entity("switch", &["on"]);
+    for name in [
+        json!({"name": "Portail"}),
+        json!("Relay\nPortail"),
+        json!(format!("{} Portail", "x".repeat(256))),
+    ] {
+        assert!(decode(&e, &state(&e, "off", json!({"friendly_name": name}))).is_err());
+    }
+    let s = decode(&e, &state(&e, "off", json!({"friendly_name": null}))).unwrap();
+    assert!(s.native_name.contains(&e.native_id));
+    assert!(s.native_name.contains(&e.entity_id));
+}

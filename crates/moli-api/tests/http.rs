@@ -1578,3 +1578,65 @@ async fn a_held_order_is_replaced_by_its_own_callers_only() {
     assert_eq!(pending(mcp, "fake:lamp/state"), [ids[0], ids[2]]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
+    struct WarningDriver(Arc<tokio::sync::Notify>);
+    impl Driver for WarningDriver {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.ready();
+                ctx.warn("Connection uses HTTP; prefer pinned HTTPS.");
+                self.0.notified().await;
+                ctx.clear_warning();
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let clear = Arc::new(tokio::sync::Notify::new());
+    let cancel = CancellationToken::new();
+    let supervisor = spawn_driver(
+        &hub,
+        "bridge".into(),
+        Arc::new(WarningDriver(clear.clone())),
+        cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.snapshot().drivers[0].warning.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let expected = hub.snapshot().drivers[0]
+        .warning
+        .clone()
+        .expect("driver warning");
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    for path in ["/api/devices", "/api/health", "/api/system"] {
+        let (status, body) = request(&addr, "GET", path, None).await;
+        assert_eq!(status, 200, "{body}");
+        let data: Json = serde_json::from_str(&body).unwrap();
+        assert_eq!(data["drivers"][0]["warning"], expected, "{path}");
+        assert_eq!(data["drivers"][0]["status"]["state"], "running", "{path}");
+    }
+    let (status, mut events) = live(&addr, "/api/events", "").await;
+    assert_eq!(status, 200);
+    let (name, snapshot) = events.next().await;
+    assert_eq!(name, "snapshot");
+    assert_eq!(snapshot["drivers"][0]["warning"], expected);
+    clear.notify_one();
+    let (_, event) = events.next().await;
+    assert_eq!(event["type"], "driver_status");
+    assert_eq!(event["instance"], "bridge");
+    assert_eq!(event["status"]["state"], "running");
+    assert!(event["warning"].is_null());
+    let (_, body) = request(&addr, "GET", "/api/system", None).await;
+    assert!(serde_json::from_str::<Json>(&body).unwrap()["drivers"][0]["warning"].is_null());
+    cancel.cancel();
+    supervisor.await.unwrap();
+}

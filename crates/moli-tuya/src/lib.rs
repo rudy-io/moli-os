@@ -14,6 +14,7 @@
 pub mod cloud;
 mod connections;
 mod device;
+pub mod light;
 pub mod model;
 pub mod protocol;
 mod seek;
@@ -426,7 +427,7 @@ async fn serve(
             // `None` once the driver is cancelled.
             command = ctx.next_command() => {
                 let Some(command) = command else { break };
-                dispatch(command, orders, devices);
+                dispatch(ctx, command, orders, devices);
             }
             message = sources.links.recv(), if links_open => match message {
                 Some(Up::State(index, values)) => set_states(ctx, &devices[index].0, values),
@@ -532,6 +533,7 @@ fn locate(
 
 /// Hands a command to its device's link; the reply comes from the link.
 fn dispatch(
+    ctx: &DriverCtx,
     command: moli_runtime::CommandRequest,
     orders: &HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
     devices: &[(DeviceId, Arc<TuyaDevice>)],
@@ -545,19 +547,16 @@ fn dispatch(
         }));
         return;
     };
-    let raw = devices[*index]
-        .1
-        .dp_by_code(&command.key)
-        .and_then(|dp| Some((dp.id, dp.encode(&command.value)?)));
-    let Some((dp, raw)) = raw else {
+    let target = &devices[*index].1;
+    // What the lamp shows now: a colour keeps its brightness, a brightness
+    // in colour is the colour's.
+    let current = |key: &str| ctx.current(&command.device.id, key);
+    let Some(dps) = target.order(&command.key, &command.value, &current) else {
         let message = moli_i18n::tr!("pilotes.tuya.ne_se_regle_pas", point = command.key);
         command.reply(Err(message));
         return;
     };
     let (done, outcome) = oneshot::channel();
-    let mut dps = serde_json::Map::new();
-    dps.insert(dp.to_string(), raw);
-    let target = &devices[*index].1;
     let order = Order {
         dps,
         cid: target.node_id.clone().filter(|_| target.gateway.is_some()),

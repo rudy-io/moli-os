@@ -2,23 +2,31 @@
 export const pointOf = (device, key) => device?.points?.find((point) => point.key === key) ?? null;
 export const canWrite = (device, key) => device?.online !== false && pointOf(device, key)?.access?.write === true;
 
-/** A dial needs two real limits. A missing step only sets the UI granularity. */
-export function numericRange(device, key, defaultStep = 0.5) {
+/** Controls may opt into their legacy limits, but never replace invalid metadata. */
+export function numericRange(device, key, defaultStep = 0.5, fallback = null) {
   const kind = pointOf(device, key)?.kind;
   if (kind?.type !== 'numeric') return null;
-  const { min, max } = kind;
+  const min = kind.min ?? fallback?.min;
+  const max = kind.max ?? fallback?.max;
   const step = kind.step ?? defaultStep;
   if (![min, max, step, max - min].every(Number.isFinite) || max <= min || step <= 0) return null;
-  return { min, max, step };
+  // A visual fallback is not a declared step origin. The core validates limits,
+  // not steps; UI controls use the declared minimum, or zero when it is absent.
+  const range = { min, max, step, stepBase: kind.min ?? 0 };
+  const first = quantize(min, range);
+  const last = quantize(max, range);
+  return first != null && last != null && first < last ? { ...range, first, last } : null;
 }
 
-/** Snap to the device's grid, including a non-zero minimum and decimal steps. */
+/** Snap to the UI's step grid while retaining the contract's validity limits. */
 export function quantize(value, range) {
   if (!Number.isFinite(value) || !range) return null;
-  const { min, max, step } = range;
-  const last = Math.floor((max - min) / step + 1e-9);
-  const index = Math.min(last, Math.max(0, Math.round((value - min) / step)));
-  const result = Math.round((min + index * step) * 1e10) / 1e10;
+  const { min, max, step, stepBase = min } = range;
+  const first = Math.ceil((min - stepBase) / step - 1e-9);
+  const last = Math.floor((max - stepBase) / step + 1e-9);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first > last) return null;
+  const index = Math.min(last, Math.max(first, Math.round((value - stepBase) / step)));
+  const result = Math.round((stepBase + index * step) * 1e10) / 1e10;
   return Number.isFinite(result) ? result : null;
 }
 

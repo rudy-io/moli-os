@@ -36,7 +36,7 @@
   {#if positionWritable}
     <label class="position">
       <span>{t('commun.volet.position')}</span>
-      <input type="range" min={range.min} max={range.max} step={range.step} value={pos ?? range.min} disabled={!Number.isFinite(pos)} onchange={setPosition} />
+      <input type="range" min={range.first} max={range.last} step={range.step} value={pos ?? range.first} disabled={!Number.isFinite(pos)} onchange={setPosition} />
     </label>
   {/if}
 </div>

@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import DriverWarnings from '../../components/DriverWarnings.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
@@ -97,7 +98,7 @@
   // ---- words ------------------------------------------------------------------
   // Driver kinds: their name and description are in the catalog
   // (systeme.pilotes.<kind>.nom / .desc); a kind not listed shows as it is.
-  const KINDS = ['z2m', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'shelly', 'igd', 'presence', 'telegram', 'phones', 'profile', 'izypower', 'solarman'];
+  const KINDS = ['z2m', 'zwave', 'hue', 'tuya', 'reolink', 'sonos', 'helpers', 'philips', 'frigate', 'bambu', 'tapo', 'shelly', 'igd', 'presence', 'telegram', 'phones', 'profile', 'izypower', 'solarman'];
   const kindWord = (kind, part) => (KINDS.includes(kind) ? t(`systeme.pilotes.${kind}.${part}`) : null);
   const driverName = (d) => (d.kind === 'profile' ? d.instance.charAt(0).toUpperCase() + d.instance.slice(1) : (kindWord(d.kind, 'nom') ?? d.kind));
 
@@ -228,6 +229,8 @@
         </p>
       </section>
     {/if}
+
+    <DriverWarnings drivers={hub.drivers} />
 
     <div class="map" bind:this={map}>
       <svg class="links" aria-hidden="true">
