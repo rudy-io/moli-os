@@ -1,6 +1,6 @@
 [integration]
 id = "overkiz"
-name = "Somfy Overkiz (local developer mode)"
+name = "Somfy TaHoma / Overkiz (local)"
 brands = ["Somfy"]
 models = ["TaHoma developer mode"]
 transport = "https"
@@ -15,7 +15,7 @@ secrets = ["token"]
 vars = []
 options = ["host"]
 [origin]
-reused = "No copied code; Somfy local OpenAPI and PyOverkiz protocol fixtures consulted. Synthetic fixtures only."
+reused = "Cover families and favourite design follow moli-os PR25 by ddcq; shared native transport and safeguards from PR99. Somfy OpenAPI and PyOverkiz protocol fixtures consulted. Synthetic fixtures only."
 author = "agent"
 [[fixture]]
 file = "fixtures/devices.json"

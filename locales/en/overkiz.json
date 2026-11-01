@@ -9,5 +9,6 @@
   "overkiz.timeout": "Overkiz command deadline exceeded.",
   "overkiz.position": "Open position",
   "overkiz.command": "Movement",
-  "overkiz.state": "Opening state"
+  "overkiz.state": "Opening state",
+  "overkiz.favourite_position": "Favourite position"
 }

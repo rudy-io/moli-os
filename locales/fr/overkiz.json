@@ -9,5 +9,6 @@
   "overkiz.timeout": "Échéance de commande Overkiz dépassée.",
   "overkiz.position": "Position ouverte",
   "overkiz.command": "Mouvement",
-  "overkiz.state": "État d’ouverture"
+  "overkiz.state": "État d’ouverture",
+  "overkiz.favourite_position": "Position favorite"
 }
