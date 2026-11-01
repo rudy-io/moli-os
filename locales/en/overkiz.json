@@ -1,0 +1,14 @@
+{
+  "overkiz.invalid": "Invalid Overkiz configuration.",
+  "overkiz.auth": "Overkiz token missing or refused: set the token secret and restart.",
+  "overkiz.vault": "A vault is required to persist the Overkiz certificate.",
+  "overkiz.cert": "Overkiz certificate changed: verify its identity before renewing its fingerprint.",
+  "overkiz.network": "Overkiz connection failed.",
+  "overkiz.response": "Invalid Overkiz response.",
+  "overkiz.refused": "Overkiz command refused.",
+  "overkiz.timeout": "Overkiz command deadline exceeded.",
+  "overkiz.position": "Open position",
+  "overkiz.command": "Movement",
+  "overkiz.state": "Opening state",
+  "overkiz.favourite_position": "Favourite position"
+}
