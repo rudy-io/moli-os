@@ -74,5 +74,15 @@
   "ac_status": false,
   "test": false,
   "battery_defect": false
+ },
+ "0x00124b0000000002": {
+  "calibration": "ON",
+  "calibration_time": 17,
+  "linkquality": 128,
+  "motor_reversal": "ON",
+  "moving": "STOP",
+  "position": 32,
+  "state": "OPEN",
+  "switch_type": "momentary"
  }
 }
