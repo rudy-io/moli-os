@@ -10,5 +10,15 @@
   "overkiz.position": "Open position",
   "overkiz.command": "Movement",
   "overkiz.state": "Opening state",
-  "overkiz.favourite_position": "Favourite position"
+  "overkiz.favourite_position": "Favourite position",
+  "overkiz.cloud_input": "Invalid Somfy cloud request.",
+  "overkiz.cloud_response": "Invalid Somfy cloud response.",
+  "overkiz.cloud_login": "Reconnect your independent Somfy cloud session.",
+  "overkiz.cloud_network": "Somfy cloud observation is unavailable.",
+  "overkiz.cloud_deadline": "Somfy cloud observation deadline exceeded.",
+  "overkiz.cloud_persistence": "Somfy cloud session could not be saved.",
+  "overkiz.cloud_discovery": "Somfy cloud site discovery exceeded its safe limits.",
+  "overkiz.cloud_scope": "Somfy cloud site selection could not be verified.",
+  "overkiz.cloud_forbidden": "Somfy cloud access was refused.",
+  "overkiz.cloud_rate": "Somfy cloud rate limit: retry later."
 }

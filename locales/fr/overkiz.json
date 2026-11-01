@@ -10,5 +10,15 @@
   "overkiz.position": "Position ouverte",
   "overkiz.command": "Mouvement",
   "overkiz.state": "État d’ouverture",
-  "overkiz.favourite_position": "Position favorite"
+  "overkiz.favourite_position": "Position favorite",
+  "overkiz.cloud_input": "Demande cloud Somfy invalide.",
+  "overkiz.cloud_response": "Réponse cloud Somfy invalide.",
+  "overkiz.cloud_login": "Reconnectez votre session cloud Somfy indépendante.",
+  "overkiz.cloud_network": "Observation cloud Somfy indisponible.",
+  "overkiz.cloud_deadline": "Délai de l’observation cloud Somfy dépassé.",
+  "overkiz.cloud_persistence": "La session cloud Somfy n’a pas pu être enregistrée.",
+  "overkiz.cloud_discovery": "La découverte des sites cloud Somfy dépasse les limites prévues.",
+  "overkiz.cloud_scope": "La sélection du site cloud Somfy n’a pas pu être vérifiée.",
+  "overkiz.cloud_forbidden": "Accès cloud Somfy refusé.",
+  "overkiz.cloud_rate": "Limite de requêtes cloud Somfy : réessayez plus tard."
 }
