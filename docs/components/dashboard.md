@@ -83,6 +83,24 @@ telles que les appareils les nomment).
 
 ## Bibliothèques partagées (`web/src/maison/lib/`)
 
+- `capabilities.js` : droits d'écriture par point et disponibilité, choix réellement
+  proposés, plages numériques et arrondi sur le pas annoncé. Les limites du pilote
+  priment ; les anciens contrats sans bornes gardent les replis des contrôles de
+  volume (0–100) et de consigne (16–30, pas 0,5, seulement en °C ou sans unité
+  déclarée). Le volume d'annonce conserve son
+  pas de 5 en l'absence d'un pas explicite. Une borne invalide n'est jamais remplacée
+  par un repli ; un point absent, en lecture seule ou hors ligne ne devient pas
+  commandable pour autant. L'origine des pas est le minimum déclaré, ou zéro à
+  défaut : un minimum de présentation ne la décale pas. Les curseurs affichent
+  les premier et dernier crans dans les limites conservées du contrat ; le
+  validateur du cœur contrôle ces limites mais n'impose pas de grille de pas.
+  Les volets sont reconnus par le sens `position` (0–100 %, 100 = ouvert), ou
+  leur ordre ouvrir/fermer, sans devenir des interrupteurs. Le curseur exige
+  un point `position` inscriptible et une mesure valide ; les limites annoncées
+  restent respectées. Le repli Tuya `percent_control` est seulement informatif
+  et ne remplace jamais un sens `position` déclaré. Les ordres conservent la
+  casse du pilote (`OPEN` ou `open`) ; une cible ou une casse ambiguë ne produit
+  pas de commande. Le mouvement reste affiché, même sans position mesurée.
 - `home.svelte.js` : état de la maison (config, ordres retenus, toasts, thème), lecture des
   valeurs, `powerKey` (le point qui allume/éteint), `deviceKind`, `roomList`, `act` (envoie
   un ordre, gère le 202 de la garde), `confirmHeld` (code PIN), formats français.
