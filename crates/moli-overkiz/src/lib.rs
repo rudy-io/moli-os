@@ -7,7 +7,11 @@ use moli_core::DeviceId;
 use moli_net::{Method, PinnedHttps};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+type MissingDevices = HashMap<DeviceId, u8>;
+const MISSING_REFRESHES: u8 = 3;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,7 +140,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         PinnedHttps::new(&config.host, config.port, Some(pin))?,
         token,
     );
-    refresh(&client, ctx, config).await?;
+    // Absence is counted only after a complete successful snapshot. A failed
+    // run resets the streak; transport failures cannot hasten removal.
+    let mut missing = MissingDevices::new();
+    refresh(&client, ctx, config, &mut missing).await?;
     ctx.ready();
     let mut timer = tokio::time::interval(Duration::from_secs(config.poll_secs));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -146,12 +153,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             command=ctx.next_command()=>{
                 let Some(command)=command else {return Ok(());};
                 let deadline=command.deadline.min(Instant::now()+Duration::from_millis(4500));
-                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,config)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
-                let fatal=result.is_err();
+                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,config,&mut missing)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
+                let needs_human=result.as_ref().err().is_some_and(|error|error.downcast_ref::<Failure>().is_some());
                 command.reply(result.as_ref().copied().map_err(ToString::to_string));
-                if fatal {return result;}
+                if needs_human {return result;}
+                // A refused order is not a failed driver. Refresh after either
+                // outcome; only a failed read needs supervisor recovery.
+                refresh(&client,ctx,config,&mut missing).await?;
             },
-            _=timer.tick()=>{refresh(&client,ctx,config).await?;},
+            _=timer.tick()=>{refresh(&client,ctx,config,&mut missing).await?;},
         }
     }
 }
@@ -159,6 +169,7 @@ async fn refresh(
     client: &Client,
     ctx: &DriverCtx,
     config: &Config,
+    missing: &mut MissingDevices,
 ) -> anyhow::Result<Vec<model::Entry>> {
     let json = client.request(Method::GET, "/setup/devices", None).await?;
     let entries = model::parse_policy(&json, &config.writable_openers, config.read_only)?;
@@ -177,8 +188,16 @@ async fn refresh(
         ids.push(id);
     }
     for old in ctx.devices() {
-        if !ids.contains(&old) {
-            ctx.remove_device(&old);
+        if ids.contains(&old) {
+            missing.remove(&old);
+        } else {
+            ctx.set_availability(&old, false);
+            let count = missing.entry(old.clone()).or_default();
+            *count += 1;
+            if *count >= MISSING_REFRESHES {
+                ctx.remove_device(&old);
+                missing.remove(&old);
+            }
         }
     }
     Ok(entries)
@@ -189,6 +208,7 @@ async fn apply(
     command: &CommandRequest,
     deadline: Instant,
     config: &Config,
+    missing: &mut MissingDevices,
 ) -> anyhow::Result<()> {
     if config.read_only {
         anyhow::bail!(moli_i18n::tr!("overkiz.refused"));
@@ -196,7 +216,7 @@ async fn apply(
     if command.abandoned() {
         anyhow::bail!(moli_i18n::tr!("overkiz.timeout"));
     }
-    let entries = refresh(client, ctx, config).await?;
+    let entries = refresh(client, ctx, config, missing).await?;
     let entry = entries
         .iter()
         .find(|e| DeviceId::new(ctx.instance(), &e.native()) == command.device.id)

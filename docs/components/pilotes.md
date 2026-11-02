@@ -250,6 +250,50 @@ host = "192.168.1.x"
 - **Pièges** : un renommage ou un changement de pièce/zone déclenche un rechargement complet. Flux muet 10 min : réouverture et rechargement. Un message SSE (ou une ligne) qui dépasse 1 Mio sans fin : flux fermé, rouvert et rechargement complet. Les commandes tournent à côté du flux avec un budget de 4,5 s (sous les 5 s du hub). Le message « certificat changé » montre l'empreinte épinglée et celle présentée, et donne la commande `secrets forget <instance> cert_sha256` avec l'identifiant réel de l'instance (la clé part avec l'empreinte). Avec `app_key_env` configuré (même si la variable manque) ou une empreinte de la configuration, il ne conseille pas d'oublier l'empreinte : il dit de refaire la clé, ou de changer `cert_sha256` (les empreintes complètes sont dans le journal). `Bridge` n'affiche jamais la clé en `Debug`.
 - **Tests** : `src/model.rs` sur `integrations/hue/fixtures/resources.json` (pont réel) : pièces commandables, zones jamais, boutons, capteurs, événements partiels, encodage ; `src/bridge.rs` : parseur SSE découpé en morceaux, plafond de 1 Mio (ligne sans fin, `data:` sans ligne vide).
 
+## `overkiz` : Somfy TaHoma en local (`crates/moli-overkiz`)
+
+- **Couvre** : volets, stores, rideaux, écrans, pergolas et auvents compatibles avec
+  l’API locale du mode développeur ; favoris « My » selon les commandes annoncées.
+  Portails et fenêtres sont observés en lecture seule par défaut. Les scénarios
+  enregistrés, programmations et autres fonctions cloud ne sont pas implémentés ici.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "somfy"
+kind = "overkiz"
+[driver.options]
+host = "gateway-example.local"
+read_only = true
+# port = 8443
+# poll_secs = 5
+```
+
+- **Secrets** : jeton du mode développeur dans `token`, empreinte dans `cert_sha256`,
+  rangés sous l’identifiant d’instance. Le certificat est épinglé avant l’envoi du
+  jeton ; le premier contact TOFU exige un réseau de confiance ou une empreinte
+  vérifiée configurée à l’avance. Un jeton refusé ou un certificat changé place
+  le pilote en `waiting`, appareils hors ligne.
+- **Points et garde** : `percent_control` est le pourcentage ouvert (100 = ouvert),
+  de sens `Position` pour les ouvrants ordinaires ; `control` propose seulement les
+  commandes natives qualifiées, `favourite_position` reste une configuration.
+  RTS ne reçoit jamais de position mesurée inventée. Toute écriture d’un portail
+  ou d’une fenêtre exige l’autorisation explicite `writable_openers` par URL exacte
+  et classe ; tous ses points inscriptibles gardent le sens `Control`, curseur
+  compris. `read_only` refuse aussi les commandes admises sur des métadonnées anciennes.
+- **Identité et disponibilité** : SHA-256 de l’URL native exacte, indépendante du
+  nom. Une absence met immédiatement l’appareil hors ligne ; sa suppression exige
+  trois lectures réussies consécutives sans lui. Un retour conserve ses étiquettes
+  et remet le compteur à zéro ; une lecture échouée ne compte pas.
+- **Commandes** : prélecture des capacités et de la disponibilité, budget commun
+  de 4,5 s maximum, un seul `exec/apply` sans rejeu. Un refus isolé ne redémarre pas
+  le pilote. L’accusé natif ne confirme pas le mouvement physique.
+- **Tests et limites** : fixtures synthétiques, vrai Hub et serveur TLS simulé ;
+  inventaire historique anonymisé rejoué hors réseau. Les commandes matérielles
+  restent à qualifier pour cette implémentation.
+  [Détails et convergence](../../integrations/overkiz/README.md),
+  [couverture restante](../../integrations/overkiz/COVERAGE.md).
+
 ## `dirigera` : hub IKEA Dirigera (`crates/moli-dirigera`)
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
@@ -754,6 +798,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
+| `overkiz` | `moli-overkiz` | HTTPS local 8443, certificat épinglé | selon capacités ; portails/fenêtres explicitement revus et gardés | modèle rejoué hors réseau ; transport et commandes sur simulateur TLS |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |

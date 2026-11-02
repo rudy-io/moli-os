@@ -43,6 +43,75 @@ fn identities_are_exact_and_not_labels() {
     assert!(!before.contains('/'));
 }
 #[test]
+fn distinct_urls_that_collide_when_slashes_are_replaced_keep_distinct_identities() {
+    let instance = InstanceId::from("test");
+    let urls = ["io://example/a/b", "io://example/a_b"];
+    assert_eq!(
+        DeviceId::new(&instance, urls[0]),
+        DeviceId::new(&instance, urls[1])
+    );
+    let mut raw = fixture();
+    raw[1] = raw[0].clone();
+    raw[0]["deviceURL"] = json!(urls[0]);
+    raw[1]["deviceURL"] = json!(urls[1]);
+    let entries = parse(&raw).unwrap();
+    assert_ne!(
+        entries[0].device(&instance).id,
+        entries[1].device(&instance).id
+    );
+    assert_eq!(
+        entries[0].apply("control", &Value::from("open")).unwrap()["actions"][0]["deviceURL"],
+        urls[0]
+    );
+    assert_eq!(
+        entries[1].apply("control", &Value::from("open")).unwrap()["actions"][0]["deviceURL"],
+        urls[1]
+    );
+}
+#[test]
+fn labels_strip_controls_without_changing_identity_or_write_policy() {
+    let mut raw = fixture();
+    let before = parse(&raw).unwrap()[2].native();
+    raw[2]["label"] = json!("\u{1b}[31mGate\r\n\t\u{7f} test");
+    let entry = parse(&raw).unwrap().remove(2);
+    let device = entry.device(&InstanceId::from("test"));
+    assert_eq!(device.native_name.as_ref(), "[31mGate test");
+    assert_eq!(entry.native(), before);
+    assert!(device.points.iter().all(|point| !point.access.write));
+}
+#[test]
+fn current_opening_uses_position_semantics_but_favourites_and_sensitive_writes_do_not() {
+    let mut raw = fixture();
+    raw[0]["states"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name":"core:Memorized1PositionState","value":50}));
+    for read_only in [false, true] {
+        let entries = parse_policy(&raw, &[], read_only).unwrap();
+        let device = entries[0].device(&InstanceId::from("test"));
+        assert_eq!(
+            device.point("percent_control").unwrap().semantic,
+            Semantic::Position
+        );
+        assert_eq!(
+            device.point("favourite_position").unwrap().semantic,
+            Semantic::Other
+        );
+        assert_eq!(device.point("control").unwrap().semantic, Semantic::Other);
+    }
+    raw[2]["states"] = json!([{"name":"core:ClosureState","value":50}]);
+    raw[2]["definition"]["commands"] = json!([{"commandName":"setClosure","nparams":1}]);
+    let entries = parse_reviewed(&raw, &[reviewed("io://example/789", "Gate")]).unwrap();
+    assert_eq!(
+        entries[2]
+            .device(&InstanceId::from("test"))
+            .point("percent_control")
+            .unwrap()
+            .semantic,
+        Semantic::Control
+    );
+}
+#[test]
 fn malformed_special_positions_and_arity_never_gain_capabilities() {
     for state in [
         json!(108),

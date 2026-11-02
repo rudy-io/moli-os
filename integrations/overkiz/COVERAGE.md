@@ -2,7 +2,7 @@
 
 This is a local-driver convergence candidate for [PR25](https://github.com/rudy-io/moli-os/pull/25)
 and [PR99](https://github.com/rudy-io/moli-os/pull/99), not complete TaHoma application parity.
-The comparison used PR25 at `eb05dfbdb906df3a14d26baef77f3990e386c8e3`.
+The comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd4062636a236efe3`.
 
 | Function | Implemented in this driver | Limit or next step |
 | --- | --- | --- |
@@ -17,6 +17,8 @@ The comparison used PR25 at `eb05dfbdb906df3a14d26baef77f3990e386c8e3`.
 | Global read-only option | All write permissions removed and execution refused before actuation | Explicit true required; false compatibility default |
 | Stateless known openers | Visible with opening_state unknown | Presence is not physical feedback |
 | Pin/token failure | Parked and devices offline | Human verification required, no blind certificate replacement |
+| Partial snapshots | Missing devices offline immediately, removed after three successful absent snapshots | Reappearance resets the counter; failed reads do not count |
+| Position semantics | Current opening uses Position; reviewed opener writes keep Control | Favourite configuration never substitutes for current opening |
 | Readback after commands | Snapshot observation only, no optimistic state | execId means receipt, not movement |
 | Events | Not implemented | Official API supports listeners; current snapshots every five seconds |
 | Tilt, combined axes, speed | Not mapped | Need distinct qualified bindings; two sequential commands may interrupt each other |
@@ -55,5 +57,10 @@ native identity and explicit site scope, keep the local source preferred, and ne
 an ambiguous local action through cloud. Opaque cloud scenarios must not bypass opener
 approvals. These are requirements for the separate extension, not features already shipped.
 
-The canonical driver name, compatibility for raw-URL IDs from PR25, and Semantic::Position
-adoption after PR30 remain coordinated upstream. UI changes belong in a separate PR.
+The proposed common driver retains the `overkiz` kind and SHA-256 identities for
+compatibility with existing fork installations. Raw-URL IDs collide after the core's
+slash-to-underscore normalization and can exceed its point-length limit. Agreement
+with PR25's author on naming and identity remains pending; no migration is automatic.
+Any future PR25 import needs an explicit mapping from original URLs for labels,
+rooms and automation references. `Semantic::Position` is now used without removing
+Control semantics from sensitive writes. UI changes belong in a separate PR.
