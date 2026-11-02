@@ -941,6 +941,7 @@ const KINDS: &[&str] = &[
     "z2m",
     "zwave",
     "hue",
+    "overkiz",
     "dirigera",
     "homeassistant",
     "igd",
@@ -1108,6 +1109,7 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
+        "overkiz" => configured_driver(config, moli_overkiz::Overkiz::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
             config.options.clone().try_into().with_context(context)?,
         )),
