@@ -114,6 +114,18 @@ appareils changent. En tête : Moli contre HA (mémoire, processeur, taille, ré
 tendance des livraisons) lu dans `data/perf.jsonl`. Un nouveau pilote ou une nouvelle brique y
 apparaît sans toucher à la page.
 
+## Programmations TaHoma en lecture seule
+
+La carte Somfy de Système présente les jours, horaires et actions du catalogue
+privé déjà collecté. `lib/somfy-programmes.js` projette les définitions ;
+`ui/SomfyCloudProgramme.svelte` et `SomfyCloudActions.svelte` affichent les mêmes
+actions pour les scénarios, journées et règles intégrées. Les noms viennent des
+étiquettes du catalogue, sans rapprochement heuristique avec d'autres pilotes.
+Les états déclarés restent distincts d'une activation effective. Les formats
+inconnus, données historiques et limites d'affichage sont explicitement qualifiés.
+Les détails longs s'ouvrent à la demande ; la définition JSON d'origine reste
+accessible. Aucun contrôle d'exécution, nouvelle requête ou minuterie n'est ajouté.
+
 ## Vérifier visuellement
 
 Pour un agent, plutôt que son navigateur intégré (chaque clic y demande une autorisation) :

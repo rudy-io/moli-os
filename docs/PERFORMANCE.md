@@ -129,3 +129,22 @@ mesurent pas le coût réseau d'un cycle Somfy authentifié, un redémarrage sur
 Freebox, une coupure secteur ou l'exhaustivité des programmes du fournisseur. Le
 cas cloud désactivé est complété par les tests qui vérifient l'absence de tâche,
 de minuterie et de requête cloud lorsque l'option est omise.
+
+## 2026-11-02 — lecture des programmations TaHoma dans le navigateur
+
+La vue lisible réutilise le catalogue déjà chargé : aucun nouvel appel API, minuteur,
+paquet ou changement de tâche cloud. Un modèle de lecture pur est calculé pour les
+collections ouvertes. La vue est bornée à 50 définitions par collection, 64 horaires,
+100 actions partagées par définition et 16 commandes par action ; le dépassement est
+signalé et le JSON d’origine reste accessible. Trois actions sont rendues avant
+d’ouvrir le détail du groupe.
+
+Même hôte, dépendances et build Vite que la référence `8b0febc` : les 30 fichiers
+produits passent de **3 965 826 à 3 992 035 octets**, soit **+26 209 octets (+0,66 %)**.
+Le bloc JavaScript principal passe de **834 722 à 854 539 octets (+2,37 %)**.
+L’avertissement Vite pour les blocs de plus de 500 ko reste présent et existait
+déjà ; cette livraison ne prétend pas résoudre le découpage global de l’interface.
+Les [mesures et empreintes des sources](performance/somfy-programme-ui-2026-11-02.json)
+identifient exactement ce qui a été construit. Ce relevé de taille ne mesure ni
+le CPU/RAM du navigateur ni les latences serveur. Les réserves et le dépassement
+du budget image documentés ci-dessus restent ouverts.

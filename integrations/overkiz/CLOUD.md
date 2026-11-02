@@ -177,6 +177,31 @@ Finite fractional/exponent values follow serde_json's floating-point semantics.
 Browser exports must retain the cached API response bytes, avoiding a second
 parse/stringify through JavaScript's narrower exact-integer range.
 
+## Readable read-only programmes
+
+The owner view projects known scenario, day and calendar-rule fields into days,
+wall times and ordered actions. Exact `target_labels` identify devices, while
+referenced days/scenarios resolve only within this catalogue and retain history
+qualifications. Integrated days and action groups share the same presentation.
+Declared enabled flags at rule, day, trigger and group levels remain separate;
+none certifies global agenda activation or a future execution.
+
+Monday is mask bit 1 and Sunday bit 64; months are 1-based. Valid TIME fields are
+shown as wall times; DAWN/DUSK remain solar labels, not calculated occurrences.
+A daily period is a day cadence. Weekly periods above one, modern solar offsets,
+additional solar hours, malformed or partial dates and unknown conditions are
+qualified. All-minus-one **bounds** are absent; all-minus-one specific dates are
+unknown. Closure percentages are not inverted into opening percentages. Unknown
+commands retain their names rather than acquiring guessed semantics.
+
+This is a bounded frontend projection, without new requests, dependencies or
+execution controls. It indexes the existing catalogue once and shows up to 50
+entries per family, 64 triggers and 100 actions per definition, 16 commands per
+action. The first three actions form a preview; the rest render when expanded.
+Truncation is explicit and the complete cached JSON remains available unchanged,
+including integers outside JavaScript's exact range. The model interprets only
+safe, bounded numeric values and never reconstructs the original JSON.
+
 ## Bounded private data
 
 Full definitions belong in the encrypted catalogue and owner-only views, not in
@@ -209,6 +234,6 @@ in each other collection. They demonstrate the owner interface, not a successful
 connection to a real Somfy account. The displayed observation date and all labels,
 identifiers and definitions belong to that fixture.
 
-![Desktop owner view with a raw scenario definition](../../docs/images/somfy-cloud-desktop.png)
+![Readable days, times and actions on desktop](../../docs/images/somfy-programmes-desktop.jpg)
 
-![Mobile owner view of the six programme collections](../../docs/images/somfy-cloud-mobile.png)
+![Read-only programme on mobile](../../docs/images/somfy-programmes-mobile.jpg)
