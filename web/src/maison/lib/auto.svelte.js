@@ -126,7 +126,8 @@ export function pointName(point) {
   return spec && !generic ? `${name} · ${spec.label}` : name;
 }
 
-/** Every point a graph touches (steps and rules alike). */
+/** Every point a graph touches (steps and rules alike, and the points their
+ *  values are read from). */
 export function graphPoints(graph) {
   const found = new Set();
   const walk = (v) => {
@@ -134,6 +135,7 @@ export function graphPoints(graph) {
     else if (v && typeof v === 'object') {
       for (const [k, x] of Object.entries(v)) {
         if (k === 'point' && typeof x === 'string') found.add(x);
+        else if (k === 'value' && isFrom(x) && typeof x.from === 'string') found.add(x.from);
         else walk(x);
       }
     }
@@ -228,7 +230,7 @@ export function nodeText(node) {
       );
     case 'set': {
       const key = splitPoint(node.point)[1];
-      if (key === 'key') return t('automatismes.texte.touche', { nom: pointName(node.point), valeur: node.value });
+      if (key === 'key') return t('automatismes.texte.touche', { nom: pointName(node.point), valeur: isFrom(node.value) ? valueText(node.point, node.value) : node.value });
       return `${pointName(node.point)} → ${valueText(node.point, node.value)}`;
     }
     case 'toggle':
