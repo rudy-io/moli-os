@@ -10,7 +10,9 @@ use moli_runtime::Hub;
 use serde::Serialize;
 use serde_json::Value as Json;
 
-use crate::model::{Channel, DayNight, Graph, Node, Op, Rule, Step, SunEvent, minutes_of};
+use crate::model::{
+    Channel, DayNight, FromPoint, Graph, Node, Op, Rule, Step, SunEvent, minutes_of,
+};
 use crate::{decimal, fold, join_last};
 
 pub const MAX_NODES: usize = 60;
@@ -220,12 +222,38 @@ impl Ctx<'_> {
         Some(spec)
     }
 
+    /// A value read from another point (`{"from": …}`): that point exists, and
+    /// holds a number when one is needed. Whether `value` is such a reference.
+    fn source(&mut self, value: &Json, number: bool) -> bool {
+        if FromPoint::malformed(value) {
+            self.push(Level::Error, tr!("moteur.verif.source_illisible"));
+            return true;
+        }
+        let Some(from) = FromPoint::of(value) else {
+            return false;
+        };
+        if let Some(spec) = self.need(from.point, false)
+            && (number || from.add.is_some())
+            && !matches!(spec.kind, Kind::Numeric { .. })
+        {
+            self.push(
+                Level::Error,
+                tr!("moteur.verif.source_pas_nombre", nom = spec.label),
+            );
+        }
+        true
+    }
+
     fn rule(&mut self, rule: &Rule) {
         match rule {
             Rule::State { point, op, value } => {
-                if let Some(spec) = self.need(point, false)
-                    && matches!(op, Op::Gt | Op::Ge | Op::Lt | Op::Le)
-                    && (!matches!(spec.kind, Kind::Numeric { .. }) || value.as_f64().is_none())
+                let ordered = matches!(op, Op::Gt | Op::Ge | Op::Lt | Op::Le);
+                let spec = self.need(point, false);
+                let reference = self.source(value, ordered);
+                if let Some(spec) = spec
+                    && ordered
+                    && (!matches!(spec.kind, Kind::Numeric { .. })
+                        || (!reference && value.as_f64().is_none()))
                 {
                     self.push(Level::Error, tr!("moteur.verif.comparaison_nombres"));
                 }
@@ -327,7 +355,13 @@ fn check_node(
             }
         }
         Step::Set { point, value } => {
-            if let Some(spec) = c.need(point, true)
+            let spec = c.need(point, true);
+            let number = spec
+                .as_ref()
+                .is_some_and(|s| matches!(s.kind, Kind::Numeric { .. }));
+            // A value read from another point is validated when it runs.
+            if !c.source(value, number)
+                && let Some(spec) = spec
                 && let Err(e) = moli_core::validate(&spec.kind, &Value::from_json(value))
             {
                 c.push(
@@ -509,6 +543,41 @@ fn value_words(spec: Option<&PointSpec>, v: &Json) -> String {
         Json::Number(n) => format!("{}{unit}", decimal(&n.to_string())),
         Json::String(s) => tr!("moteur.valeur.texte", texte = s),
         other => other.to_string(),
+    }
+}
+
+/// A value an action or a rule wants: the constant, or « the Comfort of
+/// Settings + 0.5 °C » when it is read from another point.
+fn wanted_words(hub: &Hub, spec: Option<&PointSpec>, v: &Json) -> String {
+    let Some(from) = FromPoint::of(v) else {
+        return value_words(spec, v);
+    };
+    let s = said(hub, from.point);
+    let label = s.spec.as_ref().map_or_else(
+        || from.point.rsplit('/').next().unwrap_or_default().to_owned(),
+        |p| p.label.to_string(),
+    );
+    match from.add {
+        Some(add) if add.abs() > f64::EPSILON => {
+            let sign = if add > 0.0 { "+" } else { "−" };
+            let n = add.abs();
+            let number = if n.fract().abs() < f64::EPSILON {
+                format!("{n:.0}")
+            } else {
+                n.to_string()
+            };
+            let unit = spec
+                .and_then(|s| s.unit.as_ref())
+                .map(|u| format!(" {}", u.symbol()))
+                .unwrap_or_default();
+            tr!(
+                "moteur.valeur.depuis_ecart",
+                libelle = label,
+                appareil = s.device,
+                ecart = format!("{sign} {}{unit}", decimal(&number))
+            )
+        }
+        _ => tr!("moteur.valeur.depuis", libelle = label, appareil = s.device),
     }
 }
 
@@ -765,7 +834,7 @@ pub(crate) fn rule_words(rule: &Rule, hub: &Hub) -> String {
                 phrase,
                 libelle = label,
                 appareil = s.device,
-                valeur = value_words(s.spec.as_ref(), value)
+                valeur = wanted_words(hub, s.spec.as_ref(), value)
             )
         }
         Rule::Time {
@@ -842,7 +911,7 @@ fn action_words(step: &Step, hub: &Hub) -> String {
                 "moteur.action.regler",
                 libelle = label,
                 appareil = s.device,
-                valeur = value_words(s.spec.as_ref(), value)
+                valeur = wanted_words(hub, s.spec.as_ref(), value)
             )
         }
         Step::Toggle { point } => {

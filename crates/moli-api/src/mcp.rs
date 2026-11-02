@@ -82,7 +82,10 @@ struct DraftArgs {
     /// (point, value), toggle (point), wait (seconds), wait_for (rule,
     /// timeout_s → ports ok/timeout), notify (title, message, channels
     /// maison|telegram), write (prompt). Edges: {from, port (out by default),
-    /// to}.
+    /// to}. A `value` (set, state rule) may be read from another point when
+    /// the step runs instead of a constant: {"from": "<device>/<key>", "add":
+    /// -0.5} (add optional, numbers only), e.g. a household setting such as a
+    /// target temperature, tuned without editing the automation.
     #[schemars(with = "serde_json::Value")]
     automation: Json,
 }

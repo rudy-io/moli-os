@@ -63,7 +63,7 @@
               <option value="ne">{t('automatismes.inspecteur.nest_pas')}</option>
             </select>
           {/if}
-          <Fields kind="value" point={r.point} value={r.value} onchange={(v) => change({ value: v })} />
+          <Fields kind="value" readable point={r.point} value={r.value} onchange={(v) => change({ value: v })} />
         </div>
       {/if}
     {:else if r.kind === 'time'}
@@ -163,7 +163,7 @@
       <PointPicker point={node.point} mode="write" onpick={(p) => set({ point: p, value: defaultValue(p) })} />
       {#if node.point}
         <span class="lbl">{t('automatismes.inspecteur.mettre_sur')}</span>
-        <Fields kind="value" point={node.point} value={node.value} onchange={(v) => set({ value: v })} />
+        <Fields kind="value" readable point={node.point} value={node.value} onchange={(v) => set({ value: v })} />
       {/if}
     {:else if node.type === 'toggle'}
       <span class="lbl">{t('automatismes.inspecteur.quel_appareil')}</span>
