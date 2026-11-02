@@ -50,3 +50,82 @@ Assistant.
 | 2026-10-04 | 7,0 → 7,2 Mio anonyme (16,9 RSS) | 0,26 % (en usage) | 17,0 Mo | Pilote téléphones + appli mobile. Alerte « mémoire +43 % » mesurée avec **11 à 12 clients connectés** (réseau local et tunnel : appli mobile, tableaux de bord), bien plus que d'ordinaire ; latences `/api/automations` 28,4 ms à la 1re mesure (hôte chargé, charge 1,7), 14,8 ms à la remesure. Mémoire suivie 2 min 30 : 7,2 Mio stable (7 à 11 connexions), pas de croissance. **À revérifier au repos** (mesure de nuit) : si elle reste au-dessus de 5 Mio sans client, chercher. |
 | 2026-10-04 | 6,1 Mio anonyme (15,4 RSS) | 7 % → **0,32 %** | 17,2 Mo | Ambiances, cadran de clim, conseils d'énergie. Alerte au déploiement expliquée : un onglet de vérification était resté sur l'Accueil (image de la sonnette rafraîchie, comme le 3 oct.) : 4 à 9 % tant qu'il était ouvert, 0,1 à 0,5 % une fois fermé. Remesure : budget OK, `/api/energy` p95 7,9 ms. |
 | 2026-10-04 | 6,1 Mio anonyme (15,9 RSS) | 0,36 % | 17,5 Mo | Alerte `/api/automations` p95 35,1 ms (> 25), mesurée pendant le démarrage ; hors démarrage 16,4 ms, en hausse depuis 12 ms avec 10 brouillons de plus (103 automatismes). Profil local sur les vraies données : l'**empreinte** (graphe sérialisé puis SHA-256) recalculée 4 fois par automatisme et par listing était le gros du temps, puis la vérification qui copiait tout l'état de chaque appareil cité. Corrigé : `Hub::describe` (description + étiquette, sans l'état), une seule empreinte par vue, puis **empreintes gardées entre deux écritures** (oubliées sous le verrou d'écriture ; valider et lancer recalculent toujours). `/api/automations` **16,4 → 8,5 ms** (p95 9,6). |
+
+## 2026-11-02 — observateur Somfy cloud, essai synthétique ARM64
+
+Comparaison locale sur le même hôte Docker Desktop ARM64, sans compilation ni client
+UI sur les instances mesurées. Il ne s'agit ni d'une mesure de la maison réelle,
+ni d'une comparaison simultanée avec Home Assistant, ni d'une qualification Freebox.
+Les [résultats bruts](performance/somfy-cloud-2026-11-02.json) conservent les octets,
+les durées, les identités des images et les conditions de mesure.
+
+Source de référence : `d81b2be13ec6a5a3496c29617f2706f6f37a0f1c`.
+Source construite : `9183b39530e81fda75c2e0b818441698854f4838`, archivée avec
+`git archive` avant le build ; les modifications documentaires ultérieures ne sont
+pas embarquées. Même Dockerfile et mêmes bases que la référence :
+`node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94`
+et `rust:1-alpine@sha256:7e9e2d068a107a2adafd19930011178d14a78326053cd4c3a9f7ad3fd049557d`.
+Image construite : `sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511`.
+
+Les trois conteneurs utilisent deux workers et un plafond de 128 Mio. Après au moins
+150 s de stabilisation, le CPU au repos est mesuré sur 30 s ; les mesures sont
+séquentielles. Chaque p95 est le 48e résultat de 50 requêtes triées. Les durées HTTP
+incluent la boucle locale hôte → VM Docker et le transfert de la réponse ; le
+démarrage va de l'appel `docker start` à la première réponse de santé valide.
+La mémoire est l'`anon` du cgroup, avec RSS des processus indiqué séparément.
+
+Le cas catalogue contient 1 000 030 octets sérialisés, 120 définitions dans deux
+collections et quatre collections non observées. Sa session fictive exige une
+reconnexion : aucun jeton fournisseur ni demande de connexion n'est présent. Le
+coffre est chiffré avec une clé de test. Un réseau Docker dédié publie uniquement
+des ports loopback ; les hôtes Somfy fixes et le DNS configuré pointent vers
+loopback, et les proxies sont vidés. Aucun compte réel n'est utilisé.
+
+| Série | Charge | Anonyme (Mio) | RSS (Mio) | CPU repos (%) | Santé p95 (ms) | Catalogue p95 (ms) | Démarrage (s) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | Référence vide | 2.16 | 11.59 | 0.0350 | 2.61 | — | 0.144 |
+| 1 | Nouvelle image, cloud omis | 2.20 | 12.01 | 0.0241 | 2.89 | — | 0.132 |
+| 1 | Catalogue fictif proche de 1 Mio | 4.46 | 14.88 | 0.0337 | 5.72 | 26.14 | 0.120 |
+| 2 | Référence vide | 2.23 | 11.58 | 0.0303 | 2.50 | — | 0.148 |
+| 2 | Nouvelle image, cloud omis | 3.55 | 13.28 | 0.0226 | 1.41 | — | 0.103 |
+| 2 | Catalogue fictif proche de 1 Mio | 5.36 | 15.89 | 0.0379 | 2.25 | 14.93 | 0.100 |
+
+La première série a déclenché deux alertes sur la charge maximale : santé p95
+**5.72 ms** (> 5) et catalogue **26.14 ms** (> 25).
+La deuxième série, sans changement de code ni de recette, donne respectivement
+**2.25 ms** et **14.93 ms**.
+Les deux séries sont conservées ; leur variation ne permet pas d'attribuer les
+écarts à une cause précise. Une mesure comparable sur l'hôte cible reste nécessaire.
+
+Après les 50 lectures privées de 1 000 307 octets chacune,
+la mémoire anonyme est de **5.48 Mio**
+et le RSS de **16.08 Mio** lors du second relevé.
+Les fenêtres CPU comprennent une pause de 30 s, puis la collecte Docker : leur durée
+observée est d'environ 31 s, enregistrée dans les résultats bruts.
+
+Les seuils mémoire, CPU, santé, catalogue et démarrage sont respectés dans la deuxième série. Cela ne fait pas disparaître les alertes du premier relevé ni le dépassement du budget image ci-dessous.
+
+**Variation relative de mémoire encore à expliquer.** Sans changement de code,
+la nouvelle image sans cloud passe de 2,20 à 3,55 Mio anonymes entre les deux
+séries (+61 %), et le cas catalogue de 4,46 à 5,36 Mio (+20 %). La référence varie
+de 2,16 à 2,23 Mio. Les plafonds absolus restent respectés, mais ces variations
+interdisent de conclure à une absence de régression mémoire. Leur cause n'est pas
+isolée dans ce banc Docker Desktop ; un profilage comparable sur la cible reste
+ouvert. Les tests d'absence de tâche cloud ne remplacent pas cette mesure globale.
+
+
+**Budget image dépassé, déclaré explicitement.** La taille Docker locale non
+compressée passe de **25 711 448 à 26 409 536 octets** : **+698 088 octets (+2,72 %)**.
+La nouvelle image vaut **26,410 Mo décimaux / 25,186 Mio** ; elle dépasse donc aussi
+bien 25 000 000 octets que 25 Mio. La référence dépassait déjà 25 Mo décimaux. Les
+options release et les symboles conservés (`strip = "debuginfo"`) restent inchangés.
+Aucun nouveau paquet runtime externe n'est ajouté ; le supplément comprend le protocole, le catalogue,
+l'API et l'interface cloud. Aucune conformité au budget image n'est revendiquée.
+Une optimisation de taille reste nécessaire pour revendiquer ce budget ; ce
+dépassement documenté n'empêche pas l'essai isolé en lecture seule.
+
+Les essais prouvent le comportement borné de ces charges synthétiques. Ils ne
+mesurent pas le coût réseau d'un cycle Somfy authentifié, un redémarrage sur la
+Freebox, une coupure secteur ou l'exhaustivité des programmes du fournisseur. Le
+cas cloud désactivé est complété par les tests qui vérifient l'absence de tâche,
+de minuterie et de requête cloud lorsque l'option est omise.

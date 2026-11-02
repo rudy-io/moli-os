@@ -1,7 +1,8 @@
 # TaHoma coverage and convergence
 
-This is a local-driver convergence candidate for [PR25](https://github.com/rudy-io/moli-os/pull/25)
-and [PR99](https://github.com/rudy-io/moli-os/pull/99), not complete TaHoma application parity.
+This branch combines a local-driver convergence candidate for [PR25](https://github.com/rudy-io/moli-os/pull/25)
+and [PR99](https://github.com/rudy-io/moli-os/pull/99) with an optional read-only cloud observer.
+It does not provide complete TaHoma application parity.
 The comparison used PR25 at `eb05dfbdb906df3a14d26baef77f3990e386c8e3`.
 
 | Function | Implemented in this driver | Limit or next step |
@@ -16,16 +17,16 @@ The comparison used PR25 at `eb05dfbdb906df3a14d26baef77f3990e386c8e3`.
 | Gates/windows | Observation, exact identity/class opt-in for guarded writes | Every write keeps Control semantics; no change to core approval policy |
 | Global read-only option | All write permissions removed and execution refused before actuation | Explicit true required; false compatibility default |
 | Stateless known openers | Visible with opening_state unknown | Presence is not physical feedback |
-| Pin/token failure | Parked and devices offline | Human verification required, no blind certificate replacement |
+| Local pin/token failure | Local source parked and its devices offline; cloud source independent | Human verification required, no blind certificate replacement |
 | Readback after commands | Snapshot observation only, no optimistic state | execId means receipt, not movement |
 | Events | Not implemented | Official API supports listeners; current snapshots every five seconds |
 | Tilt, combined axes, speed | Not mapped | Need distinct qualified bindings; two sequential commands may interrupt each other |
 | Lighting, sockets, sensors, climate, security | Not complete mappings | Local API varies by device; some data/functions require cloud or another platform |
-| Saved TaHoma scenarios | Not executed by this local driver | Somfy explicitly excludes local Developer Mode scenario execution |
+| Saved TaHoma scenarios | Cloud reads bounded action definitions; never executes/imports them | Somfy excludes local Developer Mode scenario execution; modern cloud availability still needs account qualification |
 | Grouped immediate actions | No public batch point | Any future batch must validate each action and preserve opener guard |
-| Agenda / SMART / holidays | Not imported or synchronized | No complete contract confirmed in the inspected local spec or cloud client |
+| Agenda / SMART / holidays | Cloud reads calendar days/rules, triggers and scheduled/delayed records | Opaque definitions, no recurrence evaluation, synchronization or guaranteed future horizon |
 | App notifications and administration | Not implemented | Moli rules/notifications and Somfy administration are separate concerns |
-| Optional cloud complement | Design/research only, disabled/absent in this driver | Separate Somfy session, reviewed OAuth rotation, read-only first |
+| Optional cloud complement | Independent session, fixed read endpoints, bounded encrypted catalogue and owner-only viewing | Opt-in; no cloud physical devices or command path; real account compatibility is separately qualified |
 
 ## Evidence and qualification
 
@@ -40,6 +41,12 @@ physical operation, 100% house coverage, or complete replacement of Home Assista
 A scene label and identifier are not its action definition; an equivalent Moli scene needs
 all targets, commands, parameters, order and delays, followed by explicit review.
 
+The cloud observer has synthetic parser, protocol and rotating-session tests. Its
+Classic route evidence is described in [CLOUD.md](CLOUD.md); neither that evidence
+nor fabricated responses prove that a modern account exposes all six collections.
+Failures retain last-good data with its observation time. Unknown definitions are
+preserved without evaluation; cached visibility is not a claim of live activation.
+
 ## Sources and cloud boundary
 
 - [Official local OpenAPI](https://github.com/Somfy-Developer/Somfy-TaHoma-Developer-Mode/blob/3eae7a51ba55eee28649319942239aab7b139eb7/docs/openapi.yaml): snapshots, events, immediate actions and execution tracking.
@@ -49,11 +56,12 @@ all targets, commands, parameters, order and delays, followed by explicit review
 - [HA memorized-position setting](https://github.com/home-assistant/core/blob/0e52c3f4401c385d365d1675538a4757ec71d05f/homeassistant/components/overkiz/number.py#L77).
 - [Current Somfy cloud authentication implementation](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/pyoverkiz/auth/strategies.py): OAuth and multi-site tokens; not a generic login cookie.
 
-The optional cloud extension needs its own session: sharing Home Assistant's rotating
-refresh token could invalidate that session. Local/cloud reconciliation must use exact
-native identity and explicit site scope, keep the local source preferred, and never retry
-an ambiguous local action through cloud. Opaque cloud scenarios must not bypass opener
-approvals. These are requirements for the separate extension, not features already shipped.
+The cloud extension uses its own session: sharing Home Assistant's rotating refresh
+token could invalidate that session. It scopes observations to an explicitly selected
+setup, verifies an anchor gateway and leaves native device identity unchanged. It
+publishes a read-only summary rather than duplicate physical devices. It cannot retry
+a local action through cloud, and opaque scenario definitions are never executable
+points. The cloud contribution is kept separate from the native convergence PR.
 
 The canonical driver name, compatibility for raw-URL IDs from PR25, and Semantic::Position
 adoption after PR30 remain coordinated upstream. UI changes belong in a separate PR.
