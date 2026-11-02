@@ -42,6 +42,19 @@ consistent `master_zoneID` on every zone, including the masters. Ambiguous
 common control is omitted. Zone on/off and setpoint never inherit broad scope.
 No writes use system or zone broadcast IDs.
 
+A malformed zone with valid, unique IDs is skipped while healthy zones remain
+available. Shared controls for its entire system are omitted until a complete
+valid snapshot returns, so a partial snapshot never shrinks the guard's scope.
+The driver remembers every validated zone identity, including malformed zones;
+if a known zone disappears entirely from a later response, its system's shared
+controls stay unavailable until all known zones return. This inventory survives
+actor restarts; a new driver also restores published zone identities from the
+runtime's known devices. A permanently removed zone therefore requires a
+deliberate inventory reset before shared controls can use the smaller scope.
+One bounded warning records the number of skipped zones, without raw data or
+names. Missing/invalid IDs, duplicate IDs, inconsistent system membership and
+invalid envelopes still reject the whole snapshot.
+
 Each write performs identity and full capability reads before the one PUT.
 It refuses changed shared membership (the guard used the previous membership),
 unknown/missing zones, invalid capabilities and cancelled/expired commands.
@@ -49,9 +62,12 @@ Preflight and PUT share a total budget of min(remaining command deadline,
 4500 ms); requests are sequential and never retried. A parameter-level error
 on HTTP 200 still fails. Both object and single-element list acknowledgements
 are accepted after checking IDs and returned values. Acceptance never invents
-achieved state: a separate full read publishes confirmation. Failed reads mark
-all devices offline through the normal driver supervisor. Missing zones become
-offline without resetting their last measurements.
+achieved state: a separate full read publishes confirmation. A refused command
+returns its error and triggers a fresh read without restarting the driver or
+replaying the write. Failed transport, identity or envelope reads mark all
+devices offline through the normal driver supervisor. Missing or malformed zones
+and unresolved shared controls become offline without resetting their last
+measurements; stale capabilities cannot be used to write them.
 
 ## Provenance and limits
 

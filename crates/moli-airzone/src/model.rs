@@ -1,13 +1,16 @@
-//! Pure, strict decoding and scope-aware command construction.
+//! Validated decoding and scope-aware command construction.
 use anyhow::{Context as _, ensure};
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
 use serde_json::{Value as Json, json};
 use std::collections::BTreeSet;
 
 pub(crate) type Entity = (Device, Vec<(String, Value)>);
+pub(crate) type ZoneIds = BTreeSet<(u64, u64)>;
 #[derive(Debug)]
 pub(crate) struct Snapshot {
     zones: Vec<Zone>,
+    identities: ZoneIds,
+    incomplete_systems: BTreeSet<u64>,
 }
 #[derive(Debug)]
 struct Zone {
@@ -105,9 +108,7 @@ fn spec(key: &str, kind: Kind, unit: Option<Unit>, write: bool) -> PointSpec {
     }
 }
 impl Zone {
-    fn parse(raw: &Json) -> anyhow::Result<Self> {
-        let system = code(&raw["systemID"], 1, 32)?;
-        let id = code(&raw["zoneID"], 1, 32)?;
+    fn parse(raw: &Json, system: u64, id: u64) -> anyhow::Result<Self> {
         binary(&raw["on"])?;
         number(&raw["roomTemp"])?;
         let target = number(&raw["setpoint"])?;
@@ -333,6 +334,8 @@ impl Snapshot {
             .context(invalid())?;
         let mut zones = vec![];
         let mut ids = BTreeSet::new();
+        let mut incomplete_systems = BTreeSet::new();
+        let mut skipped = 0;
         for system in systems {
             let data = system["data"]
                 .as_array()
@@ -340,17 +343,76 @@ impl Snapshot {
                 .context(invalid())?;
             let mut system_id = None;
             for raw in data {
-                let z = Zone::parse(raw)?;
-                ensure!(system_id.is_none_or(|s| s == z.system), invalid());
-                system_id = Some(z.system);
-                ensure!(ids.insert((z.system, z.id)), invalid());
-                zones.push(z);
+                // Validate every identity, including malformed zones: ignoring an
+                // ambiguous or broadcast ID could expose an unsafe write target.
+                let system = code(&raw["systemID"], 1, 32)?;
+                let id = code(&raw["zoneID"], 1, 32)?;
+                ensure!(system_id.is_none_or(|s| s == system), invalid());
+                system_id = Some(system);
+                ensure!(ids.insert((system, id)), invalid());
+                if let Ok(zone) = Zone::parse(raw, system, id) {
+                    zones.push(zone);
+                } else {
+                    incomplete_systems.insert(system);
+                    skipped += 1;
+                }
             }
         }
-        Ok(Self { zones })
+        if skipped > 0 {
+            // One bounded warning per snapshot; no names, raw data or errors from
+            // the controller are logged. Envelope limits bound the count to 1024.
+            tracing::warn!(
+                skipped_zones = skipped,
+                "malformed Airzone zones ignored; shared controls disabled for affected systems"
+            );
+        }
+        Ok(Self {
+            zones,
+            identities: ids,
+            incomplete_systems,
+        })
+    }
+    pub(crate) fn retain_known_scope(
+        &mut self,
+        instance: &InstanceId,
+        mac: &str,
+        published: &[DeviceId],
+        known: &mut ZoneIds,
+    ) {
+        // Restore only native zone identities of this controller. Shared
+        // controls end in `_control` and cannot parse as numeric zone IDs.
+        let prefix = format!("{instance}:{mac}_s");
+        for device in published {
+            let Some((system, zone)) = device
+                .as_str()
+                .strip_prefix(&prefix)
+                .and_then(|native| native.split_once("_z"))
+                .and_then(|(system, zone)| {
+                    Some((system.parse::<u64>().ok()?, zone.parse::<u64>().ok()?))
+                })
+            else {
+                continue;
+            };
+            if (1..=32).contains(&system) && (1..=32).contains(&zone) {
+                known.insert((system, zone));
+            }
+        }
+        // Learn even malformed zones, but only after the entire envelope and
+        // all IDs validated. Memory is bounded to 32 systems × 32 zones.
+        known.extend(&self.identities);
+        self.incomplete_systems.extend(
+            known
+                .difference(&self.identities)
+                .map(|(system, _)| *system),
+        );
     }
     fn members(&self, master: &Zone, instance: &InstanceId, mac: &str) -> Option<Vec<DeviceId>> {
         master.modes.as_ref()?;
+        // Dropped zones may belong to this master's guard scope. Never infer
+        // reduced membership from an incomplete system, even with explicit IDs.
+        if self.incomplete_systems.contains(&master.system) {
+            return None;
+        }
         let system = self
             .zones
             .iter()
@@ -592,22 +654,90 @@ mod tests {
         );
     }
     #[test]
-    fn malformed_and_duplicate_zones_are_rejected() {
+    fn malformed_zones_are_isolated_without_shrinking_shared_control_scope() {
         for (key, bad) in [
             ("on", serde_json::json!(2)),
             ("minTemp", serde_json::json!(35)),
             ("units", serde_json::json!(7)),
-            ("systemID", serde_json::json!(0)),
             ("temp_step", serde_json::json!(0)),
             ("roomTemp", Json::Null),
         ] {
             let mut v = fixture();
             v["systems"][0]["data"][0][key] = bad;
-            assert!(Snapshot::parse(&v).is_err(), "{key}");
+            let snapshot = Snapshot::parse(&v).unwrap();
+            let instance = InstanceId::from("az");
+            let mac = "aabbccddeeff";
+            let entities = snapshot.entities(&instance, mac);
+            assert_eq!(
+                entities
+                    .iter()
+                    .map(|(d, _)| d.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![
+                    "az:aabbccddeeff_s1_z8",
+                    "az:aabbccddeeff_s2_z8",
+                    "az:aabbccddeeff_s2_z8_control"
+                ],
+                "{key}"
+            );
+            assert!(
+                snapshot
+                    .encode(
+                        &instance,
+                        mac,
+                        &DeviceId::from("az:aabbccddeeff_s1_z2"),
+                        "on",
+                        &Value::Bool(false)
+                    )
+                    .is_err()
+            );
+            assert!(
+                snapshot
+                    .encode(
+                        &instance,
+                        mac,
+                        &DeviceId::from("az:aabbccddeeff_s1_z8_control"),
+                        "mode",
+                        &Value::from("heat")
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                snapshot
+                    .encode(
+                        &instance,
+                        mac,
+                        &DeviceId::from("az:aabbccddeeff_s2_z8_control"),
+                        "mode",
+                        &Value::from("heat")
+                    )
+                    .unwrap(),
+                json!({"systemID":2,"zoneID":8,"mode":3})
+            );
         }
+    }
+    #[test]
+    fn malformed_envelopes_and_ambiguous_identities_fail_closed() {
         assert!(Snapshot::parse(&serde_json::json!({"data":[]})).is_err());
+        for key in ["systemID", "zoneID"] {
+            for bad in [json!(0), json!(33), Json::Null, json!("2")] {
+                let mut v = fixture();
+                v["systems"][0]["data"][0][key] = bad;
+                v["systems"][0]["data"][0]["roomTemp"] = Json::Null;
+                assert!(Snapshot::parse(&v).is_err(), "{key}");
+            }
+        }
+        let mut v = fixture();
+        v["systems"][0]["data"][0]["systemID"] = json!(3);
+        v["systems"][0]["data"][0]["roomTemp"] = Json::Null;
+        assert!(Snapshot::parse(&v).is_err());
+        let mut v = fixture();
+        v["systems"][0]["data"] = Json::Null;
+        assert!(Snapshot::parse(&v).is_err());
         let mut v = fixture();
         let z = v["systems"][0]["data"][0].clone();
+        // The malformed copy must still participate in identity validation.
+        v["systems"][0]["data"][0]["roomTemp"] = Json::Null;
         v["systems"][0]["data"].as_array_mut().unwrap().push(z);
         assert!(Snapshot::parse(&v).is_err());
     }

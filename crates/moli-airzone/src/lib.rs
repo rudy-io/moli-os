@@ -39,6 +39,7 @@ fn default_poll() -> u64 {
 pub struct Airzone {
     config: Config,
     identity: Mutex<Option<String>>,
+    known_zones: Mutex<model::ZoneIds>,
 }
 impl Airzone {
     pub fn new(mut config: Config) -> anyhow::Result<Self> {
@@ -66,6 +67,7 @@ impl Airzone {
         }
         Ok(Self {
             identity: Mutex::new(config.mac.clone()),
+            known_zones: Mutex::default(),
             config,
         })
     }
@@ -113,7 +115,7 @@ impl Airzone {
             .and_then(moli_net::lan::mac_hex)
             .context(invalid_identity())
     }
-    async fn zones(&self, end: Instant) -> anyhow::Result<Snapshot> {
+    async fn zones(&self, ctx: &DriverCtx, mac: &str, end: Instant) -> anyhow::Result<Snapshot> {
         let value = api::exchange(
             &self.config,
             "POST",
@@ -122,14 +124,24 @@ impl Airzone {
             remaining(end)?,
         )
         .await?;
-        Snapshot::parse(&value)
+        let mut snapshot = Snapshot::parse(&value)?;
+        snapshot.retain_known_scope(
+            ctx.instance(),
+            mac,
+            &ctx.known_devices(),
+            &mut self
+                .known_zones
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        Ok(snapshot)
     }
     async fn refresh(&self, ctx: &DriverCtx, mac: &str, end: Instant) -> anyhow::Result<Snapshot> {
         ensure!(
             self.reported_identity(end).await? == mac,
             invalid_identity()
         );
-        let snapshot = self.zones(end).await?;
+        let snapshot = self.zones(ctx, mac, end).await?;
         publish(ctx, &snapshot, mac);
         Ok(snapshot)
     }
@@ -185,7 +197,7 @@ impl Airzone {
             expected.as_ref().is_none_or(|expected| expected == &mac),
             invalid_identity()
         );
-        let snapshot = self.zones(end).await?;
+        let snapshot = self.zones(ctx, &mac, end).await?;
         *self.identity.lock().unwrap_or_else(PoisonError::into_inner) = Some(mac.clone());
         ctx.remember_address(KnownAddress {
             configured: self.config.host.clone(),
@@ -205,7 +217,8 @@ impl Airzone {
               let Some(command)=cmd else{return Ok(());};
               let result=self.execute(ctx,&mac,&command).await;
               command.reply(result.as_ref().copied().map_err(ToString::to_string));
-              result?;
+              // A refused order is not a failed driver. Refresh after either outcome;
+              // only a failed read takes the instance offline through supervision.
               // Acceptance is separate from confirmation, including for shared mode.
               self.refresh(ctx,&mac,Instant::now()+COMMAND_LIMIT).await?;
              }
@@ -257,11 +270,14 @@ mod tests {
 mod lifecycle_tests {
     use super::*;
     use axum::{Json as Reply, Router, extract::State, http::Method, routing::any};
-    use moli_core::{DeviceId, InstanceId, Origin, PointId, Value};
+    use moli_core::{DeviceId, DriverStatus, Event, InstanceId, Origin, PointId, Value};
     use moli_runtime::{Hub, HubOptions, spawn_driver};
     use serde_json::{Value as Json, json};
     use std::{
-        sync::{Arc, Mutex},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::{Duration, Instant},
     };
     use tokio_util::sync::CancellationToken;
@@ -272,6 +288,7 @@ mod lifecycle_tests {
         writes: Arc<Mutex<Vec<Json>>>,
         reject: Arc<Mutex<bool>>,
         delay: Arc<Mutex<u64>>,
+        reads: Arc<AtomicUsize>,
     }
     async fn start() -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
         start_with_zones(
@@ -285,12 +302,19 @@ mod lifecycle_tests {
     async fn start_with_zones(
         zones: Json,
     ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
+        start_with_hub(zones, Hub::new(HubOptions::default()).unwrap()).await
+    }
+    async fn start_with_hub(
+        zones: Json,
+        hub: Hub,
+    ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
         let sim = Sim {
             zones: Arc::new(Mutex::new(zones)),
             mac: Arc::new(Mutex::new("aa:bb:cc:dd:ee:ff".into())),
             writes: Arc::default(),
             reject: Arc::default(),
             delay: Arc::default(),
+            reads: Arc::default(),
         };
         let app = Router::new()
             .route(
@@ -308,6 +332,7 @@ mod lifecycle_tests {
                     |State(s): State<Sim>, method: Method, Reply(body): Reply<Json>| async move {
                         let delay = *s.delay.lock().unwrap();
                         if method == Method::POST {
+                            s.reads.fetch_add(1, Ordering::SeqCst);
                             tokio::time::sleep(Duration::from_millis(delay)).await;
                             assert_eq!(body, json!({"systemID":0,"zoneID":0}));
                             Reply(s.zones.lock().unwrap().clone())
@@ -330,7 +355,6 @@ mod lifecycle_tests {
         let server = tokio::spawn(async move {
             axum::serve(tcp, app).await.unwrap();
         });
-        let hub = Hub::new(HubOptions::default()).unwrap();
         let cancel = CancellationToken::new();
         spawn_driver(
             &hub,
@@ -356,6 +380,342 @@ mod lifecycle_tests {
     }
     fn point(device: &str, key: &str) -> PointId {
         PointId::new(&DeviceId::from(device), key)
+    }
+    fn assert_no_restart(events: &mut tokio::sync::broadcast::Receiver<Event>) {
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, Event::DeviceRemoved { .. }));
+            if let Event::DriverStatus { status, .. } = event {
+                assert_eq!(status, DriverStatus::Running);
+            }
+        }
+    }
+    async fn wait_for_backoff(events: &mut tokio::sync::broadcast::Receiver<Event>) {
+        wait_for_status(events, |status| {
+            matches!(status, DriverStatus::Backoff { .. })
+        })
+        .await;
+    }
+    async fn wait_for_status(
+        events: &mut tokio::sync::broadcast::Receiver<Event>,
+        wanted: fn(&DriverStatus) -> bool,
+    ) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if matches!(
+                    events.recv().await.unwrap(),
+                    Event::DriverStatus {
+                        status,
+                        ..
+                    } if wanted(&status)
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn refused_command_refreshes_and_keeps_all_zones_available() {
+        for refused_by_api in [false, true] {
+            let (hub, cancel, sim, server) = start().await;
+            let mut events = hub.subscribe();
+            *sim.reject.lock().unwrap() = refused_by_api;
+            let (key, value) = if refused_by_api {
+                ("on", Value::Bool(false))
+            } else {
+                ("target_temperature", Value::Float(21.3))
+            };
+            assert!(
+                hub.command(
+                    &point("az:aabbccddeeff_s1_z2", key),
+                    value,
+                    Origin::Ui,
+                    None
+                )
+                .await
+                .is_err()
+            );
+            *sim.reject.lock().unwrap() = false;
+            hub.command(
+                &point("az:aabbccddeeff_s2_z8", "on"),
+                Value::Bool(true),
+                Origin::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+            // Initial read + rejected preflight + recovery read + next preflight.
+            assert!(sim.reads.load(Ordering::SeqCst) >= 4);
+            assert_eq!(
+                sim.writes.lock().unwrap().len(),
+                if refused_by_api { 2 } else { 1 }
+            );
+            assert_eq!(hub.stats().drivers_running, 1);
+            while let Ok(event) = events.try_recv() {
+                assert!(!matches!(
+                    event,
+                    Event::Availability { online: false, .. } | Event::DeviceRemoved { .. }
+                ));
+                if let Event::DriverStatus { status, .. } = event {
+                    assert_eq!(status, DriverStatus::Running);
+                }
+            }
+            cancel.cancel();
+            server.abort();
+        }
+    }
+    #[tokio::test]
+    async fn malformed_zone_disables_its_shared_control_and_recovers_without_restart() {
+        let (hub, cancel, sim, server) = start().await;
+        let mut events = hub.subscribe();
+        let good = sim.zones.lock().unwrap().clone();
+        sim.zones.lock().unwrap()["systems"][0]["data"][0]["roomTemp"] = Json::Null;
+        // The admitted shared command must not use stale or reduced membership.
+        assert!(
+            hub.command(
+                &point("az:aabbccddeeff_s1_z8_control", "mode"),
+                Value::from("heat"),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+        );
+        hub.command(
+            &point("az:aabbccddeeff_s2_z8", "on"),
+            Value::Bool(true),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        for id in ["az:aabbccddeeff_s1_z2", "az:aabbccddeeff_s1_z8_control"] {
+            assert_eq!(hub.device(&DeviceId::from(id)).unwrap().online, Some(false));
+        }
+        assert!(
+            hub.command(
+                &point("az:aabbccddeeff_s1_z2", "on"),
+                Value::Bool(false),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            sim.writes.lock().unwrap().as_slice(),
+            &[json!({"systemID":2,"zoneID":8,"on":1})]
+        );
+        for id in [
+            "az:aabbccddeeff_s1_z8",
+            "az:aabbccddeeff_s2_z8",
+            "az:aabbccddeeff_s2_z8_control",
+        ] {
+            assert_eq!(hub.device(&DeviceId::from(id)).unwrap().online, Some(true));
+        }
+        *sim.zones.lock().unwrap() = good;
+        hub.command(
+            &point("az:aabbccddeeff_s2_z8", "on"),
+            Value::Bool(false),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        for id in ["az:aabbccddeeff_s1_z2", "az:aabbccddeeff_s1_z8_control"] {
+            assert_eq!(hub.device(&DeviceId::from(id)).unwrap().online, Some(true));
+        }
+        assert_no_restart(&mut events);
+        assert_eq!(sim.writes.lock().unwrap().len(), 2);
+        cancel.cancel();
+        server.abort();
+    }
+    async fn refresh_using_independent_zone(hub: &Hub) {
+        hub.command(
+            &point("az:aabbccddeeff_s2_z8", "on"),
+            Value::Bool(true),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    fn assert_missing_member_disables_shared_control(hub: &Hub) {
+        assert_eq!(
+            hub.device(&DeviceId::from("az:aabbccddeeff_s1_z8_control"))
+                .unwrap()
+                .online,
+            Some(false)
+        );
+        assert_eq!(
+            hub.rooms_of(&DeviceId::from("az:aabbccddeeff_s1_z8_control")),
+            vec!["Protected"]
+        );
+    }
+    #[tokio::test]
+    async fn disappeared_known_zones_keep_shared_controls_disabled_across_restarts() {
+        for malformed_first in [false, true] {
+            let (hub, cancel, sim, server) = start().await;
+            let good = sim.zones.lock().unwrap().clone();
+            hub.set_label(
+                &DeviceId::from("az:aabbccddeeff_s1_z2"),
+                moli_runtime::LabelPatch {
+                    name: None,
+                    room: Some("Protected".into()),
+                },
+                Origin::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+            if malformed_first {
+                sim.zones.lock().unwrap()["systems"][0]["data"][0]["roomTemp"] = Json::Null;
+                refresh_using_independent_zone(&hub).await;
+                assert_missing_member_disables_shared_control(&hub);
+            }
+            sim.zones.lock().unwrap()["systems"][0]["data"]
+                .as_array_mut()
+                .unwrap()
+                .remove(0);
+            let missing = sim.zones.lock().unwrap().clone();
+            // Direct disappearance must fail in preflight; a previously hidden
+            // control must not reappear with reduced members on the next read.
+            assert!(
+                hub.command(
+                    &point("az:aabbccddeeff_s1_z8_control", "mode"),
+                    Value::from("heat"),
+                    Origin::Ui,
+                    None
+                )
+                .await
+                .is_err()
+            );
+            refresh_using_independent_zone(&hub).await;
+            assert_missing_member_disables_shared_control(&hub);
+            let mut events = hub.subscribe();
+            *sim.zones.lock().unwrap() = json!({});
+            assert!(
+                hub.command(
+                    &point("az:aabbccddeeff_s2_z8", "on"),
+                    Value::Bool(true),
+                    Origin::Ui,
+                    None
+                )
+                .await
+                .is_err()
+            );
+            wait_for_backoff(&mut events).await;
+            *sim.zones.lock().unwrap() = missing;
+            wait_for_status(&mut events, |status| *status == DriverStatus::Running).await;
+            assert_missing_member_disables_shared_control(&hub);
+            assert!(
+                hub.command(
+                    &point("az:aabbccddeeff_s1_z8_control", "mode"),
+                    Value::from("heat"),
+                    Origin::Ui,
+                    None
+                )
+                .await
+                .is_err()
+            );
+            assert!(
+                sim.writes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|body| body == &json!({"systemID":2,"zoneID":8,"on":1}))
+            );
+            *sim.zones.lock().unwrap() = good;
+            refresh_using_independent_zone(&hub).await;
+            assert_eq!(
+                hub.device(&DeviceId::from("az:aabbccddeeff_s1_z8_control"))
+                    .unwrap()
+                    .online,
+                Some(true)
+            );
+            assert_eq!(
+                hub.rooms_of(&DeviceId::from("az:aabbccddeeff_s1_z8_control")),
+                vec!["Protected"]
+            );
+            cancel.cancel();
+            server.abort();
+        }
+    }
+    #[tokio::test]
+    async fn malformed_zone_identity_is_retained_even_before_first_publication() {
+        let mut zones: Json = serde_json::from_str(include_str!(
+            "../../../integrations/airzone/fixtures/zones.json"
+        ))
+        .unwrap();
+        zones["systems"][0]["data"][0]["roomTemp"] = Json::Null;
+        let (hub, cancel, sim, server) = start_with_zones(zones).await;
+        sim.zones.lock().unwrap()["systems"][0]["data"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        refresh_using_independent_zone(&hub).await;
+        assert!(
+            hub.device(&DeviceId::from("az:aabbccddeeff_s1_z8_control"))
+                .is_none()
+        );
+        assert!(
+            hub.command(
+                &point("az:aabbccddeeff_s1_z8_control", "mode"),
+                Value::from("heat"),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(sim.writes.lock().unwrap().len(), 1);
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn new_driver_retains_missing_members_from_known_devices() {
+        let (hub, cancel, sim, server) = start().await;
+        let good = sim.zones.lock().unwrap().clone();
+        let mut missing = good.clone();
+        missing["systems"][0]["data"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        let mut events = hub.subscribe();
+        cancel.cancel();
+        wait_for_status(&mut events, |status| *status == DriverStatus::Stopped).await;
+        server.abort();
+        // A new Airzone object has no in-memory inventory; the hub still knows
+        // the native zones (and controls) published by the previous object.
+        let (hub, cancel, sim, server) = start_with_hub(missing, hub).await;
+        assert_eq!(
+            hub.device(&DeviceId::from("az:aabbccddeeff_s1_z8_control"))
+                .unwrap()
+                .online,
+            Some(false)
+        );
+        assert!(
+            hub.command(
+                &point("az:aabbccddeeff_s1_z8_control", "mode"),
+                Value::from("heat"),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert!(sim.writes.lock().unwrap().is_empty());
+        *sim.zones.lock().unwrap() = good;
+        refresh_using_independent_zone(&hub).await;
+        assert_eq!(
+            hub.device(&DeviceId::from("az:aabbccddeeff_s1_z8_control"))
+                .unwrap()
+                .online,
+            Some(true)
+        );
+        cancel.cancel();
+        server.abort();
     }
     #[tokio::test]
     async fn writes_use_fresh_snapshot_and_ack_never_fabricates_state() {
@@ -495,6 +855,7 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn changed_controller_identity_refuses_writes() {
         let (hub, cancel, sim, server) = start().await;
+        let mut events = hub.subscribe();
         let p = point("az:aabbccddeeff_s1_z2", "on");
         *sim.mac.lock().unwrap() = "aa:bb:cc:dd:ee:01".into();
         assert!(
@@ -503,6 +864,13 @@ mod lifecycle_tests {
                 .is_err()
         );
         assert!(sim.writes.lock().unwrap().is_empty());
+        wait_for_backoff(&mut events).await;
+        assert_eq!(
+            hub.device(&DeviceId::from("az:aabbccddeeff_s2_z8"))
+                .unwrap()
+                .online,
+            Some(false)
+        );
         cancel.cancel();
         server.abort();
     }
@@ -577,6 +945,7 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn recovery_reloads_snapshot_without_replaying_failed_command() {
         let (hub, cancel, sim, server) = start().await;
+        let mut events = hub.subscribe();
         let good = sim.zones.lock().unwrap().clone();
         *sim.zones.lock().unwrap() = json!({});
         let p = point("az:aabbccddeeff_s1_z2", "on");
@@ -586,6 +955,7 @@ mod lifecycle_tests {
                 .is_err()
         );
         assert!(sim.writes.lock().unwrap().is_empty());
+        wait_for_backoff(&mut events).await;
         assert_eq!(
             hub.device(&DeviceId::from("az:aabbccddeeff_s1_z2"))
                 .unwrap()
