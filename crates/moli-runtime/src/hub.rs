@@ -1705,6 +1705,12 @@ impl Hub {
             .then(|| moli_i18n::tr!("serveur.garde.appareil_sans_piece"))
     }
 
+    /// Whether the device answers, as its driver last said (`None`: it never said).
+    #[must_use]
+    pub fn online(&self, device: &DeviceId) -> Option<bool> {
+        self.read().availability.get(device).copied()
+    }
+
     pub(crate) fn device_ids_of(&self, instance: &InstanceId) -> Vec<DeviceId> {
         self.read()
             .devices

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use moli_automation::{
     Actor, Author, Automation, AutomationError, Automations, Config, Graph, Mode, RunStatus, Step,
-    Writer,
+    StepStatus, Writer,
 };
 use moli_core::{Access, Device, InstanceId, Kind, Origin, PointId, PointSpec, Semantic, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub, HubOptions, spawn_driver};
@@ -81,6 +81,35 @@ fn heating(ctx: &mut DriverCtx) {
     });
     ctx.set_state(&settings, "comfort", Value::Float(21.5));
     ctx.set_state(&settings, "word", Value::Text("warm".into()));
+    // A thermometer that stopped answering (its last value stays), and a lock.
+    let away = ctx.device_id("away");
+    ctx.upsert_device(Device {
+        id: away.clone(),
+        instance: ctx.instance().clone(),
+        native_name: "away".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![number("value", false)],
+    });
+    ctx.set_state(&away, "value", Value::Float(20.0));
+    ctx.set_availability(&away, false);
+    ctx.upsert_device(Device {
+        id: ctx.device_id("lock"),
+        instance: ctx.instance().clone(),
+        native_name: "lock".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![PointSpec {
+            kind: Kind::Text,
+            ..number("code", true)
+        }],
+    });
 }
 
 impl Driver for Fake {
@@ -955,5 +984,62 @@ async fn the_checker_reads_references_too() {
         problems(serde_json::json!({ "from": "fake:settings/comfort", "add": "1" })),
         1,
         "malformed add"
+    );
+    let into = |point: &str, value: serde_json::Value| {
+        let graph = serde_json::from_value::<Graph>(serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": point, "value": value }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }))
+        .unwrap();
+        autos.check(&graph).problems.len()
+    };
+    assert_eq!(
+        into(
+            "fake:lamp/on",
+            serde_json::json!({ "from": "fake:settings/comfort" })
+        ),
+        1,
+        "a number into a switch"
+    );
+    assert_eq!(
+        into(
+            "fake:lock/code",
+            serde_json::json!({ "from": "fake:settings/word" })
+        ),
+        1,
+        "whoever writes the setting would choose what the lock gets"
+    );
+    assert_eq!(
+        into("fake:lock/code", serde_json::json!("1234")),
+        0,
+        "a fixed value stays allowed"
+    );
+}
+
+#[tokio::test]
+async fn a_source_that_stopped_answering_is_not_trusted() {
+    let (hub, autos, _c) = setup().await;
+    let a = approved(
+        &autos,
+        serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": "fake:heater/target",
+                  "value": { "from": "fake:away/value" } }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }),
+    )
+    .await;
+    let run = autos.run_now(&a.id, true, None, HUMAN).await.unwrap();
+    let step = run.steps.iter().find(|s| s.node == "s").unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{:?}", step.detail);
+    assert_eq!(
+        hub.state(&PointId::from("fake:heater/target"))
+            .map(|s| s.value),
+        Some(Value::Float(18.0))
     );
 }

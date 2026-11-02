@@ -335,6 +335,35 @@ impl Automations {
     /// `check` with abilities computed once (a list checks every automation).
     pub fn check_with(&self, graph: &Graph, can: Abilities) -> Check {
         let mut c = check(graph, &self.0.hub, can);
+        // A value the model never reads (a phone's position) is not copied
+        // elsewhere either, where it could read it.
+        if let Some(writer) = self.writer() {
+            for node in &graph.nodes {
+                let (set, rules) = match &node.step {
+                    Step::Set { value, .. } => (Some(value), &[][..]),
+                    Step::If { rules, .. } => (None, &rules[..]),
+                    Step::WaitFor { rule, .. } => (None, std::slice::from_ref(rule)),
+                    _ => continue,
+                };
+                let private = set
+                    .into_iter()
+                    .chain(rules.iter().filter_map(|r| match r {
+                        Rule::State { value, .. } => Some(value),
+                        _ => None,
+                    }))
+                    .filter_map(FromPoint::of)
+                    .any(|from| {
+                        writer.withholds(from.point.rsplit('/').next().unwrap_or_default())
+                    });
+                if private {
+                    c.problems.push(Problem {
+                        node: Some(node.id.clone()),
+                        level: Level::Error,
+                        message: tr!("moteur.verif.source_privee"),
+                    });
+                }
+            }
+        }
         let uses_sun = graph.nodes.iter().any(|n| {
             matches!(n.step, Step::AtSun { .. })
                 || matches!(&n.step, Step::If { rules, .. } if rules.iter().any(|r| matches!(r, Rule::Sun { .. })))

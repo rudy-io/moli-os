@@ -222,9 +222,12 @@ impl Ctx<'_> {
         Some(spec)
     }
 
-    /// A value read from another point (`{"from": …}`): that point exists, and
-    /// holds a number when one is needed. Whether `value` is such a reference.
-    fn source(&mut self, value: &Json, number: bool) -> bool {
+    /// A value read from another point (`{"from": …}`): that point exists and
+    /// holds what `kind` takes (a number when `add` is there). Written into
+    /// `into`, it must not let whoever writes the source choose what a guard
+    /// keeps for people (see [`Checker::guarded`]). Whether `value` is such a
+    /// reference.
+    fn source(&mut self, value: &Json, kind: Option<&Kind>, into: Option<&str>) -> bool {
         if FromPoint::malformed(value) {
             self.push(Level::Error, tr!("moteur.verif.source_illisible"));
             return true;
@@ -232,16 +235,62 @@ impl Ctx<'_> {
         let Some(from) = FromPoint::of(value) else {
             return false;
         };
-        if let Some(spec) = self.need(from.point, false)
-            && (number || from.add.is_some())
-            && !matches!(spec.kind, Kind::Numeric { .. })
-        {
-            self.push(
-                Level::Error,
-                tr!("moteur.verif.source_pas_nombre", nom = spec.label),
-            );
+        if let Some(spec) = self.need(from.point, false) {
+            let number = matches!(spec.kind, Kind::Numeric { .. });
+            if (from.add.is_some() || matches!(kind, Some(Kind::Numeric { .. }))) && !number {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_pas_nombre", nom = spec.label),
+                );
+            } else if let Some(kind) = kind
+                && !fits(kind, &spec.kind)
+            {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_incompatible", nom = spec.label),
+                );
+            }
+        }
+        if let Some(into) = into {
+            self.guarded(into, from.point);
         }
         true
+    }
+
+    /// An approved automation acts past the guard: a value it reads elsewhere
+    /// would let whoever writes that point (an agent, a person without the
+    /// code) choose it. So never into what opens (a lock, a gate) or stops a
+    /// machine, and into a protected room only from a point as protected.
+    fn guarded(&mut self, into: &str, source: &str) {
+        let pid = PointId::from(into);
+        let Some((device, key)) = pid.split() else {
+            return;
+        };
+        let Some((found, label)) = self.hub.describe(&device) else {
+            return;
+        };
+        let names: Vec<&str> = std::iter::once(&*found.native_name)
+            .chain(label.name.as_deref())
+            .collect();
+        let control = found
+            .points
+            .iter()
+            .any(|p| *p.key == *key && p.semantic == moli_core::Semantic::Control);
+        if control || moli_runtime::opener(&names, &found.points) != moli_runtime::Opener::None {
+            self.push(Level::Error, tr!("moteur.verif.source_garde"));
+            return;
+        }
+        if let Some(room) = self.hub.protected_room(&device) {
+            let shielded = PointId::from(source)
+                .split()
+                .is_some_and(|(d, _)| self.hub.protected_room(&d).is_some());
+            if !shielded {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_protegee", piece = room),
+                );
+            }
+        }
     }
 
     fn rule(&mut self, rule: &Rule) {
@@ -249,7 +298,7 @@ impl Ctx<'_> {
             Rule::State { point, op, value } => {
                 let ordered = matches!(op, Op::Gt | Op::Ge | Op::Lt | Op::Le);
                 let spec = self.need(point, false);
-                let reference = self.source(value, ordered);
+                let reference = self.source(value, spec.as_ref().map(|s| &s.kind), None);
                 if let Some(spec) = spec
                     && ordered
                     && (!matches!(spec.kind, Kind::Numeric { .. })
@@ -356,11 +405,8 @@ fn check_node(
         }
         Step::Set { point, value } => {
             let spec = c.need(point, true);
-            let number = spec
-                .as_ref()
-                .is_some_and(|s| matches!(s.kind, Kind::Numeric { .. }));
             // A value read from another point is validated when it runs.
-            if !c.source(value, number)
+            if !c.source(value, spec.as_ref().map(|s| &s.kind), Some(point))
                 && let Some(spec) = spec
                 && let Err(e) = moli_core::validate(&spec.kind, &Value::from_json(value))
             {
@@ -510,6 +556,14 @@ fn said(hub: &Hub, point: &str) -> Said {
             spec: None,
         },
     }
+}
+
+/// Whether what a point of kind `source` holds can go where `target` is expected
+/// (words fit words, whatever their list: the value is checked when it runs).
+fn fits(target: &Kind, source: &Kind) -> bool {
+    let words = |k: &Kind| matches!(k, Kind::Enum { .. } | Kind::Text);
+    std::mem::discriminant(target) == std::mem::discriminant(source)
+        || (words(target) && words(source))
 }
 
 fn is_power(spec: Option<&PointSpec>) -> bool {
@@ -899,7 +953,7 @@ fn action_words(step: &Step, hub: &Hub) -> String {
             if key == "key" {
                 return tr!(
                     "moteur.action.appuyer",
-                    valeur = value_words(None, value),
+                    valeur = wanted_words(hub, None, value),
                     appareil = s.device
                 );
             }

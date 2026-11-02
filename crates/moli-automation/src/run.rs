@@ -268,7 +268,7 @@ async fn step(
                 let (status, said, port) = act(autos, a, point, v, dry).await;
                 // Say where the value came from: « → 22 (Comfort) ».
                 let said = match (said, FromPoint::of(value)) {
-                    (Some(s), Some(from)) => {
+                    (Some(s), Some(from)) if port.is_some() => {
                         Some(format!("{s} ({})", source_label(hub, from.point)))
                     }
                     (s, _) => s,
@@ -440,14 +440,24 @@ async fn act(
 ///
 /// # Errors
 ///
-/// The source point is unknown or empty, or `add` meets something that is not
-/// a number.
+/// The reference is malformed, its source point unknown, empty or on a device
+/// that stopped answering (its last value would be a guess), or `add` meets
+/// something that is not a number.
 pub fn resolve(hub: &Hub, value: &Json) -> Result<Value, String> {
+    if FromPoint::malformed(value) {
+        return Err(tr!("moteur.verif.source_illisible"));
+    }
     let Some(from) = FromPoint::of(value) else {
         return Ok(Value::from_json(value));
     };
+    let pid = PointId::from(from.point);
+    if let Some((device, _)) = pid.split()
+        && hub.online(&device) == Some(false)
+    {
+        return Err(tr!("moteur.etape.source_hors_ligne", point = from.point));
+    }
     let current = hub
-        .state(&PointId::from(from.point))
+        .state(&pid)
         .map(|s| s.value)
         .filter(|v| !matches!(v, Value::Null))
         .ok_or_else(|| tr!("moteur.etape.source_vide", point = from.point))?;

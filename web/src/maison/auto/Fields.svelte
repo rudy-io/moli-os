@@ -13,6 +13,15 @@
   const type = $derived(spec?.kind?.type);
   const from = $derived(readable && isFrom(value));
 
+  // Back to a fixed value: one the point takes, never an empty one.
+  function fixed() {
+    const k = spec?.kind;
+    if (k?.type === 'binary') return true;
+    if (k?.type === 'enum') return k.values?.[0] ?? '';
+    if (k?.type === 'numeric') return k.min ?? 0;
+    return '';
+  }
+
   // Durations: the biggest unit that reads well.
   const unit = $derived(kind === 'duration' ? (value >= 3600 && value % 3600 === 0 ? 3600 : value >= 60 && value % 60 === 0 ? 60 : 1) : 1);
 </script>
@@ -20,7 +29,7 @@
 {#if kind === 'value'}
   {#if readable}
     <div class="seg" role="group" aria-label={t('automatismes.champ.valeur')}>
-      <button class:on={!from} onclick={() => from && onchange?.(null)}>{t('automatismes.champ.fixe')}</button>
+      <button class:on={!from} onclick={() => from && onchange?.(fixed())}>{t('automatismes.champ.fixe')}</button>
       <button class:on={from} onclick={() => from || onchange?.({ from: '' })}>{t('automatismes.champ.lue')}</button>
     </div>
   {/if}
