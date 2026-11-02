@@ -2,7 +2,7 @@
   import { device, value, act, nameOf, num } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
-  import { canWrite, numericRange, quantize, writableChoices, pointOf, positionPoint, coverOrder, enumChoice } from '../lib/capabilities.js';
+  import { canWrite, numericRange, quantize, writableChoices, positionPoint, coverOrder, enumChoice } from '../lib/capabilities.js';
 
   /** A shutter: open, stop, close (whatever the device offers). */
   let { id, name = null } = $props();
@@ -12,7 +12,7 @@
   const posPoint = $derived(positionPoint(d, true));
   const reported = $derived(posPoint ? value(id, posPoint.key) : null);
   const pos = $derived(posPoint?.kind?.type === 'numeric' && Number.isFinite(reported) && reported >= 0 && reported <= 100 ? reported : null);
-  const order = $derived(pointOf(d, 'control') ?? coverOrder(d));
+  const order = $derived(coverOrder(d, true));
   const offers = $derived(writableChoices(d, order?.key));
   const range = $derived(posPoint?.semantic === 'position' ? numericRange(d, posPoint.key, 1, { min: 0, max: 100 }) : null);
   const positionWritable = $derived(!!range && range.min >= 0 && range.max <= 100 && canWrite(d, posPoint.key));

@@ -246,6 +246,20 @@ test('multiple position or motor-order candidates do not choose an arbitrary act
   assert.equal(buttons(html).length, 0);
 });
 
+test('the named legacy control cannot bypass an ambiguous motor-order selection', () => {
+  for (const legacy of [enumeration('OPEN', 'CLOSE'), enumeration('close', 'stop'), enumeration('cycle')]) {
+    const html = show('CoverTile', [point('control', legacy), point('state', enumeration('OPEN', 'CLOSE'))], {}, { model: 'Overkiz RollerShutter' });
+    assert.equal(buttons(html).length, 0);
+    assert.equal(inputs(html).length, 0);
+  }
+});
+
+test('a partial legacy control does not identify a fan as a cover', () => {
+  show('CoverTile', [point('control', enumeration('stop')), point('on', { type: 'binary' })], { on: false }, { native_name: 'Fan' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'plug');
+  assert.equal(home.powerKey(hub.devices['fixture:device']), 'on');
+});
+
 test('ambiguous enum casing hides only the ambiguous cover command', () => {
   const html = show('CoverTile', [point('control', enumeration('OPEN', 'open', 'STOP', 'CLOSE'))], {});
   assert.equal(buttons(html).length, 2);

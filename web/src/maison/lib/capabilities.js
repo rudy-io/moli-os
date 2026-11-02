@@ -52,14 +52,15 @@ export function positionPoint(device, legacy = false) {
   return legacy ? pointOf(device, 'percent_control') : null;
 }
 
-/** A motor order identifies a cover even read-only or offline; access is separate. */
-export function coverOrder(device) {
+/** A motor order identifies a cover even read-only or offline; access is separate.
+ *  Only an already identified cover may opt into close/stop/cycle-only legacy
+ *  controls. They participate in the same ambiguity check, never a fallback. */
+export function coverOrder(device, allowPartial = false) {
+  const legacyCommands = allowPartial ? ['open', 'close', 'stop', 'cycle'] : ['open'];
   const points = device?.points?.filter((point) => point.kind?.type === 'enum'
-    && enumChoice(point.kind.values, 'open') && enumChoice(point.kind.values, 'close')) ?? [];
-  if (points.length) return points.length === 1 ? points[0] : null;
-  // Retain Tuya's named, sometimes partial order until its contract is normalized.
-  const legacy = pointOf(device, 'control');
-  return legacy?.kind?.type === 'enum' && enumChoice(legacy.kind.values, 'open') ? legacy : null;
+    && ((enumChoice(point.kind.values, 'open') && enumChoice(point.kind.values, 'close'))
+      || (point.key === 'control' && legacyCommands.some((command) => enumChoice(point.kind.values, command))))) ?? [];
+  return points.length === 1 ? points[0] : null;
 }
 
 /** Reading power and commanding it are separate capabilities. */
