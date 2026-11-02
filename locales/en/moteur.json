@@ -51,6 +51,8 @@
   "moteur.valeur.texte": "“{texte}”",
   "moteur.valeur.depuis": "the “{libelle}” of {appareil}",
   "moteur.valeur.depuis_ecart": "the “{libelle}” of {appareil} {ecart}",
+  "moteur.valeur.reglage": "“{libelle}”",
+  "moteur.valeur.reglage_ecart": "“{libelle}” {ecart}",
 
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes} min",

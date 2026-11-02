@@ -611,6 +611,8 @@ fn wanted_words(hub: &Hub, spec: Option<&PointSpec>, v: &Json) -> String {
         || from.point.rsplit('/').next().unwrap_or_default().to_owned(),
         |p| p.label.to_string(),
     );
+    // A household setting is named once (« Comfort »), not « Comfort » of Comfort.
+    let alone = s.device == label;
     match from.add {
         Some(add) if add.abs() > f64::EPSILON => {
             let sign = if add > 0.0 { "+" } else { "−" };
@@ -624,13 +626,23 @@ fn wanted_words(hub: &Hub, spec: Option<&PointSpec>, v: &Json) -> String {
                 .and_then(|s| s.unit.as_ref())
                 .map(|u| format!(" {}", u.symbol()))
                 .unwrap_or_default();
-            tr!(
-                "moteur.valeur.depuis_ecart",
-                libelle = label,
-                appareil = s.device,
-                ecart = format!("{sign} {}{unit}", decimal(&number))
-            )
+            let ecart = format!("{sign} {}{unit}", decimal(&number));
+            if alone {
+                tr!(
+                    "moteur.valeur.reglage_ecart",
+                    libelle = label,
+                    ecart = ecart
+                )
+            } else {
+                tr!(
+                    "moteur.valeur.depuis_ecart",
+                    libelle = label,
+                    appareil = s.device,
+                    ecart = ecart
+                )
+            }
         }
+        _ if alone => tr!("moteur.valeur.reglage", libelle = label),
         _ => tr!("moteur.valeur.depuis", libelle = label, appareil = s.device),
     }
 }
