@@ -13,7 +13,7 @@ Real house strictly read-only; no HA credential/session extraction, commands, ac
 
 ## Review Focus
 
-- A site with several gateways is a whole setup inventory, never falsely gateway-filtered; auth candidates use BOB sub-site externalOID.
+- A site with several gateways is a whole setup inventory, never falsely gateway-filtered; catalogue candidates use BOB sub-site externalOID, while OAuth siteOID uses the parent BOB siteOID (`home_id`). Regional gateway membership is verified before programme reads.
 - A refresh response lost or persisted late cannot cause old-token replay, even after restart/reconnect.
 - One successful source cannot revive stale devices from the other, remove them, or hide its warning.
 - Unknown/failed/oversized programme data is never an empty inventory or silently truncated; wall-time/astronomical schedules are not falsely evaluated.
@@ -60,7 +60,7 @@ Files: integration README/onboarding/manifest/CLOUD.md and coverage updates, sam
 - [x] Document genuine API evidence and Classic/modern qualification limits, session scope/read-only enforcement, all bounds, isolated configuration, user-only account connection steps. No cloud source snapshot/token/personal data in repo.
 - [x] Independent whole-branch review, one fix wave and scoped re-review; full local test evidence at 9183b395.
 - [x] Compare release/performance of a representative synthetic catalogue against baseline. Two runs and budget deviations are recorded in docs/PERFORMANCE.md; image size and unexplained relative memory variation remain open. Disabled-cloud task/timer invariants are tested; no new external runtime package.
-- [ ] Fresh remote CI for the published branch (tracked by PR checks).
-- [ ] Commit/push cloud feature; create draft PR on user's fork against feature/tahoma-unified to keep the cloud diff separate. Do not publish it into nativePR99 or message contributors without instruction.
+- [x] Initial published revision a8dad833 passed remote Rust/web/model/image CI and audit. Subsequent fixes are qualified by the current PR checks and its delivery checklist.
+- [x] Commit/push cloud feature; draft fork PR #2 targets feature/tahoma-unified to keep the cloud diff separate. Native PR99 is unchanged; no contributor message was sent.
 - [x] Prepare isolated local read-only trial from tested build with persistent encrypted storage, keep current real-house pilot/HA intact. If no safe independent Somfy credential/session available, ask user to authenticate in prepared local UI (never in chat) as final connection step; continue all independent checks while waiting.
 - [ ] Authenticated inventory retrieval if user completes login: six collections separately verified, report actual counts/status/scope, no effects. No claim of100% TaHoma parity or real-account validation before evidence.

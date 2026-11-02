@@ -292,7 +292,7 @@ impl<T: Transport> CloudClient<T> {
         let mut reported_total = None;
         for offset in (0..200).step_by(20) {
             let response = self
-                .authorized(Endpoint::Directory, Query::Offset(offset), None, sink)
+                .authorized(Endpoint::Directory, Query::Offset(offset), sink)
                 .await?;
             auth_status(&response, self.backoff)?;
             let page: BobPage =
@@ -410,7 +410,8 @@ impl<T: Transport> CloudClient<T> {
             region: selected,
         });
         self.verified = false;
-        self.rotate(Some(site_oid.to_owned()), sink).await?;
+        self.rotate(self.authentication_scope(Endpoint::Gateways)?, sink)
+            .await?;
         self.verify_scope(sink).await
     }
     fn expired(&self) -> bool {
@@ -426,7 +427,9 @@ impl<T: Transport> CloudClient<T> {
         let site = self
             .session
             .as_ref()
-            .and_then(|s| s.scope.as_ref().map(|s| s.site_oid.clone()));
+            .ok_or(Error::LoginRequired)?
+            .oauth_site_oid()?
+            .map(str::to_owned);
         let result = self.rotate(site, sink).await;
         self.failure = result.as_ref().err().copied();
         result
@@ -556,15 +559,32 @@ impl<T: Transport> CloudClient<T> {
             Err(Error::InvalidResponse)
         }
     }
+    /// Every regional read uses the selected setup's parent home, never externalOID.
+    fn authentication_scope(&self, endpoint: Endpoint) -> Result<Option<String>, Error> {
+        match endpoint {
+            Endpoint::Directory => Ok(None),
+            Endpoint::Collection(_)
+            | Endpoint::Location
+            | Endpoint::Devices
+            | Endpoint::Gateways => self
+                .session
+                .as_ref()
+                .ok_or(Error::LoginRequired)?
+                .oauth_site_oid()?
+                .map(|site| Some(site.to_owned()))
+                .ok_or(Error::ScopeMismatch),
+            _ => Err(Error::InvalidInput),
+        }
+    }
     async fn authorized(
         &mut self,
         endpoint: Endpoint,
         query: Query,
-        site: Option<String>,
         sink: &mut impl SessionSink,
     ) -> Result<Response, Error> {
         self.check_rate()?;
         self.persist(sink).await?;
+        let site = self.authentication_scope(endpoint)?;
         if self.expired()
             || self
                 .session
@@ -613,12 +633,7 @@ impl<T: Transport> CloudClient<T> {
             .and_then(|s| s.scope.clone())
             .ok_or(Error::ScopeMismatch)?;
         let response = self
-            .authorized(
-                Endpoint::Gateways,
-                Query::None,
-                Some(scope.site_oid.clone()),
-                sink,
-            )
+            .authorized(Endpoint::Gateways, Query::None, sink)
             .await?;
         auth_status(&response, self.backoff)?;
         let gateways: Vec<BobGateway> =
@@ -673,7 +688,6 @@ impl<T: Transport> CloudClient<T> {
         }
         self.verify_scope(sink).await?;
         let identity = self.identity()?;
-        let site = Some(identity.scope.site_oid.clone());
         let mut failed = false;
         for kind in CollectionKind::ALL {
             let attempt = now_ms().max(catalog.collections[&kind].last_attempt_ms.unwrap_or(0));
@@ -684,7 +698,7 @@ impl<T: Transport> CloudClient<T> {
                 Err(CollectionFailure::Unavailable),
             );
             let response = self
-                .authorized(Endpoint::Collection(kind), Query::None, site.clone(), sink)
+                .authorized(Endpoint::Collection(kind), Query::None, sink)
                 .await;
             let mut rate_seconds = None;
             let outcome = match response {
@@ -749,13 +763,12 @@ impl<T: Transport> CloudClient<T> {
         identity: &CatalogIdentity,
         sink: &mut impl SessionSink,
     ) -> Result<(), Error> {
-        let site = Some(identity.scope.site_oid.clone());
         let location = self
-            .authorized(Endpoint::Location, Query::None, site.clone(), sink)
+            .authorized(Endpoint::Location, Query::None, sink)
             .await?;
         auth_status(&location, self.backoff)?;
         let devices = self
-            .authorized(Endpoint::Devices, Query::None, site, sink)
+            .authorized(Endpoint::Devices, Query::None, sink)
             .await?;
         auth_status(&devices, self.backoff)?;
         let timezone = inventory::parse_location_timezone(&location.body)

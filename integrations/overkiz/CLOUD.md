@@ -45,10 +45,20 @@ Ginaite refresh scoped to an explicitly selected setup. The
 are distinct from the user's password and rotating tokens. This interoperability
 flow is not a claim of Moli-specific partner registration or provider guarantees.
 
-The selected BOB sub-site's `externalOID` is the setup scope. A gateway is selected
-as a membership anchor; a setup can contain several gateways. The programme
-catalogue covers the whole selected setup and is not filtered to that anchor.
-Unknown country/region mappings require an explicit supported region.
+BOB exposes two different identifiers. The sub-site's `externalOID` identifies the
+selected Overkiz setup in the catalogue. Ginaite's OAuth `siteOID` parameter must
+instead contain the **parent BOB site's `siteOID`**, stored as the candidate's
+`home_id`. The [BOB candidate mapping](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/pyoverkiz/auth/bob.py#L61)
+and [selected-site refresh](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/pyoverkiz/auth/strategies.py#L411)
+establish this distinction; the [reference regression test](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/tests/test_auth.py#L2053)
+uses different parent and sub-site identifiers.
+
+A gateway is selected as a membership anchor; a setup can contain several
+gateways. The programme catalogue covers the whole selected setup and is not
+filtered to that anchor. Parent-site authentication alone does not establish
+membership: the selected gateway must still be returned by the regional API
+before programme reads. Unknown country/region mappings require an explicit
+supported region.
 
 The provider issues no read-only OAuth scope for this flow. Read-only behaviour
 is enforced by the closed Moli transport: fixed HTTPS hosts, authentication POSTs
@@ -96,6 +106,17 @@ catalogue. The driver is the only writer of its cloud session. Before rotating a
 refresh token it checkpoints the operation; after rotation it saves the replacement
 before further authenticated reads. An ambiguous refresh response or interrupted
 refresh checkpoint requires reconnection instead of replaying an old token.
+
+Older version-1 sessions that incorrectly recorded the setup `externalOID` as the
+OAuth scope are validated before recovery. Their old access bearer is retired;
+a usable replacement refresh is retained for the single writer to checkpoint and
+rotate to the parent home. Catalogue identity and the selected gateway stay
+unchanged. An interrupted `refreshing` checkpoint or `login_required` session
+remains terminal; recovery never replays a possibly consumed refresh token.
+After the parent-scoped replacement has been persisted, older binaries that
+expect the incorrect setup-scoped binding cannot resume it. Keep the current
+vault and master key when rolling back code; never restore an old refresh-token
+snapshot, which may contain an already consumed token.
 
 Use one active writer per vault/data directory. Do not share the observer's vault
 between Moli processes or run concurrent CLI secret mutations against it. The

@@ -43,6 +43,9 @@ pub(super) use SessionPhase as Phase;
 
 impl Session {
     pub fn validate(&self) -> Result<(), Error> {
+        self.validate_scope(false)
+    }
+    fn validate_scope(&self, allow_legacy_setup_scope: bool) -> Result<(), Error> {
         if self.version != 1
             || !bounded_text(&self.instance, 256)
             || !bounded_text(&self.generation, 64)
@@ -73,22 +76,13 @@ impl Session {
             return Err(Error::InvalidResponse);
         }
         super::types::validate_candidates(&self.candidates)?;
-        if let Some(scope) = &self.scope {
-            let known = self.candidates.iter().any(|c| {
-                c.site_oid == scope.site_oid
-                    && c.gateway_ids.contains(&scope.gateway_id)
-                    && c.region.is_none_or(|r| r == scope.region)
-            });
-            if !known {
+        let parent = self.oauth_site_oid()?;
+        if let Some(site) = &self.token_site_oid {
+            let legacy = allow_legacy_setup_scope
+                && self.scope.as_ref().is_some_and(|s| s.site_oid == *site);
+            if Some(site.as_str()) != parent && !legacy {
                 return Err(Error::ScopeMismatch);
             }
-        }
-        if self
-            .token_site_oid
-            .as_ref()
-            .is_some_and(|site| self.scope.as_ref().is_none_or(|s| &s.site_oid != site))
-        {
-            return Err(Error::ScopeMismatch);
         }
         if self.phase == Phase::Ready
             && (self.access.is_none()
@@ -98,6 +92,21 @@ impl Session {
             return Err(Error::InvalidResponse);
         }
         Ok(())
+    }
+    /// OAuth scopes the parent BOB home; catalogue identity remains the selected setup.
+    pub fn oauth_site_oid(&self) -> Result<Option<&str>, Error> {
+        let Some(scope) = &self.scope else {
+            return Ok(None);
+        };
+        self.candidates
+            .iter()
+            .find(|c| {
+                c.site_oid == scope.site_oid
+                    && c.gateway_ids.contains(&scope.gateway_id)
+                    && c.region.is_none_or(|r| r == scope.region)
+            })
+            .map(|c| Some(c.home_id.as_str()))
+            .ok_or(Error::ScopeMismatch)
     }
     pub fn identity(&self) -> Result<CatalogIdentity, Error> {
         Ok(CatalogIdentity {
@@ -118,11 +127,25 @@ impl Session {
         if body.len() > MAX_SESSION_BYTES {
             return Err(Error::InvalidResponse);
         }
-        let session: Self = serde_json::from_slice(body).map_err(|_| Error::InvalidResponse)?;
-        session.validate()?;
+        let mut session: Self = serde_json::from_slice(body).map_err(|_| Error::InvalidResponse)?;
+        // Older v1 records used externalOID for OAuth. Validate every field before
+        // retiring that bearer; only the actor may checkpoint and re-scope its refresh.
+        session.validate_scope(true)?;
         if session.instance != instance {
             return Err(Error::ScopeMismatch);
         }
+        if session.token_site_oid.is_some()
+            && session.token_site_oid.as_deref() != session.oauth_site_oid()?
+        {
+            session.token_site_oid = None;
+            session.access = None;
+            session.expires_at_ms = 0;
+            if session.phase == Phase::Ready {
+                session.phase = Phase::Incomplete;
+            }
+            // Refreshing/LoginRequired stay terminal: their refresh may be consumed.
+        }
+        session.validate()?;
         Ok(session)
     }
 }

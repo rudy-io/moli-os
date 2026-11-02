@@ -105,10 +105,11 @@ struct Script {
 impl Transport for Script {
     fn send(&mut self, request: Request) -> BoxFuture<'_, Result<Response, Error>> {
         self.trace.push(format!(
-            "request:{:?}:{}:{}",
+            "request:{:?}:{}:{}:{}",
             request.endpoint,
             request.bearer.as_deref().unwrap_or("none"),
-            request.body
+            request.body,
+            request.path().expect("closed request path")
         ));
         let response = self
             .replies
@@ -123,6 +124,9 @@ impl Transport for Script {
         })
     }
 }
+
+#[path = "scope_tests.rs"]
+mod scope_tests;
 #[derive(Default)]
 struct Sink {
     saved: Vec<Vec<u8>>,

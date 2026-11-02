@@ -116,8 +116,9 @@ pub fn encode_request(value: &RequestEnvelope) -> Result<Vec<u8>, Error> {
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SiteCandidate {
-    /// BOB sub-site externalOID: the Overkiz setup, never the parent BOB siteOID.
+    /// BOB sub-site externalOID: selected setup/catalogue identity, not OAuth scope.
     pub site_oid: String,
+    /// Parent BOB siteOID, required by Ginaite's OAuth siteOID query parameter.
     pub home_id: String,
     pub label: Option<String>,
     pub country: Option<String>,

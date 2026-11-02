@@ -160,7 +160,7 @@ fn scope() -> Value {
 async fn seed(server: &Server) -> Vec<u8> {
     use moli_overkiz::inventory::{Catalog, CatalogIdentity, CollectionKind, encode_catalog};
     let now = i64::try_from(moli_core::now_ms()).unwrap();
-    let session = json!({"version":1,"instance":"fixture","generation":"generation-a","phase":"ready","scope":scope(),"token_site_oid":"site-fixture","access":"ACCESS_SENTINEL","refresh":"REFRESH_SENTINEL","issued_at_ms":now,"expires_at_ms":now+300_000,"candidates":[candidate()]});
+    let session = json!({"version":1,"instance":"fixture","generation":"generation-a","phase":"ready","scope":scope(),"token_site_oid":"home-fixture","access":"ACCESS_SENTINEL","refresh":"REFRESH_SENTINEL","issued_at_ms":now,"expires_at_ms":now+300_000,"candidates":[candidate()]});
     store(server, "cloud_session_v1", &session).await;
     store(server, "cloud_state_v1", &json!({"version":1,"phase":"ready","generation":"generation-a","request_id":"finished-a","scope":scope(),"candidates":[candidate()],"failure":null,"last_attempt_ms":now,"last_observation_ms":now,"retry_after_secs":null})).await;
     let id: CatalogIdentity = serde_json::from_value(
@@ -443,6 +443,29 @@ async fn fresh_requires_live_cloud_source_valid_age_and_qualified_collection() {
     assert_eq!(data["freshness"]["current"], true);
     assert_eq!(data["freshness"]["collections"]["scenarios"], true);
     assert_eq!(data["freshness"]["collections"]["triggers"], false);
+    // A pre-fix setup-scoped bearer must not make an online cached source current.
+    let original_session = server
+        .hub
+        .secret(&"fixture".into(), "cloud_session_v1")
+        .unwrap();
+    let mut legacy: Value = serde_json::from_str(&original_session).unwrap();
+    legacy["token_site_oid"] = json!("site-fixture");
+    store(&server, "cloud_session_v1", &legacy).await;
+    let (_, _, legacy_state) = server.json("GET", ROOT, Value::Null, &pin).await;
+    assert_eq!(legacy_state["instances"][0]["session_phase"], "incomplete");
+    assert!(!legacy_state.to_string().contains("SENTINEL"));
+    let (_, _, legacy_catalog) = server.json("GET", &path, Value::Null, &pin).await;
+    assert_eq!(legacy_catalog["freshness"]["current"], false);
+    assert_eq!(
+        legacy_catalog["freshness"]["collections"]["scenarios"],
+        false
+    );
+    store(
+        &server,
+        "cloud_session_v1",
+        &serde_json::from_str(&original_session).unwrap(),
+    )
+    .await;
     let mut state: Value = serde_json::from_str(
         &server
             .hub
