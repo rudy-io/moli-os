@@ -29,10 +29,10 @@ use tokio_util::sync::CancellationToken;
 
 pub use check::{Abilities, Check, Level, Problem, check, describe};
 pub use model::{
-    Author, Automation, Channel, DayNight, Edge, Graph, Mode, Node, Op, Rule, Step, SunEvent,
-    Version, minutes_of,
+    Author, Automation, Channel, DayNight, Edge, FromPoint, Graph, Mode, Node, Op, Rule, Step,
+    SunEvent, Version, minutes_of,
 };
-pub use run::{Live, Run, RunStatus, StepLog, StepStatus};
+pub use run::{Live, Run, RunStatus, StepLog, StepStatus, resolve};
 
 /// `[automations]` in moli.toml.
 #[derive(Clone, Debug, Deserialize)]

@@ -356,6 +356,40 @@ pub enum Op {
     Le,
 }
 
+/// A value taken from another point when the step runs, instead of a
+/// constant: `{"from": "<device>/<key>", "add": -0.5}` (`add` is optional,
+/// numbers only). Wherever a `set` or a `state` rule expects a value, so a
+/// setting the household tunes (a target temperature…) drives the automation
+/// without editing it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FromPoint<'a> {
+    pub point: &'a str,
+    pub add: Option<f64>,
+}
+
+impl<'a> FromPoint<'a> {
+    /// `None` for a constant.
+    #[must_use]
+    pub fn of(value: &'a Json) -> Option<Self> {
+        let fields = value.as_object()?;
+        let point = fields.get("from")?.as_str()?;
+        if fields.keys().any(|k| k != "from" && k != "add") {
+            return None;
+        }
+        let add = match fields.get("add") {
+            None => None,
+            Some(n) => Some(n.as_f64()?),
+        };
+        Some(Self { point, add })
+    }
+
+    /// Looks like a reference (an object with `from`) but is not a valid one.
+    #[must_use]
+    pub fn malformed(value: &Json) -> bool {
+        value.get("from").is_some() && FromPoint::of(value).is_none()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DayNight {

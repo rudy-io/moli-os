@@ -36,6 +36,8 @@
   "moteur.verif.ecrit_vide": "Dis à Moli ce qu'il doit écrire.",
   "moteur.verif.moli_absent": "Moli n'est pas branché : ce nœud n'écrira rien.",
   "moteur.verif.position_inconnue": "Position de la maison inconnue ([automations] latitude/longitude) : le soleil se lira sur la météo.",
+  "moteur.verif.source_illisible": "Valeur lue ailleurs illisible : il faut « from » (appareil/valeur) et, en option, « add » (un nombre).",
+  "moteur.verif.source_pas_nombre": "« {nom} » n'est pas un nombre : il ne peut pas servir ici.",
 
   "moteur.nombre.separateur": ",",
   "moteur.valeur.oui": "oui",
@@ -43,6 +45,8 @@
   "moteur.valeur.vrai": "oui",
   "moteur.valeur.faux": "non",
   "moteur.valeur.texte": "« {texte} »",
+  "moteur.valeur.depuis": "« {libelle} » de {appareil}",
+  "moteur.valeur.depuis_ecart": "« {libelle} » de {appareil} {ecart}",
 
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes}",
@@ -162,6 +166,8 @@
   "moteur.etape.moli_lent": "Moli n'a pas répondu à temps",
   "moteur.etape.declencheur_milieu": "déclencheur au milieu du graphe",
   "moteur.etape.retenu": "retenu par la garde : {raison}",
+  "moteur.etape.source_vide": "pas de valeur à lire dans {point}",
+  "moteur.etape.source_pas_nombre": "{point} ne donne pas un nombre",
 
   "moteur.canal.annonce": "annonce",
   "moteur.canal.telephone": "téléphone",

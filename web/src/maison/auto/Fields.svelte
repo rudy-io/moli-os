@@ -1,21 +1,49 @@
 <script>
   // Small editors shared by the inspector: a value for a point, days of the
   // week, a duration, a time.
-  import { pointSpec, valueText, dayInitials } from '../lib/auto.svelte.js';
+  import { pointSpec, valueText, dayInitials, isFrom } from '../lib/auto.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
+  import PointPicker from './PointPicker.svelte';
 
-  /** kind: value | days | duration | time */
-  let { kind, point = '', value = null, onchange } = $props();
+  /** kind: value | days | duration | time. `readable`: the value may also be
+   *  read from another point when the step runs (`{ from, add }`). */
+  let { kind, point = '', value = null, readable = false, onchange } = $props();
 
   const spec = $derived(kind === 'value' ? pointSpec(point) : null);
   const type = $derived(spec?.kind?.type);
+  const from = $derived(readable && isFrom(value));
 
   // Durations: the biggest unit that reads well.
   const unit = $derived(kind === 'duration' ? (value >= 3600 && value % 3600 === 0 ? 3600 : value >= 60 && value % 60 === 0 ? 60 : 1) : 1);
 </script>
 
 {#if kind === 'value'}
-  {#if type === 'binary'}
+  {#if readable}
+    <div class="seg" role="group" aria-label={t('automatismes.champ.valeur')}>
+      <button class:on={!from} onclick={() => from && onchange?.(null)}>{t('automatismes.champ.fixe')}</button>
+      <button class:on={from} onclick={() => from || onchange?.({ from: '' })}>{t('automatismes.champ.lue')}</button>
+    </div>
+  {/if}
+  {#if from}
+    <PointPicker
+      point={value.from}
+      mode={type === 'numeric' ? 'number' : 'any'}
+      onpick={(p) => onchange?.(value.add != null ? { from: p, add: value.add } : { from: p })} />
+    {#if type === 'numeric'}
+      <label class="num">
+        <span>{t('automatismes.champ.ecart')}</span>
+        <input
+          type="number"
+          step="any"
+          value={value.add ?? 0}
+          onchange={(e) => {
+            const add = Number(e.currentTarget.value) || 0;
+            onchange?.(add ? { from: value.from, add } : { from: value.from });
+          }} />
+        {#if spec.unit}<span>{spec.unit}</span>{/if}
+      </label>
+    {/if}
+  {:else if type === 'binary'}
     <div class="seg">
       {#each [true, false] as v (v)}
         <button class:on={value === v} onclick={() => onchange?.(v)}>{valueText(point, v)}</button>

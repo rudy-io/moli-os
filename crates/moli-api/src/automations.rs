@@ -273,10 +273,11 @@ pub(crate) async fn run(
 /// that opens a lock, a garage door or a gate).
 fn household_may_run(hub: &Hub, graph: &Graph) -> bool {
     graph.nodes.iter().all(|node| match &node.step {
+        // A value read from another point: judged on what it holds now.
         Step::Set { point, value } => hub
             .would_hold(
                 &PointId::from(point.as_str()),
-                Some(&moli_core::Value::from_json(value)),
+                moli_automation::resolve(hub, value).ok().as_ref(),
                 Origin::Household,
             )
             .is_none(),

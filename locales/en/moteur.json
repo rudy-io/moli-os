@@ -36,6 +36,8 @@
   "moteur.verif.ecrit_vide": "Tell Moli what to write.",
   "moteur.verif.moli_absent": "Moli isn’t connected: this node won’t write anything.",
   "moteur.verif.position_inconnue": "The house’s location is unknown ([automations] latitude/longitude): sunrise and sunset will come from the weather.",
+  "moteur.verif.source_illisible": "Unreadable value from another point: it needs “from” (device/key) and, optionally, “add” (a number).",
+  "moteur.verif.source_pas_nombre": "“{nom}” is not a number: it cannot be used here.",
 
   "moteur.nombre.separateur": ".",
   "moteur.valeur.oui": "yes",
@@ -43,6 +45,8 @@
   "moteur.valeur.vrai": "yes",
   "moteur.valeur.faux": "no",
   "moteur.valeur.texte": "“{texte}”",
+  "moteur.valeur.depuis": "the “{libelle}” of {appareil}",
+  "moteur.valeur.depuis_ecart": "the “{libelle}” of {appareil} {ecart}",
 
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes} min",
@@ -162,6 +166,8 @@
   "moteur.etape.moli_lent": "Moli did not answer in time",
   "moteur.etape.declencheur_milieu": "trigger in the middle of the graph",
   "moteur.etape.retenu": "held back by the guard: {raison}",
+  "moteur.etape.source_vide": "no value to read in {point}",
+  "moteur.etape.source_pas_nombre": "{point} does not hold a number",
 
   "moteur.canal.annonce": "announcement",
   "moteur.canal.telephone": "phone",

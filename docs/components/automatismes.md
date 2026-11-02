@@ -61,6 +61,17 @@ Une automatisation = un **graphe** de nœuds reliés (comme n8n), stocké dans
 Messages : `{{<appareil>/<clé>}}` = valeur actuelle (avec unité), `{{texte}}` = dernier texte
 de Moli, `{{heure}}`.
 
+**Valeur lue dans un autre point.** Là où une automatisation attend une valeur (`value` d'un
+`set`, d'une règle `state`), elle peut la lire au moment de l'étape au lieu d'une constante :
+`{"from": "<appareil>/<clé>", "add": -0.5}` (`add` facultatif, nombres seulement). Usage
+type : une aide `number` de la maison (« Confort salon ») qui pilote une consigne ; la changer
+dans le tableau de bord change le comportement sans toucher au graphe (donc sans nouvelle
+validation). Jamais de valeur inventée : un point sans valeur fait échouer le `set` (raison au
+journal) et rend la règle fausse. Le vérificateur signale un point introuvable, une forme
+illisible, un texte là où il faut un nombre ; le résumé dit le nom du point, le test à blanc
+la valeur lue (« → 21,5 (Confort salon) »). Les seuils des déclencheurs `when_threshold`
+restent des constantes : pour comparer à un réglage, un `every` suivi d'un `if`.
+
 Modes (comme HA) : `restart` (défaut : minuteries « mouvement → lumière 5 min »), `single`,
 `queued`.
 

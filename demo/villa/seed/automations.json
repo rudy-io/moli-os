@@ -1288,6 +1288,50 @@
       "mode": "restart",
       "name": "Toute la famille est partie",
       "updated": 1791546924820
+    },
+    {
+      "author": "human",
+      "created": 1791546924800,
+      "enabled": false,
+      "graph": {
+        "edges": [
+          {
+            "from": "t",
+            "port": "out",
+            "to": "n1"
+          }
+        ],
+        "nodes": [
+          {
+            "at": "17:30",
+            "days": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "id": "t",
+            "type": "at_time",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "n1",
+            "point": "daikin:salon/target_temperature",
+            "type": "set",
+            "value": {
+              "from": "maison:confort_salon/value"
+            },
+            "x": 300.0,
+            "y": 0.0
+          }
+        ]
+      },
+      "id": "salon-tempere-au-retour",
+      "mode": "single",
+      "name": "Salon tempéré au retour",
+      "updated": 1791546924800
     }
   ]
 }
