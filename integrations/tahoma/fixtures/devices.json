@@ -113,7 +113,7 @@
         { "commandName": "stop", "nparams": 0 },
         { "commandName": "setClosure", "nparams": 1 },
         { "commandName": "my", "nparams": 0 },
-        { "commandName": "setMemorized1Position", "nparams": 0 }
+        { "commandName": "setMemorized1Position", "nparams": 1 }
       ]
     }
   }
