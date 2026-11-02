@@ -18,6 +18,7 @@ type Entry = (Endpoint, Result<Response, Error>, Duration);
 struct Script {
     replies: Arc<Mutex<VecDeque<Entry>>>,
     calls: Arc<Mutex<Vec<Endpoint>>>,
+    refresh_bodies: Arc<Mutex<Vec<String>>>,
     active: Arc<AtomicUsize>,
     hub: Hub,
     instance: InstanceId,
@@ -63,6 +64,10 @@ impl Transport for Script {
                 assert!(!marker.contains("PASSWORD_SENTINEL"));
             }
             if request.endpoint == Endpoint::Refresh {
+                self.refresh_bodies
+                    .lock()
+                    .unwrap()
+                    .push(request.body.clone());
                 let encoded = self.hub.secret(&self.instance, SESSION_KEY).unwrap();
                 assert_eq!(
                     super::super::read_session_binding(encoded.as_bytes(), self.instance.as_str())
@@ -205,6 +210,7 @@ impl Rig {
         let script = Script {
             replies: Arc::new(Mutex::new(replies.into())),
             calls: Arc::new(Mutex::new(vec![])),
+            refresh_bodies: Arc::new(Mutex::new(vec![])),
             active: Arc::new(AtomicUsize::new(0)),
             hub: hub.clone(),
             instance: instance.clone(),
@@ -619,6 +625,7 @@ enum Check {
     ProviderGate,
     QueuedQuota,
     WaitingSelection,
+    DiscoveryRecovery { phase: SessionPhase, failure: Error },
 }
 #[derive(Debug)]
 struct CheckProbe {
@@ -647,6 +654,10 @@ impl Driver for CheckProbe {
                 Check::NativeAwait => self.check_native_await(ctx, &mut cloud).await,
                 Check::ProviderGate => self.check_provider_gate(ctx, &mut cloud).await,
                 Check::QueuedQuota => self.check_queued_quota(ctx, &mut cloud).await,
+                Check::DiscoveryRecovery { phase, failure } => {
+                    self.check_discovery_recovery(ctx, &mut cloud, phase, failure)
+                        .await;
+                }
                 Check::WaitingSelection => {
                     cloud.tick(ctx);
                     assert!(
@@ -665,6 +676,89 @@ impl Driver for CheckProbe {
     }
 }
 impl CheckProbe {
+    async fn drain(ctx: &DriverCtx, cloud: &mut Controller) {
+        while cloud.busy || cloud.job.is_some() {
+            let event = cloud.next_event().await;
+            cloud.handle(ctx, event);
+        }
+    }
+    async fn check_discovery_recovery(
+        &self,
+        ctx: &DriverCtx,
+        cloud: &mut Controller,
+        phase: SessionPhase,
+        failure: Error,
+    ) {
+        cloud.tick(ctx);
+        Self::drain(ctx, cloud).await;
+        assert_eq!(cloud.state.phase, ConnectionPhase::Unavailable);
+        assert_eq!(cloud.state.failure, Some(failure));
+        let session = ctx.secret(SESSION_KEY).unwrap();
+        let binding =
+            super::super::read_session_binding(session.as_bytes(), ctx.instance().as_str())
+                .unwrap();
+        assert_eq!(binding.phase, phase);
+        assert!(binding.scope.is_none());
+        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(!session.contains("PASSWORD_SENTINEL"));
+        let previous_calls = self.script.calls.lock().unwrap().len();
+
+        // Make the ordinary poll due without bypassing either provider quota gate.
+        cloud.next_poll = Instant::now();
+        if matches!(failure, Error::RateLimited { .. }) {
+            tokio::time::pause();
+            cloud.tick(ctx);
+            assert!(!cloud.busy && cloud.job.is_none());
+            assert_eq!(self.script.calls.lock().unwrap().len(), previous_calls);
+            tokio::time::advance(Duration::from_secs(6)).await;
+            tokio::time::resume();
+            assert!(cloud.gate.open());
+        }
+        cloud.tick(ctx);
+        assert!(cloud.busy, "a failed unscoped discovery remains retryable");
+        Self::drain(ctx, cloud).await;
+        assert_eq!(cloud.state.phase, ConnectionPhase::SelectingSite);
+        assert!(
+            cloud.state.failure.is_none(),
+            "successful retry clears failure"
+        );
+        assert_eq!(cloud.state.generation.as_ref(), Some(&binding.generation));
+        assert!(cloud.state.scope.is_none());
+        assert_eq!(cloud.state.candidates.len(), 1);
+        assert_eq!(cloud.state.candidates[0].site_oid, "setup");
+        assert_eq!(cloud.state.candidates[0].gateway_ids, ["anchor"]);
+        let saved = super::super::decode_state(ctx.secret(STATE_KEY).unwrap().as_bytes()).unwrap();
+        assert_eq!(saved.phase, ConnectionPhase::SelectingSite);
+        assert!(saved.failure.is_none());
+        assert_eq!(saved.generation, cloud.state.generation);
+        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(
+            !ctx.secret(SESSION_KEY)
+                .unwrap()
+                .contains("PASSWORD_SENTINEL")
+        );
+        assert!(ctx.secret(inventory::INVENTORY_KEY).is_none());
+        assert!(!cloud.live, "discovery alone is not a fresh inventory");
+        assert!(self.script.replies.lock().unwrap().is_empty());
+
+        let calls = self.script.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls.iter().filter(|&&e| e == Endpoint::Accounts).count(),
+            1
+        );
+        assert_eq!(
+            calls.iter().filter(|&&e| e == Endpoint::Exchange).count(),
+            1
+        );
+        cloud.next_poll = Instant::now();
+        cloud.tick(ctx);
+        assert!(!cloud.busy && cloud.job.is_none());
+        assert_eq!(
+            *self.script.calls.lock().unwrap(),
+            calls,
+            "recovered choices wait for the owner without repeated discovery"
+        );
+    }
     fn check_stale_saves(ctx: &DriverCtx, cloud: &mut Controller) {
         let before = ctx.secret(SESSION_KEY).unwrap();
         assert!(matches!(
@@ -1639,6 +1733,151 @@ async fn saved_site_choices_wait_for_owner_without_periodic_provider_discovery()
             .unwrap();
     }
     check(&rig, Check::WaitingSelection).await;
+}
+
+async fn queue_discovery_login(rig: &Rig) {
+    rig.queue(
+        "discovery-login",
+        PendingRequest::Login {
+            username: "user@example.com".into(),
+            password: "PASSWORD_SENTINEL".into(),
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn review_discovery_resumes_after_503_without_replaying_password() {
+    let mut replies = login_replies();
+    let success = replies.pop().unwrap();
+    replies.push(reply(Endpoint::Directory, 503, &serde_json::json!({})));
+    replies.push(success);
+    let rig = Rig::new("discovery-503", replies);
+    queue_discovery_login(&rig).await;
+    check(
+        &rig,
+        Check::DiscoveryRecovery {
+            phase: SessionPhase::Ready,
+            failure: Error::Network,
+        },
+    )
+    .await;
+    assert_eq!(
+        *rig.script.calls.lock().unwrap(),
+        [
+            Endpoint::Accounts,
+            Endpoint::Exchange,
+            Endpoint::Directory,
+            Endpoint::Directory
+        ]
+    );
+}
+
+#[tokio::test]
+async fn review_discovery_resumes_after_429_only_when_quota_expires() {
+    let mut replies = login_replies();
+    let success = replies.pop().unwrap();
+    let mut limited = reply(Endpoint::Directory, 429, &serde_json::json!({}));
+    limited.1.as_mut().unwrap().retry_after = Some("5".into());
+    replies.push(limited);
+    replies.push(success);
+    let rig = Rig::new("discovery-429", replies);
+    queue_discovery_login(&rig).await;
+    check(
+        &rig,
+        Check::DiscoveryRecovery {
+            phase: SessionPhase::Ready,
+            failure: Error::RateLimited {
+                retry_after_secs: 5,
+            },
+        },
+    )
+    .await;
+    assert_eq!(
+        *rig.script.calls.lock().unwrap(),
+        [
+            Endpoint::Accounts,
+            Endpoint::Exchange,
+            Endpoint::Directory,
+            Endpoint::Directory
+        ]
+    );
+}
+
+#[tokio::test]
+async fn review_discovery_resumes_incomplete_exchange_using_only_saved_replacement_refresh() {
+    let mut replies = login_replies();
+    replies[1] = reply(
+        Endpoint::Exchange,
+        200,
+        &serde_json::json!({"refresh_token":"exchange-replacement-token", "expires_in":"invalid"}),
+    );
+    replies.insert(
+        2,
+        reply(
+            Endpoint::Refresh,
+            200,
+            &serde_json::json!({"access_token":"recovered-access", "refresh_token":"recovered-refresh", "expires_in":3600}),
+        ),
+    );
+    let rig = Rig::new("discovery-incomplete", replies);
+    queue_discovery_login(&rig).await;
+    check(
+        &rig,
+        Check::DiscoveryRecovery {
+            phase: SessionPhase::Incomplete,
+            failure: Error::InvalidResponse,
+        },
+    )
+    .await;
+    assert_eq!(
+        *rig.script.calls.lock().unwrap(),
+        [
+            Endpoint::Accounts,
+            Endpoint::Exchange,
+            Endpoint::Refresh,
+            Endpoint::Directory
+        ]
+    );
+    let bodies = rig.script.refresh_bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert!(
+        bodies[0]
+            .split('&')
+            .any(|field| field == "refresh_token=exchange-replacement-token")
+    );
+}
+
+#[tokio::test]
+async fn review_discovery_never_retries_terminal_unscoped_sessions_even_on_manual_refresh() {
+    let seed = Rig::new("discovery-terminal-seed", login_replies());
+    let generation = seed.login().await;
+    let mut session: serde_json::Value =
+        serde_json::from_str(&seed.hub.secret(&seed.instance, SESSION_KEY).unwrap()).unwrap();
+    for phase in [SessionPhase::Refreshing, SessionPhase::LoginRequired] {
+        session["phase"] = serde_json::to_value(phase).unwrap();
+        let rig = Rig::new(&format!("discovery-terminal-{phase:?}"), vec![]);
+        rig.hub
+            .store_secret(&rig.instance, SESSION_KEY, &session.to_string())
+            .await
+            .unwrap();
+        rig.queue(
+            "terminal-refresh",
+            PendingRequest::Refresh {
+                generation: generation.clone(),
+            },
+        )
+        .await;
+        rig.start();
+        let state = rig
+            .wait_state(|s| s.request_id.as_deref() == Some("terminal-refresh"))
+            .await;
+        assert_eq!(state.phase, ConnectionPhase::ReconnectRequired);
+        assert_eq!(state.failure, Some(Error::LoginRequired));
+        assert_eq!(state.generation.as_ref(), Some(&generation));
+        assert!(rig.script.calls.lock().unwrap().is_empty());
+        assert!(rig.hub.secret(&rig.instance, PENDING_KEY).is_none());
+    }
 }
 
 #[tokio::test]

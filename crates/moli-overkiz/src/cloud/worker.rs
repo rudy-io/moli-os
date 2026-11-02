@@ -140,7 +140,7 @@ fn spawn<T: Transport + 'static>(
                     } else {
                         Err(Error::InvalidResponse)
                     }
-                } else if client.state().phase == ConnectionPhase::SelectingSite {
+                } else if client.can_resume_discovery() {
                     client.discover(&mut sink).await
                 } else {
                     Err(Error::LoginRequired)

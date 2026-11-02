@@ -85,6 +85,14 @@ impl<T: Transport> CloudClient<T> {
             .ok_or(Error::LoginRequired)?
             .identity()
     }
+    /// Resume usable unscoped auth even when the last discovery failure masks its UI phase.
+    pub(crate) fn can_resume_discovery(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            session.scope.is_none()
+                && session.refresh.is_some()
+                && matches!(session.phase, Phase::Ready | Phase::Incomplete)
+        })
+    }
     pub(crate) fn identity(&self) -> Result<CatalogIdentity, Error> {
         if !self.verified || self.dirty {
             return Err(Error::ScopeMismatch);
