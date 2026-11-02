@@ -440,16 +440,18 @@ impl Index {
             }
             ("control", Value::Text(command)) => {
                 let command = command.as_ref();
-                if command == "favourite" {
-                    let name = entry.favourite?;
-                    return Some((
-                        entry.url.clone(),
-                        vec![Json::Object(
-                            [("name".to_owned(), Json::String(name.to_owned()))]
-                                .into_iter()
-                                .collect(),
-                        )],
-                    ));
+                // Check if this is the device's favourite recall command
+                if let Some(fav) = entry.favourite {
+                    if command == fav {
+                        return Some((
+                            entry.url.clone(),
+                            vec![Json::Object(
+                                [("name".to_owned(), Json::String(fav.to_owned()))]
+                                    .into_iter()
+                                    .collect(),
+                            )],
+                        ));
+                    }
                 }
                 if !entry.controls.contains(&command) {
                     return None;
@@ -737,5 +739,72 @@ mod tests {
         fewer.retain(|d| d.label != "Volet atelier");
         let other = Load::new(&instance(), &fewer);
         assert!(!load.index.same_ids(&other.index));
+    }
+
+    #[test]
+    fn a_shutter_with_favourite_has_it_in_control_enum() {
+        let load = load();
+        let shutter = named(&load, "Volet bureau");
+        assert_eq!(
+            point(shutter, "control").expect("control").kind,
+            Kind::Enum {
+                values: vec!["open".into(), "stop".into(), "close".into(), "my".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn favourite_position_is_exposed_and_inverted() {
+        let load = load();
+        let shutter = named(&load, "Volet bureau");
+        let fav = point(shutter, "favourite_position").expect("favourite_position");
+        assert_eq!(fav.unit, Some(Unit::Percent));
+        assert!(fav.access.write); // setMemorized1Position present
+        assert_eq!(
+            state(&load, &fixture(), shutter, "favourite_position"),
+            Some(Value::Int(25)) // closure 75 inverted
+        );
+    }
+
+    #[test]
+    fn control_my_sends_the_recall_command() {
+        let load = load();
+        let shutter = named(&load, "Volet bureau");
+        let (url, commands) = load
+            .index
+            .encode(&shutter.id, "control", &Value::Text("my".into()))
+            .expect("command");
+        assert!(url.starts_with("io://"));
+        assert_eq!(commands[0]["name"], "my");
+        assert!(commands[0].get("parameters").is_none());
+    }
+
+    #[test]
+    fn favourite_position_write_stores_inverted_closure() {
+        let load = load();
+        let shutter = named(&load, "Volet bureau");
+        let (_, commands) = load
+            .index
+            .encode(&shutter.id, "favourite_position", &Value::Int(30))
+            .expect("command");
+        assert_eq!(commands[0]["name"], "setMemorized1Position");
+        assert_eq!(commands[0]["parameters"][0], 70); // 30% open = 70 closed
+    }
+
+    #[test]
+    fn memorized_position_unknown_is_ignored() {
+        let mut raw = fixture();
+        for device in &mut raw {
+            if device.label == "Volet bureau" {
+                for s in &mut device.states {
+                    if s.name == "core:Memorized1PositionState" {
+                        s.value = Json::from(108);
+                    }
+                }
+            }
+        }
+        let load = Load::new(&instance(), &raw);
+        let shutter = named(&load, "Volet bureau");
+        assert_eq!(state(&load, &raw, shutter, "favourite_position"), None);
     }
 }

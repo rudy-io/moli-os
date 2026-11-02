@@ -93,5 +93,28 @@
       "uiClass": "Light",
       "commands": []
     }
+  },
+  {
+    "deviceURL": "io://1234-5678-1234/67890123",
+    "label": "Volet bureau",
+    "uiClass": "RollerShutter",
+    "controllableName": "io:RollerShutterWithBatterySomfyIOComponent",
+    "available": true,
+    "enabled": true,
+    "states": [
+      { "name": "core:ClosureState", "type": 1, "value": 50 },
+      { "name": "core:Memorized1PositionState", "type": 1, "value": 75 }
+    ],
+    "definition": {
+      "uiClass": "RollerShutter",
+      "commands": [
+        { "commandName": "open", "nparams": 0 },
+        { "commandName": "close", "nparams": 0 },
+        { "commandName": "stop", "nparams": 0 },
+        { "commandName": "setClosure", "nparams": 1 },
+        { "commandName": "my", "nparams": 0 },
+        { "commandName": "setMemorized1Position", "nparams": 0 }
+      ]
+    }
   }
 ]
