@@ -21,6 +21,7 @@
   "assistant.recap.interrompu": "stopped",
   "assistant.recap.fin": "(conversation closed)",
   "assistant.recap.more": "and {n} earlier exchanges (see the dashboard)",
+  "assistant.recap.own": "and {n} questions asked from the dashboard",
   "assistant.power.total": "Live electricity: {watts} for the whole home (main meter, not an appliance)",
   "assistant.power.unknown": "Live electricity: unknown",
   "assistant.power.circuits": "; measured circuits: {circuits}; the rest of the home (not measured separately): {rest}",
