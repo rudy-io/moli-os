@@ -343,14 +343,20 @@ host = "192.168.1.x"
   ; **écrivables** si l'attribut est dans `capabilities.canReceive`. En mode couleur,
   `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
   Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
-  `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
+  `illuminance` (lux, converti depuis la mesure Matter ou Zigbee `10000·log10(lux)+1` comme
+  pour Hue ; 0, trop sombre pour mesurer, donne 0 lx ; 0xFFFF, aucune mesure, `null`),
+  `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
   (`single`, `double`, `long`, en `pulse`). Store : `position` ✎ (sens `position`, 0-100 %,
   100 = ouvert ; le hub compte à l'envers, 0 = en haut : lue dans `blindsCurrentLevel`,
   envoyée en `blindsTargetLevel`, inversée), `control` ✎ (`open` / `stop` / `close`, un ordre
   jamais relu, envoyé en `blindsState` `up` / `stopped` / `down`), `moving` (`UP` / `DOWN` /
   `STOP` depuis `blindsState`, `null` pour une valeur inconnue) ; reconnu comme volet par le
   tableau de bord et l'assistant. `battery` partout où il y a une pile.
-  Disponibilité : `isReachable` (aussi dans chaque événement).
+  Disponibilité : `isReachable` (aussi dans chaque événement). **Migration** : au
+  déploiement, l'historique `illuminance` des capteurs Dirigera passe de la mesure brute
+  (jusqu'à 40001) aux lux (jusqu'à 10 000) ; les anciennes valeurs restent brutes dans les
+  graphiques. Une automatisation écrite avec un seuil brut (`< 20000`, environ 100 lx) est à
+  reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
   native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
@@ -371,7 +377,7 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, store (points et sens, position inversée dans les deux sens,
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
   ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
