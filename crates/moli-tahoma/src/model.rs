@@ -225,6 +225,7 @@ impl Load {
             let store_favourite = commands.contains(STORE_FAVOURITE);
             let points = points(
                 &controls,
+                favourite,
                 position,
                 device.state(MEMORIZED_1).is_some(),
                 store_favourite,
@@ -288,17 +289,22 @@ fn controls(commands: &HashSet<&str>) -> Vec<&'static str> {
 /// buttons nor a position (an unpaired motor, say) is left out.
 fn points(
     controls: &[&str],
+    favourite: Option<&'static str>,
     position: bool,
     has_memorized: bool,
     store_favourite: bool,
 ) -> Vec<PointSpec> {
     let mut points = Vec::new();
-    if !controls.is_empty() {
+    if !controls.is_empty() || favourite.is_some() {
+        let mut values: Vec<Arc<str>> = controls.iter().map(|c| Arc::from(*c)).collect();
+        if let Some(fav) = favourite {
+            values.push(Arc::from(fav));
+        }
         points.push(PointSpec {
             key: "control".into(),
             label: moli_i18n::tr!("pilotes.tahoma.commande").into(),
             kind: Kind::Enum {
-                values: controls.iter().map(|c| Arc::from(*c)).collect(),
+                values,
             },
             access: Access {
                 read: true,
