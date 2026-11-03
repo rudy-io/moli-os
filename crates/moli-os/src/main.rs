@@ -945,6 +945,7 @@ const KINDS: &[&str] = &[
     "dirigera",
     "homeassistant",
     "igd",
+    "melcloud",
     "tapo",
     "shelly",
     "airzone",
@@ -1114,6 +1115,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "melcloud" => Arc::new(moli_melcloud::Melcloud::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "tapo" => Arc::new(moli_tapo::Tapo::new(

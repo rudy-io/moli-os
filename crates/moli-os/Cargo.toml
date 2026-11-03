@@ -33,6 +33,7 @@ moli-alexa.workspace = true
 moli-moonraker.workspace = true
 moli-frigate.workspace = true
 moli-philips.workspace = true
+moli-melcloud.workspace = true
 moli-tapo.workspace = true
 moli-shelly.workspace = true
 moli-izypower.workspace = true

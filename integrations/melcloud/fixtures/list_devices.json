@@ -1,0 +1,82 @@
+[
+  {
+    "Structure": {
+      "Floors": [],
+      "Areas": [],
+      "Devices": [
+        {
+          "DeviceID": 1000001,
+          "DeviceName": "Salon",
+          "Device": {
+            "DeviceType": 0,
+            "Power": false,
+            "RoomTemperature": 20.0,
+            "SetTemperature": 19.5,
+            "OperationMode": 1,
+            "Offline": false,
+            "MinTempHeat": 10.0,
+            "MaxTempHeat": 31.0,
+            "MinTempCoolDry": 16.0,
+            "MaxTempCoolDry": 31.0,
+            "MinTempAutomatic": 16.0,
+            "MaxTempAutomatic": 31.0,
+            "TemperatureIncrement": 0.5,
+            "NumberOfFanSpeeds": 5,
+            "ModelSupportsFanSpeed": true,
+            "HasAutomaticFanSpeed": true,
+            "ModelSupportsVaneVertical": true,
+            "ModelSupportsVaneHorizontal": true,
+            "ModelSupportsAuto": true,
+            "CanHeat": true,
+            "CanCool": true,
+            "CanDry": true,
+            "ProhibitPower": false,
+            "ProhibitOperationMode": false,
+            "ProhibitSetTemperature": false,
+            "FanSpeed": 0,
+            "VaneVerticalDirection": 0,
+            "VaneHorizontalDirection": 12
+          },
+          "BuildingID": 500,
+          "AccessLevel": 4
+        },
+        {
+          "DeviceID": 1000002,
+          "DeviceName": "Chambre",
+          "Device": {
+            "DeviceType": 0,
+            "Power": false,
+            "RoomTemperature": 21.0,
+            "SetTemperature": 19.0,
+            "OperationMode": 3,
+            "Offline": false,
+            "MinTempHeat": 10.0,
+            "MaxTempHeat": 31.0,
+            "MinTempCoolDry": 16.0,
+            "MaxTempCoolDry": 31.0,
+            "MinTempAutomatic": 16.0,
+            "MaxTempAutomatic": 31.0,
+            "TemperatureIncrement": 0.5,
+            "NumberOfFanSpeeds": 5,
+            "ModelSupportsFanSpeed": true,
+            "HasAutomaticFanSpeed": true,
+            "ModelSupportsVaneVertical": true,
+            "ModelSupportsVaneHorizontal": true,
+            "ModelSupportsAuto": true,
+            "CanHeat": true,
+            "CanCool": true,
+            "CanDry": true,
+            "ProhibitPower": false,
+            "ProhibitOperationMode": false,
+            "ProhibitSetTemperature": false,
+            "FanSpeed": 0,
+            "VaneVerticalDirection": 7,
+            "VaneHorizontalDirection": 3
+          },
+          "BuildingID": 500,
+          "AccessLevel": 4
+        }
+      ]
+    }
+  }
+]
