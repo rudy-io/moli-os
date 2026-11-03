@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use moli_core::color::{hex_to_xy, xy_to_hex};
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
@@ -30,6 +31,9 @@ struct Codec {
     /// A dimming level the device counts from 0 to this maximum (Zigbee: 254),
     /// exposed in percent like every other driver and the dashboard do.
     level_max: Option<f64>,
+    /// The colour people pick (« #rrggbb »), sent to the lamp as CIE xy and
+    /// read back from its `color {x, y}`, as the Hue driver does.
+    xy_hex: bool,
 }
 
 /// One Z2M device with everything needed to decode its messages.
@@ -145,12 +149,27 @@ impl Entry {
     /// Unknown properties (`update`, `last_seen`…) are ignored.
     #[must_use]
     pub fn decode(&self, payload: &Map<String, Json>) -> Vec<(Arc<str>, Value)> {
+        let color_mode = payload.get("color_mode").and_then(Json::as_str);
         self.device
             .points
             .iter()
             .filter_map(|point| {
                 let json = lookup(payload, &point.key)?;
                 let codec = self.codecs.get(&point.key);
+                if codec.is_some_and(|c| c.xy_hex) {
+                    let axis = |a: &str| json.get(a).and_then(Json::as_f64);
+                    let hex = axis("x")
+                        .zip(axis("y"))
+                        .and_then(|(x, y)| xy_to_hex(x, y))?;
+                    return Some((point.key.clone(), Value::from(hex.as_str())));
+                }
+                // A lamp in colour mode keeps reporting its last white: no
+                // temperature then, as with Hue, so pages show the colour.
+                if point.semantic == Semantic::ColorTemp
+                    && color_mode.is_some_and(|mode| mode != "color_temp")
+                {
+                    return Some((point.key.clone(), Value::Null));
+                }
                 let level = codec.and_then(|c| c.level_max).zip(json.as_f64());
                 let value = if let Some((max, level)) = level {
                     Value::Int(level_to_percent(level, max))
@@ -174,7 +193,19 @@ impl Entry {
     pub fn encode(&self, key: &str, value: &Value) -> Json {
         let codec = self.codecs.get(key);
         let level = codec.and_then(|c| c.level_max).zip(value.as_f64());
-        let wire = if let Some((max, percent)) = level {
+        let xy = match value {
+            Value::Text(hex) if codec.is_some_and(|c| c.xy_hex) => {
+                Some(hex_to_xy(hex).map_or_else(
+                    // Not a colour (black…): Z2M says why it refuses.
+                    || serde_json::json!({ "hex": &**hex }),
+                    |(x, y)| serde_json::json!({ "x": x, "y": y }),
+                ))
+            }
+            _ => None,
+        };
+        let wire = if let Some(xy) = xy {
+            xy
+        } else if let Some((max, percent)) = level {
             Json::from(percent_to_level(percent, max))
         } else {
             match (codec.and_then(|c| c.binary.as_ref()), value) {
@@ -234,6 +265,9 @@ fn flatten(
     codecs: &mut HashMap<Arc<str>, Codec>,
 ) {
     if !expose.features.is_empty() {
+        if is_xy_color(expose) {
+            push_color(expose, prefix, points, codecs);
+        }
         // Composite values nest under their property; specific types
         // (light, switch, climate…) are plain groups.
         let prefix = match (&*expose.kind, &expose.property) {
@@ -293,6 +327,7 @@ fn flatten(
         gettable: expose.access & ACCESS_GET != 0,
         numeric_enum: !expose.values.is_empty() && expose.values.iter().all(Json::is_number),
         level_max: None,
+        xy_hex: false,
     };
     let unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
@@ -343,6 +378,57 @@ fn flatten(
         key: key.clone(),
     });
     codecs.insert(key, codec);
+}
+
+/// A lamp's settable `color {x, y}` composite (`color_xy`).
+fn is_xy_color(expose: &RawExpose) -> bool {
+    let has = |axis: &str| {
+        expose
+            .features
+            .iter()
+            .any(|f| f.property.as_deref() == Some(axis))
+    };
+    expose.kind == "composite"
+        && expose.property.as_deref() == Some("color")
+        && expose.access & ACCESS_SET != 0
+        && has("x")
+        && has("y")
+}
+
+/// The whole colour as one writable point, `color` (« #rrggbb »): Z2M only takes
+/// the composite as a whole, and pages and agents pick colours, not CIE axes.
+/// The members stay, read-only, for history.
+fn push_color(
+    expose: &RawExpose,
+    prefix: &str,
+    points: &mut Vec<PointSpec>,
+    codecs: &mut HashMap<Arc<str>, Codec>,
+) {
+    let key: Arc<str> = format!("{prefix}color").into();
+    if points.iter().any(|p| p.key == key) {
+        return;
+    }
+    points.push(PointSpec {
+        label: "Color".into(),
+        kind: Kind::Text,
+        access: Access {
+            read: expose.access & ACCESS_STATE != 0,
+            write: true,
+        },
+        unit: None,
+        semantic: Semantic::Color,
+        key: key.clone(),
+    });
+    codecs.insert(
+        key,
+        Codec {
+            binary: None,
+            gettable: expose.access & ACCESS_GET != 0,
+            numeric_enum: false,
+            level_max: None,
+            xy_hex: true,
+        },
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -773,6 +859,59 @@ mod tests {
             smoke.read_request().is_none(),
             "sleepy devices are never polled"
         );
+    }
+
+    #[test]
+    fn a_colour_lamp_takes_a_colour_and_keeps_its_whites() {
+        // Innr RB 287 C, as Zigbee2MQTT 2.14 exposes it.
+        let lamp = entry_of(json!({"type": "light", "features": [
+            {"type": "binary", "property": "state", "access": 7, "value_on": "ON", "value_off": "OFF"},
+            {"type": "numeric", "property": "brightness", "access": 7, "value_min": 0, "value_max": 254},
+            {"type": "numeric", "property": "color_temp", "access": 7, "unit": "mired", "value_min": 153, "value_max": 556},
+            {"type": "composite", "name": "color_xy", "property": "color", "access": 7, "features": [
+                {"type": "numeric", "property": "x", "access": 7},
+                {"type": "numeric", "property": "y", "access": 7}
+            ]},
+            {"type": "composite", "name": "color_hs", "property": "color", "access": 7, "features": [
+                {"type": "numeric", "property": "hue", "access": 7},
+                {"type": "numeric", "property": "saturation", "access": 7}
+            ]}
+        ]}));
+        let color = lamp.device.point("color").expect("a colour point");
+        assert!(color.access.write);
+        assert_eq!(color.kind, Kind::Text);
+        assert_eq!(color.semantic, Semantic::Color);
+        assert_eq!(
+            lamp.device
+                .points
+                .iter()
+                .filter(|p| &*p.key == "color")
+                .count(),
+            1,
+            "one colour, whatever the number of colour spaces"
+        );
+        assert!(lamp.device.point("color_temp").unwrap().access.write);
+
+        let (x, y) = hex_to_xy("#ff0000").unwrap();
+        assert_eq!(
+            lamp.encode("color", &Value::from("#ff0000")),
+            json!({"color": {"x": x, "y": y}})
+        );
+
+        let decode = |payload: Json| -> HashMap<Arc<str>, Value> {
+            lamp.decode(payload.as_object().unwrap())
+                .into_iter()
+                .collect()
+        };
+        let red = decode(json!({"state": "ON", "color_mode": "xy", "color_temp": 370,
+            "color": {"x": x, "y": y, "hue": 0, "saturation": 100}}));
+        assert_eq!(red["color"], Value::from(xy_to_hex(x, y).unwrap().as_str()));
+        assert_eq!(red["color_temp"], Value::Null, "in colour mode, no white");
+        let warm = decode(
+            json!({"state": "ON", "color_mode": "color_temp", "color_temp": 370,
+            "color": {"x": 0.4599, "y": 0.4106}}),
+        );
+        assert_eq!(warm["color_temp"], Value::Int(370));
     }
 
     #[test]
