@@ -92,7 +92,7 @@
     max-height: calc(100vh - 32px);
     overflow: auto;
     background: var(--card);
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     padding: 16px 18px;
   }
@@ -145,7 +145,7 @@
     text-transform: uppercase;
     color: var(--ink-3);
     padding: 6px 4px;
-    border-bottom: var(--stroke) solid var(--ink);
+    border-bottom: var(--stroke) solid var(--edge, var(--ink));
   }
   td {
     padding: 6px 4px;

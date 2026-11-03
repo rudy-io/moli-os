@@ -2,10 +2,9 @@
   import { onMount } from 'svelte';
   import { hub } from './lib/hub.svelte.js';
   import Maison from './maison/Maison.svelte';
-  import Atelier from './Atelier.svelte';
 
-  // Two faces, one hub: « Maison » for the family (default), « Atelier »
-  // for tinkering with every device. Routes live in the hash.
+  // Two faces, one shell: « Maison » for the family (default), « Atelier »
+  // (a page of it) for tinkering with every device. Routes live in the hash.
   const read = () => location.hash.replace(/^#\/?/, '');
   let route = $state(read());
 
@@ -23,8 +22,4 @@
   });
 </script>
 
-{#if atelier && allowed}
-  <Atelier />
-{:else}
-  <Maison {route} />
-{/if}
+<Maison route={atelier && !allowed ? '' : route} />

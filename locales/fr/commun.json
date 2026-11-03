@@ -59,7 +59,7 @@
   "commun.theme.titre_auto": "Thème : automatique (soleil)",
   "commun.theme.titre_jour": "Thème : jour",
   "commun.theme.titre_nuit": "Thème : nuit",
-  "commun.atelier.retour": "Retour à la maison",
+  "commun.atelier.sous_titre": "Tous les appareils, tels que les pilotes les voient. Pour bricoler.",
   "commun.atelier.maison": "Maison",
   "commun.atelier.connexion": "Connexion au hub…",
   "commun.atelier.aucun_appareil": "Aucun appareil pour l'instant. Les pilotes publient leurs appareils dès qu'ils sont connectés.",

@@ -140,7 +140,7 @@
         <span class="label">{t('commun.nav.systeme')}</span>
       </a>
       {#if hub.session.atelier !== false}
-        <a class="atelier" href="#/atelier" title={t('commun.nav.atelier_titre')}>
+        <a class="atelier" href="#/atelier" class:active={page === 'atelier'} title={t('commun.nav.atelier_titre')}>
           <Icon name="atelier" size={20} />
           <span class="label">{t('commun.nav.atelier')}</span>
         </a>
@@ -180,6 +180,9 @@
     {:else if page === 'infra'}
       <!-- The house's machines: loaded only when visited. -->
       {#await import('./pages/Infra.svelte') then { default: Infra }}<Infra />{/await}
+    {:else if page === 'atelier'}
+      <!-- Every device, raw (owners): loaded only when visited. -->
+      {#await import('../Atelier.svelte') then { default: Atelier }}<Atelier />{/await}
     {:else if page === 'parc'}
       <!-- What the house watches beyond itself: loaded only when visited. -->
       {#await import('./pages/Parc.svelte') then { default: Parc }}<Parc />{/await}
