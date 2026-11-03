@@ -1,14 +1,17 @@
 //! The TV's Android side, beside JointSpace: the app on screen and launching
 //! apps (Android TV Remote, with the pairing Home Assistant made: secrets
-//! `atv_cert` / `atv_key`, PEM), what plays (Google Cast, nothing to pair).
-//! Both certificates are pinned on first contact, like the TV's own.
+//! `atv_cert` / `atv_key`, PEM), what plays (Google Cast, nothing to pair;
+//! and ADB when the TV's network debugging is on and `adb = true`: what any
+//! app plays, not only what was cast). Both certificates are pinned on first
+//! contact, like the TV's own; Moli's ADB key is made on the first start
+//! (secret `adb_key`) and allowed once on the TV's screen.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
-use moli_androidtv::{cast, remote};
+use moli_androidtv::{adb, cast, remote};
 use moli_core::{DeviceId, Value};
 use moli_net::PinnedTls;
 use moli_runtime::{CommandRequest, DriverCtx};
@@ -36,6 +39,29 @@ const STARTING: Duration = Duration::from_secs(90);
 const SETTLE: Duration = Duration::from_secs(1);
 /// The hub's patience ends at the order's deadline: answered a little before.
 const BEFORE_DEADLINE: Duration = Duration::from_millis(300);
+pub(crate) const ADB_KEY: &str = "adb_key";
+/// What plays, asked this often through ADB.
+const ADB_POLL: Duration = Duration::from_secs(3);
+/// The TV asked whether to allow Moli and no one said yes: not asked again
+/// before this (a question every minute on the screen would be a nuisance).
+const ASK_AGAIN: Duration = Duration::from_secs(600);
+/// A key held from the dashboard is let go after this, whatever happens
+/// (the phone that held it gone, its « let go » lost).
+const HOLD_MAX: Duration = Duration::from_secs(20);
+/// How far a position may be from the one foreseen before it is told
+/// again (a seek): a playing position moves on by itself on the dashboard.
+const DRIFT: f64 = 3.0;
+/// The keys that can be held (a video seeks faster, a list scrolls), and
+/// the word that lets go.
+pub(crate) const HOLD_KEYS: [&str; 7] = [
+    "CursorLeft",
+    "CursorRight",
+    "CursorUp",
+    "CursorDown",
+    "FastForward",
+    "Rewind",
+    "release",
+];
 
 /// The Android key of a JointSpace key: the same press through the remote's
 /// session, open as long as the TV is, where JointSpace goes away for half a
@@ -82,6 +108,17 @@ fn send_link(side: Option<&Side<remote::Order>>, link: &str) -> anyhow::Result<(
 pub(crate) enum Up {
     Remote(remote::Event),
     Cast(cast::Event),
+    Adb(AdbNews),
+}
+
+/// News from the ADB side.
+pub(crate) enum AdbNews {
+    /// The TV asks on its screen whether to allow Moli.
+    Asking,
+    Ready,
+    /// What plays (the app's package and what it shows), or nothing.
+    Playing(Option<(String, cast::Playing)>),
+    Lost,
 }
 
 /// One side: its orders, its TLS settings (for the pin), whether it is up,
@@ -150,7 +187,16 @@ impl Sent {
 pub(crate) struct Android {
     remote: Option<Side<remote::Order>>,
     cast: Option<Side<cast::Order>>,
+    /// What Cast says plays.
     playing: Option<cast::Playing>,
+    /// ADB, when on: whether it is connected, and its nudge.
+    adb: Option<(bool, Arc<Notify>)>,
+    /// What ADB says plays.
+    adb_playing: Option<(String, cast::Playing)>,
+    /// What was last published, and when.
+    shown: Option<(cast::Playing, Instant)>,
+    /// The key held down, since when.
+    held: Option<(u32, Instant)>,
     pending: Option<Pending>,
     /// The last app sent.
     sent: Option<Sent>,
@@ -167,7 +213,11 @@ pub(crate) struct Android {
 
 impl Android {
     /// Starts both connections (the remote only when paired).
-    pub(crate) fn start(ctx: &DriverCtx, host: &str) -> (Self, mpsc::Receiver<Up>) {
+    pub(crate) fn start(
+        ctx: &DriverCtx,
+        host: &str,
+        adb_key: Option<adb::Key>,
+    ) -> (Self, mpsc::Receiver<Up>) {
         let (up, ups) = mpsc::channel(32);
         let remote = match (ctx.secret(ATV_CERT), ctx.secret(ATV_KEY)) {
             (Some(cert), Some(key)) => {
@@ -196,6 +246,11 @@ impl Android {
             }
             _ => None,
         };
+        let adb = adb_key.map(|key| {
+            let nudge = Arc::new(Notify::new());
+            keep_adb(host.to_owned(), key, up.clone(), nudge.clone());
+            (false, nudge)
+        });
         let pin = ctx.secret(CAST_PIN);
         let cast = match PinnedTls::new(pin.clone()) {
             Ok(tls) => {
@@ -218,6 +273,10 @@ impl Android {
                 remote,
                 cast,
                 playing: None,
+                adb,
+                adb_playing: None,
+                shown: None,
+                held: None,
                 pending: None,
                 sent: None,
                 ready_at: None,
@@ -248,6 +307,38 @@ impl Android {
         Some(side.orders.try_send(remote::Order::Key(code)).map_err(|_| {
             anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas"))
         }))
+    }
+
+    /// Holds a key down (`release` lets it go): through the Android remote,
+    /// which must be up. A key already held is let go first.
+    pub(crate) fn hold(&mut self, name: &str) -> anyhow::Result<()> {
+        let side = self
+            .remote
+            .as_ref()
+            .filter(|s| s.up)
+            .with_context(|| moli_i18n::tr!("pilotes.philips.pas_de_telecommande"))?;
+        let code = match name {
+            "release" => None,
+            key if HOLD_KEYS.contains(&key) => android_key(key),
+            other => bail!(moli_i18n::tr!(
+                "pilotes.philips.touche_inconnue",
+                key = format!("{other:?}")
+            )),
+        };
+        let mut orders = Vec::new();
+        if let Some((held, _)) = self.held.take() {
+            orders.push(remote::Order::Hold(held, false));
+        }
+        if let Some(code) = code {
+            orders.push(remote::Order::Hold(code, true));
+        }
+        for order in orders {
+            side.orders.try_send(order).map_err(|_| {
+                anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas"))
+            })?;
+        }
+        self.held = code.map(|code| (code, Instant::now()));
+        Ok(())
     }
 
     /// Paired: an app can be opened (worth waking the TV for).
@@ -313,7 +404,16 @@ impl Android {
 
     /// When an order waiting for the TV's word is answered anyway: no
     /// refusal for [`SETTLE`], and never past the hub's patience.
+    /// Also when a held key is let go anyway ([`HOLD_MAX`]).
     pub(crate) fn due(&self) -> Option<Instant> {
+        let release = self.held.map(|(_, at)| at + HOLD_MAX);
+        match (release, self.answer_due()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn answer_due(&self) -> Option<Instant> {
         let sent = self.sent.as_ref()?;
         let waiting = sent.waiting.as_ref()?;
         let deadline = Instant::from_std(waiting.deadline)
@@ -322,9 +422,17 @@ impl Android {
         Some((sent.at + SETTLE).min(deadline))
     }
 
-    /// The TV did not refuse in time: the app opened.
+    /// The TV did not refuse in time: the app opened. A key held too long
+    /// is let go.
     pub(crate) fn settle(&mut self) {
-        if self.due().is_some_and(|due| Instant::now() >= due)
+        let now = Instant::now();
+        if self.held.is_some_and(|(_, at)| now >= at + HOLD_MAX) {
+            tracing::debug!("android tv remote: held key let go (held too long)");
+            if self.hold("release").is_err() {
+                self.held = None;
+            }
+        }
+        if self.answer_due().is_some_and(|due| now >= due)
             && let Some(sent) = &mut self.sent
         {
             sent.answer(Ok(()));
@@ -345,6 +453,10 @@ impl Android {
             }
             if let Some(side) = self.cast.as_ref().filter(|s| !s.up) {
                 side.nudge.notify_one();
+                nudged = true;
+            }
+            if let Some((false, nudge)) = &self.adb {
+                nudge.notify_one();
                 nudged = true;
             }
             if nudged {
@@ -455,26 +567,71 @@ impl Android {
         Ok(())
     }
 
+    /// Play, pause or stop: through Cast when Cast sees what plays,
+    /// otherwise as a media key through the remote (what ADB sees playing:
+    /// an app opened on the TV, not cast).
     pub(crate) fn control(&self, word: &str) -> anyhow::Result<()> {
-        let order = match word {
-            "play" => cast::Order::Play,
-            "pause" => cast::Order::Pause,
-            "stop" => cast::Order::Stop,
+        let (order, key) = match word {
+            "play" => (cast::Order::Play, 126),
+            "pause" => (cast::Order::Pause, 127),
+            "stop" => (cast::Order::Stop, 86),
             other => bail!(moli_i18n::tr!(
                 "pilotes.philips.play_pause_stop",
                 word = format!("{other:?}")
             )),
         };
-        let side = self
-            .cast
-            .as_ref()
-            .with_context(|| moli_i18n::tr!("pilotes.philips.cast_indisponible"))?;
-        if !side.up || self.playing.as_ref().is_none_or(|p| p.state.is_none()) {
-            bail!(moli_i18n::tr!("pilotes.philips.rien_ne_joue"));
+        let cast_plays = self.playing.as_ref().is_some_and(|p| p.state.is_some());
+        if let Some(side) = self.cast.as_ref().filter(|s| s.up && cast_plays) {
+            return side
+                .orders
+                .try_send(order)
+                .map_err(|_| anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.cast_ne_suit_pas")));
         }
-        side.orders
-            .try_send(order)
-            .map_err(|_| anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.cast_ne_suit_pas")))
+        let adb_plays = self.adb_playing.is_some();
+        match self.remote.as_ref().filter(|s| s.up && adb_plays) {
+            Some(side) => side.orders.try_send(remote::Order::Key(key)).map_err(|_| {
+                anyhow::anyhow!(moli_i18n::tr!("pilotes.philips.telecommande_ne_suit_pas"))
+            }),
+            None => bail!(moli_i18n::tr!("pilotes.philips.rien_ne_joue")),
+        }
+    }
+
+    /// What to show: what ADB sees when it sees a title (with Cast's
+    /// picture and length when Cast sees the same), otherwise Cast's,
+    /// otherwise what ADB sees without a title. ADB's leaves the app's
+    /// name out: the app on screen says it.
+    fn now_playing(&self) -> cast::Playing {
+        let from_cast = self.playing.clone().unwrap_or_default();
+        match &self.adb_playing {
+            Some((_, p)) if p.title.is_some() => {
+                let mut p = p.clone();
+                if from_cast.title == p.title {
+                    p.image.clone_from(&from_cast.image);
+                    p.duration = from_cast.duration;
+                }
+                p
+            }
+            _ if from_cast.state.is_some() => from_cast,
+            Some((_, p)) => p.clone(),
+            None => cast::Playing::default(),
+        }
+    }
+
+    /// Publishes what plays when it changed; a position only when it is not
+    /// where it was foreseen (the dashboard moves it on while playing).
+    fn publish(&mut self, ctx: &DriverCtx, id: &DeviceId) {
+        let now = self.now_playing();
+        if self
+            .shown
+            .as_ref()
+            .is_some_and(|(shown, at)| same_but_on(shown, at.elapsed(), &now))
+        {
+            return;
+        }
+        for (key, value) in media_values(&now) {
+            ctx.set_state(id, key, value);
+        }
+        self.shown = Some((now, Instant::now()));
     }
 
     pub(crate) async fn on(&mut self, up: Up, ctx: &DriverCtx, id: &DeviceId) {
@@ -493,6 +650,7 @@ impl Android {
                     remote::Event::Lost => {
                         side.up = false;
                         self.power = None;
+                        self.held = None;
                     }
                     remote::Event::Refused(what) => self.refused(&what),
                     remote::Event::App(app) => {
@@ -524,13 +682,35 @@ impl Android {
                         cast::Playing::default()
                     }
                 };
-                if self.playing.as_ref() == Some(&playing) {
-                    return;
-                }
-                for (key, value) in media_values(&playing) {
-                    ctx.set_state(id, key, value);
-                }
                 self.playing = Some(playing);
+                self.publish(ctx, id);
+            }
+            Up::Adb(news) => {
+                let Some((up, _)) = self.adb.as_mut() else {
+                    return;
+                };
+                match news {
+                    AdbNews::Asking => {
+                        tracing::info!(instance = %ctx.instance(), "adb: the TV asks whether to allow Moli");
+                        ctx.warn(moli_i18n::tr!("pilotes.philips.adb_autoriser"));
+                    }
+                    AdbNews::Ready => {
+                        if !*up {
+                            tracing::info!(instance = %ctx.instance(), "adb: connected");
+                        }
+                        *up = true;
+                        ctx.clear_warning();
+                    }
+                    AdbNews::Playing(playing) => {
+                        self.adb_playing = playing;
+                        self.publish(ctx, id);
+                    }
+                    AdbNews::Lost => {
+                        *up = false;
+                        self.adb_playing = None;
+                        self.publish(ctx, id);
+                    }
+                }
             }
         }
     }
@@ -545,6 +725,26 @@ async fn pin<O>(ctx: &DriverCtx, side: &mut Side<O>, name: &str) {
         && ctx.store_secret(name, &seen).await.is_ok()
     {
         side.pinned = true;
+    }
+}
+
+/// `now` is `shown` `elapsed` later: the same thing, its position where it
+/// was foreseen.
+fn same_but_on(shown: &cast::Playing, elapsed: Duration, now: &cast::Playing) -> bool {
+    let without = |p: &cast::Playing| cast::Playing {
+        position: None,
+        ..p.clone()
+    };
+    if without(shown) != without(now) {
+        return false;
+    }
+    let playing = shown.state.as_deref() == Some("playing");
+    let foreseen = shown
+        .position
+        .map(|p| p + if playing { elapsed.as_secs_f64() } else { 0.0 });
+    match (foreseen, now.position) {
+        (Some(a), Some(b)) => (a - b).abs() < DRIFT,
+        (a, b) => a.is_none() && b.is_none(),
     }
 }
 
@@ -659,6 +859,84 @@ fn keep_cast(
     orders_tx
 }
 
+/// Moli's ADB key: the stored one, or a new one stored now (made off the
+/// async threads: a few seconds). `None`, said in the logs or on the
+/// driver, when it cannot be kept.
+pub(crate) async fn adb_key(ctx: &DriverCtx) -> Option<adb::Key> {
+    if let Some(stored) = ctx.secret(ADB_KEY) {
+        return adb::Key::from_secret(&stored)
+            .inspect_err(|e| tracing::warn!(instance = %ctx.instance(), error = %format!("{e:#}"), "adb key unreadable"))
+            .ok();
+    }
+    if !ctx.can_store_secrets() {
+        ctx.warn(moli_i18n::tr!("pilotes.philips.adb_sans_coffre"));
+        return None;
+    }
+    let key = match tokio::task::spawn_blocking(adb::Key::generate).await {
+        Ok(Ok(key)) => key,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %format!("{e:#}"), "adb key not made");
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "adb key not made");
+            return None;
+        }
+    };
+    if let Err(e) = ctx.store_secret(ADB_KEY, &key.to_secret()).await {
+        tracing::warn!(error = %e, "adb key not stored");
+        return None;
+    }
+    Some(key)
+}
+
+/// ADB's connection, again and again while the driver lives: what plays,
+/// asked every [`ADB_POLL`].
+fn keep_adb(host: String, key: adb::Key, up: mpsc::Sender<Up>, nudge: Arc<Notify>) {
+    tokio::spawn(async move {
+        let mut pause = RETRY_MIN;
+        loop {
+            let started = Instant::now();
+            let (mut asked, mut ready) = (false, false);
+            let result = adb_session(&host, &key, &up, &mut asked, &mut ready).await;
+            if up.is_closed() || up.send(Up::Adb(AdbNews::Lost)).await.is_err() {
+                break;
+            }
+            if let Err(e) = result {
+                tracing::debug!(error = %format!("{e:#}"), "adb: reconnecting");
+            }
+            pause = if asked && !ready {
+                ASK_AGAIN
+            } else {
+                next_pause(pause, started)
+            };
+            wait(&mut pause, &nudge).await;
+        }
+    });
+}
+
+async fn adb_session(
+    host: &str,
+    key: &adb::Key,
+    up: &mpsc::Sender<Up>,
+    asked: &mut bool,
+    ready: &mut bool,
+) -> anyhow::Result<()> {
+    let (mut tv, _) = adb::Adb::connect(host, key, "moli-os", || {
+        *asked = true;
+        let _ = up.try_send(Up::Adb(AdbNews::Asking));
+    })
+    .await?;
+    *ready = true;
+    up.send(Up::Adb(AdbNews::Ready)).await?;
+    loop {
+        let out = tv.shell(adb::MEDIA).await?;
+        up.send(Up::Adb(AdbNews::Playing(adb::playing(&out))))
+            .await?;
+        tokio::time::sleep(ADB_POLL).await;
+    }
+}
+
 /// A connection that lasted starts again quickly; one that keeps failing
 /// waits longer and longer.
 fn next_pause(pause: Duration, started: Instant) -> Duration {
@@ -687,6 +965,10 @@ mod tests {
             }),
             cast: None,
             playing: None,
+            adb: None,
+            adb_playing: None,
+            shown: None,
+            held: None,
             pending: None,
             sent: None,
             ready_at: None,
@@ -795,6 +1077,88 @@ mod tests {
         android.remote.as_mut().unwrap().up = true;
         android.power = Some(false);
         assert!(!android.says_on());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_held_key_is_let_go_by_the_dashboard_or_in_the_end() {
+        let (tx, mut orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        android.hold("CursorRight").unwrap();
+        assert_eq!(orders.recv().await, Some(Order::Hold(22, true)));
+        // Another key: the first is let go before.
+        android.hold("CursorLeft").unwrap();
+        assert_eq!(orders.recv().await, Some(Order::Hold(22, false)));
+        assert_eq!(orders.recv().await, Some(Order::Hold(21, true)));
+        android.hold("release").unwrap();
+        assert_eq!(orders.recv().await, Some(Order::Hold(21, false)));
+        assert!(android.due().is_none());
+        assert!(android.hold("Home").is_err(), "not a key to hold");
+        // Never let go by the dashboard: let go anyway.
+        android.hold("FastForward").unwrap();
+        assert_eq!(orders.recv().await, Some(Order::Hold(90, true)));
+        assert_eq!(android.due(), Some(Instant::now() + HOLD_MAX));
+        tokio::time::advance(HOLD_MAX).await;
+        android.settle();
+        assert_eq!(orders.recv().await, Some(Order::Hold(90, false)));
+        assert!(android.due().is_none());
+    }
+
+    fn plays(title: &str, state: &str, position: f64) -> cast::Playing {
+        cast::Playing {
+            title: Some(title.into()),
+            state: Some(state.into()),
+            position: Some(position),
+            ..cast::Playing::default()
+        }
+    }
+
+    #[test]
+    fn a_position_is_told_again_only_when_it_jumps() {
+        let shown = plays("Dune", "playing", 100.0);
+        let ten = Duration::from_secs(10);
+        assert!(same_but_on(&shown, ten, &plays("Dune", "playing", 111.0)));
+        assert!(
+            !same_but_on(&shown, ten, &plays("Dune", "playing", 300.0)),
+            "a seek"
+        );
+        assert!(!same_but_on(&shown, ten, &plays("Dune", "paused", 110.0)));
+        assert!(!same_but_on(
+            &shown,
+            ten,
+            &plays("Arrival", "playing", 110.0)
+        ));
+        let paused = plays("Dune", "paused", 100.0);
+        assert!(same_but_on(&paused, ten, &plays("Dune", "paused", 100.5)));
+    }
+
+    #[test]
+    fn what_adb_sees_comes_first_with_casts_picture() {
+        let (tx, _orders) = mpsc::channel(8);
+        let mut android = paired(tx);
+        assert_eq!(android.now_playing(), cast::Playing::default());
+        android.playing = Some(cast::Playing {
+            app: Some("YouTube".into()),
+            image: Some("https://i.ytimg.com/vi/x/hq.jpg".into()),
+            duration: Some(600.0),
+            ..plays("Dune", "playing", 10.0)
+        });
+        assert_eq!(
+            android.now_playing().app.as_deref(),
+            Some("YouTube"),
+            "Cast alone"
+        );
+        android.adb_playing = Some((
+            "com.google.android.youtube.tv".into(),
+            plays("Dune", "playing", 12.0),
+        ));
+        let now = android.now_playing();
+        assert_eq!(now.app, None);
+        assert_eq!(now.position, Some(12.0));
+        assert_eq!(now.duration, Some(600.0));
+        assert!(now.image.is_some());
+        android.adb_playing = Some(("com.netflix.ninja".into(), plays("Arrival", "paused", 5.0)));
+        let now = android.now_playing();
+        assert_eq!((now.title.as_deref(), now.image), (Some("Arrival"), None));
     }
 
     #[tokio::test]

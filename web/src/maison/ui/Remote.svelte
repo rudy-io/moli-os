@@ -3,7 +3,9 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
-  /** The living-room remote. Keys go straight to the TV, one press each.
+  /** The living-room remote. Keys go straight to the TV, one press each;
+   *  an arrow held (or a swipe kept under the finger) is held on the TV too,
+   *  as with its own remote: a video seeks faster, a list scrolls.
    *  `speaker`: a soundbar beside it; while it plays the TV (its `source`
    *  is `tv`), the volume is the speaker's: the TV's own then sets its
    *  silent speakers. By default, the living room's of the layout. */
@@ -31,6 +33,7 @@
   const points = $derived(hub.devices[tv]?.points ?? []);
   const maxVolume = $derived((hub.devices[target]?.points ?? []).find((p) => p.key === 'volume')?.kind?.max ?? 100);
   const canWrite = $derived(points.some((p) => p.key === 'text'));
+  const canHold = $derived(points.some((p) => p.key === 'hold'));
   const volumeLabel = $derived(sound ? (hub.devices[sound]?.model ?? hub.devices[sound]?.native_name ?? '').toUpperCase() : t('salon.tele.volume_tv'));
 
   /** One step, or mute: the speaker's own when it plays the TV. */
@@ -159,7 +162,49 @@
     savePref('maison-remote', m);
   }
 
-  // Touchpad: a swipe moves, a tap validates. Long swipes repeat.
+  // Held keys: after HOLD_AFTER still pressed, the TV holds the key until
+  // let go (`release`; the TV lets go by itself if that never comes).
+  const HOLD_AFTER = 450;
+  let holdTimer = null;
+  let holding = null;
+  let suppress = false;
+
+  function holdSoon(name) {
+    letGo();
+    suppress = false;
+    if (!canHold || !on) return;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      holding = name;
+      flash = name;
+      if (navigator.vibrate) navigator.vibrate(15);
+      act(`${tv}/hold`, name, t('salon.tele.label'));
+    }, HOLD_AFTER);
+  }
+
+  /** Stops a hold (or the wait before one); true when a key was held. */
+  function letGo() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    if (!holding) return false;
+    if (flash === holding) flash = null;
+    holding = null;
+    // The click that follows the pointer's release is not one more press.
+    suppress = true;
+    act(`${tv}/hold`, 'release', t('salon.tele.label'));
+    return true;
+  }
+
+  function tap(name) {
+    if (suppress) {
+      suppress = false;
+      return;
+    }
+    key(name);
+  }
+
+  // Touchpad: a swipe moves, a tap validates. Long swipes repeat; a swipe
+  // kept under the finger holds its arrow.
   let start = null;
   let moved = false;
   const STEP = 38;
@@ -176,12 +221,23 @@
     const dy = e.clientY - start.y;
     if (Math.max(Math.abs(dx), Math.abs(dy)) < STEP) return;
     moved = true;
-    key(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'CursorRight' : 'CursorLeft') : dy > 0 ? 'CursorDown' : 'CursorUp');
+    const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'CursorRight' : 'CursorLeft') : dy > 0 ? 'CursorDown' : 'CursorUp';
     start = { x: e.clientX, y: e.clientY };
+    // Already held that way: the finger going on does not press it again.
+    if (holding === dir) return;
+    letGo();
+    key(dir);
+    holdSoon(dir);
   }
 
   function up() {
-    if (start && !moved) key('Confirm');
+    const held = letGo();
+    if (start && !moved && !held) key('Confirm');
+    start = null;
+  }
+
+  function cancel() {
+    letGo();
     start = null;
   }
 
@@ -232,12 +288,12 @@
 
   <div class="middle">
   {#if mode === 'keys'}
-    <div class="dpad" role="group" aria-label={t('salon.tele.fleches')}>
-      <button class="up" class:flash={flash === 'CursorUp'} onclick={() => key('CursorUp')} disabled={!on} aria-label={t('salon.tele.haut')}><Icon name="chevron-up" size={30} /></button>
-      <button class="left" class:flash={flash === 'CursorLeft'} onclick={() => key('CursorLeft')} disabled={!on} aria-label={t('salon.tele.gauche')}><Icon name="chevron-left" size={30} /></button>
+    <div class="dpad" role="group" aria-label={t('salon.tele.fleches')} oncontextmenu={(e) => e.preventDefault()}>
+      <button class="up" class:flash={flash === 'CursorUp'} onclick={() => tap('CursorUp')} onpointerdown={() => holdSoon('CursorUp')} onpointerup={letGo} onpointerleave={letGo} onpointercancel={letGo} disabled={!on} aria-label={t('salon.tele.haut')}><Icon name="chevron-up" size={30} /></button>
+      <button class="left" class:flash={flash === 'CursorLeft'} onclick={() => tap('CursorLeft')} onpointerdown={() => holdSoon('CursorLeft')} onpointerup={letGo} onpointerleave={letGo} onpointercancel={letGo} disabled={!on} aria-label={t('salon.tele.gauche')}><Icon name="chevron-left" size={30} /></button>
       <button class="ok" class:flash={flash === 'Confirm'} onclick={() => key('Confirm')} disabled={!on} aria-label={t('salon.tele.valider')}>OK</button>
-      <button class="right" class:flash={flash === 'CursorRight'} onclick={() => key('CursorRight')} disabled={!on} aria-label={t('salon.tele.droite')}><Icon name="chevron-right" size={30} /></button>
-      <button class="down" class:flash={flash === 'CursorDown'} onclick={() => key('CursorDown')} disabled={!on} aria-label={t('salon.tele.bas')}><Icon name="chevron-down" size={30} /></button>
+      <button class="right" class:flash={flash === 'CursorRight'} onclick={() => tap('CursorRight')} onpointerdown={() => holdSoon('CursorRight')} onpointerup={letGo} onpointerleave={letGo} onpointercancel={letGo} disabled={!on} aria-label={t('salon.tele.droite')}><Icon name="chevron-right" size={30} /></button>
+      <button class="down" class:flash={flash === 'CursorDown'} onclick={() => tap('CursorDown')} onpointerdown={() => holdSoon('CursorDown')} onpointerup={letGo} onpointerleave={letGo} onpointercancel={letGo} disabled={!on} aria-label={t('salon.tele.bas')}><Icon name="chevron-down" size={30} /></button>
     </div>
   {:else}
     <div
@@ -249,10 +305,11 @@
       onpointerdown={down}
       onpointermove={move}
       onpointerup={up}
-      onpointercancel={() => (start = null)}>
+      onpointercancel={cancel}
+      oncontextmenu={(e) => e.preventDefault()}>
       <span class="pad-hint">
         <b>OK</b>
-        <small>{t('salon.tele.glisser')}<br />{t('salon.tele.toucher')}</small>
+        <small>{t('salon.tele.glisser')}<br />{t('salon.tele.toucher')}{#if canHold}<br />{t('salon.tele.garder')}{/if}</small>
       </span>
       {#if flash}<i class="ripple"></i>{/if}
     </div>
@@ -514,6 +571,10 @@
     background: none;
     box-shadow: none;
     border-radius: 50%;
+    /* Held down: no text selection, no callout menu on a phone. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
 
   .dpad button:hover:not(:disabled) {

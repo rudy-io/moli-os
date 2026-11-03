@@ -77,6 +77,9 @@ hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 md-5 = "0.11"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
+# Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
+num-bigint = "0.4"
+num-traits = "0.2"
 rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
