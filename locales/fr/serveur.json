@@ -43,6 +43,7 @@
   "serveur.plan.piece_invalide": "pièce invalide : {id}",
   "serveur.plan.trop_d_etages": "{max} étages au plus",
   "serveur.plan.habillage_inconnu": "habillage inconnu : {skin}",
+  "serveur.plan.couleur": "couleur invalide (attendu : #rrggbb)",
   "serveur.plan.etage_id": "identifiant d'étage invalide ou en double : {id}",
   "serveur.plan.etage_nom": "nom d'étage vide, trop long ou invalide",
   "serveur.plan.image_inconnue": "image inconnue : {image}",
