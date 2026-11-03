@@ -294,6 +294,16 @@ read_only = true
   [Détails et convergence](../../integrations/overkiz/README.md),
   [couverture restante](../../integrations/overkiz/COVERAGE.md).
 
+## `voltalis` : radiateurs Voltalis (`crates/moli-voltalis`)
+
+- **Couvre** : les radiateurs d'un site Voltalis, en lecture et en commande.
+- **Config** : `kind = "voltalis"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secrets `username` et `password` : le service n'a pas de clé durable ; le jeton de session reste en mémoire.
+- **Points** : `on`, `mode` (les modes que le radiateur annonce), `target_temperature` (s'il a le mode `temperature`), `automatic` (sur le programme du service) **écrivables** ; `fault` (tout diagnostic autre que `OK`) en lecture.
+- **Commandes** : `GET manualsetting` pour trouver le réglage du radiateur, puis `PUT manualsetting/{id}`, jusqu'à nouvel ordre ; `automatic = true` ferme le réglage manuel. Un mode ou une consigne allume le radiateur ; éteindre garde le mode. Session finie : reconnexion et un second essai ; refus à la reconnexion : le pilote s'arrête. Budget de 4,5 s, sous les 5 s du hub.
+- **Identité** : `id` de l'appareil dans le service.
+- **Pièges** : API web non officielle, dépendante d'Internet. Un compte refusé arrête le pilote jusqu'à l'intervention d'un humain, pour ne pas bloquer le compte ; une session expirée est rouverte au relevé suivant.
+- **Tests** : `src/model.rs` sur `integrations/voltalis/fixtures/`, plus les statuts inconnus et les valeurs absurdes.
+
 ## `dirigera` : hub IKEA Dirigera (`crates/moli-dirigera`)
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
@@ -812,6 +822,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `overkiz` | `moli-overkiz` | HTTPS local 8443, certificat épinglé | selon capacités ; portails/fenêtres explicitement revus et gardés | modèle rejoué hors réseau ; transport et commandes sur simulateur TLS |
+| `voltalis` | `moli-voltalis` | HTTPS vers le service, compte puis jeton de session | oui : marche, mode, consigne, programme | quatre radiateurs `VX_WIRE` (lecture) ; commandes sur l'un |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |

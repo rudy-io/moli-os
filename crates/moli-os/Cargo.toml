@@ -10,6 +10,7 @@ rust-version.workspace = true
 moli-core.workspace = true
 moli-i18n.workspace = true
 moli-runtime.workspace = true
+moli-voltalis.workspace = true
 moli-z2m.workspace = true
 moli-zwave.workspace = true
 moli-api.workspace = true
