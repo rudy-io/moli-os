@@ -84,6 +84,11 @@ function observationOnly(html, filters = false) {
     assert.ok(filters && /aria-label="Filtrer par système"/.test(select), `unexpected setting selector: ${select}`);
   }
   for (const button of tags(html, 'button')) {
+    if (filters && /class="filter-chip\b/.test(button)) {
+      assert.match(button, /aria-pressed="(?:true|false)"/);
+      continue;
+    }
+    if (filters && /class="filter-reset\b/.test(button)) continue;
     assert.match(button, /class="metric\b/, 'only observed metrics can use a button in the zone detail');
     if (!/\bdisabled\b/.test(button)) {
       assert.match(button, /aria-label="[^"]+Voir l’historique"/, 'available metrics name their history navigation');
@@ -139,6 +144,25 @@ test('overview encodes native identities in links and detail resolves the select
   assert.doesNotMatch(text(html), /Control for sibling zone|Foreign control|Other installation zone|Hidden zone/);
   assert.equal(tags(html, 'button').length, 2, 'two observed main metrics link to history');
   observationOnly(html);
+});
+
+test('overview exposes labelled zone links, pressed activity filters and an explicit disconnected state', () => {
+  house();
+  let html = page();
+  const buttons = tags(html, 'button');
+  assert.equal(buttons.length, 3);
+  assert.equal(buttons.filter((b) => /aria-pressed="true"/.test(b)).length, 1);
+  for (const card of cardLinks(html)) {
+    const id = card.match(/aria-labelledby="([^"]+)"/)[1];
+    assert.ok(html.includes(`id="${id}"`), 'every zone link has a visible accessible name');
+  }
+  assert.match(text(html), /Toutes 4 En demande 1 Indisponibles 1/);
+  hub.connected = false;
+  html = page();
+  assert.match(text(html), /Connexion à Moli interrompue/);
+  assert.match(text(html), /En demande —/);
+  assert.match(tags(html, 'button')[1], /disabled/);
+  observationOnly(html, true);
 });
 
 test('zone detail preserves Fahrenheit for both primary readings and does not manufacture a missing unit', () => {
@@ -240,7 +264,7 @@ test('double setpoints remain separate on the zone card and detail without a fab
   assert.match(text(card), /24 °C/);
   const html = page('airzone/native-a%3Adual');
   const metrics = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
-  assert.deepEqual(metrics, ['20 °C', '—', '19 °C', '24 °C']);
+  assert.deepEqual(metrics, ['20 °C', '19 °C', '24 °C']);
   observationOnly(card);
   observationOnly(html);
 });

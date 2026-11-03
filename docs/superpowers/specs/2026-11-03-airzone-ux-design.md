@@ -24,3 +24,26 @@ Use declared point types and units. Retained offline readings are explicitly des
 Pure-model tests cover multiple instances, HA lookalikes, hidden devices, explicit membership, missing data, offline/null availability, °C/°F/unknown units, demand semantics and complete section coverage. SSR tests use synthetic devices and assert semantic links, translated summaries and absence of command controls even with writable fixtures. Check the real read-only preview in desktop and phone-sized layouts, keyboard navigation, filtering, back navigation, detail/history and installation disclosures. Never publish private house data or screenshots in GitHub.
 
 No new dependency, poller, backend route or persisted setting. Run the existing full checks before committing, build a committed image, deploy only the test container and preserve its secrets, labels, read-only configuration and rollback image.
+
+
+## Raffinement de la navigation et des fiches
+
+Les vues conservent les surfaces, la typographie et les icônes Moli. La navigation
+Zones / Alertes / Appareils / Installation est regroupée ; l’ajout d’une passerelle
+reste accessible dès l’aperçu. Les filtres combinent recherche, système et activité
+réellement signalée, sans déduire une demande de l’activation ou d’un écart de
+température. Une coupure du flux rend le filtre de demande indisponible ; elle ne
+transforme pas tous les appareils en panne matérielle.
+
+Sur téléphone, une seule colonne garde visibles les états et les mesures ; la
+recherche et les filtres occupent moins de hauteur. La fiche distingue mesure et
+consigne, donne accès à leur historique, puis présente le thermostat et les
+demandes. Les paramètres complets et réglages communs restent dans des sections
+repliées. Une double consigne conserve ses deux valeurs. « Dernier changement »
+désigne le timestamp du point et ne prétend pas dater la dernière interrogation.
+
+Les cartes ont un nom accessible explicite, les filtres un état pressé et les
+cibles interactives mesurent au moins 44 px. L’effacement des filtres restaure le
+focus sur la recherche ; la fermeture de l’historique le rend à la mesure. Les
+transitions respectent la réduction de mouvement. Aucun matériau translucide,
+polling, dépendance ou chemin de commande supplémentaire n’est introduit.

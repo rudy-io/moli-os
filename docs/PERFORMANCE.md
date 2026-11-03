@@ -62,3 +62,9 @@ existant ; il n’ajoute aucune interrogation périodique lorsqu’il est inacti
 La taille de l’image finale et les mesures de l’essai sont rapportées dans la PR.
 Les mesures localhost avec un dashboard ouvert ne constituent ni un test CPU au
 repos, ni un comparatif avec Home Assistant.
+
+Le raffinement UX conserve le chargement différé de la vue. Le bundle Airzone
+mesuré passe de 54,57 Ko / 16,03 Ko gzip à 60,75 Ko / 17,51 Ko gzip ; aucune
+bibliothèque ni requête périodique supplémentaire n’est ajoutée. Les mesures et
+captures actualisées figurent dans la PR, sans assimiler ce coût à un gain de
+latence ou à une qualification complète du budget.
