@@ -1,13 +1,14 @@
 <script>
   import { t } from '../../lib/i18n.svelte.js';
   import { deviceName, formatValue } from '../../lib/format.js';
-  import { zoneSummary } from '../lib/airzone.js';
+  import { zoneSummary, batterySummary } from '../lib/airzone.js';
   import { climateMode } from '../lib/climate.js';
   import Icon from './Icon.svelte';
 
   let { device, href } = $props();
 
   const zone = $derived(zoneSummary(device));
+  const battery = $derived(batterySummary(device));
   const name = $derived(deviceName(device) || t('airzone_ui.unknown'));
   const mode = $derived(climateMode(zone.mode));
   const modeLabel = $derived(mode ? t(mode.label) : (zone.mode ?? t('airzone_ui.unknown')));
@@ -54,6 +55,7 @@
   </div>
 
   <div class="observations">
+    {#if battery.status === 'level'}<span class="battery"><span>{t('airzone_health.battery')} <span class="num">{battery.percent} %</span></span></span>{/if}
     <span class="mode"><Icon name={mode?.icon ?? 'air-conditioner'} size={16} /><span>{modeLabel}</span></span>
     {#if zone.humidity}
       <span class="humidity"><Icon name="humidity" size={16} /><span><span class="sr-only">{t('airzone_ui.humidity')} </span><span class="num">{shown(zone.humidity)}</span>{#if zone.humidity.unit} {zone.humidity.unit}{/if}</span></span>

@@ -1,13 +1,16 @@
 <script>
   import { tick, untrack } from 'svelte';
-  import { hub, home } from '../lib/home.svelte.js';
+  import { hub, home, reloadLayout } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import { deviceName, formatValue } from '../../lib/format.js';
-  import { airzoneInventory, zoneSummary, readingOf } from '../lib/airzone.js';
+  import { airzoneInventory, zoneSummary, readingOf, batterySummary, airzoneAlerts } from '../lib/airzone.js';
   import { climateMode } from '../lib/climate.js';
   import Icon from '../ui/Icon.svelte';
   import AirzoneZoneCard from '../ui/AirzoneZoneCard.svelte';
   import AirzoneReadings from '../ui/AirzoneReadings.svelte';
+  import AirzoneManagement from '../ui/AirzoneManagement.svelte';
+  import AirzoneAlerts from '../ui/AirzoneAlerts.svelte';
+  import AirzoneAdd from '../ui/AirzoneAdd.svelte';
   import HistoryPanel from '../../components/HistoryPanel.svelte';
 
   let { route = 'airzone' } = $props();
@@ -17,9 +20,19 @@
   let historyShell = $state(null);
   let focusedRoute;
   const inventory = $derived(airzoneInventory(hub.devices, hub.drivers, home.config?.hidden ?? []));
+  const allInventory = $derived(airzoneInventory(hub.devices, hub.drivers));
+  const nativeDevices = $derived([...allInventory.byId.values()]);
+  const alertReport = $derived(airzoneAlerts(hub.devices, hub.drivers, {connected:hub.connected}));
   const systems = $derived(inventory.instances.flatMap((instance) => instance.systems.map((system) => ({ ...system, instance }))));
   const installation = $derived(route === 'airzone/installation');
-  const detail = $derived(route.startsWith('airzone/') && !installation);
+  const management = $derived(route === 'airzone/devices' || route.startsWith('airzone/devices/'));
+  const alerts = $derived(route === 'airzone/alerts');
+  const adding = $derived(route === 'airzone/add');
+  const detail = $derived(route.startsWith('airzone/') && !installation && !management && !alerts && !adding);
+  const managedId = $derived.by(() => {
+    if (!route.startsWith('airzone/devices/')) return null;
+    try {return decodeURIComponent(route.slice('airzone/devices/'.length));} catch {return null;}
+  });
   const zoneId = $derived.by(() => {
     if (!detail) return null;
     try { return decodeURIComponent(route.slice('airzone/'.length)); }
@@ -27,6 +40,8 @@
   });
   const zone = $derived(inventory.zones.find((d) => d.id === zoneId));
   const summary = $derived(zone ? zoneSummary(zone) : null);
+  const battery = $derived(zone ? batterySummary(zone) : null);
+  const coverage = $derived(zone ? readingOf(zone, 'coverage') : null);
   const group = $derived(zone ? systems.find((s) => s.zones.some((d) => d.id === zone.id)) : null);
   const controls = $derived(group?.controls.filter((d) => d.instance === zone?.instance && d.members?.includes(zone?.id)) ?? []);
   const norm = (text) => String(text ?? '').normalize('NFD').replace(/\p{M}/gu, '').trim().toLocaleLowerCase(locale());
@@ -102,15 +117,17 @@
     <div>
       {#if detail}<a class="back" href="#/airzone"><Icon name="chevron-left" size={18} />{t('airzone_ui.back')}</a>{/if}
       {#if detail || installation}<div class="eyebrow"><Icon name="air-conditioner" size={18} />{detail && group ? systemLabel(group) : t('airzone_ui.title')}</div>{/if}
-      <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_ui.installation') : t('airzone_ui.title')}</h1>
-      <p>{zone ? zone.label?.room || zone.native_room || systemName(group ?? {}) : installation ? t('airzone_ui.installation_help') : t('airzone_ui.subtitle')}</p>
+      <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_ui.installation') : management ? t('airzone_ui.manage') : alerts ? t('airzone_ui.alerts') : adding ? t('airzone_ui.add') : t('airzone_ui.title')}</h1>
+      <p>{zone ? zone.label?.room || zone.native_room || systemName(group ?? {}) : installation ? t('airzone_ui.installation_help') : management ? t('airzone_ui.manage_help') : alerts ? t('airzone_ui.alerts_help') : adding ? t('airzone_ui.add_help') : t('airzone_ui.subtitle')}</p>
     </div>
     <span class="read-only" title={t('airzone_ui.read_only_help')}><Icon name="lock" size={16} />{t('airzone_ui.read_only')}</span>
   </header>
 
   {#if !detail}
     <nav class="view-tabs" aria-label={t('airzone_ui.title')}>
-      <a href="#/airzone" aria-current={!installation ? 'page' : undefined}><Icon name="home" size={18} />{t('airzone_ui.zones')}</a>
+      <a href="#/airzone" aria-current={route === 'airzone' ? 'page' : undefined}><Icon name="home" size={18} />{t('airzone_ui.zones')}</a>
+      <a href="#/airzone/alerts" aria-current={alerts ? 'page' : undefined}><Icon name="alert" size={18} />{t('airzone_ui.alerts')}{#if alertReport.items.length}<span class="alert-count">{alertReport.items.length}</span>{/if}</a>
+      <a href="#/airzone/devices" aria-current={management || adding ? 'page' : undefined}><Icon name="tune" size={18} />{t('airzone_ui.manage')}</a>
       <a href="#/airzone/installation" aria-current={installation ? 'page' : undefined}><Icon name="tune" size={18} />{t('airzone_ui.installation')}</a>
     </nav>
   {/if}
@@ -121,6 +138,13 @@
 
   {#if !hub.connected && !inventory.instances.length}
     <div class="empty" role="status"><Icon name="air-conditioner" size={32} /><p>{t('airzone_ui.loading')}</p></div>
+  {:else if management}
+    <a class="add-link" href="#/airzone/add">{t('airzone_ui.add')}<Icon name="chevron-right" size={18} /></a>
+    <AirzoneManagement devices={nativeDevices} hidden={home.config?.hidden ?? []} connected={hub.connected} selectedId={managedId} onchanged={reloadLayout} />
+  {:else if alerts}
+    <AirzoneAlerts report={alertReport} devices={nativeDevices} hidden={home.config?.hidden ?? []} />
+  {:else if adding}
+    <AirzoneAdd drivers={hub.drivers} />
   {:else if installation}
     <div class="installation-stack">
       {#each inventory.instances as instance (instance.id)}
@@ -193,10 +217,20 @@
         {#each controls as control (control.id)}<h3>{deviceName(control)}</h3><AirzoneReadings device={control} />{/each}
       </section>
     {/if}
+    <section class="parameters-card battery-card">
+      <div><h2>{t('airzone_health.battery')}</h2>
+        <strong>{battery.status === 'level' ? `${battery.percent} %` : battery.status === 'wired' ? t('airzone_health.wired') : t('airzone_health.battery_missing')}</strong>
+        {#if battery.radio === true}<p>{t('airzone_health.radio')}</p>{/if}
+        {#if battery.availability !== 'online'}<p>{t('airzone_ui.latest')}</p>{/if}
+        {#if coverage?.unit === '%' && Number.isInteger(coverage.value) && coverage.value >= 0 && coverage.value <= 100}<p>{t('airzone_health.signal')} : {coverage.value} %</p>{/if}
+      </div><p class="explanation">{t('airzone_health.battery_help')}</p>
+    </section>
+    <a class="text-link" href={`#/airzone/devices/${encodeURIComponent(zone.id)}`}>{t('airzone_ui.manage')}<Icon name="chevron-right" size={18} /></a>
     <a class="text-link" href="#/airzone/installation">{t('airzone_ui.installation')}<Icon name="chevron-right" size={18} /></a>
   {:else if !inventory.zones.length}
     <div class="empty"><Icon name="air-conditioner" size={32} /><h2>{t('airzone_ui.empty')}</h2><p>{t('airzone_ui.empty_help')}</p><a href="#/atelier">{t('airzone_ui.back_workshop')}</a></div>
   {:else}
+    {#if alertReport.items.length}<a class="alert-summary" href="#/airzone/alerts"><Icon name="alert" size={20} /><span>{t('airzone_ui.alert_count',{count:alertReport.items.length})}</span><Icon name="chevron-right" size={18} /></a>{/if}
     <div class="overview-bar">
       <div class="inventory-counts"><strong>{t('airzone_ui.zone_count', { count: inventory.zones.length })}</strong><span>{t('airzone_ui.system_count', { count: zoneSystems.length })}</span><span>{t('airzone_ui.online_count', { count: onlineCount })}</span></div>
       <div class="filters">
@@ -221,6 +255,14 @@
 {/if}
 
 <style>
+  .add-link {display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:10px 18px; border-radius:var(--r-sm); background:var(--cool-soft); color:var(--cool); font-weight:650; margin-bottom:20px; text-decoration:none;}
+  .alert-count {display:inline-grid; place-items:center; min-width:22px; height:22px; border-radius:50%; padding:0 5px; background:var(--alert-soft); color:var(--alert); font-size:12px;}
+  .alert-summary {display:flex; gap:12px; align-items:center; margin-bottom:20px; padding:15px 18px; border-radius:var(--r-md); background:var(--warm-soft); color:var(--warm-ink); text-decoration:none; min-height:48px;}
+  .alert-summary span {flex:1;}
+  .battery-card {display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  .battery-card strong {font-size:22px;}
+  .battery-card p {font-size:13px; color:var(--ink-2); margin:8px 0 0;}
+  @media(max-width:700px) {.battery-card {grid-template-columns:1fr;}}
   .airzone-page { max-width: 1240px; margin: 0 auto; padding: 8px 0 40px; }
   .history-shell { position: fixed; inset: 0; z-index: 100; --card: var(--surface); --radius: var(--r-lg); --stroke: 1px; --copper: var(--cool); }
   .history-shell :global(.panel) { border-color: var(--line); box-shadow: var(--shadow-lift); }
@@ -231,7 +273,7 @@
   h1:focus-visible { outline: none; }
   .page-heading p { margin-top: 12px; color: var(--ink-2); max-width: 48rem; }
   .read-only { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--ink-2); font-size: 13px; flex: none; }
-  .view-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
+  .view-tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
   .view-tabs a { min-height: 48px; display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; color: var(--ink-2); text-decoration: none; border-bottom: 2px solid transparent; }
   .view-tabs a[aria-current] { color: var(--cool); border-bottom-color: var(--cool); font-weight: 650; }
   .overview-bar { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 28px; }
@@ -299,7 +341,8 @@
   @media (max-width: 700px) {
     .page-heading { align-items: flex-start; flex-direction: column; gap: 18px; margin-bottom: 20px; }
     .read-only { padding: 8px 12px; }
-    .view-tabs a { padding: 12px 10px; font-size: 13px; }
+    .view-tabs {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0;}
+    .view-tabs a { min-width:0; padding:12px 8px; font-size:12px; gap:6px; }
     .filters { flex-direction: row; } select { max-width: 148px; } .search { padding: 0 10px; min-width: 0; }
     .zone-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .detail-grid { grid-template-columns: minmax(0, 1fr); }

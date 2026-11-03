@@ -172,5 +172,8 @@
   "serveur.personnes.point_quelquun": "Someone at home",
   "serveur.personnes.point_tous_partis": "Everyone has left",
   "serveur.garde.ouverture": "opening a lock, a garage door or a gate: a person approves",
-  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen"
+  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen",
+  "serveur.visibilite.identifiant_invalide": "Invalid device identifier.",
+  "serveur.visibilite.indisponible": "Dashboard configuration unavailable.",
+  "serveur.visibilite.enregistrement_impossible": "Unable to save visibility."
 }

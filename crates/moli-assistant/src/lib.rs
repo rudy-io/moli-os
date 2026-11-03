@@ -44,7 +44,7 @@ pub use correct::{Corrected, CorrectionError};
 pub use directory::{Directory, Done as DirectoryDone};
 pub use exchanges::{Cost, Exchange, Kind as ExchangeKind, Order};
 pub use import::HaAutomation;
-pub use layout_edit::saved_place;
+pub use layout_edit::{saved_place, set_hidden};
 pub use places::{OpenMeteoPlaces, Place, Places};
 pub use providers::{ProviderConfig, Routes};
 pub use tier::Tier;

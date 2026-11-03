@@ -37,6 +37,14 @@ La fiche `#/airzone/<identifiant encodé>` distingue température mesurée, cons
 
 Le modèle pur `maison/lib/airzone.js` conserve les périmètres et les champs inconnus. Les composants `AirzoneZoneCard` et `AirzoneReadings` sont partagés entre aperçu, fiche et diagnostic. Les tests métier et SSR utilisent exclusivement des appareils fictifs ; les captures publiées sont celles d’une maison de démonstration.
 
+### Gestion et alertes Airzone
+
+`#/airzone/devices` présente aussi les appareils masqués. Le nom et la pièce modifient seulement les étiquettes Moli. Masquer/restaurer réutilise le layout existant via une API générique authentifiée ; aucun appareil physique, historique ou automatisme n’est supprimé. Un lien `#/airzone/devices/<identifiant encodé>` ouvre son éditeur. Le flux `layout_changed`, puis les snapshots de reconnexion, invalident le layout des autres tableaux de bord.
+
+`#/airzone/alerts` conserve la liste des défauts actuellement signalés, y compris les appareils masqués. Les défauts système répétés et les copies dans les commandes communes sont regroupés ; une panne de pilote ou du flux ne devient pas une cascade de défauts matériels. `errors` absent/invalide reste inconnu, et `problem=false` ne suffit pas à affirmer que tout fonctionne. Aucun seuil constructeur n’est inventé : batterie et couverture radio sont des pourcentages lorsqu’ils sont transmis ; « batterie faible » provient de l’avertissement explicite Airzone. Les timestamps SSE reflètent les changements de valeur, pas chaque relève : ils ne servent pas de détecteur de péremption. Cette vue n’émet aucune notification externe.
+
+`#/airzone/add` explique la découverte automatique des zones déjà appairées, la restauration d’une carte et la préparation d’une nouvelle passerelle. Le générateur HTTP prépare un bloc TOML borné, avec `read_only=true` et sans écraser un identifiant existant ou réservé. Il n’applique rien : l’installation exige encore une modification validée de `moli.toml` et un redémarrage. L’API locale n’offre ni appairage ni désappairage physique.
+
 Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
 Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 

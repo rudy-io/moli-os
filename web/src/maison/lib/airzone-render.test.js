@@ -56,7 +56,7 @@ function device(id, name, values = {}, options = {}) {
     kind: key === 'mode' ? { type: 'enum', values: ['off', 'heat', 'cool'] }
       : { type: typeof value === 'boolean' ? 'binary' : typeof value === 'number' ? 'numeric' : 'text' },
     unit: ['temperature', 'target_temperature', 'heatsetpoint', 'coolsetpoint'].includes(key) ? '°C'
-      : key === 'humidity' ? '%' : null,
+      : ['humidity', 'battery', 'coverage'].includes(key) ? '%' : null,
     access: { read: true, write: true },
     semantic: 'other',
   }));
@@ -338,4 +338,60 @@ test('the zone card and unset diagnostic values follow the selected English loca
   const html = render(Readings, { props: { device: gateway } }).body;
   assert.match(text(html), /Not set/);
   assert.doesNotMatch(text(html), /Non renseigné|airzone_ui\./);
+});
+
+test('native battery percentages are visible on cards, including zero, while missing levels stay absent', () => {
+  const d = device('native:aabbccddeeff_s1_z2', 'Battery zone', { battery: 0, thermos_radio: true });
+  let html = render(ZoneCard, { props: { device: d, href: '#/airzone/example' } }).body;
+  assert.match(text(html), /Batterie\s+0\s*%/);
+  delete d.state.battery;
+  html = render(ZoneCard, { props: { device: d, href: '#/airzone/example' } }).body;
+  assert.doesNotMatch(text(html), /Batterie\s+0\s*%/);
+});
+
+test('device management includes native hidden resources without admitting bridge imitations', () => {
+  house();
+  const html = page('airzone/devices');
+  assert.match(text(html), /Gérer les appareils/);
+  assert.match(text(html), /Hidden zone/);
+  assert.doesNotMatch(text(html), /Bridge imitation zone/);
+  assert.match(text(html), /Afficher dans Moli/);
+  assert.doesNotMatch(html, /type="(?:range|number)"|role="(?:switch|slider)"/);
+});
+
+test('alerts show an explicit battery warning and retain hidden native faults', () => {
+  const { selected, hidden } = house();
+  const a = device(selected.id, 'Battery zone', {systemID:1,zoneID:2,battery:14,thermos_radio:true,errors:'[{"zone":"Low battery"}]'});
+  const b = device(hidden.id, 'Hidden warning zone', {systemID:1,zoneID:4,errors:'[{"zone":"Error 3"}]'});
+  hub.devices[a.id]=a; hub.devices[b.id]=b;
+  const html=page('airzone/alerts');
+  assert.match(text(html), /Batterie faible/);
+  assert.match(text(html), /Hidden warning zone/);
+  assert.match(html, /href="#\/airzone\/devices\//);
+  assert.doesNotMatch(text(html), /Tout fonctionne|Tous les appareils fonctionnent/);
+});
+
+test('add flow distinguishes automatic discovery from physical commissioning and gateway configuration', () => {
+  house();
+  const html=page('airzone/add');
+  assert.match(text(html), /Ajouter un appareil/);
+  assert.match(text(html), /appairage/);
+  assert.match(text(html), /passerelle/);
+  assert.match(html, /href="#\/airzone\/devices"/);
+  assert.doesNotMatch(html, /role="(?:switch|slider)"|type="range"/);
+});
+
+test('wired thermostat detail does not invent a battery level', () => {
+  const { selected }=house();
+  hub.devices[selected.id]=device(selected.id,'Wired zone',{systemID:1,zoneID:2,thermos_radio:false});
+  const html=page('airzone/'+encodeURIComponent(selected.id));
+  assert.match(text(html), /Thermostat filaire/);
+  assert.doesNotMatch(text(html), /Batterie\s+0\s*%/);
+});
+
+test('journal renders visibility changes without treating them as labels', async () => {
+  const Journal=(await vite.ssrLoadModule('/src/components/Journal.svelte')).default;
+  hub.journal=[{id:1,ts:1700000000000,action:{kind:'visibility',device:'native:example',hidden:true},origin:'ui',outcome:{result:'ok'}}];
+  assert.match(text(render(Journal).body), /Masqué dans Moli/);
+  hub.journal=[];
 });

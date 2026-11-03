@@ -46,6 +46,7 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     }
     // A person's decisions: approvals, and what Moli proposed, learned or should undo.
     if path.starts_with("/api/approvals/")
+        || (path.starts_with("/api/devices/") && path.ends_with("/visibility"))
         || path.starts_with("/api/assistant/proposals/")
         || path.starts_with("/api/assistant/turns/")
         || path.starts_with("/api/assistant/rules/")
@@ -195,6 +196,10 @@ mod tests {
         assert_eq!(
             budget(&Method::PUT, "/api/labels/x", false),
             Some(("command", 30))
+        );
+        assert_eq!(
+            budget(&Method::PUT, "/api/devices/fake:lamp/visibility", true),
+            Some(("decide", 30))
         );
         assert_eq!(budget(&Method::POST, "/mcp", false), Some(("mcp", 120)));
         assert_eq!(

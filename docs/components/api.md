@@ -301,6 +301,7 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 
 - `{"kind":"command","point":"…","value":…}`
 - `{"kind":"label","device":"…","label":{"name":"…","room":"…"}}` (label vide si refus)
+- `{"kind":"visibility","device":"…","hidden":true}` (masquage local réversible)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
 
 Stockage : `data/journal.jsonl` (ajout seul) + les 500 dernières entrées en mémoire.
@@ -342,6 +343,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
 | POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
 | PUT | `/api/labels/{id}` | libre ; changer la pièce d'un appareil gardé exige `ui` | `{name?, room?}` : absent = inchangé, `""` = effacé | `Label` `{name?, room?}` | `404` unknown device ; `403` changement de pièce gardé ; `500` écriture de `labels.toml` |
+| PUT | `/api/devices/{id}/visibility` | session humaine + origine `ui`, invités refusés | `{hidden:bool}`, champs inconnus refusés, 1 KiB maximum | `{hidden:bool}` | `403` non-humain ; `404` appareil inconnu ; `422` identifiant invalide ; `503` layout non configuré ; `500` sauvegarde impossible |
 | GET | `/api/journal` | libre | `?limit=` (défaut 100) | `[JournalEntry]`, plus récent d'abord (500 au plus en mémoire) | `400` requête invalide |
 | GET | `/api/approvals` | libre ; un invité : ses pièces seulement | aucune | `[ApprovalRequest]`, plus ancien d'abord | aucune |
 | POST | `/api/approvals/{id}` | **humain** + `x-moli-origin: ui` | `{approve: bool, point}` | `{ok:true}` | `403` ; `409` mauvais point ; `410` inconnue / expirée ; erreurs de commande si l'ordre approuvé échoue ; `400` id non numérique |
@@ -619,6 +621,7 @@ rend sa place.
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |
 | `driver_status` | `instance`, `status` (`DriverStatus`, § 2.2) | état d'un pilote |
 | `label_changed` | `device`, `label` `{name?, room?}` | étiquette modifiée (label complet après fusion) |
+| `layout_changed` | aucun | disposition modifiée : recharger `/api/home` ; aussi à recharger après une reconnexion/snapshot |
 | `journal` | `entry` : `JournalEntry` (§ 1.6) | toute écriture journalisée |
 | `approval_requested` | `request` : `ApprovalRequest` (`id`, `ts`, `expires`, `point`, `value`, `origin`, `actor?`, `reason`, `device_name`, `native_name`, `rooms`) | un ordre attend un humain |
 | `approval_resolved` | `id`, `decision` : `approved` \| `denied` \| `expired` | décision ou expiration |
