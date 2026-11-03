@@ -115,6 +115,22 @@ base_topic = "zigbee2mqtt"
 # port = 8443
 # poll_secs = 5
 
+# Airzone Local API, one instance per controller. Read-only also defaults to
+# true on upgrade. See integrations/airzone/README.md for capabilities/limits.
+# [[driver]]
+# id = "airzone"
+# kind = "airzone"
+#
+# [driver.options]
+# host = "controller.example"
+# port = 3000
+# poll_secs = 30
+# read_only = true
+# mac = "aa:bb:cc:dd:ee:ff"   # optional identity pin
+# dhw_units = 0               # only if DHW omits its unit: 0 Celsius, 1 Fahrenheit
+# For HTTPS: replace port with the controller's TLS port and explicitly pin:
+# tls_fingerprint = "<64 hexadecimal SHA-256 characters>"
+
 # IKEA, through a Dirigera hub (local API). Needs the master key: the driver
 # keeps its token encrypted; press the action button under the hub when asked.
 # [[driver]]

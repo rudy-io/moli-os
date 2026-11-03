@@ -1,9 +1,13 @@
 # Airzone Local API
 
-One native `airzone` driver instance per local Webserver, HTTP port 3000 by
-default. No Home Assistant or cloud dependency. This does not implement Aidoo
-Cloud, DHW, energy, IAQ, double setpoints, stage configuration or schedules.
-No installation request modifies `/integration` or the controller configuration.
+Native local integration of the documented Airzone Local API 1.78. One instance
+per controller, no Home Assistant or cloud dependency. The reviewed contract is
+in [coverage.json](coverage.json): 12 operations, 118 parameter schemas, 31
+explicitly writable parameters and 17 energy leaves. Descriptors also cover the
+known example/prose fields; these do not acquire write permission without a
+write contract. Coverage is conditional on what a controller actually reports.
+
+## Configuration and migration
 
 ```toml
 [[driver]]
@@ -13,78 +17,156 @@ kind = "airzone"
 host = "controller.example"
 port = 3000
 poll_secs = 30
-mac = "aa:bb:cc:dd:ee:ff" # optional; otherwise learned from /webserver
+read_only = true
+mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
+# dhw_units = 0          # only if DHW omits units: 0 Celsius, 1 Fahrenheit
+# port = 3443           # HTTPS: replace port above and set a verified fingerprint
+# tls_fingerprint = "<64 hexadecimal SHA-256 characters>"
 ```
 
-`Airzone::new` validates configuration without networking. Hosts are explicit
-IPv4 addresses or DNS hostnames (no URLs, paths, embedded port, discovery or
-IPv6 in this initial version). Poll interval: 5–3600 seconds. Controller MAC
-is configured or learned and retained across driver restarts; it never derives
-from the host or zone name. Learned identity is persisted by the runtime's
-known-address store. Changing an identity requires deliberate reconfiguration.
-Without persistent runtime storage, configure `mac` to pin it across process
-restarts. No authentication is specified by the local API: isolate its network.
+**Read-only defaults to true**, including when upgrading the initial driver.
+An operator must explicitly set `read_only = false` to enable commands. The
+restriction applies to published capabilities, the executor and transport,
+including integration configuration. It is not merely a disabled UI button.
+No startup or diagnostic operation writes `/integration`.
 
-Zones use stable `<controller MAC>_s<systemID>_z<zoneID>` identities. Names are
-bounded labels; they never automatically become Moli rooms. Each zone exposes
-`on`, `temperature`, `target_temperature`, read-only `mode`, optional humidity,
-reported demands and bounded diagnostics. Numeric bounds, unit and increment
-come from the current response; readings are not rounded to the increment.
-Writes enforce reported bounds and increment (relative to `minTemp`, tolerance
-1e-6). Celsius and Fahrenheit are published explicitly without conversion.
+Hosts are explicit IPv4 addresses or DNS names, not URLs. Configuration is
+validated before networking. Polling is 5–3600 seconds. HTTPS requires an explicit
+certificate fingerprint and uses the shared pinned transport; no certificate
+verification bypass or automatic downgrade. Pin replacement is deliberate.
+The MAC is configured or learned through `/webserver` and persisted by the
+runtime known-address store; changing an IP/name does not change device IDs.
+Without persistent storage, configure the MAC explicitly.
 
-A separate `_control` device publishes only advertised modes and `fan_speed`
-(string enum of supported wire speeds, `0` is auto). A zone is a master only
-when it advertises `modes`, regardless of its number. Only a resolved master
-domain offers common controls. Its `members` enumerate directly affected zones
-so Moli's room guard checks all of them. Multiple masters require explicit,
-consistent `master_zoneID` on every zone, including the masters. Ambiguous
-common control is omitted. Zone on/off and setpoint never inherit broad scope.
-No writes use system or zone broadcast IDs.
+## Published resources
 
-A malformed zone with valid, unique IDs is skipped while healthy zones remain
-available. Shared controls for its entire system are omitted until a complete
-valid snapshot returns, so a partial snapshot never shrinks the guard's scope.
-The driver remembers every validated zone identity, including malformed zones;
-if a known zone disappears entirely from a later response, its system's shared
-controls stay unavailable until all known zones return. This inventory survives
-actor restarts; a new driver also restores published zone identities from the
-runtime's known devices. A permanently removed zone therefore requires a
-deliberate inventory reset before shared controls can use the smaller scope.
-One bounded warning records the number of skipped zones, without raw data or
-names. Missing/invalid IDs, duplicate IDs, inconsistent system membership and
-invalid envelopes still reject the whole snapshot.
+| Resource | Stable native identity | Data and commands when advertised |
+|---|---|---|
+| Zone | `<MAC>_s<N>_z<M>` | Existing on/temperature/target keys, double setpoints, sleep, air/floor stages, thermostat information, battery/radio, demands, air quality, windows, angles and alerts |
+| Shared settings | `<MAC>_s<N>_z<M>_control` | Modes, fan, slats, Q-Adapt and ERV controls, with direct affected-zone members |
+| System | `<MAC>_s<N>_system` | Firmware/type/manufacturer, scenes, ERV, meter and 17 individual energy values |
+| Hot water | `<MAC>_dhw` | Temperature, setpoint/bounds, on/off and powerful mode |
+| Air-quality sensor | `<MAC>_s<N>_iaq<M>` | IAQ index/score, CO2, particles, TVOC, pressure, ventilation mode and name |
+| Gateway | `<MAC>_gateway` | Webserver/API versions, connection information, optional-section status and integration driver label |
 
-Each write performs identity and full capability reads before the one PUT.
-It refuses changed shared membership (the guard used the previous membership),
-unknown/missing zones, invalid capabilities and cancelled/expired commands.
-Preflight and PUT share a total budget of min(remaining command deadline,
-4500 ms); requests are sequential and never retried. A parameter-level error
-on HTTP 200 still fails. Both object and single-element list acknowledgements
-are accepted after checking IDs and returned values. Acceptance never invents
-achieved state: a separate full read publishes confirmation. A refused command
-returns its error and triggers a fresh read without restarting the driver or
-replaying the write. Failed transport, identity or envelope reads mark all
-devices offline through the normal driver supervisor. Missing or malformed zones
-and unresolved shared controls become offline without resetting their last
-measurements; stale capabilities cannot be used to write them.
+All published points are available through normal Moli REST/SSE/MCP, history
+and Atelier. Text writes use an explicit Save action. Renaming the manufacturer's
+`name` point is distinct from changing a local Moli label. Advanced settings
+remain generic typed points; this does not introduce a separate Airzone app.
+Unknown units are displayed without an invented degree symbol. Mixed or unknown
+units are not averaged as room temperatures.
 
-## Provenance and limits
+A present reading is not necessarily a writable capability. Modes, speeds,
+stages and modern grille angles use the current advertised choices. Setpoints
+use current bounds, units and step. Integer, name-alphabet/11-character and
+threshold ordering restrictions are enforced. `acs_setpoint` remains read-only
+when its unit is unknown; `dhw_units` is an explicit operator choice in that case,
+never inferred from the first zone and never overriding a reported unit.
 
-Independent Rust implementation; no upstream code copied. References:
+`humidity = 0` is an ambiguous manufacturer sentinel: retain it as diagnostic
+`humidity_reported`, without adding a false ambient humidity measurement.
+`power` (documented ambiguously as kW/h) and `consumption_ue` are retained without
+inventing billable energy. `energy_data` leaves preserve their documented kW/kWh.
+Deprecated grille code 4 has no documented meaning and is not offered as a write.
+The metadata `driver` has a local 240-character bound and is not a firmware update.
 
-- [Airzone Local API documentation](https://developers.airzonecloud.com/docs/local-api/).
-- [Official OpenAPI 1.78](https://developers.airzonecloud.com/downloads/local-api/1.78/lapi_openapi.yaml):
-  `/webserver`, `/hvac`, modes, speeds and parameter errors.
-- [Official Local API manual](https://doc.airzone.es/producto/Gama_AZ6/Airzone/Comunes/Manuales/MI_AZ6_WSCLAPI_A4_MUL.pdf),
-  printed pages 20–33 (POST reads, addressed PUT writes).
-- [aioairzone v1.0.5 reference revision](https://github.com/Noltari/aioairzone/tree/b683595ffe4660b5a01a7b0acceeb0931444f306):
-  `localapi.py`, `system.py`, `zone.py`, `const.py`, `http.py`; Apache-2.0,
-  used to understand envelope shapes and master scope.
+## Operations and diagnostics
 
-The fixture is entirely synthetic, with multiple systems, non-contiguous IDs,
-a master numbered 8, fractional measurements and Fahrenheit. Tests use pure
-parsing and loopback simulators. No physical command has been tested.
+| Official operation | Integration use |
+|---|---|
+| POST /hvac | Zone inventory, system metadata (127 broadcast with per-system fallback), DHW system 0 without zoneID |
+| GET /hvac | Explicit read-only diagnostic alternative, lowercase query keys |
+| PUT /hvac | One current, validated parameter on one zone/system/DHW resource |
+| POST /iaq | Dedicated sensor inventory when `num_airqsensor` is advertised |
+| GET /iaq | Explicit read-only diagnostic alternative |
+| PUT /iaq | Validated sensor name or supported ventilation mode |
+| POST /webserver | Identity verification and gateway information |
+| POST /version | API version and diagnostic |
+| POST /integration | Current integration label/version |
+| PUT /integration | Explicit guarded text-point command only |
+| POST /demo | Explicit synthetic diagnostic; never discovery or live capabilities |
+| GET / | Controller thermostat-page availability/size; no HTML execution or embedding |
+
+Paths except `/` are relative to `/api/v1/`. Moli deliberately sends one addressed
+parameter per hub command. Manufacturer multi-parameter and broadcast write
+payloads are not exposed as a raw proxy; each documented writable parameter is
+covered individually. The special DHW `{systemID:0}` is an addressed resource,
+not a zone broadcast.
+
+Read-only operator commands use an existing configured instance:
+
+```sh
+moli-os airzone-inspect --instance airzone version
+moli-os airzone-inspect --instance airzone webserver
+moli-os airzone-inspect --instance airzone hvac --system 0 --zone 0
+moli-os airzone-inspect --instance airzone hvac --system 127 --get
+moli-os airzone-inspect --instance airzone hvac --system 0
+moli-os airzone-inspect --instance airzone iaq --system 1 --sensor 0 --get
+moli-os airzone-inspect --instance airzone integration
+moli-os airzone-inspect --instance airzone demo
+moli-os airzone-inspect --instance airzone thermostat
+```
+
+These commands cannot write, even with a writable instance configuration. The
+host comes from that instance, paths/methods are closed, and a configured MAC is
+checked. Diagnostic output removes unknown keys and names/MAC/integration labels,
+keeps known alarm codes, marks demo as synthetic and never emits the thermostat
+HTML. Measurements and system topology still describe an installation: inspect
+an export before sharing it publicly.
+
+## Lifecycle, scope and bounds
+
+Existing zone identities and room guards are preserved. A reported master is not
+assumed to be zone 1. Unambiguous master domains have direct zone members;
+independently advertised shared settings without a mode master use the entire
+system as their conservative scope. Unknown or missing members never silently
+reduce a shared command's scope. Global DHW/integration commands require a
+complete system inventory, including previously published systems. Partial IAQ
+inventories remain read-only.
+
+Optional invalid humidity/demand readings are omitted. Malformed essential zone
+measurements, units or master capability data retain the earlier conservative
+policy: isolate the zone and disable its system's shared controls, remembering
+its identity. Invalid/duplicate identities and inconsistent nested groups reject
+the envelope. Flat multi-system arrays and nested system arrays are accepted.
+Permanently removing a known zone still requires a deliberate inventory reset;
+this change does not add automatic destructive cleanup or physical pairing.
+
+Commands re-read identity, the zone inventory and only the target resource's
+necessary capabilities. They compare admitted units and guard membership before
+one PUT within the remaining deadline (at most 4.5 seconds). HTTP 200 parameter
+errors, wrong acknowledgements, cancellation and expiry fail without a retry.
+Acceptance is separate from the later state read. Queued commands interrupt slow
+read-only polls, including optional diagnostics; confirmation resumes afterwards.
+A failed optional section becomes unavailable without taking healthy zones down.
+
+Responses are bounded by the shared transport (4 MiB). Known fields are projected
+before retention: 240-character texts, bounded lists and errors, 16 KiB serialized
+JSON per record and 2 MiB aggregate optional-resource snapshot. These are data
+bounds, not a measurement of process RSS. Oversized sections are rejected
+atomically rather than truncating their guard inventory. HTML acceptance is
+64 KiB; pinned HTTPS first applies the shared 4 MiB response bound.
+
+## Provenance, verification and limits
+
+The contract inventory pins the official OpenAPI 1.78 source SHA-256 and records
+its known errata (case aliases, inconsistent enums/shapes/units). Tests cover
+publication, the 31 encoders, exact HTTP/TLS requests, acknowledgements, partial
+failures, bounds, expiry, read-only and guarded membership using synthetic data.
+No copied implementation or new production dependency is required; TLS fixtures
+use dev dependencies already present elsewhere in the workspace.
+
+References:
+- [Official Local API](https://developers.airzonecloud.com/docs/local-api/)
+- [OpenAPI 1.78](https://developers.airzonecloud.com/downloads/local-api/1.78/lapi_openapi.yaml)
+- [Integration manual](https://doc.airzone.es/producto/Gama_AZ6/Airzone/Comunes/Manuales/MI_AZ6_WSCLAPI_A4_MUL.pdf)
+- [aioairzone reference](https://github.com/Noltari/aioairzone/tree/b683595ffe4660b5a01a7b0acceeb0931444f306) is historical protocol context; no implementation copied.
+
+This is documented Local API coverage, not Airzone Cloud, physical thermostat
+pairing, network commissioning, firmware installation or manufacturer calendars:
+those operations do not exist in this local specification. Runtime capabilities
+and firmware compatibility still require qualification on each target controller.
+No physical command or deployment was performed for this extension.
 
 Read-only hardware validation on 2026-10-31 exercised the unmodified Hyper
 transport and snapshot parser against a Webserver reporting API type `ws_az`,

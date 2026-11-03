@@ -1,14 +1,19 @@
 mod api;
+mod diagnostic;
+pub use diagnostic::{DiagnosticRequest, inspect};
+mod fields;
 mod model;
+mod resources;
 use anyhow::{Context as _, ensure};
 use model::Snapshot;
-use moli_core::DeviceId;
+use moli_core::{DeviceId, InstanceId};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 const COMMAND_LIMIT: Duration = Duration::from_millis(4500);
+const POLL_LIMIT: Duration = Duration::from_secs(30);
 fn invalid_identity() -> String {
     moli_i18n::tr!("airzone.identity")
 }
@@ -28,6 +33,17 @@ pub struct Config {
     pub poll_secs: u64,
     #[serde(default)]
     pub mac: Option<String>,
+    #[serde(default = "default_read_only")]
+    pub read_only: bool,
+    /// Explicit DHW temperature unit when the controller omits it (0 Celsius, 1 Fahrenheit).
+    #[serde(default)]
+    pub dhw_units: Option<u8>,
+    /// SHA-256 certificate fingerprint; presence selects pinned HTTPS.
+    #[serde(default)]
+    pub tls_fingerprint: Option<String>,
+}
+fn default_read_only() -> bool {
+    true
 }
 fn default_port() -> u16 {
     3000
@@ -59,6 +75,22 @@ impl Airzone {
             config.port > 0 && (5..=3600).contains(&config.poll_secs),
             moli_i18n::tr!("airzone.bad_config")
         );
+        ensure!(
+            config.dhw_units.is_none_or(|unit| unit <= 1),
+            moli_i18n::tr!("airzone.bad_config")
+        );
+        if let Some(pin) = &config.tls_fingerprint {
+            let normalized: String = pin
+                .chars()
+                .filter(|c| *c != ':' && !c.is_ascii_whitespace())
+                .collect();
+            ensure!(
+                pin.len() <= 128
+                    && normalized.len() == 64
+                    && normalized.bytes().all(|b| b.is_ascii_hexdigit()),
+                moli_i18n::tr!("airzone.bad_config")
+            );
+        }
         if let Some(mac) = config.mac {
             config.mac = Some(
                 moli_net::lan::mac_hex(&mac)
@@ -80,15 +112,91 @@ impl Driver for Airzone {
         Box::pin(self.run_inner(ctx))
     }
 }
-fn publish(ctx: &DriverCtx, snapshot: &Snapshot, mac: &str) {
-    let entities = snapshot.entities(ctx.instance(), mac);
+enum Next {
+    Command(Option<CommandRequest>),
+    Refresh(anyhow::Result<Box<LiveSnapshot>>),
+    Tick,
+}
+#[derive(Debug)]
+struct LiveSnapshot {
+    zones: Snapshot,
+    resources: resources::ResourceSnapshot,
+}
+impl LiveSnapshot {
+    fn entities(&self, instance: &moli_core::InstanceId, mac: &str) -> Vec<model::Entity> {
+        let mut entities = self.zones.entities(instance, mac);
+        entities.extend(self.resources.entities(instance, mac, &self.zones, false));
+        entities
+    }
+    fn encode(
+        &self,
+        instance: &moli_core::InstanceId,
+        mac: &str,
+        device: &DeviceId,
+        key: &str,
+        value: &moli_core::Value,
+    ) -> anyhow::Result<(&'static str, serde_json::Value)> {
+        if self
+            .zones
+            .entities(instance, mac)
+            .iter()
+            .any(|(d, _)| &d.id == device)
+        {
+            return self
+                .zones
+                .encode(instance, mac, device, key, value)
+                .map(|body| ("hvac", body));
+        }
+        self.resources
+            .encode(instance, mac, &self.zones, device, key, value)
+    }
+}
+fn publish(ctx: &DriverCtx, snapshot: &LiveSnapshot, mac: &str, read_only: bool) {
+    publish_entities(
+        ctx,
+        snapshot.entities(ctx.instance(), mac),
+        read_only,
+        &ctx.devices(),
+    );
+}
+fn publish_core(ctx: &DriverCtx, snapshot: &Snapshot, mac: &str, read_only: bool) {
+    let prefix = format!("{}:{mac}_s", ctx.instance());
+    let managed = ctx
+        .devices()
+        .into_iter()
+        .filter(|id| {
+            id.as_str()
+                .strip_prefix(&prefix)
+                .is_some_and(|tail| tail.contains("_z"))
+        })
+        .collect::<Vec<_>>();
+    publish_entities(
+        ctx,
+        snapshot.entities(ctx.instance(), mac),
+        read_only,
+        &managed,
+    );
+}
+fn publish_entities(
+    ctx: &DriverCtx,
+    mut entities: Vec<model::Entity>,
+    read_only: bool,
+    managed: &[DeviceId],
+) {
+    if read_only {
+        for (device, _) in &mut entities {
+            for point in &mut device.points {
+                point.access.write = false;
+            }
+        }
+    }
     let present = entities
         .iter()
         .map(|(d, _)| d.id.clone())
         .collect::<Vec<DeviceId>>();
-    for id in ctx.devices() {
-        if !present.contains(&id) {
-            ctx.set_availability(&id, false);
+    for id in managed {
+        if !present.contains(id) {
+            ctx.set_availability(id, false);
         }
     }
     for (device, states) in entities {
@@ -101,7 +209,10 @@ fn publish(ctx: &DriverCtx, snapshot: &Snapshot, mac: &str) {
     }
 }
 impl Airzone {
-    async fn reported_identity(&self, end: Instant) -> anyhow::Result<String> {
+    async fn reported_controller(
+        &self,
+        end: Instant,
+    ) -> anyhow::Result<(String, serde_json::Value)> {
         let info = api::exchange(
             &self.config,
             "POST",
@@ -110,12 +221,19 @@ impl Airzone {
             remaining(end)?,
         )
         .await?;
-        info["mac"]
+        let mac = info["mac"]
             .as_str()
             .and_then(moli_net::lan::mac_hex)
-            .context(invalid_identity())
+            .context(invalid_identity())?;
+        Ok((mac, info))
     }
-    async fn zones(&self, ctx: &DriverCtx, mac: &str, end: Instant) -> anyhow::Result<Snapshot> {
+    async fn zones(
+        &self,
+        instance: &InstanceId,
+        known: &[DeviceId],
+        mac: &str,
+        end: Instant,
+    ) -> anyhow::Result<Snapshot> {
         let value = api::exchange(
             &self.config,
             "POST",
@@ -126,9 +244,9 @@ impl Airzone {
         .await?;
         let mut snapshot = Snapshot::parse(&value)?;
         snapshot.retain_known_scope(
-            ctx.instance(),
+            instance,
             mac,
-            &ctx.known_devices(),
+            known,
             &mut self
                 .known_zones
                 .lock()
@@ -136,14 +254,30 @@ impl Airzone {
         );
         Ok(snapshot)
     }
-    async fn refresh(&self, ctx: &DriverCtx, mac: &str, end: Instant) -> anyhow::Result<Snapshot> {
-        ensure!(
-            self.reported_identity(end).await? == mac,
-            invalid_identity()
-        );
-        let snapshot = self.zones(ctx, mac, end).await?;
-        publish(ctx, &snapshot, mac);
-        Ok(snapshot)
+    async fn snapshot(
+        &self,
+        instance: &InstanceId,
+        known: &[DeviceId],
+        mac: &str,
+        info: &serde_json::Value,
+        end: Instant,
+    ) -> anyhow::Result<LiveSnapshot> {
+        let zones = self.zones(instance, known, mac, end).await?;
+        let mut resources =
+            resources::ResourceSnapshot::read(&self.config, &zones, info, end).await;
+        resources.retain_known_scope(instance, mac, &zones, known);
+        Ok(LiveSnapshot { zones, resources })
+    }
+    async fn refresh(
+        &self,
+        instance: &InstanceId,
+        known: &[DeviceId],
+        mac: &str,
+        end: Instant,
+    ) -> anyhow::Result<LiveSnapshot> {
+        let (reported, info) = self.reported_controller(end).await?;
+        ensure!(reported == mac, invalid_identity());
+        self.snapshot(instance, known, mac, &info, end).await
     }
     async fn execute(
         &self,
@@ -151,9 +285,42 @@ impl Airzone {
         mac: &str,
         command: &CommandRequest,
     ) -> anyhow::Result<()> {
+        ensure!(!self.config.read_only, moli_i18n::tr!("airzone.read_only"));
         ensure!(!command.abandoned(), moli_i18n::tr!("airzone.expired"));
         let end = command.deadline.min(Instant::now() + COMMAND_LIMIT);
-        let snapshot = self.refresh(ctx, mac, end).await?;
+        let (reported, info) = self.reported_controller(end).await?;
+        ensure!(reported == mac, invalid_identity());
+        let zones = self
+            .zones(ctx.instance(), &ctx.known_devices(), mac, end)
+            .await?;
+        publish_core(ctx, &zones, mac, self.config.read_only);
+        let resources = if zones
+            .entities(ctx.instance(), mac)
+            .iter()
+            .any(|(device, _)| device.id == command.device.id)
+        {
+            resources::ResourceSnapshot::default()
+        } else {
+            let prefix = format!("{}:", ctx.instance());
+            let native = command
+                .device
+                .id
+                .as_str()
+                .strip_prefix(&prefix)
+                .context(moli_i18n::tr!("airzone.stale"))?;
+            let mut resources = resources::ResourceSnapshot::read_for(
+                &self.config,
+                &zones,
+                &info,
+                native,
+                mac,
+                end,
+            )
+            .await;
+            resources.retain_known_scope(ctx.instance(), mac, &zones, &ctx.known_devices());
+            resources
+        };
+        let snapshot = LiveSnapshot { zones, resources };
         let entities = snapshot.entities(ctx.instance(), mac);
         let (current, _) = entities
             .iter()
@@ -172,7 +339,7 @@ impl Airzone {
                 .is_some_and(|(current, admitted)| current.unit == admitted.unit),
             moli_i18n::tr!("airzone.stale")
         );
-        let body = snapshot.encode(
+        let (path, body) = snapshot.encode(
             ctx.instance(),
             mac,
             &command.device.id,
@@ -181,12 +348,12 @@ impl Airzone {
         )?;
         // No awaited work occurs between this check and starting the one PUT.
         ensure!(!command.abandoned(), moli_i18n::tr!("airzone.expired"));
-        let value = api::exchange(&self.config, "PUT", "hvac", &body, remaining(end)?).await?;
+        let value = api::exchange(&self.config, "PUT", path, &body, remaining(end)?).await?;
         api::acknowledge(&value, &body)
     }
     async fn run_inner(&self, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-        let end = Instant::now() + COMMAND_LIMIT;
-        let mac = self.reported_identity(end).await?;
+        let end = Instant::now() + POLL_LIMIT;
+        let (mac, info) = self.reported_controller(end).await?;
         let expected = self
             .identity
             .lock()
@@ -197,7 +364,9 @@ impl Airzone {
             expected.as_ref().is_none_or(|expected| expected == &mac),
             invalid_identity()
         );
-        let snapshot = self.zones(ctx, &mac, end).await?;
+        let snapshot = self
+            .snapshot(ctx.instance(), &ctx.known_devices(), &mac, &info, end)
+            .await?;
         *self.identity.lock().unwrap_or_else(PoisonError::into_inner) = Some(mac.clone());
         ctx.remember_address(KnownAddress {
             configured: self.config.host.clone(),
@@ -206,23 +375,35 @@ impl Airzone {
             identity: Some(mac.clone()),
         })
         .await;
-        publish(ctx, &snapshot, &mac);
+        publish(ctx, &snapshot, &mac, self.config.read_only);
         ctx.ready();
         let period = Duration::from_secs(self.config.poll_secs);
         let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut refresh_pending = false;
         loop {
-            tokio::select! {
-             cmd=ctx.next_command()=>{
-              let Some(command)=cmd else{return Ok(());};
-              let result=self.execute(ctx,&mac,&command).await;
-              command.reply(result.as_ref().copied().map_err(ToString::to_string));
-              // A refused order is not a failed driver. Refresh after either outcome;
-              // only a failed read takes the instance offline through supervision.
-              // Acceptance is separate from confirmation, including for shared mode.
-              self.refresh(ctx,&mac,Instant::now()+COMMAND_LIMIT).await?;
-             }
-             _=interval.tick()=>{self.refresh(ctx,&mac,Instant::now()+COMMAND_LIMIT).await?;}
+            let instance = ctx.instance().clone();
+            let known = ctx.known_devices();
+            // Read requests are safe to cancel. A queued command interrupts a
+            // slow optional poll; writes themselves are never replayed.
+            let next = tokio::select! {
+                biased;
+                command=ctx.next_command()=>Next::Command(command),
+                result=self.refresh(&instance,&known,&mac,Instant::now()+POLL_LIMIT), if refresh_pending=>Next::Refresh(result.map(Box::new)),
+                _=interval.tick(), if !refresh_pending=>Next::Tick,
+            };
+            match next {
+                Next::Command(Some(command)) => {
+                    let result = self.execute(ctx, &mac, &command).await;
+                    command.reply(result.as_ref().copied().map_err(ToString::to_string));
+                    refresh_pending = true;
+                }
+                Next::Command(None) => return Ok(()),
+                Next::Refresh(result) => {
+                    publish(ctx, result?.as_ref(), &mac, self.config.read_only);
+                    refresh_pending = false;
+                }
+                Next::Tick => refresh_pending = true,
             }
         }
     }
@@ -231,12 +412,33 @@ impl Airzone {
 mod tests {
     use super::*;
     #[test]
+    fn explicit_read_only_configuration_is_supported() {
+        assert!(
+            serde_json::from_value::<Config>(json!({
+                "host":"controller.example", "read_only":true
+            }))
+            .is_ok()
+        );
+    }
+    #[test]
+    fn omitted_read_only_defaults_to_true_and_writes_require_explicit_opt_in() {
+        let config: Config = serde_json::from_value(json!({"host":"controller.example"})).unwrap();
+        assert!(config.read_only);
+        let config: Config =
+            serde_json::from_value(json!({"host":"controller.example", "read_only":false}))
+                .unwrap();
+        assert!(!config.read_only);
+    }
+    #[test]
     fn constructor_validates_without_network() {
         let good = Config {
             host: "controller.example".into(),
             port: 3000,
             poll_secs: 30,
             mac: Some("aa:bb:cc:dd:ee:ff".into()),
+            read_only: true,
+            dhw_units: None,
+            tls_fingerprint: None,
         };
         assert!(Airzone::new(good.clone()).is_ok());
         for host in [
@@ -288,6 +490,8 @@ mod lifecycle_tests {
         writes: Arc<Mutex<Vec<Json>>>,
         reject: Arc<Mutex<bool>>,
         delay: Arc<Mutex<u64>>,
+        optional_delay: Arc<Mutex<u64>>,
+        optional_started: Arc<AtomicUsize>,
         reads: Arc<AtomicUsize>,
     }
     async fn start() -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
@@ -308,15 +512,33 @@ mod lifecycle_tests {
         zones: Json,
         hub: Hub,
     ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
+        start_with_settings(zones, hub, false).await
+    }
+    async fn start_with_settings(
+        zones: Json,
+        hub: Hub,
+        read_only: bool,
+    ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
         let sim = Sim {
             zones: Arc::new(Mutex::new(zones)),
             mac: Arc::new(Mutex::new("aa:bb:cc:dd:ee:ff".into())),
             writes: Arc::default(),
             reject: Arc::default(),
             delay: Arc::default(),
+            optional_delay: Arc::default(),
+            optional_started: Arc::default(),
             reads: Arc::default(),
         };
         let app = Router::new()
+            .route(
+                "/api/v1/version",
+                any(|State(s): State<Sim>| async move {
+                    let delay = *s.optional_delay.lock().unwrap();
+                    s.optional_started.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    Reply(json!({"version":"1.78"}))
+                }),
+            )
             .route(
                 "/api/v1/webserver",
                 any(|State(s): State<Sim>, method: Method| async move {
@@ -332,9 +554,11 @@ mod lifecycle_tests {
                     |State(s): State<Sim>, method: Method, Reply(body): Reply<Json>| async move {
                         let delay = *s.delay.lock().unwrap();
                         if method == Method::POST {
+                            if body != json!({"systemID":0,"zoneID":0}) {
+                                return Reply(json!({"errors":[{"error":"method not supported"}]}));
+                            }
                             s.reads.fetch_add(1, Ordering::SeqCst);
                             tokio::time::sleep(Duration::from_millis(delay)).await;
-                            assert_eq!(body, json!({"systemID":0,"zoneID":0}));
                             Reply(s.zones.lock().unwrap().clone())
                         } else {
                             assert_eq!(method, Method::PUT);
@@ -365,6 +589,9 @@ mod lifecycle_tests {
                     port,
                     poll_secs: 5,
                     mac: None,
+                    read_only,
+                    dhw_units: None,
+                    tls_fingerprint: None,
                 })
                 .unwrap(),
             ),
@@ -380,6 +607,88 @@ mod lifecycle_tests {
     }
     fn point(device: &str, key: &str) -> PointId {
         PointId::new(&DeviceId::from(device), key)
+    }
+    #[tokio::test]
+    async fn slow_optional_metadata_does_not_delay_a_zone_command() {
+        let (hub, cancel, sim, server) = start().await;
+        *sim.optional_delay.lock().unwrap() = 6000;
+        let started = Instant::now();
+        hub.command(
+            &point("az:aabbccddeeff_s1_z2", "on"),
+            Value::Bool(true),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        assert_eq!(sim.writes.lock().unwrap().len(), 1);
+        for _ in 0..100 {
+            if sim.optional_started.load(Ordering::SeqCst) > 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            sim.optional_started.load(Ordering::SeqCst) > 1,
+            "confirmation poll started"
+        );
+        let started = Instant::now();
+        hub.command(
+            &point("az:aabbccddeeff_s1_z2", "on"),
+            Value::Bool(false),
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "command interrupts optional poll"
+        );
+        assert_eq!(sim.writes.lock().unwrap().len(), 2);
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn read_only_publishes_no_writable_points_and_rejects_every_origin() {
+        let zones = serde_json::from_str(include_str!(
+            "../../../integrations/airzone/fixtures/zones.json"
+        ))
+        .unwrap();
+        let (hub, cancel, sim, server) =
+            start_with_settings(zones, Hub::new(HubOptions::default()).unwrap(), true).await;
+        assert!(
+            hub.snapshot().devices.iter().all(|device| device
+                .device
+                .points
+                .iter()
+                .all(|point| !point.access.write))
+        );
+        for origin in [
+            Origin::Ui,
+            Origin::Household,
+            Origin::Api,
+            Origin::Mcp,
+            Origin::Cli,
+            Origin::System,
+            Origin::Assistant,
+            Origin::Automation,
+        ] {
+            assert!(
+                hub.command(
+                    &point("az:aabbccddeeff_s1_z2", "on"),
+                    Value::Bool(true),
+                    origin,
+                    None
+                )
+                .await
+                .is_err()
+            );
+        }
+        assert!(sim.writes.lock().unwrap().is_empty());
+        cancel.cancel();
+        server.abort();
     }
     fn assert_no_restart(events: &mut tokio::sync::broadcast::Receiver<Event>) {
         while let Ok(event) = events.try_recv() {
@@ -445,7 +754,13 @@ mod lifecycle_tests {
             )
             .await
             .unwrap();
-            // Initial read + rejected preflight + recovery read + next preflight.
+            // Confirmation may yield to a queued command, but must follow it.
+            for _ in 0..100 {
+                if sim.reads.load(Ordering::SeqCst) >= 4 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
             assert!(sim.reads.load(Ordering::SeqCst) >= 4);
             assert_eq!(
                 sim.writes.lock().unwrap().len(),

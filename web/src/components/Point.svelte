@@ -2,6 +2,7 @@
   import { hub, command } from '../lib/hub.svelte.js';
   import { formatValue, unitOf, isAlarm } from '../lib/format.js';
   import { t, locale } from '../lib/i18n.svelte.js';
+  import { pointCanWrite, textPointCommand } from '../lib/point-edit.js';
 
   let { device, point, big = false } = $props();
 
@@ -10,12 +11,34 @@
   const value = $derived(sample?.value);
   const pending = $derived(id in hub.pending);
   const flash = $derived(hub.changed[id]);
-  const writable = $derived(point.access.write);
+  const writable = $derived(pointCanWrite(device, point));
   const kind = $derived(point.kind.type);
+  let draft = $state(null);
+  const textRequest = $derived(textPointCommand(device, point, draft, pending));
+
+  $effect(() => {
+    // Reusing a row or losing write access must discard an old unsent edit.
+    void id;
+    void writable;
+    draft = null;
+  });
+  $effect(() => {
+    if (draft !== null && draft === value) draft = null;
+  });
+
+  function submit(next) {
+    if (writable && !pending) command(id, next);
+  }
 
   function submitNumber(e) {
     const n = Number(e.currentTarget.value);
-    if (Number.isFinite(n) && n !== value) command(id, n);
+    if (Number.isFinite(n) && n !== value) submit(n);
+  }
+
+  function submitText(e) {
+    e.preventDefault();
+    const request = textPointCommand(device, point, draft, pending);
+    if (request) command(request.point, request.value);
   }
 </script>
 
@@ -29,7 +52,7 @@
       aria-checked={value === true}
       aria-label={point.label}
       disabled={pending}
-      onclick={() => command(id, !(value === true))}
+      onclick={() => submit(!(value === true))}
     >
       <span class="knob"></span>
     </button>
@@ -38,7 +61,7 @@
       value={value ?? ''}
       disabled={pending}
       aria-label={point.label}
-      onchange={(e) => command(id, e.currentTarget.value)}
+      onchange={(e) => submit(e.currentTarget.value)}
     >
       {#if value == null}<option value="" disabled>—</option>{/if}
       {#each point.kind.values as v (v)}
@@ -75,6 +98,18 @@
       />
       <span class="unit">{unitOf(point)}</span>
     </span>
+  {:else if writable && kind === 'text'}
+    <form class="text-editor" data-unsaved={draft !== null ? '' : undefined} onsubmit={submitText}>
+      <input
+        type="text"
+        value={draft ?? value ?? ''}
+        maxlength="8000"
+        aria-label={point.label}
+        disabled={pending}
+        oninput={(e) => (draft = e.currentTarget.value)}
+      />
+      <button type="submit" disabled={!textRequest}>{t('systeme.appareil.enregistrer')}</button>
+    </form>
   {:else}
     {#key flash}
       <button
@@ -189,6 +224,32 @@
   .numeric {
     display: flex;
     align-items: baseline;
+  }
+  .text-editor {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: min(65%, 350px);
+    flex: 0 1 auto;
+  }
+  .text-editor input {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+  }
+  .text-editor button {
+    border: var(--stroke) solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+    padding: 4px 6px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .text-editor button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .slider {
     width: 110px;
