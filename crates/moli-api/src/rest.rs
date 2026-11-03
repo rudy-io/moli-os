@@ -311,6 +311,9 @@ pub(crate) async fn session(
         "who": who,
         // May choose the code without the current one (`PUT /api/session/pin`).
         "owner": owner,
+        // The Atelier (every device, raw): owners only, or everyone in a
+        // house that has no owner yet.
+        "atelier": owner || (!persons.has_owner() && !humans.has_owners()),
         // A new house: the installation code (logs) chooses the first code.
         "setup": humans.setup_pending(),
         // The shortest code this house accepts.
