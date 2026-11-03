@@ -70,6 +70,7 @@
   "pilotes.alexa.echec": "Alexa could not do it: {why}",
   "pilotes.alexa.lecture": "Playing",
   "pilotes.alexa.volume": "Volume",
+  "pilotes.alexa.temperature": "Room temperature",
   "pilotes.alexa.etat": "State",
   "pilotes.alexa.titre": "Title",
   "pilotes.alexa.artiste": "Artist",
