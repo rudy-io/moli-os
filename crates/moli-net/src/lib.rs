@@ -621,7 +621,13 @@ pub async fn plain_with_headers(
         let tcp = TcpStream::connect((host, port))
             .await
             .with_context(|| format!("cannot reach {host}:{port}"))?;
-        let (mut sender, connection) = http1::handshake(TokioIo::new(tcp)).await?;
+        // Embedded HTTP servers are not always RFC-tolerant: a Tapo L530
+        // answers 400 to `content-length:` and 200 to `Content-Length:`
+        // (as Daikin's BRP069 does for `host:`, see moli-profile).
+        let (mut sender, connection) = http1::Builder::new()
+            .title_case_headers(true)
+            .handshake(TokioIo::new(tcp))
+            .await?;
         tokio::spawn(async move {
             let _ = connection.await;
         });
@@ -836,6 +842,43 @@ mod pin_tests {
         assert_eq!(tls.pinned_fingerprint().as_ref(), Some(&hex));
         assert!(verify(&tls, vec![1, 2, 3]).is_ok());
         assert!(verify(&tls, vec![4, 5, 6]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod plain_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    #[tokio::test]
+    async fn lan_requests_send_title_case_headers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let device = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&seen).into_owned()
+        });
+        let request = Request::post("/app/handshake1")
+            .header("host", "127.0.0.1")
+            .header("content-type", "application/octet-stream")
+            .body(Full::new(Bytes::from_static(&[0; 16])))
+            .unwrap();
+        let (status, _) = plain("127.0.0.1", port, request).await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        let head = device.await.unwrap();
+        for header in ["Host: ", "Content-Type: ", "Content-Length: 16"] {
+            assert!(head.contains(header), "{header:?} missing from {head:?}");
+        }
     }
 }
 
