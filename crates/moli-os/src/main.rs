@@ -943,6 +943,7 @@ const KINDS: &[&str] = &[
     "hue",
     "overkiz",
     "dirigera",
+    "enedis",
     "homeassistant",
     "igd",
     "tapo",
@@ -1085,6 +1086,7 @@ fn spawn_drivers(
     Ok((tasks, gates))
 }
 
+#[allow(clippy::too_many_lines)] // one short arm per kind of driver
 fn build_driver(
     config: &DriverConfig,
     data_dir: &std::path::Path,
@@ -1111,6 +1113,9 @@ fn build_driver(
         "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
         "overkiz" => configured_driver(config, moli_overkiz::Overkiz::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "enedis" => Arc::new(moli_enedis::Enedis::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(

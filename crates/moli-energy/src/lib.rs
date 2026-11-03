@@ -21,7 +21,7 @@ use std::sync::Arc;
 use jiff::tz::TimeZone;
 use moli_core::{Event, PointId, Unit, Value, now_ms};
 use moli_runtime::Hub;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -303,7 +303,11 @@ impl Energy {
             live: self.live(),
             today: Period::of(config, &rows, today, tomorrow),
             yesterday: Period::of(config, &rows, yesterday, today),
-            month_projection: report::projection(&month_period, now, month_end),
+            month_projection: report::projection(
+                &month_period,
+                pace_until(config, &rows, month, now),
+                month_end,
+            ),
             month: month_period,
             last_month: Period::of(config, &rows, last_month, month),
             monthly_fee: config.monthly_fee,
@@ -388,9 +392,23 @@ pub fn import(
 ) -> Result<ImportReport, EnergyError> {
     config.check().map_err(EnergyError::Invalid)?;
     let tz = TimeZone::get(&config.timezone).map_err(|e| EnergyError::Invalid(e.to_string()))?;
+    let (priced, invalid) = price_rows(config, &tz, rows);
+    let mut report = ImportReport {
+        invalid,
+        ..ImportReport::default()
+    };
+    let (inserted, repriced, skipped) = Store::open(path)?.import(&priced)?;
+    report.inserted = inserted;
+    report.repriced = repriced;
+    report.skipped = skipped;
+    Ok(report)
+}
+
+/// The rows that make sense, each with its price, and how many did not.
+fn price_rows(config: &Config, tz: &TimeZone, rows: &[ImportRow]) -> (Vec<HourRow>, usize) {
     let meters: HashMap<&str, &MeterConfig> =
         config.meters.iter().map(|m| (m.id.as_str(), m)).collect();
-    let mut report = ImportReport::default();
+    let mut invalid = 0;
     let valid: Vec<(&MeterConfig, &ImportRow)> = rows
         .iter()
         .filter_map(|r| {
@@ -399,7 +417,7 @@ pub fn import(
                 && (0.0..=MAX_KWH_PER_HOUR).contains(&r.kwh);
             let meter = meters.get(r.meter.as_str()).filter(|_| ok);
             if meter.is_none() {
-                report.invalid += 1;
+                invalid += 1;
             }
             meter.map(|m| (*m, r))
         })
@@ -446,11 +464,25 @@ pub fn import(
             }
         })
         .collect();
-    let (inserted, repriced, skipped) = Store::open(path)?.import(&priced)?;
-    report.inserted = inserted;
-    report.repriced = repriced;
-    report.skipped = skipped;
-    Ok(report)
+    (priced, invalid)
+}
+
+/// How far the month's figures reach. Meters that report a day late have nothing
+/// yet for the last hours: counted as empty, they would make the pace too low.
+fn pace_until(config: &Config, rows: &[HourRow], month: u64, now: u64) -> u64 {
+    let mut main = config
+        .meters
+        .iter()
+        .filter(|m| matches!(m.role, Role::Grid | Role::Total))
+        .peekable();
+    if main.peek().is_none() || !main.clone().all(|m| m.history) {
+        return now;
+    }
+    rows.iter()
+        .filter(|r| r.hour >= month && main.clone().any(|m| m.id == r.meter))
+        .map(|r| r.hour + meter::HOUR_MS)
+        .max()
+        .unwrap_or(month)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -716,6 +748,10 @@ impl Recorder {
         let Some(&index) = self.by_point.get(point) else {
             return;
         };
+        if self.config.meters[index].history {
+            self.on_history(index, value).await;
+            return;
+        }
         let Some(raw) = value.as_f64() else {
             return; // unavailable: nothing to count
         };
@@ -742,6 +778,44 @@ impl Recorder {
             }
         };
         self.file(&meter, next).await;
+    }
+
+    /// Hours a service reported late, filed as they are. The same hours can
+    /// come back (a restart, the next report): what is filed stays.
+    async fn on_history(&mut self, index: usize, value: &Value) {
+        #[derive(Deserialize)]
+        struct Reported {
+            hour: u64,
+            kwh: f64,
+        }
+        let Value::Text(text) = value else {
+            return; // unavailable: nothing to file
+        };
+        let meter = &self.config.meters[index];
+        let Ok(reported) = serde_json::from_str::<Vec<Reported>>(text) else {
+            tracing::warn!(meter = meter.id, "energy history unreadable");
+            return;
+        };
+        let rows: Vec<ImportRow> = reported
+            .into_iter()
+            .map(|r| ImportRow {
+                meter: meter.id.clone(),
+                hour: r.hour,
+                kwh: r.kwh,
+            })
+            .collect();
+        let Ok(tz) = TimeZone::get(&self.config.timezone) else {
+            return; // refused when the recorder started
+        };
+        let (priced, invalid) = price_rows(&self.config, &tz, &rows);
+        if invalid > 0 {
+            tracing::warn!(meter = meter.id, invalid, "energy history: hours refused");
+        }
+        let store = Arc::clone(&self.store);
+        let filed = blocking(move || store.import(&priced)).await;
+        if let Err(error) = filed {
+            tracing::warn!(error = %error, "energy history not filed");
+        }
     }
 
     /// An integrated meter's running energy (from the last filed reading).
@@ -927,6 +1001,82 @@ mod tests {
         assert_eq!(cost("general", day + 3 * H), Some(0.2));
         assert_eq!(cost("general", 9 * H), None);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_late_meter_paces_the_month_on_what_it_has_reported() {
+        let row = |meter: &str, hour| HourRow {
+            meter: meter.to_owned(),
+            hour,
+            kwh: 1.0,
+            cost: None,
+        };
+        let meter = |id: &str, role: &str, late: bool| {
+            format!(
+                "[[meter]]\nid = \"{id}\"\nname = \"x\"\npoint = \"a:b/c\"\nrole = \"{role}\"\nhistory = {late}\n"
+            )
+        };
+        let config = |text: String| toml::from_str::<Config>(&text).unwrap();
+        let late = config(meter("linky", "grid", true));
+        let rows = [
+            row("linky", 100 * H),
+            row("linky", 130 * H),
+            row("old", 90 * H),
+        ];
+        assert_eq!(pace_until(&late, &rows, 100 * H, 150 * H), 131 * H);
+        // Nothing reported this month: no pace at all, not a pace of zero.
+        assert_eq!(pace_until(&late, &rows[2..], 100 * H, 150 * H), 100 * H);
+        // A meter read live says the present.
+        let live = config(format!(
+            "{}{}",
+            meter("linky", "grid", true),
+            meter("em", "total", false)
+        ));
+        assert_eq!(pace_until(&live, &rows, 100 * H, 150 * H), 150 * H);
+        assert_eq!(
+            pace_until(&config(String::new()), &rows, 100 * H, 150 * H),
+            150 * H
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_report_files_each_hour_once_at_its_place() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\nprice = 0.5\n",
+        )
+        .unwrap();
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let store = Arc::new(Store::memory());
+        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
+        let point = "enedis:linky/hours";
+        let text = |json: String| Value::Text(json.into());
+        let first = format!(
+            r#"[{{"hour":{},"kwh":2.0}},{{"hour":{},"kwh":1.0}}]"#,
+            10 * H,
+            11 * H
+        );
+        recorder.on_meter(point, &text(first.clone()), 30 * H).await;
+        // The same report again, then a new hour, an impossible one, and nonsense.
+        recorder.on_meter(point, &text(first), 31 * H).await;
+        let more = format!(
+            r#"[{{"hour":{},"kwh":4.0}},{{"hour":{},"kwh":-1.0}}]"#,
+            12 * H,
+            13 * H
+        );
+        recorder.on_meter(point, &text(more), 32 * H).await;
+        recorder.on_meter(point, &text("nope".into()), 33 * H).await;
+        recorder.on_meter(point, &Value::Null, 34 * H).await;
+        let rows = store.hours(0, 100 * H).unwrap();
+        let filed: Vec<(u64, f64, Option<f64>)> =
+            rows.iter().map(|r| (r.hour, r.kwh, r.cost)).collect();
+        assert_eq!(
+            filed,
+            vec![
+                (10 * H, 2.0, Some(1.0)),
+                (11 * H, 1.0, Some(0.5)),
+                (12 * H, 4.0, Some(2.0)),
+            ]
+        );
     }
 
     #[test]
