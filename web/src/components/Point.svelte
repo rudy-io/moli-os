@@ -145,7 +145,7 @@
     width: 42px;
     height: 24px;
     flex: none;
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: 999px;
     background: var(--card);
     cursor: pointer;

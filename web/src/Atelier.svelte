@@ -42,6 +42,7 @@
   });
 </script>
 
+<div class="atelier">
 <Header />
 <Approvals />
 
@@ -55,7 +56,7 @@
   <p class="waiting" role="alert"><strong>{d.instance}</strong> {d.status.reason}</p>
 {/each}
 
-<main>
+<div class="layout">
   <section class="home" aria-label={t('commun.atelier.maison')}>
     <EnergyStrip onopen={() => (energyOpen = true)} />
     {#if !hub.connected && rooms.length === 0}
@@ -78,7 +79,7 @@
     {/each}
   </section>
   <Journal />
-</main>
+</div>
 
 {#if hub.chart}
   <HistoryPanel point={hub.chart} onclose={() => (hub.chart = null)} />
@@ -95,46 +96,58 @@
     <p>{toast.text}</p>
   {/each}
 </div>
+</div>
 
 <style>
-  main {
+  /* The Atelier's parts were drawn in ink (« Le Relevé »): on this page they
+     take the house's look, day and night alike. */
+  .atelier {
+    --card: var(--surface);
+    --paper: var(--surface);
+    --bone: var(--bg);
+    --radius: var(--r-sm);
+    --stroke: 1px;
+    --edge: var(--line);
+    --card-shadow: var(--shadow);
+    --copper: var(--warm-ink);
+    --alarm: var(--alert);
+    --ok: var(--good);
+    --sun-soft: var(--warm-soft);
+    font-size: 15px;
+  }
+  .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;
     gap: 28px;
-    max-width: 1440px;
-    margin: 0 auto;
-    padding: 24px 28px 64px;
   }
-  @media (max-width: 1000px) {
-    main {
+  @media (max-width: 1100px) {
+    .layout {
       grid-template-columns: minmax(0, 1fr);
-      padding: 16px 16px 48px;
     }
   }
   .room + .room {
     margin-top: 32px;
   }
   h2 {
-    font-size: 13px;
+    font-size: 19px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin: 0 0 12px;
+    margin: 0 0 14px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
   .count {
+    font-size: 14px;
     font-weight: 600;
     color: var(--ink-3);
   }
   .lock {
-    font-size: 10.5px;
-    letter-spacing: 0.06em;
-    padding: 2px 6px;
-    border: 1.5px solid var(--copper);
-    color: var(--copper);
-    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--warm-soft);
+    color: var(--warm-ink);
   }
   .grid {
     display: grid;
@@ -145,34 +158,38 @@
     color: var(--ink-2);
   }
   .waiting {
-    margin: 0;
-    padding: 12px 28px;
-    background: var(--sun);
-    color: #161512;
-    border-bottom: var(--stroke) solid var(--ink);
-    font-weight: 600;
+    margin: 0 0 12px;
+    padding: 14px 18px;
+    border-radius: var(--r-sm);
+    background: var(--warm-soft);
+    color: var(--warm-ink);
+    font-weight: 500;
   }
   .waiting strong {
     margin-right: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 12px;
+    font-weight: 700;
   }
   .toasts {
     position: fixed;
-    bottom: 16px;
+    bottom: calc(28px + env(safe-area-inset-bottom));
     left: 50%;
     transform: translateX(-50%);
     display: grid;
     gap: 8px;
-    z-index: 10;
+    z-index: 40;
   }
   .toasts p {
     margin: 0;
-    padding: 10px 14px;
+    padding: 10px 16px;
     background: var(--ink);
     color: var(--bg);
-    border-radius: var(--radius);
+    border-radius: 999px;
     font-size: 14px;
+    box-shadow: var(--shadow-lift);
+  }
+  @media (max-width: 760px) {
+    .toasts {
+      bottom: calc(110px + env(safe-area-inset-bottom));
+    }
   }
 </style>
