@@ -131,16 +131,19 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    min-width: 0;
     min-height: 32px;
   }
   .label {
+    min-width: 0;
     color: var(--ink-2);
     font-size: 13.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
   .value {
+    min-width: 0;
+    max-width: 65%;
+    flex-shrink: 0;
     font: inherit;
     font-weight: 700;
     color: inherit;
@@ -149,7 +152,9 @@
     border-radius: 3px;
     padding: 1px 4px;
     margin-right: -4px;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
     cursor: pointer;
   }
   .value:hover {
