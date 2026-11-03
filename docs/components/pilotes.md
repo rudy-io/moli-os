@@ -250,6 +250,16 @@ host = "192.168.1.x"
 - **Pièges** : un renommage ou un changement de pièce/zone déclenche un rechargement complet. Flux muet 10 min : réouverture et rechargement. Un message SSE (ou une ligne) qui dépasse 1 Mio sans fin : flux fermé, rouvert et rechargement complet. Les commandes tournent à côté du flux avec un budget de 4,5 s (sous les 5 s du hub). Le message « certificat changé » montre l'empreinte épinglée et celle présentée, et donne la commande `secrets forget <instance> cert_sha256` avec l'identifiant réel de l'instance (la clé part avec l'empreinte). Avec `app_key_env` configuré (même si la variable manque) ou une empreinte de la configuration, il ne conseille pas d'oublier l'empreinte : il dit de refaire la clé, ou de changer `cert_sha256` (les empreintes complètes sont dans le journal). `Bridge` n'affiche jamais la clé en `Debug`.
 - **Tests** : `src/model.rs` sur `integrations/hue/fixtures/resources.json` (pont réel) : pièces commandables, zones jamais, boutons, capteurs, événements partiels, encodage ; `src/bridge.rs` : parseur SSE découpé en morceaux, plafond de 1 Mio (ligne sans fin, `data:` sans ligne vide).
 
+## `melcloud` : climatiseurs Mitsubishi Electric (`crates/moli-melcloud`)
+
+- **Couvre** : les unités air-air du MELCloud classique, en lecture et en commande. MELCloud Home est un autre service, non couvert.
+- **Config** : `kind = "melcloud"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secret `token` : la clé de contexte du compte, jamais le mot de passe.
+- **Points** : `on`, `mode`, `target_temperature`, `fan_speed`, `vertical_vane`, `horizontal_vane` **écrivables** selon ce que l'unité annonce ; `temperature` en lecture. Un invité ou un réglage verrouillé reste en lecture.
+- **Commandes** : `Device/Get`, puis `Device/SetAta` avec tout l'état et le drapeau du seul champ changé. L'unité applique l'ordre à son prochain contact ; la liste retarde, donc ce qui a été commandé fait foi 150 s. Budget de 4,5 s, sous les 5 s du hub. La consigne est arrondie au pas et refusée hors de la plage du mode en cours.
+- **Identité** : `DeviceID` du service.
+- **Pièges** : API web non officielle, dépendante d'Internet ; `Offline` varie d'une réponse à l'autre, d'où 3 réponses de suite avant de passer hors ligne. Une clé refusée (401, 403) met le pilote en attente d'un humain.
+- **Tests** : `src/model.rs` sur `integrations/melcloud/fixtures/list_devices.json`, plus les emplacements (zones, étages), les doublons et les valeurs absurdes.
+
 ## `overkiz` : Somfy TaHoma en local (`crates/moli-overkiz`)
 
 - **Couvre** : volets, stores, rideaux, écrans, pergolas et auvents compatibles avec
@@ -811,6 +821,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
+| `melcloud` | `moli-melcloud` | HTTPS vers le MELCloud classique, clé de contexte | oui : marche, mode, consigne, ventilateur, ailettes | deux unités air-air (lecture) ; commandes sur l'une |
 | `overkiz` | `moli-overkiz` | HTTPS local 8443, certificat épinglé | selon capacités ; portails/fenêtres explicitement revus et gardés | modèle rejoué hors réseau ; transport et commandes sur simulateur TLS |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |

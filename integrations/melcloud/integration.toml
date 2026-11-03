@@ -1,0 +1,26 @@
+[integration]
+id = "melcloud"
+name = "Mitsubishi Electric MELCloud (climatiseurs)"
+brands = ["Mitsubishi Electric"]
+models = ["Unités air-air (DeviceType 0) du MELCloud classique"]
+transport = "http"
+driver = "melcloud"
+crate = "moli-melcloud"
+
+[discovery]
+# No discovery: a cloud account.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+secrets = ["token"]
+vars = []
+options = ["poll_seconds"]
+
+[origin]
+reused = "aucun code repris : requêtes et champs observés sur un compte réel, python-melcloud (MIT) lu comme référence du protocole"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/list_devices.json"
