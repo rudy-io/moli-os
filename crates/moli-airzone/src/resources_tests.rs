@@ -257,6 +257,110 @@ fn version_metadata_rejects_conflicting_documented_aliases() {
     assert!(metadata(&json!({"driver":"unsafe\ntext"}), "driver").is_err());
 }
 
+#[test]
+fn empty_driver_is_valid_metadata_but_empty_version_and_malformed_values_are_not() {
+    for response in [json!({"driver":""}), json!({"data":{"driver":""}})] {
+        assert_eq!(metadata(&response, "driver").unwrap(), json!({"driver":""}));
+    }
+    for response in [
+        json!({}),
+        json!({"driver":null}),
+        json!({"driver":false}),
+        json!({"driver":[]}),
+        json!({"driver":"invalid\ntext"}),
+        json!({"driver":"x".repeat(257)}),
+    ] {
+        assert!(metadata(&response, "driver").is_err());
+    }
+    for response in [json!({"version":""}), json!({"schema":""})] {
+        assert!(metadata(&response, "version").is_err());
+    }
+}
+
+#[tokio::test]
+async fn empty_driver_is_available_and_published_read_only_without_registration_write() {
+    use axum::{
+        Json as Reply, Router,
+        body::Bytes,
+        http::{Method, Uri},
+        routing::any,
+    };
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let app = Router::new().fallback(any(move |method: Method, uri: Uri, body: Bytes| {
+        let observed = observed.clone();
+        async move {
+            let body: Json = serde_json::from_slice(&body).unwrap();
+            observed
+                .lock()
+                .unwrap()
+                .push((method.clone(), uri.path().to_owned(), body.clone()));
+            assert_eq!(method, Method::POST);
+            Reply(match uri.path() {
+                "/api/v1/hvac" => {
+                    assert_eq!(body, json!({"systemID":127}));
+                    json!({"systems":[{"systemID":1},{"systemID":2}]})
+                }
+                "/api/v1/integration" => json!({"driver":""}),
+                _ => panic!("unexpected read endpoint"),
+            })
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: Config = serde_json::from_value(
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port()}),
+    )
+    .unwrap();
+    let task = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones = fixture_zones();
+    let resources = ResourceSnapshot::read_for(
+        &config,
+        &zones,
+        &json!({"mac":"aa:bb:cc:dd:ee:ff"}),
+        "aabbccddeeff_gateway",
+        "aabbccddeeff",
+        Instant::now() + Duration::from_secs(3),
+    )
+    .await;
+    let instance = InstanceId::from("az");
+    let entities = resources.entities(&instance, "aabbccddeeff", &zones, false);
+    let (gateway, states) = entities
+        .iter()
+        .find(|(d, _)| d.id.as_str() == "az:aabbccddeeff_gateway")
+        .unwrap();
+    assert_eq!(resources.integration, Some(json!({"driver":""})));
+    assert_eq!(resources.failures, 0);
+    assert!(states.contains(&("integration_available".into(), Value::Bool(true))));
+    assert!(states.contains(&("driver".into(), Value::Text("".into()))));
+    assert!(!gateway.point("driver").unwrap().access.write);
+    assert!(
+        resources
+            .encode(
+                &instance,
+                "aabbccddeeff",
+                &zones,
+                &gateway.id,
+                "driver",
+                &Value::Text("Moli".into())
+            )
+            .is_err()
+    );
+    assert_eq!(
+        *requests.lock().unwrap(),
+        vec![
+            (Method::POST, "/api/v1/hvac".into(), json!({"systemID":127})),
+            (Method::POST, "/api/v1/integration".into(), json!({})),
+        ]
+    );
+    task.abort();
+}
+
 #[derive(Clone, Default)]
 struct OptionalServer {
     phase: std::sync::Arc<std::sync::atomic::AtomicUsize>,

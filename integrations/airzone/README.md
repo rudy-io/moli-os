@@ -29,6 +29,8 @@ An operator must explicitly set `read_only = false` to enable commands. The
 restriction applies to published capabilities, the executor and transport,
 including integration configuration. It is not merely a disabled UI button.
 No startup or diagnostic operation writes `/integration`.
+An empty `driver` label is a valid unset value: the integration endpoint remains
+available, and Moli does not register itself automatically to fill that label.
 
 Hosts are explicit IPv4 addresses or DNS names, not URLs. Configuration is
 validated before networking. Polling is 5–3600 seconds. HTTPS requires an explicit

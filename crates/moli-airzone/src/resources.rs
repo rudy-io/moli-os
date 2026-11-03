@@ -227,7 +227,11 @@ fn metadata(value: &Json, key: &str) -> anyhow::Result<Json> {
         .context(invalid())?;
     let text = value
         .as_str()
-        .filter(|s| !s.is_empty() && s.chars().count() <= 256 && !s.chars().any(char::is_control))
+        .filter(|s| {
+            (key == "driver" || !s.is_empty())
+                && s.chars().count() <= 256
+                && !s.chars().any(char::is_control)
+        })
         .context(invalid())?;
     Ok(json!({key:text}))
 }
