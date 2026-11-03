@@ -395,3 +395,12 @@ test('journal renders visibility changes without treating them as labels', async
   assert.match(text(render(Journal).body), /Masqué dans Moli/);
   hub.journal=[];
 });
+
+test('journal identifies a read-only gateway installation without a label payload', async () => {
+  const Journal=(await vite.ssrLoadModule('/src/components/Journal.svelte')).default;
+  hub.journal=[{id:2,ts:1700000000000,action:{kind:'driver_added',instance:'new-airzone',driver_kind:'airzone',read_only:true},origin:'ui',outcome:{result:'ok'}}];
+  const content=text(render(Journal).body);
+  assert.match(content,/new-airzone/);
+  assert.match(content,/lecture seule/);
+  hub.journal=[];
+});

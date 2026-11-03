@@ -37,6 +37,9 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     if !writes {
         return None;
     }
+    if path == "/api/integrations/airzone" || path == "/api/integrations/airzone/probe" {
+        return Some(("airzone_setup", 6));
+    }
     if path == "/api/command" || path.starts_with("/api/labels/") {
         return Some(if from_dashboard {
             ("dashboard", 100)

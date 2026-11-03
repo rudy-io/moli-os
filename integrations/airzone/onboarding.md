@@ -3,9 +3,14 @@
 1. FR : Vérifier une passerelle compatible API locale, son adresse et son port.
    EN: Verify a Local API controller, its host and port. Cloud-only equipment
    is not made locally compatible by adding this driver.
-2. FR : Créer une instance par passerelle, `read_only = true` (valeur par défaut),
-   puis `moli-os check-config`. EN: Configure one instance per controller with
-   read-only enabled (the default), validate configuration, then restart Moli.
+2. FR : Dans **Système → Ajouter une passerelle**, saisir l’IPv4 locale et le port,
+   vérifier la connexion, puis **Ajouter en lecture seule** avec le code Moli.
+   L’instance est conservée et démarre immédiatement, sans fichier à modifier.
+   EN: In **System → Add a gateway**, enter its local IPv4 and port, verify it,
+   then explicitly add it read-only with the Moli code. It is saved and starts
+   immediately. Manual configuration remains available for advanced deployment:
+   one instance per controller, `read_only = true`, then `moli-os check-config`
+   and restart. Do not configure the same gateway through both paths.
 3. FR : Comparer les systèmes/zones et les capacités publiées avec l'installation.
    EN: Compare discovered systems/zones, units, ranges and capabilities with the
    installation. Assign Moli rooms; protect the relevant rooms. A new zone already

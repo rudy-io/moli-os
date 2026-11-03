@@ -30,6 +30,7 @@ mod people_api;
 mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
+pub mod airzone_setup;
 mod phones;
 mod plan;
 mod rest;
@@ -100,6 +101,8 @@ impl Household {
 /// Surface settings.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    /// Bounded human-only Airzone onboarding, owned by the executable.
+    pub airzone_setup: Option<Arc<dyn airzone_setup::AirzoneSetup>>,
     /// Host names (or IPs) this instance is reached by, besides localhost.
     pub allowed_hosts: Vec<String>,
     /// PIN that opens a human session in the dashboard. `None`: nobody is
@@ -320,6 +323,18 @@ fn assistant_routes() -> Router<Hub> {
         .route("/api/assistant/key", put(assistant::set_key))
 }
 
+fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
+    Router::new()
+        .route(
+            "/api/integrations/airzone/probe",
+            upload(post(airzone_setup::probe), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone",
+            upload(post(airzone_setup::install), 2048, humans),
+        )
+}
+
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
@@ -329,6 +344,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
     }
     Router::new()
         .route("/api/health", get(rest::health))
+        .merge(integration_routes(&humans))
         .merge(device_routes())
         .route("/api/media/{name}", get(rest::media))
         .route("/api/command", post(rest::command))
@@ -387,6 +403,9 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         )
         .fallback(assets::serve)
         .layer(Extension(shutdown))
+        .layer(Extension(airzone_setup::Setup(
+            options.airzone_setup.clone(),
+        )))
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))

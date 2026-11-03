@@ -185,6 +185,7 @@ impl View {
             }
             // A driver's state, a decision on a request: no room in them.
             Event::DriverStatus { .. }
+            | Event::DriverRegistered { .. }
             | Event::ApprovalResolved { .. }
             | Event::LayoutChanged {} => {
                 return Pass::Event;

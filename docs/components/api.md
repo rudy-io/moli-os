@@ -302,6 +302,7 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 - `{"kind":"command","point":"…","value":…}`
 - `{"kind":"label","device":"…","label":{"name":"…","room":"…"}}` (label vide si refus)
 - `{"kind":"visibility","device":"…","hidden":true}` (masquage local réversible)
+- `{"kind":"driver_added","instance":"…","driver_kind":"airzone","read_only":true}` (installation locale d’une passerelle)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
 
 Stockage : `data/journal.jsonl` (ajout seul) + les 500 dernières entrées en mémoire.
@@ -339,6 +340,8 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 |---|---|---|---|---|---|
 | GET | `/api/integrations/tuya-cloud` | libre | aucune | `{instances:[{instance, configured}]}` (jamais les clés) | aucune |
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
+| POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
+| POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only:true,already_installed}` ; enregistré et démarré, sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
 | POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
@@ -620,6 +623,7 @@ rend sa place.
 | `state` | `point`, `value`, `ts`, `pulse?` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence, alors avec `pulse: true`) ; aussi à la restauration du cache |
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |
 | `driver_status` | `instance`, `status` (`DriverStatus`, § 2.2) | état d'un pilote |
+| `driver_registered` | `instance`, `kind`, `integration` | pilote enregistré ; les surfaces connaissent son type avant les premiers relevés |
 | `label_changed` | `device`, `label` `{name?, room?}` | étiquette modifiée (label complet après fusion) |
 | `layout_changed` | aucun | disposition modifiée : recharger `/api/home` ; aussi à recharger après une reconnexion/snapshot |
 | `journal` | `entry` : `JournalEntry` (§ 1.6) | toute écriture journalisée |

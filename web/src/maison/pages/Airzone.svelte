@@ -144,7 +144,7 @@
   {:else if alerts}
     <AirzoneAlerts report={alertReport} devices={nativeDevices} hidden={home.config?.hidden ?? []} />
   {:else if adding}
-    <AirzoneAdd drivers={hub.drivers} />
+    <AirzoneAdd drivers={hub.drivers} connected={hub.connected} />
   {:else if installation}
     <div class="installation-stack">
       {#each inventory.instances as instance (instance.id)}

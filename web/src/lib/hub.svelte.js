@@ -1,5 +1,5 @@
 import { setLanguage, t } from './i18n.svelte.js';
-import { applyDriverStatus } from './driver-status.js';
+import { applyDriverStatus, applyDriverRegistration } from './driver-status.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -88,6 +88,9 @@ function applyEvent(e) {
       break;
     case 'layout_changed':
       hub.layoutRevision += 1;
+      break;
+    case 'driver_registered':
+      applyDriverRegistration(hub.drivers, e);
       break;
     case 'driver_status': {
       applyDriverStatus(hub.drivers, e);

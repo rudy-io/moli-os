@@ -1,9 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
-import { parse } from 'svelte/compiler';
-import { build } from 'vite';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { scriptFixture } from '../../../test-support/svelte-script-fixture.js';
 import { saveDeviceLabels, setDeviceHidden } from './device-management.js';
 
 const response = (data, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => data });
@@ -90,55 +87,15 @@ const globals = new Map(['document', 'localStorage'].map((key) => [key, Object.g
 before(async () => {
   delete globalThis.localStorage;
   globalThis.document = { querySelector: () => null, documentElement: {} };
-  // Exercise the actual component handlers and effects with the client runtime.
-  // Only this test bundle exposes handlers; no test API ships in the component.
-  const result = await build({
-    configFile: false,
-    root: fileURLToPath(new URL('../../../', import.meta.url)),
-    logLevel: 'silent',
-    plugins: [{
-      name: 'device-management-interaction-fixture', enforce: 'pre',
-      resolveId(id) { if (id === 'virtual:management-fixture') return '\0' + id; },
-      load(id) {
-        if (id !== '\0virtual:management-fixture') return;
-        return `
-          import Management from '/src/maison/ui/AirzoneManagement.svelte';
-          import { home } from '/src/maison/lib/home.svelte.js';
-          import { flushSync } from 'svelte';
-          import { effect_root, proxy } from 'svelte/internal/client';
-          export { home, flushSync };
-          export function mount(input) {
-            const props = proxy(input);
-            let component;
-            const dispose = effect_root(() => { component = Management(null, props); });
-            flushSync();
-            return { component, dispose, props };
-          }
-        `;
-      },
-      transform(source, id) {
-        if (!id.endsWith('/maison/ui/AirzoneManagement.svelte')) return;
-        const { content } = parse(source, { modern: true }).instance;
-        return `<script>${source.slice(content.start, content.end)}
-          export { edit, cancelEdit, requestHide, cancelHide, saveLabels, changeVisibility };
-          export function typeLabel(name, room) { draft = { name, room }; }
-          export function search(text, visibility = 'all') { query = text; filter = visibility; }
-          export function intent() {
-            return { editing, draft: { ...draft }, confirmId, pending, awaitingPin, error, success, warning,
-              visible: visibleDevices.map((device) => device.id) };
-          }
-        </script>`;
-      },
-    }, svelte()],
-    build: {
-      write: false, minify: false,
-      lib: { entry: 'virtual:management-fixture', formats: ['es'] },
-      rolldownOptions: { input: 'virtual:management-fixture' },
-    },
-  });
-  const chunk = (Array.isArray(result) ? result[0] : result).output.find((entry) => entry.type === 'chunk' && entry.isEntry);
-  const source = `${chunk.code}\n//# sourceURL=device-management-interaction-fixture.js`;
-  client = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  client = await scriptFixture('/src/maison/ui/AirzoneManagement.svelte', `
+    export { edit, cancelEdit, requestHide, cancelHide, saveLabels, changeVisibility };
+    export function typeLabel(name, room) { draft = { name, room }; }
+    export function search(text, visibility = 'all') { query = text; filter = visibility; }
+    export function intent() {
+      return { editing, draft: { ...draft }, confirmId, pending, awaitingPin, error, success, warning,
+        visible: visibleDevices.map((device) => device.id) };
+    }
+  `);
 });
 after(() => {
   for (const [key, descriptor] of globals) {

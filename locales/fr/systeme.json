@@ -359,5 +359,10 @@
   "systeme.alexa.aide": "Moli ne voit jamais ton mot de passe : il apparaîtra comme un appareil « Moli » de ton compte Amazon, et garde un jeton chiffré dans son coffre.",
   "systeme.alexa.officieux": "Amazon ne propose pas d'interface officielle pour piloter la musique des Echo : Moli utilise celle de l'appli Alexa, qui peut changer sans prévenir.",
   "systeme.journal.masque": "Masqué dans Moli",
-  "systeme.journal.restaure": "Restauré dans Moli"
+  "systeme.journal.restaure": "Restauré dans Moli",
+  "systeme.journal.pilote_lecture_seule": "Pilote {kind} ajouté en lecture seule",
+  "systeme.journal.pilote_ajoute": "Pilote {kind} ajouté",
+  "systeme.airzone.title": "Passerelle Airzone",
+  "systeme.airzone.help": "Connectez une passerelle compatible avec l’API locale et retrouvez ses zones dans Moli, en lecture seule.",
+  "systeme.airzone.add": "Ajouter une passerelle"
 }

@@ -1037,6 +1037,28 @@ impl Hub {
         }
     }
 
+    /// Journals a human's persisted driver installation without its address.
+    pub fn record_driver_added(
+        &self,
+        instance: InstanceId,
+        driver_kind: &str,
+        read_only: bool,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        self.record(
+            Origin::Ui,
+            actor,
+            Action::DriverAdded {
+                instance,
+                driver_kind: driver_kind.to_owned(),
+                read_only,
+            },
+            outcome,
+            Instant::now(),
+        );
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {
@@ -1449,12 +1471,17 @@ impl Hub {
             instance.clone(),
             DriverSlot {
                 kind,
-                integration,
+                integration: integration.clone(),
                 status: DriverStatus::Starting,
                 warning: None,
                 commands,
             },
         );
+        self.emit(Event::DriverRegistered {
+            instance: instance.clone(),
+            kind: kind.to_owned(),
+            integration,
+        });
         self.emit(Event::DriverStatus {
             instance: instance.clone(),
             status: DriverStatus::Starting,

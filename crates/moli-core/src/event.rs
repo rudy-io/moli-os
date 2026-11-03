@@ -35,6 +35,12 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         warning: Option<String>,
     },
+    /// A newly registered integration, including its classification for live UIs.
+    DriverRegistered {
+        instance: InstanceId,
+        kind: String,
+        integration: Arc<str>,
+    },
     LabelChanged {
         device: DeviceId,
         label: Label,
@@ -146,6 +152,12 @@ pub enum Origin {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
+    /// A person's persisted integration installation; no address or credential.
+    DriverAdded {
+        instance: InstanceId,
+        driver_kind: String,
+        read_only: bool,
+    },
     Command {
         point: PointId,
         value: Value,
