@@ -7,11 +7,14 @@
 //!   playing or paused) and play / pause.
 //! - [`adb`]: ADB over the network (TCP 5555, the TV's developer options):
 //!   what any app plays, from the TV's media sessions.
+//! - [`overlay`]: TvOverlay, an app that draws notifications (a picture, a
+//!   live video) over whatever plays.
 //!
 //! Each runs one connection until it fails; the driver reconnects.
 
 pub mod adb;
 pub mod cast;
+pub mod overlay;
 pub mod remote;
 
 /// The protobuf codec, shared with the other protocols.

@@ -13,8 +13,9 @@ crate = "moli-philips"
 mdns = []
 ssdp = []
 # 1926 JointSpace ; 6466 Android TV Remote (open apps, app on screen) ;
-# 8009 Google Cast (what plays) ; 5555 ADB (option `adb`: what any app plays).
-ports = [1926, 6466, 8009, 5555]
+# 8009 Google Cast (what plays) ; 5555 ADB (option `adb`: what any app plays) ;
+# 5001 TvOverlay (option `overlay`: notifications over the picture).
+ports = [1926, 6466, 8009, 5555, 5001]
 
 [needs]
 # JointSpace pairing credentials; `cert`, `atv_pin`, `cast_pin` are written

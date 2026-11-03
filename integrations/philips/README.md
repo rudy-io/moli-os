@@ -21,6 +21,9 @@
     lu dans les sessions média d'Android (`dumpsys media_session`). Cast ne dit rien d'une
     appli ouverte sur une Google TV. Clé de Moli créée au premier démarrage (`adb_key`),
     autorisée une fois sur l'écran de la télé.
+  - Incrustations (`overlay = true`, port 5001) : l'appli TvOverlay affiche par-dessus
+    l'image une notification, une photo ou une vidéo en direct (point `notify`). Vérifié le
+    3 nov. (TvOverlay 1.0.4) : la sonnette en direct, en bas à droite, sur l'accueil Google TV.
   - Un ordre donné pendant que la connexion est coupée n'est jamais rejoué à la reconnexion
     (refusé tout de suite, file vidée à chaque connexion).
 - Vérifié en vrai le 4 oct. (sonde en lecture) sur une Philips Google TV : elle accepte le

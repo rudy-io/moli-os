@@ -17,3 +17,9 @@
    appuyer 7 fois sur « Build »), activer le **débogage réseau** (ou « débogage ADB »).
    Ajouter `adb = true` aux options, redémarrer : la télé demande sur son écran d'autoriser
    « moli-os » (humain devant la télé : cocher « Toujours autoriser »).
+7. Notifications par-dessus l'image (la sonnette en direct quand on sonne…) : installer
+   **TvOverlay** depuis le Play Store de la télé, puis par ADB
+   `appops set com.tabdeveloper.tvoverlay SYSTEM_ALERT_WINDOW allow` et
+   `dumpsys deviceidle whitelist +com.tabdeveloper.tvoverlay`, ouvrir l'appli une fois.
+   Ajouter `overlay = true`, redémarrer : le point `notify` apparaît, à écrire depuis un
+   automatisme.
