@@ -415,6 +415,11 @@ test('a cleaning robot offers pause, stop and home; a paused one resumes', () =>
   assert.equal(orders(paused), 4);
 });
 
+test('a cleaning time that is not a number is not shown', () => {
+  const html = show('VacuumCard', robot(), { state: 'totaling', clean: true, pause: false, clean_time: 'soon' });
+  assert.doesNotMatch(html, /NaN/);
+});
+
 test('a read-only or offline robot shows its state and offers no order', () => {
   const values = { state: 'idle', clean: false, pause: false, battery: 50, fan_speed: 'quiet' };
   assert.equal(buttons(show('VacuumCard', robot(false), values)).length, 0);

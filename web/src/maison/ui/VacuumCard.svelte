@@ -41,6 +41,7 @@
   const fault = $derived(value(id, 'fault') === true);
   const area = $derived(value(id, 'clean_area'));
   const seconds = $derived(value(id, 'clean_time'));
+  const minutes = $derived(Number.isFinite(seconds) ? Math.floor(seconds / 60) : null);
   const battery = $derived(value(id, 'battery'));
   const suction = $derived(value(id, 'fan_speed'));
   const speeds = $derived(writableChoices(d, 'fan_speed'));
@@ -57,7 +58,7 @@
   <p class="facts muted">
     {#if battery != null}<span><Icon name="battery" size={16} />{num(battery)} %</span>{/if}
     {#if started && area != null}<span>{t('maison.robot.surface', { area: num(area) })}</span>{/if}
-    {#if started && seconds != null}<span>{t('maison.robot.duree', { minutes: num(Math.floor(seconds / 60)) })}</span>{/if}
+    {#if started && minutes != null}<span>{t('maison.robot.duree', { minutes: num(minutes) })}</span>{/if}
   </p>
   {#if fault}
     <p class="problem">{t('maison.robot.probleme', { detail: value(id, 'detail') ?? '' })}</p>

@@ -1,6 +1,9 @@
 //! Robot vacuums (category `sd`): the Rowenta and Tefal X-plorer Serie 75, and
 //! the others described by the same Tuya codes.
 //!
+//! The Serie 75's table comes from `tefal_xplorer_vacuum.yaml` of tuya-local
+//! (MIT, see NOTICE), confirmed on a real robot.
+//!
 //! The generic translation would hand over every data point as it is, with its
 //! writable flag: on a robot that includes erasing the map and driving by hand.
 //! Here only what the table names exists, under the same keys for every robot.
@@ -283,6 +286,12 @@ pub fn decode(dps: &[Dp], raw: &Map<String, Json>) -> Vec<(String, Value)> {
                     matches!(&decoded, Value::Text(state) if GOING_HOME.contains(&state.as_ref()));
                 values.push((DOCK.to_owned(), Value::Bool(home)));
             }
+            // Going home is told by `dock`: `mode` only names what can be asked for.
+            if role.key == "mode"
+                && !matches!(&decoded, Value::Text(mode) if STARTABLE.contains(&mode.as_ref()))
+            {
+                continue;
+            }
             values.push((role.key.to_owned(), decoded));
         }
     }
@@ -431,11 +440,18 @@ mod tests {
         assert_eq!(value(&values, "state"), &Value::from("tocharge"));
         assert_eq!(value(&values, "clean"), &Value::Bool(false));
         assert_eq!(value(&values, "dock"), &Value::Bool(true));
-        assert_eq!(value(&values, "mode"), &Value::from("backcharge"));
+        // On its way home: not a mode the point offers.
+        assert!(values.iter().all(|(key, _)| key != "mode"));
         assert_eq!(value(&values, "fan_speed"), &Value::from("strong"));
         assert_eq!(value(&values, "fault"), &Value::Bool(false));
         // Totals and data points outside the table are not points.
         assert!(values.iter().all(|(key, _)| key != "total_clean_area"));
+    }
+
+    #[test]
+    fn a_startable_mode_is_read() {
+        let values = decode(&series_75(), &raw(r#"{"dps":{"104":"smart"}}"#));
+        assert_eq!(value(&values, "mode"), &Value::from("smart"));
     }
 
     #[test]
