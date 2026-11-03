@@ -67,3 +67,64 @@ test('auth, known conflicts and uncertain network outcomes stay distinct and nev
   assert.deepEqual(await onboarding.probeGateway(request,async()=>{throw new Error('private network data');}),{ok:false,error:'network'});
   assert.equal((await onboarding.addGateway(request,preview.mac,async()=>response({instance:'airzone-2',stored:true,read_only:true,already_installed:true}))).data.already_installed,true);
 });
+
+test('lifecycle lists stored gateways independently of runtime and rejects malformed metadata',async()=>{
+  assert.equal(typeof onboarding.listGateways,'function');
+  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:false,source:'configuration',read_only:false,running:false};
+  let sent;
+  const result=await onboarding.listGateways(async(url,options)=>{sent={url,options};return response({gateways:[gateway]});});
+  assert.deepEqual(result,{ok:true,data:{gateways:[gateway]}});
+  assert.equal(sent.options.method,'GET');assert.equal(sent.options.body,undefined);
+  assert.equal(sent.options.headers['x-moli-origin'],'ui');
+  for(const changed of [{mac:123456789012},{enabled:'false'},{source:'unknown'},{read_only:null},{running:true},{tls_fingerprint:'bad'}]) {
+    assert.equal((await onboarding.listGateways(async()=>response({gateways:[{...gateway,...changed}]}))).error,'response');
+  }
+  assert.equal((await onboarding.listGateways(async()=>response({gateways:[gateway,gateway]}))).error,'response');
+});
+
+test('update and resume bind an existing instance and identity; withdrawal is reversible configuration only',async()=>{
+  assert.equal(typeof onboarding.updateGateway,'function');
+  const calls=[];
+  const transport=async(url,options)=>{calls.push({url,...options,body:JSON.parse(options.body)});return response(url.endsWith('/probe')?preview:url.endsWith('/withdraw')?{instance:request.instance,stored:true,enabled:false,read_only:false}:{instance:request.instance,stored:true,read_only:true,already_installed:false});};
+  assert.equal((await onboarding.probeExistingGateway(request,transport)).ok,true);
+  assert.equal((await onboarding.updateGateway(request,preview.mac,transport)).ok,true);
+  assert.equal((await onboarding.withdrawGateway(request.instance,transport)).ok,true);
+  assert.deepEqual(calls.map(c=>[c.method,c.url]),[['POST','/api/integrations/airzone/airzone-2/probe'],['PUT','/api/integrations/airzone/airzone-2'],['POST','/api/integrations/airzone/airzone-2/withdraw']]);
+  assert.equal(calls[1].body.expected_mac,preview.mac);assert.deepEqual(calls[2].body,{});
+  const count=calls.length;
+  assert.equal((await onboarding.updateGateway(request,null,transport)).error,'expected_identity_required');
+  assert.equal((await onboarding.withdrawGateway('../wrong',transport)).error,'invalid_instance');assert.equal(calls.length,count);
+  assert.equal((await onboarding.withdrawGateway(request.instance,async()=>response({instance:request.instance,stored:true,enabled:true,read_only:true}))).error,'response');
+});
+
+test('legacy configured IDs are preserved exactly and encoded in lifecycle paths without relaxing new IDs',async()=>{
+  for(const instance of ['Airzone étage.v1','  Loft  ','gateway?one#A','..inside']) {
+    const input={...request,instance};
+    const gateway={...input,tls_fingerprint:null,mac:preview.mac,enabled:true,source:'configuration',read_only:true,running:true};
+    assert.equal((await onboarding.listGateways(async()=>response({gateways:[gateway]}))).ok,true);
+    assert.equal(onboarding.gatewayRequest(input).error,'invalid_instance');
+    const calls=[];
+    const transport=async(url,options)=>{
+      calls.push({url,body:JSON.parse(options.body)});
+      return response(url.endsWith('/probe')?{...preview,instance}:url.endsWith('/withdraw')?{instance,stored:true,enabled:false,read_only:true}:{instance,stored:true,read_only:true,already_installed:false});
+    };
+    assert.equal((await onboarding.probeExistingGateway(input,transport)).ok,true);
+    assert.equal((await onboarding.updateGateway(input,preview.mac,transport)).ok,true);
+    assert.equal((await onboarding.withdrawGateway(instance,transport)).ok,true);
+    const path='/api/integrations/airzone/'+encodeURIComponent(instance);
+    assert.deepEqual(calls.map(call=>call.url),[path+'/probe',path,path+'/withdraw']);
+    assert.equal(calls[0].body.instance,instance);assert.equal(calls[1].body.instance,instance);
+  }
+});
+
+test('dot-only legacy IDs remain visible but never become normalized browser paths',async()=>{
+  for(const instance of ['.','..']) {
+    const input={...request,instance};
+    const gateway={...input,tls_fingerprint:null,mac:null,enabled:false,source:'configuration',read_only:true,running:false};
+    assert.equal((await onboarding.listGateways(async()=>response({gateways:[gateway]}))).ok,true);
+    const noNetwork=()=>assert.fail('dot segments must never be sent to a different route');
+    assert.equal((await onboarding.probeExistingGateway(input,noNetwork)).error,'unaddressable_instance');
+    assert.equal((await onboarding.updateGateway(input,preview.mac,noNetwork)).error,'unaddressable_instance');
+    assert.equal((await onboarding.withdrawGateway(instance,noNetwork)).error,'unaddressable_instance');
+  }
+});

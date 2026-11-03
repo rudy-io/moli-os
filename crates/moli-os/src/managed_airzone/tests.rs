@@ -7,6 +7,46 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+#[test]
+fn static_gateway_override_preserves_options_and_withdrawal_survives_restart() {
+    let (dir, _) = house();
+    let path = dir.join("moli.toml");
+    let mut toml = std::fs::read_to_string(&path).unwrap();
+    toml.push_str("\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.1'\nport = 3000\nmac = 'aabbccddeeff'\npoll_secs = 67\ndhw_units = 1\nread_only = false\n");
+    std::fs::write(&path, &toml).unwrap();
+    let registry = json!({"version":2,"gateways":[],"overrides":[{"instance":"configured","enabled":false,"connection":null}]});
+    std::fs::write(dir.join(FILE), registry.to_string()).unwrap();
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.drivers.len(), 1);
+    assert_eq!(config.drivers[0].enabled, Some(false));
+    assert_eq!(
+        config.drivers[0].options["poll_secs"].as_integer(),
+        Some(67)
+    );
+    assert_eq!(
+        config.drivers[0].options["read_only"].as_bool(),
+        Some(false)
+    );
+    let mut moved = registry;
+    moved["overrides"][0]["enabled"] = json!(true);
+    moved["overrides"][0]["connection"] = json!({"instance":"configured","host":"127.0.0.2","port":4000,"mac":"aabbccddeeff","read_only":true,"enabled":true});
+    std::fs::write(dir.join(FILE), moved.to_string()).unwrap();
+    let config = Config::load(&path).unwrap();
+    assert_eq!(
+        config.drivers[0].options["host"].as_str(),
+        Some("127.0.0.2")
+    );
+    assert_eq!(config.drivers[0].options["port"].as_integer(), Some(4000));
+    assert_eq!(
+        config.drivers[0].options["poll_secs"].as_integer(),
+        Some(67)
+    );
+    assert_eq!(config.drivers[0].options["dhw_units"].as_integer(), Some(1));
+    assert_eq!(config.drivers[0].options["read_only"].as_bool(), Some(true));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), toml);
+    std::fs::remove_dir_all(dir).unwrap();
+}
 fn house() -> (PathBuf, Config) {
     let dir = std::env::temp_dir().join(format!(
         "moli-airzone-setup-{}-{}",
@@ -31,7 +71,15 @@ async fn controller() -> (u16, Arc<AtomicUsize>, CancellationToken) {
 }
 
 async fn controller_with_gate(
+    gate: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+) -> (u16, Arc<AtomicUsize>, CancellationToken) {
+    controller_with_identity("aa:bb:cc:dd:ee:ff", gate, None).await
+}
+
+async fn controller_with_identity(
+    mac: &'static str,
     mut gate: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    requests: Option<Arc<AtomicUsize>>,
 ) -> (u16, Arc<AtomicUsize>, CancellationToken) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -67,6 +115,9 @@ async fn controller_with_gate(
             }
             let raw = String::from_utf8_lossy(&raw[..used]);
             let first = raw.lines().next().unwrap_or("");
+            if let Some(count) = &requests {
+                count.fetch_add(1, Ordering::Relaxed);
+            }
             if first.contains("/webserver")
                 && let Some((started, release)) = gate.take()
             {
@@ -82,7 +133,7 @@ async fn controller_with_gate(
                 watched.fetch_add(1, Ordering::Relaxed);
             }
             let body = if first.contains("/webserver") {
-                json!({"mac":"aa:bb:cc:dd:ee:ff","ws_type":"ws_az","ws_firmware":"4.21"})
+                json!({"mac":mac,"ws_type":"ws_az","ws_firmware":"4.21"})
             } else if first.contains("/hvac") {
                 json!({"data":[{"systemID":1,"zoneID":1,"on":1,"roomTemp":22.5,"units":0}]})
             } else {
@@ -109,7 +160,12 @@ fn request(port: u16) -> GatewayRequest {
 }
 async fn populated(hub: &Hub) {
     tokio::time::timeout(Duration::from_secs(3), async {
-        while hub.snapshot().devices.is_empty() {
+        while !hub
+            .snapshot()
+            .devices
+            .iter()
+            .any(|device| device.device.id.as_str().ends_with("_s1_z1"))
+        {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -118,6 +174,360 @@ async fn populated(hub: &Hub) {
 }
 fn read(path: &Path) -> Json {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn static_gateway_is_listed_moved_with_identity_and_withdrawn_without_losing_observations() {
+    let (dir, mut config) = house();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (port, writes, stop) =
+        controller_with_identity("aa:bb:cc:dd:ee:ff", None, Some(calls.clone())).await;
+    config.drivers.push(DriverConfig {
+        id: "configured".into(), kind: "airzone".into(), enabled: None,
+        options: toml::from_str(&format!("host = '127.0.0.1'\nport = {port}\nmac = 'aabbccddeeff'\nread_only = false\npoll_secs = 5\ndhw_units = 1")).unwrap(),
+    });
+    let cancel = CancellationToken::new();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+    let (tasks, _) = crate::spawn_drivers(&config, &hub, &cancel, &manager).unwrap();
+    assert!(
+        tasks.is_empty(),
+        "the generic spawner must not own Airzone supervisors"
+    );
+    populated(&hub).await;
+    let before: Vec<_> = hub
+        .snapshot()
+        .devices
+        .iter()
+        .map(|device| device.device.id.clone())
+        .collect();
+    let list = manager.list().await.unwrap();
+    assert_eq!(list.gateways[0].source, "configuration");
+    assert!(
+        !list.gateways[0].read_only,
+        "unmodified static configuration keeps its native mode"
+    );
+    assert!(list.gateways[0].running);
+    let moved_calls = Arc::new(AtomicUsize::new(0));
+    let (moved_port, moved_writes, moved_stop) =
+        controller_with_identity("aa:bb:cc:dd:ee:ff", None, Some(moved_calls.clone())).await;
+    let mut moved = request(moved_port);
+    moved.instance = "configured".into();
+    manager
+        .probe_update("configured".into(), moved.clone())
+        .await
+        .unwrap();
+    manager
+        .update("configured".into(), moved, "person".into())
+        .await
+        .unwrap();
+    let list = manager.list().await.unwrap();
+    assert_eq!(list.gateways[0].port, moved_port);
+    assert!(list.gateways[0].read_only);
+    let state = manager.0.state.lock().await;
+    let current = manager.existing(&state, "configured").unwrap();
+    assert_eq!(current.config.poll_secs, 5);
+    assert_eq!(current.config.dhw_units, Some(1));
+    drop(state);
+    let retired = manager
+        .withdraw("configured".into(), "person".into())
+        .await
+        .unwrap();
+    assert!(!retired.enabled);
+    assert!(hub.snapshot().drivers.is_empty());
+    assert!(
+        hub.snapshot()
+            .devices
+            .iter()
+            .all(|device| device.online == Some(false))
+    );
+    assert!(before.iter().all(|id| {
+        hub.snapshot()
+            .devices
+            .iter()
+            .any(|device| device.device.id == *id)
+    }));
+    let after = calls.load(Ordering::Relaxed);
+    let moved_after = moved_calls.load(Ordering::Relaxed);
+    tokio::time::sleep(Duration::from_millis(5100)).await;
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        after,
+        "withdrawal must stop the former poll loop"
+    );
+    assert_eq!(
+        moved_calls.load(Ordering::Relaxed),
+        moved_after,
+        "withdrawal must stop the current poll loop"
+    );
+    let list = manager.list().await.unwrap();
+    assert!(!list.gateways[0].enabled && !list.gateways[0].running);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    assert_eq!(moved_writes.load(Ordering::Relaxed), 0);
+    cancel.cancel();
+    manager.shutdown().await;
+    stop.cancel();
+    moved_stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn withdrawal_survives_restart_and_reactivation_requires_the_same_gateway() {
+    let (dir, config) = house();
+    let (port, writes, stop) = controller().await;
+    let cancel = CancellationToken::new();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+    manager
+        .install(request(port), "person".into())
+        .await
+        .unwrap();
+    populated(&hub).await;
+    manager
+        .withdraw("airzone-added".into(), "person".into())
+        .await
+        .unwrap();
+    assert_eq!(read(&dir.join(FILE))["gateways"][0]["enabled"], false);
+    assert_eq!(
+        manager
+            .install(request(port), "retry".into())
+            .await
+            .unwrap_err()
+            .code,
+        "gateway_disabled"
+    );
+    let journal_before = hub.journal(20).len();
+    manager
+        .withdraw("airzone-added".into(), "retry".into())
+        .await
+        .unwrap();
+    assert_eq!(hub.journal(20).len(), journal_before);
+    cancel.cancel();
+    manager.shutdown().await;
+    let config = Config::load(&dir.join("moli.toml")).unwrap();
+    let reboot_hub = Hub::new(HubOptions::default()).unwrap();
+    let reboot_cancel = CancellationToken::new();
+    let reboot = Manager::new(reboot_hub.clone(), &config, reboot_cancel.clone()).unwrap();
+    reboot.start_configured().unwrap();
+    assert!(reboot_hub.snapshot().drivers.is_empty());
+    let (wrong_port, wrong_writes, wrong_stop) =
+        controller_with_identity("aa:bb:cc:dd:ee:01", None, None).await;
+    let wrong = request(wrong_port);
+    assert_eq!(
+        reboot
+            .probe_update("airzone-added".into(), wrong.clone())
+            .await
+            .unwrap_err()
+            .code,
+        "identity_changed"
+    );
+    assert_eq!(
+        reboot
+            .update("airzone-added".into(), wrong, "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "identity_changed"
+    );
+    assert_eq!(read(&dir.join(FILE))["gateways"][0]["enabled"], false);
+    reboot
+        .update("airzone-added".into(), request(port), "person".into())
+        .await
+        .unwrap();
+    populated(&reboot_hub).await;
+    assert_eq!(reboot_hub.snapshot().drivers.len(), 1);
+    assert!(reboot.list().await.unwrap().gateways[0].enabled);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    assert_eq!(wrong_writes.load(Ordering::Relaxed), 0);
+    reboot_cancel.cancel();
+    reboot.shutdown().await;
+    stop.cancel();
+    wrong_stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn a_failed_withdrawal_save_keeps_the_existing_supervisor_active() {
+    let (dir, config) = house();
+    let (port, _, stop) = controller().await;
+    let cancel = CancellationToken::new();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+    manager
+        .install(request(port), "person".into())
+        .await
+        .unwrap();
+    std::fs::write(dir.join(FILE), "externally changed").unwrap();
+    let (moved_port, _, moved_stop) = controller().await;
+    assert_eq!(
+        manager
+            .update("airzone-added".into(), request(moved_port), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    assert_eq!(manager.list().await.unwrap().gateways[0].port, port);
+    assert_eq!(
+        manager
+            .withdraw("airzone-added".into(), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    assert_eq!(hub.snapshot().drivers.len(), 1);
+    assert!(manager.list().await.unwrap().gateways[0].enabled);
+    cancel.cancel();
+    manager.shutdown().await;
+    stop.cancel();
+    moved_stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn updating_is_owned_and_a_lost_response_can_be_replayed_without_the_gateway() {
+    let (dir, config) = house();
+    let (port, writes, stop) = controller().await;
+    let cancel = CancellationToken::new();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+    manager
+        .install(request(port), "person".into())
+        .await
+        .unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (moved_port, moved_writes, moved_stop) = controller_with_identity(
+        "aa:bb:cc:dd:ee:ff",
+        Some((started.clone(), release.clone())),
+        Some(calls.clone()),
+    )
+    .await;
+    let caller = manager.clone();
+    let http = tokio::spawn(async move {
+        caller
+            .update("airzone-added".into(), request(moved_port), "person".into())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), started.notified())
+        .await
+        .unwrap();
+    assert_eq!(
+        manager
+            .withdraw("airzone-added".into(), "second".into())
+            .await
+            .unwrap_err()
+            .code,
+        "busy"
+    );
+    http.abort();
+    assert!(http.await.unwrap_err().is_cancelled());
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if manager
+                .list()
+                .await
+                .is_ok_and(|list| list.gateways[0].port == moved_port)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    moved_stop.cancel();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let before = calls.load(Ordering::Relaxed);
+    assert!(
+        manager
+            .update("airzone-added".into(), request(moved_port), "retry".into())
+            .await
+            .unwrap()
+            .already_installed
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), before);
+    assert_eq!(
+        hub.journal(30)
+            .iter()
+            .filter(|entry| matches!(entry.action, moli_core::Action::DriverConfigured { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(hub.snapshot().drivers.len(), 1);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    assert_eq!(moved_writes.load(Ordering::Relaxed), 0);
+    cancel.cancel();
+    manager.shutdown().await;
+    stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn replacement_uses_a_new_instance_and_keeps_the_old_identity_retired() {
+    let (dir, config) = house();
+    let (port, _, stop) = controller().await;
+    let cancel = CancellationToken::new();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+    manager
+        .install(request(port), "person".into())
+        .await
+        .unwrap();
+    populated(&hub).await;
+    let old_ids: Vec<_> = hub
+        .snapshot()
+        .devices
+        .iter()
+        .map(|device| device.device.id.clone())
+        .collect();
+    manager
+        .withdraw("airzone-added".into(), "person".into())
+        .await
+        .unwrap();
+    let (replacement_port, writes, replacement_stop) =
+        controller_with_identity("aa:bb:cc:dd:ee:01", None, None).await;
+    let mut replacement = request(replacement_port);
+    replacement.instance = "airzone-replacement".into();
+    replacement.expected_mac = Some("aabbccddee01".into());
+    manager.install(replacement, "person".into()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !hub
+            .snapshot()
+            .devices
+            .iter()
+            .any(|device| device.device.instance.as_str() == "airzone-replacement")
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(old_ids.iter().all(|id| {
+        hub.snapshot()
+            .devices
+            .iter()
+            .any(|device| device.device.id == *id && device.online == Some(false))
+    }));
+    assert_eq!(manager.list().await.unwrap().gateways.len(), 2);
+    assert!(
+        manager
+            .list()
+            .await
+            .unwrap()
+            .gateways
+            .iter()
+            .any(|gateway| gateway.instance == "airzone-added" && !gateway.enabled)
+    );
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    cancel.cancel();
+    manager.shutdown().await;
+    stop.cancel();
+    replacement_stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
@@ -174,7 +584,8 @@ async fn installed_gateway_is_saved_started_readonly_and_replayed_once() {
     let reboot_cancel = CancellationToken::new();
     let reboot_manager =
         Manager::new(reboot_hub.clone(), &reopened, reboot_cancel.clone()).unwrap();
-    let (tasks, _) = crate::spawn_drivers(&reopened, &reboot_hub, &reboot_cancel).unwrap();
+    let (tasks, _) =
+        crate::spawn_drivers(&reopened, &reboot_hub, &reboot_cancel, &reboot_manager).unwrap();
     populated(&reboot_hub).await;
     assert_eq!(reboot_hub.snapshot().drivers.len(), 1);
     assert!(
@@ -231,6 +642,7 @@ fn stored_gateway(instance: &str, port: u16) -> Gateway {
         tls_fingerprint: None,
         mac: "aabbccddeeff".into(),
         read_only: true,
+        enabled: true,
     }
 }
 
@@ -240,6 +652,7 @@ fn a_starter_loads_saved_gateways_and_recovery_can_reach_a_corrupt_registry() {
     let store = Store {
         version: 1,
         gateways: vec![stored_gateway("airzone-kept", 3000)],
+        overrides: Vec::new(),
     };
     std::fs::write(dir.join(FILE), serde_json::to_vec(&store).unwrap()).unwrap();
     std::fs::remove_file(dir.join("moli.toml")).unwrap();
@@ -291,6 +704,7 @@ fn a_registry_changed_after_config_load_does_not_announce_an_inactive_gateway() 
         serde_json::to_vec(&Store {
             version: 1,
             gateways: vec![stored_gateway("late", 3000)],
+            overrides: Vec::new(),
         })
         .unwrap(),
     )
@@ -430,7 +844,7 @@ async fn identities_endpoints_and_reserved_ids_cannot_be_added_twice() {
         "expected_identity_required"
     );
     let mut changed = request(port);
-    changed.expected_mac = Some("112233445566".into());
+    changed.expected_mac = Some("aabbccddee01".into());
     assert_eq!(
         manager
             .install(changed, "test".into())
@@ -498,7 +912,7 @@ fn registry_is_restored_and_invalid_content_is_never_silently_reset() {
     let mut writable = stored.clone();
     writable["gateways"][0]["read_only"] = json!(false);
     let mut future = stored.clone();
-    future["version"] = json!(2);
+    future["version"] = json!(3);
     let mut duplicate = stored.clone();
     duplicate["gateways"]
         .as_array_mut()

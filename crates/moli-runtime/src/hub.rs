@@ -1,6 +1,6 @@
 //! The hub: single source of truth for the live model of the home.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::addresses::{self, KnownAddress};
+use crate::device_cache::{self, CachedDevice};
 use crate::driver::CommandRequest;
 use crate::guard::{GuardPolicy, GuardStatus, Verdict};
 use crate::journal_log::JournalLog;
@@ -320,6 +321,8 @@ struct Inner {
     secrets_problem: Option<String>,
     /// Values changed since the state cache was last written.
     state_dirty: AtomicBool,
+    /// Serializes the two cache replacements and their shared generation.
+    state_write: tokio::sync::Mutex<()>,
     /// The last image of each camera, shared by every viewer for a second.
     images: Mutex<HashMap<DeviceId, LastImage>>,
     /// Short-lived media a device fetches back (an announcement's sound).
@@ -348,6 +351,14 @@ struct Model {
     /// Cached values not yet claimed by a device (its driver has not
     /// published it yet in this run).
     restored: States,
+    /// Original definitions and coherent samples, including dormant instances.
+    cached_devices: device_cache::Devices,
+    /// Restored/retired definitions cannot be revived by availability alone.
+    /// The bool records an explicit offline report since restoration.
+    unconfirmed: HashMap<DeviceId, bool>,
+    /// Retained values are displayable, but not usable as current observations
+    /// until each point receives its first sample from this driver run.
+    awaiting_samples: HashMap<DeviceId, BTreeSet<Arc<str>>>,
     availability: HashMap<DeviceId, bool>,
     /// Devices taken offline because their driver failed, with what they
     /// were before: given back when the driver runs again, unless it said
@@ -384,13 +395,24 @@ impl Hub {
             Some(path) => labels::load(path)?,
             None => BTreeMap::new(),
         };
-        let restored = match &opts.state_path {
+        let mut restored = match &opts.state_path {
             Some(path) => state_cache::load(path).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "state cache unreadable, starting empty");
                 States::new()
             }),
             None => States::new(),
         };
+        let inventory = opts.state_path.as_deref().map(device_cache::load)
+            .transpose().unwrap_or_else(|error| {
+                tracing::warn!(%error, "device inventory cache unreadable; waiting for fresh definitions");
+                None
+            }).flatten();
+        // A sidecar definition and its samples are one generation. Never pair
+        // it with state.json from an interrupted older/newer replacement.
+        let cached_devices = inventory.map_or_else(device_cache::Devices::new, |inventory| {
+            restored = inventory.unclaimed;
+            inventory.devices
+        });
         let (journal_log, past) = match &opts.journal_path {
             Some(path) => {
                 let (log, past) = JournalLog::open(path, opts.journal_capacity)?;
@@ -426,6 +448,7 @@ impl Hub {
         Ok(Self(Arc::new(Inner {
             model: RwLock::new(Model {
                 restored,
+                cached_devices,
                 labels,
                 ..Model::default()
             }),
@@ -442,6 +465,7 @@ impl Hub {
             addresses: Mutex::new(book),
             address_write: tokio::sync::Mutex::new(()),
             state_dirty: AtomicBool::new(false),
+            state_write: tokio::sync::Mutex::new(()),
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
             voice: std::sync::OnceLock::new(),
@@ -520,6 +544,23 @@ impl Hub {
     pub fn state(&self, point: &PointId) -> Option<Sample> {
         let (device, key) = point.split()?;
         self.read().states.get(&device)?.get(key).cloned()
+    }
+
+    /// A usable current observation, for consumers that may act on it.
+    #[must_use]
+    pub fn current_state(&self, point: &PointId) -> Option<Sample> {
+        let (device, key) = point.split()?;
+        let model = self.read();
+        if model.availability.get(&device) == Some(&false)
+            || model.unconfirmed.contains_key(&device)
+            || model
+                .awaiting_samples
+                .get(&device)
+                .is_some_and(|keys| keys.contains(key))
+        {
+            return None;
+        }
+        model.states.get(&device)?.get(key).cloned()
     }
 
     /// Most recent journal entries first.
@@ -1059,6 +1100,30 @@ impl Hub {
         );
     }
 
+    /// Journals a human's persisted driver edit without its address or secrets.
+    pub fn record_driver_configured(
+        &self,
+        instance: InstanceId,
+        driver_kind: &str,
+        enabled: bool,
+        read_only: bool,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        self.record(
+            Origin::Ui,
+            actor,
+            Action::DriverConfigured {
+                instance,
+                driver_kind: driver_kind.to_owned(),
+                enabled,
+                read_only,
+            },
+            outcome,
+            Instant::now(),
+        );
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {
@@ -1467,16 +1532,73 @@ impl Hub {
         integration: Arc<str>,
     ) -> mpsc::Receiver<CommandRequest> {
         let (commands, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.write().drivers.insert(
-            instance.clone(),
-            DriverSlot {
-                kind,
-                integration: integration.clone(),
-                status: DriverStatus::Starting,
-                warning: None,
-                commands,
-            },
-        );
+        let restored = {
+            let mut model = self.write();
+            model.drivers.insert(
+                instance.clone(),
+                DriverSlot {
+                    kind,
+                    integration: integration.clone(),
+                    status: DriverStatus::Starting,
+                    warning: None,
+                    commands,
+                },
+            );
+            let foreign: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && (&*cached.kind != kind || cached.integration != integration)
+                })
+                .map(|cached| cached.device.id.clone())
+                .collect();
+            let mut restored = Vec::new();
+            for id in foreign {
+                if model.devices.remove(&id).is_some() {
+                    model.states.remove(&id);
+                    model.availability.remove(&id);
+                    model.unconfirmed.remove(&id);
+                    model.awaiting_samples.remove(&id);
+                    model.held_offline.remove(&id);
+                    restored.push(Event::DeviceRemoved { device: id });
+                }
+            }
+            let cached: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && &*cached.kind == kind
+                        && cached.integration == integration
+                })
+                .cloned()
+                .collect();
+            for cached in cached {
+                let mut device = (*cached.device).clone();
+                for point in &mut device.points {
+                    point.access.write = false;
+                }
+                let device = Arc::new(device);
+                let id = device.id.clone();
+                let states = model.states.get(&id).cloned().unwrap_or(cached.states);
+                model.devices.insert(id.clone(), Arc::clone(&device));
+                model.states.insert(id.clone(), states.clone());
+                model
+                    .awaiting_samples
+                    .insert(id.clone(), states.keys().cloned().collect());
+                model.availability.insert(id.clone(), false);
+                model.unconfirmed.insert(id.clone(), false);
+                model.held_offline.remove(&id);
+                let label = model.labels.get(&id).cloned().unwrap_or_default();
+                restored.push(Event::DeviceRestored {
+                    device,
+                    states,
+                    label,
+                });
+            }
+            restored
+        };
         self.emit(Event::DriverRegistered {
             instance: instance.clone(),
             kind: kind.to_owned(),
@@ -1487,7 +1609,58 @@ impl Hub {
             status: DriverStatus::Starting,
             warning: None,
         });
+        for event in restored {
+            self.emit(event);
+        }
         rx
+    }
+
+    /// Detaches an already stopped driver. Call only after cancelling and
+    /// awaiting its task: an old task must not publish over a replacement.
+    /// Labels, history and original cached definitions are retained.
+    pub fn unregister_driver(&self, instance: &InstanceId) {
+        let devices = {
+            let mut model = self.write();
+            if model.drivers.remove(instance).is_none() {
+                return;
+            }
+            let mut devices: Vec<_> = model
+                .devices
+                .values()
+                .filter(|device| &device.instance == instance)
+                .map(|device| (**device).clone())
+                .collect();
+            for device in &mut devices {
+                let states = model.states.get(&device.id).cloned().unwrap_or_default();
+                if let Some(cached) = model.cached_devices.get_mut(&device.id) {
+                    cached.states = states;
+                }
+                for point in &mut device.points {
+                    point.access.write = false;
+                }
+                model
+                    .devices
+                    .insert(device.id.clone(), Arc::new(device.clone()));
+                model.availability.insert(device.id.clone(), false);
+                model.unconfirmed.insert(device.id.clone(), false);
+                model.held_offline.remove(&device.id);
+                model.snapshots.remove(&device.id);
+                model.printers.remove(&device.id);
+            }
+            devices
+        };
+        for device in devices {
+            self.emit(Event::Availability {
+                device: device.id.clone(),
+                online: false,
+            });
+            self.emit(Event::DeviceUpserted {
+                device: Arc::new(device),
+            });
+        }
+        self.emit(Event::DriverUnregistered {
+            instance: instance.clone(),
+        });
     }
 
     pub(crate) fn set_driver_status(&self, instance: &InstanceId, status: DriverStatus) {
@@ -1516,10 +1689,11 @@ impl Hub {
                     .held_offline
                     .keys()
                     .filter(|d| {
-                        model
-                            .devices
-                            .get(*d)
-                            .is_some_and(|d| &d.instance == instance)
+                        !model.unconfirmed.contains_key(*d)
+                            && model
+                                .devices
+                                .get(*d)
+                                .is_some_and(|d| &d.instance == instance)
                     })
                     .cloned()
                     .collect();
@@ -1570,26 +1744,52 @@ impl Hub {
 
     pub(crate) fn upsert_device(&self, device: Device) {
         let device = Arc::new(device);
-        let restored = {
+        let (restored, revived) = {
             let mut model = self.write();
-            if model
-                .devices
-                .get(&device.id)
-                .is_some_and(|d| **d == *device)
+            let unconfirmed = model.unconfirmed.remove(&device.id);
+            let revived = unconfirmed == Some(false);
+            if revived {
+                model.availability.insert(device.id.clone(), true);
+                model.held_offline.remove(&device.id);
+            }
+            if unconfirmed.is_none()
+                && model
+                    .devices
+                    .get(&device.id)
+                    .is_some_and(|d| **d == *device)
             {
                 return;
+            }
+            let identity = model
+                .drivers
+                .get(&device.instance)
+                .map(|slot| (Arc::<str>::from(slot.kind), slot.integration.clone()));
+            if model.cached_devices.get(&device.id).is_some_and(|cached| {
+                identity.as_ref().is_some_and(|(kind, integration)| {
+                    &cached.kind != kind || &cached.integration != integration
+                })
+            }) {
+                model.states.remove(&device.id);
+                model.restored.remove(&device.id);
             }
             // Claim cached values for the points this definition declares.
             // The rest stays cached: a device first published without its
             // definition (interview in progress) must not lose its history.
             let mut cached = model.restored.remove(&device.id).unwrap_or_default();
             let states = model.states.entry(device.id.clone()).or_default();
-            states.retain(|key, _| device.point(key).is_some());
+            states.retain(|key, sample| {
+                device
+                    .point(key)
+                    .is_some_and(|point| device_cache::sample_matches(&point.kind, &sample.value))
+            });
             let mut restored = Vec::new();
+            let mut awaiting = Vec::new();
             for point in &device.points {
                 if let Some(sample) = cached.remove(&point.key)
                     && !states.contains_key(&point.key)
+                    && device_cache::sample_matches(&point.kind, &sample.value)
                 {
+                    awaiting.push(point.key.clone());
                     restored.push(Event::State {
                         point: PointId::new(&device.id, &point.key),
                         value: sample.value.clone(),
@@ -1602,10 +1802,40 @@ impl Hub {
             if !cached.is_empty() {
                 model.restored.insert(device.id.clone(), cached);
             }
+            let pending = model.awaiting_samples.entry(device.id.clone()).or_default();
+            pending.retain(|key| device.point(key).is_some());
+            pending.extend(awaiting);
+            if let Some((kind, integration)) = identity {
+                if model.cached_devices.contains_key(&device.id)
+                    || model.cached_devices.len() < device_cache::MAX_DEVICES
+                {
+                    model.cached_devices.insert(
+                        device.id.clone(),
+                        CachedDevice {
+                            kind,
+                            integration,
+                            device: Arc::clone(&device),
+                            states: BTreeMap::new(),
+                        },
+                    );
+                } else {
+                    tracing::warn!(
+                        "device inventory cache full; fresh discovery will be required for additional devices"
+                    );
+                }
+            }
             model.devices.insert(device.id.clone(), Arc::clone(&device));
-            restored
+            self.0.state_dirty.store(true, Ordering::Release);
+            (restored, revived)
         };
+        let id = device.id.clone();
         self.emit(Event::DeviceUpserted { device });
+        if revived {
+            self.emit(Event::Availability {
+                device: id,
+                online: true,
+            });
+        }
         for event in restored {
             self.emit(event);
         }
@@ -1617,16 +1847,40 @@ impl Hub {
         let Some(path) = &self.0.opts.state_path else {
             return Ok(false);
         };
+        let _writing = self.0.state_write.lock().await;
         if !self.0.state_dirty.swap(false, Ordering::AcqRel) {
             return Ok(false);
         }
-        let all = {
+        let (all, devices, unclaimed) = {
             let model = self.read();
             let mut all = model.restored.clone();
             all.extend(model.states.iter().map(|(k, v)| (k.clone(), v.clone())));
-            all
+            let mut devices = model.cached_devices.clone();
+            let mut unclaimed = model.restored.clone();
+            for (id, states) in &model.states {
+                if !devices.contains_key(id) {
+                    unclaimed.insert(id.clone(), states.clone());
+                }
+            }
+            for (id, cached) in &mut devices {
+                if let Some(states) = model.states.get(id) {
+                    cached.states = states
+                        .iter()
+                        .filter(|(key, sample)| {
+                            cached.device.point(key).is_some_and(|point| {
+                                device_cache::sample_matches(&point.kind, &sample.value)
+                            })
+                        })
+                        .map(|(key, sample)| (key.clone(), sample.clone()))
+                        .collect();
+                }
+                // Keep legacy values complete even for temporarily disabled instances.
+                all.entry(id.clone())
+                    .or_insert_with(|| cached.states.clone());
+            }
+            (all, devices, unclaimed)
         };
-        if let Err(e) = state_cache::save(path, &all).await {
+        if let Err(e) = device_cache::save_snapshot(path, devices, unclaimed, &all).await {
             self.0.state_dirty.store(true, Ordering::Release);
             return Err(e);
         }
@@ -1637,11 +1891,17 @@ impl Hub {
         let removed = {
             let mut model = self.write();
             model.states.remove(id);
+            model.restored.remove(id);
+            model.cached_devices.remove(id);
+            model.unconfirmed.remove(id);
+            model.awaiting_samples.remove(id);
+            model.held_offline.remove(id);
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
             model.devices.remove(id).is_some()
         };
+        self.0.state_dirty.store(true, Ordering::Release);
         self.0
             .images
             .lock()
@@ -1773,8 +2033,16 @@ impl Hub {
             .keys()
             .chain(model.labels.keys())
             .chain(model.restored.keys())
+            .chain(model.cached_devices.keys())
             .chain(model.states.keys())
-            .filter(|id| &id.instance() == instance)
+            .filter(|id| {
+                &id.instance() == instance
+                    && model.cached_devices.get(*id).is_none_or(|cached| {
+                        model.drivers.get(instance).is_some_and(|slot| {
+                            slot.kind == &*cached.kind && slot.integration == cached.integration
+                        })
+                    })
+            })
             .collect();
         ids.into_iter().cloned().collect()
     }
@@ -1800,8 +2068,12 @@ impl Hub {
             };
             let key = spec.key.clone();
             self.0.state_dirty.store(true, Ordering::Release);
+            let first_live = model
+                .awaiting_samples
+                .get_mut(device)
+                .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || states.get(&key).is_none_or(|s| s.value != value);
+            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
             states.insert(
                 key.clone(),
                 Sample {
@@ -1825,6 +2097,12 @@ impl Hub {
         let changed = {
             let mut model = self.write();
             if !model.devices.contains_key(device) {
+                return;
+            }
+            if let Some(explicit_offline) = model.unconfirmed.get_mut(device) {
+                if !online {
+                    *explicit_offline = true;
+                }
                 return;
             }
             // The driver speaks for it again.

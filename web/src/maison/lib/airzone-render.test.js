@@ -89,6 +89,7 @@ function observationOnly(html, filters = false) {
       continue;
     }
     if (filters && /class="filter-reset\b/.test(button)) continue;
+    if (/class="refresh\b/.test(button)) continue; // Stored configuration refresh, never an equipment command.
     assert.match(button, /class="metric\b/, 'only observed metrics can use a button in the zone detail');
     if (!/\bdisabled\b/.test(button)) {
       assert.match(button, /aria-label="[^"]+Voir l’historique"/, 'available metrics name their history navigation');
@@ -427,4 +428,47 @@ test('journal identifies a read-only gateway installation without a label payloa
   assert.match(content,/new-airzone/);
   assert.match(content,/lecture seule/);
   hub.journal=[];
+});
+
+test('installation retains gateway management with no live drivers and while disconnected',()=>{
+  for (const connected of [true,false]) {
+    hub.connected=connected;
+    const html=page('airzone/installation');
+    assert.match(text(html),/Passerelles Airzone/);
+    assert.match(html,/href="#\/airzone\/add"/);
+    assert.match(text(html),/Actualiser la liste/);
+  }
+});
+
+test('system always exposes the gateway management route after every Airzone driver is withdrawn',async()=>{
+  const System=(await vite.ssrLoadModule('/src/maison/pages/Systeme.svelte')).default;
+  assert.match(render(System).body,/href="#\/airzone\/installation"/);
+});
+
+test('gateway cards distinguish pause from offline and show actual writable configuration',async()=>{
+  const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
+  const gateway={instance:'airzone-old',host:'127.0.0.1',port:3000,enabled:false,source:'configuration',read_only:false,running:false};
+  let html=render(Card,{props:{gateway}}).body;
+  assert.match(text(html),/En pause/);assert.match(text(html),/Pilotage autorisé par la configuration/);
+  assert.match(text(html),/Vérifier et réactiver/);assert.doesNotMatch(text(html),/Hors ligne/);
+  html=render(Card,{props:{gateway:{...gateway,enabled:true,running:true,read_only:true},connected:false}}).body;
+  assert.match(text(html),/État à vérifier/);assert.ok(tags(html,'button').every(tag=>/disabled/.test(tag)));
+});
+
+test('gateway connection editor retains identity and announces read-only conversion',async()=>{
+  const Add=(await vite.ssrLoadModule('/src/maison/ui/AirzoneAdd.svelte')).default;
+  const gateway={instance:'airzone-old',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',enabled:false,read_only:false};
+  const html=render(Add,{props:{gateway}}).body;
+  assert.match(text(html),/Réactiver cette passerelle/);
+  assert.match(text(html),/Tout enregistrement active la lecture seule/);
+  assert.match(html,/<input[^>]*value="airzone-old"[^>]*disabled/);
+  assert.doesNotMatch(text(html),/Ajouter une autre passerelle/);
+});
+
+test('journal renders gateway pause and reconfiguration without a label payload',async()=>{
+  const Journal=(await vite.ssrLoadModule('/src/components/Journal.svelte')).default;
+  for (const [enabled,expected] of [[false,/mis en pause/],[true,/reconfiguré en lecture seule/]]) {
+    hub.journal=[{id:3,ts:1700000000000,action:{kind:'driver_configured',instance:'airzone-old',driver_kind:'airzone',enabled,read_only:true},origin:'ui',outcome:{result:'ok'}}];
+    assert.match(text(render(Journal).body),expected);
+  }
 });

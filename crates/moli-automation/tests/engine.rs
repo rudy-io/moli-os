@@ -14,6 +14,37 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug)]
 struct Fake;
 
+#[derive(Debug)]
+struct WeatherObservation(bool);
+impl Driver for WeatherObservation {
+    fn kind(&self) -> &'static str {
+        "weather-test"
+    }
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("weather");
+            let mut point = onoff("daylight");
+            point.access.write = false;
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "Synthetic weather".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: vec![],
+                points: vec![point],
+            });
+            ctx.set_state(&id, "daylight", Value::Bool(self.0));
+            ctx.set_availability(&id, false);
+            ctx.ready();
+            ctx.cancelled().await;
+            Ok(())
+        })
+    }
+}
+
 fn onoff(key: &str) -> PointSpec {
     PointSpec {
         key: key.into(),
@@ -127,6 +158,157 @@ async fn setup() -> (Hub, Automations, CancellationToken) {
         .await
         .unwrap();
     (hub, autos, cancel)
+}
+
+#[tokio::test]
+async fn an_offline_observation_cannot_satisfy_a_rule_for_a_live_actuator() {
+    let (hub, autos, cancel) = setup().await;
+    let sensor_cancel = CancellationToken::new();
+    let sensor = spawn_driver(
+        &hub,
+        InstanceId::from("observation"),
+        Arc::new(Fake),
+        sensor_cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.state(&PointId::from("observation:switch/on")).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    sensor_cancel.cancel();
+    sensor.await.unwrap();
+    hub.unregister_driver(&InstanceId::from("observation"));
+    assert_eq!(
+        hub.state(&PointId::from("observation:switch/on"))
+            .unwrap()
+            .value,
+        Value::Bool(false)
+    );
+    let a = approved(&autos, serde_json::json!({
+        "nodes":[{"id":"t","type":"manual"},
+            {"id":"c","type":"if","rules":[{"kind":"state","point":"observation:switch/on","op":"eq","value":false}]},
+            {"id":"s","type":"set","point":"fake:lamp/on","value":true}],
+        "edges":[{"from":"t","to":"c"},{"from":"c","port":"yes","to":"s"}]
+    })).await;
+    autos
+        .run_now(&a.id, false, Some(&a.fingerprint()), HUMAN)
+        .await
+        .unwrap();
+    for _ in 0..200 {
+        if autos
+            .runs(Some(&a.id), 1)
+            .first()
+            .is_some_and(|run| run.status != RunStatus::Running)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(autos.runs(Some(&a.id), 1)[0].status, RunStatus::Done);
+    assert_eq!(
+        hub.state(&PointId::from("fake:lamp/on")).unwrap().value,
+        Value::Bool(false)
+    );
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn offline_weather_is_neither_a_day_nor_a_night_condition() {
+    for daylight in [true, false] {
+        let (hub, autos, cancel) = setup().await;
+        let weather = spawn_driver(
+            &hub,
+            "observation".into(),
+            Arc::new(WeatherObservation(daylight)),
+            cancel.clone(),
+        );
+        for _ in 0..200 {
+            if hub
+                .device(&"observation:weather".into())
+                .is_some_and(|view| view.online == Some(false))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        for period in ["day", "night"] {
+            let a = approved(
+                &autos,
+                serde_json::json!({
+                    "nodes":[{"id":"t","type":"manual"},
+                        {"id":"c","type":"if","rules":[{"kind":"sun","is":period}]},
+                        {"id":"s","type":"set","point":"fake:lamp/on","value":true}],
+                    "edges":[{"from":"t","to":"c"},{"from":"c","port":"yes","to":"s"}]
+                }),
+            )
+            .await;
+            autos
+                .run_now(&a.id, false, Some(&a.fingerprint()), HUMAN)
+                .await
+                .unwrap();
+            for _ in 0..200 {
+                if autos
+                    .runs(Some(&a.id), 1)
+                    .first()
+                    .is_some_and(|run| run.status != RunStatus::Running)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(autos.runs(Some(&a.id), 1)[0].status, RunStatus::Done);
+            assert_eq!(
+                hub.state(&PointId::from("fake:lamp/on")).unwrap().value,
+                Value::Bool(false),
+                "old weather cannot establish {period}"
+            );
+        }
+        cancel.cancel();
+        weather.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_held_trigger_does_not_fire_after_its_source_goes_offline() {
+    let (hub, autos, cancel) = setup().await;
+    let sensor_cancel = CancellationToken::new();
+    let sensor = spawn_driver(
+        &hub,
+        "observation".into(),
+        Arc::new(Fake),
+        sensor_cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.state(&PointId::from("observation:switch/on")).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    approved(&autos,serde_json::json!({
+        "nodes":[{"id":"t","type":"when_state","point":"observation:switch/on","to":true,"for_s":1},
+            {"id":"s","type":"set","point":"fake:lamp/on","value":true}],
+        "edges":[{"from":"t","to":"s"}]
+    })).await;
+    hub.command(
+        &PointId::from("observation:switch/on"),
+        Value::Bool(true),
+        Origin::Api,
+        None,
+    )
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    sensor_cancel.cancel();
+    sensor.await.unwrap();
+    hub.unregister_driver(&InstanceId::from("observation"));
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        hub.state(&PointId::from("fake:lamp/on")).unwrap().value,
+        Value::Bool(false)
+    );
+    assert!(autos.runs(None, 10).is_empty());
+    cancel.cancel();
 }
 
 fn automation(graph: serde_json::Value) -> Automation {

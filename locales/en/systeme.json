@@ -364,5 +364,8 @@
   "systeme.journal.pilote_ajoute": "{kind} driver added",
   "systeme.airzone.title": "Airzone gateway",
   "systeme.airzone.help": "Connect a gateway compatible with the Local API and discover its zones in Moli, in read-only mode.",
-  "systeme.airzone.add": "Add a gateway"
+  "systeme.airzone.add": "Add a gateway",
+  "systeme.journal.pilote_pause": "{kind} driver paused",
+  "systeme.journal.pilote_reconfigure_lecture_seule": "{kind} driver reconfigured as read-only",
+  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured"
 }

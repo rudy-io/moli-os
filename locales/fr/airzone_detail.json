@@ -1,6 +1,6 @@
 {
   "airzone_detail.view_history": "Voir l’historique",
-  "airzone_detail.changed_at": "Dernier changement : {time}",
+  "airzone_detail.changed_at": "Valeur enregistrée : {time}",
   "airzone_detail.thermostat": "État du thermostat",
   "airzone_detail.no_battery": "Non applicable (filaire)",
   "airzone_detail.personalise": "Personnaliser cette zone",

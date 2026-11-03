@@ -112,3 +112,28 @@ test('disconnects, identity changes and unrelated approvals cannot authorize an 
   mode='auth';const unrelated={custom:()=>{}};client.home.held=unrelated;await component.runProbe();
   assert.equal(client.home.held.custom,unrelated.custom);assert.equal(component.intent().failure.error,'auth_busy');
 });
+
+test('editing and resuming a gateway preserves its stable instance and uses the lifecycle endpoints',async(t)=>{
+  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3001,tls_fingerprint:null,mac:preview.mac,enabled:false,read_only:false};
+  const{component,calls}=fixture(t,undefined,{gateway});
+  component.change('instance','different');assert.equal(component.intent().draft.instance,gateway.instance);
+  assert.equal(component.intent().draft.port,'3001');
+  await component.runProbe();assert.equal(calls[0].url,'/api/integrations/airzone/airzone-2/probe');
+  await component.runInstall();assert.equal(calls[1].url,'/api/integrations/airzone/airzone-2');assert.equal(calls[1].body.expected_mac,preview.mac);
+});
+
+test('editing refuses a different hardware identity even if a malformed server approves its probe',async(t)=>{
+  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:'112233445566',enabled:true,read_only:true};
+  const{component,calls}=fixture(t,undefined,{gateway});
+  await component.runProbe();assert.equal(component.intent().checked,null);assert.equal(component.intent().failure.error,'identity_changed');
+  await component.runInstall();assert.equal(calls.length,1);
+});
+
+test('editing a legacy configured ID preserves whitespace and punctuation in both body and path',async(t)=>{
+  const instance=' Airzone étage.v1 ';
+  const gateway={instance,host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:true,read_only:true};
+  const{component,calls}=fixture(t,(url)=>response(url.endsWith('/probe')?{...preview,instance}:{...saved,instance}),{gateway});
+  await component.runProbe();await component.runInstall();assert.equal(calls.length,2);
+  assert.equal(calls[0].body.instance,instance);assert.equal(calls[1].body.instance,instance);
+  assert.equal(calls[1].url,'/api/integrations/airzone/'+encodeURIComponent(instance));
+});

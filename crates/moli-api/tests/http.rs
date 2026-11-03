@@ -918,6 +918,7 @@ struct GuestHouse {
     pin: String,
     /// The guest's headers: from the Internet, its session.
     guest: String,
+    drivers: Vec<(CancellationToken, tokio::task::JoinHandle<()>)>,
 }
 
 const GUEST_ROOM: &str = "Chambre d'amis";
@@ -940,13 +941,11 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         ("salon", Arc::new(Lamp)),
         ("tel", Arc::new(Phone)),
     ];
+    let mut running = Vec::new();
     for (instance, driver) in drivers {
-        spawn_driver(
-            &hub,
-            InstanceId::from(instance),
-            driver,
-            CancellationToken::new(),
-        );
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(&hub, InstanceId::from(instance), driver, cancel.clone());
+        running.push((cancel, task));
     }
     for _ in 0..200 {
         if hub.stats().drivers_running == 3 {
@@ -1003,6 +1002,7 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         dir,
         pin,
         guest,
+        drivers: running,
     }
 }
 
@@ -1251,6 +1251,65 @@ async fn a_guest_follows_its_rooms_only_live() {
     assert_eq!(name, "snapshot");
     assert_eq!(device_ids(&snapshot), ["fake:lamp", "salon:lamp"]);
     let _ = std::fs::remove_dir_all(&house.dir);
+}
+
+#[tokio::test]
+async fn restored_cached_devices_are_scoped_to_the_guests_rooms_over_sse() {
+    struct DormantLamp;
+    impl Driver for DormantLamp {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let mut house = guest_house("restored-guest", |_| {}).await;
+    for (cancel, task) in house.drivers.drain(..) {
+        cancel.cancel();
+        task.await.unwrap();
+    }
+    let (status, mut guest) = live(&house.addr, "/api/events", &house.guest).await;
+    assert_eq!(status, 200);
+    assert_eq!(device_ids(&guest.next().await.1), ["fake:lamp"]);
+    let cancel = CancellationToken::new();
+    let outside = spawn_driver(
+        &house.hub,
+        "salon".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    let visible = spawn_driver(
+        &house.hub,
+        "fake".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let (_, event) = guest.next().await;
+            assert!(
+                !event.to_string().contains("salon:lamp"),
+                "private cached device leaked: {event}"
+            );
+            if event["type"] == "device_restored" {
+                assert_eq!(event["device"]["id"], "fake:lamp");
+                assert_eq!(event["label"]["room"], GUEST_ROOM);
+                assert_eq!(event["states"]["state"]["value"], false);
+                assert_eq!(event["device"]["points"][0]["access"]["write"], false);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    cancel.cancel();
+    outside.await.unwrap();
+    visible.await.unwrap();
+    std::fs::remove_dir_all(house.dir).unwrap();
 }
 
 /// A phone is paired without the code (a device of the home network is the
@@ -1898,9 +1957,90 @@ async fn airzone_onboarding_requires_a_human_before_any_probe() {
     }
 }
 
+#[tokio::test]
+async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unauthenticated_change()
+{
+    let (addr, _) = server().await;
+    for (method, path, body) in [
+        ("GET", "/api/integrations/airzone", None),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/probe",
+            Some(json!({"instance":"existing","host":"127.0.0.1","port":3000})),
+        ),
+        (
+            "PUT",
+            "/api/integrations/airzone/existing",
+            Some(
+                json!({"instance":"existing","host":"127.0.0.1","port":3000,"expected_mac":"aabbccddeeff"}),
+            ),
+        ),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/withdraw",
+            Some(json!({})),
+        ),
+    ] {
+        let (status, _) =
+            request_with(&addr, method, path, body.as_ref(), "x-moli-origin: ui\r\n").await;
+        assert_eq!(
+            status, 403,
+            "unauthenticated caller reached {method} {path}"
+        );
+    }
+}
+
 #[derive(Debug, Default)]
 struct CountedAirzoneSetup(std::sync::atomic::AtomicUsize);
 impl moli_api::airzone_setup::AirzoneSetup for CountedAirzoneSetup {
+    fn list(
+        &self,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayList, moli_api::airzone_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async { Ok(moli_api::airzone_setup::GatewayList { gateways: vec![] }) })
+    }
+    fn probe_update(
+        &self,
+        _instance: String,
+        request: moli_api::airzone_setup::GatewayRequest,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayPreview, moli_api::airzone_setup::SetupError>,
+    > {
+        self.probe(request)
+    }
+    fn update(
+        &self,
+        _instance: String,
+        request: moli_api::airzone_setup::GatewayRequest,
+        actor: String,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayInstalled, moli_api::airzone_setup::SetupError>,
+    > {
+        self.install(request, actor)
+    }
+    fn withdraw(
+        &self,
+        instance: String,
+        _actor: String,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayWithdrawn, moli_api::airzone_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(moli_api::airzone_setup::GatewayWithdrawn {
+                instance,
+                stored: true,
+                enabled: false,
+                read_only: true,
+            })
+        })
+    }
     fn probe(
         &self,
         request: moli_api::airzone_setup::GatewayRequest,
@@ -2017,6 +2157,93 @@ async fn airzone_routes_bind_authentication_bounded_typed_input_and_rate_budget(
 }
 
 #[tokio::test]
+async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismatched_changes() {
+    for (method, path, body) in [
+        ("GET", "/api/integrations/airzone", None),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/probe",
+            Some(json!({"instance":"existing","host":"127.0.0.1","port":3000})),
+        ),
+        (
+            "PUT",
+            "/api/integrations/airzone/existing",
+            Some(
+                json!({"instance":"existing","host":"127.0.0.1","port":3000,"expected_mac":"aabbccddeeff"}),
+            ),
+        ),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/withdraw",
+            Some(json!({})),
+        ),
+    ] {
+        let hub = lamp_hub().await;
+        let setup = Arc::new(CountedAirzoneSetup::default());
+        let addr = serve(
+            &hub,
+            &moli_api::Options {
+                ui_pin: Some(moli_api::UiPin::new("482915")),
+                airzone_setup: Some(setup.clone()),
+                ..moli_api::Options::default()
+            },
+        )
+        .await;
+        let pin = pin_session(&addr, "482915").await;
+        assert_eq!(
+            request_with(&addr, method, path, body.as_ref(), &pin)
+                .await
+                .0,
+            403
+        );
+        let human = format!("{pin}x-moli-origin: ui\r\n");
+        if let Some(body) = &body {
+            let mut invalid = body.clone();
+            invalid["read_only"] = json!(false);
+            assert_eq!(
+                request_with(&addr, method, path, Some(&invalid), &human)
+                    .await
+                    .0,
+                422
+            );
+        }
+        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+        let (status, response) = request_with(&addr, method, path, body.as_ref(), &human).await;
+        assert_eq!(status, 200, "{method} {path}: {response}");
+        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let (status, response) = request_with(
+        &addr,
+        "PUT",
+        "/api/integrations/airzone/existing",
+        Some(&json!({"instance":"different","host":"127.0.0.1","port":3000})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 422);
+    assert_eq!(
+        serde_json::from_str::<Json>(&response).unwrap()["error"],
+        "instance_mismatch"
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
 async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_code() {
     let setup = Arc::new(CountedAirzoneSetup::default());
     let service = setup.clone();
@@ -2037,14 +2264,18 @@ async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_co
     let guest = house
         .guest
         .replace("Cookie: ", &format!("Cookie: {}; ", session.unwrap()));
-    for path in [
-        "/api/integrations/airzone/probe",
-        "/api/integrations/airzone",
+    for (method, path) in [
+        ("POST", "/api/integrations/airzone/probe"),
+        ("POST", "/api/integrations/airzone"),
+        ("GET", "/api/integrations/airzone"),
+        ("POST", "/api/integrations/airzone/existing/probe"),
+        ("PUT", "/api/integrations/airzone/existing"),
+        ("POST", "/api/integrations/airzone/existing/withdraw"),
     ] {
         assert_eq!(
             request_with(
                 &house.addr,
-                "POST",
+                method,
                 path,
                 Some(&json!({"instance":"airzone-new","host":"127.0.0.1","port":3000})),
                 &guest

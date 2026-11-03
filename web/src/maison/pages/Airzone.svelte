@@ -12,6 +12,7 @@
   import AirzoneManagement from '../ui/AirzoneManagement.svelte';
   import AirzoneAlerts from '../ui/AirzoneAlerts.svelte';
   import AirzoneAdd from '../ui/AirzoneAdd.svelte';
+  import AirzoneGateways from '../ui/AirzoneGateways.svelte';
   import HistoryPanel from '../../components/HistoryPanel.svelte';
 
   let { route = 'airzone' } = $props();
@@ -128,7 +129,7 @@
     <p class="notice" role="status"><Icon name="offline" size={18} />{t('airzone_ui.connection_lost')}</p>
   {/if}
 
-  {#if !hub.connected && !inventory.instances.length}
+  {#if !hub.connected && !inventory.instances.length && !installation && !adding}
     <div class="empty" role="status"><Icon name="air-conditioner" size={32} /><p>{t('airzone_ui.loading')}</p></div>
   {:else if management}
     <a class="add-link" href="#/airzone/add">{t('airzone_ui.add')}<Icon name="chevron-right" size={18} /></a>
@@ -139,6 +140,7 @@
     <AirzoneAdd drivers={hub.drivers} connected={hub.connected} />
   {:else if installation}
     <div class="installation-stack">
+      <AirzoneGateways connected={hub.connected} drivers={hub.drivers} registryRevision={hub.driverRevision} />
       {#each inventory.instances as instance (instance.id)}
         <section class="installation-card">
           <header class="section-heading"><h2>{multipleInstances ? instance.id : t('airzone_ui.gateway')}</h2><span class="connection-state">{driverName(instance.driver)}</span></header>

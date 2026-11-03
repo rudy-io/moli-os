@@ -331,7 +331,19 @@ fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
         )
         .route(
             "/api/integrations/airzone",
-            upload(post(airzone_setup::install), 2048, humans),
+            upload(post(airzone_setup::install), 2048, humans).get(airzone_setup::list),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/probe",
+            upload(post(airzone_setup::probe_update), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}",
+            upload(put(airzone_setup::update), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/withdraw",
+            upload(post(airzone_setup::withdraw), 1024, humans),
         )
 }
 

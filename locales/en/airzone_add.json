@@ -58,12 +58,12 @@
   "airzone_add.error.duplicate_instance": "This ID is already used. Choose another in the connection settings.",
   "airzone_add.error.duplicate_gateway": "This gateway is already configured in Moli. It has not been added a second time.",
   "airzone_add.error.identity_unavailable": "The identity of an existing gateway is unavailable. Check its connection and settings in the installation, then try again.",
-  "airzone_add.error.identity_changed": "The device responding at this address changed since verification. Nothing was added. Check the gateway again.",
+  "airzone_add.error.identity_changed": "The gateway identity has changed. No connection was changed. Check again or use hardware replacement.",
   "airzone_add.error.probe_failed": "A compatible Airzone gateway could not be verified at this address. Check its power, address, port and whether its Local API is enabled.",
   "airzone_add.error.busy": "A check is already running or requests are too close together. Try again shortly.",
   "airzone_add.error.limit_reached": "The maximum number of gateways added from Moli has been reached.",
   "airzone_add.error.persistence_failed": "Moli could not save the gateway. No new connection was started.",
-  "airzone_add.error.unavailable": "Gateway setup is unavailable on this Moli instance.",
+  "airzone_add.error.unavailable": "Gateway management is unavailable on this Moli instance.",
   "airzone_add.error.shutting_down": "Moli is shutting down. Wait for it to return before trying again.",
   "airzone_add.error.network": "The connection to Moli was interrupted. Your settings remain in this form.",
   "airzone_add.error.response": "Moli returned an unexpected response. This step is not confirmed.",
@@ -71,6 +71,10 @@
   "airzone_add.error.auth": "Your access was not confirmed. Validate your Moli code, then try again.",
   "airzone_add.error.auth_busy": "Another action is already awaiting your approval. Complete or cancel it before continuing.",
   "airzone_add.error.cancelled": "Approval cancelled. Your settings are retained.",
-  "airzone_add.error.connection": "Moli is disconnected. Wait for it to reconnect before checking or adding a gateway.",
-  "airzone_add.error.verify_first": "Check the gateway with these settings first."
+  "airzone_add.error.connection": "Moli is disconnected. Wait for it to reconnect before managing gateways.",
+  "airzone_add.error.verify_first": "Check the gateway with these settings first.",
+  "airzone_add.error.not_found": "This gateway is no longer saved. Refresh the list.",
+  "airzone_add.error.instance_mismatch": "The identifier does not match the selected connection. Reopen its form.",
+  "airzone_add.error.gateway_disabled": "This connection is paused. Check it before resuming.",
+  "airzone_add.error.unaddressable_instance": "Legacy identifiers “.” and “..” remain visible, but managing them from this page requires a configuration migration."
 }

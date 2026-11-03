@@ -1,7 +1,7 @@
 const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
-const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down']);
+const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled']);
 
 export function nextGatewayInstance(drivers = []) {
   const used = new Set(drivers.map((driver) => driver.instance));
@@ -11,11 +11,17 @@ export function nextGatewayInstance(drivers = []) {
 }
 
 // A small UI contract, not arbitrary driver options. The server validates again.
-export function gatewayRequest(input) {
-  const instance = String(input?.instance ?? '').trim();
+function existingInstance(instance) {
+  return typeof instance === 'string' && instance.length > 0 && !/[:/]/.test(instance) && !RESERVED.has(instance);
+}
+
+// Existing configuration IDs predate the onboarding syntax; never trim or rename them.
+export function gatewayRequest(input, { existing = false } = {}) {
+  const instance = existing ? input?.instance : String(input?.instance ?? '').trim();
   const host = String(input?.host ?? '').trim();
   const port = String(input?.port ?? '').trim();
-  if (!INSTANCE.test(instance) || RESERVED.has(instance)) return {error:'invalid_instance'};
+  if (existing ? !existingInstance(instance) : !INSTANCE.test(instance) || RESERVED.has(instance)) return {error:'invalid_instance'};
+  if (existing && (instance === '.' || instance === '..')) return {error:'unaddressable_instance'};
   const pieces = host.split('.');
   const octets = pieces.map(Number);
   if (pieces.length !== 4 || pieces.some((part) => !/^(?:0|[1-9]\d{0,2})$/.test(part)) || octets.some((part) => part > 255)
@@ -38,10 +44,10 @@ function previewIsValid(data, instance) {
     && Number.isSafeInteger(data.zones) && data.zones >= 0 && data.zones <= 4096 && typeof data.incomplete === 'boolean';
 }
 
-async function exchange(path, request, installed, fetcher) {
+async function exchange(path, request, validate, fetcher, method = 'POST') {
   let response;
   try {
-    response = await fetcher(path, {method:'POST',headers:{'content-type':'application/json','x-moli-origin':'ui'},body:JSON.stringify(request)});
+    response = await fetcher(path, {method,headers:{'content-type':'application/json','x-moli-origin':'ui'},...(method === 'GET' ? {} : {body:JSON.stringify(request)})});
   } catch { return {ok:false,error:'network'}; }
   if (response.status === 403) return {ok:false,error:'auth',status:403};
   let data;
@@ -49,26 +55,63 @@ async function exchange(path, request, installed, fetcher) {
   if (!response.ok) {
     const error = ERRORS.has(data?.error) ? data.error : response.status === 429 ? 'busy' : 'server';
     const result = {ok:false,error,status:response.status};
-    if (['duplicate_instance','duplicate_gateway'].includes(error) && typeof data?.existing_instance === 'string' && INSTANCE.test(data.existing_instance)) result.existingInstance = data.existing_instance;
+    if (['duplicate_instance','duplicate_gateway'].includes(error) && existingInstance(data?.existing_instance)) result.existingInstance = data.existing_instance;
     return result;
   }
-  const valid = installed
-    ? data?.instance === request.instance && data.stored === true && data.read_only === true && typeof data.already_installed === 'boolean'
-    : previewIsValid(data, request.instance);
-  if (response.status !== 200 || !valid) return {ok:false,error:'response',status:response.status};
+  if (response.status !== 200 || !validate(data)) return {ok:false,error:'response',status:response.status};
   return {ok:true,data};
 }
 
 export async function probeGateway(input, fetcher = globalThis.fetch) {
   const parsed = gatewayRequest(input);
   if (parsed.error) return {ok:false,error:parsed.error};
-  return exchange('/api/integrations/airzone/probe', parsed.request, false, fetcher);
+  return exchange('/api/integrations/airzone/probe', parsed.request, (data) => previewIsValid(data,parsed.request.instance), fetcher);
 }
 
-export async function addGateway(input, expectedMac, fetcher = globalThis.fetch) {
-  const parsed = gatewayRequest(input);
+function savedIsValid(data, instance) {
+  return data?.instance === instance && data.stored === true && data.read_only === true && typeof data.already_installed === 'boolean';
+}
+
+async function saveGateway(input, expectedMac, updating, fetcher) {
+  const parsed = gatewayRequest(input,{existing:updating});
   if (parsed.error) return {ok:false,error:parsed.error};
   if (!expectedMac) return {ok:false,error:'expected_identity_required'};
   if (typeof expectedMac !== 'string' || !MAC.test(expectedMac)) return {ok:false,error:'invalid_identity'};
-  return exchange('/api/integrations/airzone', {...parsed.request,expected_mac:expectedMac}, true, fetcher);
+  const path = '/api/integrations/airzone' + (updating ? `/${encodeURIComponent(parsed.request.instance)}` : '');
+  return exchange(path, {...parsed.request,expected_mac:expectedMac}, (data) => savedIsValid(data,parsed.request.instance), fetcher, updating ? 'PUT' : 'POST');
+}
+
+export function addGateway(input, expectedMac, fetcher = globalThis.fetch) {
+  return saveGateway(input,expectedMac,false,fetcher);
+}
+
+export function updateGateway(input, expectedMac, fetcher = globalThis.fetch) {
+  return saveGateway(input,expectedMac,true,fetcher);
+}
+
+export async function probeExistingGateway(input, fetcher = globalThis.fetch) {
+  const parsed = gatewayRequest(input,{existing:true});
+  if (parsed.error) return {ok:false,error:parsed.error};
+  return exchange(`/api/integrations/airzone/${encodeURIComponent(parsed.request.instance)}/probe`,parsed.request,(data) => previewIsValid(data,parsed.request.instance),fetcher);
+}
+
+export async function withdrawGateway(instance, fetcher = globalThis.fetch) {
+  if (!existingInstance(instance)) return {ok:false,error:'invalid_instance'};
+  if (instance === '.' || instance === '..') return {ok:false,error:'unaddressable_instance'};
+  return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/withdraw`,{},(data) => data?.instance === instance && data.stored === true && data.enabled === false && typeof data.read_only === 'boolean',fetcher);
+}
+
+function gatewayIsValid(item) {
+  return item && existingInstance(item.instance)
+    && typeof item.host === 'string' && item.host.length > 0 && item.host.length <= 253 && !/[\u0000-\u0020\u007f]/.test(item.host)
+    && Number.isSafeInteger(item.port) && item.port >= 1 && item.port <= 65535
+    && (item.tls_fingerprint === null || (typeof item.tls_fingerprint === 'string' && /^[0-9a-f]{64}$/.test(item.tls_fingerprint)))
+    && (item.mac === null || (typeof item.mac === 'string' && MAC.test(item.mac)))
+    && typeof item.enabled === 'boolean' && typeof item.read_only === 'boolean' && typeof item.running === 'boolean'
+    && (item.enabled || !item.running) && ['configuration','moli'].includes(item.source);
+}
+
+export function listGateways(fetcher = globalThis.fetch) {
+  return exchange('/api/integrations/airzone',null,(data) => Array.isArray(data?.gateways) && data.gateways.length <= 256
+    && data.gateways.every(gatewayIsValid) && new Set(data.gateways.map((item) => item.instance)).size === data.gateways.length,fetcher,'GET');
 }

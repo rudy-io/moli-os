@@ -389,7 +389,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         None => (None, None),
     };
 
-    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel)?;
+    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
@@ -399,7 +399,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .with_context(|| format!("cannot listen on {}", config.server.listen))?;
     tracing::info!(
         listen = %config.server.listen,
-        drivers = tasks.len(),
+        drivers = hub.snapshot().drivers.len(),
         boot_ms = boot.elapsed().as_millis(),
         "moli-os ready"
     );
@@ -1072,10 +1072,14 @@ fn spawn_drivers(
     config: &Config,
     hub: &Hub,
     cancel: &CancellationToken,
+    airzone: &managed_airzone::Manager,
 ) -> anyhow::Result<(Vec<tokio::task::JoinHandle<()>>, Gateways)> {
     let mut tasks = Vec::new();
     let mut gates = Gateways::default();
     for driver in config.drivers.iter().filter(|d| d.enabled != Some(false)) {
+        if driver.kind == "airzone" {
+            continue;
+        }
         let context = || format!("driver {:?} options", driver.id);
         let built: Arc<dyn Driver> = match driver.kind.as_str() {
             "phones" => {
@@ -1099,6 +1103,7 @@ fn spawn_drivers(
             cancel.clone(),
         ));
     }
+    airzone.start_configured()?;
     Ok((tasks, gates))
 }
 

@@ -58,12 +58,12 @@
   "airzone_add.error.duplicate_instance": "Cet identifiant est déjà utilisé. Choisissez-en un autre dans les réglages de connexion.",
   "airzone_add.error.duplicate_gateway": "Cette passerelle est déjà configurée dans Moli. Elle n’a pas été ajoutée une seconde fois.",
   "airzone_add.error.identity_unavailable": "L’identité d’une passerelle déjà configurée n’est pas disponible. Vérifiez sa connexion et ses réglages dans l’installation, puis réessayez.",
-  "airzone_add.error.identity_changed": "L’appareil répondant à cette adresse a changé depuis la vérification. Rien n’a été ajouté. Vérifiez à nouveau la passerelle.",
+  "airzone_add.error.identity_changed": "L’identité de la passerelle a changé. Aucune connexion n’a été modifiée. Vérifiez à nouveau ou utilisez le remplacement de matériel.",
   "airzone_add.error.probe_failed": "Impossible de vérifier une passerelle Airzone compatible à cette adresse. Vérifiez son alimentation, son adresse, le port et l’activation de son API locale.",
   "airzone_add.error.busy": "Une vérification est déjà en cours ou les demandes sont trop rapprochées. Réessayez dans quelques instants.",
   "airzone_add.error.limit_reached": "Le nombre maximal de passerelles ajoutées depuis Moli est atteint.",
   "airzone_add.error.persistence_failed": "Moli n’a pas pu enregistrer la passerelle. Aucune nouvelle connexion n’a été démarrée.",
-  "airzone_add.error.unavailable": "L’ajout de passerelles n’est pas disponible sur cette instance de Moli.",
+  "airzone_add.error.unavailable": "La gestion des passerelles n’est pas disponible sur cette instance de Moli.",
   "airzone_add.error.shutting_down": "Moli est en cours d’arrêt. Attendez son retour avant de réessayer.",
   "airzone_add.error.network": "La connexion avec Moli a été interrompue. Vos réglages sont conservés dans ce formulaire.",
   "airzone_add.error.response": "Moli a renvoyé une réponse inattendue. L’étape n’est pas confirmée.",
@@ -71,6 +71,10 @@
   "airzone_add.error.auth": "Votre accès n’a pas été confirmé. Validez votre code Moli puis réessayez.",
   "airzone_add.error.auth_busy": "Une autre action attend déjà votre validation. Terminez-la ou annulez-la avant de continuer.",
   "airzone_add.error.cancelled": "Validation annulée. Vos réglages sont conservés.",
-  "airzone_add.error.connection": "Moli est déconnecté. Attendez la reconnexion avant de vérifier ou d’ajouter une passerelle.",
-  "airzone_add.error.verify_first": "Vérifiez d’abord la passerelle avec ces réglages."
+  "airzone_add.error.connection": "Moli est déconnecté. Attendez la reconnexion avant de gérer les passerelles.",
+  "airzone_add.error.verify_first": "Vérifiez d’abord la passerelle avec ces réglages.",
+  "airzone_add.error.not_found": "Cette passerelle n’est plus enregistrée. Actualisez la liste.",
+  "airzone_add.error.instance_mismatch": "L’identifiant ne correspond pas à la connexion sélectionnée. Rouvrez son formulaire.",
+  "airzone_add.error.gateway_disabled": "Cette connexion est en pause. Vérifiez-la avant de la réactiver.",
+  "airzone_add.error.unaddressable_instance": "Les identifiants historiques « . » et « .. » restent visibles, mais leur gestion depuis cette page nécessite une migration de configuration."
 }

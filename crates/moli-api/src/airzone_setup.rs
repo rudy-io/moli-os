@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -47,6 +47,37 @@ pub struct GatewayInstalled {
     pub already_installed: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GatewayStatus {
+    pub instance: String,
+    pub host: String,
+    pub port: u16,
+    pub tls_fingerprint: Option<String>,
+    pub mac: Option<String>,
+    pub enabled: bool,
+    pub source: &'static str,
+    pub read_only: bool,
+    /// A supervisor is active; this does not assert network availability.
+    pub running: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GatewayList {
+    pub gateways: Vec<GatewayStatus>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GatewayWithdrawn {
+    pub instance: String,
+    pub stored: bool,
+    pub enabled: bool,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Withdrawal {}
+
 /// Stable machine codes; the dashboard translates them without rendering
 /// upstream responses, addresses, credentials or filesystem errors.
 #[derive(Clone, Debug, Serialize)]
@@ -76,7 +107,9 @@ impl SetupError {
 impl IntoResponse for SetupError {
     fn into_response(self) -> Response {
         let status = match self.code {
-            "duplicate_instance" | "duplicate_gateway" | "identity_changed" => StatusCode::CONFLICT,
+            "duplicate_instance" | "duplicate_gateway" | "identity_changed"
+            | "gateway_disabled" => StatusCode::CONFLICT,
+            "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
             "probe_failed" => StatusCode::BAD_GATEWAY,
             "persistence_failed" => StatusCode::INTERNAL_SERVER_ERROR,
@@ -90,16 +123,129 @@ impl IntoResponse for SetupError {
 }
 
 pub trait AirzoneSetup: Send + Sync + Debug {
+    fn list(&self) -> BoxFuture<'_, Result<GatewayList, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
     fn probe(&self, request: GatewayRequest) -> BoxFuture<'_, Result<GatewayPreview, SetupError>>;
     fn install(
         &self,
         request: GatewayRequest,
         actor: String,
     ) -> BoxFuture<'_, Result<GatewayInstalled, SetupError>>;
+    fn probe_update(
+        &self,
+        _instance: String,
+        _request: GatewayRequest,
+    ) -> BoxFuture<'_, Result<GatewayPreview, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
+    fn update(
+        &self,
+        _instance: String,
+        _request: GatewayRequest,
+        _actor: String,
+    ) -> BoxFuture<'_, Result<GatewayInstalled, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
+    fn withdraw(
+        &self,
+        _instance: String,
+        _actor: String,
+    ) -> BoxFuture<'_, Result<GatewayWithdrawn, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct Setup(pub Option<Arc<dyn AirzoneSetup>>);
+
+pub(crate) async fn list(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    match setup.list().await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+pub(crate) async fn probe_update(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    Path(instance): Path<String>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(request): Json<GatewayRequest>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    if instance != request.instance {
+        return SetupError::new("instance_mismatch").into_response();
+    }
+    match setup.probe_update(instance, request).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+pub(crate) async fn update(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    Path(instance): Path<String>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(request): Json<GatewayRequest>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    if instance != request.instance {
+        return SetupError::new("instance_mismatch").into_response();
+    }
+    match setup.update(instance, request, caller.describe()).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+pub(crate) async fn withdraw(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    Path(instance): Path<String>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(_request): Json<Withdrawal>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    match setup.withdraw(instance, caller.describe()).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
 
 pub(crate) async fn probe(
     State(hub): State<Hub>,

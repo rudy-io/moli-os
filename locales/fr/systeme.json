@@ -364,5 +364,8 @@
   "systeme.journal.pilote_ajoute": "Pilote {kind} ajouté",
   "systeme.airzone.title": "Passerelle Airzone",
   "systeme.airzone.help": "Connectez une passerelle compatible avec l’API locale et retrouvez ses zones dans Moli, en lecture seule.",
-  "systeme.airzone.add": "Ajouter une passerelle"
+  "systeme.airzone.add": "Ajouter une passerelle",
+  "systeme.journal.pilote_pause": "Pilote {kind} mis en pause",
+  "systeme.journal.pilote_reconfigure_lecture_seule": "Pilote {kind} reconfiguré en lecture seule",
+  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré"
 }

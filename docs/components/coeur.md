@@ -27,6 +27,17 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   (blocage total déjà vécu).
 - **Bus** : `broadcast` d'`Event`. Un état n'est émis **que s'il change**. Un abonné trop lent
   reçoit un nouvel instantané au lieu de bloquer les autres (SSE).
+  La restauration d'un appareil depuis le sidecar émet `device_restored` avec sa définition
+  en lecture seule,
+  ses valeurs conservées et ses étiquettes, **sans** rejouer de mesures `state` aux
+  automatismes, à l'énergie ou à l'historique. Le premier relevé frais de chaque point
+  restauré émet ensuite un `state`, même si sa valeur est identique ; les suivants sont
+  de nouveau dédupliqués.
+- **Observation actuelle** : `hub.state` garde les valeurs utiles à l'affichage.
+  `hub.current_state`, destiné aux consommateurs qui peuvent agir, exclut sous un même
+  verrou les appareils hors ligne, les définitions restaurées non confirmées et les
+  points qui attendent leur premier relevé frais. Une nouvelle définition ne rajeunit
+  donc pas les valeurs ; un pilote qui n'annonce pas sa disponibilité reste compatible.
 - **Commandes** : `hub.command(point, value, origin, actor)` → validation contre le
   `PointSpec` (lecture seule, valeur invalide : refus) → **garde** → envoi au pilote
   (délai 5 s) → journal. La confirmation arrive ensuite comme un événement `state`.
@@ -41,6 +52,30 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   disque sont comptés et visibles dans `/api/health` (`journal_failures`).
 - **Persistance** : `data/labels.toml` (étiquettes), `data/state.json` (dernières valeurs,
   rejouées au démarrage avec leur horodatage d'origine), écritures périodiques ;
+  `data/state.devices.json` (inventaire versionné, définitions et valeurs prises ensemble).
+  Ce fichier séparé laisse `state.json` compatible avec les anciens binaires. Il est
+  dérivé du chemin configuré du cache d'état en remplaçant son extension par
+  `.devices.json`. Les deux écritures sont sérialisées ; chaque fichier est remplacé
+  atomiquement. Le sidecar inclut aussi les valeurs héritées non encore réclamées et
+  reste l'autorité pour l'ensemble de ce snapshot,
+  même après une interruption entre les deux remplacements.
+  Une fiche est restaurée seulement quand une instance active de mêmes `kind` et
+  `integration` s'enregistre. Elle reste **hors ligne, tous ses points en lecture seule**
+  jusqu'à une nouvelle publication de sa définition par le pilote ; `ready()` et un
+  simple changement de disponibilité ne suffisent pas. Une instance désactivée garde
+  son cache dormant sans exposer ses appareils au redémarrage. `remove_device` purge
+  définition et valeurs du prochain flush, sans supprimer les étiquettes ni l'historique.
+  Le cache d'inventaire est limité à 8 Mio, 4 096 appareils et 1 024 points par appareil ;
+  une version inconnue, un fichier illisible ou une identité incohérente est ignoré avec
+  avertissement. Une définition reçue à nouveau reste nécessaire pour commander.
+  Un échec d'écriture de l'inventaire est remonté et retenté au prochain flush. Pour
+  permettre le repli vers `state.json`, l'ancien sidecar est d'abord déplacé atomiquement
+  vers `state.devices.json.stale` (un seul dernier cache conservé, jamais chargé).
+  Si ce déplacement échoue, aucune nouvelle valeur legacy n'est écrite. Si l'écriture
+  legacy échoue ensuite, l'ancien sidecar est remis en place et les erreurs sont signalées.
+  L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne ;
+  `unregister_driver`, appelé après avoir attendu sa tâche, détache le pilote et retire
+  les droits d'écriture des fiches conservées, sans effacer leurs noms ni leurs valeurs.
   `data/addresses.json` (où chaque pilote a joint son appareil, sa MAC, son identité : de quoi
   le retrouver si la box lui donne une autre adresse ; seulement appris : hors des sauvegardes,
   perdu il se réapprend).

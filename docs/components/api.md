@@ -303,6 +303,7 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 - `{"kind":"label","device":"…","label":{"name":"…","room":"…"}}` (label vide si refus)
 - `{"kind":"visibility","device":"…","hidden":true}` (masquage local réversible)
 - `{"kind":"driver_added","instance":"…","driver_kind":"airzone","read_only":true}` (installation locale d’une passerelle)
+- `{"kind":"driver_configured","instance":"…","driver_kind":"airzone","enabled":false,"read_only":true}` (connexion modifiée ou retrait réversible ; aucune adresse enregistrée dans le journal)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
 
 Stockage : `data/journal.jsonl` (ajout seul) + les 500 dernières entrées en mémoire.
@@ -342,6 +343,11 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
 | POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
 | POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only:true,already_installed}` ; enregistré et démarré, sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
+| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
+| POST | `/api/integrations/airzone/{instance}/probe` | **humain**, origine `ui`, invités refusés | saisie de connexion avec la même `instance` | même aperçu ; exige l’identité matérielle existante | `404` inconnue ; `409` identité modifiée ; `503` identité antérieure inconnue |
+| PUT | `/api/integrations/airzone/{instance}` | **humain**, origine `ui`, invités refusés | saisie de connexion + `expected_mac` issu de la vérification | même résultat que l’ajout ; met à jour ou réactive en lecture seule | mêmes refus, sauvegarde avant activation |
+| POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:true,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `500` sauvegarde |
+
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
 | POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
@@ -350,6 +356,40 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/journal` | libre | `?limit=` (défaut 100) | `[JournalEntry]`, plus récent d'abord (500 au plus en mémoire) | `400` requête invalide |
 | GET | `/api/approvals` | libre ; un invité : ses pièces seulement | aucune | `[ApprovalRequest]`, plus ancien d'abord | aucune |
 | POST | `/api/approvals/{id}` | **humain** + `x-moli-origin: ui` | `{approve: bool, point}` | `{ok:true}` | `403` ; `409` mauvais point ; `410` inconnue / expirée ; erreurs de commande si l'ordre approuvé échoue ; `400` id non numérique |
+
+La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateways.json`
+lit la version 1 et écrit la version 2 : connexions gérées, surcharges ciblées des
+entrées TOML et retraits réversibles. Une modification conserve les options natives
+non concernées (`poll_secs`, `dhw_units`), mais impose `read_only=true`. Une entrée
+TOML jamais modifiée conserve son mode d’origine. `running` désigne la présence du
+superviseur, pas la disponibilité réseau de la passerelle.
+
+Le registre accepte au plus 32 connexions gérées et surcharges au total, retraits
+compris, et 64 Kio. Les entrées TOML retirées restent représentées par une surcharge
+`enabled=false` : cette trace empêche leur redémarrage au prochain lancement.
+La première opération persistée migre le registre vers la version 2. Pour revenir
+à un ancien binaire qui ne lit que la version 1, restaurer la sauvegarde cohérente
+du registre et de la configuration prise avant cette migration. Changer seulement
+le numéro de version ou effacer les traces de retrait ne constitue pas un retour
+arrière et pourrait relancer une passerelle retirée.
+
+Les identifiants d’instances TOML existants sont conservés à l’identique, y compris
+les majuscules, points, espaces ou caractères Unicode autorisés par la configuration.
+Les routes utilisent leur encodage URL ; le corps doit porter exactement le même
+identifiant. Seuls les identifiants littéraux `.` et `..` ne peuvent pas être modifiés
+depuis le navigateur, qui normalise ces segments de chemin : ils restent listés et
+l’interface explique le refus sans les renommer ni envoyer de requête vers une
+autre instance. Les nouveaux identifiants suivent la syntaxe `[a-z][a-z0-9_-]{0,31}`.
+
+Un changement d’adresse conserve l’instance et exige la même MAC. Un remplacement
+matériel passe par le retrait explicite de l’ancienne passerelle puis l’ajout sous
+une nouvelle instance ; aucun historique, nom ou automatisme n’est transplanté.
+Retirer n’efface ni les historiques ni les étiquettes : les fiches connues restent
+hors ligne durant la session et leur cache est dormant après redémarrage, jusqu’à
+réactivation. Le superviseur est annulé, ses commandes vidées, puis sa tâche attendue
+avant désinscription ou redémarrage. Les opérations persistées continuent même si
+le client HTTP se déconnecte ; rejouer exactement une opération réussie ne crée
+ni second superviseur ni seconde entrée de journal.
 
 **Session humaine**
 

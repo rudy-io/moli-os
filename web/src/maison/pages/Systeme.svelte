@@ -174,7 +174,7 @@
 
   <section class="gateway-entry" aria-label={t('systeme.airzone.title')}>
     <div><h2>{t('systeme.airzone.title')}</h2><p>{t('systeme.airzone.help')}</p></div>
-    <a href="#/airzone/add">{t('systeme.airzone.add')}<Icon name="chevron-right" size={18} /></a>
+    <div class="gateway-links"><a href="#/airzone/installation">{t('airzone_gateways.manage')}<Icon name="chevron-right" size={18} /></a><a href="#/airzone/add">{t('systeme.airzone.add')}<Icon name="chevron-right" size={18} /></a></div>
   </section>
 
   <AssistantSettings />
@@ -328,6 +328,7 @@
 </div>
 
 <style>
+  .gateway-links {display:flex;gap:12px;flex-wrap:wrap;}
   .systeme {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

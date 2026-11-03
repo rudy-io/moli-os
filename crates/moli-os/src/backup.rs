@@ -19,7 +19,7 @@ use anyhow::{Context as _, bail};
 /// SQLite databases: copied through SQLite itself.
 const DATABASES: [&str; 2] = ["history.db", "energy.db"];
 /// Everything else worth keeping (missing ones are skipped).
-const FILES: [&str; 17] = [
+const FILES: [&str; 18] = [
     "moli.toml",
     crate::managed_airzone::FILE,
     "plan.json",
@@ -34,6 +34,7 @@ const FILES: [&str; 17] = [
     "journal.jsonl",
     "journal.jsonl.1",
     "state.json",
+    "state.devices.json",
     "trusted-profiles.toml",
     "perf.jsonl",
     "bench.json",
@@ -184,6 +185,8 @@ mod tests {
         )
         .unwrap();
         std::fs::write(data.join("labels.toml"), "x = 1\n").unwrap();
+        let definitions = br#"{"version":1,"devices":{},"unclaimed":{}}"#;
+        std::fs::write(data.join("state.devices.json"), definitions).unwrap();
         std::fs::create_dir_all(data.join("plan")).unwrap();
         std::fs::write(data.join("plan").join("0123456789abcdef.png"), b"png").unwrap();
         std::fs::write(data.join("plan").join("notes.txt"), b"not a plan").unwrap();
@@ -197,6 +200,10 @@ mod tests {
         let back = rusqlite::Connection::open(fresh.join("history.db")).unwrap();
         let v: i64 = back.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(v, 42);
+        assert_eq!(
+            std::fs::read(fresh.join("state.devices.json")).unwrap(),
+            definitions
+        );
         assert_eq!(
             std::fs::read_to_string(fresh.join("labels.toml")).unwrap(),
             "x = 1\n"

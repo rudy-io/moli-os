@@ -159,3 +159,304 @@ async fn readings_become_priced_hours_that_survive_restarts() {
     drivers.cancel();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// A real persisted hub snapshot with a silent driver after restart. Every update
+// is synthetic and acknowledged; no command reaches a network or an appliance.
+enum CachedUpdate {
+    Publish,
+    Sample(&'static str, Value),
+}
+
+type CachedMessage = (CachedUpdate, tokio::sync::oneshot::Sender<()>);
+
+struct CachedMeter(tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<CachedMessage>>);
+
+fn cached_device(ctx: &DriverCtx) -> Device {
+    let mut on = spec("on", Kind::Binary, None);
+    on.semantic = Semantic::OnOff;
+    let numeric = Kind::Numeric {
+        min: None,
+        max: None,
+        step: None,
+    };
+    Device {
+        id: ctx.device_id("m"),
+        instance: ctx.instance().clone(),
+        native_name: "Cached meter".into(),
+        manufacturer: None,
+        model: Some("LCA006".into()),
+        description: None,
+        native_room: None,
+        members: vec![],
+        points: vec![
+            spec("e", numeric.clone(), Some(Unit::WattHour)),
+            spec("w", numeric, Some(Unit::Watt)),
+            spec("ptec", Kind::Text, None),
+            on,
+        ],
+    }
+}
+
+impl Driver for CachedMeter {
+    fn kind(&self) -> &'static str {
+        "cached-meter"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let mut updates = self.0.lock().await;
+            ctx.ready();
+            while let Some((update, acknowledged)) = updates.recv().await {
+                match update {
+                    CachedUpdate::Publish => ctx.upsert_device(cached_device(ctx)),
+                    CachedUpdate::Sample(key, value) => {
+                        ctx.set_state(&ctx.device_id("m"), key, value);
+                    }
+                }
+                let _ = acknowledged.send(());
+            }
+            std::future::pending().await
+        })
+    }
+}
+
+struct CachedDriver {
+    updates: tokio::sync::mpsc::UnboundedSender<CachedMessage>,
+    cancel: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl CachedDriver {
+    fn start(hub: &Hub) -> Self {
+        let (updates, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(
+            hub,
+            "cached".into(),
+            Arc::new(CachedMeter(tokio::sync::Mutex::new(receiver))),
+            cancel.clone(),
+        );
+        Self {
+            updates,
+            cancel,
+            task,
+        }
+    }
+
+    async fn update(&self, update: CachedUpdate) {
+        let (acknowledged, received) = tokio::sync::oneshot::channel();
+        self.updates.send((update, acknowledged)).unwrap();
+        received.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+}
+
+impl Drop for CachedDriver {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.task.abort();
+    }
+}
+
+struct CachedFixture {
+    hub: Hub,
+    driver: CachedDriver,
+    dir: std::path::PathBuf,
+}
+
+impl CachedFixture {
+    async fn new(tariff: bool) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "moli-energy-cache-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let options = || HubOptions {
+            state_path: Some(dir.join("state.json")),
+            ..HubOptions::default()
+        };
+        let before = Hub::new(options()).unwrap();
+        let seeding = CachedDriver::start(&before);
+        seeding.update(CachedUpdate::Publish).await;
+        for (key, value) in [
+            ("e", Value::Float(1000.0)),
+            ("w", Value::Float(3600.0)),
+            ("on", Value::Bool(true)),
+        ] {
+            seeding.update(CachedUpdate::Sample(key, value)).await;
+        }
+        if tariff {
+            seeding
+                .update(CachedUpdate::Sample("ptec", Value::from("HP..")))
+                .await;
+        }
+        assert!(before.persist_state().await.unwrap());
+        drop(seeding);
+        let hub = Hub::new(options()).unwrap();
+        let driver = CachedDriver::start(&hub);
+        assert_eq!(hub.device(&"cached:m".into()).unwrap().online, Some(false));
+        Self { hub, driver, dir }
+    }
+
+    fn db(&self) -> std::path::PathBuf {
+        self.dir.join("energy.db")
+    }
+
+    fn recorded_kwh(&self) -> f64 {
+        rusqlite::Connection::open(self.db())
+            .unwrap()
+            .query_row("SELECT coalesce(sum(kwh), 0) FROM energy_hour", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    fn recorded_meters(&self) -> i64 {
+        rusqlite::Connection::open(self.db())
+            .unwrap()
+            .query_row("SELECT count(*) FROM meter_last", [], |row| row.get(0))
+            .unwrap()
+    }
+}
+
+impl Drop for CachedFixture {
+    fn drop(&mut self) {
+        self.driver.cancel.cancel();
+        self.driver.task.abort();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[tokio::test]
+async fn offline_cached_power_is_not_integrated_when_recording_starts() {
+    let f = CachedFixture::new(false).await;
+    let config = toml::from_str(
+        r#"
+        max_power_kw = 1e12
+        [[meter]]
+        id = "power"
+        name = "Power"
+        point = "cached:m/w"
+        role = "total"
+        integrate = true
+        price = 0.2
+    "#,
+    )
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let (energy, task) = Energy::start(&f.hub, &f.db(), config, cancel.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(
+        f.recorded_meters(),
+        0,
+        "cached power must not seed a held integral"
+    );
+    f.driver.update(CachedUpdate::Publish).await;
+    f.driver
+        .update(CachedUpdate::Sample("w", Value::Float(0.0)))
+        .await;
+    assert_eq!(today_kwh(&energy).await.0, 0.0);
+    f.driver
+        .update(CachedUpdate::Sample("w", Value::Float(3600.0)))
+        .await;
+    f.driver
+        .update(CachedUpdate::Sample("w", Value::Float(0.0)))
+        .await;
+    assert!(
+        f.recorded_kwh() > 0.0,
+        "fresh power still integrates below the summary rounding threshold"
+    );
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn offline_cached_counter_is_not_replayed_when_the_first_tariff_arrives() {
+    let f = CachedFixture::new(false).await;
+    let config = toml::from_str(&CONFIG.replace("fake:m", "cached:m")).unwrap();
+    let cancel = CancellationToken::new();
+    let (energy, task) = Energy::start(&f.hub, &f.db(), config, cancel.clone()).unwrap();
+    f.driver.update(CachedUpdate::Publish).await;
+    f.driver
+        .update(CachedUpdate::Sample("ptec", Value::from("HP..")))
+        .await;
+    assert_eq!(
+        f.recorded_meters(),
+        0,
+        "a fresh tariff cannot make an old counter current"
+    );
+    f.driver
+        .update(CachedUpdate::Sample("e", Value::Float(1100.0)))
+        .await;
+    assert_eq!(
+        today_kwh(&energy).await.0,
+        0.0,
+        "the first fresh counter is the reference"
+    );
+    f.driver
+        .update(CachedUpdate::Sample("e", Value::Float(1200.0)))
+        .await;
+    assert!((today_kwh(&energy).await.0 - 0.1).abs() < 1e-9);
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn offline_cached_tariff_and_power_are_not_current_energy_values() {
+    let f = CachedFixture::new(true).await;
+    let config = toml::from_str(&format!(
+        "{}\npower = \"cached:m/w\"\n[live]\npower = \"cached:m/w\"\nmax = 5000\n",
+        CONFIG.replace("fake:m", "cached:m")
+    ))
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let (energy, task) = Energy::start(&f.hub, &f.db(), config, cancel.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let summary = energy.summary().await.unwrap();
+    assert_eq!(
+        summary.period, None,
+        "a retained tariff is not the current price"
+    );
+    assert_eq!(summary.meters[0].power_w, None);
+    assert_eq!(summary.live.unwrap().value, None);
+    assert_eq!(f.recorded_meters(), 0);
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn offline_cached_light_cannot_restart_an_estimate_without_a_fresh_sample() {
+    let f = CachedFixture::new(false).await;
+    f.driver.update(CachedUpdate::Publish).await;
+    assert!(f.hub.current_state(&"cached:m/on".into()).is_none());
+    let config = toml::from_str(
+        r#"
+        [[meter]]
+        id = "light"
+        name = "Light"
+        point = "cached:m/on"
+        role = "appliance"
+        estimate = true
+        price = 0.2
+    "#,
+    )
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let (energy, task) = Energy::start(&f.hub, &f.db(), config, cancel.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(
+        f.recorded_meters(),
+        0,
+        "republishing a definition does not refresh its cached on state"
+    );
+    assert_eq!(energy.summary().await.unwrap().meters[0].power_w, None);
+    f.driver
+        .update(CachedUpdate::Sample("on", Value::Bool(true)))
+        .await;
+    assert_eq!(f.recorded_meters(), 1);
+    assert!((energy.summary().await.unwrap().meters[0].power_w.unwrap() - 7.3).abs() < 1e-9);
+    cancel.cancel();
+    task.await.unwrap();
+}

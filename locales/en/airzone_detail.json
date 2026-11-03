@@ -1,6 +1,6 @@
 {
   "airzone_detail.view_history": "View history",
-  "airzone_detail.changed_at": "Last changed: {time}",
+  "airzone_detail.changed_at": "Value recorded: {time}",
   "airzone_detail.thermostat": "Thermostat status",
   "airzone_detail.no_battery": "Not applicable (wired)",
   "airzone_detail.personalise": "Personalise this zone",

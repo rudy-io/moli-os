@@ -218,11 +218,11 @@ impl Energy {
             .map(|m| {
                 let power = if m.estimate {
                     device_of(&m.point)
-                        .and_then(|d| estimate::watts(hub, &d))
+                        .and_then(|d| current_estimate(hub, &d))
                         .map(|w| (w, now_ms()))
                 } else {
                     m.power_point()
-                        .and_then(|p| hub.state(&PointId::from(p.to_owned())))
+                        .and_then(|p| hub.current_state(&PointId::from(p.to_owned())))
                         .and_then(|s| s.value.as_f64().map(|w| (w, s.ts)))
                 };
                 MeterInfo {
@@ -246,7 +246,7 @@ impl Energy {
         let hub = &self.inner.hub;
         let point = PointId::from(live.power.clone());
         let state = hub
-            .state(&point)
+            .current_state(&point)
             .and_then(|s| s.value.as_f64().map(|v| (v, s.ts)));
         let unit = point.split().and_then(|(device, key)| {
             let unit = hub.device(&device)?.device.point(key)?.unit.clone()?;
@@ -267,7 +267,7 @@ impl Energy {
         match self
             .inner
             .hub
-            .state(&PointId::from(tariff.period.clone()))?
+            .current_state(&PointId::from(tariff.period.clone()))?
             .value
         {
             Value::Text(s) => Some(s.to_string()),
@@ -349,6 +349,40 @@ impl Energy {
 /// The device of a point id (`device/key`).
 fn device_of(point: &str) -> Option<moli_core::DeviceId> {
     PointId::from(point.to_owned()).split().map(|(d, _)| d)
+}
+
+// Retained bulb settings are useful to display, but must not restart an
+// integral when a driver republishes its definition before its first reading.
+fn current_estimate(hub: &Hub, device: &moli_core::DeviceId) -> Option<f64> {
+    for source in estimate::sources(hub, device) {
+        let Some(view) = hub.device(&source) else {
+            continue;
+        };
+        // Keep the existing zero-power convention for an explicitly offline
+        // bulb; fixtures derive their power from their members, not their own state.
+        if view.online == Some(false)
+            || view.device.model.as_deref() == Some("Luminaire")
+            || estimate::watts(hub, &source).is_none()
+        {
+            continue;
+        }
+        for point in &view.device.points {
+            if matches!(
+                point.semantic,
+                moli_core::Semantic::OnOff
+                    | moli_core::Semantic::Brightness
+                    | moli_core::Semantic::Color
+                    | moli_core::Semantic::ColorTemp
+            ) && view.state.contains_key(&point.key)
+                && hub
+                    .current_state(&PointId::new(&source, &point.key))
+                    .is_none()
+            {
+                return None;
+            }
+        }
+    }
+    estimate::watts(hub, device)
 }
 
 /// One hour of history recorded elsewhere (Home Assistant statistics…).
@@ -641,7 +675,7 @@ impl Recorder {
             .chain(self.config.meters.iter().map(|m| m.point.clone()))
             .collect();
         for point in points {
-            if let Some(sample) = self.hub.state(&PointId::from(point.clone())) {
+            if let Some(sample) = self.hub.current_state(&PointId::from(point.clone())) {
                 self.on_state(&point, &sample.value, sample.ts).await;
             }
         }
@@ -672,7 +706,7 @@ impl Recorder {
             .map(|&i| self.config.meters[i].clone())
             .collect();
         for meter in meters {
-            let Some(w) = device_of(&meter.point).and_then(|d| estimate::watts(&self.hub, &d))
+            let Some(w) = device_of(&meter.point).and_then(|d| current_estimate(&self.hub, &d))
             else {
                 continue;
             };
@@ -706,7 +740,7 @@ impl Recorder {
     async fn read_meters(&mut self) {
         let points: Vec<String> = self.config.meters.iter().map(|m| m.point.clone()).collect();
         for point in points {
-            if let Some(sample) = self.hub.state(&PointId::from(point.clone())) {
+            if let Some(sample) = self.hub.current_state(&PointId::from(point.clone())) {
                 self.on_meter(&point, &sample.value, sample.ts).await;
             }
         }

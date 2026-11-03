@@ -42,6 +42,9 @@
     if (a.kind === 'driver_added') {
       return {target:a.instance,detail:t(a.read_only ? 'systeme.journal.pilote_lecture_seule' : 'systeme.journal.pilote_ajoute', {kind:a.driver_kind})};
     }
+    if (a.kind === 'driver_configured') {
+      return {target:a.instance,detail:t(!a.enabled ? 'systeme.journal.pilote_pause' : a.read_only ? 'systeme.journal.pilote_reconfigure_lecture_seule' : 'systeme.journal.pilote_reconfigure', {kind:a.driver_kind})};
+    }
     const d = hub.devices[a.device];
     const parts = [a.label.name, a.label.room].filter(Boolean).join(' · ');
     return { target: d ? deviceName(d) : a.device, detail: t('systeme.journal.etiquette', { value: parts || t('systeme.journal.effacee') }) };
