@@ -59,6 +59,7 @@
   "commun.theme.titre_jour": "Theme: day",
   "commun.theme.titre_nuit": "Theme: night",
 
+  "commun.atelier.retour": "Back to the house",
   "commun.atelier.maison": "Home",
   "commun.atelier.connexion": "Connecting to the hub…",
   "commun.atelier.aucun_appareil": "No devices yet. Drivers publish their devices as soon as they connect.",

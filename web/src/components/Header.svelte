@@ -12,6 +12,7 @@
 </script>
 
 <header>
+  <a class="back" href="#/">← {t('commun.atelier.retour')}</a>
   <div class="brand">
     <svg viewBox="0 0 32 32" aria-hidden="true">
       <circle cx="16" cy="16" r="15" fill="var(--sun)" />
@@ -66,9 +67,17 @@
     align-items: center;
     gap: 32px;
     flex-wrap: wrap;
-    padding: 14px 28px;
+    padding: 14px max(28px, env(safe-area-inset-right)) 14px max(28px, env(safe-area-inset-left));
     border-bottom: var(--stroke) solid var(--ink);
     background: var(--card);
+  }
+  .back {
+    font-weight: 700;
+    color: var(--ink);
+    text-decoration: none;
+    padding: 8px 14px;
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius);
   }
   .brand {
     display: flex;

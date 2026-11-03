@@ -1253,6 +1253,8 @@ async fn an_invited_person_reaches_the_house_from_the_internet() {
     let session: Json = serde_json::from_str(&session).unwrap();
     assert_eq!(session["person"]["id"], "elodie");
     assert_eq!(session["owner"], false);
+    // No owner in this house yet: its Atelier stays open to everyone.
+    assert_eq!(session["atelier"], true);
     let (status, _) = request_with(
         &addr,
         "POST",
