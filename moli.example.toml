@@ -59,6 +59,16 @@ timezone = "Europe/Paris"
 # price = 0.14
 # reset = "never"        # an index; default "auto" handles daily counters
 
+# Without a local reading of the meter, the `enedis` driver reports yesterday's
+# consumption hour by hour:
+# [[energy.meter]]
+# id = "linky"
+# name = "Linky"
+# point = "enedis:linky/hours"
+# role = "grid"
+# history = true
+# price = 0.17
+
 # Light fixtures: bulbs and the relay that feeds them as one light
 # (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb
 # answers, and comes back on its own when the light is switched on.
