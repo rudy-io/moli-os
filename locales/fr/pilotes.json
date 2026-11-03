@@ -349,6 +349,8 @@
   "pilotes.philips.ambilight": "Ambilight",
   "pilotes.philips.texte": "Texte à écrire sur la télé (dans le champ ouvert, une recherche ; retour à la ligne final = Entrée)",
   "pilotes.philips.touche": "Touche",
+  "pilotes.philips.notification": "Notification à l'écran (un texte, ou le JSON de TvOverlay : title, message, image, video, corner, duration)",
+  "pilotes.philips.ecran_eteint": "la télé est éteinte : rien à afficher",
   "pilotes.philips.touche_maintenue": "Touche maintenue (jusqu'à « release »)",
   "pilotes.philips.touche_inconnue": "{key} : pas une touche à maintenir",
   "pilotes.philips.adb_autoriser": "la télé demande sur son écran d'autoriser le débogage pour Moli : coche « Toujours autoriser » et valide",

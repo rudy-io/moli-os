@@ -349,6 +349,8 @@
   "pilotes.philips.ambilight": "Ambilight",
   "pilotes.philips.texte": "Text to write on the TV (in the open field, a search; a final line break = Enter)",
   "pilotes.philips.touche": "Key",
+  "pilotes.philips.notification": "On-screen notification (text, or TvOverlay's JSON: title, message, image, video, corner, duration)",
+  "pilotes.philips.ecran_eteint": "the TV is off: nothing to show",
   "pilotes.philips.touche_maintenue": "Key held (until « release »)",
   "pilotes.philips.touche_inconnue": "{key}: not a key to hold",
   "pilotes.philips.adb_autoriser": "the TV asks on its screen whether to allow debugging for Moli: tick « Always allow » and confirm",
