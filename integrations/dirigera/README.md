@@ -20,6 +20,14 @@
   saturation arrondies par le hub ; un nom de pièce avec une espace insécable au bout.
 - Les points viennent des attributs présents, pas seulement du `deviceType` : le vieux
   détecteur TRADFRI n'a pas `isDetected`, un TIMMERFLOTTE se présente en deux appareils.
+- Éclairement : `illuminance` n'est pas en lux, c'est la mesure Matter (la même qu'en
+  Zigbee) `10000·log10(lux) + 1`, comme le niveau de lumière de Hue (bornes annoncées par
+  un MYGGSPRAY : 1 à 40001, soit 1 à 10 000 lx). Moli la convertit en lux pour tout
+  `lightSensor`, VALLHORN compris ; 0, trop sombre pour mesurer, donne 0 lx ; 0xFFFF, aucune
+  mesure, `null`. openHAB et Home Assistant (dirigera_platform) convertissent de la même
+  façon ; l'application Homey laisse la valeur d'un VALLHORN telle quelle, sans l'avoir
+  vérifié. Relevé sur un vrai MYGGSPRAY (firmware 1.1.4) : 0 dans le noir, 26010 (399 lx)
+  éclairé de près, puis 0 une minute après, la lumière éteinte.
 - Stores (`deviceType: blinds` ; FYRTUR, TREDANSEN et PRAKTLYSING dans les réponses
   publiées) : le hub compte de combien le store est descendu (`blindsCurrentLevel`,
   `blindsTargetLevel` : 0 = en haut, ouvert ; 100 = en bas, fermé), Moli de combien il est
@@ -42,7 +50,9 @@
   WebSocket jamais fermé par le hub en 20 min, même sans ping (le ping reste, son `pong`
   prouve que la connexion vit).
 - **Pas encore vu en vrai** : prises, boutons de raccourci, capteurs d'air, d'ouverture et de
-  fuite (écrits d'après les réponses réelles publiées par lpgera/dirigera). **Stores : non
+  fuite (écrits d'après les réponses réelles publiées par lpgera/dirigera) ; l'éclairement
+  d'un VALLHORN, converti comme celui du MYGGSPRAY (attendu dans une pièce éclairée : 100 à
+  300 lx, soit environ 20000 à 25000 en mesure brute). **Stores : non
   vérifiés sur un vrai store**, écrits d'après le protocole documenté ; à confirmer par
   quelqu'un qui en a un (ouvrir, stop, fermer, curseur, valeurs de `moving` pendant un
   mouvement lancé par `position`).

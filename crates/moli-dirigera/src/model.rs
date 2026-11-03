@@ -30,6 +30,10 @@ enum Read {
     /// `blindsState` → `moving` (see [`MOVES`]); a state never seen is
     /// unknown, not a way.
     Moving,
+    /// `illuminance` → lux: the hub passes on the Matter measure,
+    /// `10000·log10(lux) + 1`, as Hue's light level (a MYGGSPRAY announces
+    /// 1 to 40001, 1 to 10 000 lx).
+    Lux,
 }
 
 /// A blind's orders (`control`) and the `blindsState` each one sends: the
@@ -355,6 +359,19 @@ fn mireds(kelvin: f64) -> i64 {
     (1_000_000.0 / kelvin).round() as i64
 }
 
+/// A Matter light level → lux, rounded as Hue's. 0 means too dark to
+/// measure: 0 lx. 0xFFFF and above is no measure at all: unknown.
+#[allow(clippy::cast_possible_truncation)]
+fn lux(level: f64) -> Value {
+    if level <= 0.0 {
+        Value::Int(0)
+    } else if level >= 65_535.0 {
+        Value::Null
+    } else {
+        Value::Int(10f64.powf((level - 1.0) / 10_000.0).round() as i64)
+    }
+}
+
 fn text<'a>(json: &'a Json, key: &str) -> Option<&'a str> {
     json.get(key)?
         .as_str()
@@ -546,10 +563,10 @@ fn device(
     }
     for &(attribute, key) in measures(device_type) {
         if has(attribute) {
-            let read = if attribute == "isOpen" {
-                Read::Closed
-            } else {
-                Read::Plain
+            let read = match attribute {
+                "isOpen" => Read::Closed,
+                "illuminance" => Read::Lux,
+                _ => Read::Plain,
             };
             add(&mut entry, &mut points, key, Some((attribute, read)), false);
         }
@@ -682,6 +699,7 @@ impl Index {
                             .find(|(hub, _)| *hub == state.as_str())
                             .map_or(Value::Null, |(_, moving)| Value::from(*moving)),
                     ),
+                    (Read::Lux, Json::Number(n)) => n.as_f64().map(lux),
                     _ => None,
                 }
             };
@@ -1222,6 +1240,41 @@ mod tests {
             &*lux.devices[0].native_name,
             "VALLHORN Wireless Motion Sensor"
         );
+    }
+
+    #[test]
+    fn light_level_reads_in_lux() {
+        // The MYGGSPRAY half of the fixture: the hub announces Matter's bounds.
+        let item = |level: Json| {
+            json!({"id": "s1_1", "type": "sensor", "deviceType": "lightSensor",
+                   "isReachable": true,
+                   "attributes": {"illuminance": level, "minIlluminance": 1,
+                                  "maxIlluminance": 40001},
+                   "capabilities": {"canSend": [], "canReceive": ["customName"]}})
+        };
+        let mut sensor = one(item(json!(0)));
+        let point = sensor.devices[0].point("illuminance").unwrap();
+        assert_eq!(point.unit, Some(Unit::Lux));
+        assert_eq!(point.semantic, Semantic::Illuminance);
+        // 12345 is openHAB's MYGGSPRAY test (17 lx); 21790 Leggin/dirigera's;
+        // 26010 a real MYGGSPRAY lit up close.
+        for (level, lx) in [
+            (0, Value::Int(0)),
+            (1, Value::Int(1)),
+            (10_001, Value::Int(10)),
+            (12_345, Value::Int(17)),
+            (20_001, Value::Int(100)),
+            (21_790, Value::Int(151)),
+            (26_010, Value::Int(399)),
+            (40_001, Value::Int(10_000)),
+            (65_535, Value::Null),
+        ] {
+            assert_eq!(
+                sensor.index.decode(&item(json!(level))).unwrap().values,
+                vec![(Arc::from("illuminance"), lx)],
+                "{level}"
+            );
+        }
     }
 
     #[test]
