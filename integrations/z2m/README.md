@@ -16,3 +16,6 @@
   QS-Zigbee-C03, ouvrir / stop / fermer et curseur depuis le tableau de bord, la position suit
   Z2M ; firmware non relevé. `moving` vaut `UP` / `DOWN` chez Lonsonho et `forward` / `reverse`
   chez SONOFF.
+- **Vérifié sur du vrai matériel** (3 novembre 2026) : ampoule couleur Innr RB 287 C, firmware
+  1.9.64, Zigbee2MQTT 2.14.2 : rouge, vert, bleu par le point `color` (« #rrggbb »), relus par
+  l'ampoule ; `color_temp` vide en mode couleur, de retour au blanc (370 mired).
