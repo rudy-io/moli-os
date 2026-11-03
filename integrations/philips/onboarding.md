@@ -12,3 +12,8 @@
    l'appairage Android TV Remote de HA s'il existe :
    `cat …/.storage/androidtv_remote_cert.pem | docker exec -i moli-os /moli-os secrets set <instance> atv_cert`,
    idem `androidtv_remote_key.pem` → `atv_key`, puis redémarrer.
+6. Ce que joue n'importe quelle appli (Netflix, YouTube… ouvertes sur la télé, que Cast ne
+   voit pas) : sur la télé, options pour les développeurs (Paramètres › Système › À propos ›
+   appuyer 7 fois sur « Build »), activer le **débogage réseau** (ou « débogage ADB »).
+   Ajouter `adb = true` aux options, redémarrer : la télé demande sur son écran d'autoriser
+   « moli-os » (humain devant la télé : cocher « Toujours autoriser »).

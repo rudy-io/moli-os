@@ -2,7 +2,8 @@
 //! authentication with the pairing credentials): power, volume, mute,
 //! current app. Turning on from standby also sends a Wake-on-LAN packet.
 //! Their Android side ([`android`]) opens apps, says what plays, and takes
-//! the remote's keys while it is up (JointSpace when it is not).
+//! the remote's keys while it is up (JointSpace when it is not), held keys
+//! included; with `adb = true`, what any app plays (network debugging).
 
 mod android;
 
@@ -63,6 +64,11 @@ pub struct Config {
     pub mac: Option<String>,
     #[serde(default = "default_api")]
     pub api_version: u8,
+    /// What any app plays (title, playing or paused, position), through
+    /// ADB: the TV's « network debugging » must be on, and the TV asks
+    /// once on its screen whether to allow Moli.
+    #[serde(default)]
+    pub adb: bool,
 }
 
 fn default_api() -> u8 {
@@ -355,6 +361,18 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64) -> Device
                 unit: None,
                 semantic: Semantic::Other,
             },
+            // A key held down until `release` (a video seeks faster).
+            PointSpec {
+                key: "hold".into(),
+                label: moli_i18n::tr!("pilotes.philips.touche_maintenue").into(),
+                kind: enumeration(&android::HOLD_KEYS),
+                access: Access {
+                    read: false,
+                    write: true,
+                },
+                unit: None,
+                semantic: Semantic::Other,
+            },
             spec(
                 "media_app",
                 &moli_i18n::tr!("pilotes.philips.appli_en_lecture"),
@@ -627,6 +645,7 @@ async fn apply(
             }
         },
         ("text", Value::Text(text)) => android.write(text)?,
+        ("hold", Value::Text(key)) => android.hold(key)?,
         ("ambilight", Value::Bool(on)) => {
             tv.request(
                 Method::POST,
@@ -724,7 +743,12 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         .map_or_else(|| moli_i18n::tr!("pilotes.philips.tele"), str::to_owned);
     let mut max = 60.0;
     ctx.upsert_device(device(ctx, &id, &name, max));
-    let (mut android, mut ups) = android::Android::start(ctx, &config.host);
+    let adb_key = if config.adb {
+        android::adb_key(ctx).await
+    } else {
+        None
+    };
+    let (mut android, mut ups) = android::Android::start(ctx, &config.host, adb_key);
     ctx.ready();
     let mut tick = tokio::time::interval(POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
