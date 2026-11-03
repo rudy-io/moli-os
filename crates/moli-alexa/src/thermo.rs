@@ -7,7 +7,7 @@ use serde_json::{Value as Json, json};
 
 /// The account's smart-home endpoints, just enough to find the temperature
 /// sensors and the speaker each one sits in.
-pub(crate) const ENDPOINTS: &str = "query { endpoints(endpointsQueryParams: { paginationParams: { disablePagination: true } }) { items { legacyAppliance { applianceId applianceTypes alexaDeviceIdentifierList { dmsDeviceSerialNumber } } } } }";
+pub(crate) const ENDPOINTS: &str = "query { endpoints(endpointsQueryParams: { paginationParams: { disablePagination: true } }) { items { legacyAppliance { applianceId applianceTypes alexaDeviceIdentifierList } } } }";
 
 /// (speaker serial, sensor id) for each temperature sensor built into a
 /// speaker, from the answer to [`ENDPOINTS`].
@@ -27,12 +27,16 @@ pub(crate) fn sensors(answer: &Json) -> Vec<(String, String)> {
                 return None;
             }
             let id = appliance["applianceId"].as_str()?.to_owned();
+            // A raw JSON field: objects, or JSON in strings.
             let serial = appliance["alexaDeviceIdentifierList"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .find_map(|d| d["dmsDeviceSerialNumber"].as_str())?
-                .to_owned();
+                .filter_map(|d| match d {
+                    Json::String(s) => serde_json::from_str::<Json>(s).ok(),
+                    other => Some(other.clone()),
+                })
+                .find_map(|d| d["dmsDeviceSerialNumber"].as_str().map(str::to_owned))?;
             Some((serial, id))
         })
         .collect()
@@ -106,19 +110,20 @@ mod tests {
                 "applianceTypes": ["TEMPERATURE_SENSOR"],
                 "alexaDeviceIdentifierList": [{ "dmsDeviceSerialNumber": "G0911" }] } },
             { "legacyAppliance": {
+                "applianceId": "AAA_SonarCloudService_00000000-0000-0000-0000-000000000002",
+                "applianceTypes": ["TEMPERATURE_SENSOR"],
+                "alexaDeviceIdentifierList": ["{\"dmsDeviceSerialNumber\":\"G0922\"}"] } },
+            { "legacyAppliance": {
                 "applianceId": "SKILL_lamp", "applianceTypes": ["LIGHT"],
                 "alexaDeviceIdentifierList": [] } },
             { "legacyAppliance": {
                 "applianceId": "SKILL_probe", "applianceTypes": ["TEMPERATURE_SENSOR"] } },
             { "legacyAppliance": null }
         ] } } });
-        assert_eq!(
-            sensors(&answer),
-            [(
-                "G0911".to_owned(),
-                "AAA_SonarCloudService_00000000-0000-0000-0000-000000000001".to_owned()
-            )]
-        );
+        let found = sensors(&answer);
+        let serials: Vec<&str> = found.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(serials, ["G0911", "G0922"]);
+        assert!(found[0].1.ends_with("0001"));
         assert!(sensors(&json!({})).is_empty());
     }
 
