@@ -365,9 +365,8 @@ fn a_day() -> u32 {
     24
 }
 
-/// What the house asked Moli lately, newest first (at most 30 days).
 /// What was said to Moli: the shared exchanges (satellites, doors), and the caller's own from the
-/// dashboard, not the questions of the rest of the household.
+/// dashboard, not the questions of the rest of the household; newest first, at most 30 days.
 pub(crate) async fn exchanges(
     Extension(Moli(moli)): Extension<Moli>,
     caller: Caller,
