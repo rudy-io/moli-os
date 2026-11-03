@@ -692,14 +692,15 @@ impl Android {
                 match news {
                     AdbNews::Asking => {
                         tracing::info!(instance = %ctx.instance(), "adb: the TV asks whether to allow Moli");
-                        ctx.warn(moli_i18n::tr!("pilotes.philips.adb_autoriser"));
+                        // This branch has no driver warnings yet: the waiting status says it.
+                        ctx.wait_for(moli_i18n::tr!("pilotes.philips.adb_autoriser"));
                     }
                     AdbNews::Ready => {
                         if !*up {
                             tracing::info!(instance = %ctx.instance(), "adb: connected");
                         }
                         *up = true;
-                        ctx.clear_warning();
+                        ctx.ready();
                     }
                     AdbNews::Playing(playing) => {
                         self.adb_playing = playing;
@@ -869,7 +870,7 @@ pub(crate) async fn adb_key(ctx: &DriverCtx) -> Option<adb::Key> {
             .ok();
     }
     if !ctx.can_store_secrets() {
-        ctx.warn(moli_i18n::tr!("pilotes.philips.adb_sans_coffre"));
+        tracing::warn!(instance = %ctx.instance(), "{}", moli_i18n::tr!("pilotes.philips.adb_sans_coffre"));
         return None;
     }
     let key = match tokio::task::spawn_blocking(adb::Key::generate).await {
