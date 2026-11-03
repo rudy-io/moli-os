@@ -13,6 +13,7 @@ use serde_json::Value as Json;
 
 use crate::light::{self, Hsv, Light};
 use crate::protocol::Version;
+use crate::vacuum;
 
 /// `data/tuya.json`, written by `moli-os tuya import`. Hand-editable: `ip`,
 /// `version` and `room` are kept across re-imports.
@@ -173,7 +174,7 @@ impl Dp {
     }
 
     /// The Moli point for this DP; `None` for opaque types.
-    fn point(&self, lamp: bool) -> Option<PointSpec> {
+    pub(crate) fn point(&self, lamp: bool) -> Option<PointSpec> {
         if let Some(light) = self.setting(lamp) {
             return Some(self.light_point(light));
         }
@@ -364,11 +365,33 @@ impl TuyaDevice {
             description: None,
             native_room: self.room.as_deref().map(Into::into),
             members: Vec::new(),
-            points: self
-                .dps
-                .iter()
-                .filter_map(|d| d.point(self.is_lamp()))
-                .collect(),
+            points: if self.is_vacuum() {
+                vacuum::points(&self.dps)
+            } else {
+                self.dps
+                    .iter()
+                    .filter_map(|d| d.point(self.is_lamp()))
+                    .collect()
+            },
+        }
+    }
+
+    /// A robot vacuum: only what [`vacuum`] names is shown and commanded.
+    #[must_use]
+    pub fn is_vacuum(&self) -> bool {
+        self.category == vacuum::CATEGORY
+    }
+
+    /// A Serie 75 gets its known table, even over the cloud's description, which
+    /// names data points it does not answer. Another robot may use the same ids
+    /// for something else.
+    pub fn complete(&mut self) {
+        let series_75 = self
+            .product
+            .as_deref()
+            .is_some_and(|product| product.trim().eq_ignore_ascii_case("x-plorer serie 75"));
+        if self.is_vacuum() && series_75 {
+            self.dps = vacuum::series_75();
         }
     }
 
@@ -401,6 +424,9 @@ impl TuyaDevice {
         value: &Value,
         current: &dyn Fn(&str) -> Option<Value>,
     ) -> Option<serde_json::Map<String, Json>> {
+        if self.is_vacuum() {
+            return vacuum::order(&self.dps, key, value);
+        }
         let lamp = self.is_lamp();
         let dp = self.dp_by_key(key)?;
         let raw = dp.encode(lamp, value)?;
@@ -425,6 +451,9 @@ impl TuyaDevice {
     /// skipped. A bulb in colour shows its colour's own brightness.
     #[must_use]
     pub fn decode_dps(&self, dps: &serde_json::Map<String, Json>) -> Vec<(String, Value)> {
+        if self.is_vacuum() {
+            return vacuum::decode(&self.dps, dps);
+        }
         let by_id: BTreeMap<u32, &Dp> = self.dps.iter().map(|d| (d.id, d)).collect();
         let mut values: Vec<(String, Value)> = dps
             .iter()
