@@ -40,6 +40,7 @@
   "serveur.plan.piece_invalide": "invalid room: {id}",
   "serveur.plan.trop_d_etages": "at most {max} floors",
   "serveur.plan.habillage_inconnu": "unknown skin: {skin}",
+  "serveur.plan.couleur": "invalid colour (expected: #rrggbb)",
   "serveur.plan.etage_id": "invalid or duplicate floor id: {id}",
   "serveur.plan.etage_nom": "floor name empty, too long or invalid",
   "serveur.plan.image_inconnue": "unknown image: {image}",

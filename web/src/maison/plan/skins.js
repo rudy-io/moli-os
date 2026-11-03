@@ -169,6 +169,49 @@ export const SKINS = {
   },
 };
 
+// « Réel »: the house as it is. Each room's own finish (floor, paint,
+// painted walls), each fixture's own colours, the facade; daylight.
+SKINS.reel = {
+  real: true,
+  wall3d: '#f4f2ee',
+  get name() {
+    return t('maison.skin.reel');
+  },
+  bg: '#e6ebef',
+  grid: null,
+  wall: '#55524d',
+  window: '#a9cfe2',
+  door: '#b9b2a6',
+  label: '#3f3b35',
+  sub: '#8a847a',
+  roomLine: 'none',
+  item: '#e4ded4',
+  itemLine: '#a39b8e',
+  glow: '#ffc66e',
+  glowStrength: 0.55,
+  roof: '#bf6a46',
+  frame: '#f2f2f0',
+  trim: '#ece7de',
+  paint: '#f4f2ee',
+  palette: {
+    wood: '#b88a5a', fabric: '#d9cfc1', soft: '#f6f4f0', stone: '#9a9893', metal: '#c5c9cc',
+    dark: '#2f3236', line: '#8e877c', green: '#5a8c3f', terracotta: '#b5603f', water: '#5fb8d8',
+    glass: '#bfe3f2', pad: '#3a3d42',
+  },
+  rooms: rooms('#e9e5de', {
+    bath: '#dfe6e8',
+    wc: '#dfe6e8',
+    void: '#d8d3ca',
+    roof: '#b8b2a7',
+    garden: '#8db06a',
+    deck: '#c8b08a',
+    pool: '#5fb8d8',
+    terrace: '#d4c6ae',
+    driveway: '#b4afa6',
+    garage: '#c9c4bb',
+  }),
+};
+
 export const SKIN_IDS = Object.keys(SKINS);
 
 /** Fixtures one can add to a drawn floor (the server's ITEM_KINDS). */
@@ -195,6 +238,12 @@ export const ITEMS = {
   lounger: { get name() { return t('maison.meuble.lounger'); }, w: 65, h: 190 },
   trampoline: { get name() { return t('maison.meuble.trampoline'); }, w: 300, h: 300 },
   bin: { get name() { return t('maison.meuble.bin'); }, w: 60, h: 70 },
+  rug: { get name() { return t('maison.meuble.rug'); }, w: 200, h: 140 },
+  bookcase: { get name() { return t('maison.meuble.bookcase'); }, w: 100, h: 35 },
+  pendant: { get name() { return t('maison.meuble.pendant'); }, w: 40, h: 40 },
+  hammock: { get name() { return t('maison.meuble.hammock'); }, w: 300, h: 110 },
+  slide: { get name() { return t('maison.meuble.slide'); }, w: 50, h: 160 },
+  tree: { get name() { return t('maison.meuble.tree'); }, w: 400, h: 400 },
   stairs: { get name() { return t('maison.meuble.stairs'); }, w: 100, h: 280 },
   stairs_u: { get name() { return t('maison.meuble.stairs_u'); }, w: 200, h: 190 },
   other: { get name() { return t('maison.meuble.other'); }, w: 80, h: 80 },
