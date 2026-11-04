@@ -197,10 +197,10 @@ mod tests {
         let offer = "v=0\r\na=ice-ufrag:abcd\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n\
             a=candidate:1111 1 udp 2113937151 aaaaaaaa-bbbb.local 50000 typ host generation 0 network-cost 999\r\n\
             a=candidate:1 1 udp 2113939711 fe80::1 50001 typ host generation 0\r\n\
-            a=candidate:2 1 tcp 1518280447 192.168.1.20 9 typ host tcptype active\r\n\
-            a=candidate:3 1 udp 2113937151 192.168.1.21 50002 typ host\r\n\
+            a=candidate:2 1 tcp 1518280447 192.0.2.20 9 typ host tcptype active\r\n\
+            a=candidate:3 1 udp 2113937151 192.0.2.21 50002 typ host\r\n\
             a=end-of-candidates\r\n";
-        let viewer: IpAddr = "192.168.1.20".parse().unwrap();
+        let viewer: IpAddr = "192.0.2.20".parse().unwrap();
         let sent = for_camera(offer, Some(viewer));
         let candidates: Vec<&str> = sent
             .lines()
@@ -209,8 +209,8 @@ mod tests {
         assert_eq!(
             candidates,
             [
-                "a=candidate:1111 1 udp 2113937151 192.168.1.20 50000 typ host ufrag abcd generation 0",
-                "a=candidate:3 1 udp 2113937151 192.168.1.21 50002 typ host ufrag abcd generation 0",
+                "a=candidate:1111 1 udp 2113937151 192.0.2.20 50000 typ host ufrag abcd generation 0",
+                "a=candidate:3 1 udp 2113937151 192.0.2.21 50002 typ host ufrag abcd generation 0",
             ]
         );
         assert!(sent.contains("a=end-of-candidates\r\n") && sent.starts_with("v=0\r\n"));

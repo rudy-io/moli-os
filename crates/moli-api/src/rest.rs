@@ -702,8 +702,6 @@ pub(crate) async fn media(
 
 // ---- camera images ----------------------------------------------------------
 
-/// A fresh camera image. A camera in a protected room shows itself only to
-/// a human session (PIN): an agent or a script never looks into a bedroom.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LiveBody {
@@ -762,6 +760,8 @@ pub(crate) async fn live(
     }
 }
 
+/// A fresh camera image. A camera in a protected room shows itself only to
+/// a human session (PIN): an agent or a script never looks into a bedroom.
 pub(crate) async fn snapshot(
     State(hub): State<Hub>,
     Extension(humans): Humans,
