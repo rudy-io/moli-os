@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
 });
@@ -485,4 +485,42 @@ test('a fault is told in words and an unknown state keeps its own', () => {
   const html = show('VacuumCard', robot(), { state: 'remotectl', clean: false, battery: 50, fault: true, detail: 'code 27' });
   assert.match(html, /remotectl/);
   assert.match(html, /code 27/);
+});
+
+const valvePoints = (setpointWrite = true, modeWrite = true) => [
+  point('occupied_heating_setpoint', { ...number(4, 35, 0.5) }, setpointWrite, 'temperature'),
+  point('local_temperature', { type: 'numeric' }, false, 'temperature'),
+  point('system_mode', enumeration('off', 'auto', 'heat'), modeWrite),
+  point('running_state', enumeration('idle', 'heat'), false),
+];
+
+test('a Zigbee valve is a climate shown with its measured temperature, setpoint and mode', () => {
+  const html = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18.5, local_temperature: 19.2, system_mode: 'auto', running_state: 'idle' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'climate');
+  assert.match(html, /19[.,]2/);
+  assert.match(html, /18[.,]5/);
+  // − and +, then one button per mode the valve accepts: no preset, no extra mode.
+  assert.equal(buttons(html).length, 5);
+  assert.match(html, /aria-pressed="true"[^>]*>Programme/);
+  assert.doesNotMatch(html, /class="dial/);
+});
+
+test('a valve setpoint stops at the bounds its own contract states', () => {
+  const atMin = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 4, local_temperature: 19, system_mode: 'heat' });
+  assert.match(atMin, /aria-label="[^"]*"\s+disabled/);
+  assert.equal(buttons(atMin).filter((tag) => tag.includes('disabled')).length, 1);
+  const atMax = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 35, local_temperature: 19, system_mode: 'heat' });
+  assert.equal(buttons(atMax).filter((tag) => tag.includes('disabled')).length, 1);
+});
+
+test('a read-only valve shows its setpoint and mode without any control', () => {
+  const html = show('ValveCard', valvePoints(false, false), { occupied_heating_setpoint: 18.5, local_temperature: 19, system_mode: 'heat' });
+  assert.equal(buttons(html).length, 0);
+  assert.match(html, /18[.,]5/);
+});
+
+test('a room lists its valve as a climate and opens the valve card, not the air-conditioner dial', () => {
+  const html = showRoom([{ id: 'fixture:valve', points: valvePoints(), values: { occupied_heating_setpoint: 18.5, local_temperature: 19.2, system_mode: 'heat' } }]);
+  assert.match(html, /19/);
+  assert.doesNotMatch(html, /class="dial/);
 });

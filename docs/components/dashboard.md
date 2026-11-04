@@ -143,3 +143,10 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
 - Télé : applis et clavier non disponibles (JointSpace ne le permet pas ; protocole
   Android TV Remote v2 à faire).
 - Clims : lecture seule tant que les écritures Daikin n'ont pas été testées physiquement.
+- **Vannes thermostatiques** : une vanne **Zigbee2MQTT** (SONOFF TRVZB, TRV-ZBT) est un climat
+  reconnu à ses points `occupied_heating_setpoint` et `system_mode`, sans rien déclarer. Sa carte
+  (`ui/ValveCard.svelte`) montre la température mesurée (`local_temperature`), la consigne (bornes
+  et pas lus dans le point) et les modes que la vanne accepte ; chaque ordre passe par le chemin
+  normal du hub, donc par la garde. Pas de table horaire ni de graphique pour l'instant. Une vanne
+  d'un autre protocole peut nommer ses points autrement : une Danfoss Z-Wave expose `temperature`
+  et `occupied_heating_setpoint` mais pas `system_mode`, elle n'est pas reconnue.

@@ -3,7 +3,7 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder } from './capabilities.js';
+import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve } from './capabilities.js';
 
 export { hub, positionPoint, coverOrder };
 
@@ -227,7 +227,7 @@ export function deviceKind(d) {
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
-  if (has(d, 'target_temperature')) return 'climate';
+  if (has(d, 'target_temperature') || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
     return 'cover';

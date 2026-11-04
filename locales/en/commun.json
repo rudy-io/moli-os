@@ -210,6 +210,9 @@
   "commun.clim.aujourdhui": "Today",
   "commun.clim.ce_mois": "This month",
   "commun.clim.cout_non_mesure": "Cost not measured: no clamp on its circuit",
+  "commun.vanne.mode.off": "Off",
+  "commun.vanne.mode.auto": "Schedule",
+  "commun.vanne.mode.heat": "Manual",
 
   "commun.jour.jusqua": "Today until {h}:00",
   "commun.jour.habitude": "usually {kwh} kWh",
