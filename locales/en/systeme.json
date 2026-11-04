@@ -357,5 +357,10 @@
   "systeme.alexa.connecter": "Connect",
   "systeme.alexa.verification": "Connecting…",
   "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
-  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice."
+  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice.",
+  "systeme.journal.pilote_lecture_seule": "{kind} driver added in read-only mode",
+  "systeme.journal.pilote_ajoute": "{kind} driver added",
+  "systeme.journal.pilote_pause": "{kind} driver paused",
+  "systeme.journal.pilote_reconfigure_lecture_seule": "{kind} driver reconfigured as read-only",
+  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured"
 }
