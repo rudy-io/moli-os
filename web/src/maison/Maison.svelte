@@ -24,6 +24,7 @@
   import Parler from './pages/Parler.svelte';
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
+  import { airzonePresent } from './lib/airzone.js';
 
   let { route } = $props();
 
@@ -44,6 +45,7 @@
     { path: 'moli', name: 'Moli', orb: true },
     { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
     { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
+    { path: 'airzone', label: 'airzone_ui.title', icon: 'air-conditioner', shown: () => airzonePresent(hub.drivers) },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
@@ -151,6 +153,8 @@
       <Salon />
     {:else if page === 'pieces'}
       <Pieces />
+    {:else if page === 'airzone'}
+      {#await import('./pages/Airzone.svelte') then { default: Airzone }}<Airzone {route} />{/await}
     {:else if page === 'plan'}
       <Plan />
     {:else if page === 'carte'}

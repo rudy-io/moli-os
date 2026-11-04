@@ -1,6 +1,7 @@
 //! Validated decoding and scope-aware command construction.
+use crate::fields::{self, Scope};
 use anyhow::{Context as _, ensure};
-use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
+use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Value};
 use serde_json::{Value as Json, json};
 use std::collections::BTreeSet;
 
@@ -18,8 +19,7 @@ struct Zone {
     system: u64,
     id: u64,
     master: Option<u64>,
-    modes: Option<Vec<u64>>,
-    fan: Vec<u64>,
+    shared: bool,
 }
 fn invalid() -> String {
     moli_i18n::tr!("airzone.invalid")
@@ -41,7 +41,7 @@ fn binary(v: &Json) -> anyhow::Result<bool> {
 fn codes(v: &Json, min: u64, max: u64) -> anyhow::Result<Vec<u64>> {
     let a = v
         .as_array()
-        .filter(|a| !a.is_empty() && a.len() <= 8)
+        .filter(|a| !a.is_empty() && a.len() <= 32)
         .context(invalid())?;
     let values = a
         .iter()
@@ -53,115 +53,58 @@ fn codes(v: &Json, min: u64, max: u64) -> anyhow::Result<Vec<u64>> {
     );
     Ok(values)
 }
-fn text(value: &Value) -> anyhow::Result<&str> {
-    if let Value::Text(s) = value {
-        Ok(s)
-    } else {
-        anyhow::bail!(invalid())
-    }
-}
-fn mode(code: u64) -> &'static str {
-    match code {
-        1 => "off",
-        2 => "cool",
-        3 => "heat",
-        4 => "fan",
-        5 => "dry",
-        6 => "aux_heat",
-        7 => "auto",
-        _ => unreachable!("validated mode"),
-    }
-}
-fn numeric(min: Option<f64>, max: Option<f64>, step: Option<f64>) -> Kind {
-    Kind::Numeric { min, max, step }
-}
-fn spec(key: &str, kind: Kind, unit: Option<Unit>, write: bool) -> PointSpec {
-    let semantic = match key {
-        "on" => Semantic::OnOff,
-        "temperature" | "target_temperature" => Semantic::Temperature,
-        "humidity" => Semantic::Humidity,
-        "problem" => Semantic::Alert,
-        _ => Semantic::Other,
-    };
-    let label = match key {
-        "on" => moli_i18n::tr!("airzone.on"),
-        "temperature" => moli_i18n::tr!("airzone.temperature"),
-        "target_temperature" => moli_i18n::tr!("airzone.target_temperature"),
-        "humidity" => moli_i18n::tr!("airzone.humidity"),
-        "mode" => moli_i18n::tr!("airzone.mode"),
-        "fan_speed" => moli_i18n::tr!("airzone.fan_speed"),
-        "problem" => moli_i18n::tr!("airzone.problem"),
-        "detail" => moli_i18n::tr!("airzone.detail"),
-        "air_demand" => moli_i18n::tr!("airzone.air_demand"),
-        "floor_demand" => moli_i18n::tr!("airzone.floor_demand"),
-        "cold_demand" => moli_i18n::tr!("airzone.cold_demand"),
-        "heat_demand" => moli_i18n::tr!("airzone.heat_demand"),
-        _ => unreachable!("known point"),
-    };
-    PointSpec {
-        key: key.into(),
-        label: label.into(),
-        kind,
-        unit,
-        semantic,
-        access: Access { read: true, write },
-    }
-}
 impl Zone {
     fn parse(raw: &Json, system: u64, id: u64) -> anyhow::Result<Self> {
-        binary(&raw["on"])?;
-        number(&raw["roomTemp"])?;
-        let target = number(&raw["setpoint"])?;
-        let min = number(&raw["minTemp"])?;
-        let max = number(&raw["maxTemp"])?;
-        ensure!(min < max && target >= min && target <= max, invalid());
-        if let Some(step) = raw.get("temp_step") {
-            let step = number(step)?;
-            ensure!(step > 0. && step <= max - min, invalid());
+        let raw = fields::project(raw)?;
+        // Invalid core measurements still isolate the zone. Absent thermostat
+        // fields are legitimate on ERV and double-setpoint-only controllers.
+        if let Some(value) = raw.get("on") {
+            binary(value)?;
         }
-        code(&raw["units"], 0, 1)?;
-        code(&raw["mode"], 1, 7)?;
-        let modes = raw.get("modes").map(|v| codes(v, 1, 7)).transpose()?;
+        if let Some(value) = raw.get("roomTemp") {
+            number(value)?;
+        }
+        if let Some(value) = raw.get("units") {
+            code(value, 0, 1)?;
+        }
+        if let Some(value) = raw.get("mode") {
+            code(value, 1, 7)?;
+        }
+        if let Some(value) = raw.get("setpoint") {
+            let target = number(value)?;
+            if let (Some(min), Some(max)) = (raw.get("minTemp"), raw.get("maxTemp")) {
+                let min = number(min)?;
+                let max = number(max)?;
+                ensure!(min < max && target >= min && target <= max, invalid());
+            }
+        }
+        if let Some(value) = raw.get("temp_step") {
+            let step = number(value)?;
+            ensure!(step > 0., invalid());
+            if let (Some(min), Some(max)) = (raw["minTemp"].as_f64(), raw["maxTemp"].as_f64()) {
+                ensure!(step <= max - min, invalid());
+            }
+        }
+        if let Some(value) = raw.get("modes") {
+            codes(value, 1, 7)?;
+        }
+        if let Some(value) = raw.get("erv_modes") {
+            codes(value, 0, 10)?;
+        }
         let master = raw
             .get("master_zoneID")
             .map(|v| code(v, 1, 32))
             .transpose()?;
-        for key in ["air_demand", "floor_demand", "cold_demand", "heat_demand"] {
-            if let Some(v) = raw.get(key) {
-                binary(v)?;
-            }
+        if let Some(errors) = raw.get("errors") {
+            ensure!(errors.is_array(), invalid());
         }
-        if let Some(v) = raw.get("humidity") {
-            let h = number(v)?;
-            ensure!((0.0..=100.0).contains(&h), invalid());
-        }
-        if let Some(v) = raw.get("speed") {
-            code(v, 0, 7)?;
-        }
-        let speeds = raw.get("speeds").map(|v| code(v, 0, 7)).transpose()?;
-        let fan = if let Some(v) = raw.get("speed_values") {
-            let values = codes(v, 0, 7)?;
-            ensure!(
-                speeds.is_none_or(|max| values.iter().all(|v| *v <= max)),
-                invalid()
-            );
-            values
-        } else {
-            speeds
-                .filter(|s| *s > 0)
-                .map(|s| (0..=s).collect())
-                .unwrap_or_default()
-        };
-        if let Some(v) = raw.get("errors") {
-            ensure!(v.is_array(), invalid());
-        }
+        let shared = raw.get("modes").is_some() || raw.get("erv_modes").is_some();
         Ok(Self {
-            raw: raw.clone(),
+            raw,
             system,
             id,
             master,
-            modes,
-            fan,
+            shared,
         })
     }
     fn native(&self, mac: &str, control: bool) -> String {
@@ -172,110 +115,39 @@ impl Zone {
             if control { "_control" } else { "" }
         )
     }
-    #[allow(clippy::too_many_lines)] // one block per advertised point, with its state
     fn entity(&self, instance: &InstanceId, mac: &str, members: Option<Vec<DeviceId>>) -> Entity {
         let control = members.is_some();
-        let r = &self.raw;
-        let mut points = vec![];
-        let mut states = vec![];
-        let mut add = |p: PointSpec, value: Value| {
-            states.push((p.key.to_string(), value));
-            points.push(p);
-        };
-        if control {
-            let values = self
-                .modes
-                .as_ref()
-                .expect("master")
-                .iter()
-                .map(|m| mode(*m).into())
-                .collect();
-            add(
-                spec("mode", Kind::Enum { values }, None, true),
-                Value::from(mode(r["mode"].as_u64().expect("mode"))),
-            );
-            if !self.fan.is_empty() && self.fan.iter().any(|s| *s > 0) && r.get("speed").is_some() {
-                add(
-                    spec(
-                        "fan_speed",
-                        Kind::Enum {
-                            values: self.fan.iter().map(|s| s.to_string().into()).collect(),
-                        },
-                        None,
-                        true,
-                    ),
-                    Value::Text(r["speed"].as_u64().expect("speed").to_string().into()),
-                );
-            }
-        } else {
-            let unit = if r["units"] == 0 {
-                Unit::Celsius
-            } else {
-                Unit::Other("°F".into())
-            };
-            add(
-                spec("on", Kind::Binary, None, true),
-                Value::Bool(binary(&r["on"]).expect("on")),
-            );
-            add(
-                spec(
-                    "temperature",
-                    numeric(None, None, None),
-                    Some(unit.clone()),
-                    false,
-                ),
-                Value::Float(r["roomTemp"].as_f64().expect("temperature")),
-            );
-            add(
-                spec(
-                    "target_temperature",
-                    numeric(
-                        r["minTemp"].as_f64(),
-                        r["maxTemp"].as_f64(),
-                        r["temp_step"].as_f64(),
-                    ),
-                    Some(unit),
-                    true,
-                ),
-                Value::Float(r["setpoint"].as_f64().expect("target")),
-            );
-            add(
-                spec(
-                    "mode",
-                    Kind::Enum {
-                        values: vec![mode(r["mode"].as_u64().expect("mode")).into()],
-                    },
-                    None,
-                    false,
-                ),
-                Value::from(mode(r["mode"].as_u64().expect("mode"))),
-            );
-            if let Some(v) = r["humidity"].as_f64() {
-                add(
-                    spec(
-                        "humidity",
-                        numeric(Some(0.), Some(100.), None),
-                        Some(Unit::Percent),
-                        false,
-                    ),
-                    Value::Float(v),
-                );
-            }
-            for key in ["air_demand", "floor_demand", "cold_demand", "heat_demand"] {
-                if let Some(v) = r.get(key) {
-                    add(
-                        spec(key, Kind::Binary, None, false),
-                        Value::Bool(binary(v).expect("demand")),
-                    );
-                }
-            }
-            let errors = r["errors"].as_array();
-            add(
-                spec("problem", Kind::Binary, None, false),
+        let values = fields::points(
+            if control { Scope::System } else { Scope::Zone },
+            &self.raw,
+            false,
+        );
+        let (mut points, mut states): (Vec<_>, Vec<_>) = values
+            .into_iter()
+            .map(|(p, v)| {
+                let key = p.key.to_string();
+                (p, (key, v))
+            })
+            .unzip();
+        if !control {
+            let errors = self.raw["errors"].as_array();
+            points.push(PointSpec {
+                key: "problem".into(),
+                label: moli_i18n::tr!("airzone.problem").into(),
+                kind: Kind::Binary,
+                unit: None,
+                semantic: Semantic::Alert,
+                access: Access {
+                    read: true,
+                    write: false,
+                },
+            });
+            states.push((
+                "problem".into(),
                 Value::Bool(errors.is_some_and(|e| !e.is_empty())),
-            );
+            ));
             if let Some(errors) = errors {
-                let text = errors
+                let detail = errors
                     .iter()
                     .take(8)
                     .map(ToString::to_string)
@@ -285,13 +157,21 @@ impl Zone {
                     .filter(|c| !c.is_control())
                     .take(240)
                     .collect::<String>();
-                add(
-                    spec("detail", Kind::Text, None, false),
-                    Value::Text(text.into()),
-                );
+                points.push(PointSpec {
+                    key: "detail".into(),
+                    label: moli_i18n::tr!("airzone.detail").into(),
+                    kind: Kind::Text,
+                    unit: None,
+                    semantic: Semantic::Other,
+                    access: Access {
+                        read: true,
+                        write: false,
+                    },
+                });
+                states.push(("detail".into(), Value::Text(detail.into())));
             }
         }
-        let name = r["name"]
+        let name = self.raw["name"]
             .as_str()
             .unwrap_or("Airzone")
             .chars()
@@ -328,27 +208,46 @@ impl Zone {
 }
 impl Snapshot {
     pub(crate) fn parse(value: &Json) -> anyhow::Result<Self> {
-        let systems = value["systems"]
-            .as_array()
-            .filter(|s| s.len() <= 32)
-            .context(invalid())?;
+        let nested = value.get("systems").is_some();
+        let groups = if let Some(systems) = value.get("systems") {
+            systems
+                .as_array()
+                .filter(|s| s.len() <= 32)
+                .context(invalid())?
+                .iter()
+                .collect::<Vec<_>>()
+        } else {
+            let data = value.get("data").context(invalid())?;
+            ensure!(
+                data.is_object() || data.as_array().is_some_and(|a| !a.is_empty()),
+                invalid()
+            );
+            vec![value]
+        };
         let mut zones = vec![];
         let mut ids = BTreeSet::new();
         let mut incomplete_systems = BTreeSet::new();
         let mut skipped = 0;
-        for system in systems {
-            let data = system["data"]
-                .as_array()
-                .filter(|z| z.len() <= 32)
-                .context(invalid())?;
-            let mut system_id = None;
+        for group in groups {
+            let data = match &group["data"] {
+                Json::Object(_) => vec![&group["data"]],
+                Json::Array(rows) if rows.len() <= if nested { 32 } else { 1024 } => {
+                    rows.iter().collect()
+                }
+                _ => anyhow::bail!(invalid()),
+            };
+            let mut system_id = if nested {
+                group.get("systemID").map(|v| code(v, 1, 32)).transpose()?
+            } else {
+                None
+            };
             for raw in data {
-                // Validate every identity, including malformed zones: ignoring an
-                // ambiguous or broadcast ID could expose an unsafe write target.
                 let system = code(&raw["systemID"], 1, 32)?;
                 let id = code(&raw["zoneID"], 1, 32)?;
-                ensure!(system_id.is_none_or(|s| s == system), invalid());
-                system_id = Some(system);
+                if nested {
+                    ensure!(system_id.is_none_or(|s| s == system), invalid());
+                    system_id = Some(system);
+                }
                 ensure!(ids.insert((system, id)), invalid());
                 if let Ok(zone) = Zone::parse(raw, system, id) {
                     zones.push(zone);
@@ -359,8 +258,6 @@ impl Snapshot {
             }
         }
         if skipped > 0 {
-            // One bounded warning per snapshot; no names, raw data or errors from
-            // the controller are logged. Envelope limits bound the count to 1024.
             tracing::warn!(
                 skipped_zones = skipped,
                 "malformed Airzone zones ignored; shared controls disabled for affected systems"
@@ -372,6 +269,37 @@ impl Snapshot {
             incomplete_systems,
         })
     }
+    pub(crate) fn system_ids(&self) -> Vec<u64> {
+        self.identities
+            .iter()
+            .map(|(system, _)| *system)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+    pub(crate) fn scope_members(
+        &self,
+        instance: &InstanceId,
+        mac: &str,
+        system: Option<u64>,
+    ) -> Option<Vec<DeviceId>> {
+        if self
+            .incomplete_systems
+            .iter()
+            .any(|s| system.is_none_or(|wanted| wanted == *s))
+        {
+            return None;
+        }
+        let members = self
+            .zones
+            .iter()
+            .filter(|zone| system.is_none_or(|wanted| wanted == zone.system))
+            .map(|zone| DeviceId::new(instance, &zone.native(mac, false)))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        (!members.is_empty()).then_some(members)
+    }
     pub(crate) fn retain_known_scope(
         &mut self,
         instance: &InstanceId,
@@ -379,17 +307,13 @@ impl Snapshot {
         published: &[DeviceId],
         known: &mut ZoneIds,
     ) {
-        // Restore only native zone identities of this controller. Shared
-        // controls end in `_control` and cannot parse as numeric zone IDs.
         let prefix = format!("{instance}:{mac}_s");
         for device in published {
             let Some((system, zone)) = device
                 .as_str()
                 .strip_prefix(&prefix)
-                .and_then(|native| native.split_once("_z"))
-                .and_then(|(system, zone)| {
-                    Some((system.parse::<u64>().ok()?, zone.parse::<u64>().ok()?))
-                })
+                .and_then(|n| n.split_once("_z"))
+                .and_then(|(s, z)| Some((s.parse::<u64>().ok()?, z.parse::<u64>().ok()?)))
             else {
                 continue;
             };
@@ -397,8 +321,6 @@ impl Snapshot {
                 known.insert((system, zone));
             }
         }
-        // Learn even malformed zones, but only after the entire envelope and
-        // all IDs validated. Memory is bounded to 32 systems × 32 zones.
         known.extend(&self.identities);
         self.incomplete_systems.extend(
             known
@@ -407,9 +329,6 @@ impl Snapshot {
         );
     }
     fn members(&self, master: &Zone, instance: &InstanceId, mac: &str) -> Option<Vec<DeviceId>> {
-        master.modes.as_ref()?;
-        // Dropped zones may belong to this master's guard scope. Never infer
-        // reduced membership from an incomplete system, even with explicit IDs.
         if self.incomplete_systems.contains(&master.system) {
             return None;
         }
@@ -420,10 +339,19 @@ impl Snapshot {
             .collect::<Vec<_>>();
         let masters = system
             .iter()
-            .filter(|z| z.modes.is_some())
+            .filter(|z| z.shared)
             .map(|z| z.id)
             .collect::<Vec<_>>();
-        // Ambiguous/missing domain metadata disables shared writes, not zone writes.
+        if !master.shared {
+            // Some systems advertise shared settings without a mode list.
+            // Use every zone, never infer a narrower domain or a fake master.
+            return (masters.is_empty()
+                && fields::points(Scope::System, &master.raw, false)
+                    .iter()
+                    .any(|(point, _)| point.access.write))
+            .then(|| self.scope_members(instance, mac, Some(master.system)))
+            .flatten();
+        }
         if system
             .iter()
             .any(|z| z.master.is_some_and(|m| !masters.contains(&m)))
@@ -435,7 +363,6 @@ impl Snapshot {
             .iter()
             .filter(|z| z.master.map_or(masters.len() == 1, |m| m == master.id))
             .map(|z| DeviceId::new(instance, &z.native(mac, false)))
-            // Scope is a set: response ordering cannot change the guard's targets.
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -472,36 +399,19 @@ impl Snapshot {
             .iter()
             .find(|(d, _)| &d.id == device)
             .context(invalid())?;
-        let p = d.point(key).filter(|p| p.access.write).context(invalid())?;
-        let value = moli_core::validate(&p.kind, value).map_err(|_| anyhow::anyhow!(invalid()))?;
-        if let Kind::Numeric {
-            min: Some(min),
-            step: Some(step),
-            ..
-        } = p.kind
-        {
-            let grid = (value.as_f64().expect("numeric") - min) / step;
-            ensure!((grid - grid.round()).abs() < 1e-6, invalid());
-        }
+        ensure!(d.point(key).is_some_and(|p| p.access.write), invalid());
         let control = !d.members.is_empty();
         let zone = self
             .zones
             .iter()
             .find(|z| DeviceId::new(instance, &z.native(mac, control)) == *device)
             .context(invalid())?;
-        let (param, wire) = match key {
-            "on" => ("on", json!(u8::from(value == Value::Bool(true)))),
-            "target_temperature" => ("setpoint", json!(value.as_f64().context(invalid())?)),
-            "mode" => {
-                let text = text(&value)?;
-                (
-                    "mode",
-                    json!((1..=7).find(|m| mode(*m) == text).context(invalid())?),
-                )
-            }
-            "fan_speed" => ("speed", json!(text(&value)?.parse::<u64>()?)),
-            _ => anyhow::bail!(invalid()),
-        };
+        let (param, wire) = fields::encode(
+            if control { Scope::System } else { Scope::Zone },
+            &zone.raw,
+            key,
+            value,
+        )?;
         let mut body = json!({"systemID":zone.system,"zoneID":zone.id});
         body[param] = wire;
         Ok(body)
@@ -516,6 +426,118 @@ mod tests {
             "../../../integrations/airzone/fixtures/zones.json"
         ))
         .unwrap()
+    }
+    #[test]
+    fn flat_broadcast_covers_multiple_systems_but_nested_parent_ids_must_match() {
+        let flat =
+            json!({"data":[{"systemID":1,"zoneID":1,"on":1},{"systemID":2,"zoneID":1,"on":0}]});
+        assert_eq!(
+            Snapshot::parse(&flat)
+                .unwrap()
+                .entities(&InstanceId::from("az"), "aabbccddeeff")
+                .len(),
+            2
+        );
+        assert!(
+            Snapshot::parse(
+                &json!({"systems":[{"systemID":2,"data":[{"systemID":1,"zoneID":1,"on":1}]}]})
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn invalid_optional_humidity_does_not_remove_an_independent_zone() {
+        let snapshot =
+            Snapshot::parse(&json!({"data":{"systemID":1,"zoneID":1,"on":1,"humidity":null}}))
+                .unwrap();
+        let entities = snapshot.entities(&InstanceId::from("az"), "aabbccddeeff");
+        assert_eq!(entities.len(), 1);
+        assert!(entities[0].0.point("on").is_some());
+        assert!(entities[0].0.point("humidity").is_none());
+    }
+    #[test]
+    fn independently_advertised_shared_capabilities_use_whole_system_scope() {
+        let snapshot = Snapshot::parse(&json!({"data":[
+            {"systemID":1,"zoneID":1,"on":1,"speed":1,"speed_values":[0,1],"qAdapt":1},
+            {"systemID":1,"zoneID":2,"on":0}
+        ]}))
+        .unwrap();
+        let instance = InstanceId::from("az");
+        let mac = "aabbccddeeff";
+        let entities = snapshot.entities(&instance, mac);
+        let control = entities
+            .iter()
+            .find(|(d, _)| d.id.as_str().ends_with("_control"))
+            .unwrap();
+        assert_eq!(control.0.members.len(), 2);
+        assert_eq!(
+            snapshot
+                .encode(
+                    &instance,
+                    mac,
+                    &control.0.id,
+                    "fan_speed",
+                    &Value::from("1")
+                )
+                .unwrap(),
+            json!({"systemID":1,"zoneID":1,"speed":1})
+        );
+    }
+    #[test]
+    fn accepts_documented_single_system_object_and_array_envelopes() {
+        let raw = fixture()["systems"][0]["data"][0].clone();
+        for response in [json!({"data": raw}), json!({"data": [raw]})] {
+            let snapshot = Snapshot::parse(&response).unwrap();
+            let devices = snapshot.entities(&InstanceId::from("az"), "aabbccddeeff");
+            assert_eq!(devices.len(), 1);
+            assert_eq!(devices[0].0.id.as_str(), "az:aabbccddeeff_s1_z2");
+        }
+    }
+    #[test]
+    fn double_setpoint_only_zone_keeps_both_targets_without_fake_single_target() {
+        let raw = json!({"systemID":1,"zoneID":4,"on":1,"roomTemp":22,
+            "double_sp":1,"coolsetpoint":25,"coolmintemp":16,"coolmaxtemp":32,
+            "heatsetpoint":20,"heatmintemp":15,"heatmaxtemp":30,
+            "units":0,"temp_step":0.5,"mode":7,"modes":[1,3,7]});
+        let snapshot = Snapshot::parse(&json!({"systems":[{"data":[raw]}]})).unwrap();
+        let devices = snapshot.entities(&InstanceId::from("az"), "aabbccddeeff");
+        let (device, _) = devices
+            .iter()
+            .find(|(d, _)| d.id.as_str().ends_with("_z4"))
+            .unwrap();
+        assert!(device.point("target_temperature").is_none());
+        assert!(
+            device
+                .points
+                .iter()
+                .any(|p| p.access.write && p.key.as_ref().contains("cool"))
+        );
+        assert!(
+            device
+                .points
+                .iter()
+                .any(|p| p.access.write && p.key.as_ref().contains("heat"))
+        );
+    }
+    #[test]
+    fn erv_only_zone_is_published_without_fake_thermostat() {
+        let snapshot = Snapshot::parse(&json!({"systems":[{"data":[{
+            "systemID":1,"zoneID":1,"erv_power":1,"erv_modes":[0,1,2,6],
+            "erv_mode":2,"erv_speed_values":[1,3,5],"erv_speed":3
+        }]}]}))
+        .unwrap();
+        let devices = snapshot.entities(&InstanceId::from("az"), "aabbccddeeff");
+        assert_eq!(devices.len(), 2);
+        assert!(
+            devices
+                .iter()
+                .all(|(d, _)| d.point("target_temperature").is_none())
+        );
+        assert!(
+            devices
+                .iter()
+                .any(|(d, _)| d.point("erv_mode").is_some_and(|p| p.access.write))
+        );
     }
     #[test]
     fn controller_identity_scope_and_reported_capabilities() {
@@ -550,7 +572,9 @@ mod tests {
         );
         assert!(control.0.point("on").is_none());
         assert!(control.0.point("target_temperature").is_none());
-        assert!(control.0.point("fan_speed").is_none());
+        // A reported speed remains visible even when no writable fan
+        // capability was advertised (e.g. radiant-only systems).
+        assert!(!control.0.point("fan_speed").unwrap().access.write);
         assert_eq!(
             control.0.point("mode").unwrap().kind,
             Kind::Enum {
