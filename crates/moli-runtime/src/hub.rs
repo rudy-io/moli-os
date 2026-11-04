@@ -726,6 +726,17 @@ impl Hub {
         if agent && self.is_control(point) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.machine"));
         }
+        // A protected device is the same call, on every point of it: a
+        // countdown cuts a plug as surely as its switch.
+        if agent
+            && let Some((device, _)) = point.split()
+            && let Some(name) = self.protected_device(&device)
+        {
+            return Verdict::Approval(moli_i18n::tr!(
+                "serveur.garde.appareil_protege",
+                name = name
+            ));
+        }
         let rooms = point
             .split()
             .map(|(device, _)| self.rooms_of(&device))
@@ -838,6 +849,53 @@ impl Hub {
             .protected_rooms
             .iter()
             .filter(|p| !known.iter().any(|k| crate::guard::same_room(p, k)))
+            .cloned()
+            .collect()
+    }
+
+    /// The name of the protected device this order reaches (itself, or a
+    /// member if it is a group), if any.
+    #[must_use]
+    pub fn protected_device(&self, device: &DeviceId) -> Option<String> {
+        let protected = &self.0.opts.guard.protected_devices;
+        if protected.is_empty() {
+            return None;
+        }
+        let model = self.read();
+        // Groups may nest (a group of fixtures): walk them all, once each.
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![device];
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if protected.iter().any(|p| p == id.as_str()) {
+                return Some(
+                    model
+                        .labels
+                        .get(id)
+                        .and_then(|l| l.name.clone())
+                        .unwrap_or_else(|| id.as_str().to_owned()),
+                );
+            }
+            if let Some(d) = model.devices.get(id) {
+                todo.extend(&d.members);
+            }
+        }
+        None
+    }
+
+    /// Protected devices the hub does not know: a typo, or a device gone.
+    /// Then protection silently stopped applying — say so.
+    #[must_use]
+    pub fn unmatched_protected_devices(&self) -> Vec<String> {
+        let model = self.read();
+        self.0
+            .opts
+            .guard
+            .protected_devices
+            .iter()
+            .filter(|p| !model.devices.keys().any(|id| id.as_str() == p.as_str()))
             .cloned()
             .collect()
     }
@@ -1078,50 +1136,27 @@ impl Hub {
         );
     }
 
-    /// Journals a human's persisted driver installation without its address.
-    pub fn record_driver_added(
+    /// Records a persisted visibility edit and tells dashboards to reload the
+    /// layout only when it succeeded. No device capability or state changes.
+    pub fn record_visibility(
         &self,
-        instance: InstanceId,
-        driver_kind: &str,
-        read_only: bool,
+        device: DeviceId,
+        hidden: bool,
+        origin: Origin,
         actor: Option<String>,
         outcome: Outcome,
     ) {
+        let saved = outcome == Outcome::Ok;
         self.record(
-            Origin::Ui,
+            origin,
             actor,
-            Action::DriverAdded {
-                instance,
-                driver_kind: driver_kind.to_owned(),
-                read_only,
-            },
+            Action::Visibility { device, hidden },
             outcome,
             Instant::now(),
         );
-    }
-
-    /// Journals a human's persisted driver edit without its address or secrets.
-    pub fn record_driver_configured(
-        &self,
-        instance: InstanceId,
-        driver_kind: &str,
-        enabled: bool,
-        read_only: bool,
-        actor: Option<String>,
-        outcome: Outcome,
-    ) {
-        self.record(
-            Origin::Ui,
-            actor,
-            Action::DriverConfigured {
-                instance,
-                driver_kind: driver_kind.to_owned(),
-                enabled,
-                read_only,
-            },
-            outcome,
-            Instant::now(),
-        );
+        if saved {
+            self.emit(Event::LayoutChanged {});
+        }
     }
 
     /// Where `instance` last reached its device.
@@ -1259,6 +1294,7 @@ impl Hub {
     pub fn guard_status(&self) -> GuardStatus {
         let mut status = self.0.opts.guard.status(jiff::Timestamp::now());
         status.unmatched_protected_rooms = self.unmatched_protected_rooms();
+        status.unmatched_protected_devices = self.unmatched_protected_devices();
         status
     }
 
@@ -1615,54 +1651,6 @@ impl Hub {
         rx
     }
 
-    /// Detaches an already stopped driver. Call only after cancelling and
-    /// awaiting its task: an old task must not publish over a replacement.
-    /// Labels, history and original cached definitions are retained.
-    pub fn unregister_driver(&self, instance: &InstanceId) {
-        let devices = {
-            let mut model = self.write();
-            if model.drivers.remove(instance).is_none() {
-                return;
-            }
-            let mut devices: Vec<_> = model
-                .devices
-                .values()
-                .filter(|device| &device.instance == instance)
-                .map(|device| (**device).clone())
-                .collect();
-            for device in &mut devices {
-                let states = model.states.get(&device.id).cloned().unwrap_or_default();
-                if let Some(cached) = model.cached_devices.get_mut(&device.id) {
-                    cached.states = states;
-                }
-                for point in &mut device.points {
-                    point.access.write = false;
-                }
-                model
-                    .devices
-                    .insert(device.id.clone(), Arc::new(device.clone()));
-                model.availability.insert(device.id.clone(), false);
-                model.unconfirmed.insert(device.id.clone(), false);
-                model.held_offline.remove(&device.id);
-                model.snapshots.remove(&device.id);
-                model.printers.remove(&device.id);
-            }
-            devices
-        };
-        for device in devices {
-            self.emit(Event::Availability {
-                device: device.id.clone(),
-                online: false,
-            });
-            self.emit(Event::DeviceUpserted {
-                device: Arc::new(device),
-            });
-        }
-        self.emit(Event::DriverUnregistered {
-            instance: instance.clone(),
-        });
-    }
-
     pub(crate) fn set_driver_status(&self, instance: &InstanceId, status: DriverStatus) {
         let (changed, warning, back) = {
             let mut model = self.write();
@@ -1887,18 +1875,23 @@ impl Hub {
     pub(crate) fn remove_device(&self, id: &DeviceId) {
         let removed = {
             let mut model = self.write();
-            model.states.remove(id);
-            model.restored.remove(id);
-            model.cached_devices.remove(id);
+            let states_removed = model.states.remove(id).is_some();
+            let restored_removed = model.restored.remove(id).is_some();
+            let cached_removed = model.cached_devices.remove(id).is_some();
             model.unconfirmed.remove(id);
             model.awaiting_samples.remove(id);
             model.held_offline.remove(id);
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
-            self.0.state_dirty.store(true, Ordering::Release);
-            self.0.definitions_dirty.store(true, Ordering::Release);
-            model.devices.remove(id).is_some()
+            let removed = model.devices.remove(id).is_some();
+            if states_removed || restored_removed || cached_removed || removed {
+                self.0.state_dirty.store(true, Ordering::Release);
+            }
+            if cached_removed || removed {
+                self.0.definitions_dirty.store(true, Ordering::Release);
+            }
+            removed
         };
         self.0
             .images

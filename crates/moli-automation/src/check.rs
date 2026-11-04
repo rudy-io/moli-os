@@ -216,6 +216,9 @@ impl Ctx<'_> {
             if let Some(room) = self.hub.protected_room(&device) {
                 self.protected.push(room);
             }
+            if let Some(name) = self.hub.protected_device(&device) {
+                self.protected.push(name);
+            }
         }
         Some(spec)
     }

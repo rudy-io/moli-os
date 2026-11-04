@@ -1,5 +1,5 @@
 import { setLanguage, t } from './i18n.svelte.js';
-import { applyDriverStatus, applyDriverRegistration, applyDriverUnregistration } from './driver-status.js';
+import { applyDriverStatus, applyDriverRegistration } from './driver-status.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -7,6 +7,8 @@ export const hub = $state({
   connected: false,
   /** Invalidates persisted integration lists after lifecycle changes or a snapshot. */
   driverRevision: 0,
+  /** Invalidates the layout after edits and reconnects, without another poller. */
+  layoutRevision: 0,
   /** @type {Record<string, any>} device id → DeviceView */
   devices: {},
   /** @type {any[]} */
@@ -41,6 +43,7 @@ const JOURNAL_MAX = 60;
 
 function applySnapshot(snapshot) {
   hub.driverRevision += 1;
+  hub.layoutRevision += 1;
   const devices = {};
   for (const d of snapshot.devices) devices[d.id] = d;
   hub.devices = devices;
@@ -96,9 +99,8 @@ function applyEvent(e) {
       applyDriverRegistration(hub.drivers, e);
       hub.driverRevision += 1;
       break;
-    case 'driver_unregistered':
-      applyDriverUnregistration(hub.drivers, e);
-      hub.driverRevision += 1;
+    case 'layout_changed':
+      hub.layoutRevision += 1;
       break;
     case 'driver_status': {
       applyDriverStatus(hub.drivers, e);

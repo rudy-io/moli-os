@@ -188,10 +188,8 @@ impl View {
             // A driver's state, a decision on a request: no room in them.
             Event::DriverStatus { .. }
             | Event::DriverRegistered { .. }
-            | Event::DriverUnregistered { .. }
-            | Event::ApprovalResolved { .. } => {
-                return Pass::Event;
-            }
+            | Event::ApprovalResolved { .. }
+            | Event::LayoutChanged {} => return Pass::Event,
             // The house's journal and notices are the household's.
             Event::Journal { .. } | Event::Notice { .. } => return Pass::Drop,
         };

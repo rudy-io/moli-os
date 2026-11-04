@@ -12,6 +12,7 @@
 
   const d = $derived(device(id));
   const targetUnit = $derived(pointOf(d, 'target_temperature')?.unit);
+  const temperatureUnit = $derived(pointOf(d, 'temperature')?.unit);
   // Older Celsius contracts omit limits or units. Never apply that scale to another unit.
   const range = $derived(numericRange(d, 'target_temperature', 0.5,
     targetUnit == null || targetUnit === '°C' ? { min: 16, max: 30 } : null));
@@ -70,8 +71,9 @@
   function send(after) {
     clearTimeout(timer);
     const forId = id;
+    const forUnit = targetUnit;
     timer = setTimeout(() => {
-      if (id === forId) flush();
+      if (id === forId && targetUnit === forUnit) flush();
       else wanted = null;
     }, after);
   }
@@ -99,8 +101,10 @@
   });
 
   $effect(() => {
-    // A reused card must never send its previous device's pending gesture.
+    // A gesture belongs to both the device and the unit in which it was made.
+    // Invalidate its timers and any in-flight result before accepting another.
     void id;
+    void targetUnit;
     completion.change();
     clearTimeout(timer);
     clearTimeout(resetTimer);
@@ -179,7 +183,7 @@
     return { x: 80 + R * Math.cos(a), y: 80 + R * Math.sin(a) };
   };
   const bead = $derived(range && Number.isFinite(shownTarget) ? at(shownTarget) : null);
-  const here = $derived(range && Number.isFinite(temp) ? at(temp) : null);
+  const here = $derived(range && temperatureUnit != null && temperatureUnit === targetUnit && Number.isFinite(temp) ? at(temp) : null);
 </script>
 
 <div class="clim" class:on data-tone={m.tone} class:unreachable={!reachable(id)}>
@@ -214,11 +218,11 @@
     </svg>
     <div class="reading">
       {#if dragging}
-        <strong class="num">{num(wanted, wanted % 1 ? 1 : 0)}<small>°</small></strong>
+        <strong class="num">{num(wanted, wanted % 1 ? 1 : 0)}<small>{targetUnit ?? ''}</small></strong>
         <span>{t('commun.clim.consigne')}</span>
       {:else}
-        <strong class="num">{num(temp, 1)}<small>°</small></strong>
-        {#if shownTarget != null}<span>{t('commun.clim.consigne_val', { temp: num(shownTarget, shownTarget % 1 ? 1 : 0) })}</span>{/if}
+        <strong class="num">{num(temp, 1)}<small>{temperatureUnit ?? ''}</small></strong>
+        {#if shownTarget != null}<span>{t('commun.clim.consigne_val', { temp: num(shownTarget, shownTarget % 1 ? 1 : 0), unit: targetUnit ?? '' })}</span>{/if}
       {/if}
     </div>
   </div>
@@ -235,7 +239,7 @@
       {#if writable && Number.isFinite(shownTarget)}
         <div class="setpoint" role="group" aria-label={t('commun.clim.consigne')}>
           <button onclick={() => nudge(-STEP)} aria-label={t('commun.clim.moins_chaud')} disabled={shownTarget <= MIN}>−</button>
-          <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}°</b>
+          <b class="num">{num(shownTarget, shownTarget % 1 ? 1 : 0)}{targetUnit ?? ''}</b>
           <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
         </div>
       {/if}
@@ -257,10 +261,12 @@
             {#each fans as speed (speed)}<option value={speed}>{speed === '0' || speed === 'auto' ? t('commun.clim.mode.auto') : speed}</option>{/each}
           </select>
         </label>
+      {:else if pointOf(d, 'fan_speed')}
+        <p class="muted">{t('commun.clim.ventilation')} <b>{fan === '0' || fan === 'auto' ? t('commun.clim.mode.auto') : (fan ?? '—')}</b></p>
       {/if}
     {#if pointOf(d, 'outdoor_temperature') || (draw != null && draw >= 5)}
     <p class="muted">
-      {#if pointOf(d, 'outdoor_temperature')}{t('commun.clim.dehors', { temp: num(outdoor, 0) })}{/if}
+      {#if pointOf(d, 'outdoor_temperature')}{t('commun.clim.dehors', { temp: num(outdoor, 0), unit: pointOf(d, 'outdoor_temperature')?.unit ?? '' })}{/if}
       {#if draw != null && draw >= 5}
         <span class="draw num" title={t('commun.clim.mesure_tableau', { name: feeder.name })}>
           {#if pointOf(d, 'outdoor_temperature')}· {/if}{watts(draw)}{#if shared}<small> {t('commun.clim.circuit_partage_paren')}</small>{/if}

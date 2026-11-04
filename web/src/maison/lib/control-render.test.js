@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
 });
@@ -130,6 +130,61 @@ test('Airzone system has translated mode and fan controls without a fake thermos
   assert.equal(buttons(html).length, 2);
   assert.match(html, /value="3"/);
   assert.doesNotMatch(html, /class="dial/);
+});
+
+test('read-only climate ventilation remains visible without a selector', () => {
+  const html = show('ClimateCard', [point('mode', enumeration('off', 'heat'), false), point('fan_speed', enumeration('0', '1', '3'), false)], { mode: 'heat', fan_speed: '3' }, { model: 'Airzone system' });
+  assert.match(html, /Ventilation/);
+  assert.match(html, />3</);
+  assert.doesNotMatch(html, /<select\b/);
+});
+
+test('climate readings never invent a unit and preserve explicitly reported Fahrenheit', () => {
+  const temperature = point('temperature', { type: 'numeric' }, false);
+  const target = point('target_temperature', number(10, 100, 0.5), false);
+  for (const unit of [undefined, null]) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 20.4, target_temperature: 21.5 });
+    assert.match(html, /20,4/);
+    assert.match(html, /21,5/);
+    assert.doesNotMatch(html, /°/);
+  }
+  for (const unit of ['°C', '°F']) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 70, target_temperature: 72 });
+    assert.ok(html.includes(unit));
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+  }
+});
+
+test('room climate summaries use only the declared temperature units', () => {
+  for (const unit of [null, '°F']) {
+    const html = showRoom([{
+      id: 'fixture:climate', model: 'Home Assistant climate',
+      points: [{ ...point('temperature', { type: 'numeric' }, false), unit }, { ...point('target_temperature', { type: 'numeric' }, false), unit }],
+      values: { temperature: 70, target_temperature: 72 },
+    }]);
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+    if (unit) assert.ok(html.includes(unit));
+    else assert.doesNotMatch(html, /°/);
+  }
+});
+
+test('room averages never combine temperature scales or grade Fahrenheit as Celsius', () => {
+  const entries = (units, values) => units.map((unit, index) => ({
+    id: `fixture:climate${index}`, model: 'Home Assistant climate',
+    points: [{ ...point('temperature', { type: 'numeric' }, false), unit }], values: { temperature: values[index] },
+  }));
+  const mixed = showRoom(entries(['°C', '°F'], [20, 68]));
+  assert.doesNotMatch(mixed, /<span class="temp /);
+  const unknown = showRoom(entries(['°C', null], [20, 68]));
+  assert.doesNotMatch(unknown, /<span class="temp /);
+  const celsius = showRoom(entries(['°C', '°C'], [20, 22]));
+  assert.match(celsius, /class="temp good/);
+  assert.match(celsius, /21,0°C/);
+  const fahrenheit = showRoom(entries(['°F', '°F'], [68, 72]));
+  assert.match(fahrenheit, /70,0°F/);
+  assert.doesNotMatch(fahrenheit, /class="temp hot/);
 });
 
 test('offline thermostat exposes no active commands', () => {
@@ -386,4 +441,48 @@ test('climate watts have no leading separator without an outdoor temperature', (
   const draw = html.match(/<span class="draw num[^\"]*"[^>]*>([\s\S]*?)<\/span>/)?.[1];
   assert.ok(draw);
   assert.equal(draw.replace(/<!--.*?-->/g, '').trim(), '120 W');
+});
+
+const robot = (write = true) => [
+  point('clean', { type: 'binary' }, write, 'control'),
+  point('pause', { type: 'binary' }, write, 'control'),
+  point('dock', { type: 'binary' }, write, 'control'),
+  point('locate', { type: 'binary' }, write),
+  point('state', { type: 'text' }, false),
+  point('battery', number(0, 100, 1), false, 'battery'),
+  point('fan_speed', enumeration('quiet', 'strong'), write, 'config'),
+];
+const orders = (html) => (html.match(/class="orders[\s\S]*?(?=<div class="speeds|<\/section)/)?.[0].match(/<button/g) ?? []).length;
+
+test('a robot at its base can start and ring, not stop or go home', () => {
+  const html = show('VacuumCard', robot(), { state: 'fullcharge', clean: false, pause: false, battery: 100, fan_speed: 'strong' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'vacuum');
+  assert.equal(orders(html), 2);
+  assert.match(html, /aria-pressed="true"[^>]*>[^<]*(Forte|Strong)/);
+});
+
+test('a cleaning robot offers pause, stop and home; a paused one resumes', () => {
+  const cleaning = show('VacuumCard', robot(), { state: 'totaling', clean: true, pause: false, battery: 80 });
+  assert.match(cleaning, /Pause/);
+  assert.equal(orders(cleaning), 4);
+  const paused = show('VacuumCard', robot(), { state: 'pause', clean: true, pause: true, battery: 80 });
+  assert.match(paused, /Reprendre|Resume/);
+  assert.equal(orders(paused), 4);
+});
+
+test('a cleaning time that is not a number is not shown', () => {
+  const html = show('VacuumCard', robot(), { state: 'totaling', clean: true, pause: false, clean_time: 'soon' });
+  assert.doesNotMatch(html, /NaN/);
+});
+
+test('a read-only or offline robot shows its state and offers no order', () => {
+  const values = { state: 'idle', clean: false, pause: false, battery: 50, fan_speed: 'quiet' };
+  assert.equal(buttons(show('VacuumCard', robot(false), values)).length, 0);
+  assert.equal(buttons(show('VacuumCard', robot(), values, { online: false })).length, 0);
+});
+
+test('a fault is told in words and an unknown state keeps its own', () => {
+  const html = show('VacuumCard', robot(), { state: 'remotectl', clean: false, battery: 50, fault: true, detail: 'code 27' });
+  assert.match(html, /remotectl/);
+  assert.match(html, /code 27/);
 });

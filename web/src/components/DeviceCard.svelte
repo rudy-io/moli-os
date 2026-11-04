@@ -87,6 +87,7 @@
   article {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     gap: 10px;
     padding: 14px 16px 12px;
     background: var(--card);
@@ -105,6 +106,8 @@
   }
   .name {
     all: unset;
+    min-width: 0;
+    overflow-wrap: anywhere;
     cursor: text;
     font-size: 16px;
     font-weight: 700;
@@ -136,6 +139,7 @@
   }
   .points {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
   .none {

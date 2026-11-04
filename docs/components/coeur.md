@@ -99,9 +99,7 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   autorité est remplacé avant le miroir legacy : si ce dernier échoue, la suppression
   déjà enregistrée reste effective ; si l'écriture faisant autorité échoue, le précédent
   snapshot cohérent reste en place.
-  L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne ;
-  `unregister_driver`, appelé après avoir attendu sa tâche, détache le pilote et retire
-  les droits d'écriture des fiches conservées, sans effacer leurs noms ni leurs valeurs.
+  L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne.
   `data/addresses.json` (où chaque pilote a joint son appareil, sa MAC, son identité : de quoi
   le retrouver si la box lui donne une autre adresse ; seulement appris : hors des sauvegardes,
   perdu il se réapprend).
@@ -121,6 +119,9 @@ un humain.**
   plus les autres noms que Hue ou HA donnent à la même pièce. Comparaison sans accents ni
   casse ; un appareil est protégé si **l'une** de ses pièces (étiquette ou pièce native,
   ou celles des membres d'un groupe) l'est.
+- `protected_devices` : la même règle pour un appareil précis, quelle que soit sa pièce (la
+  prise qui alimente la box), sur tous ses points. Un automatisme validé par un humain reste
+  obéi ; son éditeur signale l'appareil.
 - `quiet_hours` : une plage horaire (par exemple 21 h → 7 h 30, fuseau de la config), pour
   toutes les pièces ou celles listées dans `rooms`.
 - **Commandes de machine** (sémantique `control` : mettre en pause ou annuler une impression

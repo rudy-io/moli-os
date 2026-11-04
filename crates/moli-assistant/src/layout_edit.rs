@@ -77,7 +77,7 @@ pub(crate) fn set_location(path: &Path, place: Option<&crate::places::Place>) ->
 }
 
 /// Hides a device from the dashboard and from the model, or shows it again.
-pub(crate) fn set_hidden(path: &Path, device: &str, hidden: bool) -> Result<()> {
+pub fn set_hidden(path: &Path, device: &str, hidden: bool) -> Result<()> {
     let _one_at_a_time = EDITING
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

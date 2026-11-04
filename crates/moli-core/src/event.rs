@@ -48,14 +48,12 @@ pub enum Event {
         kind: String,
         integration: Arc<str>,
     },
-    /// A configured driver was stopped and detached; its known devices remain.
-    DriverUnregistered {
-        instance: InstanceId,
-    },
     LabelChanged {
         device: DeviceId,
         label: Label,
     },
+    /// The dashboard layout changed on disk; surfaces reload `/api/home`.
+    LayoutChanged {},
     Journal {
         entry: Arc<JournalEntry>,
     },
@@ -161,19 +159,6 @@ pub enum Origin {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
-    /// A person's persisted integration installation; no address or credential.
-    DriverAdded {
-        instance: InstanceId,
-        driver_kind: String,
-        read_only: bool,
-    },
-    /// A person's persisted integration change; no address or credential.
-    DriverConfigured {
-        instance: InstanceId,
-        driver_kind: String,
-        enabled: bool,
-        read_only: bool,
-    },
     Command {
         point: PointId,
         value: Value,
@@ -181,6 +166,11 @@ pub enum Action {
     Label {
         device: DeviceId,
         label: Label,
+    },
+    /// Visibility in Moli, without removing the device or changing its driver.
+    Visibility {
+        device: DeviceId,
+        hidden: bool,
     },
     /// A human's decision on a held order (and, when approved, its execution).
     Approval {

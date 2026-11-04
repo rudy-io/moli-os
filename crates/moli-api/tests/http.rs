@@ -568,6 +568,244 @@ async fn pin_session(addr: &str, pin: &str) -> String {
     format!("Cookie: {}\r\n", cookie.unwrap())
 }
 
+async fn visibility_house(name: &str) -> (String, Hub, std::path::PathBuf, String) {
+    let dir = std::env::temp_dir().join(format!("moli-visibility-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("home.json");
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(path.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let human = format!(
+        "{}X-Moli-Origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    (addr, hub, path, human)
+}
+
+#[tokio::test]
+async fn visibility_is_persisted_reversible_and_announced_without_removing_the_device() {
+    let (addr, hub, path, human) = visibility_house("roundtrip").await;
+    std::fs::write(
+        &path,
+        r#"{"hidden":["other:device"],"rooms":[{"name":"Salon"}],"future":{"keep":true}}"#,
+    )
+    .unwrap();
+    let mut events = hub.subscribe();
+    let (status, mut dashboard) = live(&addr, "/api/events", "").await;
+    assert_eq!(status, 200);
+    assert_eq!(dashboard.next().await.0, "snapshot");
+    for (hidden, expected) in [
+        (true, json!(["other:device", "fake:lamp"])),
+        (true, json!(["other:device", "fake:lamp"])),
+        (false, json!(["other:device"])),
+        (false, json!(["other:device"])),
+    ] {
+        let (status, body) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake%3Alamp/visibility",
+            Some(&json!({"hidden": hidden})),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Json>(&body).unwrap(),
+            json!({"hidden": hidden})
+        );
+        let saved: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved,
+            json!({"hidden": expected, "rooms":[{"name":"Salon"}], "future":{"keep":true}})
+        );
+        let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+        assert_eq!(
+            entry["action"],
+            json!({"kind":"visibility", "device":"fake:lamp", "hidden":hidden})
+        );
+        assert_eq!(entry["origin"], "ui");
+        assert_eq!(entry["outcome"]["result"], "ok");
+        let mut notified = false;
+        while let Ok(event) = events.try_recv() {
+            notified |= serde_json::to_value(event).unwrap()["type"] == "layout_changed";
+        }
+        assert!(
+            notified,
+            "other dashboards must reload their layout after a successful save"
+        );
+        assert_eq!(dashboard.next().await.1["type"], "journal");
+        assert_eq!(
+            dashboard.next().await,
+            ("event".into(), json!({"type":"layout_changed"}))
+        );
+        assert!(hub.device(&"fake:lamp".into()).is_some());
+        assert_eq!(
+            hub.state(&"fake:lamp/state".into()).unwrap().value,
+            Value::Bool(false)
+        );
+    }
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_requires_a_human_dashboard_and_rejects_invalid_input() {
+    let (addr, hub, path, human) = visibility_house("validation").await;
+    let body = json!({"hidden":true});
+    for headers in [
+        "",
+        "X-Moli-Origin: ui\r\n",
+        human.split("X-Moli-Origin").next().unwrap(),
+    ] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&body),
+            headers,
+        )
+        .await;
+        assert_eq!(status, 403, "a cookie and the UI origin are both needed");
+    }
+    for malformed in [
+        json!({}),
+        json!({"hidden":null}),
+        json!({"hidden":"true"}),
+        json!({"hidden":true,"extra":false}),
+    ] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&malformed),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 422);
+    }
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/missing:lamp/visibility",
+        Some(&body),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 404);
+    for id in ["x".repeat(257), "fake%00lamp".into()] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            &format!("/api/devices/{id}/visibility"),
+            Some(&body),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 422);
+    }
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true,"extra":"x".repeat(2048)})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 413);
+    assert!(!path.exists(), "refused requests never write the layout");
+    assert!(hub.device(&"fake:lamp".into()).is_some());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_preserves_invalid_layouts_and_does_not_announce_failed_writes() {
+    let (addr, hub, path, human) = visibility_house("broken-file").await;
+    for original in ["{broken", r#"{"hidden":{}}"#, "[]"] {
+        std::fs::write(&path, original).unwrap();
+        let mut events = hub.subscribe();
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&json!({"hidden":true})),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 500);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        while let Ok(event) = events.try_recv() {
+            assert_ne!(
+                serde_json::to_value(event).unwrap()["type"],
+                "layout_changed"
+            );
+        }
+        let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+        assert_eq!(entry["action"]["kind"], "visibility");
+        assert_eq!(entry["outcome"]["result"], "err");
+    }
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_is_not_a_guests_setting_even_with_the_house_code() {
+    let house = guest_house("visibility-guest", |_| {}).await;
+    let (status, session, _) = request_cookie(
+        &house.addr,
+        "POST",
+        "/api/session",
+        &json!({"pin":"482915"}),
+        &house.guest,
+        "moli_session",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let guest = house
+        .guest
+        .replace("Cookie: ", &format!("Cookie: {}; ", session.unwrap()));
+    let (status, body) = request_with(&house.addr, "GET", "/api/session", None, &guest).await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Json>(&body).unwrap()["human"], true);
+    let (status, _) = request_with(
+        &house.addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true})),
+        &guest,
+    )
+    .await;
+    assert_eq!(status, 403);
+    assert!(!house.dir.join("home.json").exists());
+    std::fs::remove_dir_all(house.dir).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_needs_a_persistent_layout_location() {
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let human = format!(
+        "{}X-Moli-Origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 503);
+    assert!(hub.device(&"fake:lamp".into()).is_some());
+}
+
 /// What the satellites heard: switched on and listened to by a person only,
 /// never by any device of the house.
 #[tokio::test]
