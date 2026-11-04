@@ -4,7 +4,11 @@
 //! [`SnapshotSource`] with [`crate::DriverCtx::provide_snapshots`]; the hub
 //! calls it directly when a surface asks. No queue: an image nobody asked
 //! for is never fetched. A printer registers a [`PrintSink`] the same way
-//! ([`crate::DriverCtx::provide_printing`]).
+//! ([`crate::DriverCtx::provide_printing`]). A device with live video a
+//! browser plays itself (WebRTC) registers a [`LiveSource`]
+//! ([`crate::DriverCtx::provide_live`]): Moli only passes the browser's
+//! offer and the device's answer; the video goes from the device to the
+//! browser, never through Moli.
 
 use crate::BoxFuture;
 
@@ -27,6 +31,31 @@ impl std::fmt::Debug for Image {
 /// Produces a fresh image on demand.
 pub trait SnapshotSource: std::fmt::Debug + Send + Sync + 'static {
     fn snapshot(&self) -> BoxFuture<'_, anyhow::Result<Image>>;
+}
+
+/// Live video, played by the browser (WebRTC): answers the browser's offer
+/// (SDP) with the device's own. Only the signalling passes through Moli.
+/// `viewer` is the browser's address on the home network, when Moli knows
+/// it: a browser hides its own behind a `.local` name a device may not
+/// resolve.
+pub trait LiveSource: std::fmt::Debug + Send + Sync + 'static {
+    fn answer(
+        &self,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> BoxFuture<'_, anyhow::Result<String>>;
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum LiveError {
+    #[error("unknown device")]
+    UnknownDevice,
+    #[error("this device has no live video")]
+    NoLive,
+    #[error("no answer in time")]
+    Timeout,
+    #[error("live video unavailable: {0}")]
+    Failed(String),
 }
 
 /// A document to print (a page, a photo), in a format the printer takes.

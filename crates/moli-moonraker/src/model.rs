@@ -456,7 +456,6 @@ fn filament(table: &Json, i: usize) -> Option<(String, String)> {
     (!text.is_empty()).then_some((text, color))
 }
 
-/// Values from one `objects/query` answer (`result.status`).
 /// Layer and total: Klipper's own, else Creality's when they hold (a total
 /// above zero, the layer within it).
 fn layers(job_stats: &Json, sdcard: &Json) -> [Option<f64>; 2] {
@@ -473,6 +472,26 @@ fn layers(job_stats: &Json, sdcard: &Json) -> [Option<f64>; 2] {
     ]
 }
 
+/// The same file, whatever folder each names it from.
+fn same_file(a: &str, b: &str) -> bool {
+    let name = |path: &str| path.rsplit('/').next().unwrap_or(path).to_owned();
+    !a.is_empty() && name(a) == name(b)
+}
+
+/// Creality's firmware tells its own print (`cur_print_data`): its
+/// `display_status` lags far behind, the file's progress is the one its
+/// screen shows, and Moonraker does not read its slicer: the estimate is
+/// here. Taken only while it prints this very file: the firmware may keep it
+/// once the print is over (its progress back to 0).
+fn creality_print<'a>(sdcard: &'a Json, file: &str, active: bool) -> Option<&'a Json> {
+    let print = &sdcard["cur_print_data"];
+    let same = print["filename"]
+        .as_str()
+        .is_some_and(|name| same_file(name, file));
+    (active && print.is_object() && same).then_some(print)
+}
+
+/// Values from one `objects/query` answer (`result.status`).
 #[must_use]
 pub fn values(shape: &Shape, status: &Json, job: Option<&Job>) -> Vec<(String, Value)> {
     let mut found: Vec<(String, Value)> = Vec::new();
@@ -489,15 +508,13 @@ pub fn values(shape: &Shape, status: &Json, job: Option<&Job>) -> Vec<(String, V
     let active = matches!(state, "printing" | "paused");
     add(&mut found, "printing", Value::Bool(active));
     let sdcard = &status["virtual_sdcard"];
-    // Creality's firmware tells its own print (`cur_print_data`): its
-    // `display_status` lags far behind, the file's progress is the one its
-    // screen shows. Moonraker does not read its slicer: the estimate is here.
-    // Each of its values is taken only when it holds, else the usual
-    // reading stands.
-    let creality = &sdcard["cur_print_data"];
+    // Each of Creality's values is taken only when it holds, else the
+    // usual reading stands.
+    let file = job_stats["filename"].as_str().unwrap_or("");
+    let creality = creality_print(sdcard, file, active);
     let progress = sdcard["progress"]
         .as_f64()
-        .filter(|p| creality.is_object() && (0.0..=1.0).contains(p))
+        .filter(|p| creality.is_some() && (0.0..=1.0).contains(p))
         .or_else(|| {
             status["display_status"]["progress"]
                 .as_f64()
@@ -513,8 +530,8 @@ pub fn values(shape: &Shape, status: &Json, job: Option<&Job>) -> Vec<(String, V
     let duration = job_stats["print_duration"].as_f64().unwrap_or(0.0);
     if active {
         let estimated = job.and_then(|j| j.estimated).or_else(|| {
-            creality["metadata"]["estimated_time"]
-                .as_f64()
+            creality
+                .and_then(|c| c["metadata"]["estimated_time"].as_f64())
                 .filter(|t| *t > 0.0)
         });
         if let Some(left) = remaining(duration, progress, estimated) {
@@ -523,7 +540,6 @@ pub fn values(shape: &Shape, status: &Json, job: Option<&Job>) -> Vec<(String, V
     } else if state == "complete" {
         add(&mut found, "remaining", Value::Float(0.0));
     }
-    let file = job_stats["filename"].as_str().unwrap_or("");
     add(
         &mut found,
         "job",
@@ -877,6 +893,45 @@ mod tests {
         status["virtual_sdcard"]["layer_count"] = Json::from(1092);
         let v = values(&shape, &status, None);
         assert!(v.iter().all(|(k, _)| k != "layer"));
+    }
+
+    /// Creality's own print counts only while it prints that very file: the
+    /// firmware may keep it once the print is over (its progress back to 0),
+    /// or still describe the previous file.
+    #[test]
+    fn creality_values_count_only_for_the_file_being_printed() {
+        let f = k2();
+        let objects: Vec<String> = serde_json::from_value(f["objects"].clone()).unwrap();
+        let shape = Shape::of(&objects);
+        let status = f["query"]["result"]["status"].clone();
+        let printing = values(&shape, &status, None);
+        assert_eq!(get(&printing, "progress"), &Value::Float(44.0));
+
+        // The print is over, Creality's progress back to 0: not 0 %.
+        let mut over = status.clone();
+        over["print_stats"]["state"] = Json::from("complete");
+        over["virtual_sdcard"]["progress"] = Json::from(0.0);
+        over["display_status"]["progress"] = Json::from(1.0);
+        assert_eq!(
+            get(&values(&shape, &over, None), "progress"),
+            &Value::Float(100.0)
+        );
+
+        // Another file: neither its progress nor its slicer's estimate.
+        let mut other = status.clone();
+        other["virtual_sdcard"]["cur_print_data"]["filename"] = Json::from("Autre.gcode");
+        let v = values(&shape, &other, None);
+        assert_eq!(get(&v, "progress"), &Value::Float(19.0));
+        assert_ne!(get(&v, "remaining"), get(&printing, "remaining"));
+
+        // The same file named from a folder still counts.
+        let mut folder = status;
+        folder["virtual_sdcard"]["cur_print_data"]["filename"] =
+            Json::from("local/Exemple_PLA_6h13m43s.gcode");
+        assert_eq!(
+            get(&values(&shape, &folder, None), "progress"),
+            &Value::Float(44.0)
+        );
     }
 
     #[test]

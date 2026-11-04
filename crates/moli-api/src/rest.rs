@@ -704,6 +704,64 @@ pub(crate) async fn media(
 
 /// A fresh camera image. A camera in a protected room shows itself only to
 /// a human session (PIN): an agent or a script never looks into a bedroom.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LiveBody {
+    /// The browser's WebRTC offer (SDP).
+    sdp: String,
+}
+
+/// An SDP is a few kilobytes; more is not an offer.
+const MAX_SDP: usize = 64 * 1024;
+
+/// Live video the browser plays (WebRTC): the browser's offer goes to the
+/// device, its answer comes back; the video itself never passes through
+/// Moli. Who may see a camera's image may see this.
+pub(crate) async fn live(
+    State(hub): State<Hub>,
+    Extension(humans): Humans,
+    caller: Caller,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<LiveBody>,
+) -> Response {
+    use moli_runtime::media::LiveError;
+    let id = DeviceId::from(id);
+    if caller
+        .person
+        .as_ref()
+        .is_some_and(crate::people::PersonRef::is_guest)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.personnes.invite_limite"),
+        );
+    }
+    if let Some(room) = hub.protected_room(&id)
+        && !humans.is_human(&headers, &caller.key)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.camera.piece_protegee", room = room),
+        );
+    }
+    if body.sdp.len() > MAX_SDP || !body.sdp.starts_with("v=0") {
+        return error(StatusCode::BAD_REQUEST, "not a WebRTC offer (SDP)");
+    }
+    // The browser's address, when it is on the home network: the device
+    // sends its video there.
+    let viewer = matches!(caller.via, Via::Lan | Via::Loopback)
+        .then(|| caller.key.parse::<std::net::IpAddr>().ok())
+        .flatten();
+    match hub.live_answer(&id, body.sdp, viewer).await {
+        Ok(sdp) => Json(json!({ "sdp": sdp })).into_response(),
+        Err(e @ (LiveError::UnknownDevice | LiveError::NoLive)) => {
+            error(StatusCode::NOT_FOUND, &e.to_string())
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    }
+}
+
 pub(crate) async fn snapshot(
     State(hub): State<Hub>,
     Extension(humans): Humans,

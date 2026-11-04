@@ -277,6 +277,9 @@ pub struct DeviceView {
     /// Prints documents (`/api/devices/{id}/print`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub printer: bool,
+    /// Live video the browser plays (`/api/devices/{id}/live`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub live: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -389,6 +392,7 @@ struct Model {
     labels: BTreeMap<DeviceId, Label>,
     snapshots: HashMap<DeviceId, Arc<dyn crate::media::SnapshotSource>>,
     printers: HashMap<DeviceId, Arc<dyn crate::media::PrintSink>>,
+    lives: HashMap<DeviceId, Arc<dyn crate::media::LiveSource>>,
 }
 
 #[derive(Debug)]
@@ -1884,6 +1888,7 @@ impl Hub {
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
+            model.lives.remove(id);
             let removed = model.devices.remove(id).is_some();
             if states_removed || restored_removed || cached_removed || removed {
                 self.0.state_dirty.store(true, Ordering::Release);
@@ -1909,6 +1914,42 @@ impl Hub {
         source: Arc<dyn crate::media::SnapshotSource>,
     ) {
         self.write().snapshots.insert(device.clone(), source);
+    }
+
+    pub(crate) fn provide_live(
+        &self,
+        device: &DeviceId,
+        source: Arc<dyn crate::media::LiveSource>,
+    ) {
+        self.write().lives.insert(device.clone(), source);
+    }
+
+    /// The device's answer to a browser's offer for its live video. The
+    /// source is called without the model lock.
+    pub async fn live_answer(
+        &self,
+        device: &DeviceId,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> Result<String, crate::media::LiveError> {
+        use crate::media::LiveError;
+        let source = {
+            let model = self.read();
+            if !model.devices.contains_key(device) {
+                return Err(LiveError::UnknownDevice);
+            }
+            model.lives.get(device).cloned().ok_or(LiveError::NoLive)?
+        };
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            source.answer(offer, viewer),
+        )
+        .await
+        {
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(e)) => Err(LiveError::Failed(format!("{e:#}"))),
+            Err(_) => Err(LiveError::Timeout),
+        }
     }
 
     pub(crate) fn provide_printing(
@@ -2194,6 +2235,7 @@ impl Model {
             state: self.states.get(&device.id).cloned().unwrap_or_default(),
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),
+            live: self.lives.contains_key(&device.id),
         }
     }
 }

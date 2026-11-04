@@ -166,6 +166,7 @@ fn device_routes() -> Router<Hub> {
             put(visibility::put).layer(DefaultBodyLimit::max(1024)),
         )
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
+        .route("/api/devices/{id}/live", post(rest::live))
         .route(
             "/api/devices/{id}/print",
             post(rest::print).layer(DefaultBodyLimit::max(rest::MAX_PAGE)),

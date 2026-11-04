@@ -1957,3 +1957,99 @@ async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
     cancel.cancel();
     task.await.unwrap();
 }
+
+/// A camera with live video only: it answers an offer with an echo of it.
+struct LiveCam;
+
+#[derive(Debug)]
+struct Echo;
+
+impl moli_runtime::media::LiveSource for Echo {
+    fn answer(
+        &self,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> BoxFuture<'_, anyhow::Result<String>> {
+        // The viewer's address (this test's client, on this machine) comes along.
+        let to = viewer.map_or_else(|| "nobody".to_owned(), |ip| ip.to_string());
+        Box::pin(async move {
+            Ok(format!(
+                "{}a=viewer:{to}\r\n",
+                offer.replace("offer", "answer")
+            ))
+        })
+    }
+}
+
+impl Driver for LiveCam {
+    fn kind(&self) -> &'static str {
+        "livecam"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("printer");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "printer".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: Vec::new(),
+            });
+            ctx.provide_live(&id, Arc::new(Echo));
+            ctx.ready();
+            while ctx.next_command().await.is_some() {}
+            Ok(())
+        })
+    }
+}
+
+/// Live video: the browser's offer reaches the device, its answer comes
+/// back; a device without live video, or something else than an offer, is
+/// refused.
+#[tokio::test]
+async fn a_live_offer_reaches_the_device_and_its_answer_comes_back() {
+    let hub = lamp_hub().await;
+    spawn_driver(
+        &hub,
+        InstanceId::from("cam"),
+        Arc::new(LiveCam),
+        CancellationToken::new(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    let offer = json!({ "sdp": "v=0\r\ns=offer\r\n" });
+
+    let (_, body) = request(&addr, "GET", "/api/devices/cam:printer", None).await;
+    let view: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(view["live"], json!(true), "{body}");
+
+    let (status, body) =
+        request(&addr, "POST", "/api/devices/cam:printer/live", Some(&offer)).await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        answer["sdp"],
+        json!("v=0\r\ns=answer\r\na=viewer:127.0.0.1\r\n")
+    );
+
+    let (status, body) = request(&addr, "POST", "/api/devices/fake:lamp/live", Some(&offer)).await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/api/devices/cam:printer/live",
+        Some(&json!({ "sdp": "hello" })),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+}
