@@ -19,6 +19,7 @@
   "airzone.cold_demand": "Demande froid",
   "airzone.heat_demand": "Demande chauffage",
   "airzone.read_only": "Airzone est en lecture seule.",
+  "airzone.extended_writes_disabled": "Cette commande Airzone nécessite write = \"extended\" dans la configuration de l’instance.",
   "airzone.timeout": "Airzone n’a pas répondu avant l’échéance.",
   "airzone.transport_failed": "Connexion à la passerelle Airzone impossible.",
   "airzone.http_failed": "Airzone a renvoyé une erreur HTTP.",

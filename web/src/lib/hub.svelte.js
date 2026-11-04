@@ -5,10 +5,10 @@ import { applyDriverStatus, applyDriverRegistration, applyDriverUnregistration }
 
 export const hub = $state({
   connected: false,
-  /** Invalidates the layout after edits and reconnects, without another poller. */
-  layoutRevision: 0,
   /** Invalidates persisted integration lists after lifecycle changes or a snapshot. */
   driverRevision: 0,
+  /** Invalidates the layout after edits and reconnects, without another poller. */
+  layoutRevision: 0,
   /** @type {Record<string, any>} device id → DeviceView */
   devices: {},
   /** @type {any[]} */
@@ -42,8 +42,8 @@ export const hub = $state({
 const JOURNAL_MAX = 60;
 
 function applySnapshot(snapshot) {
-  hub.layoutRevision += 1;
   hub.driverRevision += 1;
+  hub.layoutRevision += 1;
   const devices = {};
   for (const d of snapshot.devices) devices[d.id] = d;
   hub.devices = devices;
@@ -95,9 +95,6 @@ function applyEvent(e) {
     case 'label_changed':
       if (hub.devices[e.device]) hub.devices[e.device].label = e.label;
       break;
-    case 'layout_changed':
-      hub.layoutRevision += 1;
-      break;
     case 'driver_registered':
       applyDriverRegistration(hub.drivers, e);
       hub.driverRevision += 1;
@@ -105,6 +102,9 @@ function applyEvent(e) {
     case 'driver_unregistered':
       applyDriverUnregistration(hub.drivers, e);
       hub.driverRevision += 1;
+      break;
+    case 'layout_changed':
+      hub.layoutRevision += 1;
       break;
     case 'driver_status': {
       applyDriverStatus(hub.drivers, e);

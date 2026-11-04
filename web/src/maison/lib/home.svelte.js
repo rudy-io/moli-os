@@ -226,6 +226,7 @@ export function deviceKind(d) {
   if (d.camera) return 'camera';
   const known = knownDeviceKind(d);
   if (known) return known;
+  if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
   if (has(d, 'target_temperature')) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))

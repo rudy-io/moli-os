@@ -72,6 +72,9 @@ pub struct Config {
 pub struct GuardConfig {
     #[serde(default)]
     pub protected_rooms: Vec<String>,
+    /// Devices (ids) needing approval whatever their room.
+    #[serde(default)]
+    pub protected_devices: Vec<String>,
     #[serde(default)]
     pub quiet_hours: Option<QuietHoursConfig>,
     /// Devices with no known room need approval too.
@@ -117,6 +120,7 @@ impl GuardConfig {
         };
         Ok(GuardPolicy {
             protected_rooms: self.protected_rooms.clone(),
+            protected_devices: self.protected_devices.clone(),
             quiet_hours,
             protect_unassigned: self.protect_unassigned,
             dashboard: self.dashboard,

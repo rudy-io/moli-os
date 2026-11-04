@@ -121,6 +121,9 @@ un humain.**
   plus les autres noms que Hue ou HA donnent à la même pièce. Comparaison sans accents ni
   casse ; un appareil est protégé si **l'une** de ses pièces (étiquette ou pièce native,
   ou celles des membres d'un groupe) l'est.
+- `protected_devices` : la même règle pour un appareil précis, quelle que soit sa pièce (la
+  prise qui alimente la box), sur tous ses points. Un automatisme validé par un humain reste
+  obéi ; son éditeur signale l'appareil.
 - `quiet_hours` : une plage horaire (par exemple 21 h → 7 h 30, fuseau de la config), pour
   toutes les pièces ou celles listées dans `rooms`.
 - **Commandes de machine** (sémantique `control` : mettre en pause ou annuler une impression

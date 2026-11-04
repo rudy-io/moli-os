@@ -190,9 +190,7 @@ impl View {
             | Event::DriverRegistered { .. }
             | Event::DriverUnregistered { .. }
             | Event::ApprovalResolved { .. }
-            | Event::LayoutChanged {} => {
-                return Pass::Event;
-            }
+            | Event::LayoutChanged {} => return Pass::Event,
             // The house's journal and notices are the household's.
             Event::Journal { .. } | Event::Notice { .. } => return Pass::Drop,
         };

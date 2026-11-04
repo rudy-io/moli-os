@@ -546,17 +546,32 @@ impl Automations {
                     .is_some_and(|(rise, set)| rise <= now && now < set),
             );
         }
-        self.0.hub.snapshot().devices.iter().find_map(|d| {
-            match self
-                .0
-                .hub
-                .current_state(&PointId::new(&d.device.id, "daylight"))?
-                .value
-            {
-                Value::Bool(daylight) => Some(daylight),
-                _ => None,
-            }
-        })
+        let snapshot = self.0.hub.snapshot();
+        let daylight = |sample: moli_core::Sample| match sample.value {
+            Value::Bool(day) => Some((sample.ts, day)),
+            _ => None,
+        };
+        // Prefer any live observation before considering offline sources.
+        // Sun is an estimate when the house has no position: its last known
+        // daylight still lets day/night conditions work while weather is down.
+        snapshot
+            .devices
+            .iter()
+            .filter_map(|d| {
+                self.0
+                    .hub
+                    .current_state(&PointId::new(&d.device.id, "daylight"))
+                    .and_then(daylight)
+            })
+            .max_by_key(|(ts, _)| *ts)
+            .or_else(|| {
+                snapshot
+                    .devices
+                    .iter()
+                    .filter_map(|d| d.state.get("daylight").cloned().and_then(daylight))
+                    .max_by_key(|(ts, _)| *ts)
+            })
+            .map(|(_, day)| day)
     }
 }
 

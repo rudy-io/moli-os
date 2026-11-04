@@ -1,4 +1,5 @@
 # Les pilotes
+- **Aspirateurs robots** (catégorie `sd`, `src/vacuum.rs`, Rowenta et Tefal X-plorer Serie 75) : seule une table de points existe, sous les mêmes clés pour tous : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`, `mop`, `volume` (selon le robot), `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`. Effacer la carte, conduire à la main et nettoyer une zone n'existent pas, même si le cloud les dit écrivables. Ce qui fait bouger le robot est un `Control`. Le produit `X-Plorer Serie 75` reçoit toujours sa table, car la description du cloud nomme des points qu'il ne renvoie pas. Un robot a sa carte sur l'accueil (`web/src/maison/ui/VacuumCard.svelte`) : il passe par toutes les pièces, il n'appartient à aucune.
 
 Un pilote relie un système extérieur (pont Zigbee, box, caméra, télé…) au hub. Chaque
 pilote est une crate `crates/moli-<nom>` et un paquet du catalogue `integrations/<kind>/`
@@ -129,10 +130,18 @@ contrôleur ; cette couverture ne garantit pas la compatibilité de tous les fir
 
 Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
 `read_only = false` est conservé pour ne pas désactiver les automatismes existants.
-Un essai d’observation configure explicitement `read_only = true` ; les passerelles
-ajoutées ou modifiées depuis Moli imposent cette lecture seule. Les commandes
-restent soumises aux gardes, aux membres
-affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
+Le défaut `write = "legacy"` conserve seulement `on`, `target_temperature`, `mode`
+et `fan_speed` (paramètre Airzone `speed`) sur les zones et leurs contrôles partagés
+historiques. `write = "extended"` active explicitement les nouvelles commandes :
+modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
+qualité de l’air et libellé d’intégration. Un essai d’observation configure
+explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Les passerelles ajoutées depuis Moli démarrent en lecture seule avec le périmètre
+`legacy` ; l'autorisation par code Moli ne modifie pas ce périmètre. Les modifications
+de connexion et réactivations rétablissent la lecture seule.
+Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
+transport. Les commandes restent soumises aux gardes, aux membres affectés et à
+une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
 démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
 au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient
 pas à cette API.

@@ -90,6 +90,7 @@
   "serveur.systeme.surface.rest.quoi": "scripts and apps",
 
   "serveur.garde.piece_protegee": "protected room ({room})",
+  "serveur.garde.appareil_protege": "protected device ({name})",
   "serveur.garde.sans_piece_connue": "device with no known room",
   "serveur.garde.heures_calmes": "quiet hours ({from} → {to})",
   "serveur.garde.machine": "command to a machine (printer, computer): a human decides",

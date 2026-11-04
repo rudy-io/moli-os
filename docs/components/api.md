@@ -215,6 +215,9 @@ Règles, dans l'ordre :
    l'utilisateur **et** la pièce native (Hue…). Comparaison insensible à la casse, aux
    espaces multiples et aux accents (« chambre bebe » = « Chambre bébé »).
    Raison affichée : `pièce protégée (<pièce>)`.
+   **Appareil protégé** (`protected_devices`, ids) : même règle quelle que soit la pièce,
+   sur tous ses points, ou un membre s'il s'agit d'un groupe. Un id inconnu est signalé
+   dans `guard.unmatched_protected_devices` et dans les logs. Raison : `appareil protégé (<nom>)`.
 2. **Appareil sans pièce** (`protect_unassigned = true`) : raison `appareil sans pièce
    connue`.
 3. **Mode `pin`** (`dashboard = "pin"`) : tout ordre est retenu, quels que soient la pièce
