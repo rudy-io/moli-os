@@ -317,6 +317,7 @@ fn guarded_hub() -> HubOptions {
     HubOptions {
         guard: moli_runtime::guard::GuardPolicy {
             protected_rooms: vec!["Chambre".into()],
+            protected_devices: vec![],
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
@@ -605,6 +606,12 @@ impl Driver for FakeGroup {
             for (id, name, room, members) in [
                 (lamp.clone(), "lamp", "Chambre à coucher", Vec::new()),
                 (group.clone(), "group", "Salon", vec![lamp.clone()]),
+                (
+                    ctx.device_id("outer"),
+                    "outer",
+                    "Salon",
+                    vec![group.clone()],
+                ),
             ] {
                 ctx.upsert_device(Device {
                     id: id.clone(),
@@ -650,6 +657,7 @@ async fn groups_are_guarded_by_their_members_rooms_and_lost_rooms_are_reported()
         guard: moli_runtime::guard::GuardPolicy {
             // Typed without the accent, plus a room no device is in.
             protected_rooms: vec!["chambre a  coucher".into(), "Bureau".into()],
+            protected_devices: vec![],
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
@@ -683,6 +691,44 @@ async fn groups_are_guarded_by_their_members_rooms_and_lost_rooms_are_reported()
     assert_eq!(
         hub.guard_status().unmatched_protected_rooms,
         vec!["Bureau".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn a_protected_device_needs_a_human_whatever_its_room() {
+    let hub = Hub::new(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_devices: vec!["fake:lamp".into(), "fake:gone".into()],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(FakeGroup),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    // The device itself, a group reaching it, a group of that group; a
+    // person is obeyed.
+    for point in ["fake:lamp/state", "fake:group/state", "fake:outer/state"] {
+        let point = PointId::from(point.to_owned());
+        for origin in [Origin::Mcp, Origin::Household] {
+            let held = hub.command(&point, Value::Bool(true), origin, None).await;
+            assert!(
+                matches!(held, Err(CommandError::NeedsApproval { .. })),
+                "{held:?}"
+            );
+        }
+        assert_eq!(hub.would_hold(&point, None, Origin::Ui), None);
+    }
+    assert_eq!(
+        hub.unmatched_protected_devices(),
+        vec!["fake:gone".to_owned()]
     );
 }
 
@@ -1029,6 +1075,7 @@ fn quiet_all_day() -> HubOptions {
     HubOptions {
         guard: moli_runtime::guard::GuardPolicy {
             protected_rooms: vec![],
+            protected_devices: vec![],
             quiet_hours: Some(
                 moli_runtime::guard::QuietHours::parse("00:00", "00:00", "Europe/Paris", vec![])
                     .unwrap(),
