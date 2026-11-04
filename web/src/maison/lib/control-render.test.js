@@ -209,6 +209,35 @@ test('read-only shutter shows position without command buttons', () => {
   assert.equal(inputs(html).length, 0);
 });
 
+test('observed bridge covers explain read-only access and retain their advertised actions as text', () => {
+  const html = show('CoverTile', [
+    point('state', { type: 'text' }, false),
+    { ...point('control', enumeration('open', 'close', 'stop'), false, 'control'), access: { read: false, write: false } },
+    { ...point('percent_control', number(0, 100, 1), false, 'control'), unit: '%' },
+  ], { percent_control: 100 }, { model: 'Home Assistant cover' });
+  assert.match(html, /Lecture seule/);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.match(html, /Ouvert à 100 %/);
+  assert.match(html, /href="#\/systeme"/);
+  assert.doesNotMatch(html, /code Moli|<button|<input/);
+});
+
+test('unavailable covers mark retained positions as historical and never claim movement', () => {
+  const html = show('CoverTile', [point('opening', number(0, 100, 1), true, 'position'), point('state', enumeration('OPEN', 'STOP', 'CLOSE'))],
+    { opening: 42, moving: 'UP' }, { online: false });
+  assert.match(html, /Injoignable/);
+  assert.match(html, /Dernière position.*42/s);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<button|<input/);
+});
+
+test('static cover capabilities stay partial and an unknown position stays explicit', () => {
+  const html = show('CoverTile', [point('control', enumeration('close', 'stop'), false)], {}, { model: 'Overkiz RollerShutter' });
+  assert.match(html, /Position non communiquée/);
+  assert.match(html, /Stop.*Fermer/s);
+  assert.doesNotMatch(html, /Ouvrir|<button|<input|0 %/);
+});
+
 test('partial RTS shutter retains close and stop without inventing position or open', () => {
   const points = [point('control', enumeration('close', 'stop'))];
   const html = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter' });
@@ -286,7 +315,8 @@ test('case-preserving motor orders identify a cover without inventing a power sw
   assert.match(readonly, /en fermeture/);
   const offline = show('CoverTile', points, { moving: 'forward' }, { online: false });
   assert.equal(buttons(offline).length, 0);
-  assert.match(offline, /mouvement/);
+  assert.match(offline, /Injoignable/);
+  assert.doesNotMatch(offline, /mouvement/);
 });
 
 test('multiple position or motor-order candidates do not choose an arbitrary actuator', () => {
