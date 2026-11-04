@@ -13,6 +13,7 @@ The local comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd406
 | 18 ordinary cover classes | Yes, according to declared valid commands | Other families require qualified mappings |
 | Closure / Deployment position | Yes, state axis first, one conversion for reads/writes | Both reported axes keep Deployment convention; ambiguous absent axes refuse numeric writes |
 | Open, stop, close | Only declared bindings with valid arity | No invented command from a label |
+| Low-speed open, close and target | One qualified `setClosureAndLinearSpeed` action per request | Ordinary io covers only; no inferred or measured speed, no Position-command fallback; normal stop unchanged |
 | RTS | Qualified movement and My variants | No measured position or feedback invented |
 | My/favourite recall | Published enum and encoder use the same binding | Only qualified arities; native acknowledgement is not completion |
 | Memorized favourite position | Genuine state read; one-parameter numeric setter | Invalid/absent values unknown; zero-parameter save-current meaning unqualified |
@@ -24,7 +25,7 @@ The local comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd406
 | Position semantics | Current opening uses Position; reviewed opener writes keep Control | Favourite configuration never substitutes for current opening |
 | Readback after commands | Snapshot observation only, no optimistic state | execId means receipt, not movement |
 | Events | Not implemented | Official API supports listeners; current snapshots every five seconds |
-| Tilt, combined axes, speed | Not mapped | Need distinct qualified bindings; two sequential commands may interrupt each other |
+| Tilt, combined axes, arbitrary speed | Not mapped | Need distinct qualified bindings; two sequential commands may interrupt each other |
 | Lighting, sockets, sensors, climate, security | Not complete mappings | Local API varies by device; some data/functions require cloud or another platform |
 | Saved TaHoma scenarios | Bounded cloud reads and opt-in launch of known saved IDs through Hub guard/journal | Fresh owner PIN and scope-bound consent; global read-only wins; no local execution or import into Moli automations |
 | Grouped immediate actions | No public batch point | Any future batch must validate each action and preserve opener guard |
@@ -39,6 +40,14 @@ coverage. Every origin is refused in read-only mode; stale writable metadata als
 before preflight. Fixtures are synthetic. A historical normalized inventory was replayed
 through the actual pure production model with all networking disabled. Its placeholder
 identities cannot route a live command or establish a writable-opener allowlist.
+
+Low-speed regression tests exercise the exact one-command TLS payload, Closure conversion
+under both observed position families, normal movement compatibility, optional-argument
+metadata, duplicate/malformed definitions, excluded protocols/classes, fresh-definition
+revalidation, read-only enforcement (including stale writable publication), protected-room
+approval, cancellation/deadline and refusal without replay. The synthetic low-speed fixture
+contains no real installation data. No physical low-speed movement was tested.
+See [qualified shapes and pinned primary sources](README.md) for this bounded mapping.
 
 The native validation described in README (2026-10-31) issued no authenticated
 Moli hardware commands. Synthetic cloud execution tests likewise do not establish

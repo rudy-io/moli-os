@@ -279,6 +279,10 @@ async fn test_vault(command_timeout: Duration) -> (std::path::PathBuf, Hub, Inst
     let hub = Hub::new(HubOptions {
         secrets: Some((path.clone(), MasterKey::new("b".repeat(64)))),
         command_timeout,
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_rooms: vec!["Protected slow fixture".into()],
+            ..Default::default()
+        },
         ..HubOptions::default()
     })
     .unwrap();
@@ -288,6 +292,9 @@ async fn test_vault(command_timeout: Duration) -> (std::path::PathBuf, Hub, Inst
         .unwrap();
     (path, hub, instance)
 }
+
+#[path = "runtime_slow_tests.rs"]
+mod slow;
 fn tls_acceptor() -> TlsAcceptor {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());

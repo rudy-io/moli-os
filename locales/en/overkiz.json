@@ -25,5 +25,6 @@
   "overkiz.cloud_status": "Cloud observation status",
   "overkiz.cloud_scenario": "TaHoma scenario",
   "overkiz.cloud_run": "Run scenario",
-  "overkiz.cloud_execution_uncertain": "Scenario submission could not be confirmed. It is not retried automatically; check TaHoma before trying again."
+  "overkiz.cloud_execution_uncertain": "Scenario submission could not be confirmed. It is not retried automatically; check TaHoma before trying again.",
+  "overkiz.slow_position": "Open position at low speed"
 }

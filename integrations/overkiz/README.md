@@ -32,6 +32,26 @@ its native payload, so a favourite cannot be encoded but absent from the public 
 `control` may offer open/close/stop/favourite according to the native definition and arity.
 Root and nested `uiClass` must agree when both are supplied; labels never grant capabilities.
 
+Ordinary io covers with a qualified `setClosureAndLinearSpeed` also expose
+`control = "open_slow"`, `control = "close_slow"` and the optional write-only numeric
+point `percent_control_slow` (0–100 percent **open**). Each is one native command:
+`[0, "lowspeed"]`, `[100, "lowspeed"]` or `[100 - opening, "lowspeed"]`, respectively.
+The command uses the Closure axis even when measured position uses DeploymentState.
+It never sends a separate speed-setting action. Normal open/close/position and stop
+remain unchanged. Slow means a request for the next movement, not measured speed,
+a saved preference or proof that a motor moved. Only `percent_control` represents
+current position; the slow target has `Semantic::Other` and publishes no observation.
+Existing room/origin guards apply without modification.
+
+Qualification requires one exact command definition: either `nparams = 2` with no
+`paramsSig` or the exact `"p1,p2"` signature, or `nparams = 1` with the exact
+`"p1,*p2"` signature declaring the optional speed argument. Duplicate commands,
+contradictory/malformed signatures and other arities are refused. Similar names such
+as `setPositionAndLinearSpeed` are not qualified here. RTS, unknown classes, gates
+and windows do not gain slow commands, including reviewed gates/windows. Read-only
+mode retains these capabilities for display but disables their write permissions
+and rejects their execution before network preflight.
+
 Position is always percentage open. An explicitly reported DeploymentState uses its value;
 otherwise ClosureState is inverted (100 minus closure). Reported state axes take precedence
 over extra setters: a shutter may advertise both setters but report ClosureState only.
@@ -116,6 +136,8 @@ Protocol sources consulted at pinned revisions (cover-family/favourite design al
 - [Somfy setup](https://github.com/Somfy-Developer/Somfy-TaHoma-Developer-Mode/blob/3eae7a51ba55eee28649319942239aab7b139eb7/README.md)
 - [PyOverkiz RTS arity tests](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/tests/test_rts_injection.py)
 - [PyOverkiz local device definitions](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/tests/fixtures/setup/setup_local_tahoma.json)
+- [Home Assistant atomic low-speed cover mapping](https://github.com/home-assistant/core/blob/20a7eb5e6ce79a2018543081a74d45aa28c9cd3d/homeassistant/components/overkiz/cover.py#L884) and [behavioral tests](https://github.com/home-assistant/core/blob/20a7eb5e6ce79a2018543081a74d45aa28c9cd3d/tests/components/overkiz/test_cover.py#L1395), consulted 2026-11-04: Closure conversion, `lowspeed`, normal stop retained.
+- [Home Assistant public low-speed fixture](https://github.com/home-assistant/core/blob/20a7eb5e6ce79a2018543081a74d45aa28c9cd3d/tests/components/overkiz/fixtures/setup/cloud_nexity_rail_din_europe.json): ordinary RollerShutter definitions with `nparams = 2`; the separate optional-argument shape is covered by this repository's synthetic fixture.
 
 
 The official local API excludes saved TaHoma scenarios; even an execution ID from an
