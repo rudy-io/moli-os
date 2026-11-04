@@ -39,6 +39,8 @@ pub enum Event {
         device: DeviceId,
         label: Label,
     },
+    /// The dashboard layout changed on disk; surfaces reload `/api/home`.
+    LayoutChanged {},
     Journal {
         entry: Arc<JournalEntry>,
     },
@@ -151,6 +153,11 @@ pub enum Action {
     Label {
         device: DeviceId,
         label: Label,
+    },
+    /// Visibility in Moli, without removing the device or changing its driver.
+    Visibility {
+        device: DeviceId,
+        hidden: bool,
     },
     /// A human's decision on a held order (and, when approved, its execution).
     Approval {
