@@ -18,6 +18,7 @@ pub mod light;
 pub mod model;
 pub mod protocol;
 mod seek;
+pub mod vacuum;
 
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -106,7 +107,7 @@ fn parse_key(key: &str) -> Option<[u8; 16]> {
 
 #[allow(clippy::too_many_lines)] // one pass: each device, its link, its sub-devices
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-    let file: DeviceFile = match tokio::fs::read(&config.devices_file).await {
+    let mut file: DeviceFile = match tokio::fs::read(&config.devices_file).await {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             ctx.wait_for(moli_i18n::tr!(
@@ -118,6 +119,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         }
         Err(e) => return Err(e.into()),
     };
+    file.devices.iter_mut().for_each(TuyaDevice::complete);
 
     let (up_tx, mut up) = mpsc::channel::<Up>(256);
     let mut orders: HashMap<DeviceId, (usize, mpsc::Sender<Order>)> = HashMap::new();
