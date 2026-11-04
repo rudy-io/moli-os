@@ -14,6 +14,7 @@
   const d = $derived(device(id));
   const available = $derived(!!d && d.online !== false);
   const connected = $derived(hub.connected === true);
+  const live = $derived(available && connected);
   let speedChoice = $state(null);
   const speed = $derived(speedChoice?.id === id ? speedChoice.speed : 'normal');
   const hasSlow = $derived(hasSlowCoverControl(d));
@@ -21,7 +22,7 @@
   const posPoint = $derived(positionPoint(d, true));
   const reported = $derived(posPoint ? value(id, posPoint.key) : null);
   const pos = $derived(posPoint?.kind?.type === 'numeric' && Number.isFinite(reported) && reported >= 0 && reported <= 100 ? reported : null);
-  const actions = $derived(coverCommands(d, speed).map((action) => ({ ...action, labelKey: BUTTONS.find(([command]) => command === action.command)[1] })));
+  const actions = $derived(coverCommands(d, speed).map((action) => ({ ...action, ...BUTTONS[action.command] })));
   const writableActions = $derived(actions.filter(({ key, value }) => value && connected && canWrite(d, key)));
   const positionTarget = $derived(coverPositionTarget(d, speed));
   const range = $derived(positionTarget?.range);
@@ -46,9 +47,15 @@
   const sameTarget = $derived(dragging?.id === id && dragging?.key === positionTarget?.point.key && dragging.speed === speed);
   const shown = $derived(positionWritable && sameTarget ? dragging.value : pos);
   const status = $derived([
-    pos != null ? t(available ? 'commun.volet.ouvert_a' : 'commun.volet.derniere_position', { pct: num(pos) }) : t('commun.volet.position_inconnue'),
-    available ? going : '',
+    pos == null ? t('commun.volet.position_inconnue')
+      : !live ? t('commun.volet.derniere_position', { pct: num(pos) })
+        : pos === 0 ? t('systeme.format.binaire.contact.on')
+          : pos === 100 ? t('systeme.format.binaire.contact.off')
+            : t('commun.volet.ouvert_a', { pct: num(pos) }),
+    live ? going : '',
   ].filter(Boolean).join(' · '));
+  const accessReason = $derived(!connected ? 'reconnexion' : !available ? 'injoignable'
+    : !writableActions.length && !positionWritable ? 'lecture_seule' : null);
   function selectSpeed(next) {
     if (next === 'normal' || next === 'slow' && hasSlow) speedChoice = { id, speed: next };
   }
@@ -79,36 +86,48 @@
     sending = null;
     feedback = result === 'ok' ? 'sent' : result;
   }
-  // [command sent to the device, catalogue key of its button]
-  const BUTTONS = [
-    ['open', 'commun.volet.ouvrir'],
-    ['stop', 'commun.volet.stop'],
-    ['close', 'commun.volet.fermer'],
-    ['cycle', 'commun.volet.impulsion'],
-  ];
+  const BUTTONS = {
+    open: { labelKey: 'commun.volet.ouvrir', icon: 'chevron-up' },
+    stop: { labelKey: 'commun.volet.stop', icon: 'stop' },
+    close: { labelKey: 'commun.volet.fermer', icon: 'chevron-down' },
+    cycle: { labelKey: 'commun.volet.impulsion', icon: 'repeat' },
+  };
 </script>
 
 <div class="cover" class:standalone>
-  <Icon name={available ? 'shutter' : 'offline'} size={22} />
-  <span class="name">{label}<small class="muted">{status}</small></span>
-  {#if !available || (!writableActions.length && !positionWritable)}
+  <div class="heading">
+    <span class="device-icon" class:open={live && pos > 0} class:moving={live && !!going}>
+      <Icon name={live ? 'shutter' : 'offline'} size={24} />
+    </span>
+    <span class="name">{label}<small>{status}</small></span>
+  </div>
+  {#if accessReason}
     <details class="access">
-      <summary>{t(available ? 'commun.volet.lecture_seule' : 'commun.piece.injoignable')}</summary>
-      <p>{t(available ? 'commun.volet.lecture_seule_aide' : 'commun.volet.connexion_aide')} <a href="#/systeme">{t('commun.volet.voir_connexion')}</a></p>
+      <summary>{t(accessReason === 'injoignable' ? 'commun.piece.injoignable' : `commun.volet.${accessReason}`)}</summary>
+      <p>{t(!connected ? 'commun.hors_ligne' : available ? 'commun.volet.lecture_seule_aide' : 'commun.volet.connexion_aide')}
+        <a href="#/systeme">{t('commun.volet.voir_connexion')}</a></p>
     </details>
+  {/if}
+  {#if actions.length}
+    <div class="actions" role="group" aria-label={t('commun.volet.commandes_de', { label })}>
+      {#each actions as action (action.command)}
+        <button type="button" data-cover-command={action.command}
+          disabled={!live || !action.value || !canWrite(d, action.key) || sending?.key === action.key && sending.value === action.value}
+          onclick={() => sendOrder(action.command, action.labelKey)}>
+          <Icon name={action.icon} size={20} />
+          <span>{t(action.labelKey)}</span>
+        </button>
+      {/each}
+    </div>
   {/if}
   {#if hasSlow || speed === 'slow'}
     <div class="speed" role="group" aria-label={t('commun.volet.vitesse_prochaine')}>
       <span>{t('commun.volet.vitesse')}</span>
-      <button aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}>{t('commun.volet.vitesse_normale')}</button>
-      <button aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}>{t('commun.volet.vitesse_lente')}</button>
+      <div class="segments">
+        <button type="button" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}>{t('commun.volet.vitesse_normale')}</button>
+        <button type="button" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}>{t('commun.volet.vitesse_lente')}</button>
+      </div>
     </div>
-  {/if}
-  {#each writableActions as action (action.command)}
-    <button disabled={sending?.key === action.key && sending.value === action.value} onclick={() => sendOrder(action.command, action.labelKey)}>{t(action.labelKey)}</button>
-  {/each}
-  {#if actions.length && !writableActions.length}
-    <p class="observed">{t('commun.volet.actions_observees', { actions: actions.map(({ labelKey }) => t(labelKey)).join(' · ') })}</p>
   {/if}
   {#if positionWritable}
     <label class="position">
@@ -121,52 +140,73 @@
 
 <style>
   .cover {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px;
     background: var(--surface-2);
     border-radius: var(--r-md);
     color: var(--ink-2);
-    flex-wrap: wrap;
   }
-
+  .heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .device-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: var(--r-sm); background: var(--surface-3); color: var(--ink-2); }
+  .device-icon.open { background: var(--warm-soft); color: var(--warm-ink); }
+  .device-icon.moving { animation: moving 1.6s ease-in-out infinite alternate; }
   .name {
     flex: 1;
     display: grid;
     font-weight: 650;
     color: var(--ink);
-    min-width: 120px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+    gap: 2px;
   }
 
   .standalone { background: var(--surface); border: 1px solid var(--line); }
 
   small {
     font-weight: 500;
+    color: var(--ink-2);
+    font-size: 13px;
   }
 
-  .access { font-size: 12px; max-width: 100%; }
-  .access summary { cursor: pointer; color: var(--ink-2); }
+  .access { font-size: 13px; max-width: 100%; }
+  .access summary { cursor: pointer; color: var(--ink-2); min-height: 44px; line-height: 24px; padding: 10px 0; }
   .access p { max-width: 38ch; margin: 8px 0 0; line-height: 1.5; }
   .access a { color: inherit; text-underline-offset: 3px; }
-  .observed { width: 100%; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
-  .feedback { width: 100%; margin: 0; color: var(--ink-2); font-size: 12px; }
+  .feedback { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
 
+  .actions { display: flex; gap: 6px; }
+  .actions button { flex: 1; display: grid; justify-items: center; align-content: center; gap: 2px; min-width: 0; min-height: 52px; }
   button {
-    border: 0;
+    border: 1px solid var(--line);
     background: var(--surface);
-    border-radius: 999px;
-    padding: 8px 12px;
+    color: var(--ink);
+    border-radius: var(--r-sm);
+    padding: 6px 8px;
     font-size: 13px;
     font-weight: 650;
-    box-shadow: var(--shadow);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background-color 160ms ease, transform 160ms ease;
   }
-  button:disabled { opacity: 0.6; cursor: wait; }
+  button:disabled { color: var(--ink-2); background: var(--surface-2); cursor: default; }
+  button:not(:disabled):active { transform: scale(0.97); background: var(--surface-3); }
+  button:focus-visible, summary:focus-visible { outline: 3px solid var(--cool); outline-offset: 3px; }
+  @media (hover: hover) { button:not(:disabled):hover { background: var(--surface-3); } }
 
-  .position { display: flex; align-items: center; gap: 10px; width: 100%; }
-  .position input { flex: 1; min-width: 0; }
-  .speed { display: flex; align-items: center; gap: 8px; width: 100%; }
-  .speed span { flex: 1; font-size: 13px; }
-  .speed button { min-height: 44px; }
-  .speed button[aria-pressed="true"] { color: var(--ink); outline: 1px solid var(--ink-2); }
+  .position { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .position input { flex: 1; min-width: 0; min-height: 44px; accent-color: var(--cool); }
+  .speed { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .speed > span { font-size: 12px; color: var(--ink-2); }
+  .segments { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-sm); background: var(--surface-3); }
+  .segments button { min-height: 44px; min-width: 60px; border-color: transparent; background: transparent; }
+  .segments button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+  @keyframes moving { to { opacity: 0.6; } }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+    button:not(:disabled):active { transform: none; }
+    .device-icon.moving { animation: none; }
+  }
 </style>

@@ -41,6 +41,7 @@ before(async () => {
           export { sendOrder, setPosition, previewPosition };
           export { selectSpeed as chooseSpeed };
           export function result() { return typeof feedback === 'undefined' ? '' : feedback; }
+          export function observedStatus() { return status; }
         </script>`;
       },
     }, svelte()],
@@ -223,4 +224,19 @@ test('a changed device cancels position previews, speed selection and delayed fe
   finish(reply());
   await pending;
   assert.equal(card.result(), '');
+});
+
+test('a new device starts in Normal and a speed switch cannot redirect a previous slider gesture', async (t) => {
+  const { card, orders, device, setId } = fixture(t);
+  addSlow(device);
+  card.previewPosition({ currentTarget: { value: '80' } });
+  assert.match(card.observedStatus(), /40/);
+  assert.doesNotMatch(card.observedStatus(), /80/);
+  card.chooseSpeed('slow');
+  await card.setPosition({ currentTarget: { value: '80' } });
+  assert.deepEqual(orders, []);
+  client.hub.devices['fixture:other'] = { ...device, id: 'fixture:other' };
+  setId('fixture:other');
+  await card.sendOrder('open', 'commun.volet.ouvrir');
+  assert.deepEqual(orders, [{ point: 'fixture:other/motor', value: 'OPEN' }]);
 });

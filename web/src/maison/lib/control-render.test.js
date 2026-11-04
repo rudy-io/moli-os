@@ -203,14 +203,15 @@ test('partial bridge climate and cover retain their family controls', () => {
   assert.equal(buttons(cover).length, 2);
 });
 
-test('read-only shutter shows position without command buttons', () => {
+test('read-only shutter keeps advertised command buttons visible and disabled', () => {
   const html = show('CoverTile', [point('percent_control', number(0, 100, 1), false), point('control', enumeration('open', 'close'), false)], { percent_control: 42 });
   assert.match(html, /42/);
-  assert.equal(buttons(html).length, 0);
+  assert.equal(buttons(html).length, 2);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
   assert.equal(inputs(html).length, 0);
 });
 
-test('observed bridge covers explain read-only access and retain their advertised actions as text', () => {
+test('observed bridge covers explain read-only access beside labelled icon actions', () => {
   const html = show('CoverTile', [
     point('state', { type: 'text' }, false),
     { ...point('control', enumeration('open', 'close', 'stop'), false, 'control'), access: { read: false, write: false } },
@@ -218,9 +219,13 @@ test('observed bridge covers explain read-only access and retain their advertise
   ], { percent_control: 100 }, { model: 'Home Assistant cover' });
   assert.match(html, /Lecture seule/);
   assert.match(html, /Ouvrir.*Stop.*Fermer/s);
-  assert.match(html, /Ouvert à 100 %/);
+  assert.match(html, /Ouvert/);
+  assert.doesNotMatch(html, /Ouvert à 100 %/);
   assert.match(html, /href="#\/systeme"/);
-  assert.doesNotMatch(html, /code Moli|<button|<input/);
+  assert.doesNotMatch(html, /code Moli|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+  assert.equal((html.match(/data-cover-command=/g) ?? []).length, 3);
 });
 
 test('unavailable covers mark retained positions as historical and never claim movement', () => {
@@ -229,14 +234,43 @@ test('unavailable covers mark retained positions as historical and never claim m
   assert.match(html, /Injoignable/);
   assert.match(html, /Dernière position.*42/s);
   assert.match(html, /Ouvrir.*Stop.*Fermer/s);
-  assert.doesNotMatch(html, /en ouverture|Ouvert à|<button|<input/);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
 });
 
 test('static cover capabilities stay partial and an unknown position stays explicit', () => {
   const html = show('CoverTile', [point('control', enumeration('close', 'stop'), false)], {}, { model: 'Overkiz RollerShutter' });
   assert.match(html, /Position non communiquée/);
   assert.match(html, /Stop.*Fermer/s);
-  assert.doesNotMatch(html, /Ouvrir|<button|<input|0 %/);
+  assert.doesNotMatch(html, /Ouvrir|<input|0 %/);
+  assert.equal(buttons(html).length, 2);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+});
+
+test('slow mode remains a selectable preview with disabled physical actions in read-only', () => {
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close', 'open_slow'), false),
+    point('opening', number(0, 100, 1), false, 'position')], { opening: 0 });
+  assert.match(html, /Fermé/);
+  assert.doesNotMatch(html, /Ouvert à 0|en mouvement/);
+  assert.match(html, /Vitesse de la prochaine commande/);
+  const physical = buttons(html).filter((button) => /data-cover-command/.test(button));
+  const speed = buttons(html).filter((button) => /aria-pressed/.test(button));
+  assert.equal(physical.length, 3);
+  assert.ok(physical.every((button) => /disabled/.test(button)));
+  assert.equal(speed.length, 2);
+  assert.ok(speed.every((button) => !/disabled/.test(button)));
+});
+
+test('a disconnected hub keeps cached positions historical and disables every physical action', () => {
+  hub.connected = false;
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close')),
+    point('opening', number(0, 100, 1), true, 'position')], { opening: 40, moving: 'UP' });
+  assert.match(html, /Connexion à Moli/);
+  assert.match(html, /Dernière position.*40/s);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
 });
 
 test('the shutter route bypasses a stored lights filter without replacing it or deduplicating identities', () => {
@@ -253,7 +287,7 @@ test('the shutter route bypasses a stored lights filter without replacing it or 
     hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
     home.home.config = { hidden: ['fixture:hidden'] };
     const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
-    assert.equal((focused.match(/Twin shade/g) ?? []).length, 2);
+    assert.equal((focused.match(/>Twin shade</g) ?? []).length, 2);
     assert.doesNotMatch(focused, /Fixture lamp|Hidden shade/);
     assert.match(focused, /href="#\/pieces"/);
     const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
@@ -287,7 +321,9 @@ test('the shutters view groups many individual cards by room without lighting su
     assert.equal((list.match(/<li\b/g) ?? []).length, count);
     assert.match(list, /Injoignable/);
   }
-  assert.doesNotMatch(html, /Tout est éteint|<button|<input/);
+  assert.doesNotMatch(html, /Tout est éteint|<input/);
+  assert.equal(buttons(html).length, 120);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
   const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
   assert.match(normal, /Tout est éteint/);
   assert.doesNotMatch(normal, /<ul[^>]*aria-label="Studio"/);
@@ -300,7 +336,8 @@ test('partial RTS shutter retains close and stop without inventing position or o
   assert.equal(buttons(html).length, 2);
   assert.equal(inputs(html).length, 0);
   const offline = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter', online: false });
-  assert.equal(buttons(offline).length, 0);
+  assert.equal(buttons(offline).length, 2);
+  assert.ok(buttons(offline).every((button) => /disabled/.test(button)));
 });
 
 test('legacy Tuya position stays informative until its normalized position semantic is declared', () => {
@@ -366,10 +403,12 @@ test('case-preserving motor orders identify a cover without inventing a power sw
   const readonly = show('CoverTile', [point('state', enumeration('OPEN', 'STOP', 'CLOSE'), false)], { moving: 'DOWN' });
   assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
   assert.equal(home.powerKey(hub.devices['fixture:device'], false), null);
-  assert.equal(buttons(readonly).length, 0);
+  assert.equal(buttons(readonly).length, 3);
+  assert.ok(buttons(readonly).every((button) => /disabled/.test(button)));
   assert.match(readonly, /en fermeture/);
   const offline = show('CoverTile', points, { moving: 'forward' }, { online: false });
-  assert.equal(buttons(offline).length, 0);
+  assert.equal(buttons(offline).length, 3);
+  assert.ok(buttons(offline).every((button) => /disabled/.test(button)));
   assert.match(offline, /Injoignable/);
   assert.doesNotMatch(offline, /mouvement/);
 });
