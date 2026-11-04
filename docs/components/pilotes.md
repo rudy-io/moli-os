@@ -127,9 +127,11 @@ Le [registre de couverture](../../integrations/airzone/coverage.json) recense le
 d'énergie. Chaque point dépend des capacités effectivement annoncées par le
 contrôleur ; cette couverture ne garantit pas la compatibilité de tous les firmwares.
 
-Une instance par contrôleur, avec `host` explicite et `read_only = true` par défaut,
-y compris après migration du premier pilote. Les commandes exigent donc un choix
-explicite `read_only = false`. Elles restent soumises aux gardes, aux membres
+Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
+`read_only = false` est conservé pour ne pas désactiver les automatismes existants.
+Un essai d’observation configure explicitement `read_only = true` ; les passerelles
+ajoutées ou modifiées depuis Moli imposent cette lecture seule. Les commandes
+restent soumises aux gardes, aux membres
 affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
 démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
 au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient

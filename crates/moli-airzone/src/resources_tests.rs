@@ -312,7 +312,7 @@ async fn empty_driver_is_available_and_published_read_only_without_registration_
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let config: Config = serde_json::from_value(
-        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port()}),
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"read_only":true}),
     )
     .unwrap();
     let task = tokio::spawn(async {

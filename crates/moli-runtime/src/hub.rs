@@ -321,8 +321,10 @@ struct Inner {
     secrets_problem: Option<String>,
     /// Values changed since the state cache was last written.
     state_dirty: AtomicBool,
-    /// Serializes the two cache replacements and their shared generation.
-    state_write: tokio::sync::Mutex<()>,
+    /// Definitions changed independently of their frequently updated samples.
+    definitions_dirty: AtomicBool,
+    /// Serializes cache replacements and retains the committed inventory generation.
+    state_write: Arc<tokio::sync::Mutex<device_cache::Generation>>,
     /// The last image of each camera, shared by every viewer for a second.
     images: Mutex<HashMap<DeviceId, LastImage>>,
     /// Short-lived media a device fetches back (an announcement's sound).
@@ -331,6 +333,24 @@ struct Inner {
     voice: std::sync::OnceLock<Arc<dyn crate::voice::VoiceBrain>>,
     opts: HubOptions,
     started: Instant,
+}
+
+/// A failed or panicking writer must not consume the only retry signal.
+struct CacheWriteRetry {
+    hub: Hub,
+    definitions_changed: bool,
+    completed: bool,
+}
+
+impl Drop for CacheWriteRetry {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.hub.0.state_dirty.store(true, Ordering::Release);
+            if self.definitions_changed {
+                self.hub.0.definitions_dirty.store(true, Ordering::Release);
+            }
+        }
+    }
 }
 
 /// Two screens showing the same camera live cost one fetch, not two.
@@ -407,6 +427,8 @@ impl Hub {
                 tracing::warn!(%error, "device inventory cache unreadable; waiting for fresh definitions");
                 None
             }).flatten();
+        let generation = inventory.as_ref().map_or([0; 16], |cache| cache.generation);
+        let migrate_inventory = inventory.is_some() && generation == [0; 16];
         // A sidecar definition and its samples are one generation. Never pair
         // it with state.json from an interrupted older/newer replacement.
         let cached_devices = inventory.map_or_else(device_cache::Devices::new, |inventory| {
@@ -465,7 +487,8 @@ impl Hub {
             addresses: Mutex::new(book),
             address_write: tokio::sync::Mutex::new(()),
             state_dirty: AtomicBool::new(false),
-            state_write: tokio::sync::Mutex::new(()),
+            definitions_dirty: AtomicBool::new(migrate_inventory),
+            state_write: Arc::new(tokio::sync::Mutex::new(generation)),
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
             voice: std::sync::OnceLock::new(),
@@ -1806,22 +1829,14 @@ impl Hub {
             pending.retain(|key| device.point(key).is_some());
             pending.extend(awaiting);
             if let Some((kind, integration)) = identity {
-                if model.cached_devices.contains_key(&device.id)
-                    || model.cached_devices.len() < device_cache::MAX_DEVICES
-                {
-                    model.cached_devices.insert(
-                        device.id.clone(),
-                        CachedDevice {
-                            kind,
-                            integration,
-                            device: Arc::clone(&device),
-                            states: BTreeMap::new(),
-                        },
-                    );
-                } else {
-                    tracing::warn!(
-                        "device inventory cache full; fresh discovery will be required for additional devices"
-                    );
+                let cached = CachedDevice {
+                    kind,
+                    integration,
+                    device: Arc::clone(&device),
+                    states: BTreeMap::new(),
+                };
+                if model.cache_definition(cached) {
+                    self.0.definitions_dirty.store(true, Ordering::Release);
                 }
             }
             model.devices.insert(device.id.clone(), Arc::clone(&device));
@@ -1847,44 +1862,49 @@ impl Hub {
         let Some(path) = &self.0.opts.state_path else {
             return Ok(false);
         };
-        let _writing = self.0.state_write.lock().await;
-        if !self.0.state_dirty.swap(false, Ordering::AcqRel) {
-            return Ok(false);
-        }
-        let (all, devices, unclaimed) = {
+        let mut generation = Arc::clone(&self.0.state_write).lock_owned().await;
+        let (all, devices, definitions_changed) = {
             let model = self.read();
+            // Consume flags while holding the same lock as mutations: changes
+            // during the subsequent async writes remain dirty for the next flush.
+            let states_changed = self.0.state_dirty.swap(false, Ordering::AcqRel);
+            let definitions_changed = self.0.definitions_dirty.swap(false, Ordering::AcqRel);
+            if !states_changed && !definitions_changed {
+                return Ok(false);
+            }
+            let definitions_changed = definitions_changed || *generation == [0; 16];
             let mut all = model.restored.clone();
-            all.extend(model.states.iter().map(|(k, v)| (k.clone(), v.clone())));
-            let mut devices = model.cached_devices.clone();
-            let mut unclaimed = model.restored.clone();
             for (id, states) in &model.states {
-                if !devices.contains_key(id) {
-                    unclaimed.insert(id.clone(), states.clone());
+                all.entry(id.clone()).or_default().extend(states.clone());
+            }
+            // Disabled instances keep their samples without cloning definitions.
+            for (id, cached) in &model.cached_devices {
+                if !model.states.contains_key(id) {
+                    all.entry(id.clone())
+                        .or_default()
+                        .extend(cached.states.clone());
                 }
             }
-            for (id, cached) in &mut devices {
-                if let Some(states) = model.states.get(id) {
-                    cached.states = states
-                        .iter()
-                        .filter(|(key, sample)| {
-                            cached.device.point(key).is_some_and(|point| {
-                                device_cache::sample_matches(&point.kind, &sample.value)
-                            })
-                        })
-                        .map(|(key, sample)| (key.clone(), sample.clone()))
-                        .collect();
-                }
-                // Keep legacy values complete even for temporarily disabled instances.
-                all.entry(id.clone())
-                    .or_insert_with(|| cached.states.clone());
-            }
-            (all, devices, unclaimed)
+            let devices = definitions_changed.then(|| model.cached_devices.clone());
+            (all, devices, definitions_changed)
         };
-        if let Err(e) = device_cache::save_snapshot(path, devices, unclaimed, &all).await {
-            self.0.state_dirty.store(true, Ordering::Release);
-            return Err(e);
-        }
-        Ok(true)
+        let path = path.clone();
+        let mut retry = CacheWriteRetry {
+            hub: self.clone(),
+            definitions_changed,
+            completed: false,
+        };
+        // Tokio filesystem operations can outlive a cancelled caller. Keep the
+        // writer and its owned lock alive together so a subsequent flush cannot
+        // race an unfinished .tmp write or lose a committed generation.
+        tokio::spawn(async move {
+            device_cache::save_snapshot(&path, devices, all, &mut generation).await?;
+            retry.completed = true;
+            drop(retry);
+            Ok(true)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     pub(crate) fn remove_device(&self, id: &DeviceId) {
@@ -1899,9 +1919,10 @@ impl Hub {
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
+            self.0.state_dirty.store(true, Ordering::Release);
+            self.0.definitions_dirty.store(true, Ordering::Release);
             model.devices.remove(id).is_some()
         };
-        self.0.state_dirty.store(true, Ordering::Release);
         self.0
             .images
             .lock()
@@ -2169,6 +2190,32 @@ impl Hub {
 }
 
 impl Model {
+    /// Returns whether the persistent definition set actually changed.
+    fn cache_definition(&mut self, cached: CachedDevice) -> bool {
+        let id = &cached.device.id;
+        if !device_cache::valid_definition(id, &cached) {
+            tracing::warn!("invalid definition omitted from device inventory cache");
+            return self.cached_devices.remove(id).is_some();
+        }
+        if self.cached_devices.get(id).is_some_and(|previous| {
+            previous.device == cached.device
+                && previous.kind == cached.kind
+                && previous.integration == cached.integration
+        }) {
+            return false;
+        }
+        if !self.cached_devices.contains_key(id)
+            && self.cached_devices.len() >= device_cache::MAX_DEVICES
+        {
+            tracing::warn!(
+                "device inventory cache full; fresh discovery will be required for additional devices"
+            );
+            return false;
+        }
+        self.cached_devices.insert(id.clone(), cached);
+        true
+    }
+
     fn view(&self, device: &Arc<Device>) -> DeviceView {
         DeviceView {
             device: Arc::clone(device),

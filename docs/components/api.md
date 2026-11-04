@@ -401,6 +401,19 @@ reste disponible. Le scan ne modifie aucune identité ni aucun état d’apparei
 Le registre accepte au plus 32 connexions gérées et surcharges au total, retraits
 compris, et 64 Kio. Les entrées TOML retirées restent représentées par une surcharge
 `enabled=false` : cette trace empêche leur redémarrage au prochain lancement.
+Au démarrage, une entrée mal formée, en doublon ou dont le pilote TOML a été
+supprimé est signalée dans les journaux puis ignorée. Les entrées valides et les
+autres pilotes de la maison continuent de fonctionner. Une surcharge invalide
+identifiable laisse son pilote Airzone en pause ; une surcharge sans instance
+identifiable met tous les pilotes Airzone en pause. Si le registre entier est
+illisible, dépasse les bornes ou utilise une version inconnue, tous les pilotes
+Airzone restent en pause, car les retraits précédents ne sont plus vérifiables.
+Le fichier original reste intact, y compris les données ignorées. Tant qu'une
+anomalie existe, les ajouts, modifications et retraits gérés échouent avec
+`persistence_failed`, avant toute vérification réseau ou activation. Sauvegarder
+le fichier puis le corriger, ou restaurer une sauvegarde cohérente, et redémarrer
+Moli pour retrouver ces opérations. La commande de restauration reste utilisable.
+
 La première opération persistée migre le registre vers la version 2. Pour revenir
 à un ancien binaire qui ne lit que la version 1, restaurer la sauvegarde cohérente
 du registre et de la configuration prise avant cette migration. Changer seulement

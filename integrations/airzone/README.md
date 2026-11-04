@@ -24,9 +24,10 @@ mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 # tls_fingerprint = "<64 hexadecimal SHA-256 characters>"
 ```
 
-**Read-only defaults to true**, including when upgrading the initial driver.
-An operator must explicitly set `read_only = false` to enable commands. The
-restriction applies to published capabilities, the executor and transport,
+**TOML instances retain their existing command mode**: an omitted `read_only`
+defaults to `false`, preserving existing automations. Set `read_only = true` for
+an observation-only trial. Gateways added or edited from the dashboard explicitly
+use `read_only = true`. That restriction applies to published capabilities, the executor and transport,
 including integration configuration. It is not merely a disabled UI button.
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains
@@ -187,3 +188,12 @@ reported setpoint does not fit the advertised increment, resolve that
 inconsistency before a command test: this driver preserves the reading but
 refuses an off-grid write. Manufacturer schedules remain active and can change
 state independently.
+
+### Rollback compatibility
+
+Older driver binaries reject unknown TOML options. Before rolling back, restore
+a configuration compatible with that version: `read_only`, `tls_fingerprint` and
+`dhw_units` are not accepted by the original driver. Removing `read_only` does not
+make an older driver read-only; keep the instance disabled if observation-only
+operation is required. Restore a matching managed-gateway registry/backup too.
+Keep the current configuration, registry and encrypted store backed up first.

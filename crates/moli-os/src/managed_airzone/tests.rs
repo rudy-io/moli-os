@@ -1,6 +1,7 @@
 use super::*;
 use moli_runtime::HubOptions;
 use serde_json::{Value as Json, json};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -253,6 +254,11 @@ async fn controller_with_identity(
                     }
                 }
             }
+            // A cancelled request may close a connected socket before sending
+            // any HTTP bytes; this is not a controller read or write.
+            if used == 0 {
+                continue;
+            }
             let raw = String::from_utf8_lossy(&raw[..used]);
             let first = raw.lines().next().unwrap_or("");
             if let Some(count) = &requests {
@@ -289,6 +295,25 @@ async fn controller_with_identity(
     });
     (port, writes, stop)
 }
+async fn controller_barrier(port: u16) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stream
+            .write_all(
+                b"GET /test-barrier HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    })
+    .await
+    .unwrap();
+}
+
 fn request(port: u16) -> GatewayRequest {
     GatewayRequest {
         instance: "airzone-added".into(),
@@ -387,6 +412,11 @@ async fn static_gateway_is_listed_moved_with_identity_and_withdrawn_without_losi
             .iter()
             .any(|device| device.device.id == *id)
     }));
+    // Joining the supervisors prevents new polls, but the mock may still have
+    // an already-written request queued in its listener. Its sequential HTTP
+    // barrier drains those requests before measuring the absence of new polls.
+    controller_barrier(port).await;
+    controller_barrier(moved_port).await;
     let after = calls.load(Ordering::Relaxed);
     let moved_after = moved_calls.load(Ordering::Relaxed);
     tokio::time::sleep(Duration::from_millis(5100)).await;
@@ -786,6 +816,275 @@ fn stored_gateway(instance: &str, port: u16) -> Gateway {
     }
 }
 
+#[tokio::test]
+async fn unreadable_registry_preserves_other_drivers_and_blocks_managed_edits() {
+    let (dir, _) = house();
+    let path = dir.join("moli.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[[driver]]\nid = 'house-tools'\nkind = 'helpers'\n\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.1'\nmac = 'aabbccddeeff'\n");
+    std::fs::write(&path, text).unwrap();
+    for raw in ["broken json".to_owned(), " ".repeat(65_537)] {
+        std::fs::write(dir.join(FILE), &raw).unwrap();
+        let config = Config::load(&path).expect("the house must still load");
+        crate::check_config(&config).unwrap();
+        assert_eq!(config.drivers[0].enabled, None);
+        assert_eq!(config.drivers[1].enabled, Some(false));
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let cancel = CancellationToken::new();
+        let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+        let (tasks, _) = crate::spawn_drivers(&config, &hub, &cancel, &manager).unwrap();
+        assert_eq!(hub.snapshot().drivers.len(), 1);
+        assert_eq!(hub.snapshot().drivers[0].instance.as_str(), "house-tools");
+        assert_eq!(
+            manager
+                .install(request(3000), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "persistence_failed"
+        );
+        assert_eq!(
+            manager
+                .withdraw("configured".into(), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "persistence_failed"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+        cancel.cancel();
+        manager.shutdown().await;
+        for task in tasks {
+            task.await.unwrap();
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn unidentified_override_pauses_managed_and_static_airzone_without_changing_registry() {
+    let (dir, _) = house();
+    let path = dir.join("moli.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[[driver]]\nid = 'house-tools'\nkind = 'helpers'\n\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.2'\nmac = 'aabbccddee01'\n");
+    std::fs::write(&path, text).unwrap();
+    for entry in [
+        json!({"enabled":false}),
+        json!({"instance":false,"enabled":false}),
+        json!({"instance":"","enabled":false}),
+    ] {
+        let raw =
+            json!({"version":2,"gateways":[stored_gateway("managed",3000)],"overrides":[entry]})
+                .to_string();
+        std::fs::write(dir.join(FILE), &raw).unwrap();
+        let config = Config::load(&path).unwrap();
+        crate::check_config(&config).unwrap();
+        assert_eq!(config.drivers.len(), 3);
+        assert!(
+            config
+                .drivers
+                .iter()
+                .filter(|driver| driver.kind == "airzone")
+                .all(|driver| driver.enabled == Some(false))
+        );
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let cancel = CancellationToken::new();
+        let manager = Manager::new(hub.clone(), &config, cancel.clone()).unwrap();
+        let (tasks, _) = crate::spawn_drivers(&config, &hub, &cancel, &manager).unwrap();
+        assert_eq!(hub.snapshot().drivers.len(), 1);
+        assert_eq!(hub.snapshot().drivers[0].instance.as_str(), "house-tools");
+        let list = manager.list().await.unwrap();
+        assert_eq!(list.gateways.len(), 2);
+        assert!(
+            list.gateways
+                .iter()
+                .all(|gateway| !gateway.enabled && !gateway.running)
+        );
+        assert_eq!(
+            manager
+                .install(request(3000), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "persistence_failed"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+        cancel.cancel();
+        manager.shutdown().await;
+        for task in tasks {
+            task.await.unwrap();
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn partial_registry_skips_bad_entries_without_reviving_a_withdrawn_driver() {
+    let (dir, _) = house();
+    let path = dir.join("moli.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.2'\nmac = 'aabbccddee01'\n\n[[driver]]\nid = 'healthy-static'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.3'\nmac = 'aabbccddee02'\n");
+    std::fs::write(&path, text).unwrap();
+    let raw = json!({"version":2,"gateways":[
+        stored_gateway("healthy-managed", 3000),
+        {"instance":"broken-managed", "host":false, "enabled":false}
+    ],"overrides":[
+        {"instance":"removed-from-toml", "enabled":false},
+        {"instance":"configured", "enabled":false, "mac":"invalid"}
+    ]})
+    .to_string();
+    std::fs::write(dir.join(FILE), &raw).unwrap();
+    let config = Config::load(&path).expect("valid entries must survive");
+    crate::check_config(&config).unwrap();
+    assert_eq!(config.drivers.len(), 3);
+    assert_eq!(config.drivers[0].enabled, Some(false));
+    assert_eq!(config.drivers[1].enabled, None);
+    assert_eq!(config.drivers[2].id, "healthy-managed");
+    let manager = Manager::new(
+        Hub::new(HubOptions::default()).unwrap(),
+        &config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let list = manager.list().await.unwrap();
+    assert_eq!(list.gateways.len(), 3);
+    assert!(
+        !list
+            .gateways
+            .iter()
+            .find(|g| g.instance == "configured")
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        list.gateways
+            .iter()
+            .find(|g| g.instance == "healthy-static")
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        list.gateways
+            .iter()
+            .find(|g| g.instance == "healthy-managed")
+            .unwrap()
+            .enabled
+    );
+    assert_eq!(
+        manager
+            .withdraw("healthy-managed".into(), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+    manager.shutdown().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn ambiguous_registry_entries_never_start_duplicate_or_withdrawn_gateways() {
+    let (dir, _) = house();
+    let mut disabled = stored_gateway("ambiguous", 3000);
+    disabled.enabled = false;
+    let mut healthy = stored_gateway("healthy", 4000);
+    healthy.mac = "aabbccddee01".into();
+    let raw = json!({"version":2,"gateways":[
+        stored_gateway("ambiguous", 3000), disabled,
+        stored_gateway("same-controller", 3001), healthy
+    ]})
+    .to_string();
+    std::fs::write(dir.join(FILE), &raw).unwrap();
+    let config = Config::load(&dir.join("moli.toml")).unwrap();
+    assert_eq!(config.drivers.len(), 1);
+    assert_eq!(config.drivers[0].id, "healthy");
+    let manager = Manager::new(
+        Hub::new(HubOptions::default()).unwrap(),
+        &config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(manager.list().await.unwrap().gateways.len(), 1);
+    assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+    manager.shutdown().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn conflicting_registry_entry_cannot_claim_an_identical_toml_driver() {
+    for enabled in [true, false] {
+        let (dir, _) = house();
+        let path = dir.join("moli.toml");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        write!(text, "\n[[driver]]\nid = 'configured'\nkind = 'airzone'\nenabled = {enabled}\n[driver.options]\nhost = '127.0.0.1'\nport = 3000\nmac = 'aabbccddeeff'\npoll_secs = 30\nread_only = true\n").unwrap();
+        std::fs::write(&path, text).unwrap();
+        let mut saved = stored_gateway("configured", 3000);
+        saved.enabled = enabled;
+        let raw = json!({"version":2,"gateways":[saved]}).to_string();
+        std::fs::write(dir.join(FILE), &raw).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.drivers.len(), 1);
+        let manager = Manager::new(
+            Hub::new(HubOptions::default()).unwrap(),
+            &config,
+            CancellationToken::new(),
+        )
+        .unwrap();
+        let list = manager.list().await.unwrap();
+        assert_eq!(list.gateways.len(), 1);
+        assert_eq!(list.gateways[0].source, "configuration");
+        assert_eq!(list.gateways[0].enabled, enabled);
+        assert_eq!(
+            manager
+                .withdraw("configured".into(), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "persistence_failed"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+        manager.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn registry_removed_between_load_and_serve_pauses_airzone_without_stopping_the_house() {
+    let (dir, _) = house();
+    std::fs::write(
+        dir.join(FILE),
+        json!({"version":2,"gateways":[stored_gateway("saved", 3000)]}).to_string(),
+    )
+    .unwrap();
+    let config = Config::load(&dir.join("moli.toml")).unwrap();
+    std::fs::remove_file(dir.join(FILE)).unwrap();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    manager.start_configured().unwrap();
+    assert!(hub.snapshot().drivers.is_empty());
+    assert!(
+        manager
+            .list()
+            .await
+            .unwrap()
+            .gateways
+            .iter()
+            .all(|gateway| !gateway.enabled && !gateway.running)
+    );
+    assert_eq!(
+        manager
+            .install(request(3000), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    assert!(!dir.join(FILE).exists());
+    manager.shutdown().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_starter_loads_saved_gateways_and_recovery_can_reach_a_corrupt_registry() {
     let (dir, _) = house();
@@ -803,7 +1102,12 @@ fn a_starter_loads_saved_gateways_and_recovery_can_reach_a_corrupt_registry() {
         "starter must spawn restored managed gateways"
     );
     std::fs::write(dir.join(FILE), "broken json").unwrap();
-    assert!(Config::load(&dir.join("moli.toml")).is_err());
+    assert!(
+        Config::load(&dir.join("moli.toml"))
+            .unwrap()
+            .drivers
+            .is_empty()
+    );
     let recoverable = Config::load_for_recovery(&dir.join("moli.toml")).unwrap();
     assert_eq!(recoverable.server.data_dir, dir);
     assert_eq!(
@@ -836,8 +1140,8 @@ async fn replay_never_claims_a_removed_registry_is_still_persisted() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn a_registry_changed_after_config_load_does_not_announce_an_inactive_gateway() {
+#[tokio::test]
+async fn a_registry_changed_after_config_load_does_not_announce_an_inactive_gateway() {
     let (dir, config) = house();
     std::fs::write(
         dir.join(FILE),
@@ -850,7 +1154,17 @@ fn a_registry_changed_after_config_load_does_not_announce_an_inactive_gateway() 
     )
     .unwrap();
     let hub = Hub::new(HubOptions::default()).unwrap();
-    assert!(Manager::new(hub, &config, CancellationToken::new()).is_err());
+    let manager = Manager::new(hub, &config, CancellationToken::new()).unwrap();
+    assert!(manager.list().await.unwrap().gateways.is_empty());
+    assert_eq!(
+        manager
+            .install(request(3000), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    manager.shutdown().await;
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -858,7 +1172,12 @@ fn a_registry_changed_after_config_load_does_not_announce_an_inactive_gateway() 
 fn recovery_can_load_base_config_without_discarding_a_broken_registry() {
     let (dir, _) = house();
     std::fs::write(dir.join(FILE), "broken json").unwrap();
-    assert!(Config::load(&dir.join("moli.toml")).is_err());
+    assert!(
+        Config::load(&dir.join("moli.toml"))
+            .unwrap()
+            .drivers
+            .is_empty()
+    );
     assert_eq!(
         Config::load_for_recovery(&dir.join("moli.toml"))
             .unwrap()
@@ -1065,7 +1384,12 @@ fn registry_is_restored_and_invalid_content_is_never_silently_reset() {
         " ".repeat(65_537),
     ] {
         std::fs::write(dir.join(FILE), &invalid).unwrap();
-        assert!(Config::load(&dir.join("moli.toml")).is_err());
+        assert!(
+            Config::load(&dir.join("moli.toml"))
+                .unwrap()
+                .drivers
+                .is_empty()
+        );
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), invalid);
     }
     std::fs::remove_dir_all(dir).unwrap();

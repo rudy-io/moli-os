@@ -38,6 +38,9 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   verrou les appareils hors ligne, les définitions restaurées non confirmées et les
   points qui attendent leur premier relevé frais. Une nouvelle définition ne rajeunit
   donc pas les valeurs ; un pilote qui n'annonce pas sa disponibilité reste compatible.
+  Une condition solaire `jour` ou `nuit` reste fausse si la position est absente et
+  qu'aucun relevé actuel `daylight` n'est disponible : l'absence d'information ne prouve
+  pas qu'il fait nuit, et une ancienne valeur météo ne doit pas déclencher d'action.
 - **Commandes** : `hub.command(point, value, origin, actor)` → validation contre le
   `PointSpec` (lecture seule, valeur invalide : refus) → **garde** → envoi au pilote
   (délai 5 s) → journal. La confirmation arrive ensuite comme un événement `state`.
@@ -51,28 +54,51 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   réécrit avec ses 2 000 dernières lignes au-delà de 8 Mio) ; les échecs d'écriture sur
   disque sont comptés et visibles dans `/api/health` (`journal_failures`).
 - **Persistance** : `data/labels.toml` (étiquettes), `data/state.json` (dernières valeurs,
-  rejouées au démarrage avec leur horodatage d'origine), écritures périodiques ;
-  `data/state.devices.json` (inventaire versionné, définitions et valeurs prises ensemble).
-  Ce fichier séparé laisse `state.json` compatible avec les anciens binaires. Il est
-  dérivé du chemin configuré du cache d'état en remplaçant son extension par
-  `.devices.json`. Les deux écritures sont sérialisées ; chaque fichier est remplacé
-  atomiquement. Le sidecar inclut aussi les valeurs héritées non encore réclamées et
-  reste l'autorité pour l'ensemble de ce snapshot,
-  même après une interruption entre les deux remplacements.
+  compatibles avec les anciens binaires), écritures périodiques ;
+  `data/state.devices.json` (inventaire versionné et relevés de référence cohérents) et
+  `data/state.observations.json` (derniers relevés, sans recopier les définitions).
+  Les chemins sont dérivés du cache d'état configuré en remplaçant son extension par
+  `.devices.json` et `.observations.json`. Un indicateur distinct suit les changements
+  de définitions : seuls un ajout, un changement ou une suppression de fiche réécrivent
+  l'inventaire. Republier une définition identique ne le réécrit pas. Les mises à jour
+  d'état écrivent uniquement les observations et le miroir legacy.
+  Les écritures sont sérialisées et chaque fichier est remplacé atomiquement.
+  Une écriture commencée conserve son verrou jusqu’à la fin, même si son appelant annule
+  son attente, pour éviter la concurrence entre deux remplacements temporaires. Un nouvel
+  inventaire reçoit une génération aléatoire de 128 bits ; les observations ne remplacent
+  ses relevés de référence que si leur génération correspond. Les anciennes observations
+  et un `state.json` resté en retard ne peuvent donc pas ressusciter un appareil supprimé,
+  ni associer les mesures d'une ancienne fiche à une nouvelle définition. Un fichier
+  d'observations manquant ou corrompu laisse les relevés de référence disponibles.
+  L'inventaire et les observations incluent les valeurs héritées encore non réclamées.
+  Le format d'inventaire v1 reste lisible et migre au prochain flush ; `state.json` seul
+  continue de fonctionner. Sauvegarder les trois fichiers conserve aussi les derniers
+  relevés ; le snapshot restauré reste affichable avec ses horodatages d'origine.
   Une fiche est restaurée seulement quand une instance active de mêmes `kind` et
   `integration` s'enregistre. Elle reste **hors ligne, tous ses points en lecture seule**
   jusqu'à une nouvelle publication de sa définition par le pilote ; `ready()` et un
-  simple changement de disponibilité ne suffisent pas. Une instance désactivée garde
-  son cache dormant sans exposer ses appareils au redémarrage. `remove_device` purge
-  définition et valeurs du prochain flush, sans supprimer les étiquettes ni l'historique.
-  Le cache d'inventaire est limité à 8 Mio, 4 096 appareils et 1 024 points par appareil ;
-  une version inconnue, un fichier illisible ou une identité incohérente est ignoré avec
-  avertissement. Une définition reçue à nouveau reste nécessaire pour commander.
-  Un échec d'écriture de l'inventaire est remonté et retenté au prochain flush. Pour
-  permettre le repli vers `state.json`, l'ancien sidecar est d'abord déplacé atomiquement
-  vers `state.devices.json.stale` (un seul dernier cache conservé, jamais chargé).
-  Si ce déplacement échoue, aucune nouvelle valeur legacy n'est écrite. Si l'écriture
-  legacy échoue ensuite, l'ancien sidecar est remis en place et les erreurs sont signalées.
+  simple changement de disponibilité ne suffisent pas. Cette publication fraîche enlève
+  l'indisponibilité imposée par le cache et annonce l'appareil en ligne, pour les pilotes
+  qui ne publient pas eux-mêmes de disponibilité. Un `false` explicitement annoncé par le
+  pilote reste prioritaire. Les valeurs conservées attendent toujours leur propre relevé
+  frais avant de devenir des observations actuelles.
+  Une instance désactivée garde son cache dormant sans exposer ses appareils au redémarrage.
+  `remove_device` purge définition et valeurs du prochain flush, sans supprimer les
+  étiquettes ni l'historique. Le pont Home Assistant retire ainsi les entités supprimées
+  de sa configuration explicite ; une entité encore configurée mais indisponible garde
+  sa fiche hors ligne. Sans cette distinction, le cache conserverait indéfiniment une
+  entité volontairement retirée.
+  Les fichiers de cache sont limités à 8 Mio, 4 096 appareils et 1 024 points par appareil ;
+  métadonnées et valeurs d'énumération à 8 Kio, textes de relevés à 64 Kio. Une définition
+  invalide (identité, taille, nombre de choix ou borne numérique non finie) est écartée
+  individuellement avec avertissement. Les relevés invalides et les entrées dépassant le
+  budget sont omis sans bloquer les appareils valides ni relancer indéfiniment le flush.
+  Une version inconnue ou un inventaire illisible est ignoré avec avertissement ; une
+  définition fraîche reste nécessaire pour commander. Les erreurs d'entrée/sortie
+  réelles conservent les indicateurs de modification pour réessayer. Le fichier faisant
+  autorité est remplacé avant le miroir legacy : si ce dernier échoue, la suppression
+  déjà enregistrée reste effective ; si l'écriture faisant autorité échoue, le précédent
+  snapshot cohérent reste en place.
   L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne ;
   `unregister_driver`, appelé après avoir attendu sa tâche, détache le pilote et retire
   les droits d'écriture des fiches conservées, sans effacer leurs noms ni leurs valeurs.

@@ -37,6 +37,9 @@ data_dir = {data_dir}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Startup provenance: only accepted registry entries may become managed.
+    #[serde(skip)]
+    pub(crate) managed_airzone: Option<crate::managed_airzone::Registry>,
     #[serde(default)]
     pub server: Server,
     #[serde(default, rename = "driver")]

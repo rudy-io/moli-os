@@ -122,125 +122,342 @@ fn bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     Ok(Some(data))
 }
 
-fn read_store(path: &Path) -> anyhow::Result<(Store, Option<Vec<u8>>)> {
-    let raw = bytes(path).context("cannot read managed Airzone registry")?;
-    let store: Store = raw
-        .as_deref()
-        .map(serde_json::from_slice)
-        .transpose()
-        .context("invalid managed Airzone registry")?
-        .unwrap_or_default();
-    ensure!(
-        matches!(store.version, 1 | 2)
-            && store.gateways.len() + store.overrides.len() <= MAX_GATEWAYS
-            && (store.version == 2 || store.overrides.is_empty()),
-        "unsupported managed Airzone registry"
-    );
-    let mut ids = HashSet::new();
-    let mut endpoints = HashSet::new();
-    let mut macs = HashSet::new();
-    for gateway in &store.gateways {
-        let normalized = normalize(gateway.request())
-            .map_err(|_| anyhow::anyhow!("invalid managed Airzone gateway"))?;
-        ensure!(
-            gateway.read_only && normalized == gateway.request(),
-            "managed Airzone gateway must be canonical and read-only"
-        );
-        ensure!(
-            ids.insert(&gateway.instance)
-                && (!gateway.enabled || endpoints.insert((&gateway.host, gateway.port)))
-                && macs.insert(&gateway.mac),
-            "duplicate managed Airzone gateway"
-        );
-    }
-    for entry in &store.overrides {
-        ensure!(
-            ids.insert(&entry.instance),
-            "duplicate managed Airzone override"
-        );
-        ensure!(
-            entry
-                .mac
-                .as_deref()
-                .is_none_or(|mac| moli_net::lan::mac_hex(mac).as_deref() == Some(mac)),
-            "invalid managed Airzone identity"
-        );
-        if let Some(gateway) = &entry.connection {
-            let request = gateway.request();
-            ensure!(
-                gateway.instance == entry.instance
-                    && gateway.read_only
-                    && normalize_connection(request.clone())
-                        .is_ok_and(|normalized| normalized == request),
-                "invalid managed Airzone override"
-            );
-        }
-    }
-    Ok((store, raw))
+/// Parsing is bounded, but entries are independent: one broken connection must
+/// not take the house down. A degraded registry is never eligible for rewriting.
+#[derive(Clone, Debug)]
+pub(crate) struct Registry {
+    store: Store,
+    raw: Option<Vec<u8>>,
+    editable: bool,
+    suppressed: HashSet<String>,
+    suppress_all: bool,
 }
 
-/// Called after resolving data_dir and before validating/spawning any driver.
-/// A corrupt or conflicting file is an explicit startup error, never discarded.
-pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
-    let (store, _) = read_store(&config.server.data_dir.join(FILE))?;
-    for entry in &store.overrides {
-        let driver = config
-            .drivers
-            .iter_mut()
-            .find(|driver| driver.id == entry.instance)
-            .context("managed Airzone override has no configured driver")?;
-        ensure!(
-            driver.kind == "airzone",
-            "managed Airzone override conflicts with configured driver"
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStore {
+    version: u8,
+    gateways: Vec<serde_json::Value>,
+    #[serde(default)]
+    overrides: Vec<serde_json::Value>,
+}
+
+impl Registry {
+    fn skip(&mut self, instance: &str, reason: &str) {
+        self.editable = false;
+        tracing::warn!(
+            instance,
+            reason,
+            "ignoring managed Airzone entry; registry retained, edits disabled until repair and restart"
         );
-        driver.enabled = Some(entry.enabled);
-        if let Some(mac) = &entry.mac {
-            driver
-                .options
-                .as_table_mut()
-                .context("invalid Airzone options")?
-                .insert("mac".into(), mac.clone().into());
-        }
-        if let Some(gateway) = &entry.connection {
-            let options = driver
-                .options
-                .as_table_mut()
-                .context("invalid Airzone options")?;
-            options.insert("host".into(), gateway.host.clone().into());
-            options.insert("port".into(), i64::from(gateway.port).into());
-            options.insert("mac".into(), gateway.mac.clone().into());
-            options.insert("read_only".into(), true.into());
-            options.remove("tls_fingerprint");
-            if let Some(pin) = &gateway.tls_fingerprint {
-                options.insert("tls_fingerprint".into(), pin.clone().into());
-            }
-        }
     }
-    for gateway in store.gateways {
-        for driver in &config.drivers {
-            ensure!(
-                driver.id != gateway.instance,
-                "managed Airzone instance conflicts with configured driver"
-            );
-            if driver.kind == "airzone" {
-                let other: moli_airzone::Config = driver.options.clone().try_into()?;
-                ensure!(
-                    !(driver.enabled != Some(false)
-                        && gateway.enabled
-                        && other.host == gateway.host
-                        && other.port == gateway.port)
-                        && other
-                            .mac
-                            .as_deref()
-                            .and_then(moli_net::lan::mac_hex)
-                            .as_deref()
-                            != Some(&gateway.mac),
-                    "managed Airzone gateway duplicates configured gateway"
+
+    fn reconcile_overrides(&mut self, configured: &mut [StaticGateway]) {
+        let overrides = std::mem::take(&mut self.store.overrides);
+        for entry in overrides {
+            let current = configured
+                .iter_mut()
+                .find(|gateway| gateway.instance == entry.instance);
+            let matches = current.as_ref().is_some_and(|current| {
+                current.enabled == entry.enabled
+                    && entry
+                        .mac
+                        .as_ref()
+                        .is_none_or(|mac| current.config.mac.as_ref() == Some(mac))
+                    && entry.connection.as_ref().is_none_or(|connection| {
+                        current.config.host == connection.host
+                            && current.config.port == connection.port
+                            && current.config.mac.as_deref() == Some(&connection.mac)
+                            && current.config.tls_fingerprint == connection.tls_fingerprint
+                            && current.config.read_only
+                    })
+            });
+            if matches && !self.suppress_all {
+                self.store.overrides.push(entry);
+            } else {
+                self.skip(
+                    &entry.instance,
+                    "override was not loaded or changed during startup",
                 );
+                if let Some(current) = current {
+                    current.enabled = false;
+                }
             }
         }
-        config.drivers.push(gateway.driver());
     }
+
+    fn unreadable(&mut self) {
+        self.editable = false;
+        self.suppress_all = true;
+        tracing::warn!(
+            "cannot read managed Airzone registry; Airzone paused, other drivers unaffected; retain or restore the file before restarting"
+        );
+    }
+}
+
+fn valid_gateway(gateway: &Gateway) -> bool {
+    gateway.read_only
+        && normalize(gateway.request()).is_ok_and(|request| request == gateway.request())
+}
+
+fn valid_override(entry: &GatewayOverride) -> bool {
+    !entry.instance.is_empty()
+        && entry
+            .mac
+            .as_deref()
+            .is_none_or(|mac| moli_net::lan::mac_hex(mac).as_deref() == Some(mac))
+        && entry.connection.as_ref().is_none_or(|gateway| {
+            let request = gateway.request();
+            gateway.instance == entry.instance
+                && gateway.read_only
+                && entry.mac.as_ref().is_none_or(|mac| mac == &gateway.mac)
+                && normalize_connection(request.clone())
+                    .is_ok_and(|normalized| normalized == request)
+        })
+}
+
+/// Include recognizable claims from malformed entries, too. In particular an
+/// invalid withdrawal cannot lose to an enabled duplicate earlier in the file.
+fn conflicting_claims(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    let id = left.get("instance").and_then(serde_json::Value::as_str);
+    if id.is_some() && id == right.get("instance").and_then(serde_json::Value::as_str) {
+        return true;
+    }
+    let a = left
+        .get("connection")
+        .filter(|value| value.is_object())
+        .unwrap_or(left);
+    let b = right
+        .get("connection")
+        .filter(|value| value.is_object())
+        .unwrap_or(right);
+    let mac = |entry: &serde_json::Value| {
+        entry
+            .get("mac")
+            .and_then(serde_json::Value::as_str)
+            .and_then(moli_net::lan::mac_hex)
+    };
+    let identities = [mac(left), mac(a)];
+    let other_identities = [mac(right), mac(b)];
+    if identities.iter().flatten().any(|identity| {
+        other_identities
+            .iter()
+            .flatten()
+            .any(|other| other == identity)
+    }) {
+        return true;
+    }
+    let host = a.get("host").and_then(serde_json::Value::as_str);
+    let port = a.get("port").and_then(serde_json::Value::as_u64);
+    left.get("enabled").and_then(serde_json::Value::as_bool) != Some(false)
+        && right.get("enabled").and_then(serde_json::Value::as_bool) != Some(false)
+        && host.is_some()
+        && port.is_some()
+        && host == b.get("host").and_then(serde_json::Value::as_str)
+        && port == b.get("port").and_then(serde_json::Value::as_u64)
+}
+
+fn read_store(path: &Path) -> Registry {
+    let mut registry = Registry {
+        store: Store::default(),
+        raw: None,
+        editable: true,
+        suppressed: HashSet::new(),
+        suppress_all: false,
+    };
+    let Ok(raw) = bytes(path) else {
+        registry.unreadable();
+        return registry;
+    };
+    let Some(data) = raw.as_deref() else {
+        return registry;
+    };
+    let parsed = serde_json::from_slice::<RawStore>(data);
+    registry.raw = raw;
+    let Ok(parsed) = parsed else {
+        registry.unreadable();
+        return registry;
+    };
+    if !matches!(parsed.version, 1 | 2)
+        || parsed.gateways.len() + parsed.overrides.len() > MAX_GATEWAYS
+        || (parsed.version == 1 && !parsed.overrides.is_empty())
+    {
+        registry.unreadable();
+        return registry;
+    }
+    registry.store.version = parsed.version;
+    let entries: Vec<_> = parsed.gateways.iter().chain(&parsed.overrides).collect();
+    for (index, raw) in entries.iter().enumerate() {
+        let is_override = index >= parsed.gateways.len();
+        let instance = raw
+            .get("instance")
+            .and_then(serde_json::Value::as_str)
+            .filter(|instance| !instance.is_empty());
+        let ambiguous = entries
+            .iter()
+            .enumerate()
+            .any(|(other, entry)| other != index && conflicting_claims(raw, entry));
+        let accepted = if ambiguous {
+            false
+        } else if is_override {
+            serde_json::from_value::<GatewayOverride>((*raw).clone())
+                .ok()
+                .filter(valid_override)
+                .is_some_and(|entry| {
+                    registry.store.overrides.push(entry);
+                    true
+                })
+        } else {
+            serde_json::from_value::<Gateway>((*raw).clone())
+                .ok()
+                .filter(valid_gateway)
+                .is_some_and(|entry| {
+                    registry.store.gateways.push(entry);
+                    true
+                })
+        };
+        if !accepted {
+            registry.skip(
+                instance.unwrap_or("<unknown>"),
+                "malformed or ambiguous entry",
+            );
+            if let Some(instance) = instance {
+                registry.suppressed.insert(instance.to_owned());
+            } else if is_override {
+                // The withdrawal's owner cannot be identified safely.
+                registry.suppress_all = true;
+            }
+        }
+    }
+    if registry.suppress_all {
+        // An unidentified withdrawal may own a managed gateway, too. Pause the
+        // accepted in-memory entries without changing the original file.
+        for gateway in &mut registry.store.gateways {
+            gateway.enabled = false;
+        }
+    }
+    registry
+}
+
+fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<DriverConfig> {
+    ensure!(
+        driver.kind == "airzone",
+        "override targets a different driver kind"
+    );
+    let mut options = driver.options.clone();
+    let table = options.as_table_mut().context("invalid Airzone options")?;
+    if let Some(mac) = &entry.mac {
+        table.insert("mac".into(), mac.clone().into());
+    }
+    if let Some(gateway) = &entry.connection {
+        table.insert("host".into(), gateway.host.clone().into());
+        table.insert("port".into(), i64::from(gateway.port).into());
+        table.insert("mac".into(), gateway.mac.clone().into());
+        table.insert("read_only".into(), true.into());
+        table.remove("tls_fingerprint");
+        if let Some(pin) = &gateway.tls_fingerprint {
+            table.insert("tls_fingerprint".into(), pin.clone().into());
+        }
+    }
+    moli_airzone::Airzone::new(options.clone().try_into()?)?;
+    Ok(DriverConfig {
+        id: driver.id.clone(),
+        kind: driver.kind.clone(),
+        enabled: Some(entry.enabled),
+        options,
+    })
+}
+
+fn duplicates(candidate: &DriverConfig, drivers: &[DriverConfig], except: Option<usize>) -> bool {
+    let Ok(current) = candidate.options.clone().try_into::<moli_airzone::Config>() else {
+        return true;
+    };
+    drivers.iter().enumerate().any(|(index, other)| {
+        if Some(index) == except {
+            return false;
+        }
+        if candidate.id == other.id {
+            return true;
+        }
+        if other.kind != "airzone" {
+            return false;
+        }
+        let Ok(other_config) = other.options.clone().try_into::<moli_airzone::Config>() else {
+            return false;
+        };
+        (candidate.enabled != Some(false)
+            && other.enabled != Some(false)
+            && current.host == other_config.host
+            && current.port == other_config.port)
+            || current
+                .mac
+                .as_deref()
+                .and_then(moli_net::lan::mac_hex)
+                .is_some_and(|mac| {
+                    other_config
+                        .mac
+                        .as_deref()
+                        .and_then(moli_net::lan::mac_hex)
+                        .as_deref()
+                        == Some(&mac)
+                })
+    })
+}
+
+/// Called before validating/spawning drivers. Retain the original registry on
+/// disk, pause only ambiguous Airzone entries, and keep unrelated drivers alive.
+#[allow(clippy::unnecessary_wraps)] // Keep the configuration loader's fallible hook.
+pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
+    let mut registry = read_store(&config.server.data_dir.join(FILE));
+    for driver in &mut config.drivers {
+        if driver.kind == "airzone"
+            && (registry.suppress_all || registry.suppressed.contains(&driver.id))
+        {
+            driver.enabled = Some(false);
+        }
+    }
+    for entry in std::mem::take(&mut registry.store.overrides) {
+        let Some(index) = config
+            .drivers
+            .iter()
+            .position(|driver| driver.id == entry.instance)
+        else {
+            registry.skip(
+                &entry.instance,
+                "override no longer has a configured driver",
+            );
+            continue;
+        };
+        let candidate = overlay(&config.drivers[index], &entry);
+        match candidate {
+            Ok(candidate)
+                if !duplicates(&candidate, &config.drivers, Some(index))
+                    && !registry.suppress_all =>
+            {
+                config.drivers[index] = candidate;
+                registry.store.overrides.push(entry);
+            }
+            _ => {
+                registry.skip(&entry.instance, "invalid or conflicting override");
+                if config.drivers[index].kind == "airzone" {
+                    config.drivers[index].enabled = Some(false);
+                }
+            }
+        }
+    }
+    for gateway in std::mem::take(&mut registry.store.gateways) {
+        let candidate = gateway.driver();
+        if duplicates(&candidate, &config.drivers, None) {
+            registry.skip(
+                &gateway.instance,
+                "gateway conflicts with configured driver",
+            );
+        } else {
+            config.drivers.push(candidate);
+            registry.store.gateways.push(gateway);
+        }
+    }
+    config.managed_airzone = Some(registry);
     Ok(())
 }
 
@@ -351,6 +568,16 @@ struct EffectiveGateway {
 struct State {
     store: Store,
     raw: Option<Vec<u8>>,
+    editable: bool,
+}
+impl State {
+    fn editable(&self) -> Result<(), SetupError> {
+        if self.editable {
+            Ok(())
+        } else {
+            Err(SetupError::new("persistence_failed"))
+        }
+    }
 }
 struct Inner {
     hub: Hub,
@@ -377,33 +604,43 @@ impl fmt::Debug for Manager {
 impl Manager {
     pub fn new(hub: Hub, config: &Config, cancel: CancellationToken) -> anyhow::Result<Self> {
         let path = config.server.data_dir.join(FILE);
-        let (store, raw) = read_store(&path)?;
-        for saved in &store.gateways {
-            ensure!(
-                config
-                    .drivers
-                    .iter()
-                    .any(|driver| driver.id == saved.instance
-                        && driver.kind == "airzone"
-                        && (driver.enabled != Some(false)) == saved.enabled
-                        && driver.options == saved.driver().options),
-                "managed Airzone registry changed during startup"
-            );
+        let mut registry = config
+            .managed_airzone
+            .clone()
+            .unwrap_or_else(|| read_store(&path));
+        // Preserve the loader's accepted subset, including collision decisions.
+        // If the file changes before serve, no withdrawal state can be trusted.
+        if !bytes(&path).is_ok_and(|current| current == registry.raw) {
+            registry.unreadable();
+            registry.store = Store::default();
+        }
+        // Only entries actually reconciled into this configuration may start.
+        let gateways = std::mem::take(&mut registry.store.gateways);
+        for saved in gateways {
+            if config.drivers.iter().any(|driver| {
+                driver.id == saved.instance
+                    && driver.kind == "airzone"
+                    && (driver.enabled != Some(false)) == saved.enabled
+                    && driver.options == saved.driver().options
+            }) {
+                registry.store.gateways.push(saved);
+            } else {
+                registry.skip(
+                    &saved.instance,
+                    "gateway was not loaded or changed during startup",
+                );
+                registry.suppressed.insert(saved.instance);
+            }
         }
         let mut reserved = HashSet::new();
         let mut configured = Vec::new();
         for driver in &config.drivers {
-            if let Some(saved) = store
+            if registry
+                .store
                 .gateways
                 .iter()
-                .find(|saved| saved.instance == driver.id)
+                .any(|saved| saved.instance == driver.id)
             {
-                ensure!(
-                    saved.driver().options == driver.options
-                        && (driver.enabled != Some(false)) == saved.enabled
-                        && driver.kind == "airzone",
-                    "managed Airzone registry changed during startup"
-                );
                 continue;
             }
             reserved.insert(driver.id.clone());
@@ -411,43 +648,29 @@ impl Manager {
                 configured.push(StaticGateway {
                     instance: driver.id.clone(),
                     config: driver.options.clone().try_into()?,
-                    enabled: driver.enabled != Some(false),
+                    enabled: driver.enabled != Some(false)
+                        && !registry.suppress_all
+                        && !registry.suppressed.contains(&driver.id),
                 });
             }
         }
-        for entry in &store.overrides {
-            let current = configured
-                .iter()
-                .find(|gateway| gateway.instance == entry.instance)
-                .context("managed Airzone override changed during startup")?;
-            ensure!(
-                current.enabled == entry.enabled,
-                "managed Airzone registry changed during startup"
-            );
-            ensure!(
-                entry
-                    .mac
-                    .as_ref()
-                    .is_none_or(|mac| current.config.mac.as_ref() == Some(mac)),
-                "managed Airzone identity changed during startup"
-            );
-            if let Some(connection) = &entry.connection {
-                ensure!(
-                    current.config.host == connection.host
-                        && current.config.port == connection.port
-                        && current.config.mac.as_deref() == Some(&connection.mac)
-                        && current.config.tls_fingerprint == connection.tls_fingerprint
-                        && current.config.read_only,
-                    "managed Airzone connection changed during startup"
-                );
-            }
-        }
+        registry.reconcile_overrides(&mut configured);
+        let Registry {
+            store,
+            raw,
+            editable,
+            ..
+        } = registry;
         Ok(Self(Arc::new(Inner {
             hub,
             path,
             reserved,
             configured,
-            state: Arc::new(tokio::sync::Mutex::new(State { store, raw })),
+            state: Arc::new(tokio::sync::Mutex::new(State {
+                store,
+                raw,
+                editable,
+            })),
             discovery_cancel: cancel.child_token(),
             cancel,
             accepting: AtomicBool::new(true),
@@ -714,6 +937,7 @@ impl Manager {
     }
 
     async fn persisted(&self, state: &State) -> Result<(), SetupError> {
+        state.editable()?;
         let path = self.0.path.clone();
         let expected = state.raw.clone();
         let unchanged =
@@ -728,6 +952,7 @@ impl Manager {
     }
 
     async fn persist(&self, state: &mut State, mut next: Store) -> Result<(), SetupError> {
+        state.editable()?;
         next.version = 2;
         if next.gateways.len() + next.overrides.len() > MAX_GATEWAYS {
             return Err(SetupError::new("limit_reached"));
@@ -756,6 +981,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.editable()?;
         // A lost response may be retried after saving or after a process restart.
         if let Some(saved) = state
             .store
@@ -849,6 +1075,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.editable()?;
         let replay = state
             .store
             .gateways
@@ -930,6 +1157,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.editable()?;
         let current = self.existing(&state, &instance)?;
         let result = GatewayWithdrawn {
             instance: instance.clone(),

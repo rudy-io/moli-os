@@ -19,7 +19,7 @@ use anyhow::{Context as _, bail};
 /// SQLite databases: copied through SQLite itself.
 const DATABASES: [&str; 2] = ["history.db", "energy.db"];
 /// Everything else worth keeping (missing ones are skipped).
-const FILES: [&str; 18] = [
+const FILES: [&str; 19] = [
     "moli.toml",
     crate::managed_airzone::FILE,
     "plan.json",
@@ -35,6 +35,7 @@ const FILES: [&str; 18] = [
     "journal.jsonl.1",
     "state.json",
     "state.devices.json",
+    "state.observations.json",
     "trusted-profiles.toml",
     "perf.jsonl",
     "bench.json",
@@ -187,6 +188,9 @@ mod tests {
         std::fs::write(data.join("labels.toml"), "x = 1\n").unwrap();
         let definitions = br#"{"version":1,"devices":{},"unclaimed":{}}"#;
         std::fs::write(data.join("state.devices.json"), definitions).unwrap();
+        let observations =
+            br#"{"version":2,"generation":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"states":{}}"#;
+        std::fs::write(data.join("state.observations.json"), observations).unwrap();
         std::fs::create_dir_all(data.join("plan")).unwrap();
         std::fs::write(data.join("plan").join("0123456789abcdef.png"), b"png").unwrap();
         std::fs::write(data.join("plan").join("notes.txt"), b"not a plan").unwrap();
@@ -203,6 +207,10 @@ mod tests {
         assert_eq!(
             std::fs::read(fresh.join("state.devices.json")).unwrap(),
             definitions
+        );
+        assert_eq!(
+            std::fs::read(fresh.join("state.observations.json")).unwrap(),
+            observations
         );
         assert_eq!(
             std::fs::read_to_string(fresh.join("labels.toml")).unwrap(),

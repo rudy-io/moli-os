@@ -417,44 +417,29 @@ async fn restoration_does_not_replay_cached_values_as_new_measurement_events() {
 }
 
 #[tokio::test]
-async fn an_unsavable_inventory_does_not_block_legacy_values_and_can_be_retried() {
+async fn an_invalid_replacement_drops_only_its_definition_and_keeps_valid_legacy_values() {
     let f = Fixture::new();
+    save_fixture(&f).await;
     let hub = f.hub();
     let _commands = register(&hub);
-    hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
-    hub.persist_state().await.unwrap();
-    let previous_inventory = std::fs::read(f.0.join("state.devices.json")).unwrap();
     let mut oversized = definition();
     oversized.native_name = "a".repeat(8193).into();
     hub.upsert_device(oversized);
     hub.set_state(&id(), "on", Value::Bool(false));
-    assert!(hub.persist_state().await.is_err());
-    let values: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(f.0.join("state.json")).unwrap()).unwrap();
-    assert_eq!(values["synthetic:device"]["on"]["value"], false);
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
     let reboot = f.hub();
-    let _reboot_commands = register(&reboot);
-    assert!(
-        reboot.device(&id()).is_none(),
-        "a stale authoritative sidecar must not override the saved legacy values"
-    );
+    let _next = register(&reboot);
+    assert!(reboot.device(&id()).is_none());
     reboot.upsert_device(definition());
     assert_eq!(
         reboot.state(&PointId::new(&id(), "on")).unwrap().value,
         Value::Bool(false)
     );
-    assert_eq!(
-        std::fs::read(f.0.join("state.devices.json.stale")).unwrap(),
-        previous_inventory
-    );
-    hub.upsert_device(definition());
-    assert!(hub.persist_state().await.unwrap());
-    assert!(!hub.persist_state().await.unwrap());
 }
 
 #[tokio::test]
-async fn failed_inventory_deletion_does_not_resurrect_after_restart() {
+async fn deletion_is_durable_even_when_another_definition_is_invalid() {
     let f = Fixture::new();
     save_fixture(&f).await;
     let hub = f.hub();
@@ -463,74 +448,39 @@ async fn failed_inventory_deletion_does_not_resurrect_after_restart() {
     let mut other = definition();
     other.id = "synthetic:other".into();
     other.native_name = "a".repeat(8193).into();
-    hub.upsert_device(other.clone());
-    hub.set_state(&other.id, "on", Value::Bool(true));
-    assert!(hub.persist_state().await.is_err());
+    hub.upsert_device(other);
+    assert!(hub.persist_state().await.unwrap());
     let reboot = f.hub();
-    let _next_commands = register(&reboot);
-    assert!(reboot.device(&id()).is_none());
-    assert!(!reboot.known_device_ids_of(&instance()).contains(&id()));
-    other.native_name = "Synthetic other device".into();
-    reboot.upsert_device(other.clone());
+    let _next = register(&reboot);
+    assert!(reboot.known_device_ids_of(&instance()).is_empty());
+}
+
+#[tokio::test]
+async fn failed_observation_write_keeps_the_previous_snapshot_and_retries() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.persist_state().await.unwrap();
+    hub.set_state(&id(), "on", Value::Bool(false));
+    let blocked = f.0.join("state.observations.json.tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(hub.persist_state().await.is_err());
+    let before_retry = f.hub();
+    let _before = register(&before_retry);
     assert_eq!(
-        reboot.state(&PointId::new(&other.id, "on")).unwrap().value,
+        before_retry
+            .state(&PointId::new(&id(), "on"))
+            .unwrap()
+            .value,
         Value::Bool(true)
     );
-}
-
-#[tokio::test]
-async fn quarantine_without_a_previous_sidecar_keeps_the_legacy_fallback() {
-    let f = Fixture::new();
-    let hub = f.hub();
-    let _commands = register(&hub);
-    let mut oversized = definition();
-    oversized.native_name = "a".repeat(8193).into();
-    hub.upsert_device(oversized);
-    hub.set_state(&id(), "on", Value::Bool(false));
-    assert!(hub.persist_state().await.is_err());
-    assert!(!f.0.join("state.devices.json.stale").exists());
-    let reboot = f.hub();
-    let _next_commands = register(&reboot);
-    reboot.upsert_device(definition());
-    assert_eq!(
-        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
-        Value::Bool(false)
-    );
-}
-
-#[tokio::test]
-async fn quarantine_failure_is_reported_and_the_flush_can_be_retried() {
-    let f = Fixture::new();
-    save_fixture(&f).await;
-    let previous_values = std::fs::read(f.0.join("state.json")).unwrap();
-    let hub = f.hub();
-    let _commands = register(&hub);
-    let mut oversized = definition();
-    oversized.native_name = "a".repeat(8193).into();
-    hub.upsert_device(oversized);
-    hub.set_state(&id(), "on", Value::Bool(false));
-    let blocked = f.0.join("state.devices.json.stale");
-    std::fs::create_dir(&blocked).unwrap();
-    let error = hub.persist_state().await.unwrap_err().to_string();
-    assert!(
-        error.contains("quarantine"),
-        "the failed move is reported: {error}"
-    );
-    assert!(f.0.join("state.devices.json").is_file());
-    assert_eq!(
-        std::fs::read(f.0.join("state.json")).unwrap(),
-        previous_values,
-        "a blocked quarantine must not commit values that the old authority would ignore"
-    );
     std::fs::remove_dir(blocked).unwrap();
-    assert!(
-        hub.persist_state().await.is_err(),
-        "dirty retry still attempts the inadmissible inventory"
-    );
-    assert!(!f.0.join("state.devices.json").exists());
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
     let reboot = f.hub();
-    let _next_commands = register(&reboot);
-    reboot.upsert_device(definition());
+    let _next = register(&reboot);
     assert_eq!(
         reboot.state(&PointId::new(&id(), "on")).unwrap().value,
         Value::Bool(false)
@@ -538,28 +488,23 @@ async fn quarantine_failure_is_reported_and_the_flush_can_be_retried() {
 }
 
 #[tokio::test]
-async fn failed_legacy_write_keeps_the_last_coherent_inventory_and_reports_both_errors() {
+async fn failed_legacy_write_cannot_resurrect_a_committed_inventory_deletion() {
     let f = Fixture::new();
     save_fixture(&f).await;
-    let previous_inventory = std::fs::read(f.0.join("state.devices.json")).unwrap();
     let hub = f.hub();
     let _commands = register(&hub);
-    let mut oversized = definition();
-    oversized.native_name = "a".repeat(8193).into();
-    hub.upsert_device(oversized);
-    hub.set_state(&id(), "on", Value::Bool(false));
-    std::fs::remove_file(f.0.join("state.json")).unwrap();
-    std::fs::create_dir(f.0.join("state.json")).unwrap();
-    let error = hub.persist_state().await.unwrap_err().to_string();
-    assert!(
-        error.contains("inventory cache") && error.contains("state cache"),
-        "both failures are reported: {error}"
-    );
-    assert_eq!(
-        std::fs::read(f.0.join("state.devices.json")).unwrap(),
-        previous_inventory
-    );
-    assert!(!f.0.join("state.devices.json.stale").exists());
+    hub.remove_device(&id());
+    let blocked = f.0.join("state.json.tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(hub.persist_state().await.is_err());
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert!(reboot.known_device_ids_of(&instance()).is_empty());
+    reboot.upsert_device(definition());
+    assert!(reboot.device(&id()).unwrap().state.is_empty());
+    std::fs::remove_dir(blocked).unwrap();
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
 }
 
 #[tokio::test]
@@ -658,4 +603,314 @@ async fn restored_inventory_events_include_persisted_local_labels() {
     };
     assert_eq!(label.name.as_deref(), Some("Synthetic local name"));
     assert_eq!(label.room.as_deref(), Some("Synthetic room"));
+}
+
+#[tokio::test]
+async fn state_only_flush_keeps_definition_file_and_restores_latest_observations() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.persist_state().await.unwrap();
+    let definitions = std::fs::read(f.0.join("state.devices.json")).unwrap();
+    // Any attempt to rewrite the inventory now fails, even with identical bytes.
+    std::fs::create_dir(f.0.join("state.devices.json.tmp")).unwrap();
+    hub.upsert_device(definition());
+    assert!(!hub.persist_state().await.unwrap());
+    hub.set_state(&id(), "on", Value::Bool(false));
+    let latest = hub.state(&PointId::new(&id(), "on")).unwrap();
+    assert!(hub.persist_state().await.unwrap());
+    assert_eq!(
+        std::fs::read(f.0.join("state.devices.json")).unwrap(),
+        definitions
+    );
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(reboot.state(&PointId::new(&id(), "on")).unwrap(), latest);
+    assert!(reboot.current_state(&PointId::new(&id(), "on")).is_none());
+}
+
+#[tokio::test]
+async fn invalid_definitions_are_omitted_without_losing_healthy_devices_or_retrying() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    for case in ["enum", "text", "nan"] {
+        let mut invalid = definition();
+        invalid.id = format!("synthetic:{case}").into();
+        match case {
+            "enum" => {
+                invalid.points[0].kind = Kind::Enum {
+                    values: vec!["v".into(); 1025],
+                }
+            }
+            "text" => invalid.native_name = "a".repeat(8193).into(),
+            _ => {
+                invalid.points[0].kind = Kind::Numeric {
+                    min: Some(f64::NAN),
+                    max: None,
+                    step: None,
+                }
+            }
+        }
+        hub.upsert_device(invalid);
+    }
+    assert!(hub.persist_state().await.unwrap());
+    assert!(
+        !hub.persist_state().await.unwrap(),
+        "permanent invalid input is not retryable I/O"
+    );
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(reboot.known_device_ids_of(&instance()), vec![id()]);
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+}
+
+#[tokio::test]
+async fn invalid_readings_do_not_poison_other_devices_or_reappear_as_old_samples() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    let mut text = definition();
+    text.id = "synthetic:text".into();
+    text.points[0].kind = Kind::Text;
+    hub.upsert_device(text.clone());
+    hub.set_state(&text.id, "on", Value::Text("old".into()));
+    hub.persist_state().await.unwrap();
+    hub.set_state(&text.id, "on", Value::Text("a".repeat(65537).into()));
+    hub.set_state(&id(), "on", Value::Bool(true));
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert!(reboot.state(&PointId::new(&text.id, "on")).is_none());
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+}
+
+#[tokio::test]
+async fn deletion_and_readdition_ignore_observations_from_the_previous_definition_generation() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.persist_state().await.unwrap();
+    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.persist_state().await.unwrap();
+    let old_values = std::fs::read(f.0.join("state.json")).unwrap();
+    hub.remove_device(&id());
+    hub.persist_state().await.unwrap();
+    hub.upsert_device(definition());
+    hub.persist_state().await.unwrap();
+    std::fs::write(f.0.join("state.json"), old_values).unwrap();
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert!(reboot.device(&id()).unwrap().state.is_empty());
+}
+
+#[tokio::test]
+async fn failed_definition_write_keeps_the_last_snapshot_and_retries_the_deletion() {
+    let f = Fixture::new();
+    save_fixture(&f).await;
+    let hub = f.hub();
+    let _commands = register(&hub);
+    let old = std::fs::read(f.0.join("state.devices.json")).unwrap();
+    hub.remove_device(&id());
+    let blocked = f.0.join("state.devices.json.tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(hub.persist_state().await.is_err());
+    assert_eq!(std::fs::read(f.0.join("state.devices.json")).unwrap(), old);
+    std::fs::remove_dir(blocked).unwrap();
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert!(reboot.known_device_ids_of(&instance()).is_empty());
+}
+
+#[tokio::test]
+async fn one_oversized_serialized_definition_does_not_exhaust_the_inventory_budget() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    let mut oversized = definition();
+    oversized.id = "synthetic:a-oversized".into();
+    oversized.points[0].kind = Kind::Enum {
+        values: vec!["a".repeat(8192).into(); 1024],
+    };
+    hub.upsert_device(oversized);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
+    assert!(
+        std::fs::metadata(f.0.join("state.devices.json"))
+            .unwrap()
+            .len()
+            <= 8 * 1024 * 1024
+    );
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(reboot.known_device_ids_of(&instance()), vec![id()]);
+}
+
+#[tokio::test]
+async fn version_one_inventory_migrates_without_using_an_unrelated_observation_file() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.persist_state().await.unwrap();
+    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.persist_state().await.unwrap();
+    let path = f.0.join("state.devices.json");
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    old["version"] = 1.into();
+    old.as_object_mut().unwrap().remove("generation");
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let migrated = f.hub();
+    let _next = register(&migrated);
+    assert_eq!(
+        migrated.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+    assert!(migrated.persist_state().await.unwrap());
+    let upgraded: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(upgraded["version"], 2);
+    migrated.set_state(&id(), "on", Value::Bool(false));
+    migrated.persist_state().await.unwrap();
+    let reboot = f.hub();
+    let _reboot_commands = register(&reboot);
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(false)
+    );
+}
+
+#[tokio::test]
+async fn one_malformed_serialized_definition_does_not_discard_its_valid_peer() {
+    let f = Fixture::new();
+    save_fixture(&f).await;
+    let path = f.0.join("state.devices.json");
+    let mut data: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    data["devices"]["synthetic:malformed"] = serde_json::json!({"device":{"points":"invalid"}});
+    std::fs::write(path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(reboot.known_device_ids_of(&instance()), vec![id()]);
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+}
+
+#[tokio::test]
+async fn corrupt_observations_keep_the_coherent_baseline_and_ignore_legacy_values() {
+    let f = Fixture::new();
+    save_fixture(&f).await;
+    std::fs::write(f.0.join("state.observations.json"), b"{broken").unwrap();
+    std::fs::write(
+        f.0.join("state.json"),
+        r#"{"synthetic:device":{"on":{"value":false,"ts":1}}}"#,
+    )
+    .unwrap();
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+}
+
+#[tokio::test]
+async fn oversized_observation_maps_are_bounded_without_losing_other_devices() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    let mut large = definition();
+    large.id = "synthetic:a-large".into();
+    large.points[0].kind = Kind::Text;
+    let point = large.points[0].clone();
+    large.points = (0..129)
+        .map(|i| PointSpec {
+            key: format!("point-{i}").into(),
+            ..point.clone()
+        })
+        .collect();
+    hub.upsert_device(large.clone());
+    hub.upsert_device(definition());
+    hub.set_state(&large.id, "point-0", Value::Text("previous".into()));
+    hub.persist_state().await.unwrap();
+    for point in &large.points {
+        hub.set_state(&large.id, &point.key, Value::Text("a".repeat(65536).into()));
+    }
+    hub.set_state(&id(), "on", Value::Bool(true));
+    assert!(hub.persist_state().await.unwrap());
+    assert!(!hub.persist_state().await.unwrap());
+    for name in [
+        "state.json",
+        "state.devices.json",
+        "state.observations.json",
+    ] {
+        assert!(std::fs::metadata(f.0.join(name)).unwrap().len() <= 8 * 1024 * 1024);
+    }
+    let reboot = f.hub();
+    let _next = register(&reboot);
+    assert_eq!(
+        reboot.state(&PointId::new(&id(), "on")).unwrap().value,
+        Value::Bool(true)
+    );
+    assert!(reboot.device(&large.id).unwrap().state.is_empty());
+}
+
+#[test]
+fn cancelled_flush_cannot_lose_a_deletion_or_race_the_next_writer() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            let f = Fixture::new();
+            let hub = f.hub();
+            let _commands = register(&hub);
+            hub.upsert_device(definition());
+            hub.set_state(&id(), "on", Value::Bool(true));
+            hub.persist_state().await.unwrap();
+            hub.remove_device(&id());
+            // Hold the only filesystem worker: the next flush consumes its flags
+            // then waits before its first atomic-file operation can complete.
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (release, waiting) = std::sync::mpsc::channel();
+            let blocked = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                waiting.recv().unwrap();
+            });
+            ready.await.unwrap();
+            let mut flush = Box::pin(hub.persist_state());
+            assert!(futures::poll!(flush.as_mut()).is_pending());
+            tokio::task::yield_now().await;
+            drop(flush);
+            release.send(()).unwrap();
+            blocked.await.unwrap();
+            hub.persist_state().await.unwrap();
+            assert!(!hub.persist_state().await.unwrap());
+            let reboot = f.hub();
+            let _next = register(&reboot);
+            assert!(reboot.known_device_ids_of(&instance()).is_empty());
+        });
 }

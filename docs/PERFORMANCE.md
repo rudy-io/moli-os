@@ -72,8 +72,10 @@ latence ou à une qualification complète du budget.
 La gestion des passerelles porte ce même chunk différé à 72,72 Ko / 20,75 Ko
 gzip. La liste se rafraîchit sur les événements de cycle de vie et les
 reconnexions, sans nouveau poller. La conservation des appareils indisponibles
-ajoute un inventaire borné à 8 Mio sur disque, enregistré avec les valeurs par
-la tâche de persistance existante. Les observations restaurées ne sont pas
+ajoute un inventaire borné à 8 Mio sur disque, réécrit seulement lorsque les
+définitions changent. La tâche de persistance existante enregistre les valeurs
+dans un fichier séparé, lié à la génération de cet inventaire. Une observation
+invalide est écartée individuellement ; elle ne bloque pas les autres appareils. Les observations restaurées ne sont pas
 rejouées comme des mesures fraîches dans l’historique ou les intégrales d’énergie.
 Le coût de l’image et les mesures après redémarrage sont consignés dans la PR.
 

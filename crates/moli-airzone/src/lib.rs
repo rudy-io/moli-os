@@ -35,7 +35,7 @@ pub struct Config {
     pub poll_secs: u64,
     #[serde(default)]
     pub mac: Option<String>,
-    #[serde(default = "default_read_only")]
+    #[serde(default)]
     pub read_only: bool,
     /// Explicit DHW temperature unit when the controller omits it (0 Celsius, 1 Fahrenheit).
     #[serde(default)]
@@ -43,9 +43,6 @@ pub struct Config {
     /// SHA-256 certificate fingerprint; presence selects pinned HTTPS.
     #[serde(default)]
     pub tls_fingerprint: Option<String>,
-}
-fn default_read_only() -> bool {
-    true
 }
 fn default_port() -> u16 {
     3000
@@ -423,9 +420,9 @@ mod tests {
         );
     }
     #[test]
-    fn omitted_read_only_defaults_to_true_and_writes_require_explicit_opt_in() {
+    fn omitted_read_only_preserves_legacy_toml_command_mode() {
         let config: Config = serde_json::from_value(json!({"host":"controller.example"})).unwrap();
-        assert!(config.read_only);
+        assert!(!config.read_only);
         let config: Config =
             serde_json::from_value(json!({"host":"controller.example", "read_only":false}))
                 .unwrap();
