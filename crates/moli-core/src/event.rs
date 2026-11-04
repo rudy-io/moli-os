@@ -196,6 +196,14 @@ pub enum Action {
         from: String,
         to: String,
     },
+    /// A setting of the house changed by a person (`energy.price`, the price
+    /// of a kWh): what it was, what it is now.
+    Setting {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Value>,
+        to: Value,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

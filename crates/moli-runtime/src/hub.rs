@@ -1219,6 +1219,28 @@ impl Hub {
         );
     }
 
+    /// Journals a setting of the house changed by a person.
+    pub fn record_setting(
+        &self,
+        origin: Origin,
+        actor: Option<String>,
+        name: &str,
+        from: Option<Value>,
+        to: Value,
+    ) {
+        self.record(
+            origin,
+            actor,
+            Action::Setting {
+                name: name.to_owned(),
+                from,
+                to,
+            },
+            Outcome::Ok,
+            Instant::now(),
+        );
+    }
+
     /// Every writable point with this key (`announce`…), without copying
     /// the model: cheap enough for a check run on every automation.
     #[must_use]
