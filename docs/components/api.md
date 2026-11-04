@@ -332,6 +332,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/health` | libre | aucune | `{name:"moli-os", version, stats, guard, drivers}` | aucune |
 | GET | `/api/devices` | libre ; un invité : ses pièces seulement (§ 3.1) | aucune | `Snapshot` : `{devices:[DeviceView], drivers:[DriverView], approvals:[ApprovalRequest], guard}` | aucune |
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
+| POST | `/api/devices/{id}/live` | comme `/snapshot` (invités refusés ; **humain** dans une pièce protégée) | `{sdp}` : l'offre WebRTC du navigateur (64 Kio au plus) | `{sdp}` : la réponse de l'appareil ; la vidéo va ensuite de l'appareil au navigateur, sans passer par Moli (au réseau de la maison seulement : l'adresse du navigateur vue par Moli est passée à l'appareil) | `400` pas une offre ; `403` ; `404` appareil inconnu / pas de vidéo en direct ; `502` pas de réponse en 10 s ou échec |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
 | GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
 | GET | `/api/system` | libre | aucune | `{version, timezone, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
@@ -454,6 +455,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 | `online` | booléen ou `null` | `null` = disponibilité inconnue |
 | `state` | `{<clé>: {value, ts}}` | dernière valeur par point |
 | `camera` | `true`, présent seulement pour une caméra | image via `/snapshot` |
+| `live` | `true`, présent seulement pour une vidéo en direct | WebRTC via `/live` (le navigateur lit la vidéo) |
 
 **`PointSpec`** : `{key, label, kind, access:{read, write}, unit?, semantic}`.
 

@@ -6,6 +6,7 @@
 //! (the device's image). Writes: the light, and `control` (pause, resume,
 //! cancel), which the guard holds for a human when an agent asks.
 
+mod creality;
 mod model;
 
 use std::sync::{Arc, Mutex};
@@ -191,6 +192,15 @@ async fn meet(
             path: Arc::clone(thumb),
         }),
     );
+    // A Creality's camera: live video only, played by the browser.
+    if shape.creality {
+        ctx.provide_live(
+            &id,
+            Arc::new(creality::Camera {
+                host: config.host.clone(),
+            }),
+        );
+    }
     Ok(Printer {
         id,
         shape,
