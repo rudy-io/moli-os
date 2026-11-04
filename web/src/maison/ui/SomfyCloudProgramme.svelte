@@ -28,7 +28,7 @@
 <section class="programme">
   <div class="heading">
     <b>{programme.label ?? t('systeme.somfy.programme.number', { number: index + 1 })}</b>
-    <span class:disabled={programme.enabled === false}>{stateText(programme.enabled)}</span>
+    {#if kind !== 'scenarios' || programme.enabled !== null}<span class:disabled={programme.enabled === false}>{stateText(programme.enabled)}</span>{/if}
   </div>
   {#if programme.days}<p class="days">{daysText(programme.days)}</p>{/if}
   {#if programme.dates.start || programme.dates.end}

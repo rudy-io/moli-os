@@ -93,7 +93,7 @@ instance adds the same table to its existing local options; the local `host`,
 developer token, certificate pin and local polling interval retain their roles.
 An instance needs at least one source.
 
-Connect through the owner-only Somfy panel on the System page. Enter the Somfy
+Connect through the owner-only TaHoma page (`#/somfy`), accessible from System. Enter the Somfy
 account directly there, then explicitly choose a setup and an anchor gateway.
 Do not put credentials in TOML, screenshots, issue comments or chat. The house
 owner chooses their own Moli code; a new installation's one-use setup code is

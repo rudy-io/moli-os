@@ -47,6 +47,7 @@
     { path: 'moli', name: 'Moli', orb: true },
     { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
     { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
+    { path: 'somfy', label: 'systeme.somfy.page_title', icon: 'shutter', shown: () => hub.drivers.some(d => d.integration === 'overkiz') },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
@@ -176,6 +177,8 @@
       <Moli />
     {:else if page === 'automatismes'}
       <Automatismes {route} />
+    {:else if page === 'somfy'}
+      {#await import('./pages/Somfy.svelte') then { default: Somfy }}<Somfy />{/await}
     {:else if page === 'systeme'}
       <Systeme />
     {:else if page === 'infra'}

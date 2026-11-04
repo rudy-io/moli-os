@@ -123,7 +123,7 @@ apparaît sans toucher à la page.
 
 ## Programmations TaHoma en lecture seule
 
-La carte Somfy de Système présente les jours, horaires et actions du catalogue
+La page TaHoma (`#/somfy`), accessible depuis Système, présente les jours, horaires et actions du catalogue
 privé déjà collecté. `lib/somfy-programmes.js` projette les définitions ;
 `ui/SomfyCloudProgramme.svelte` et `SomfyCloudActions.svelte` affichent les mêmes
 actions pour les scénarios, journées et règles intégrées. Les noms viennent des
@@ -145,3 +145,13 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
 - Télé : applis et clavier non disponibles (JointSpace ne le permet pas ; protocole
   Android TV Remote v2 à faire).
 - Clims : lecture seule tant que les écritures Daikin n'ont pas été testées physiquement.
+
+## Accès TaHoma
+
+`#/somfy` sépare les scénarios et les programmations des réglages de connexion.
+La navigation apparaît pour une intégration Overkiz configurée ; Système conserve
+un lien vers cette page. L’ouverture lit uniquement le catalogue local du
+propriétaire déjà collecté : elle ne déclenche pas de requête au fournisseur.
+Les informations techniques et le JSON d’origine restent disponibles à la demande.
+Le lien « Volets et stores » mène à `#/pieces/volets` : les commandes y dépendent
+des capacités réelles du pilote, indépendamment du catalogue cloud.

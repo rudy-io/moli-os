@@ -497,5 +497,22 @@
   "systeme.somfy.programme.day_cycle": "Cycle en jours",
   "systeme.somfy.programme.day_state": "Journée : {state}",
   "systeme.somfy.programme.group_state": "Groupe d’actions : {state}",
-  "systeme.somfy.programme.warning.solar_time": "Des paramètres horaires accompagnent cet horaire solaire. Consulter le JSON d’origine et vérifier leur effet dans TaHoma."
+  "systeme.somfy.programme.warning.solar_time": "Des paramètres horaires accompagnent cet horaire solaire. Consulter le JSON d’origine et vérifier leur effet dans TaHoma.",
+  "systeme.somfy.page_title": "TaHoma",
+  "systeme.somfy.page_intro": "Vos scénarios, vos horaires et l’accès aux équipements.",
+  "systeme.somfy.entry": "Retrouver mes volets, scénarios et programmations",
+  "systeme.somfy.equipment": "Volets et stores",
+  "systeme.somfy.equipment_hint": "Ouvrir, arrêter ou fermer depuis les cartes des équipements.",
+  "systeme.somfy.account": "Compte et connexion",
+  "systeme.somfy.account_hint": "Installation sélectionnée et informations techniques",
+  "systeme.somfy.read_only_badge": "Lecture seule",
+  "systeme.somfy.scenarios_tab": "Scénarios",
+  "systeme.somfy.programmes_tab": "Programmations",
+  "systeme.somfy.advanced": "Informations avancées",
+  "systeme.somfy.advanced_hint": "Journées, déclencheurs et données brutes TaHoma",
+  "systeme.somfy.reload_view": "Relire les données",
+  "systeme.somfy.refresh_provider": "Actualiser depuis TaHoma",
+  "systeme.somfy.read_only_explanation": "La consultation est active. Aucun scénario ne sera lancé depuis cette vue en lecture seule.",
+  "systeme.somfy.catalog_title": "Scénarios et programmations",
+  "systeme.somfy.equipment_missing": "Aucun volet relié à cette instance. Le catalogue cloud ne connecte pas les équipements."
 }

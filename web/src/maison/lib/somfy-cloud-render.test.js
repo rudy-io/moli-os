@@ -2,16 +2,27 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-let vite, render, Catalog, Status, Actions, setLanguage;
+let vite, render, Catalog, Status, Actions, Page, hub, setLanguage;
+const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
 before(async () => {
+  delete globalThis.localStorage;
+  globalThis.document = { querySelector: () => null, documentElement: {} };
   vite = await createServer({ root: fileURLToPath(new URL('../../../', import.meta.url)), server: { middlewareMode: true, watch: null }, logLevel: 'error' });
   ({ render } = await vite.ssrLoadModule('svelte/server'));
   Catalog = (await vite.ssrLoadModule('/src/maison/ui/SomfyCloudCatalog.svelte')).default;
   Status = (await vite.ssrLoadModule('/src/maison/ui/SomfyCloudStatus.svelte')).default;
   Actions = (await vite.ssrLoadModule('/src/maison/ui/SomfyCloudActions.svelte')).default;
+  Page = (await vite.ssrLoadModule('/src/maison/pages/Somfy.svelte')).default;
+  ({ hub } = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js'));
   ({ setLanguage } = await vite.ssrLoadModule('/src/lib/i18n.svelte.js'));
 });
-after(async () => { await vite?.close(); });
+after(async () => {
+  await vite?.close();
+  delete globalThis.document;
+  if (documentDescriptor) Object.defineProperty(globalThis, 'document', documentDescriptor);
+  if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor);
+});
 test('private definitions render escaped exact JSON, qualifications and no execution controls', () => {
   const raw = '{"n":18446744073709551615,"label":"<img src=x onerror=evil()>"}';
   const html = render(Catalog, { props: {
@@ -53,12 +64,11 @@ test('collection counts distinguish no observation, observed empty and qualified
     calendar_rules: { status: 'available', data: { definitions: [] } },
     triggers: { status: 'forbidden', data: { definitions: [{ id: 'old' }] }, last_observation_ms: 100, last_attempt_ms: 200 },
   } } };
-  const html = render(Catalog, { props: { observation, showDefinition() {} } }).body;
+  const html = render(Catalog, { props: { observation, initialSection: 'programmes', showDefinition() {} } }).body;
   const summaries = [...html.matchAll(/<summary[^>]*>([\s\S]*?)<\/summary>/g)].map(m => m[1].replace(/<[^>]*>/g, '').trim());
-  assert.doesNotMatch(summaries[0], /·|0/, 'missing collection is not an empty inventory');
-  assert.doesNotMatch(summaries[1], /·|0/, 'unavailable data has no count');
-  assert.match(summaries[2], /Disponible · 0$/);
-  assert.match(summaries[3], /Accès refusé · 1 · historique$/);
+  assert.ok(summaries.some(s => /Disponible · 0$/.test(s)));
+  assert.ok(summaries.some(s => /Accès refusé · 1 · historique$/.test(s)));
+  assert.ok(summaries.some(s => /Non pris en charge$/.test(s) && !/·|0/.test(s)), 'unavailable data has no count');
 });
 
 test('calendar programmes expose days, fixed and solar times and named actions without executable controls', () => {
@@ -75,7 +85,7 @@ test('calendar programmes expose days, fixed and solar times and named actions w
       ] },
     } } }] } } },
   } };
-  const html = render(Catalog, { props: { observation, showDefinition() {} } }).body;
+  const html = render(Catalog, { props: { observation, initialSection: 'programmes', showDefinition() {} } }).body;
   assert.match(html, /Lundi/);
   assert.match(html, /Mercredi/);
   assert.match(html, /Vendredi/);
@@ -93,7 +103,7 @@ test('unsupported and incomplete programmes stay qualified rather than acquiring
   const observation = { freshness: { current: false, collections: {} }, catalog: { collections: {
     calendar_rules: { status: 'forbidden', data: { definitions: [{ id: 'future-rule', raw: { futureCalendarRule: { dayMask: 999, hours: 99 } } }] } },
   } } };
-  const html = render(Catalog, { props: { observation, showDefinition() {} } }).body;
+  const html = render(Catalog, { props: { observation, initialSection: 'programmes', showDefinition() {} } }).body;
   assert.match(html, /format.*non.*(?:reconnu|pris en charge)/i);
   assert.match(html, /Historique/);
   assert.doesNotMatch(html, /99:00|Tous les jours|sera exécuté/);
@@ -125,10 +135,23 @@ test('daily cycles do not claim every day and nested disabled flags remain separ
       } }] },
     } } }] } },
   } } };
-  const html = render(Catalog, { props: { observation, showDefinition() {} } }).body;
+  const html = render(Catalog, { props: { observation, initialSection: 'programmes', showDefinition() {} } }).body;
   const text = html.replace(/<[^>]*>/g, '');
   assert.match(text, /Tous les 2 jours/);
   assert.doesNotMatch(text, /Tous les jours/);
   assert.match(text, /Journée.*Déclaré désactivé/);
   assert.match(text, /Groupe d’actions.*Déclaré désactivé/);
+});
+
+
+test('TaHoma provides a direct equipment route and explains a cloud-only setup', () => {
+  const before = hub.devices;
+  try {
+    hub.devices = {};
+    const html = render(Page).body;
+    assert.match(html, /href="#\/pieces\/volets"/);
+    assert.match(html, /Aucun volet relié à cette instance/);
+    assert.match(html, /Scénarios et programmations/);
+    assert.doesNotMatch(html, /<button[^>]*>\s*(?:Lancer|Exécuter|Fermer)/);
+  } finally { hub.devices = before; }
 });

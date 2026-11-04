@@ -497,5 +497,22 @@
   "systeme.somfy.programme.day_cycle": "Day-based cycle",
   "systeme.somfy.programme.day_state": "Day template: {state}",
   "systeme.somfy.programme.group_state": "Action group: {state}",
-  "systeme.somfy.programme.warning.solar_time": "Time parameters accompany this solar time; check the original definition (JSON) against TaHoma."
+  "systeme.somfy.programme.warning.solar_time": "Time parameters accompany this solar time; check the original definition (JSON) against TaHoma.",
+  "systeme.somfy.page_title": "TaHoma",
+  "systeme.somfy.page_intro": "Your scenarios, schedules and access to devices.",
+  "systeme.somfy.entry": "Find my shutters, scenarios and schedules",
+  "systeme.somfy.equipment": "Shutters and blinds",
+  "systeme.somfy.equipment_hint": "Open, stop or close from the device cards.",
+  "systeme.somfy.account": "Account and connection",
+  "systeme.somfy.account_hint": "Selected setup and technical information",
+  "systeme.somfy.read_only_badge": "Read-only",
+  "systeme.somfy.scenarios_tab": "Scenarios",
+  "systeme.somfy.programmes_tab": "Schedules",
+  "systeme.somfy.advanced": "Advanced information",
+  "systeme.somfy.advanced_hint": "Days, triggers and raw TaHoma data",
+  "systeme.somfy.reload_view": "Reload data",
+  "systeme.somfy.refresh_provider": "Refresh from TaHoma",
+  "systeme.somfy.read_only_explanation": "Viewing is enabled. No scenario will run from this read-only view.",
+  "systeme.somfy.catalog_title": "Scenarios and schedules",
+  "systeme.somfy.equipment_missing": "No shutters are connected to this instance. The cloud catalogue does not connect devices."
 }

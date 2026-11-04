@@ -2,7 +2,6 @@
   import { onMount, tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import DriverWarnings from '../../components/DriverWarnings.svelte';
-  import SomfyCloud from '../ui/SomfyCloud.svelte';
   import TuyaCloudKeys from '../ui/TuyaCloudKeys.svelte';
   import AssistantSettings from '../ui/AssistantSettings.svelte';
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
@@ -182,7 +181,7 @@
 
   <TuyaCloudKeys />
 
-  <SomfyCloud />
+  <a class="somfy-entry" href="#/somfy"><Icon name="shutter" size={24} /><span><strong>{t('systeme.somfy.page_title')}</strong><br />{t('systeme.somfy.entry')}</span><Icon name="chevron-right" size={20} /></a>
 
   <!-- Only where a host script measures Moli against a Home Assistant. -->
   {#if sys && last?.ha}
@@ -326,6 +325,10 @@
 </div>
 
 <style>
+  .somfy-entry { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--r-md); color: var(--ink); text-decoration: none; background: var(--surface); }
+  .somfy-entry span { flex: 1; }
+  .somfy-entry:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+
   .systeme {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
