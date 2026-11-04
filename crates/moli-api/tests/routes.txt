@@ -11,6 +11,7 @@
 GET    /api/devices                        foyer
 GET    /api/devices/{id}                   foyer
 GET    /api/devices/{id}/snapshot          foyer
+POST   /api/devices/{id}/live              foyer   # same rules as the snapshot, checked after the body
 POST   /api/devices/{id}/print             humain
 PUT    /api/devices/{id}/visibility        foyer   # origin ui (a person) checked after the body
 GET    /api/infra                          foyer
@@ -75,6 +76,7 @@ GET    /api/bench                          foyer
 GET    /api/home                           foyer
 GET    /api/system                         foyer
 GET    /api/energy                         foyer
+PUT    /api/energy/price                   foyer   # a person (code) or an owner, checked after the body
 GET    /api/energy/series                  foyer
 GET    /api/automations                    foyer
 POST   /api/automations                    foyer
