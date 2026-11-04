@@ -1,0 +1,26 @@
+[integration]
+id = "enedis"
+name = "Enedis (compteur Linky, par la Conso API)"
+brands = ["Enedis"]
+models = ["Compteur Linky avec la courbe de charge activée"]
+transport = "http"
+driver = "enedis"
+crate = "moli-enedis"
+
+[discovery]
+# No discovery: a cloud service, with the customer's consent.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+secrets = ["token"]
+vars = []
+options = ["prm"]
+
+[origin]
+reused = "aucun code repris : réponses observées sur un compte réel, documentation publique de la Conso API (conso.boris.sh), bokub/linky et bokub/ha-linky lus comme référence"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/courbe_de_charge.json"

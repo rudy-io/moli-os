@@ -1,5 +1,5 @@
 use super::*;
-use moli_core::{InstanceId, Origin, PointId, Value};
+use moli_core::{DriverStatus, Event, InstanceId, Origin, PointId, Value};
 use moli_runtime::{Hub, HubOptions, MasterKey, spawn_driver};
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use std::sync::{
@@ -241,7 +241,6 @@ async fn missing_token_waits_for_human_without_network() {
     cancel.cancel();
     task.await.unwrap();
 }
-#[derive(Debug)]
 struct Rig {
     hub: Hub,
     instance: InstanceId,
@@ -251,8 +250,16 @@ struct Rig {
     gets: Arc<AtomicUsize>,
     preflight_delay: Arc<std::sync::atomic::AtomicU64>,
     payloads: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    get_status: Arc<AtomicUsize>,
+    post_status: Arc<AtomicUsize>,
+    acceptor: Arc<std::sync::Mutex<TlsAcceptor>>,
     cancel: CancellationToken,
     server: tokio::task::JoinHandle<()>,
+}
+impl std::fmt::Debug for Rig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rig").finish_non_exhaustive()
+    }
 }
 impl Drop for Rig {
     fn drop(&mut self) {
@@ -314,6 +321,7 @@ impl Rig {
             command_timeout,
             read_only,
             false,
+            300,
         )
         .await
     }
@@ -323,6 +331,27 @@ impl Rig {
         command_timeout: Duration,
         read_only: bool,
         stale_publication: bool,
+        poll_secs: u64,
+    ) -> Self {
+        Self::start_sources(
+            snapshot,
+            writable_openers,
+            command_timeout,
+            read_only,
+            stale_publication,
+            poll_secs,
+            false,
+        )
+        .await
+    }
+    async fn start_sources(
+        snapshot: serde_json::Value,
+        writable_openers: Vec<ReviewedOpener>,
+        command_timeout: Duration,
+        read_only: bool,
+        stale_publication: bool,
+        poll_secs: u64,
+        cloud_enabled: bool,
     ) -> Self {
         let (path, hub, instance) = test_vault(command_timeout).await;
         let snapshot = Arc::new(std::sync::Mutex::new(snapshot));
@@ -330,64 +359,33 @@ impl Rig {
         let gets = Arc::new(AtomicUsize::new(0));
         let preflight_delay = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let payloads = Arc::new(std::sync::Mutex::new(vec![]));
-        let acceptor = tls_acceptor();
+        let acceptor = Arc::new(std::sync::Mutex::new(tls_acceptor()));
+        let get_status = Arc::new(AtomicUsize::new(200));
+        let post_status = Arc::new(AtomicUsize::new(200));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let shared = (
-            hub.clone(),
-            instance.clone(),
-            Arc::clone(&snapshot),
-            Arc::clone(&posts),
-            Arc::clone(&gets),
-            Arc::clone(&preflight_delay),
-            Arc::clone(&payloads),
-        );
-        let server = tokio::spawn(async move {
-            let (hub, instance, snapshot, posts, gets, delay, payloads) = shared;
-            loop {
-                let (socket, _) = listener.accept().await.unwrap();
-                let Ok(mut stream) = acceptor.accept(socket).await else {
-                    continue;
-                };
-                let Some(request) = read_request(&mut stream).await else {
-                    continue;
-                };
-                assert!(request.contains("Bearer synthetic-test-token"));
-                assert!(hub.secret(&instance, "cert_sha256").is_some());
-                let response = if request
-                    .starts_with("GET /enduser-mobile-web/1/enduserAPI/setup/devices ")
-                {
-                    gets.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_millis(delay.load(Ordering::SeqCst))).await;
-                    snapshot.lock().unwrap().to_string()
-                } else {
-                    assert!(
-                        request.starts_with("POST /enduser-mobile-web/1/enduserAPI/exec/apply ")
-                    );
-                    let (_, body) = request.split_once("\r\n\r\n").unwrap();
-                    payloads
-                        .lock()
-                        .unwrap()
-                        .push(serde_json::from_str(body).unwrap());
-                    posts.fetch_add(1, Ordering::SeqCst);
-                    "{\"execId\":\"example\"}".to_owned()
-                };
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
-                    response.len()
-                );
-                let _ = stream.write_all(response.as_bytes()).await;
-                let _ = stream.shutdown().await;
-            }
-        });
+        let server = SimulatedGateway {
+            hub: hub.clone(),
+            instance: instance.clone(),
+            snapshot: Arc::clone(&snapshot),
+            posts: Arc::clone(&posts),
+            gets: Arc::clone(&gets),
+            delay: Arc::clone(&preflight_delay),
+            payloads: Arc::clone(&payloads),
+            get_status: Arc::clone(&get_status),
+            post_status: Arc::clone(&post_status),
+            acceptor: Arc::clone(&acceptor),
+        }
+        .spawn(listener);
         let cancel = CancellationToken::new();
-        let config: Config = serde_json::from_value(serde_json::json!({
-            "host":"localhost","port":port,"poll_secs":300,"read_only":read_only,
+        let mut config: Config = serde_json::from_value(serde_json::json!({
+            "host":"localhost","port":port,"poll_secs":poll_secs,"read_only":read_only,
             "writable_openers":writable_openers.iter().map(|p| serde_json::json!({
                 "device_url":p.device_url,"ui_class":p.ui_class
             })).collect::<Vec<_>>()
         }))
         .unwrap();
+        config.cloud = cloud_enabled.then(cloud::Config::default);
         let driver: Arc<dyn Driver> = if stale_publication {
             Arc::new(StalePublicationProbe {
                 config,
@@ -398,7 +396,12 @@ impl Rig {
         };
         spawn_driver(&hub, instance.clone(), driver, cancel.clone());
         tokio::time::timeout(Duration::from_secs(5), async {
-            while hub.stats().drivers_running != 1 {
+            while hub.stats().drivers_running != 1
+                || (cloud_enabled
+                    && !hub.snapshot().devices.iter().any(|device| {
+                        !cloud::owns_device(&device.device.id) && device.online == Some(true)
+                    }))
+            {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
@@ -413,6 +416,9 @@ impl Rig {
             gets,
             preflight_delay,
             payloads,
+            get_status,
+            post_status,
+            acceptor,
             cancel,
             server,
         }
@@ -423,6 +429,78 @@ impl Rig {
             &DeviceId::new(&self.instance, &entries[index].native()),
             key,
         )
+    }
+}
+struct SimulatedGateway {
+    hub: Hub,
+    instance: InstanceId,
+    snapshot: Arc<std::sync::Mutex<serde_json::Value>>,
+    posts: Arc<AtomicUsize>,
+    gets: Arc<AtomicUsize>,
+    delay: Arc<std::sync::atomic::AtomicU64>,
+    payloads: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    get_status: Arc<AtomicUsize>,
+    post_status: Arc<AtomicUsize>,
+    acceptor: Arc<std::sync::Mutex<TlsAcceptor>>,
+}
+impl SimulatedGateway {
+    fn spawn(self, listener: tokio::net::TcpListener) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let Self {
+                hub,
+                instance,
+                snapshot,
+                posts,
+                gets,
+                delay,
+                payloads,
+                get_status,
+                post_status,
+                acceptor,
+            } = self;
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let acceptor = acceptor.lock().unwrap().clone();
+                let Ok(mut stream) = acceptor.accept(socket).await else {
+                    continue;
+                };
+                let Some(request) = read_request(&mut stream).await else {
+                    continue;
+                };
+                assert!(request.contains("Bearer synthetic-test-token"));
+                assert!(hub.secret(&instance, "cert_sha256").is_some());
+                let (status, response) = if request
+                    .starts_with("GET /enduser-mobile-web/1/enduserAPI/setup/devices ")
+                {
+                    gets.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(delay.load(Ordering::SeqCst))).await;
+                    (
+                        get_status.load(Ordering::SeqCst),
+                        snapshot.lock().unwrap().to_string(),
+                    )
+                } else {
+                    assert!(
+                        request.starts_with("POST /enduser-mobile-web/1/enduserAPI/exec/apply ")
+                    );
+                    let (_, body) = request.split_once("\r\n\r\n").unwrap();
+                    payloads
+                        .lock()
+                        .unwrap()
+                        .push(serde_json::from_str(body).unwrap());
+                    posts.fetch_add(1, Ordering::SeqCst);
+                    (
+                        post_status.load(Ordering::SeqCst),
+                        "{\"execId\":\"example\"}".to_owned(),
+                    )
+                };
+                let response = format!(
+                    "HTTP/1.1 {status} Response\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            }
+        })
     }
 }
 async fn read_request(
@@ -849,8 +927,17 @@ impl Driver for StalePublicationProbe {
                 ctx.set_availability(&id, true);
             }
             ctx.ready();
+            let mut missing = MissingDevices::new();
             while let Some(command) = ctx.next_command().await {
-                let result = apply(&client, ctx, &command, command.deadline, &self.config).await;
+                let result = apply(
+                    &client,
+                    ctx,
+                    &command,
+                    command.deadline,
+                    &self.config,
+                    &mut missing,
+                )
+                .await;
                 command.reply(result.map_err(|error| error.to_string()));
             }
             Ok(())
@@ -865,6 +952,7 @@ async fn read_only_runtime_rejects_stale_writable_publication_before_preflight()
         Duration::from_secs(5),
         true,
         true,
+        300,
     )
     .await;
     for origin in [
@@ -1010,4 +1098,305 @@ async fn unreviewed_stateless_rts_gate_stays_visible_in_read_only_inventory() {
     assert!(device.device.point("control").is_none());
     assert_eq!(rig.hub.state(&point).unwrap().value, Value::Null);
     assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+}
+
+async fn next_event(
+    events: &mut tokio::sync::broadcast::Receiver<Event>,
+    wanted: impl Fn(&Event) -> bool,
+) -> Event {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if wanted(&event) {
+                return event;
+            }
+        }
+    })
+    .await
+    .unwrap()
+}
+async fn expect_availability(
+    events: &mut tokio::sync::broadcast::Receiver<Event>,
+    device: &DeviceId,
+    online: bool,
+) {
+    let event = next_event(events, |event| match event {
+        Event::DeviceRemoved { device: id } => id == device,
+        Event::Availability {
+            device: id,
+            online: value,
+        } => id == device && *value == online,
+        _ => false,
+    })
+    .await;
+    assert!(
+        matches!(event, Event::Availability { .. }),
+        "premature removal: {event:?}"
+    );
+}
+#[tokio::test]
+async fn refused_commands_do_not_restart_driver_or_remove_other_devices() {
+    for api_refusal in [false, true] {
+        let rig = Rig::start(opener_fixture(), vec![], Duration::from_secs(5)).await;
+        let mut events = rig.hub.subscribe();
+        let first = rig.point(0, "percent_control");
+        let next = rig.point(1, "control");
+        if api_refusal {
+            rig.post_status.store(500, Ordering::SeqCst);
+        } else {
+            rig.snapshot.lock().unwrap()[0]["definition"]["commands"] = serde_json::json!([]);
+        }
+        assert!(
+            rig.hub
+                .command(&first, Value::Float(60.), Origin::Ui, None)
+                .await
+                .is_err()
+        );
+        rig.post_status.store(200, Ordering::SeqCst);
+        rig.hub
+            .command(&next, Value::from("open"), Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(
+            rig.gets.load(Ordering::SeqCst) >= 4,
+            "refresh after refusal, before next preflight"
+        );
+        assert_eq!(
+            rig.posts.load(Ordering::SeqCst),
+            if api_refusal { 2 } else { 1 }
+        );
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(
+                event,
+                Event::DeviceRemoved { .. } | Event::Availability { online: false, .. }
+            ));
+            if let Event::DriverStatus { status, .. } = event {
+                assert_eq!(status, DriverStatus::Running);
+            }
+        }
+    }
+}
+#[tokio::test]
+async fn missing_devices_go_offline_reappear_and_need_three_absent_snapshots_for_removal() {
+    check_missing_device_lifecycle(false).await;
+}
+#[tokio::test]
+async fn combined_sources_preserve_native_missing_device_lifecycle() {
+    check_missing_device_lifecycle(true).await;
+}
+async fn check_missing_device_lifecycle(cloud_enabled: bool) {
+    let raw = opener_fixture();
+    let rig = Rig::start_sources(
+        raw.clone(),
+        vec![],
+        Duration::from_secs(5),
+        false,
+        false,
+        1,
+        cloud_enabled,
+    )
+    .await;
+    let id = rig.point(0, "percent_control").split().unwrap().0;
+    rig.hub
+        .set_label(
+            &id,
+            moli_runtime::LabelPatch {
+                name: Some("Chosen label".into()),
+                room: Some("Protected".into()),
+            },
+            Origin::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+    let mut events = rig.hub.subscribe();
+    rig.snapshot
+        .lock()
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    expect_availability(&mut events, &id, false).await;
+    assert_eq!(rig.hub.rooms_of(&id), vec!["Protected"]);
+    assert_eq!(
+        rig.hub
+            .state(&PointId::new(&id, "percent_control"))
+            .unwrap()
+            .value,
+        Value::Float(75.)
+    );
+    *rig.snapshot.lock().unwrap() = raw;
+    expect_availability(&mut events, &id, true).await;
+    assert_eq!(rig.hub.rooms_of(&id), vec!["Protected"]);
+    rig.snapshot
+        .lock()
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    expect_availability(&mut events, &id, false).await;
+    let first_missing = rig.gets.load(Ordering::SeqCst);
+    next_event(
+        &mut events,
+        |event| matches!(event, Event::DeviceRemoved { device } if device == &id),
+    )
+    .await;
+    assert!(rig.gets.load(Ordering::SeqCst) >= first_missing + 2);
+    assert!(rig.hub.device(&id).is_none());
+    assert_eq!(rig.hub.stats().drivers_running, 1);
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+    if cloud_enabled {
+        assert!(
+            rig.hub
+                .device(&cloud::summary_device_id(&rig.instance))
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn combined_sources_keep_native_available_after_refused_execution() {
+    let rig = Rig::start_sources(
+        opener_fixture(),
+        vec![],
+        Duration::from_secs(5),
+        false,
+        false,
+        300,
+        true,
+    )
+    .await;
+    let point = rig.point(0, "percent_control");
+    let next = rig.point(1, "control");
+    rig.post_status.store(500, Ordering::SeqCst);
+    assert!(
+        rig.hub
+            .command(&point, Value::Float(60.), Origin::Ui, None)
+            .await
+            .is_err()
+    );
+    rig.post_status.store(200, Ordering::SeqCst);
+    rig.hub
+        .command(&next, Value::from("open"), Origin::Ui, None)
+        .await
+        .expect("ordinary refused execution must not park the native source");
+    assert!(rig.gets.load(Ordering::SeqCst) >= 4);
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 2);
+    assert!(
+        rig.hub
+            .device(&cloud::summary_device_id(&rig.instance))
+            .is_some()
+    );
+}
+#[tokio::test]
+async fn failed_refresh_does_not_count_as_missing_devices() {
+    let raw = opener_fixture();
+    let rig = Rig::start_mode(raw.clone(), vec![], Duration::from_secs(5), false, false, 1).await;
+    let id = rig.point(0, "percent_control").split().unwrap().0;
+    let mut events = rig.hub.subscribe();
+    rig.snapshot
+        .lock()
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    expect_availability(&mut events, &id, false).await;
+    rig.get_status.store(503, Ordering::SeqCst);
+    next_event(&mut events, |event| {
+        matches!(
+            event,
+            Event::DriverStatus {
+                status: DriverStatus::Backoff { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(rig.hub.device(&id).is_some());
+    assert_eq!(rig.hub.device(&id).unwrap().online, Some(false));
+    *rig.snapshot.lock().unwrap() = raw;
+    rig.get_status.store(200, Ordering::SeqCst);
+    next_event(&mut events, |event| {
+        matches!(
+            event,
+            Event::DriverStatus {
+                status: DriverStatus::Running,
+                ..
+            }
+        )
+    })
+    .await;
+    assert_eq!(rig.hub.device(&id).unwrap().online, Some(true));
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+}
+#[tokio::test]
+async fn preflight_refuses_a_missing_device_even_while_its_metadata_is_retained() {
+    let rig = Rig::start(opener_fixture(), vec![], Duration::from_secs(5)).await;
+    let point = rig.point(0, "percent_control");
+    let id = point.split().unwrap().0;
+    rig.snapshot
+        .lock()
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    assert!(
+        rig.hub
+            .command(&point, Value::Float(60.), Origin::Ui, None)
+            .await
+            .is_err()
+    );
+    assert_eq!(rig.hub.device(&id).unwrap().online, Some(false));
+    assert!(
+        rig.hub
+            .command(&point, Value::Float(60.), Origin::Ui, None)
+            .await
+            .is_err()
+    );
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+    assert_eq!(rig.hub.stats().drivers_running, 1);
+}
+#[tokio::test]
+async fn refused_token_or_changed_certificate_waits_with_all_devices_offline() {
+    for failure in ["get_auth", "post_auth", "certificate"] {
+        let rig = Rig::start(opener_fixture(), vec![], Duration::from_secs(5)).await;
+        let mut events = rig.hub.subscribe();
+        match failure {
+            "get_auth" => rig.get_status.store(401, Ordering::SeqCst),
+            "post_auth" => rig.post_status.store(403, Ordering::SeqCst),
+            _ => *rig.acceptor.lock().unwrap() = tls_acceptor(),
+        }
+        assert!(
+            rig.hub
+                .command(
+                    &rig.point(0, "percent_control"),
+                    Value::Float(60.),
+                    Origin::Ui,
+                    None
+                )
+                .await
+                .is_err()
+        );
+        next_event(&mut events, |event| {
+            matches!(
+                event,
+                Event::DriverStatus {
+                    status: DriverStatus::Waiting { .. },
+                    ..
+                }
+            )
+        })
+        .await;
+        assert!(
+            rig.hub
+                .snapshot()
+                .devices
+                .iter()
+                .all(|device| device.online == Some(false))
+        );
+        assert_eq!(
+            rig.posts.load(Ordering::SeqCst),
+            usize::from(failure == "post_auth")
+        );
+    }
 }

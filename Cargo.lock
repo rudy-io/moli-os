@@ -1181,6 +1181,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -1389,6 +1390,23 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "moli-enedis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "jiff",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -1612,6 +1630,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-melcloud"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-moonraker"
 version = "0.1.0"
 dependencies = [
@@ -1665,6 +1700,7 @@ dependencies = [
  "moli-core",
  "moli-demo",
  "moli-dirigera",
+ "moli-enedis",
  "moli-energy",
  "moli-esphome",
  "moli-frigate",
@@ -1678,6 +1714,7 @@ dependencies = [
  "moli-ipp",
  "moli-izypower",
  "moli-lights",
+ "moli-melcloud",
  "moli-moonraker",
  "moli-net",
  "moli-overkiz",
@@ -1693,6 +1730,7 @@ dependencies = [
  "moli-tapo",
  "moli-telegram",
  "moli-tuya",
+ "moli-voltalis",
  "moli-weather",
  "moli-z2m",
  "moli-zwave",
@@ -1942,6 +1980,24 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "moli-voltalis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "jiff",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 

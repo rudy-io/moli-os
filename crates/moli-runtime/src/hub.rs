@@ -662,6 +662,17 @@ impl Hub {
         if agent && self.is_control(point) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.machine"));
         }
+        // A protected device is the same call, on every point of it: a
+        // countdown cuts a plug as surely as its switch.
+        if agent
+            && let Some((device, _)) = point.split()
+            && let Some(name) = self.protected_device(&device)
+        {
+            return Verdict::Approval(moli_i18n::tr!(
+                "serveur.garde.appareil_protege",
+                name = name
+            ));
+        }
         let rooms = point
             .split()
             .map(|(device, _)| self.rooms_of(&device))
@@ -774,6 +785,53 @@ impl Hub {
             .protected_rooms
             .iter()
             .filter(|p| !known.iter().any(|k| crate::guard::same_room(p, k)))
+            .cloned()
+            .collect()
+    }
+
+    /// The name of the protected device this order reaches (itself, or a
+    /// member if it is a group), if any.
+    #[must_use]
+    pub fn protected_device(&self, device: &DeviceId) -> Option<String> {
+        let protected = &self.0.opts.guard.protected_devices;
+        if protected.is_empty() {
+            return None;
+        }
+        let model = self.read();
+        // Groups may nest (a group of fixtures): walk them all, once each.
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![device];
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if protected.iter().any(|p| p == id.as_str()) {
+                return Some(
+                    model
+                        .labels
+                        .get(id)
+                        .and_then(|l| l.name.clone())
+                        .unwrap_or_else(|| id.as_str().to_owned()),
+                );
+            }
+            if let Some(d) = model.devices.get(id) {
+                todo.extend(&d.members);
+            }
+        }
+        None
+    }
+
+    /// Protected devices the hub does not know: a typo, or a device gone.
+    /// Then protection silently stopped applying — say so.
+    #[must_use]
+    pub fn unmatched_protected_devices(&self) -> Vec<String> {
+        let model = self.read();
+        self.0
+            .opts
+            .guard
+            .protected_devices
+            .iter()
+            .filter(|p| !model.devices.keys().any(|id| id.as_str() == p.as_str()))
             .cloned()
             .collect()
     }
@@ -1014,6 +1072,29 @@ impl Hub {
         );
     }
 
+    /// Records a persisted visibility edit and tells dashboards to reload the
+    /// layout only when it succeeded. No device capability or state changes.
+    pub fn record_visibility(
+        &self,
+        device: DeviceId,
+        hidden: bool,
+        origin: Origin,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        let saved = outcome == Outcome::Ok;
+        self.record(
+            origin,
+            actor,
+            Action::Visibility { device, hidden },
+            outcome,
+            Instant::now(),
+        );
+        if saved {
+            self.emit(Event::LayoutChanged {});
+        }
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {
@@ -1149,6 +1230,7 @@ impl Hub {
     pub fn guard_status(&self) -> GuardStatus {
         let mut status = self.0.opts.guard.status(jiff::Timestamp::now());
         status.unmatched_protected_rooms = self.unmatched_protected_rooms();
+        status.unmatched_protected_devices = self.unmatched_protected_devices();
         status
     }
 

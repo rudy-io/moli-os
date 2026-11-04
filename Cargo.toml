@@ -10,22 +10,24 @@ repository = "https://github.com/rudy-io/moli-os"
 rust-version = "1.88"
 
 [workspace.dependencies]
-moli-airzone = { path = "crates/moli-airzone" }
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }
 moli-announce = { path = "crates/moli-announce" }
 moli-airplay = { path = "crates/moli-airplay" }
+moli-airzone = { path = "crates/moli-airzone" }
+moli-voltalis = { path = "crates/moli-voltalis" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-zwave = { path = "crates/moli-zwave" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-homeassistant = { path = "crates/moli-homeassistant" }
-moli-dirigera = { path = "crates/moli-dirigera" }
 moli-overkiz = { path = "crates/moli-overkiz" }
+moli-dirigera = { path = "crates/moli-dirigera" }
 moli-host = { path = "crates/moli-host" }
 moli-history = { path = "crates/moli-history" }
 moli-profile = { path = "crates/moli-profile" }
+moli-enedis = { path = "crates/moli-enedis" }
 moli-energy = { path = "crates/moli-energy" }
 moli-tuya = { path = "crates/moli-tuya" }
 moli-net = { path = "crates/moli-net" }
@@ -35,6 +37,7 @@ moli-sonos = { path = "crates/moli-sonos" }
 moli-bambu = { path = "crates/moli-bambu" }
 moli-frigate = { path = "crates/moli-frigate" }
 moli-philips = { path = "crates/moli-philips" }
+moli-melcloud = { path = "crates/moli-melcloud" }
 moli-tapo = { path = "crates/moli-tapo" }
 moli-shelly = { path = "crates/moli-shelly" }
 moli-izypower = { path = "crates/moli-izypower" }

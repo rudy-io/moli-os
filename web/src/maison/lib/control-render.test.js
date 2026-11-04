@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
 });
@@ -132,6 +132,61 @@ test('Airzone system has translated mode and fan controls without a fake thermos
   assert.doesNotMatch(html, /class="dial/);
 });
 
+test('read-only climate ventilation remains visible without a selector', () => {
+  const html = show('ClimateCard', [point('mode', enumeration('off', 'heat'), false), point('fan_speed', enumeration('0', '1', '3'), false)], { mode: 'heat', fan_speed: '3' }, { model: 'Airzone system' });
+  assert.match(html, /Ventilation/);
+  assert.match(html, />3</);
+  assert.doesNotMatch(html, /<select\b/);
+});
+
+test('climate readings never invent a unit and preserve explicitly reported Fahrenheit', () => {
+  const temperature = point('temperature', { type: 'numeric' }, false);
+  const target = point('target_temperature', number(10, 100, 0.5), false);
+  for (const unit of [undefined, null]) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 20.4, target_temperature: 21.5 });
+    assert.match(html, /20,4/);
+    assert.match(html, /21,5/);
+    assert.doesNotMatch(html, /°/);
+  }
+  for (const unit of ['°C', '°F']) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 70, target_temperature: 72 });
+    assert.ok(html.includes(unit));
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+  }
+});
+
+test('room climate summaries use only the declared temperature units', () => {
+  for (const unit of [null, '°F']) {
+    const html = showRoom([{
+      id: 'fixture:climate', model: 'Home Assistant climate',
+      points: [{ ...point('temperature', { type: 'numeric' }, false), unit }, { ...point('target_temperature', { type: 'numeric' }, false), unit }],
+      values: { temperature: 70, target_temperature: 72 },
+    }]);
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+    if (unit) assert.ok(html.includes(unit));
+    else assert.doesNotMatch(html, /°/);
+  }
+});
+
+test('room averages never combine temperature scales or grade Fahrenheit as Celsius', () => {
+  const entries = (units, values) => units.map((unit, index) => ({
+    id: `fixture:climate${index}`, model: 'Home Assistant climate',
+    points: [{ ...point('temperature', { type: 'numeric' }, false), unit }], values: { temperature: values[index] },
+  }));
+  const mixed = showRoom(entries(['°C', '°F'], [20, 68]));
+  assert.doesNotMatch(mixed, /<span class="temp /);
+  const unknown = showRoom(entries(['°C', null], [20, 68]));
+  assert.doesNotMatch(unknown, /<span class="temp /);
+  const celsius = showRoom(entries(['°C', '°C'], [20, 22]));
+  assert.match(celsius, /class="temp good/);
+  assert.match(celsius, /21,0°C/);
+  const fahrenheit = showRoom(entries(['°F', '°F'], [68, 72]));
+  assert.match(fahrenheit, /70,0°F/);
+  assert.doesNotMatch(fahrenheit, /class="temp hot/);
+});
+
 test('offline thermostat exposes no active commands', () => {
   const html = show('ClimateCard', [point('target_temperature', number(5, 35, 0.5)), point('on', { type: 'binary' }), point('mode', enumeration('chaud'))], { target_temperature: 21, on: true }, { online: false });
   assert.equal(buttons(html).length, 0);
@@ -164,11 +219,106 @@ test('partial RTS shutter retains close and stop without inventing position or o
   assert.equal(buttons(offline).length, 0);
 });
 
-test('shutter only exposes advertised actions and measured position setting', () => {
+test('legacy Tuya position stays informative until its normalized position semantic is declared', () => {
   const html = show('CoverTile', [point('percent_control', number(0, 100, 1)), point('control', enumeration('close', 'stop'))], { percent_control: 42 });
   assert.equal(buttons(html).length, 2);
-  assert.match(inputs(html)[0], /min="0"/);
+  assert.match(html, /42/);
+  assert.equal(inputs(html).length, 0);
+  const partial = show('CoverTile', [point('control', enumeration('open'))], {});
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
+  assert.equal(buttons(partial).length, 1);
+  assert.equal(inputs(partial).length, 0);
+});
+
+test('a normalized position semantic identifies a cover and supplies its actual range', () => {
+  const html = show('CoverTile', [point('opening', number(20, 80, 10), true, 'position')], { opening: 40 });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
+  assert.match(html, /40/);
+  assert.equal(inputs(html).length, 1);
+  assert.match(inputs(html)[0], /min="20"/);
+  assert.match(inputs(html)[0], /max="80"/);
+  assert.match(inputs(html)[0], /step="10"/);
   assert.doesNotMatch(inputs(html)[0], /disabled/);
+});
+
+test('the normalized position contract supplies 0–100 only when bounds are missing', () => {
+  const html = show('CoverTile', [point('opening', { type: 'numeric' }, true, 'position')], { opening: 100 });
+  assert.equal(inputs(html).length, 1);
+  assert.match(inputs(html)[0], /min="0"/);
+  assert.match(inputs(html)[0], /max="100"/);
+  assert.match(inputs(html)[0], /value="100"/);
+  for (const kind of [number(NaN, 100, 1), number(0, Infinity, 1), number(0, 100, 0), number(-10, 100, 1), number(0, 200, 1), { type: 'text' }]) {
+    const invalid = show('CoverTile', [point('opening', kind, true, 'position')], { opening: 40 });
+    assert.equal(inputs(invalid).length, 0);
+  }
+});
+
+test('read-only semantic position cannot be replaced by a writable legacy percentage', () => {
+  const html = show('CoverTile', [point('opening', number(0, 100, 1), false, 'position'), point('percent_control', number(0, 100, 1))], { opening: 37, percent_control: 99 });
+  assert.match(html, /37/);
+  assert.doesNotMatch(html, /99/);
+  assert.equal(inputs(html).length, 0);
+});
+
+test('offline and unmeasured semantic covers cannot expose an active slider', () => {
+  const points = [point('opening', number(0, 100, 1), true, 'position')];
+  const offline = show('CoverTile', points, { opening: 40 }, { online: false });
+  assert.equal(inputs(offline).length, 0);
+  for (const opening of [null, '40', NaN, Infinity, -1, 101]) {
+    const unmeasured = show('CoverTile', points, { opening });
+    assert.equal(inputs(unmeasured).length, 1);
+    assert.match(inputs(unmeasured)[0], /disabled/);
+  }
+});
+
+test('case-preserving motor orders identify a cover without inventing a power switch or position', () => {
+  const points = [point('state', enumeration('OPEN', 'STOP', 'CLOSE'))];
+  const html = show('CoverTile', points, { moving: 'UP' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
+  assert.equal(home.powerKey(hub.devices['fixture:device']), null);
+  assert.equal(buttons(html).length, 3);
+  assert.equal(inputs(html).length, 0);
+  assert.match(html, /en ouverture/);
+  const readonly = show('CoverTile', [point('state', enumeration('OPEN', 'STOP', 'CLOSE'), false)], { moving: 'DOWN' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
+  assert.equal(home.powerKey(hub.devices['fixture:device'], false), null);
+  assert.equal(buttons(readonly).length, 0);
+  assert.match(readonly, /en fermeture/);
+  const offline = show('CoverTile', points, { moving: 'forward' }, { online: false });
+  assert.equal(buttons(offline).length, 0);
+  assert.match(offline, /mouvement/);
+});
+
+test('multiple position or motor-order candidates do not choose an arbitrary actuator', () => {
+  const html = show('CoverTile', [
+    point('left', number(0, 100, 1), true, 'position'),
+    point('right', number(0, 100, 1), true, 'position'),
+    point('percent_control', number(0, 100, 1)),
+    point('left_order', enumeration('OPEN', 'CLOSE')),
+    point('right_order', enumeration('OPEN', 'CLOSE')),
+  ], { left: 30, right: 70, percent_control: 50 });
+  assert.equal(inputs(html).length, 0);
+  assert.equal(buttons(html).length, 0);
+});
+
+test('the named legacy control cannot bypass an ambiguous motor-order selection', () => {
+  for (const legacy of [enumeration('OPEN', 'CLOSE'), enumeration('close', 'stop'), enumeration('cycle')]) {
+    const html = show('CoverTile', [point('control', legacy), point('state', enumeration('OPEN', 'CLOSE'))], {}, { model: 'Overkiz RollerShutter' });
+    assert.equal(buttons(html).length, 0);
+    assert.equal(inputs(html).length, 0);
+  }
+});
+
+test('a partial legacy control does not identify a fan as a cover', () => {
+  show('CoverTile', [point('control', enumeration('stop')), point('on', { type: 'binary' })], { on: false }, { native_name: 'Fan' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'plug');
+  assert.equal(home.powerKey(hub.devices['fixture:device']), 'on');
+});
+
+test('ambiguous enum casing hides only the ambiguous cover command', () => {
+  const html = show('CoverTile', [point('control', enumeration('OPEN', 'open', 'STOP', 'CLOSE'))], {});
+  assert.equal(buttons(html).length, 2);
+  assert.doesNotMatch(html, />Ouvrir</);
 });
 
 test('cycle-only opener has one distinct impulse, without invented direction', () => {
@@ -291,4 +441,48 @@ test('climate watts have no leading separator without an outdoor temperature', (
   const draw = html.match(/<span class="draw num[^\"]*"[^>]*>([\s\S]*?)<\/span>/)?.[1];
   assert.ok(draw);
   assert.equal(draw.replace(/<!--.*?-->/g, '').trim(), '120 W');
+});
+
+const robot = (write = true) => [
+  point('clean', { type: 'binary' }, write, 'control'),
+  point('pause', { type: 'binary' }, write, 'control'),
+  point('dock', { type: 'binary' }, write, 'control'),
+  point('locate', { type: 'binary' }, write),
+  point('state', { type: 'text' }, false),
+  point('battery', number(0, 100, 1), false, 'battery'),
+  point('fan_speed', enumeration('quiet', 'strong'), write, 'config'),
+];
+const orders = (html) => (html.match(/class="orders[\s\S]*?(?=<div class="speeds|<\/section)/)?.[0].match(/<button/g) ?? []).length;
+
+test('a robot at its base can start and ring, not stop or go home', () => {
+  const html = show('VacuumCard', robot(), { state: 'fullcharge', clean: false, pause: false, battery: 100, fan_speed: 'strong' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'vacuum');
+  assert.equal(orders(html), 2);
+  assert.match(html, /aria-pressed="true"[^>]*>[^<]*(Forte|Strong)/);
+});
+
+test('a cleaning robot offers pause, stop and home; a paused one resumes', () => {
+  const cleaning = show('VacuumCard', robot(), { state: 'totaling', clean: true, pause: false, battery: 80 });
+  assert.match(cleaning, /Pause/);
+  assert.equal(orders(cleaning), 4);
+  const paused = show('VacuumCard', robot(), { state: 'pause', clean: true, pause: true, battery: 80 });
+  assert.match(paused, /Reprendre|Resume/);
+  assert.equal(orders(paused), 4);
+});
+
+test('a cleaning time that is not a number is not shown', () => {
+  const html = show('VacuumCard', robot(), { state: 'totaling', clean: true, pause: false, clean_time: 'soon' });
+  assert.doesNotMatch(html, /NaN/);
+});
+
+test('a read-only or offline robot shows its state and offers no order', () => {
+  const values = { state: 'idle', clean: false, pause: false, battery: 50, fan_speed: 'quiet' };
+  assert.equal(buttons(show('VacuumCard', robot(false), values)).length, 0);
+  assert.equal(buttons(show('VacuumCard', robot(), values, { online: false })).length, 0);
+});
+
+test('a fault is told in words and an unknown state keeps its own', () => {
+  const html = show('VacuumCard', robot(), { state: 'remotectl', clean: false, battery: 50, fault: true, detail: 'code 27' });
+  assert.match(html, /remotectl/);
+  assert.match(html, /code 27/);
 });

@@ -649,7 +649,8 @@ mod tests {
         );
 
         // Multilevel lamp: `on` goes to `38/0/targetValue/set` with a numeric
-        // payload (CC 38 targetValue takes 0-255, not a boolean).
+        // payload (CC 38 targetValue takes a level 0-99, or 255 to restore
+        // the previous one, not a boolean).
         let decision = decide_command(true, &catalog, &lamp, "on", &Value::Bool(true));
         assert_eq!(
             decision,

@@ -9,7 +9,11 @@ use moli_core::DeviceId;
 use moli_net::{Method, PinnedHttps};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+type MissingDevices = HashMap<DeviceId, u8>;
+const MISSING_REFRESHES: u8 = 3;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +179,7 @@ async fn run_sources(
     let mut native_live = false;
     let mut native_warning = None;
     let mut native_parked = false;
+    let mut missing = MissingDevices::new();
     let mut retry = tokio::time::Instant::now();
     let mut native_timer = tokio::time::interval(Duration::from_secs(config.poll_secs));
     native_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -182,48 +187,63 @@ async fn run_sources(
     cloud_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         reconcile_status(ctx, native_live, native_warning.as_deref(), cloud.as_ref());
-        tokio::select! {
+        let outcome = tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()); };
-                let result = if cloud::owns_device(&command.device.id) || config.read_only { Err(anyhow::anyhow!(moli_i18n::tr!("overkiz.refused"))) } else if let Some(client) = &native {
-                    let deadline = command.deadline.min(Instant::now() + Duration::from_millis(4500));
-                    let operation = tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), apply(client, ctx, &command, deadline, config));
-                    cloud::worker::during(operation, &mut cloud, ctx).await.map_err(|_| anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r| r)
-                } else { Err(anyhow::anyhow!(moli_i18n::tr!("overkiz.refused"))) };
-                // A policy refusal is not a source failure. Transport failures are retried independently.
-                if let Err(error) = &result
-                    && error.to_string() != moli_i18n::tr!("overkiz.refused")
-                {
-                    native_warning = Some(error.to_string());
-                    native_parked = error.downcast_ref::<Failure>().is_some();
-                    native_live = false; native = None;
-                    retry = tokio::time::Instant::now() + Duration::from_secs(60);
+                let Some(client) = native.as_ref().filter(|_| {
+                    !cloud::owns_device(&command.device.id) && !config.read_only
+                }) else {
+                    command.reply(Err(moli_i18n::tr!("overkiz.refused")));
+                    continue;
+                };
+                let deadline = command.deadline.min(Instant::now() + Duration::from_millis(4500));
+                let operation = tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), apply(client, ctx, &command, deadline, config, &mut missing));
+                let result = cloud::worker::during(operation, &mut cloud, ctx).await.map_err(|_| anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r| r);
+                let needs_human = result.as_ref().err().is_some_and(|error| error.downcast_ref::<Failure>().is_some());
+                command.reply(result.as_ref().copied().map_err(ToString::to_string));
+                if needs_human {
+                    Some(result)
+                } else {
+                    // Match local-only behaviour: a refused order is not a source
+                    // failure. Only a failed subsequent read needs recovery.
+                    Some(cloud::worker::during(refresh(client, ctx, config, &mut missing), &mut cloud, ctx).await.map(|_| ()))
                 }
-                command.reply(result.map_err(|error| error.to_string()));
             },
             _ = native_timer.tick(), if config.host.is_some() && !native_parked => {
-                if tokio::time::Instant::now() >= retry {
-                    let operation = async {
-                        let client = if let Some(client) = native.take() { client } else { native_client(config, ctx).await? };
-                        refresh(&client, ctx, config).await?;
-                        Ok::<_, anyhow::Error>(client)
-                    };
-                    match cloud::worker::during(operation, &mut cloud, ctx).await {
-                        Ok(client) => { native = Some(client); native_live = true; native_warning = None; },
-                        Err(error) => {
-                            native_parked = error.downcast_ref::<Failure>().is_some();
-                            native_warning = Some(error.to_string()); native_live = false;
-                            retry = tokio::time::Instant::now() + Duration::from_secs(60);
-                        }
-                    }
+                if tokio::time::Instant::now() < retry {
+                    continue;
                 }
+                let operation = async {
+                    let client = if let Some(client) = native.take() { client } else { native_client(config, ctx).await? };
+                    refresh(&client, ctx, config, &mut missing).await?;
+                    native = Some(client);
+                    Ok::<_, anyhow::Error>(())
+                };
+                Some(cloud::worker::during(operation, &mut cloud, ctx).await)
             },
             _ = cloud_timer.tick(), if cloud.is_some() => {
                 if let Some(cloud) = &mut cloud { cloud.tick(ctx); }
+                None
             },
             event = async { cloud.as_mut().expect("enabled branch").next_event().await }, if cloud.as_ref().is_some_and(cloud::worker::Controller::receiving) => {
                 if let Some(cloud) = &mut cloud { cloud.handle(ctx, event); }
+                None
             }
+        };
+        match outcome {
+            Some(Ok(())) => {
+                native_live = true;
+                native_warning = None;
+            }
+            Some(Err(error)) => {
+                native_parked = error.downcast_ref::<Failure>().is_some();
+                native_warning = Some(error.to_string());
+                native_live = false;
+                native = None;
+                missing.clear();
+                retry = tokio::time::Instant::now() + Duration::from_secs(60);
+            }
+            None => {}
         }
     }
 }
@@ -263,7 +283,10 @@ async fn run_native(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> 
         }
         Err(error) => return Err(error),
     };
-    refresh(&client, ctx, config).await?;
+    // Absence is counted only after a complete successful snapshot. A failed
+    // run resets the streak; transport failures cannot hasten removal.
+    let mut missing = MissingDevices::new();
+    refresh(&client, ctx, config, &mut missing).await?;
     ctx.ready();
     let mut timer = tokio::time::interval(Duration::from_secs(config.poll_secs));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -273,12 +296,15 @@ async fn run_native(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> 
             command=ctx.next_command()=>{
                 let Some(command)=command else {return Ok(());};
                 let deadline=command.deadline.min(Instant::now()+Duration::from_millis(4500));
-                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,config)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
-                let fatal=result.is_err();
+                let result=tokio::time::timeout(deadline.saturating_duration_since(Instant::now()),apply(&client,ctx,&command,deadline,config,&mut missing)).await.map_err(|_|anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r|r);
+                let needs_human=result.as_ref().err().is_some_and(|error|error.downcast_ref::<Failure>().is_some());
                 command.reply(result.as_ref().copied().map_err(ToString::to_string));
-                if fatal {return result;}
+                if needs_human {return result;}
+                // A refused order is not a failed driver. Refresh after either
+                // outcome; only a failed read needs supervisor recovery.
+                refresh(&client,ctx,config,&mut missing).await?;
             },
-            _=timer.tick()=>{refresh(&client,ctx,config).await?;},
+            _=timer.tick()=>{refresh(&client,ctx,config,&mut missing).await?;},
         }
     }
 }
@@ -286,6 +312,7 @@ async fn refresh(
     client: &Client,
     ctx: &DriverCtx,
     config: &Config,
+    missing: &mut MissingDevices,
 ) -> anyhow::Result<Vec<model::Entry>> {
     let json = client.request(Method::GET, "/setup/devices", None).await?;
     let entries = model::parse_policy(&json, &config.writable_openers, config.read_only)?;
@@ -304,8 +331,19 @@ async fn refresh(
         ids.push(id);
     }
     for old in ctx.devices() {
-        if !cloud::owns_device(&old) && !ids.contains(&old) {
-            ctx.remove_device(&old);
+        if cloud::owns_device(&old) {
+            continue;
+        }
+        if ids.contains(&old) {
+            missing.remove(&old);
+        } else {
+            ctx.set_availability(&old, false);
+            let count = missing.entry(old.clone()).or_default();
+            *count += 1;
+            if *count >= MISSING_REFRESHES {
+                ctx.remove_device(&old);
+                missing.remove(&old);
+            }
         }
     }
     Ok(entries)
@@ -316,6 +354,7 @@ async fn apply(
     command: &CommandRequest,
     deadline: Instant,
     config: &Config,
+    missing: &mut MissingDevices,
 ) -> anyhow::Result<()> {
     if cloud::owns_device(&command.device.id) || config.read_only {
         anyhow::bail!(moli_i18n::tr!("overkiz.refused"));
@@ -323,7 +362,7 @@ async fn apply(
     if command.abandoned() {
         anyhow::bail!(moli_i18n::tr!("overkiz.timeout"));
     }
-    let entries = refresh(client, ctx, config).await?;
+    let entries = refresh(client, ctx, config, missing).await?;
     let entry = entries
         .iter()
         .find(|e| DeviceId::new(ctx.instance(), &e.native()) == command.device.id)

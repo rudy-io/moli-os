@@ -15,6 +15,17 @@ fixtures. These pictures do not establish compatibility with physical hardware.
 The adapter implementations are reviewed separately. These UI examples consume
 the standard device/point contract; they do not require a specific native adapter.
 
-[HTTP warning](ha-http-warning.jpg) was captured on 2026-11-01 from the assembled
-review development build. Two synthetic HA instances remain running while the
-unencrypted-token warning is visible. The image contains no real token or home data.
+## Cover regression checks after #30 (2026-11-02)
+
+- [Desktop](cover-capabilities-desktop.jpg): semantic position on an arbitrary
+  point key, read-only position with an older writable `percent_control`, partial
+  RTS orders, ambiguous motor targets, legacy position display and offline cover.
+- [Mobile](cover-capabilities-mobile.jpg): the same fixture in a 390×844 browser
+  viewport. This is a browser layout check, not a physical-iPhone test.
+
+These two captures use the dashboard rebased on `16f2253` with the review fixes,
+served by a loopback-only synthetic API without any proxy or outbound transport.
+Browser interactions recorded `OPEN` with its original casing, numeric position
+`43` on the semantic point, and the two advertised RTS orders (`stop`, `close`).
+No control was exposed on read-only, offline or ambiguous fixtures. No real house
+configuration, identifier or credential is included.

@@ -36,6 +36,11 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     repart de zéro à chaque envoi et n'est pas un compteur fiable.
   - `estimate = true` (appareil seulement, sans `integrate` ni `power`) : une **lumière connectée** qui ne mesure rien ; `point` = un point de la lampe ou d'un luminaire `lumieres:…`. Moli estime sa puissance d'après le profil mesuré de son modèle (powercalc, licence MIT, condensé par `scripts/light-profiles.py` dans `crates/moli-energy/src/estimate.rs` : LCA006, LTW001, LWA017, L530) : luminosité, blanc ou couleur, veille éteinte, **0 quand elle est coupée au mur** ; un luminaire = la somme de ses ampoules. Comptée dans le temps comme `integrate`, jamais ajoutée aux totaux, `estimated: true` dans l'API, « ≈ estimé » à l'écran. Modèle inconnu : pas d'estimation (jamais de chiffre inventé).
   - Pas repris de HA : ses capteurs « powercalc » (estimations, pas des mesures).
+  - `history = true` : `point` donne une consommation déjà découpée par heure, en texte JSON
+    (`[{"hour": ms, "kwh": …}]`), pour un service qui répond un jour après (pilote `enedis`). Chaque
+    heure est classée à sa place, jamais étalée sur le moment du relevé ; ce qui est déjà classé
+    reste. Le prix vient de `price`, pas de la période tarifaire. Si tous les compteurs `grid` et
+    `total` sont ainsi en retard, la projection du mois s'arrête à la dernière heure reçue.
   - `feeds = ["<device id>"]` : les appareils qu'un compteur alimente (par exemple le
     circuit d'une clim → cette clim) : leur carte montre sa puissance (« circuit partagé »
     s'il alimente autre chose). Les adaptateurs Daikin BRP069 vérifiés ne mesurent **pas**

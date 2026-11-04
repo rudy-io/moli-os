@@ -5,8 +5,8 @@
 //! may be renamed at any time), and a `values` collection (command class,
 //! endpoint, property, optional property key, metadata). Flattening that
 //! through a small `(command class, property[, property key])` table gives
-//! typed points for the v1 surface (on/off, level — `brightness` for a
-//! declared dimmer — battery, sensors, power) without one line of
+//! typed points for the v1 surface (on/off, level — `brightness` in percent
+//! for a declared dimmer — battery, sensors, power) without one line of
 //! device-specific code.
 //!
 //! The parser is tolerant of both the synthetic fixture layout
@@ -46,7 +46,15 @@ pub struct Entry {
     pub device: Device,
     pub on_target: Option<SetTarget>,
     pub level_target: Option<SetTarget>,
+    /// The raw maximum of a dimmer's level (99 on a real gateway): its
+    /// `brightness` is exposed in percent and converted both ways. `None`
+    /// for a neutral `level`, which keeps the device's own scale.
+    pub level_max: Option<f64>,
 }
+
+/// Multilevel Switch (CC 38) levels run 0–99 (zwave-js `ValueMetadata.Level`);
+/// 255 is not a level but "restore the previous one".
+const LEVEL_MAX: f64 = 99.0;
 
 impl Entry {
     /// The topic base of this node: `{loc}/{name}` or just `{name}` —
@@ -201,49 +209,59 @@ impl Catalog {
             },
             on_target: None,
             level_target: None,
+            level_max: None,
         });
         self.by_base.entry(name).or_insert(entry.device.id.clone());
-        if !entry
-            .device
-            .points
-            .iter()
-            .any(|p| p.key.as_ref() == kind.key())
-        {
-            entry.device.points.push(PointSpec {
-                key: kind.key().into(),
-                label: kind.label().into(),
-                kind: kind.kind(None, None),
-                access: Access {
-                    read: true,
-                    write: false,
-                },
-                unit: kind.unit(),
-                // No device class is available in accumulation mode, so the
-                // level point can never be called a light: keep it neutral,
-                // under the `level` key (never `brightness`).
-                semantic: if matches!(kind, PointKind::Level) {
-                    Semantic::Other
-                } else {
-                    kind.semantic()
-                },
-            });
-        }
-        match kind {
-            PointKind::On if entry.on_target.is_none() => {
-                entry.on_target = Some(SetTarget {
-                    cc,
-                    endpoint,
-                    property: switch_target_property(cc),
+        // A CC 38 `currentValue` is also the level (see `Entry::decode`): a
+        // dimmer that never reports a target still gets its level point.
+        let kinds: &[PointKind] = if cc == 38 && kind == PointKind::On {
+            &[PointKind::On, PointKind::Level]
+        } else {
+            std::slice::from_ref(&kind)
+        };
+        for &kind in kinds {
+            if !entry
+                .device
+                .points
+                .iter()
+                .any(|p| p.key.as_ref() == kind.key())
+            {
+                entry.device.points.push(PointSpec {
+                    key: kind.key().into(),
+                    label: kind.label().into(),
+                    kind: kind.kind(None, None),
+                    access: Access {
+                        read: true,
+                        write: false,
+                    },
+                    unit: kind.unit(),
+                    // No device class is available in accumulation mode, so
+                    // the level point can never be called a light: keep it
+                    // neutral, under the `level` key (never `brightness`).
+                    semantic: if matches!(kind, PointKind::Level) {
+                        Semantic::Other
+                    } else {
+                        kind.semantic()
+                    },
                 });
             }
-            PointKind::Level if entry.level_target.is_none() => {
-                entry.level_target = Some(SetTarget {
-                    cc,
-                    endpoint,
-                    property: "targetValue",
-                });
+            match kind {
+                PointKind::On if entry.on_target.is_none() => {
+                    entry.on_target = Some(SetTarget {
+                        cc,
+                        endpoint,
+                        property: switch_target_property(cc),
+                    });
+                }
+                PointKind::Level if entry.level_target.is_none() => {
+                    entry.level_target = Some(SetTarget {
+                        cc,
+                        endpoint,
+                        property: "targetValue",
+                    });
+                }
+                _ => {}
             }
-            _ => {}
         }
         refresh_write_access(entry);
         Some(entry)
@@ -290,11 +308,11 @@ impl Entry {
         let Some(cc) = parts.next().and_then(|s| s.parse::<u8>().ok()) else {
             return Vec::new();
         };
-        // The endpoint segment must be present and numeric; the mapping does
-        // not depend on it (a mismatch would mean a foreign topic).
-        if parts.next().and_then(|s| s.parse::<u8>().ok()).is_none() {
+        // The endpoint segment must be present and numeric (otherwise the
+        // topic is foreign); only the level depends on its value.
+        let Some(endpoint) = parts.next().and_then(|s| s.parse::<u8>().ok()) else {
             return Vec::new();
-        }
+        };
         let Some(property) = parts.next().filter(|p| !p.is_empty()) else {
             return Vec::new();
         };
@@ -304,13 +322,19 @@ impl Entry {
         let Some(kind) = map_value(cc, property, property_key) else {
             return Vec::new();
         };
-        // A CC 38 level point is stored under its own key: `brightness` for a
-        // dimmer, `level` otherwise (see `collect_points`).
-        let point_key: &'static str = match kind {
-            PointKind::Level => self.level_point_key(),
-            other => other.key(),
-        };
-        if self.device.point(point_key).is_none() {
+        // CC 38 `targetValue` is only the last order: 255 after an `on`
+        // (restore the previous level), and a device that never reports a
+        // target leaves it there. The level is read from `currentValue`.
+        if kind == PointKind::Level {
+            return Vec::new();
+        }
+        // A CC 38 `currentValue` is also the real level, read on the
+        // endpoint it is written to (see `collect_points`).
+        let level_key = (cc == 38 && self.level_target.is_some_and(|t| t.endpoint == endpoint))
+            .then(|| self.level_point_key())
+            .filter(|key| self.device.point(key).is_some());
+        let has_point = self.device.point(kind.key()).is_some();
+        if !has_point && level_key.is_none() {
             return Vec::new();
         }
         let Ok(json) = serde_json::from_slice::<Json>(payload) else {
@@ -320,20 +344,36 @@ impl Entry {
         // The real gateway wraps value payloads in a `{time, value}`
         // envelope; bare values (fixtures, older gateways) pass through.
         let value_json = json.get("value").unwrap_or(&json);
-        let value = match (kind, value_json) {
-            // CC 32/37/38 switch states: booleans pass through; CC 38
-            // numbers are levels (0 = off, anything else on).
-            (PointKind::On, Json::Bool(b)) => Value::Bool(*b),
-            (PointKind::On, Json::Number(n)) => Value::Bool(n.as_f64().is_some_and(|v| v > 0.0)),
-            _ => Value::from_json(value_json),
-        };
-        vec![(point_key.into(), value)]
+        let mut values = Vec::new();
+        if has_point {
+            let value = match (kind, value_json) {
+                // CC 32/37/38 switch states: booleans pass through; CC 38
+                // numbers are levels (0 = off, anything else on).
+                (PointKind::On, Json::Bool(b)) => Value::Bool(*b),
+                (PointKind::On, Json::Number(n)) => {
+                    Value::Bool(n.as_f64().is_some_and(|v| v > 0.0))
+                }
+                _ => Value::from_json(value_json),
+            };
+            values.push((kind.key().into(), value));
+        }
+        // A dimmer's `brightness` is a percent; a neutral `level` keeps the
+        // device's scale. `null` (level unknown) is skipped.
+        if let Some((key, level)) = level_key.zip(value_json.as_f64()) {
+            let value = match self.level_max {
+                Some(max) => Value::Int(level_to_percent(level, max)),
+                None => Value::from_json(value_json),
+            };
+            values.push((key.into(), value));
+        }
+        values
     }
 
     /// Encodes a validated write as `(command topic suffix, raw JSON
-    /// payload)`. Only `on` (boolean) and `level` (number) are writable;
-    /// everything else is refused (defensive: the hub already checks
-    /// `access.write`).
+    /// payload)`. Only `on` (boolean) and the level (number: a dimmer's
+    /// `brightness` in percent, converted to 0..`level_max`; a neutral
+    /// `level` as is) are writable; everything else is refused (defensive:
+    /// the hub already checks `access.write`).
     pub fn encode(&self, key: &str, value: &Value) -> anyhow::Result<(String, String)> {
         let (target, numeric) = match key {
             "on" => (self.on_target, false),
@@ -351,7 +391,12 @@ impl Entry {
                 point = key
             )));
         };
-        let payload = if numeric {
+        let level = self.level_max.filter(|_| numeric).zip(value.as_f64());
+        let payload = if let Some((max, percent)) = level {
+            // A dimmer's `brightness` is a percent; the gateway wants its
+            // level (0–99).
+            percent_to_level(percent, max).to_string()
+        } else if numeric {
             match value {
                 Value::Int(i) => i.to_string(),
                 // zwave-js wants `80`, not `80.0`: exact integers stay integers.
@@ -374,9 +419,9 @@ impl Entry {
                 )));
             };
             // Basic (32) `currentValue` and Switch Binary (37) `targetValue`
-            // take a boolean; Multilevel (38) `targetValue` takes a number
-            // 0-255 — `true` alone would be refused at the gateway: send
-            // 0/255.
+            // take a boolean; Multilevel (38) `targetValue` takes a level
+            // 0-99, or 255 to restore the previous one — `true` alone would
+            // be refused at the gateway: send 0/255.
             if target.cc == 38 {
                 if *on {
                     "255".to_string()
@@ -468,9 +513,15 @@ impl PointKind {
     fn kind(self, min: Option<f64>, max: Option<f64>) -> Kind {
         match self {
             Self::On => Kind::Binary,
-            // Switch levels, batteries and relative humidity are bounded
-            // 0-100 by the Z-Wave spec; the gateway bounds win when given.
-            Self::Level | Self::Battery | Self::Humidity => Kind::Numeric {
+            // Switch levels are bounded 0-99, batteries and relative
+            // humidity 0-100 by the Z-Wave spec; the gateway bounds win when
+            // given.
+            Self::Level => Kind::Numeric {
+                min: min.or(Some(0.0)),
+                max: max.or(Some(LEVEL_MAX)),
+                step: None,
+            },
+            Self::Battery | Self::Humidity => Kind::Numeric {
                 min: min.or(Some(0.0)),
                 max: max.or(Some(100.0)),
                 step: None,
@@ -597,7 +648,7 @@ fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option
         .map(sanitize)
         .unwrap_or_default();
 
-    let (points, level_target) = collect_points(raw);
+    let (points, level_target, level_max) = collect_points(raw);
 
     // No mappable point: the node is outside the v1 surface (dead node,
     // configuration-only device) — never a device.
@@ -639,6 +690,7 @@ fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option
         device,
         on_target,
         level_target,
+        level_max,
     };
     refresh_write_access(&mut entry);
     Some(entry)
@@ -646,10 +698,12 @@ fn entry_from_node(instance: &InstanceId, raw: &RawNode, node_id: u32) -> Option
 
 /// Flattens the node's values into the v1 points: in `values` order, the
 /// first value that creates a key wins the point; duplicates are skipped.
-/// Also returns the `level` write target (CC 38 `targetValue`) when present.
-fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>) {
+/// Also returns the `level` write target (CC 38 `targetValue`) when present,
+/// and the raw maximum of a dimmer's level (see `Entry::level_max`).
+fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>, Option<f64>) {
     let mut points: Vec<PointSpec> = Vec::new();
     let mut level_target: Option<SetTarget> = None;
+    let mut level_max: Option<f64> = None;
     for value in raw.values.iter() {
         let Some(cc) = value.command_class else {
             continue;
@@ -664,7 +718,13 @@ fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>) {
         let Some(kind) = map_value(cc, &property, property_key.as_deref()) else {
             continue;
         };
-        if points.iter().any(|p| p.key.as_ref() == kind.key()) {
+        // A dimmer's level is stored under `brightness`, not `level`: only
+        // the first CC 38 `targetValue` makes the level point.
+        let taken = match kind {
+            PointKind::Level => level_target.is_some(),
+            other => points.iter().any(|p| p.key.as_ref() == other.key()),
+        };
+        if taken {
             continue;
         }
         let (min, max) = value_bounds(value);
@@ -696,10 +756,26 @@ fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>) {
         } else {
             (kind.key(), kind.label(), kind.semantic())
         };
+        // A dimmer's brightness is a percent like every other light's
+        // (dashboard, ambiances, assistant): its 0-99 level is converted
+        // both ways. A neutral `level` keeps the gateway's bounds.
+        let kind_spec = if semantic == Semantic::Brightness {
+            level_max = Some(
+                max.filter(|m| *m > 0.0)
+                    .map_or(LEVEL_MAX, |m| m.min(LEVEL_MAX)),
+            );
+            Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0),
+            }
+        } else {
+            kind.kind(min, max)
+        };
         points.push(PointSpec {
             key: key.into(),
             label: label.into(),
-            kind: kind.kind(min, max),
+            kind: kind_spec,
             access: Access {
                 read: true,
                 write: false,
@@ -715,7 +791,7 @@ fn collect_points(raw: &RawNode) -> (Vec<PointSpec>, Option<SetTarget>) {
             });
         }
     }
-    (points, level_target)
+    (points, level_target, level_max)
 }
 
 /// `on` is commanded through the first switch command class present,
@@ -745,6 +821,25 @@ fn refresh_write_access(entry: &mut Entry) {
             _ => false,
         };
     }
+}
+
+/// A Multilevel Switch level (0..`max`) as a whole percent. A lit level is
+/// never shown as 0 %.
+///
+/// 101 percents share 100 levels, so one percent cannot come back as sent.
+/// Rounding down here and up in `percent_to_level` gives every percent back
+/// but 99 % (read back as 100 %); rounding both ways would lose 50 %.
+#[allow(clippy::cast_possible_truncation)]
+fn level_to_percent(level: f64, max: f64) -> i64 {
+    let percent = ((level * 100.0 / max).floor() as i64).clamp(0, 100);
+    if level > 0.0 { percent.max(1) } else { percent }
+}
+
+/// A percent as a Multilevel Switch level (0..`max`), rounded up (see
+/// `level_to_percent`).
+#[allow(clippy::cast_possible_truncation)]
+fn percent_to_level(percent: f64, max: f64) -> i64 {
+    (percent.clamp(0.0, 100.0) * max / 100.0).ceil() as i64
 }
 
 /// Bounds live top-level (switch values) or in `metadata` (sensor values);
@@ -1029,7 +1124,7 @@ mod tests {
             Kind::Numeric {
                 min: Some(0.0),
                 max: Some(100.0),
-                step: None
+                step: Some(1.0)
             }
         );
         assert_eq!(brightness.unit, Some(Unit::Percent));
@@ -1075,14 +1170,13 @@ mod tests {
         for (rest, payload) in &messages {
             let expected = match rest.as_str() {
                 // Switch state → `on`, whatever the command class (CC 38
-                // multilevel: 0 = off, anything else on; CC 32/37: the
-                // boolean passes through).
-                "bureau_lamp/38/0/currentValue" | "cuisine_plug/32/0/currentValue" => {
-                    vec![("on".into(), Value::Bool(true))]
-                }
-                "bureau_lamp/38/0/targetValue" => {
-                    vec![("brightness".into(), Value::Int(80))]
-                }
+                // multilevel: 0 = off, anything else on, and the level
+                // itself; CC 32/37: the boolean passes through).
+                "bureau_lamp/38/0/currentValue" => vec![
+                    ("on".into(), Value::Bool(true)),
+                    ("brightness".into(), Value::Int(80)),
+                ],
+                "cuisine_plug/32/0/currentValue" => vec![("on".into(), Value::Bool(true))],
                 "cuisine_plug/50/0/power" => vec![("power".into(), Value::Float(15.2))],
                 "garage_sensor/31/0/Air_temperature" => {
                     vec![("temperature".into(), Value::Float(21.5))]
@@ -1092,10 +1186,13 @@ mod tests {
                 }
                 "garage_sensor/53/0/batteryLevel" => vec![("battery".into(), Value::Int(87))],
                 "couloir_switch/37/0/currentValue" => vec![("on".into(), Value::Bool(false))],
-                "kitchen_dimmer/38/0/targetValue" => {
-                    vec![("brightness".into(), Value::Int(40))]
-                }
-                "inconnu/99/0/quelque_chose" => Vec::new(),
+                "kitchen_dimmer/38/0/currentValue" => vec![
+                    ("on".into(), Value::Bool(true)),
+                    ("brightness".into(), Value::Int(40)),
+                ],
+                // CC 38 `targetValue` is the last order, not the level: never
+                // read. An unknown (cc, property) is ignored.
+                "bureau_lamp/38/0/targetValue" | "inconnu/99/0/quelque_chose" => Vec::new(),
                 _ => unreachable!("fixture topic {rest}"),
             };
             assert_eq!(decoded(&catalog, rest, payload), expected, "{rest}");
@@ -1566,6 +1663,199 @@ mod tests {
             entry.device.point("level").unwrap().semantic,
             Semantic::Other,
             "accumulation mode has no device class → neutral semantic"
+        );
+        let Kind::Numeric { max, .. } = &entry.device.point("level").unwrap().kind else {
+            panic!("level is numeric");
+        };
+        assert_eq!(*max, Some(99.0), "a Multilevel Switch level runs 0-99");
+    }
+
+    #[test]
+    fn an_accumulated_dimmer_reads_its_level_from_current_value() {
+        // A dimmer that never reports a target: its `currentValue` alone
+        // makes the `on` and `level` points, both written to `targetValue`.
+        let mut catalog =
+            Catalog::from_get_nodes(&instance(), &serde_json::to_vec(&json!([])).unwrap()).unwrap();
+        let entry = catalog
+            .upsert_accumulated(&instance(), "variateur_accu", 38, 0, "currentValue", None)
+            .unwrap();
+        assert!(entry.device.point("on").is_some_and(|p| p.access.write));
+        assert!(entry.device.point("level").is_some_and(|p| p.access.write));
+        assert_eq!(
+            entry.decode("variateur_accu/38/0/currentValue", b"42"),
+            vec![
+                ("on".into(), Value::Bool(true)),
+                ("level".into(), Value::Int(42))
+            ]
+        );
+        assert!(
+            entry
+                .decode("variateur_accu/38/0/targetValue", b"255")
+                .is_empty()
+        );
+        assert_eq!(
+            entry.encode("level", &Value::Int(42)).unwrap(),
+            (
+                "variateur_accu/38/0/targetValue/set".to_owned(),
+                "42".to_owned()
+            )
+        );
+    }
+
+    /// A CC 38 node shaped like the real gateway: `values` as a map, bounds
+    /// spelled `min`/`max`, the zwave-js Multilevel Switch range 0-99.
+    fn real_cc38(specific: u8) -> Catalog {
+        let nodes = json!({"success": true, "result": [{
+            "id": 5,
+            "name": "Variateur salon",
+            "deviceClass": {"basic": 4, "generic": 17, "specific": specific},
+            "values": {
+                "38-0-currentValue": { "commandClass": 38, "endpoint": 0,
+                    "property": "currentValue", "min": 0, "max": 99, "value": 0 },
+                "38-0-targetValue": { "commandClass": 38, "endpoint": 0,
+                    "property": "targetValue", "min": 0, "max": 99, "value": 0 },
+                "38-1-targetValue": { "commandClass": 38, "endpoint": 1,
+                    "property": "targetValue", "min": 0, "max": 99, "value": 0 }
+            }
+        }]});
+        Catalog::from_get_nodes(&instance(), &serde_json::to_vec(&nodes).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_real_dimmer_is_exposed_in_percent() {
+        let catalog = real_cc38(0x01);
+        let dimmer = catalog.by_base("Variateur_salon").unwrap();
+        let brightness: Vec<_> = dimmer
+            .device
+            .points
+            .iter()
+            .filter(|p| &*p.key == "brightness")
+            .collect();
+        assert_eq!(
+            brightness.len(),
+            1,
+            "one level point, from the first CC 38 target"
+        );
+        assert_eq!(
+            brightness[0].kind,
+            Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0)
+            }
+        );
+        assert_eq!(brightness[0].unit, Some(Unit::Percent));
+        assert_eq!(dimmer.level_target.map(|t| t.endpoint), Some(0));
+
+        let read = |rest: &str, payload: &str| decoded(&catalog, rest, payload);
+        let level = |payload: &str| {
+            read("Variateur_salon/38/0/currentValue", payload)
+                .into_iter()
+                .find(|(key, _)| &**key == "brightness")
+                .map(|(_, value)| value)
+        };
+        assert_eq!(
+            level(r#"{"time": 1730457600000, "value": 99}"#),
+            Some(Value::Int(100))
+        );
+        assert_eq!(level("50"), Some(Value::Int(50)));
+        assert_eq!(level("98"), Some(Value::Int(98)));
+        assert_eq!(
+            level("1"),
+            Some(Value::Int(1)),
+            "a lit dimmer is never shown at 0 %"
+        );
+        assert_eq!(level("0"), Some(Value::Int(0)));
+        assert_eq!(
+            level(r#"{"time": 1730457600000, "value": null}"#),
+            None,
+            "unknown level"
+        );
+        assert!(
+            read("Variateur_salon/38/0/targetValue", "255").is_empty(),
+            "255 after an `on` is an order (restore the previous level), not a level"
+        );
+        assert!(
+            read("Variateur_salon/38/1/currentValue", "10")
+                .iter()
+                .all(|(key, _)| &**key != "brightness"),
+            "another endpoint never moves the level"
+        );
+
+        let write = |value: Value| dimmer.encode("brightness", &value).unwrap();
+        let topic = "Variateur_salon/38/0/targetValue/set".to_owned();
+        assert_eq!(write(Value::Float(100.0)), (topic.clone(), "99".to_owned()));
+        assert_eq!(write(Value::Int(100)), (topic.clone(), "99".to_owned()));
+        assert_eq!(write(Value::Float(50.0)), (topic.clone(), "50".to_owned()));
+        assert_eq!(write(Value::Float(99.0)), (topic.clone(), "99".to_owned()));
+        assert_eq!(write(Value::Float(1.0)), (topic.clone(), "1".to_owned()));
+        assert_eq!(write(Value::Float(0.0)), (topic.clone(), "0".to_owned()));
+        assert_eq!(
+            dimmer.encode("on", &Value::Bool(true)).unwrap(),
+            (topic, "255".to_owned()),
+            "`on` still restores the previous level"
+        );
+        assert!(
+            dimmer.encode("on", &Value::Int(1)).is_err(),
+            "on expects a boolean"
+        );
+    }
+
+    #[test]
+    fn every_dimmer_level_survives_the_round_trip() {
+        let catalog = real_cc38(0x01);
+        let dimmer = catalog.by_base("Variateur_salon").unwrap();
+        for raw in 0..=99_i64 {
+            let percent = dimmer.decode(
+                "Variateur_salon/38/0/currentValue",
+                raw.to_string().as_bytes(),
+            );
+            let (_, percent) = percent
+                .iter()
+                .find(|(key, _)| &**key == "brightness")
+                .unwrap();
+            let (_, wire) = dimmer.encode("brightness", percent).unwrap();
+            assert_eq!(wire, raw.to_string(), "level {raw} → {percent:?}");
+        }
+    }
+
+    #[test]
+    fn every_percent_but_99_survives_the_round_trip() {
+        let catalog = real_cc38(0x01);
+        let dimmer = catalog.by_base("Variateur_salon").unwrap();
+        for percent in (0..=100_i64).filter(|p| *p != 99) {
+            let (_, wire) = dimmer.encode("brightness", &Value::Int(percent)).unwrap();
+            let back = dimmer.decode("Variateur_salon/38/0/currentValue", wire.as_bytes());
+            assert!(
+                back.contains(&("brightness".into(), Value::Int(percent))),
+                "{percent} % → level {wire} → {back:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_neutral_level_keeps_the_device_scale() {
+        // Motor Control (0x11/0x05): no light, no conversion.
+        let catalog = real_cc38(0x05);
+        let motor = catalog.by_base("Variateur_salon").unwrap();
+        assert!(motor.level_max.is_none());
+        let Kind::Numeric { min, max, .. } = &motor.device.point("level").unwrap().kind else {
+            panic!("level is numeric");
+        };
+        assert_eq!((*min, *max), (Some(0.0), Some(99.0)));
+        assert_eq!(
+            decoded(&catalog, "Variateur_salon/38/0/currentValue", "42"),
+            vec![
+                ("on".into(), Value::Bool(true)),
+                ("level".into(), Value::Int(42))
+            ]
+        );
+        assert_eq!(
+            motor.encode("level", &Value::Float(42.0)).unwrap(),
+            (
+                "Variateur_salon/38/0/targetValue/set".to_owned(),
+                "42".to_owned()
+            )
         );
     }
 }

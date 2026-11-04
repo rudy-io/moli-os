@@ -65,11 +65,20 @@
   d'une seconde, `switch_mode1` vaut `single_click`, `double_click` ou `long_press`.
   Chaque appui que l'interrupteur pousse (trame `STATUS`) est un événement (`pulse_state`) :
   deux simples appuis de suite déclenchent deux fois un automatisme, même si la lumière a
-  été éteinte entre-temps depuis le tableau de bord. Ce qui arrive dans les 5 s qui suivent
-  la connexion à la passerelle n'est qu'un état, même poussé de la même façon (elle répond
-  ainsi pour ses sous-appareils) : une reconnexion ne rejoue pas le dernier appui, mais un
-  appui fait pendant ces 5 s est perdu. Le cloud ne rapporte jamais un appui (il ne connaît
-  que le dernier, et le nomme autrement : `click` pour `single_click`).
+  été éteinte entre-temps depuis le tableau de bord. Ce qui répond à la requête d'état de la
+  connexion n'est qu'un état, même poussé de la même façon (une passerelle répond ainsi pour
+  ses sous-appareils) : tout ce qui arrive dans les 5 s qui suivent la connexion, puis le
+  premier message de chaque sous-appareil, même tardif (passerelle lente), au plus 30 s
+  après la connexion. Une reconnexion ne rejoue donc pas le dernier appui ; un appui fait
+  dans ce délai est perdu ; au-delà des 30 s, un interrupteur qui n'a jamais répondu redevient
+  actif (sans ce plafond, il resterait muet pour toujours). Le cloud ne rapporte jamais un
+  appui (il ne connaît que le dernier, et le nomme autrement : `click` pour `single_click`) :
+  pendant le repli vers le cloud, un interrupteur à scènes ne déclenche donc rien.
+  **Vérifié sur du vrai matériel** (31 octobre 2026, passerelle `wg2` en 3.4, interrupteur
+  `wxkg`) : Moli redémarré après un appui qui allume, lumière éteinte entre-temps depuis le
+  tableau de bord, elle reste éteinte ; un appui une dizaine de secondes après la
+  reconnexion de la passerelle déclenche, et les appuis suivants aussi, chacun. Le
+  plafond de 30 s pour un interrupteur qui ne répond jamais n'est vérifié que par un test.
 - Ordre vers un sous-appareil, essayé sur le point `mode` d'un `wxkg` (passerelle en 3.4) :
   la passerelle accuse l'ordre, et quand la valeur demandée est déjà la bonne, elle renvoie
   l'état de ce `cid` dans les 100 ms ; une autre valeur (`remote_control`) n'est pas
@@ -82,3 +91,30 @@
   d'un ordre vient de la passerelle, pas de l'appareil Zigbee : seul l'état renvoyé ensuite
   pour son `cid` prouve que l'ordre a été exécuté ; l'état de chaque sous-appareil n'est
   demandé qu'à la connexion, ensuite seul ce que la passerelle pousse arrive.
+
+## Aspirateurs robots : Rowenta et Tefal X-plorer Serie 75
+
+- Ces robots sont des appareils Tuya : ils passent par ce pilote (`src/vacuum.rs`),
+  **en local**, sans cloud une fois la clé obtenue.
+- Points : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`,
+  `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`.
+- La Serie 75 répond sur les points 101 à 144. Le cloud en décrit d'autres (`power_go` sur 2, `mode` sur 3,
+  `seek` sur 13) qu'elle ne renvoie pas : le produit `X-Plorer Serie 75` reçoit toujours la table de
+  `src/vacuum.rs`, y compris après un import. Table reprise de `tefal_xplorer_vacuum.yaml` de
+  `make-all/tuya-local` (MIT), confirmée sur un vrai robot.
+- Les Serie 75 S et 95 S utilisent d'autres numéros (1 à 31, d'après `xplorer-rs`) et n'ont pas de table ici.
+  Non essayés. Un robot décrit par le cloud avec les codes standards garde cette description.
+- Volontairement absents : effacer la carte, remettre à zéro les compteurs, conduire à la main, nettoyer
+  une zone ou une pièce (il faudrait lire la carte, un format brut non décodé ici).
+- Les ordres qui font bouger le robot sont des `Control` : un agent passe par l'accord d'un humain.
+- `fixtures/robot_status.json` : réponse d'un vrai robot, sans identifiant, pendant son retour à la base.
+- **Vérifié sur du vrai matériel** (3 novembre 2026, Rowenta X-Plorer Serie 75, protocole 3.3, à travers
+  Moli) : lecture, `clean`, `pause` dans les deux sens, `dock`, `fan_speed`, arrêt par `clean = false`, `locate` (son entendu).
+- Constaté : `clean = true` pendant une pause relance une session (la surface repart à 0), `pause = false`
+  reprend la session en cours. `clean_time` est en secondes mais n'avance que par minute. `clean = false` arrête
+  le robot sur place, après un bref `tocharge`.
+- Non vérifié : `mode = pose`, les noms des
+  défauts, repris de `tuya-local` et jamais vus en panne réelle. Un défaut `code 27`, absent de cette liste, a
+  été vu quand le robot s'est arrêté hors de sa base ; il a disparu une fois remis en charge, sens inconnu.
+- Tableau de bord : une carte sur l'accueil, avec seulement les ordres possibles dans l'état du robot. Rendu vérifié ; boutons Démarrer, Faire sonner et aspiration cliqués sur la vraie page, ordres interceptés, et ces mêmes ordres envoyés au robot par l'API.
+- Reste : carte et zones, langues, programmation, Serie 75 S et 95 S.

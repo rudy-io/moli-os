@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind } from './capabilities.js';
+import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice } from './capabilities.js';
 
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const device = (...points) => ({ online: true, points });
@@ -85,6 +85,40 @@ test('read-only on/off state can be shown without offering a toggle', () => {
   assert.equal(powerPoint(d), null);
   assert.equal(powerPoint(d, false), 'on');
   assert.equal(powerPoint(device(point('state', { type: 'text' }, false))), null);
+});
+
+test('cover position and motor orders cannot become a generic power toggle', () => {
+  const motor = point('state', { type: 'enum', values: ['OPEN', 'STOP', 'CLOSE'] });
+  assert.equal(powerPoint(device(motor)), null);
+  assert.equal(powerPoint(device({ ...motor, access: { read: true, write: false } }), false), null);
+  assert.equal(powerPoint(device(point('opening', numeric(0, 100, 1), true, 'position'), point('on', { type: 'binary' }))), null);
+  assert.equal(powerPoint(device(motor, { ...motor, key: 'other_motor' })), null);
+  assert.equal(powerPoint(device(point('state', { type: 'enum', values: ['ON', 'OFF'] }))), 'state');
+});
+
+test('cover commands retain device spelling and reject ambiguous case matches', () => {
+  assert.equal(enumChoice(['OPEN', 'STOP', 'CLOSE'], 'open'), 'OPEN');
+  assert.equal(enumChoice(['open', 'stop', 'close'], 'close'), 'close');
+  assert.equal(enumChoice(['OPEN', 'OPEN'], 'open'), 'OPEN');
+  assert.equal(enumChoice(['OPEN', 'open'], 'open'), null);
+  assert.equal(enumChoice([null, 42, 'STOP'], 'open'), null);
+  assert.equal(enumChoice('OPEN', 'open'), null);
+});
+
+test('semantic position priority cannot be bypassed by a legacy fallback', () => {
+  const semantic = point('opening', numeric(0, 100, 1), false, 'position');
+  const legacy = point('percent_control', numeric(0, 100, 1));
+  assert.equal(positionPoint(device(legacy, semantic), true), semantic);
+  assert.equal(positionPoint(device(legacy), true), legacy);
+  assert.equal(positionPoint(device(legacy)), null);
+  assert.equal(positionPoint(device(legacy, semantic, { ...semantic, key: 'other_opening' }), true), null);
+});
+
+test('motor detection tolerates missing metadata and preserves the partial Tuya order fallback', () => {
+  const legacy = point('control', { type: 'enum', values: ['open'] });
+  assert.equal(coverOrder(device(legacy)), legacy);
+  assert.equal(coverOrder(device(point('state', { type: 'enum', values: 'OPEN,CLOSE' }))), null);
+  assert.equal(coverOrder(device(point('state', { type: 'enum', values: [null, 1, 'ON', 'OFF'] }))), null);
 });
 
 test('bridge display hints cannot depend on friendly names or write access', () => {

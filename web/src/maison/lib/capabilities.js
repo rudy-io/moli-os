@@ -37,12 +37,41 @@ export function writableChoices(device, key) {
     : [];
 }
 
+/** Match a command without changing its spelling or choosing ambiguous casing. */
+export function enumChoice(choices, command) {
+  const matches = [...new Set(Array.isArray(choices) ? choices : [])]
+    .filter((value) => typeof value === 'string' && value.toLowerCase() === command);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/** `position` means 0–100, 100 = open. A legacy Tuya reading is display-only.
+ *  An explicit semantic, even invalid or read-only, always blocks that fallback. */
+export function positionPoint(device, legacy = false) {
+  const points = device?.points?.filter((point) => point.semantic === 'position') ?? [];
+  if (points.length) return points.length === 1 ? points[0] : null;
+  return legacy ? pointOf(device, 'percent_control') : null;
+}
+
+/** A motor order identifies a cover even read-only or offline; access is separate.
+ *  Only an already identified cover may opt into close/stop/cycle-only legacy
+ *  controls. They participate in the same ambiguity check, never a fallback. */
+export function coverOrder(device, allowPartial = false) {
+  const legacyCommands = allowPartial ? ['open', 'close', 'stop', 'cycle'] : ['open'];
+  const points = device?.points?.filter((point) => point.kind?.type === 'enum'
+    && ((enumChoice(point.kind.values, 'open') && enumChoice(point.kind.values, 'close'))
+      || (point.key === 'control' && legacyCommands.some((command) => enumChoice(point.kind.values, command))))) ?? [];
+  return points.length === 1 ? points[0] : null;
+}
+
 /** Reading power and commanding it are separate capabilities. */
 export function powerPoint(device, writable = true) {
+  // A shutter's state is a motor order, never an on/off switch.
+  if (device?.points?.some((point) => point.semantic === 'position') || coverOrder(device)) return null;
   const points = device?.points?.filter((point) => !writable || point.access?.write) ?? [];
   const point = points.find((point) => point.semantic === 'on_off' && point.kind.type === 'binary')
     ?? points.find((point) => ['on', 'switch_1', 'switch', 'state'].includes(point.key)
-      && (point.kind.type === 'binary' || point.kind.type === 'enum'));
+      && (point.kind.type === 'binary' || (point.kind.type === 'enum'
+        && enumChoice(point.kind.values, 'on') && enumChoice(point.kind.values, 'off'))));
   return point?.key ?? null;
 }
 

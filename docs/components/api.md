@@ -215,6 +215,9 @@ Règles, dans l'ordre :
    l'utilisateur **et** la pièce native (Hue…). Comparaison insensible à la casse, aux
    espaces multiples et aux accents (« chambre bebe » = « Chambre bébé »).
    Raison affichée : `pièce protégée (<pièce>)`.
+   **Appareil protégé** (`protected_devices`, ids) : même règle quelle que soit la pièce,
+   sur tous ses points, ou un membre s'il s'agit d'un groupe. Un id inconnu est signalé
+   dans `guard.unmatched_protected_devices` et dans les logs. Raison : `appareil protégé (<nom>)`.
 2. **Appareil sans pièce** (`protect_unassigned = true`) : raison `appareil sans pièce
    connue`.
 3. **Mode `pin`** (`dashboard = "pin"`) : tout ordre est retenu, quels que soient la pièce
@@ -457,7 +460,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
   `ppm`, `s`, `min`, `h`, ou tout autre texte).
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
-  `battery`, `battery_low`, `signal_strength`, `contact`, `occupancy`, `water_leak`,
+  `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`,
   `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose ne va pas), `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
@@ -860,3 +863,14 @@ Restent ouverts (non urgents) :
 - le commentaire de `crates/moli-api/src/lib.rs` ne liste ni `/api/system`, ni
   `/api/home`, `/api/bench`, `/api/history`, `/api/devices/{id}/snapshot` ; la plupart des
   handlers de `rest.rs` et `automations.rs` n'ont pas de commentaire de documentation.
+
+## Visibilité locale des appareils
+
+| Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
+|---|---|---|---|---|---|
+| PUT | `/api/devices/{id}/visibility` | session humaine + origine `ui`, invités refusés | `{hidden:bool}`, champs inconnus refusés, 1 KiB maximum | `{hidden:bool}` | `403` non-humain ; `404` appareil inconnu ; `422` identifiant invalide ; `503` layout non configuré ; `500` sauvegarde impossible |
+
+Une session humaine du dashboard peut masquer ou restaurer un appareil dans Moli.
+La modification persiste dans `home.json`, ne commande pas l’appareil et ne retire
+ni sa définition ni son historique. Un succès diffuse `layout_changed` pour que
+les autres vues rechargent leur disposition, et journalise une action `visibility`.

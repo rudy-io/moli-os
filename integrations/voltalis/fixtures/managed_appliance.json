@@ -1,0 +1,78 @@
+[
+  {
+    "id": 1000,
+    "name": "Radiateur 1",
+    "applianceType": "HEATER",
+    "availableModes": [
+      "ECO",
+      "CONFORT",
+      "TEMPERATURE",
+      "HORS_GEL"
+    ],
+    "heatingLevel": 2,
+    "programming": {
+      "progType": "MANUAL",
+      "isOn": false,
+      "mode": "CONFORT",
+      "temperatureTarget": 21.0,
+      "untilFurtherNotice": true
+    }
+  },
+  {
+    "id": 1001,
+    "name": "Radiateur 2",
+    "applianceType": "HEATER",
+    "availableModes": [
+      "ECO",
+      "CONFORT",
+      "TEMPERATURE",
+      "HORS_GEL"
+    ],
+    "heatingLevel": 2,
+    "programming": {
+      "progType": "MANUAL",
+      "isOn": true,
+      "mode": "CONFORT",
+      "temperatureTarget": 21.0,
+      "untilFurtherNotice": true
+    }
+  },
+  {
+    "id": 1002,
+    "name": "Radiateur 3",
+    "applianceType": "HEATER",
+    "availableModes": [
+      "ECO",
+      "CONFORT",
+      "TEMPERATURE",
+      "HORS_GEL"
+    ],
+    "heatingLevel": 2,
+    "programming": {
+      "progType": "MANUAL",
+      "isOn": false,
+      "mode": "CONFORT",
+      "temperatureTarget": 21.0,
+      "untilFurtherNotice": true
+    }
+  },
+  {
+    "id": 1003,
+    "name": "Radiateur 4",
+    "applianceType": "HEATER",
+    "availableModes": [
+      "ECO",
+      "CONFORT",
+      "TEMPERATURE",
+      "HORS_GEL"
+    ],
+    "heatingLevel": 2,
+    "programming": {
+      "progType": "MANUAL",
+      "isOn": true,
+      "mode": "TEMPERATURE",
+      "temperatureTarget": 17.0,
+      "untilFurtherNotice": true
+    }
+  }
+]

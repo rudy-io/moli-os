@@ -1,6 +1,7 @@
 //! One Tuya device: a TCP connection kept open (6668), its session key,
 //! status pushes, heartbeats, orders. Reconnects on its own.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,6 +25,42 @@ const SILENCE: Duration = Duration::from_secs(35);
 const BACKOFF_MAX: Duration = Duration::from_secs(300);
 /// Plugs only report power when asked (or when it changes a lot).
 const REFRESH_POWER: Duration = Duration::from_secs(30);
+/// How long a sub-device's first message may still be its answer to our
+/// query at connection. Past it, even a first message is a press: a switch
+/// that never answers (asleep, or a gateway that does not answer for it)
+/// would otherwise stay mute for good, worse than a replayed press. Do not
+/// remove this bound.
+#[cfg(not(test))]
+const QUIET_CAP: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const QUIET_CAP: Duration = Duration::from_secs(7);
+
+/// Tells, frame by frame, a press pushed by a device from the answers to
+/// our queries at connection, which a gateway sends alike (`STATUS`).
+struct Answers {
+    since: Instant,
+    /// Sub-devices (`cid`) that answered since the connection.
+    answered: HashSet<String>,
+}
+
+impl Answers {
+    fn new() -> Self {
+        Self {
+            since: Instant::now(),
+            answered: HashSet::new(),
+        }
+    }
+
+    /// Whether this frame is pushed by the device on its own (a press in it
+    /// is then an event). Within a reply's time, everything answers; after
+    /// it, a sub-device's first message is still its answer, a slow
+    /// gateway's, until [`QUIET_CAP`].
+    fn pushed(&mut self, command: u32, cid: Option<&str>) -> bool {
+        let elapsed = self.since.elapsed();
+        let first = cid.is_some_and(|cid| self.answered.insert(cid.to_owned()));
+        command == cmd::STATUS && elapsed >= REPLY && (!first || elapsed >= QUIET_CAP)
+    }
+}
 const POWER_DPS: [u32; 3] = [18, 19, 20];
 
 /// Where the device is, from the device file or discovery.
@@ -259,9 +296,9 @@ impl Link {
         )
         .await
         .map_err(|_| LinkError::Timeout)??;
-        // What comes within a reply's time answers our queries: states, even
-        // pushed like a press (a gateway answers for its sub-devices so).
-        let answers_until = Instant::now() + REPLY;
+        // What answers our queries is a state, even pushed like a press (a
+        // gateway answers for its sub-devices so).
+        let mut answers = Answers::new();
         floor.proved(version);
         // Orders received before identity was established are not replayed
         // after recovery, even if their caller has not timed out yet.
@@ -279,7 +316,7 @@ impl Link {
         *online = Some(true);
         self.announce(true).await;
         if let Some(frame) = first {
-            self.report(&codec, &frame, false).await;
+            self.report(&codec, &frame, &mut answers).await;
         }
 
         let wants_power = self.device.dps.iter().any(|d| POWER_DPS.contains(&d.id));
@@ -311,8 +348,7 @@ impl Link {
                                 let _ = done.send(outcome.clone());
                             }
                         }
-                        let pushed = frame.cmd == cmd::STATUS && Instant::now() >= answers_until;
-                        self.report(&codec, &frame, pushed).await;
+                        self.report(&codec, &frame, &mut answers).await;
                     }
                 }
                 _ = heartbeat.tick() => {
@@ -350,9 +386,9 @@ impl Link {
         }
     }
 
-    /// `pushed`: sent by the device on its own, after the answers to our
-    /// queries; a press in it is then an event of its own.
-    async fn report(&self, codec: &Codec, frame: &Frame, pushed: bool) {
+    /// A frame's state, or presses when the device pushed it on its own
+    /// (`answers` tells which).
+    async fn report(&self, codec: &Codec, frame: &Frame, answers: &mut Answers) {
         let (cid, dps) = match status(codec, frame) {
             Ok(Some(status)) => status,
             Ok(None) => return,
@@ -361,6 +397,7 @@ impl Link {
                 return;
             }
         };
+        let pushed = answers.pushed(frame.cmd, cid.as_deref());
         // A sub-device's state: never applied to the gateway itself.
         let (index, device) = match cid {
             None => (self.index, &self.device),
@@ -947,6 +984,78 @@ mod tests {
         }
         server.abort();
         session.abort();
+    }
+
+    /// A gateway carrying a probe (index 1, it answers at once, the proof)
+    /// and a scene switch (index 2), whose frames the gateway sends after
+    /// the given delays. Returns the events once those frames are read.
+    async fn switch_behind(ip: &'static str, frames: Vec<(Duration, &'static [u8])>) -> Vec<Up> {
+        let key = *b"0123456789abcdef";
+        let listener = tokio::net::TcpListener::bind((ip, PORT)).await.unwrap();
+        let count = frames.len();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for _ in 0..3 {
+                assert_eq!(request(&mut stream).await.0, cmd::DP_QUERY);
+            }
+            let status = |payload: &[u8]| response(Version::V33, key, cmd::STATUS, payload);
+            stream
+                .write_all(&status(br#"{"cid":"a4c138ff","dps":{"1":215,"2":64}}"#))
+                .await
+                .unwrap();
+            for (after, payload) in frames {
+                tokio::time::sleep(after).await;
+                stream.write_all(&status(payload)).await.unwrap();
+            }
+            std::future::pending::<()>().await;
+        });
+        let (up, mut events) = mpsc::channel(16);
+        let (mut link, _orders) = test_link(up);
+        let mut button = scene_switch();
+        button.index = 2;
+        link.children = vec![thermometer(), button];
+        let session = tokio::spawn(async move {
+            link.session(ip, Version::V33, &mut Some(false), &mut Floor::new(None))
+                .await
+        });
+        let mut seen = Vec::new();
+        // Online ×3, the probe's state, then one event per frame.
+        while seen.len() < 4 + count {
+            seen.push(events.recv().await.expect("the session goes on"));
+        }
+        server.abort();
+        session.abort();
+        seen
+    }
+
+    const SINGLE: &[u8] = br#"{"cid":"b5d249ff","dps":{"1":"single_click"}}"#;
+
+    /// A slow gateway answers for the switch after a reply's time: still its
+    /// answer, a state, not a press replayed; what follows is a press.
+    #[tokio::test]
+    async fn a_slow_gateways_answer_is_still_a_state() {
+        let seen = switch_behind(
+            "127.0.0.25",
+            vec![
+                (REPLY + Duration::from_millis(500), SINGLE),
+                (Duration::from_millis(300), SINGLE),
+            ],
+        )
+        .await;
+        assert!(matches!(seen[4], Up::State(2, _)), "{seen:?}");
+        assert!(matches!(seen[5], Up::Pressed(2, _)), "{seen:?}");
+    }
+
+    /// A switch that never answers is not mute for good: past the cap, its
+    /// first message is a press.
+    #[tokio::test]
+    async fn a_switch_that_never_answers_is_not_mute() {
+        let seen = switch_behind(
+            "127.0.0.26",
+            vec![(QUIET_CAP + Duration::from_millis(500), SINGLE)],
+        )
+        .await;
+        assert!(matches!(seen[4], Up::Pressed(2, _)), "{seen:?}");
     }
 
     #[tokio::test]

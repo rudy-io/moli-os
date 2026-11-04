@@ -9,5 +9,7 @@
    Dirigera » ; l'humain appuie (un appui bref, sous le hub) ; le pilote redemande toutes les
    2 s et renouvelle le code toutes les 60 s jusqu'à l'appui.
 5. Tester : lampes, prises, capteurs et télécommandes publiés avec leur pièce IKEA ; allumer
-   puis éteindre une lampe neutre (jamais dans une chambre), humain présent.
+   puis éteindre une lampe neutre (jamais dans une chambre), humain présent. Stores : ouvrir,
+   stop, fermer, puis régler au curseur un store d'une pièce non protégée, humain présent ;
+   relever `moving` pendant le mouvement, puis remettre le store où il était.
 6. Siri, l'app Maison et l'appli IKEA restent reliés au hub : rien ne change pour eux.

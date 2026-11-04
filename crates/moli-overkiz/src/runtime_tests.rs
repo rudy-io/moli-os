@@ -80,12 +80,21 @@ impl Driver for Probe {
                 "synthetic-test-token".into(),
             );
             ctx.upsert_device(stale_summary(ctx.instance()));
+            let mut missing = MissingDevices::new();
             if !self.guard {
-                refresh(&client, ctx, &self.config).await?;
+                refresh(&client, ctx, &self.config, &mut missing).await?;
             }
             ctx.ready();
             while let Some(command) = ctx.next_command().await {
-                let result = apply(&client, ctx, &command, command.deadline, &self.config).await;
+                let result = apply(
+                    &client,
+                    ctx,
+                    &command,
+                    command.deadline,
+                    &self.config,
+                    &mut missing,
+                )
+                .await;
                 command.reply(result.map_err(|e| e.to_string()));
             }
             Ok(())

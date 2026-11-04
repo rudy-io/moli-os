@@ -28,6 +28,11 @@ Use `transport = "pinned_https"` for TLS and set `cert_sha256` to the verified
 certificate fingerprint (64 hexadecimal characters, no colons). No discovery or
 initial credential-bearing certificate learning takes place.
 
+Créer le jeton depuis un **utilisateur HA dédié à Moli, non administrateur** : un jeton
+longue durée a tous les droits de son utilisateur, et le pont reste expérimental.
+Create the token from a **dedicated, non-admin HA user**: a long-lived token
+carries all of its user's rights.
+
 Stocker le jeton HA dans le coffre de l'instance, clé `token`, par le mécanisme
 `moli-os secrets set` et un tube. Ne jamais le mettre dans le TOML, une commande
 visible, un journal ou une variable de modèle. Store the HA token through a pipe

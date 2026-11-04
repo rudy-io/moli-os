@@ -38,6 +38,7 @@ timezone = "Europe/Paris"
 # [guard]
 # dashboard = "trusted"
 # protected_rooms = ["Chambre", "Chambre des enfants"]
+# protected_devices = ["z2m:0x00124b0000aa0013"]   # whatever their room
 #
 # [guard.quiet_hours]
 # from = "21:00"
@@ -58,6 +59,16 @@ timezone = "Europe/Paris"
 # role = "grid"
 # price = 0.14
 # reset = "never"        # an index; default "auto" handles daily counters
+
+# Without a local reading of the meter, the `enedis` driver reports yesterday's
+# consumption hour by hour:
+# [[energy.meter]]
+# id = "linky"
+# name = "Linky"
+# point = "enedis:linky/hours"
+# role = "grid"
+# history = true
+# price = 0.17
 
 # Light fixtures: bulbs and the relay that feeds them as one light
 # (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb
@@ -102,6 +113,18 @@ base_topic = "zigbee2mqtt"
 #
 # [driver.options]
 # host = "192.168.0.x"
+
+# Somfy TaHoma developer mode, local HTTPS. Store the token under somfy/token
+# in the encrypted vault. Observe first; see integrations/overkiz/README.md.
+# [[driver]]
+# id = "somfy"
+# kind = "overkiz"
+#
+# [driver.options]
+# host = "gateway-example.local"
+# read_only = true
+# port = 8443
+# poll_secs = 5
 
 # IKEA, through a Dirigera hub (local API). Needs the master key: the driver
 # keeps its token encrypted; press the action button under the hub when asked.

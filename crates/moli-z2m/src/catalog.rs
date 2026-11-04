@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use moli_core::color::{hex_to_xy, xy_to_hex};
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
@@ -30,6 +31,9 @@ struct Codec {
     /// A dimming level the device counts from 0 to this maximum (Zigbee: 254),
     /// exposed in percent like every other driver and the dashboard do.
     level_max: Option<f64>,
+    /// The colour people pick (« #rrggbb »), sent to the lamp as CIE xy and
+    /// read back from its `color {x, y}`, as the Hue driver does.
+    xy_hex: bool,
 }
 
 /// One Z2M device with everything needed to decode its messages.
@@ -101,7 +105,7 @@ impl Entry {
         let mut codecs = HashMap::new();
         let definition = raw.definition.unwrap_or_default();
         for expose in &definition.exposes {
-            flatten(expose, "", &mut points, &mut codecs);
+            flatten(expose, "", "", &mut points, &mut codecs);
         }
         let device = Device {
             id: DeviceId::new(instance, &raw.ieee_address),
@@ -145,12 +149,27 @@ impl Entry {
     /// Unknown properties (`update`, `last_seen`…) are ignored.
     #[must_use]
     pub fn decode(&self, payload: &Map<String, Json>) -> Vec<(Arc<str>, Value)> {
+        let color_mode = payload.get("color_mode").and_then(Json::as_str);
         self.device
             .points
             .iter()
             .filter_map(|point| {
                 let json = lookup(payload, &point.key)?;
                 let codec = self.codecs.get(&point.key);
+                if codec.is_some_and(|c| c.xy_hex) {
+                    let axis = |a: &str| json.get(a).and_then(Json::as_f64);
+                    let hex = axis("x")
+                        .zip(axis("y"))
+                        .and_then(|(x, y)| xy_to_hex(x, y))?;
+                    return Some((point.key.clone(), Value::from(hex.as_str())));
+                }
+                // A lamp in colour mode keeps reporting its last white: no
+                // temperature then, as with Hue, so pages show the colour.
+                if point.semantic == Semantic::ColorTemp
+                    && color_mode.is_some_and(|mode| mode != "color_temp")
+                {
+                    return Some((point.key.clone(), Value::Null));
+                }
                 let level = codec.and_then(|c| c.level_max).zip(json.as_f64());
                 let value = if let Some((max, level)) = level {
                     Value::Int(level_to_percent(level, max))
@@ -174,7 +193,19 @@ impl Entry {
     pub fn encode(&self, key: &str, value: &Value) -> Json {
         let codec = self.codecs.get(key);
         let level = codec.and_then(|c| c.level_max).zip(value.as_f64());
-        let wire = if let Some((max, percent)) = level {
+        let xy = match value {
+            Value::Text(hex) if codec.is_some_and(|c| c.xy_hex) => {
+                Some(hex_to_xy(hex).map_or_else(
+                    // Not a colour (black…): Z2M says why it refuses.
+                    || serde_json::json!({ "hex": &**hex }),
+                    |(x, y)| serde_json::json!({ "x": x, "y": y }),
+                ))
+            }
+            _ => None,
+        };
+        let wire = if let Some(xy) = xy {
+            xy
+        } else if let Some((max, percent)) = level {
             Json::from(percent_to_level(percent, max))
         } else {
             match (codec.and_then(|c| c.binary.as_ref()), value) {
@@ -227,23 +258,70 @@ fn lookup<'a>(payload: &'a Map<String, Json>, key: &str) -> Option<&'a Json> {
     Some(current)
 }
 
-fn flatten(
-    expose: &RawExpose,
+/// The order point of a shutter, blind or curtain: an enum that opens and
+/// closes (`OPEN` / `CLOSE` / `STOP`), whatever the case it is spelled in.
+fn is_shutter_order(kind: &Kind) -> bool {
+    matches!(kind, Kind::Enum { values }
+        if values.iter().any(|v| v.eq_ignore_ascii_case("open"))
+            && values.iter().any(|v| v.eq_ignore_ascii_case("close")))
+}
+
+/// What a shutter's own points are (`group` is the enclosing expose's type).
+fn shutter_semantic(group: &str, property: &str, kind: &Kind) -> Option<Semantic> {
+    if is_shutter_order(kind) {
+        // `state` (OPEN / CLOSE / STOP) is an order, not a switch: read as
+        // one it shows « off » while the shutter is open, and a click on it
+        // would send `ON`. Its opening is `position`.
+        Some(Semantic::Other)
+    } else if group == "cover"
+        && property.starts_with("position")
+        && matches!(kind, Kind::Numeric { .. })
+    {
+        // The opening of a shutter, blind or curtain. Never deduced from the
+        // name alone: a `position` can be a servo or a playback position.
+        Some(Semantic::Position)
+    } else {
+        None
+    }
+}
+
+/// A group of exposes: a composite value or a specific type (light, cover…).
+fn flatten_group<'a>(
+    expose: &'a RawExpose,
     prefix: &str,
+    group: &'a str,
+    points: &mut Vec<PointSpec>,
+    codecs: &mut HashMap<Arc<str>, Codec>,
+) {
+    if is_xy_color(expose) {
+        push_color(expose, prefix, points, codecs);
+    }
+    // Composite values nest under their property; specific types
+    // (light, switch, climate…) are plain groups.
+    let prefix = match (&*expose.kind, &expose.property) {
+        ("composite", Some(p)) => format!("{prefix}{p}."),
+        _ => prefix.to_owned(),
+    };
+    // The enclosing group's type (`cover`, `light`…) says what a plain
+    // member such as `position` is.
+    let group = match &*expose.kind {
+        "composite" => group,
+        kind => kind,
+    };
+    for feature in &expose.features {
+        flatten(feature, &prefix, group, points, codecs);
+    }
+}
+
+fn flatten<'a>(
+    expose: &'a RawExpose,
+    prefix: &str,
+    group: &'a str,
     points: &mut Vec<PointSpec>,
     codecs: &mut HashMap<Arc<str>, Codec>,
 ) {
     if !expose.features.is_empty() {
-        // Composite values nest under their property; specific types
-        // (light, switch, climate…) are plain groups.
-        let prefix = match (&*expose.kind, &expose.property) {
-            ("composite", Some(p)) => format!("{prefix}{p}."),
-            _ => prefix.to_owned(),
-        };
-        for feature in &expose.features {
-            flatten(feature, &prefix, points, codecs);
-        }
-        return;
+        return flatten_group(expose, prefix, group, points, codecs);
     }
     let Some(property) = &expose.property else {
         return;
@@ -293,6 +371,7 @@ fn flatten(
         gettable: expose.access & ACCESS_GET != 0,
         numeric_enum: !expose.values.is_empty() && expose.values.iter().all(Json::is_number),
         level_max: None,
+        xy_hex: false,
     };
     let unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
@@ -308,6 +387,8 @@ fn flatten(
         Semantic::Config
     } else if lock {
         Semantic::Lock
+    } else if let Some(semantic) = shutter_semantic(group, property, &kind) {
+        semantic
     } else {
         Semantic::infer(&key, unit.as_ref())
     };
@@ -343,6 +424,57 @@ fn flatten(
         key: key.clone(),
     });
     codecs.insert(key, codec);
+}
+
+/// A lamp's settable `color {x, y}` composite (`color_xy`).
+fn is_xy_color(expose: &RawExpose) -> bool {
+    let has = |axis: &str| {
+        expose
+            .features
+            .iter()
+            .any(|f| f.property.as_deref() == Some(axis))
+    };
+    expose.kind == "composite"
+        && expose.property.as_deref() == Some("color")
+        && expose.access & ACCESS_SET != 0
+        && has("x")
+        && has("y")
+}
+
+/// The whole colour as one writable point, `color` (« #rrggbb »): Z2M only takes
+/// the composite as a whole, and pages and agents pick colours, not CIE axes.
+/// The members stay, read-only, for history.
+fn push_color(
+    expose: &RawExpose,
+    prefix: &str,
+    points: &mut Vec<PointSpec>,
+    codecs: &mut HashMap<Arc<str>, Codec>,
+) {
+    let key: Arc<str> = format!("{prefix}color").into();
+    if points.iter().any(|p| p.key == key) {
+        return;
+    }
+    points.push(PointSpec {
+        label: "Color".into(),
+        kind: Kind::Text,
+        access: Access {
+            read: expose.access & ACCESS_STATE != 0,
+            write: true,
+        },
+        unit: None,
+        semantic: Semantic::Color,
+        key: key.clone(),
+    });
+    codecs.insert(
+        key,
+        Codec {
+            binary: None,
+            gettable: expose.access & ACCESS_GET != 0,
+            numeric_enum: false,
+            level_max: None,
+            xy_hex: true,
+        },
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -427,7 +559,7 @@ mod tests {
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 7, "coordinator excluded, 7 real devices");
+        assert_eq!(catalog.len(), 8, "coordinator excluded, 8 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),
@@ -549,6 +681,56 @@ mod tests {
     }
 
     #[test]
+    fn shutter_is_a_position_not_a_switch() {
+        let catalog = catalog();
+        let shutter = catalog.by_name("0x00124b0000000002").unwrap();
+        let semantic = |key: &str| shutter.device.point(key).unwrap().semantic;
+
+        assert_eq!(semantic("position"), Semantic::Position);
+        // `state` is an order (OPEN / CLOSE / STOP), not an on/off switch.
+        assert_eq!(semantic("state"), Semantic::Other);
+        assert_eq!(semantic("moving"), Semantic::Other);
+        assert!(
+            shutter
+                .device
+                .points
+                .iter()
+                .all(|p| p.semantic != Semantic::OnOff),
+            "nothing on a shutter reads as a switch"
+        );
+
+        let position = shutter.device.point("position").unwrap();
+        assert!(position.access.write);
+        assert_eq!(position.unit, Some(Unit::Percent));
+        let Kind::Numeric { min, max, .. } = &position.kind else {
+            panic!("position is numeric");
+        };
+        assert_eq!((*min, *max), (Some(0.0), Some(100.0)));
+    }
+
+    #[test]
+    fn shutter_state_decodes_and_its_orders_encode() {
+        let catalog = catalog();
+        let shutter = catalog.by_name("0x00124b0000000002").unwrap();
+        let values: HashMap<_, _> = shutter
+            .decode(&state("0x00124b0000000002"))
+            .into_iter()
+            .collect();
+        assert_eq!(values["position"], Value::Int(32));
+        assert_eq!(values["state"], Value::from("OPEN"));
+        assert_eq!(values["moving"], Value::from("STOP"));
+
+        assert_eq!(
+            shutter.encode("position", &Value::Float(50.0)),
+            json!({"position": 50})
+        );
+        assert_eq!(
+            shutter.encode("state", &Value::from("CLOSE")),
+            json!({"state": "CLOSE"})
+        );
+    }
+
+    #[test]
     fn config_category_wins_over_units_and_numeric_enums_round_trip() {
         let expose: RawExpose = serde_json::from_value(json!({
             "type": "climate",
@@ -562,7 +744,7 @@ mod tests {
         .unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         assert_eq!(points[0].semantic, Semantic::Config);
         assert_eq!(points[1].semantic, Semantic::Temperature);
 
@@ -600,7 +782,7 @@ mod tests {
         let expose: RawExpose = serde_json::from_value(expose).unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         Entry {
             ieee: "0x3".into(),
             friendly_name: "bulb".into(),
@@ -683,6 +865,47 @@ mod tests {
         assert_eq!(
             moli_runtime::opener(&["Prise salon"], &plug.device.points),
             moli_runtime::Opener::None
+        );
+    }
+
+    #[test]
+    fn a_position_is_an_opening_only_inside_a_cover() {
+        // A servo's `position` is not a shutter.
+        let servo = entry_of(json!({
+            "type": "numeric", "property": "position", "access": 7,
+            "unit": "%", "value_min": 0, "value_max": 100
+        }));
+        assert_eq!(
+            servo.device.point("position").unwrap().semantic,
+            Semantic::Other
+        );
+        // Inside a `cover` it is.
+        let cover = entry_of(json!({"type": "cover", "features": [
+            {"type": "enum", "property": "state", "access": 7, "values": ["OPEN", "CLOSE", "STOP"]},
+            {"type": "numeric", "property": "position", "access": 7, "unit": "%",
+             "value_min": 0, "value_max": 100}
+        ]}));
+        assert_eq!(
+            cover.device.point("position").unwrap().semantic,
+            Semantic::Position
+        );
+    }
+
+    #[test]
+    fn a_simple_motor_has_an_order_and_no_position() {
+        let motor = entry_of(json!({"type": "cover", "features": [
+            {"type": "enum", "property": "state", "access": 7, "values": ["OPEN", "CLOSE", "STOP"]}
+        ]}));
+        assert_eq!(
+            motor.device.point("state").unwrap().semantic,
+            Semantic::Other
+        );
+        assert!(
+            motor
+                .device
+                .points
+                .iter()
+                .all(|p| p.semantic != Semantic::Position)
         );
     }
 
@@ -776,6 +999,59 @@ mod tests {
     }
 
     #[test]
+    fn a_colour_lamp_takes_a_colour_and_keeps_its_whites() {
+        // Innr RB 287 C, as Zigbee2MQTT 2.14 exposes it.
+        let lamp = entry_of(json!({"type": "light", "features": [
+            {"type": "binary", "property": "state", "access": 7, "value_on": "ON", "value_off": "OFF"},
+            {"type": "numeric", "property": "brightness", "access": 7, "value_min": 0, "value_max": 254},
+            {"type": "numeric", "property": "color_temp", "access": 7, "unit": "mired", "value_min": 153, "value_max": 556},
+            {"type": "composite", "name": "color_xy", "property": "color", "access": 7, "features": [
+                {"type": "numeric", "property": "x", "access": 7},
+                {"type": "numeric", "property": "y", "access": 7}
+            ]},
+            {"type": "composite", "name": "color_hs", "property": "color", "access": 7, "features": [
+                {"type": "numeric", "property": "hue", "access": 7},
+                {"type": "numeric", "property": "saturation", "access": 7}
+            ]}
+        ]}));
+        let color = lamp.device.point("color").expect("a colour point");
+        assert!(color.access.write);
+        assert_eq!(color.kind, Kind::Text);
+        assert_eq!(color.semantic, Semantic::Color);
+        assert_eq!(
+            lamp.device
+                .points
+                .iter()
+                .filter(|p| &*p.key == "color")
+                .count(),
+            1,
+            "one colour, whatever the number of colour spaces"
+        );
+        assert!(lamp.device.point("color_temp").unwrap().access.write);
+
+        let (x, y) = hex_to_xy("#ff0000").unwrap();
+        assert_eq!(
+            lamp.encode("color", &Value::from("#ff0000")),
+            json!({"color": {"x": x, "y": y}})
+        );
+
+        let decode = |payload: Json| -> HashMap<Arc<str>, Value> {
+            lamp.decode(payload.as_object().unwrap())
+                .into_iter()
+                .collect()
+        };
+        let red = decode(json!({"state": "ON", "color_mode": "xy", "color_temp": 370,
+            "color": {"x": x, "y": y, "hue": 0, "saturation": 100}}));
+        assert_eq!(red["color"], Value::from(xy_to_hex(x, y).unwrap().as_str()));
+        assert_eq!(red["color_temp"], Value::Null, "in colour mode, no white");
+        let warm = decode(
+            json!({"state": "ON", "color_mode": "color_temp", "color_temp": 370,
+            "color": {"x": 0.4599, "y": 0.4106}}),
+        );
+        assert_eq!(warm["color_temp"], Value::Int(370));
+    }
+
+    #[test]
     fn composite_keys_round_trip() {
         let expose: RawExpose = serde_json::from_value(json!({
             "type": "light",
@@ -790,7 +1066,7 @@ mod tests {
         .unwrap();
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
-        flatten(&expose, "", &mut points, &mut codecs);
+        flatten(&expose, "", "", &mut points, &mut codecs);
         let keys: Vec<_> = points.iter().map(|p| &*p.key).collect();
         assert_eq!(keys, ["state", "color.x", "color.y"]);
         assert!(points[0].access.write);

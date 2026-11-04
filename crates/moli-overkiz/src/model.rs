@@ -287,8 +287,10 @@ impl Entry {
                 write: supported && !self.read_only,
             },
             unit: Some(Unit::Percent),
-            semantic: if supported {
-                self.write_semantic()
+            semantic: if supported && self.reviewed_class.is_some() {
+                Semantic::Control
+            } else if key == "percent_control" {
+                Semantic::Position
             } else {
                 Semantic::Other
             },
@@ -351,6 +353,9 @@ impl Entry {
                 .as_str()
                 .filter(|s| s.len() <= 256)
                 .unwrap_or("Overkiz")
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>()
                 .into(),
             manufacturer: Some("Somfy / Overkiz".into()),
             model: self

@@ -1,5 +1,6 @@
 //! The evening recap: the day's exchanges with Moli, in a message the
-//! house's Telegram sends. Plain counts first, then each exchange, briefly.
+//! house's Telegram sends. Plain counts first, then each shared exchange,
+//! briefly; the dashboard's questions are their asker's, only counted.
 
 use jiff::Zoned;
 use jiff::civil::Time;
@@ -97,11 +98,13 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
         let mean = answered.iter().sum::<u64>() as f64 / answered.len() as f64 / 1000.0;
         lines.push(moli_i18n::tr!("assistant.recap.speed", s = decimal(mean)));
     }
+    let shared: Vec<&Exchange> = turns.iter().copied().filter(|e| e.shared()).collect();
+    let own = turns.len() - shared.len();
     if !turns.is_empty() {
         lines.push(String::new());
     }
-    let skipped = turns.len().saturating_sub(LISTED);
-    for e in &turns[skipped..] {
+    let skipped = shared.len().saturating_sub(LISTED);
+    for e in &shared[skipped..] {
         let time = jiff::Timestamp::from_millisecond(e.at)
             .map(|t| t.to_zoned(tz.clone()).strftime("%H:%M").to_string())
             .unwrap_or_default();
@@ -120,6 +123,9 @@ pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Optio
     }
     if skipped > 0 {
         lines.push(moli_i18n::tr!("assistant.recap.more", n = skipped));
+    }
+    if own > 0 {
+        lines.push(moli_i18n::tr!("assistant.recap.own", n = own));
     }
     Some(lines.join("\n"))
 }
@@ -235,6 +241,41 @@ mod tests {
         assert_eq!(listed.len(), 3, "{text}");
         assert!(listed[0].contains("Allume le salon"), "{text}");
         assert_eq!(compose(&[], &tz, "samedi"), None);
+    }
+
+    #[test]
+    fn the_dashboards_questions_are_counted_never_listed() {
+        let tz = TimeZone::get("Europe/Paris").unwrap();
+        let at = 1_791_552_000_000;
+        let mut mine = exchange(at, Kind::Turn, "bubble", "Mon rendez-vous ?", "À 18 h.");
+        mine.asker = Some("person:alex".into());
+        let mut aloud = exchange(
+            at + 60_000,
+            Kind::Turn,
+            "satellite",
+            "Allume",
+            "C'est fait.",
+        );
+        aloud.asker = Some("person:sam".into());
+        let older = exchange(
+            at + 120_000,
+            Kind::Turn,
+            "bubble",
+            "Quelle heure ?",
+            "Midi.",
+        );
+        let text = compose(&[mine, aloud, older], &tz, "samedi").unwrap();
+        assert!(
+            !text.contains("rendez-vous") && !text.contains("18 h"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Allume") && text.contains("Quelle heure"),
+            "{text}"
+        );
+        assert!(text.lines().last().unwrap().contains('1'), "{text}");
+        // All three still in the counts.
+        assert!(text.lines().nth(1).unwrap().contains('3'), "{text}");
     }
 
     #[test]

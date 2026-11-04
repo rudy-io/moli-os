@@ -90,6 +90,7 @@
   "serveur.systeme.surface.rest.quoi": "scripts et applications",
 
   "serveur.garde.piece_protegee": "pièce protégée ({room})",
+  "serveur.garde.appareil_protege": "appareil protégé ({name})",
   "serveur.garde.sans_piece_connue": "appareil sans pièce connue",
   "serveur.garde.heures_calmes": "heures calmes ({from} → {to})",
   "serveur.garde.machine": "ordre à une machine (imprimante, ordinateur) : un humain décide",
@@ -172,5 +173,8 @@
   "serveur.personnes.point_quelquun": "Quelqu'un à la maison",
   "serveur.personnes.point_tous_partis": "Tout le monde est parti",
   "serveur.garde.ouverture": "ouvrir une serrure, une porte de garage ou un portail : une personne valide",
-  "serveur.personnes.deja_configuree": "cette personne est déjà configurée : à retirer depuis l’écran Personnes"
+  "serveur.personnes.deja_configuree": "cette personne est déjà configurée : à retirer depuis l’écran Personnes",
+  "serveur.visibilite.identifiant_invalide": "Identifiant d’appareil invalide.",
+  "serveur.visibilite.indisponible": "Configuration du tableau de bord indisponible.",
+  "serveur.visibilite.enregistrement_impossible": "Impossible d’enregistrer la visibilité."
 }

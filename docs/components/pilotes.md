@@ -1,4 +1,5 @@
 # Les pilotes
+- **Aspirateurs robots** (catégorie `sd`, `src/vacuum.rs`, Rowenta et Tefal X-plorer Serie 75) : seule une table de points existe, sous les mêmes clés pour tous : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`, `mop`, `volume` (selon le robot), `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`. Effacer la carte, conduire à la main et nettoyer une zone n'existent pas, même si le cloud les dit écrivables. Ce qui fait bouger le robot est un `Control`. Le produit `X-Plorer Serie 75` reçoit toujours sa table, car la description du cloud nomme des points qu'il ne renvoie pas. Un robot a sa carte sur l'accueil (`web/src/maison/ui/VacuumCard.svelte`) : il passe par toutes les pièces, il n'appartient à aucune.
 
 Un pilote relie un système extérieur (pont Zigbee, box, caméra, télé…) au hub. Chaque
 pilote est une crate `crates/moli-<nom>` et un paquet du catalogue `integrations/<kind>/`
@@ -138,11 +139,11 @@ base_topic = "zigbee2mqtt"  # défaut
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
-- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (7 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
+- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (8 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
 
 ## `zwave` : Z-Wave via zwave-js-ui (`crates/moli-zwave`)
 
@@ -151,8 +152,9 @@ base_topic = "zigbee2mqtt"  # défaut
   code par marque.
 - **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées
   sur `{base}/{nom}/{cc}/{endpoint}/{prop}/set` (payload JSON brut : `true`/`false` pour
-  CC 32 sur `currentValue` et CC 37 sur `targetValue`, nombre `0`–`255` pour CC 38 sur
-  `targetValue`) ; les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la
+  CC 32 sur `currentValue` et CC 37 sur `targetValue`, nombre pour CC 38 sur
+  `targetValue` : le niveau `0`–`99`, ou `255` pour `on`, qui rallume au niveau
+  précédent) ; les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la
   passerelle, déballées par le pilote) ; disponibilité sur `{base}/{nom}/status`
   (`true`/`false`) ; bootstrap par l'API `getNodes` du gateway (topic
   `{base}/_CLIENTS/ZWAVE_GATEWAY-{mqtt_name}/api/getNodes/set`, payload `{"args":[]}`,
@@ -177,12 +179,19 @@ base_topic = "zwave"        # défaut
 - **Secrets** : mot de passe broker éventuel dans la variable d'environnement nommée par
   `password_env` ; jamais dans `moli.toml`.
 - **Points** : `on` (CC 32 Basic, 37 Switch Binary, 38 Switch Multilevel : le number de
-  CC 38 est décodé en booléen) et, écrivables, le niveau CC 38 `targetValue` (0-100 %) —
-  exposé sous la clé `brightness` (la clé standard des lumières, celle que l'interface
-  « maison » et les ambiances cherchent, comme Hue et Dirigera) quand la classe de
-  device est un vrai variateur, sinon `level` (volets, et le mode accumulation sans
-  `getNodes`) ; `battery` (CC 53 `batteryLevel` ou CC 128 `level`, %),
-  `temperature` / `humidity` (CC 31/49 : « Air temperature », « Relative humidity »),
+  CC 38 est décodé en booléen) et, écrivable, le niveau CC 38 — lu sur `currentValue`, le
+  vrai niveau (`targetValue` ne garde que le dernier ordre, `255` après un `on`, et un
+  appareil qui ne rapporte pas sa cible le laisse là), écrit sur `targetValue`, et pris sur
+  le seul endpoint où il s'écrit. Il est exposé sous la clé `brightness` (la clé standard
+  des lumières, celle que l'interface « maison » et les ambiances cherchent, comme Hue et
+  Dirigera) quand la classe de device est un vrai variateur : le niveau Z-Wave (0–99)
+  y est en % (0–100, unité `%`), comme les autres pilotes ; arrondi vers le bas à la
+  lecture et vers le haut à l'envoi, chaque pourcentage revient tel quel sauf 99 % (relu
+  100 %), et un variateur allumé n'est jamais affiché à 0 %. Sinon `level`, à l'échelle
+  de l'appareil (0–99 ; volets, et le mode accumulation sans `getNodes`, où le premier
+  `currentValue` CC 38 suffit à créer `on` et `level`) ; `battery` (CC 53 `batteryLevel`
+  ou CC 128 `level`, %), `temperature` / `humidity` (CC 31/49 : « Air temperature »,
+  « Relative humidity »),
   `power` (CC 50, clé 66049, W) en lecture ; un (cc, property) inconnu est ignoré proprement.
   Sémantique du point de niveau : `Brightness` uniquement si la classe de device du
   nœud est Multilevel Switch (generic 0x11) avec specific 0x01/0x02 — sinon `Other`,
@@ -242,12 +251,77 @@ host = "192.168.1.x"
 - **Pièges** : un renommage ou un changement de pièce/zone déclenche un rechargement complet. Flux muet 10 min : réouverture et rechargement. Un message SSE (ou une ligne) qui dépasse 1 Mio sans fin : flux fermé, rouvert et rechargement complet. Les commandes tournent à côté du flux avec un budget de 4,5 s (sous les 5 s du hub). Le message « certificat changé » montre l'empreinte épinglée et celle présentée, et donne la commande `secrets forget <instance> cert_sha256` avec l'identifiant réel de l'instance (la clé part avec l'empreinte). Avec `app_key_env` configuré (même si la variable manque) ou une empreinte de la configuration, il ne conseille pas d'oublier l'empreinte : il dit de refaire la clé, ou de changer `cert_sha256` (les empreintes complètes sont dans le journal). `Bridge` n'affiche jamais la clé en `Debug`.
 - **Tests** : `src/model.rs` sur `integrations/hue/fixtures/resources.json` (pont réel) : pièces commandables, zones jamais, boutons, capteurs, événements partiels, encodage ; `src/bridge.rs` : parseur SSE découpé en morceaux, plafond de 1 Mio (ligne sans fin, `data:` sans ligne vide).
 
+## `melcloud` : climatiseurs Mitsubishi Electric (`crates/moli-melcloud`)
+
+- **Couvre** : les unités air-air du MELCloud classique, en lecture et en commande. MELCloud Home est un autre service, non couvert.
+- **Config** : `kind = "melcloud"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secret `token` : la clé de contexte du compte, jamais le mot de passe.
+- **Points** : `on`, `mode`, `target_temperature`, `fan_speed`, `vertical_vane`, `horizontal_vane` **écrivables** selon ce que l'unité annonce ; `temperature` en lecture. Un invité ou un réglage verrouillé reste en lecture.
+- **Commandes** : `Device/Get`, puis `Device/SetAta` avec tout l'état et le drapeau du seul champ changé. L'unité applique l'ordre à son prochain contact ; la liste retarde, donc ce qui a été commandé fait foi 150 s. Budget de 4,5 s, sous les 5 s du hub. La consigne est arrondie au pas et refusée hors de la plage du mode en cours.
+- **Identité** : `DeviceID` du service.
+- **Pièges** : API web non officielle, dépendante d'Internet ; `Offline` varie d'une réponse à l'autre, d'où 3 réponses de suite avant de passer hors ligne. Une clé refusée (401, 403) met le pilote en attente d'un humain.
+- **Tests** : `src/model.rs` sur `integrations/melcloud/fixtures/list_devices.json`, plus les emplacements (zones, étages), les doublons et les valeurs absurdes.
+
+## `overkiz` : Somfy TaHoma en local (`crates/moli-overkiz`)
+
+- **Couvre** : volets, stores, rideaux, écrans, pergolas et auvents compatibles avec
+  l’API locale du mode développeur ; favoris « My » selon les commandes annoncées.
+  Portails et fenêtres sont observés en lecture seule par défaut. Les scénarios
+  enregistrés, programmations et autres fonctions cloud ne sont pas implémentés ici.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "somfy"
+kind = "overkiz"
+[driver.options]
+host = "gateway-example.local"
+read_only = true
+# port = 8443
+# poll_secs = 5
+```
+
+- **Secrets** : jeton du mode développeur dans `token`, empreinte dans `cert_sha256`,
+  rangés sous l’identifiant d’instance. Le certificat est épinglé avant l’envoi du
+  jeton ; le premier contact TOFU exige un réseau de confiance ou une empreinte
+  vérifiée configurée à l’avance. Un jeton refusé ou un certificat changé place
+  le pilote en `waiting`, appareils hors ligne.
+- **Points et garde** : `percent_control` est le pourcentage ouvert (100 = ouvert),
+  de sens `Position` pour les ouvrants ordinaires ; `control` propose seulement les
+  commandes natives qualifiées, `favourite_position` reste une configuration.
+  RTS ne reçoit jamais de position mesurée inventée. Toute écriture d’un portail
+  ou d’une fenêtre exige l’autorisation explicite `writable_openers` par URL exacte
+  et classe ; tous ses points inscriptibles gardent le sens `Control`, curseur
+  compris. `read_only` refuse aussi les commandes admises sur des métadonnées anciennes.
+- **Identité et disponibilité** : SHA-256 de l’URL native exacte, indépendante du
+  nom. Une absence met immédiatement l’appareil hors ligne ; sa suppression exige
+  trois lectures réussies consécutives sans lui. Un retour conserve ses étiquettes
+  et remet le compteur à zéro ; une lecture échouée ne compte pas.
+- **Commandes** : prélecture des capacités et de la disponibilité, budget commun
+  de 4,5 s maximum, un seul `exec/apply` sans rejeu. Un refus isolé ne redémarre pas
+  le pilote. L’accusé natif ne confirme pas le mouvement physique.
+- **Tests et limites** : fixtures synthétiques, vrai Hub et serveur TLS simulé ;
+  inventaire historique anonymisé rejoué hors réseau. Les commandes matérielles
+  restent à qualifier pour cette implémentation.
+  [Détails et convergence](../../integrations/overkiz/README.md),
+  [couverture restante](../../integrations/overkiz/COVERAGE.md).
+
+## `voltalis` : radiateurs Voltalis (`crates/moli-voltalis`)
+
+- **Couvre** : les radiateurs d'un site Voltalis, en lecture et en commande.
+- **Config** : `kind = "voltalis"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secrets `username` et `password` : le service n'a pas de clé durable ; le jeton de session reste en mémoire.
+- **Points** : `on`, `mode` (les modes que le radiateur annonce), `target_temperature` (s'il a le mode `temperature`), `automatic` (sur le programme du service) **écrivables** ; `fault` (tout diagnostic autre que `OK`) en lecture.
+- **Commandes** : `GET manualsetting` pour trouver le réglage du radiateur, puis `PUT manualsetting/{id}`, jusqu'à nouvel ordre ; `automatic = true` ferme le réglage manuel. Un mode ou une consigne allume le radiateur ; éteindre garde le mode. Session finie : reconnexion et un second essai ; refus à la reconnexion : le pilote s'arrête. Budget de 4,5 s, sous les 5 s du hub.
+- **Identité** : `id` de l'appareil dans le service.
+- **Pièges** : API web non officielle, dépendante d'Internet. Un compte refusé arrête le pilote jusqu'à l'intervention d'un humain, pour ne pas bloquer le compte ; une session expirée est rouverte au relevé suivant.
+- **Tests** : `src/model.rs` sur `integrations/voltalis/fixtures/`, plus les statuts inconnus et les valeurs absurdes.
+
 ## `dirigera` : hub IKEA Dirigera (`crates/moli-dirigera`)
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
   puissance, courant, tension, énergie), capteurs (température, humidité, PM2,5, COV, CO₂,
-  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis) et batteries.
-  Pas encore : stores, purificateurs, enceintes, pièces et scènes IKEA.
+  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis), stores
+  (position, ouvrir / stop / fermer, mouvement ; non vérifiés sur un vrai store) et batteries.
+  Pas encore : purificateurs, enceintes, pièces et scènes IKEA.
 - **Protocole** : API locale **non officielle**, HTTPS sur **8443**, certificat épinglé (un
   certificat d'usine P-384 valable jusqu'en 2071). Chargement complet `GET /v1/home`, puis
   WebSocket `wss://<hub>:8443/v1` (événements `deviceStateChanged`, `remotePressEvent`…), un
@@ -290,9 +364,20 @@ host = "192.168.1.x"
   ; **écrivables** si l'attribut est dans `capabilities.canReceive`. En mode couleur,
   `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
   Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
-  `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
-  (`single`, `double`, `long`, en `pulse`). `battery` partout où il y a une pile.
-  Disponibilité : `isReachable` (aussi dans chaque événement).
+  `illuminance` (lux, converti depuis la mesure Matter ou Zigbee `10000·log10(lux)+1` comme
+  pour Hue ; 0, trop sombre pour mesurer, donne 0 lx ; 0xFFFF, aucune mesure, `null`),
+  `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
+  (`single`, `double`, `long`, en `pulse`). Store : `position` ✎ (sens `position`, 0-100 %,
+  100 = ouvert ; le hub compte à l'envers, 0 = en haut : lue dans `blindsCurrentLevel`,
+  envoyée en `blindsTargetLevel`, inversée), `control` ✎ (`open` / `stop` / `close`, un ordre
+  jamais relu, envoyé en `blindsState` `up` / `stopped` / `down`), `moving` (`UP` / `DOWN` /
+  `STOP` depuis `blindsState`, `null` pour une valeur inconnue) ; reconnu comme volet par le
+  tableau de bord et l'assistant. `battery` partout où il y a une pile.
+  Disponibilité : `isReachable` (aussi dans chaque événement). **Migration** : au
+  déploiement, l'historique `illuminance` des capteurs Dirigera passe de la mesure brute
+  (jusqu'à 40001) aux lux (jusqu'à 10 000) ; les anciennes valeurs restent brutes dans les
+  graphiques. Une automatisation écrite avec un seuil brut (`< 20000`, environ 100 lx) est à
+  reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
   native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
@@ -313,11 +398,21 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
+  ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
+
+## `enedis` : compteur Linky par la Conso API (`crates/moli-enedis`)
+
+- **Couvre** : la consommation d'un compteur Linky, heure par heure, avec un jour de retard. Lecture seule.
+- **Config** : `kind = "enedis"`, `prm` (les 14 chiffres du compteur). Secret `token` : le jeton de la Conso API.
+- **Points** : `last_day` (date du dernier jour complet), `last_day_kwh`, `last_day_peak`, `hours` (les heures reçues, en JSON, pour un compteur `history = true` de `[energy]`).
+- **Identité** : un appareil `linky` par instance.
+- **Pièges** : service gratuit, non officiel, au quota partagé : une requête par jour à une heure propre au compteur, une seconde vers 14 h si la veille manque, aucune de plus au redémarrage (sauf au tout premier). Une mesure manquante écarte son heure et son jour. Les heures sont locales et nomment la fin de la mesure ; au passage à l'heure d'hiver, la même heure revient deux fois. Un jeton refusé arrête le pilote jusqu'à l'intervention d'un humain.
+- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes et le calendrier des requêtes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
-- **Couvre** : interrupteurs, prises, volets et tout appareil Tuya Wi-Fi joignable directement. **Par le cloud** (`src/cloud.rs`, lecture seule), quand les clés du projet cloud du foyer sont là : les capteurs **sur pile** sans adresse (catégories `mcs` porte, `sj` fuite, `ywbj` fumée, `pir`, `wsdcg`, `rqbj`, `cobj`, `sos`), qui ne parlent jamais sur le réseau local, et les **sous-appareils derrière une passerelle** Tuya. Mêmes identifiants Moli qu'en local (historique, étiquettes, portes de l'Accueil inchangés). **En local, par la passerelle** : un sous-appareil qui a dans `tuya.json` son `node_id` et son `parent` (passerelle joignable avec sa clé) passe par la connexion de sa passerelle (`Child` dans `src/device.rs`) : trames d'état routées par leur `cid`, requête d'état par `cid` à chaque connexion, ordres avec `cid` (3.3 : `{t, cid, dps}` ; 3.4+ : `data: {cid, ctype: 0, dps}`) ; en 3.3, l'état d'un sous-appareil déchiffré avec la clé de la passerelle vaut preuve (la passerelle répond « data unvalid » pour elle-même) ; disponibilité = celle de la passerelle. Il prime alors sur le cloud. **Ampoules** (`src/light.rs`, catégories de lumière et de variateur `light::LAMPS` seulement : ailleurs, un `bright_value` garde son code et son sens pour la garde) : `bright_value(_v2)`, `temp_value(_v2)`, `colour_data_v2` deviennent `brightness` (%), `color_temp` (mired, 2700–6500 K supposés, répartis en mired), `color` (`#rrggbb`, HSV Tuya lu en hexadécimal `HHHHSSSSVVVV` ou en JSON, écrit en hexadécimal) ; un ordre de couleur passe `work_mode` à `colour`, un blanc à `white`, une luminosité en couleur règle la valeur de la couleur (état courant lu par `ctx.current`) ; en couleur, la luminosité lue est celle de la couleur. **Appuis** (interrupteurs à scènes `wxkg`, points `switch_mode…`) : un appui poussé par l'appareil (trame `STATUS`) est une occurrence (`Up::Pressed` → `pulse_state`), diffusée même quand elle répète le dernier appui ; ce qui arrive pendant `REPLY` (5 s) après la connexion n'est qu'un état, même en `STATUS` (une passerelle répond ainsi pour ses sous-appareils) : une reconnexion ne rejoue rien. Le cloud ne rapporte jamais un appui (`readings`). **Repli** (`Fallback` dans `src/lib.rs`) : avec les clés cloud, ces sous-appareils sont aussi suivis par le cloud, sur un canal à part, écouté seulement quand le lien local de la passerelle est coupé (jamais établi ou perdu) alors qu'elle parle encore au cloud ; une passerelle débranchée coupe aussi le cloud : états du cloud appliqués, disponibilité = la dernière vue par le cloud ; le lien rétabli, la passerelle reprend la main. Des clés données plus tard redémarrent le pilote pour eux aussi.
+- **Couvre** : interrupteurs, prises, volets et tout appareil Tuya Wi-Fi joignable directement. **Par le cloud** (`src/cloud.rs`, lecture seule), quand les clés du projet cloud du foyer sont là : les capteurs **sur pile** sans adresse (catégories `mcs` porte, `sj` fuite, `ywbj` fumée, `pir`, `wsdcg`, `rqbj`, `cobj`, `sos`), qui ne parlent jamais sur le réseau local, et les **sous-appareils derrière une passerelle** Tuya. Mêmes identifiants Moli qu'en local (historique, étiquettes, portes de l'Accueil inchangés). **En local, par la passerelle** : un sous-appareil qui a dans `tuya.json` son `node_id` et son `parent` (passerelle joignable avec sa clé) passe par la connexion de sa passerelle (`Child` dans `src/device.rs`) : trames d'état routées par leur `cid`, requête d'état par `cid` à chaque connexion, ordres avec `cid` (3.3 : `{t, cid, dps}` ; 3.4+ : `data: {cid, ctype: 0, dps}`) ; en 3.3, l'état d'un sous-appareil déchiffré avec la clé de la passerelle vaut preuve (la passerelle répond « data unvalid » pour elle-même) ; disponibilité = celle de la passerelle. Il prime alors sur le cloud. **Ampoules** (`src/light.rs`, catégories de lumière et de variateur `light::LAMPS` seulement : ailleurs, un `bright_value` garde son code et son sens pour la garde) : `bright_value(_v2)`, `temp_value(_v2)`, `colour_data_v2` deviennent `brightness` (%), `color_temp` (mired, 2700–6500 K supposés, répartis en mired), `color` (`#rrggbb`, HSV Tuya lu en hexadécimal `HHHHSSSSVVVV` ou en JSON, écrit en hexadécimal) ; un ordre de couleur passe `work_mode` à `colour`, un blanc à `white`, une luminosité en couleur règle la valeur de la couleur (état courant lu par `ctx.current`) ; en couleur, la luminosité lue est celle de la couleur. **Appuis** (interrupteurs à scènes `wxkg`, points `switch_mode…`) : un appui poussé par l'appareil (trame `STATUS`) est une occurrence (`Up::Pressed` → `pulse_state`), diffusée même quand elle répète le dernier appui ; ce qui répond à la requête d'état de la connexion n'est qu'un état, même en `STATUS` (une passerelle répond ainsi pour ses sous-appareils) : tout ce qui arrive pendant `REPLY` (5 s), puis le premier message de chaque `cid`, au plus `QUIET_CAP` (30 s) après la connexion (`Answers` dans `src/device.rs`) ; une reconnexion ne rejoue rien, et un interrupteur qui ne répond jamais redevient actif après le plafond. Le cloud ne rapporte jamais un appui (`readings`). **Repli** (`Fallback` dans `src/lib.rs`) : avec les clés cloud, ces sous-appareils sont aussi suivis par le cloud, sur un canal à part, écouté seulement quand le lien local de la passerelle est coupé (jamais établi ou perdu) alors qu'elle parle encore au cloud ; une passerelle débranchée coupe aussi le cloud : états du cloud appliqués, disponibilité = la dernière vue par le cloud ; le lien rétabli, la passerelle reprend la main. Des clés données plus tard redémarrent le pilote pour eux aussi.
 - **Cloud** : clés dans `/run/secrets/tuya-cloud` (Access ID puis Access Secret, une ligne chacun ; écrit par le lanceur du conteneur depuis un gestionnaire de secrets ; vide = pas de cloud), **ou** données par une personne dans Système → « Cloud Tuya » (code demandé, `PUT /api/integrations/tuya-cloud`), rangées chiffrées dans le coffre de Moli (`tuya/cloud_access_id`, `tuya/cloud_access_secret`), jamais renvoyées ; sans clés au démarrage, le pilote regarde toutes les 20 s et redémarre quand elles arrivent. Mise en place conseillée : un projet cloud Tuya, les appareils liés **un par un** en lecture (capteurs sur pile, sous-appareils des passerelles, passerelles), les prises restant locales (quota de messages) ; règle de messages de production : `devicePropertyMessage`, `deviceOnline`, `deviceOffline`, chiffrement AES-GCM. Région `cloud_region` (`eu` = Central Europe, défaut ; `eu-west`, `us`, `us-east`, `in`, `cn`). Quand le cloud a des appareils à suivre, une région inconnue est dite sur l'intégration (en attente, avec les régions connues) : les appareils locaux continuent, ceux que seul le cloud lit passent hors ligne, et une passerelle injoignable n'a plus de repli. Un cloud qui ne démarre pas (rien à suivre, région inconnue) ne fait jamais redémarrer le pilote : son canal ne se ferme que si sa tâche s'arrête. OpenAPI signée (HMAC-SHA256 : `client_id` + jeton + `t` + `nonce` + méthode, empreinte du corps, chemin) : jeton renouvelé 5 min avant ses 2 h, états `iot-03/devices/status` (20 par appel) et présence au démarrage puis **toutes les 30 min**. En direct : **service de messages** (Pulsar sur websocket `wss://mqe…:8285`, mot de passe `md5(id + md5(secret))[8..24]`, chaque message acquitté), contenu chiffré avec `secret[8..24]` (AES-128-ECB, ou AES-128-GCM quand la propriété `em` vaut `aes_gcm`), messages d'état (`devId` + `status`) et métier (`bizCode` `online` / `offline` / propriétés). Quota de l'essai gratuit : ~1 500 appels par mois sur 26 000. Commandes refusées (« lecture seule : vu par le cloud »).
 - **Protocole** : 100 % local après import. TCP **6668** par appareil, connexion gardée ouverte. Versions **3.3** (trames `0x55AA`, CRC32, AES-128-ECB), **3.4** (HMAC-SHA256, clé de session négociée), **3.5** (trames `0x6699`, AES-128-GCM, même négociation). « 3.2 » est traité comme 3.3 ; **3.1 n'est pas géré**.
 - **Configuration** :
@@ -746,7 +841,11 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
-| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
+| `melcloud` | `moli-melcloud` | HTTPS vers le MELCloud classique, clé de contexte | oui : marche, mode, consigne, ventilateur, ailettes | deux unités air-air (lecture) ; commandes sur l'une |
+| `overkiz` | `moli-overkiz` | HTTPS local 8443, certificat épinglé | selon capacités ; portails/fenêtres explicitement revus et gardés | modèle rejoué hors réseau ; transport et commandes sur simulateur TLS |
+| `voltalis` | `moli-voltalis` | HTTPS vers le service, compte puis jeton de session | oui : marche, mode, consigne, programme | quatre radiateurs `VX_WIRE` (lecture) ; commandes sur l'un |
+| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
+| `enedis` | `moli-enedis` | HTTPS vers la Conso API, jeton du client | non | un compteur Linky (lecture, pas de 15 minutes) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |

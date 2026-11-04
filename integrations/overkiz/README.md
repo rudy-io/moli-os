@@ -37,6 +37,9 @@ If both state axes are reported, Deployment retains PR25's convention. With no s
 exactly one valid setter identifies the conversion; both or neither leave numeric position
 and memorisation unsupported. No silent clamping or guessed axis. States 108 and 124 stay
 unknown, and the stored favourite never substitutes for a measured current position.
+The current opening percentage uses `Semantic::Position` for ordinary covers;
+favourite configuration does not. Writable percentage points on reviewed gates
+and windows retain `Semantic::Control`, including in the slider path.
 
 `control = "favourite"` recalls validated zero-argument `goToMemorized1Position` or `my`.
 The explicitly qualified RTS `my` with one parameter receives duration `[0]`, as verified in
@@ -73,14 +76,26 @@ No fake lock semantics or global execution cancellation. Model hints are exactly
 Identity is the lowercase SHA-256 digest of the complete exact native URL, so
 long URLs do not exceed the hub's point limit. The exact URL is retained for each
 command; names/hosts are independent. Duplicate native URLs or resulting identities
-in a snapshot fail closed. No released identifier format was migrated.
+in a snapshot fail closed. `DeviceId::new` replaces `/` with `_`, so raw URLs such as
+`io://example/a/b` and `io://example/a_b` would otherwise collide. A raw URL of up to
+512 bytes can also exceed the hub's 256-byte point limit. Keeping the current digest
+preserves existing fork labels, rooms, history and automation references. This is
+the proposed common identity format, still to be agreed with PR25's author; no
+second ID mode or automatic migration is introduced.
 
 The driver polls the local device snapshot every five seconds and rereads it before
 each write. It revalidates availability, exact reviewed class, capabilities and point semantics, never retries `exec/apply`,
 and bounds the entire write flow to the earlier of its hub deadline and 4.5 seconds.
 An execution ID means accepted, not motor movement. Only snapshots publish state.
-Authentication or certificate changes require human action; transient errors use
-normal supervisor recovery. No per-device tasks or event listener.
+A refused command is returned to the caller and followed by a fresh snapshot,
+without restarting the driver or replaying the action. A device missing from a
+successful snapshot goes offline immediately; it is removed only after three
+consecutive successful snapshots omit it. Reappearance resets the counter and
+restores availability without losing its identity or labels. Failed reads do not
+count as absences, and a supervisor restart resets the absence streak.
+Authentication or certificate changes keep all devices offline in `waiting` until
+human action; failed refreshes use normal supervisor recovery. Device labels have
+control characters removed. No per-device tasks or event listener.
 
 Read-only validation on 2026-10-31: a separate gateway probe verified the TLS chain
 and hostname against the official Overkiz CA, and a redacted real device inventory
@@ -104,5 +119,6 @@ undocumented local scene endpoint does not establish support. The optional cloud
 reads the provider's programme definitions and reports each collection's availability;
 it never runs or imports them as automations. See [cloud protocol and limits](CLOUD.md)
 and [coverage and remaining work](COVERAGE.md).
-The UI/card and `Semantic::Position` integration remain separate upstream work following
-[PR30](https://github.com/rudy-io/moli-os/pull/30). No core guard is changed here.
+The driver uses `Semantic::Position` introduced by
+[PR30](https://github.com/rudy-io/moli-os/pull/30); dedicated UI/card changes remain
+separate. No core guard is changed here.

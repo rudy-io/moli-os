@@ -8,14 +8,18 @@
 - Identité : `nodeId` Z-Wave (le nom de nœud ne sert qu'au routage des sujets).
 - Écrites : `on` passe par `currentValue` pour Basic CC 32 (booléen, seule valeur
   écrivable confirmée sur le gateway réel) et par `targetValue` pour CC 37 (booléen)
-  et CC 38 (nombre 0–255). Le succès d'une écriture n'est pas vérifié : la passerelle
-  n'acquitte pas les commandes.
+  et CC 38 (nombre : `255` rallume au niveau précédent, `0` éteint). Le succès d'une
+  écriture n'est pas vérifié : la passerelle n'acquitte pas les commandes.
 - Clé du niveau CC 38 : `brightness` (clé standard des lumières, comprise par
   l'interface « maison » et les ambiances) seulement si la classe de device du nœud est
   Multilevel Switch (generic 0x11, specific 0x01/0x02) ; sinon `level` (volets,
   accumulation sans `getNodes`). Sémantique : `Brightness` dans le premier cas, `Other`
   sinon (un moteur de volet CC 38 nommé « Portail » ne doit pas être traité comme une
   lumière par la garde).
+- Niveau CC 38 : lu sur `currentValue` (le vrai niveau ; `targetValue` n'est que le
+  dernier ordre, `255` après un `on`), écrit sur `targetValue` (0–99). `brightness` est
+  en % (0–100), converti depuis et vers le 0–99 de Z-Wave ; `level` garde l'échelle de
+  l'appareil. Vérifié contre le code de zwave-js, pas encore sur un vrai variateur.
 - Multi-endpoints : un seul canal `on` par nœud — le premier CC switch trouvé dans les
   valeurs du gateway (le ZMNHBD dual-relay n'expose que son endpoint 0 dans `getNodes`) ;
   le second relay (endpoint 1) reste injoignable en v1, en attente d'une extension.

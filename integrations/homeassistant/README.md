@@ -5,6 +5,16 @@ selected entities available while each device moves to its native Moli driver.
 It is still dependent on Home Assistant, including any cloud used by HA.
 Simulator tests do not establish compatibility with hardware.
 
+> **Experimental and transitional.** Reading has run on a real home; commands are
+> so far covered by simulators only. Start read-only, then enable one ordinary
+> point at a time.
+
+**Use a dedicated, non-admin Home Assistant user for Moli.** A long-lived access
+token carries every right of the user who created it: the driver only calls the
+services listed below, but the token itself would let whoever steals it act on the
+whole HA home. Create a user for Moli (not an administrator), sign in as it, and
+create the token from that user's profile.
+
 ## Boundary
 
 - List every entity with its immutable `native_id` alias, current `entity_id`,
