@@ -67,6 +67,35 @@ pub struct GatewayList {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct DiscoveredGateway {
+    pub host: String,
+    pub port: u16,
+    pub tls_fingerprint: Option<String>,
+    pub mac: String,
+    pub gateway_type: Option<String>,
+    pub api_version: Option<String>,
+    pub firmware: Option<String>,
+    pub systems: usize,
+    pub zones: usize,
+    pub incomplete: bool,
+    pub read_only: bool,
+    pub existing_instance: Option<String>,
+    pub existing_enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GatewayDiscovery {
+    pub gateways: Vec<DiscoveredGateway>,
+    pub scanned: usize,
+    pub target_count: usize,
+    pub incomplete: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DiscoveryRequest {}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct GatewayWithdrawn {
     pub instance: String,
     pub stored: bool,
@@ -123,6 +152,9 @@ impl IntoResponse for SetupError {
 }
 
 pub trait AirzoneSetup: Send + Sync + Debug {
+    fn discover(&self) -> BoxFuture<'_, Result<GatewayDiscovery, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
     fn list(&self) -> BoxFuture<'_, Result<GatewayList, SetupError>> {
         Box::pin(async { Err(SetupError::new("unavailable")) })
     }
@@ -158,6 +190,26 @@ pub trait AirzoneSetup: Send + Sync + Debug {
 
 #[derive(Clone)]
 pub(crate) struct Setup(pub Option<Arc<dyn AirzoneSetup>>);
+
+pub(crate) async fn discover(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(_request): Json<DiscoveryRequest>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    match setup.discover().await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
 
 pub(crate) async fn list(
     State(hub): State<Hub>,

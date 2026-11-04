@@ -37,7 +37,7 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     if !writes {
         return None;
     }
-    if path == "/api/integrations/airzone" || path == "/api/integrations/airzone/probe" {
+    if path == "/api/integrations/airzone" || path.starts_with("/api/integrations/airzone/") {
         return Some(("airzone_setup", 6));
     }
     if path == "/api/command" || path.starts_with("/api/labels/") {
@@ -154,6 +154,34 @@ pub(crate) async fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn airzone_network_actions_share_one_budget_including_existing_instances() {
+        for (method, path) in [
+            (Method::POST, "/api/integrations/airzone"),
+            (Method::POST, "/api/integrations/airzone/probe"),
+            (Method::POST, "/api/integrations/airzone/discover"),
+            (Method::POST, "/api/integrations/airzone/existing/probe"),
+            (Method::PUT, "/api/integrations/airzone/existing"),
+            (Method::POST, "/api/integrations/airzone/existing/withdraw"),
+        ] {
+            for dashboard in [false, true] {
+                assert_eq!(
+                    budget(&method, path, dashboard),
+                    Some(("airzone_setup", 6)),
+                    "{path}"
+                );
+            }
+        }
+        assert_eq!(
+            budget(&Method::GET, "/api/integrations/airzone", true),
+            None
+        );
+        assert_eq!(
+            budget(&Method::PUT, "/api/integrations/airzone-unrelated", true),
+            None
+        );
+    }
 
     #[test]
     fn writes_have_a_budget_per_caller() {

@@ -110,8 +110,8 @@
     <div>
       {#if detail}<a class="back" href="#/airzone"><Icon name="chevron-left" size={18} />{t('airzone_ui.back')}</a>{/if}
       {#if detail || installation}<div class="eyebrow"><Icon name="air-conditioner" size={18} />{detail && group ? systemLabel(group) : t('airzone_ui.title')}</div>{/if}
-      <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_ui.installation') : management ? t('airzone_ui.manage') : alerts ? t('airzone_ui.alerts') : adding ? t('airzone_ui.add') : t('airzone_ui.title')}</h1>
-      {#if !zone || zone.label?.room || zone.native_room}<p>{zone ? zone.label?.room || zone.native_room : installation ? t('airzone_ui.installation_help') : management ? t('airzone_ui.manage_help') : alerts ? t('airzone_ui.alerts_help') : adding ? t('airzone_ui.add_help') : t('airzone_ui.subtitle')}</p>{/if}
+      <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_wizard.installation_title') : management ? t('airzone_ui.manage') : alerts ? t('airzone_ui.alerts') : adding ? t('airzone_add.gateway_title') : t('airzone_ui.title')}</h1>
+      {#if !zone || zone.label?.room || zone.native_room}<p>{zone ? zone.label?.room || zone.native_room : installation ? t('airzone_wizard.installation_help') : management ? t('airzone_ui.manage_help') : alerts ? t('airzone_ui.alerts_help') : adding ? t('airzone_add.gateway_help') : t('airzone_ui.subtitle')}</p>{/if}
     </div>
     <span class="read-only" title={t('airzone_ui.read_only_help')}><Icon name="lock" size={16} />{t('airzone_ui.read_only')}</span>
   </header>
@@ -141,6 +141,7 @@
   {:else if installation}
     <div class="installation-stack">
       <AirzoneGateways connected={hub.connected} drivers={hub.drivers} registryRevision={hub.driverRevision} />
+      <details class="installation-details"><summary>{t('airzone_wizard.diagnostics')}</summary>
       {#each inventory.instances as instance (instance.id)}
         <section class="installation-card">
           <header class="section-heading"><h2>{multipleInstances ? instance.id : t('airzone_ui.gateway')}</h2><span class="connection-state">{driverName(instance.driver)}</span></header>
@@ -169,6 +170,7 @@
         </section>
       {/each}
       <section class="scope-note"><Icon name="clock" size={22} /><div><h2>{t('airzone_ui.schedules')}</h2><p>{t('airzone_ui.schedules_help')}</p></div></section>
+      </details>
       <a class="text-link" href="#/atelier">{t('airzone_ui.back_workshop')}<Icon name="chevron-right" size={18} /></a>
     </div>
   {:else if detail && !zone}
@@ -264,6 +266,7 @@
   .history-shell :global(.panel) { border-color: var(--line); box-shadow: var(--shadow-lift); }
   .history-shell :global(.ranges button) { min-height: 44px; min-width: 44px; }
   h3 { font-size: 14px; color: var(--ink-2); margin: 16px 0 12px; font-weight: 650; }
+  .installation-details>summary {cursor:pointer;min-height:48px;padding:14px 0;font-size:1rem;font-weight:600;color:var(--ink-2);}.installation-details>summary:focus-visible {outline:3px solid var(--cool);outline-offset:3px;}.installation-details[open]>summary {margin-bottom:16px;}
   .installation-stack { display: grid; gap: 20px; max-width: 900px; }
   .optional-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0; }
   .optional-summary > div { display: flex; flex-direction: column; gap: 9px; background: var(--surface-2); border-radius: 14px; padding: 16px; font-size: 13px; color: var(--ink-2); }

@@ -25,7 +25,7 @@ export function gatewayRequest(input, { existing = false } = {}) {
   const pieces = host.split('.');
   const octets = pieces.map(Number);
   if (pieces.length !== 4 || pieces.some((part) => !/^(?:0|[1-9]\d{0,2})$/.test(part)) || octets.some((part) => part > 255)
-    || !(octets[0] === 10 || octets[0] === 127 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168))) return {error:'invalid_host'};
+    || !(octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168))) return {error:'invalid_host'};
   if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) return {error:'invalid_port'};
   const request = {instance,host,port:Number(port)};
   if (input.tls_fingerprint !== undefined) {
@@ -44,11 +44,11 @@ function previewIsValid(data, instance) {
     && Number.isSafeInteger(data.zones) && data.zones >= 0 && data.zones <= 4096 && typeof data.incomplete === 'boolean';
 }
 
-async function exchange(path, request, validate, fetcher, method = 'POST') {
+async function exchange(path, request, validate, fetcher, method = 'POST', signal) {
   let response;
   try {
-    response = await fetcher(path, {method,headers:{'content-type':'application/json','x-moli-origin':'ui'},...(method === 'GET' ? {} : {body:JSON.stringify(request)})});
-  } catch { return {ok:false,error:'network'}; }
+    response = await fetcher(path, {method,headers:{'content-type':'application/json','x-moli-origin':'ui'},...(method === 'GET' ? {} : {body:JSON.stringify(request)}),...(signal ? {signal} : {})});
+  } catch { return {ok:false,error:signal?.aborted ? 'cancelled' : 'network'}; }
   if (response.status === 403) return {ok:false,error:'auth',status:403};
   let data;
   try { data = await response.json(); } catch { data = null; }
@@ -62,10 +62,10 @@ async function exchange(path, request, validate, fetcher, method = 'POST') {
   return {ok:true,data};
 }
 
-export async function probeGateway(input, fetcher = globalThis.fetch) {
+export async function probeGateway(input, fetcher = globalThis.fetch, {signal} = {}) {
   const parsed = gatewayRequest(input);
   if (parsed.error) return {ok:false,error:parsed.error};
-  return exchange('/api/integrations/airzone/probe', parsed.request, (data) => previewIsValid(data,parsed.request.instance), fetcher);
+  return exchange('/api/integrations/airzone/probe', parsed.request, (data) => previewIsValid(data,parsed.request.instance), fetcher,'POST',signal);
 }
 
 function savedIsValid(data, instance) {
@@ -89,10 +89,30 @@ export function updateGateway(input, expectedMac, fetcher = globalThis.fetch) {
   return saveGateway(input,expectedMac,true,fetcher);
 }
 
-export async function probeExistingGateway(input, fetcher = globalThis.fetch) {
+export async function probeExistingGateway(input, fetcher = globalThis.fetch, {signal} = {}) {
   const parsed = gatewayRequest(input,{existing:true});
   if (parsed.error) return {ok:false,error:parsed.error};
-  return exchange(`/api/integrations/airzone/${encodeURIComponent(parsed.request.instance)}/probe`,parsed.request,(data) => previewIsValid(data,parsed.request.instance),fetcher);
+  return exchange(`/api/integrations/airzone/${encodeURIComponent(parsed.request.instance)}/probe`,parsed.request,(data) => previewIsValid(data,parsed.request.instance),fetcher,'POST',signal);
+}
+
+function discoveryIsValid(data) {
+  if (!Array.isArray(data?.gateways) || data.gateways.length > 32 || typeof data.incomplete !== 'boolean'
+    || !Number.isSafeInteger(data.scanned) || !Number.isSafeInteger(data.target_count)
+    || data.scanned < data.gateways.length || data.target_count < data.scanned || data.target_count > 512) return false;
+  const macs = new Set();
+  return data.gateways.every((item) => {
+    const parsed = gatewayRequest({...item,instance:'airzone-discovery',...(item?.tls_fingerprint === null ? {tls_fingerprint:undefined} : {})});
+    if (parsed.error || !Number.isSafeInteger(item.port) || !(item.tls_fingerprint === null || typeof item.tls_fingerprint === 'string' && /^[0-9a-f]{64}$/.test(item.tls_fingerprint)) || [0,255].includes(Number(item.host.split('.')[3]))
+      || !previewIsValid({...item,instance:'airzone-discovery'},'airzone-discovery') || macs.has(item.mac)) return false;
+    if (item.existing_instance === null ? item.existing_enabled !== null : !existingInstance(item.existing_instance) || typeof item.existing_enabled !== 'boolean') return false;
+    macs.add(item.mac);
+    return true;
+  });
+}
+
+/** One bounded server-side search. Cancellation never installs a gateway. */
+export function discoverGateways({signal} = {}, fetcher = globalThis.fetch) {
+  return exchange('/api/integrations/airzone/discover',{},discoveryIsValid,fetcher,'POST',signal);
 }
 
 export async function withdrawGateway(instance, fetcher = globalThis.fetch) {

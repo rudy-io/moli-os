@@ -341,6 +341,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 |---|---|---|---|---|---|
 | GET | `/api/integrations/tuya-cloud` | libre | aucune | `{instances:[{instance, configured}]}` (jamais les clés) | aucune |
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
+| POST | `/api/integrations/airzone/discover` | **humain**, origine `ui`, invités refusés | `{}`, champs inconnus refusés, 1 Kio maximum | `{gateways:[{host,port,tls_fingerprint,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true,existing_instance,existing_enabled}],scanned,target_count,incomplete}` | `403` session ; `422` saisie ; `429` recherche en cours ou trop récente ; `503` indisponible |
 | POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
 | POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only:true,already_installed}` ; enregistré et démarré, sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
 | GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
@@ -363,6 +364,39 @@ entrées TOML et retraits réversibles. Une modification conserve les options na
 non concernées (`poll_secs`, `dhw_units`), mais impose `read_only=true`. Une entrée
 TOML jamais modifiée conserve son mode d’origine. `running` désigne la présence du
 superviseur, pas la disponibilité réseau de la passerelle.
+
+La saisie de connexion accepte uniquement une IPv4 privée en production : les
+noms DNS, les IP publiques et la boucle locale sont refusés. L’exception de boucle
+locale n’existe que dans les binaires de tests unitaires pour leurs faux contrôleurs.
+Toutes les routes Airzone POST/PUT partagent le budget de six requêtes par client
+sur dix secondes, y compris la vérification et la modification d’une passerelle
+existante ; le dépassement renvoie `429` avant tout appel réseau. La liste GET reste
+hors de ce budget.
+
+La découverte est une lecture à la demande, sans ajout automatique, écriture de
+configuration, tâche périodique ni commande d’équipement. Ses indices viennent des
+passerelles enregistrées, des IPv4 privées des pilotes configurés, de leurs adresses
+apprises encore rattachées à la même configuration et de la table locale des voisins.
+Elle explore au plus deux `/24` privés et 512 couples adresse/port ; les adresses
+publiques, de boucle locale, de réseau et de broadcast sont exclues. Aucun nom DNS
+ni sous-réseau fourni par le navigateur n’est accepté. Elle essaie le port 3000,
+en préservant les ports et empreintes HTTPS des connexions déjà connues, sans repli
+HTTP pour ces dernières. Un autre port ou une empreinte inconnue nécessite la
+saisie manuelle. Les installations déjà présentes, actives ou retirées, sont
+identifiées par MAC sans être réenregistrées ; l’identité est revérifiée au moment
+de l’ajout explicite.
+
+Une seule recherche à la fois et au plus une toutes les 30 secondes, partagées par
+tous les clients de l’instance. La préconnexion TCP dispose de 250 ms, avec au plus
+16 connexions concurrentes ; les validations natives sont limitées à quatre en
+parallèle et 32 au total, sous une échéance globale de 18 secondes. La validation
+réutilise exclusivement les lectures natives bornées d’identité et d’inventaire.
+Abandonner la future ou arrêter Moli annule les connexions et validations restantes.
+`scanned` compte les cibles traitées, pas les passerelles trouvées. `incomplete`
+signale une borne atteinte, l’expiration ou un réseau insuffisamment identifié.
+Une recherche vide ne prouve donc pas l’absence de matériel : Docker, les VLAN et
+un premier démarrage sans indice peuvent masquer le LAN réel. Le parcours manuel
+reste disponible. Le scan ne modifie aucune identité ni aucun état d’appareil.
 
 Le registre accepte au plus 32 connexions gérées et surcharges au total, retraits
 compris, et 64 Kio. Les entrées TOML retirées restent représentées par une surcharge

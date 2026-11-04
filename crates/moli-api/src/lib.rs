@@ -326,6 +326,10 @@ fn assistant_routes() -> Router<Hub> {
 fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
     Router::new()
         .route(
+            "/api/integrations/airzone/discover",
+            upload(post(airzone_setup::discover), 1024, humans),
+        )
+        .route(
             "/api/integrations/airzone/probe",
             upload(post(airzone_setup::probe), 2048, humans),
         )

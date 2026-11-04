@@ -23,6 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, DriverConfig};
 
+mod discovery;
+
 pub const FILE: &str = "airzone-gateways.json";
 const MAX_GATEWAYS: usize = 32;
 const MAX_BYTES: u64 = 65_536;
@@ -257,12 +259,21 @@ fn normalize(request: GatewayRequest) -> Result<GatewayRequest, SetupError> {
     normalize_connection(request)
 }
 
-fn normalize_connection(mut request: GatewayRequest) -> Result<GatewayRequest, SetupError> {
+fn normalize_connection(request: GatewayRequest) -> Result<GatewayRequest, SetupError> {
+    // Loopback is solely for in-process unit-test controllers. It is never
+    // allowed in a production build, including through a saved override.
+    validate_connection(request, cfg!(test))
+}
+
+fn validate_connection(
+    mut request: GatewayRequest,
+    test_loopback: bool,
+) -> Result<GatewayRequest, SetupError> {
     let ip = request
         .host
         .parse::<Ipv4Addr>()
         .map_err(|_| SetupError::new("invalid_host"))?;
-    if !(ip.is_private() || ip.is_loopback()) {
+    if !(ip.is_private() || (test_loopback && ip.is_loopback())) {
         return Err(SetupError::new("invalid_host"));
     }
     request.host = ip.to_string();
@@ -351,6 +362,9 @@ struct Inner {
     accepting: AtomicBool,
     drivers: Mutex<HashMap<String, Running>>,
     operations: Mutex<Vec<JoinHandle<()>>>,
+    discovery: discovery::Gate,
+    discovery_cancel: CancellationToken,
+    discovery_connections: Vec<(InstanceId, Ipv4Addr)>,
 }
 #[derive(Clone)]
 pub struct Manager(Arc<Inner>);
@@ -434,10 +448,24 @@ impl Manager {
             reserved,
             configured,
             state: Arc::new(tokio::sync::Mutex::new(State { store, raw })),
+            discovery_cancel: cancel.child_token(),
             cancel,
             accepting: AtomicBool::new(true),
             drivers: Mutex::default(),
             operations: Mutex::default(),
+            discovery: discovery::Gate::default(),
+            discovery_connections: config
+                .drivers
+                .iter()
+                .filter_map(|driver| {
+                    let host = driver.options.get("host").and_then(toml::Value::as_str)?;
+                    Some((
+                        InstanceId::from(driver.id.as_str()),
+                        discovery::private_host(host)?,
+                    ))
+                })
+                .take(512)
+                .collect(),
         })))
     }
 
@@ -446,6 +474,33 @@ impl Manager {
             return Err(SetupError::new("shutting_down"));
         }
         Ok(())
+    }
+
+    async fn discover_with(
+        &self,
+        inspector: Arc<dyn discovery::Inspector>,
+    ) -> Result<moli_api::airzone_setup::GatewayDiscovery, SetupError> {
+        self.available()?;
+        let _search = self.0.discovery.enter()?;
+        // Copy the registry while holding its lock, then release it before
+        // any network I/O. A search never blocks an installation or withdrawal.
+        let known = self.list().await?.gateways;
+        let hints = self.discovery_hints();
+        discovery::search(known, hints, self.0.discovery_cancel.clone(), inspector).await
+    }
+
+    fn discovery_hints(&self) -> Vec<Ipv4Addr> {
+        let mut hints = Vec::new();
+        for (instance, configured) in &self.0.discovery_connections {
+            if let Some(address) = self.0.hub.known_address(instance)
+                && address.configured.parse::<Ipv4Addr>().ok() == Some(*configured)
+                && let Some(host) = discovery::private_host(&address.host)
+            {
+                hints.push(host);
+            }
+            hints.push(*configured);
+        }
+        hints
     }
 
     fn effective(&self, state: &State) -> Vec<EffectiveGateway> {
@@ -950,6 +1005,7 @@ impl Manager {
     /// Stop admitting operations, finish any owned commit, and await its drivers.
     pub async fn shutdown(&self) {
         self.0.accepting.store(false, Ordering::Release);
+        self.0.discovery_cancel.cancel();
         let operations = std::mem::take(
             &mut *self
                 .0
@@ -986,6 +1042,11 @@ fn installed(instance: &str, already_installed: bool) -> GatewayInstalled {
 }
 
 impl AirzoneSetup for Manager {
+    fn discover(
+        &self,
+    ) -> BoxFuture<'_, Result<moli_api::airzone_setup::GatewayDiscovery, SetupError>> {
+        Box::pin(self.discover_with(Arc::new(discovery::Network)))
+    }
     fn list(&self) -> BoxFuture<'_, Result<GatewayList, SetupError>> {
         Box::pin(async move {
             self.available()?;

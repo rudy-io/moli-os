@@ -29,7 +29,7 @@ function fixture(t,handler=(url)=>response(url.endsWith('/probe')?preview:saved)
   const mounted=client.mount({drivers:[],connected:true,...props});
   t.after(()=>{mounted.dispose();client.home.held=null;});
   assert.equal(mounted.component.intent().implemented,true,'direct gateway workflow must exist');
-  mounted.component.change('host','127.0.0.1');
+  mounted.component.change('host','172.31.1.1');
   return {...mounted,calls};
 }
 
@@ -55,8 +55,8 @@ test('double taps do not send a second probe or install and pending inputs canno
   let settle;
   const{component,calls}=fixture(t,()=>new Promise((resolve)=>{settle=resolve;}));
   const checking=component.runProbe();
-  await component.runProbe();component.change('host','127.0.0.2');
-  assert.equal(calls.length,1);assert.equal(component.intent().draft.host,'127.0.0.1');
+  await component.runProbe();component.change('host','172.31.1.2');
+  assert.equal(calls.length,1);assert.equal(component.intent().draft.host,'172.31.1.1');
   settle(response(preview));await checking;
   const saving=component.runInstall();await component.runInstall();
   assert.equal(calls.length,2);settle(response(saved));await saving;
@@ -114,7 +114,7 @@ test('disconnects, identity changes and unrelated approvals cannot authorize an 
 });
 
 test('editing and resuming a gateway preserves its stable instance and uses the lifecycle endpoints',async(t)=>{
-  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3001,tls_fingerprint:null,mac:preview.mac,enabled:false,read_only:false};
+  const gateway={instance:'airzone-2',host:'172.31.1.1',port:3001,tls_fingerprint:null,mac:preview.mac,enabled:false,read_only:false};
   const{component,calls}=fixture(t,undefined,{gateway});
   component.change('instance','different');assert.equal(component.intent().draft.instance,gateway.instance);
   assert.equal(component.intent().draft.port,'3001');
@@ -123,7 +123,7 @@ test('editing and resuming a gateway preserves its stable instance and uses the 
 });
 
 test('editing refuses a different hardware identity even if a malformed server approves its probe',async(t)=>{
-  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:'112233445566',enabled:true,read_only:true};
+  const gateway={instance:'airzone-2',host:'172.31.1.1',port:3000,tls_fingerprint:null,mac:'112233445566',enabled:true,read_only:true};
   const{component,calls}=fixture(t,undefined,{gateway});
   await component.runProbe();assert.equal(component.intent().checked,null);assert.equal(component.intent().failure.error,'identity_changed');
   await component.runInstall();assert.equal(calls.length,1);
@@ -131,7 +131,7 @@ test('editing refuses a different hardware identity even if a malformed server a
 
 test('editing a legacy configured ID preserves whitespace and punctuation in both body and path',async(t)=>{
   const instance=' Airzone étage.v1 ';
-  const gateway={instance,host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:true,read_only:true};
+  const gateway={instance,host:'172.31.1.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:true,read_only:true};
   const{component,calls}=fixture(t,(url)=>response(url.endsWith('/probe')?{...preview,instance}:{...saved,instance}),{gateway});
   await component.runProbe();await component.runInstall();assert.equal(calls.length,2);
   assert.equal(calls[0].body.instance,instance);assert.equal(calls[1].body.instance,instance);

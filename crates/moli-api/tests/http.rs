@@ -1992,7 +1992,120 @@ async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unaut
 
 #[derive(Debug, Default)]
 struct CountedAirzoneSetup(std::sync::atomic::AtomicUsize);
+
+#[tokio::test]
+async fn airzone_discovery_requires_authentication_before_searching_the_lan() {
+    let (addr, _) = server().await;
+    let (status, _) = request_with(
+        &addr,
+        "POST",
+        "/api/integrations/airzone/discover",
+        Some(&json!({})),
+        "x-moli-origin: ui\r\n",
+    )
+    .await;
+    assert_eq!(status, 403);
+}
+
+#[tokio::test]
+async fn airzone_discovery_explicitly_reports_an_unavailable_backend() {
+    let hub = lamp_hub().await;
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        "/api/integrations/airzone/discover",
+        Some(&json!({})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 503);
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["error"],
+        "unavailable"
+    );
+}
+
+#[tokio::test]
+async fn airzone_discovery_refuses_browser_selected_targets_and_oversized_input() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let route = "/api/integrations/airzone/discover";
+    for body in [
+        json!({"network":"10.0.0.0/8"}),
+        json!({"host":"127.0.0.1"}),
+        json!({"read_only":false}),
+    ] {
+        assert_eq!(
+            request_with(&addr, "POST", route, Some(&body), &human)
+                .await
+                .0,
+            422
+        );
+    }
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"padding":"x".repeat(2048)})),
+            &human
+        )
+        .await
+        .0,
+        413
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let (status, body) = request_with(&addr, "POST", route, Some(&json!({})), &human).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap(),
+        json!({"gateways":[],"scanned":0,"target_count":0,"incomplete":true})
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
 impl moli_api::airzone_setup::AirzoneSetup for CountedAirzoneSetup {
+    fn discover(
+        &self,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayDiscovery, moli_api::airzone_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async {
+            Ok(moli_api::airzone_setup::GatewayDiscovery {
+                gateways: vec![],
+                scanned: 0,
+                target_count: 0,
+                incomplete: true,
+            })
+        })
+    }
     fn list(
         &self,
     ) -> BoxFuture<
@@ -2157,8 +2270,66 @@ async fn airzone_routes_bind_authentication_bounded_typed_input_and_rate_budget(
 }
 
 #[tokio::test]
+async fn airzone_existing_gateways_share_the_installation_rate_budget() {
+    use std::sync::atomic::Ordering;
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let body = json!({"instance":"existing","host":"192.168.1.2","port":3000,"expected_mac":"aabbccddeeff"});
+    let routes = [
+        ("POST", "/api/integrations/airzone/probe"),
+        ("POST", "/api/integrations/airzone/existing/probe"),
+        ("PUT", "/api/integrations/airzone/existing"),
+    ];
+    for (method, path) in routes.into_iter().cycle().take(6) {
+        assert_eq!(
+            request_with(&addr, method, path, Some(&body), &human)
+                .await
+                .0,
+            200
+        );
+    }
+    for (method, path) in routes {
+        assert_eq!(
+            request_with(&addr, method, path, Some(&body), &human)
+                .await
+                .0,
+            429
+        );
+    }
+    assert_eq!(
+        setup.0.load(Ordering::Relaxed),
+        6,
+        "limited requests never reach a gateway"
+    );
+    assert_eq!(
+        request_with(&addr, "GET", "/api/integrations/airzone", None, &human)
+            .await
+            .0,
+        200
+    );
+}
+
+#[tokio::test]
 async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismatched_changes() {
     for (method, path, body) in [
+        (
+            "POST",
+            "/api/integrations/airzone/discover",
+            Some(json!({})),
+        ),
         ("GET", "/api/integrations/airzone", None),
         (
             "POST",
@@ -2265,6 +2436,7 @@ async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_co
         .guest
         .replace("Cookie: ", &format!("Cookie: {}; ", session.unwrap()));
     for (method, path) in [
+        ("POST", "/api/integrations/airzone/discover"),
         ("POST", "/api/integrations/airzone/probe"),
         ("POST", "/api/integrations/airzone"),
         ("GET", "/api/integrations/airzone"),

@@ -8,6 +8,146 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[tokio::test]
+async fn discovery_never_uses_an_address_learned_for_an_old_configuration() {
+    let (dir, mut config) = house();
+    config.drivers.push(DriverConfig {
+        id: "nearby".into(),
+        kind: "unused".into(),
+        enabled: None,
+        options: toml::toml! { host = "10.0.0.2" }.into(),
+    });
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    for (configured, expected) in [
+        ("192.168.1.2", vec!["10.0.0.2"]),
+        ("10.0.0.2", vec!["10.1.0.3", "10.0.0.2"]),
+    ] {
+        hub.remember_address(
+            &"nearby".into(),
+            moli_runtime::KnownAddress {
+                configured: configured.into(),
+                host: "10.1.0.3".into(),
+                mac: None,
+                identity: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            manager
+                .discovery_hints()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+struct WaitingDiscovery(Arc<tokio::sync::Notify>);
+impl discovery::Inspector for WaitingDiscovery {
+    fn connect<'a>(&'a self, _target: &'a discovery::Target) -> BoxFuture<'a, bool> {
+        Box::pin(async move {
+            self.0.notify_one();
+            std::future::pending::<bool>().await
+        })
+    }
+    fn probe<'a>(
+        &'a self,
+        _target: &'a discovery::Target,
+    ) -> BoxFuture<'a, Option<moli_airzone::GatewayProbe>> {
+        Box::pin(async { panic!("the waiting connection must never reach a probe") })
+    }
+}
+
+#[tokio::test]
+async fn shutting_down_the_manager_cancels_an_active_search() {
+    let (dir, mut config) = house();
+    config.drivers.push(DriverConfig {
+        id: "network-hint".into(),
+        kind: "unused".into(),
+        enabled: None,
+        options: toml::toml! { host = "10.0.0.2" }.into(),
+    });
+    let manager = Manager::new(
+        Hub::new(HubOptions::default()).unwrap(),
+        &config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let scanning = manager.clone();
+    let waiting = started.clone();
+    let scan = tokio::spawn(async move {
+        scanning
+            .discover_with(Arc::new(WaitingDiscovery(waiting)))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .unwrap();
+    manager.shutdown().await;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), scan)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err()
+            .code,
+        "shutting_down"
+    );
+    assert_eq!(manager.discover().await.unwrap_err().code, "shutting_down");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn discovery_does_not_hold_the_registry_lock_while_installing_a_fake_controller() {
+    let (dir, mut config) = house();
+    config.drivers.push(DriverConfig {
+        id: "network-hint".into(),
+        kind: "unused".into(),
+        enabled: None,
+        options: toml::toml! { host = "10.0.0.2" }.into(),
+    });
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub, &config, CancellationToken::new()).unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let scanning = manager.clone();
+    let waiting = started.clone();
+    let scan = tokio::spawn(async move {
+        scanning
+            .discover_with(Arc::new(WaitingDiscovery(waiting)))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .unwrap();
+    assert!(manager.list().await.unwrap().gateways.is_empty());
+    assert_eq!(manager.discover().await.unwrap_err().code, "busy");
+    let (port, writes, stop) = controller().await;
+    let installed = tokio::time::timeout(
+        Duration::from_secs(2),
+        manager.install(request(port), "test".into()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(installed.stored && installed.read_only);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    scan.abort();
+    assert!(scan.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        manager.discover().await.unwrap_err().code,
+        "busy",
+        "cancelled search keeps rate budget"
+    );
+    manager.shutdown().await;
+    stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn static_gateway_override_preserves_options_and_withdrawal_survives_restart() {
     let (dir, _) = house();
@@ -929,6 +1069,25 @@ fn registry_is_restored_and_invalid_content_is_never_silently_reset() {
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), invalid);
     }
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn loopback_connections_are_rejected_by_the_production_validation_policy() {
+    for host in ["127.0.0.1", "127.0.0.2", "127.255.255.254"] {
+        let mut local = request(3000);
+        local.host = host.into();
+        assert_eq!(
+            validate_connection(local.clone(), false).unwrap_err().code,
+            "invalid_host"
+        );
+        assert!(
+            validate_connection(local, true).is_ok(),
+            "unit-test fixture only"
+        );
+    }
+    let mut private = request(3000);
+    private.host = "192.168.1.2".into();
+    assert!(validate_connection(private, false).is_ok());
 }
 
 #[test]

@@ -1,14 +1,20 @@
 # Installation / Onboarding
 
-1. FR : Vérifier une passerelle compatible API locale, son adresse et son port.
-   EN: Verify a Local API controller, its host and port. Cloud-only equipment
+1. FR : Allumer une passerelle compatible API locale, sur le réseau de Moli.
+   EN: Power on a Local API controller on Moli's network. Cloud-only equipment
    is not made locally compatible by adding this driver.
-2. FR : Dans **Système → Ajouter une passerelle**, saisir l’IPv4 locale et le port,
-   vérifier la connexion, puis **Ajouter en lecture seule** avec le code Moli.
-   L’instance est conservée et démarre immédiatement, sans fichier à modifier.
-   EN: In **System → Add a gateway**, enter its local IPv4 and port, verify it,
-   then explicitly add it read-only with the Moli code. It is saved and starts
-   immediately. Manual configuration remains available for advanced deployment:
+2. FR : Dans **Système → Ajouter une passerelle**, lancer la recherche, choisir
+   une passerelle, puis confirmer son ajout dans Moli. Le code Moli protège
+   l’accès à la recherche et à l’installation. Une passerelle déjà ajoutée est
+   signalée ; la sélection seule n’ajoute rien. L’enregistrement démarre la
+   lecture des zones sans fichier à modifier.
+   **Saisir une adresse** reste disponible si la recherche ne trouve pas le
+   matériel. L’adresse, le port et l’empreinte HTTPS se règlent alors manuellement.
+   EN: In **System → Add a gateway**, search, choose a controller and explicitly
+   confirm its read-only addition. The Moli code protects discovery and setup.
+   Existing controllers are identified; selecting a result does not install it.
+   Use the manual-address fallback if discovery cannot reach the controller.
+   Manual configuration remains available for advanced deployment:
    one instance per controller, `read_only = true`, then `moli-os check-config`
    and restart. Do not configure the same gateway through both paths.
 3. FR : Comparer les systèmes/zones et les capacités publiées avec l'installation.
@@ -32,3 +38,20 @@
 8. FR : Qualifier séparément les coupures, reprises, horaires constructeurs et
    compatibilité du firmware. EN: Synthetic protocol tests do not establish
    physical execution, long-running reliability or all firmware compatibility.
+
+## Limites de la recherche / Discovery limits
+
+FR : La recherche est ponctuelle et bornée. Elle utilise les adresses privées
+déjà connues de Moli pour explorer les réseaux locaux correspondants et vérifie
+les réponses avec l’API Airzone. Un résultat vide ne prouve pas l’absence de
+matériel : une installation sans indice réseau, un réseau isolé ou une API locale
+désactivée nécessitent la saisie manuelle. Un appareil exclusivement cloud ne
+devient pas compatible avec l’API locale grâce au scan. La recherche ne commande,
+n’ajoute et ne réactive aucun appareil.
+
+EN: Discovery is an on-demand, bounded search based on private addresses already
+known to Moli, with responses verified through the Airzone API. Empty results
+are not proof that no device exists: an empty installation without network hints,
+an isolated network or a disabled Local API may require the manual fallback.
+Scanning cannot make cloud-only hardware locally compatible. Discovery never
+commands, installs or reactivates a device.

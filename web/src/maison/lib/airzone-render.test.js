@@ -13,6 +13,7 @@ let words;
 let Page;
 let ZoneCard;
 let Readings;
+let DiscoveryResults;
 const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const document = Object.getOwnPropertyDescriptor(globalThis, 'document');
 
@@ -31,6 +32,7 @@ before(async () => {
   Page = (await vite.ssrLoadModule('/src/maison/pages/Airzone.svelte')).default;
   ZoneCard = (await vite.ssrLoadModule('/src/maison/ui/AirzoneZoneCard.svelte')).default;
   Readings = (await vite.ssrLoadModule('/src/maison/ui/AirzoneReadings.svelte')).default;
+  DiscoveryResults = (await vite.ssrLoadModule('/src/maison/ui/AirzoneDiscoveryResults.svelte')).default;
 });
 
 beforeEach(async () => {
@@ -308,6 +310,20 @@ test('installation diagnostics expose optional availability without treating uns
   assert.match(text(html), /Capteurs de qualité d’air dédiés Disponibilité inconnue/);
 });
 
+test('discovery choices distinguish identical models accessibly and keep existing gateways out of the add flow', () => {
+  const candidate = {host:'192.168.1.20',port:3000,mac:'aabbccddeeff',gateway_type:'ws_az',zones:1,existing_instance:null,existing_enabled:null};
+  const gateways = [candidate,{...candidate,host:'192.168.1.21',mac:'112233445566'}, {...candidate,host:'192.168.1.22',mac:'aabbcc112233',existing_instance:'paused',existing_enabled:false}];
+  const html = render(DiscoveryResults,{props:{report:{gateways,incomplete:false}}}).body;
+  const choices = tags(html,'button');
+  assert.equal(choices.length,2,'an existing gateway only offers management');
+  assert.match(choices[0],/aria-label="Choisir cette passerelle[^\"]+192\.168\.1\.20"/);
+  assert.match(choices[1],/aria-label="Choisir cette passerelle[^\"]+192\.168\.1\.21"/);
+  assert.match(tags(html,'a')[0],/href="#\/airzone\/installation"[^>]+aria-label="Gérer cette passerelle[^\"]+192\.168\.1\.22"/);
+  assert.match(text(html),/1 zone disponible/);
+  assert.doesNotMatch(text(html),/1 zones/);
+  assert.ok(tags(html,'details').every((tag)=>!tag.includes(' open')),'network identities remain optional details');
+});
+
 test('offline shared controls carry their own stale warning even when the selected zone remains online', () => {
   house();
   hub.devices['native-a:scoped_control'].online = false;
@@ -399,7 +415,11 @@ test('alerts show an explicit battery warning and retain hidden native faults', 
 test('add flow distinguishes automatic discovery from physical commissioning and gateway configuration', () => {
   house();
   const html=page('airzone/add');
-  assert.match(text(html), /Ajouter un appareil/);
+  assert.match(text(html), /Ajouter une passerelle Airzone/);
+  assert.match(text(html), /Rechercher mes passerelles/);
+  assert.equal(tags(html,'input').length,0,'the initial wizard does not ask for an IP');
+  assert.match(html, /aria-current="step"/);
+  assert.match(html, /<details class="help\b[^>]*>/);
   assert.match(text(html), /appairage/);
   assert.match(text(html), /passerelle/);
   assert.match(html, /href="#\/airzone\/devices"/);
@@ -447,9 +467,9 @@ test('system always exposes the gateway management route after every Airzone dri
 
 test('gateway cards distinguish pause from offline and show actual writable configuration',async()=>{
   const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
-  const gateway={instance:'airzone-old',host:'127.0.0.1',port:3000,enabled:false,source:'configuration',read_only:false,running:false};
+  const gateway={instance:'airzone-old',host:'172.31.1.1',port:3000,enabled:false,source:'configuration',read_only:false,running:false};
   let html=render(Card,{props:{gateway}}).body;
-  assert.match(text(html),/En pause/);assert.match(text(html),/Pilotage autorisé par la configuration/);
+  assert.match(text(html),/Suivi en pause/);assert.match(text(html),/Pilotage autorisé par la configuration/);
   assert.match(text(html),/Vérifier et réactiver/);assert.doesNotMatch(text(html),/Hors ligne/);
   html=render(Card,{props:{gateway:{...gateway,enabled:true,running:true,read_only:true},connected:false}}).body;
   assert.match(text(html),/État à vérifier/);assert.ok(tags(html,'button').every(tag=>/disabled/.test(tag)));
@@ -457,7 +477,7 @@ test('gateway cards distinguish pause from offline and show actual writable conf
 
 test('gateway connection editor retains identity and announces read-only conversion',async()=>{
   const Add=(await vite.ssrLoadModule('/src/maison/ui/AirzoneAdd.svelte')).default;
-  const gateway={instance:'airzone-old',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',enabled:false,read_only:false};
+  const gateway={instance:'airzone-old',host:'172.31.1.1',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',enabled:false,read_only:false};
   const html=render(Add,{props:{gateway}}).body;
   assert.match(text(html),/Réactiver cette passerelle/);
   assert.match(text(html),/Tout enregistrement active la lecture seule/);

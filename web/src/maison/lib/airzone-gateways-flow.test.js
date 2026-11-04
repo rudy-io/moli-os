@@ -20,7 +20,7 @@ before(async()=>{
 });
 after(()=>{for(const[key,descriptor]of globals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
-const gateway={instance:'airzone-old',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',enabled:true,source:'configuration',read_only:false,running:true};
+const gateway={instance:'airzone-old',host:'172.31.1.1',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',enabled:true,source:'configuration',read_only:false,running:true};
 const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
 function fixture(t,handler=(url)=>response(url.endsWith('/withdraw')?{instance:gateway.instance,stored:true,enabled:false,read_only:false}:{gateways:[gateway]})) {
   assert.ok(client,'the installation must expose stored gateway management');
@@ -94,9 +94,9 @@ test('replacement opens the shared add flow only after withdrawal and reserves p
 
 
 test('returning from an editor always reloads persisted state even without a success callback',async(t)=>{
-  let updated=false;const{component,calls}=fixture(t,()=>response({gateways:[{...gateway,host:updated?'127.0.0.2':gateway.host}]}));
+  let updated=false;const{component,calls}=fixture(t,()=>response({gateways:[{...gateway,host:updated?'172.31.1.2':gateway.host}]}));
   await turn();component.select(gateway.instance,'edit');updated=true;
-  await component.close();assert.equal(calls.length,2);assert.equal(component.inspect().gateways[0].host,'127.0.0.2');
+  await component.close();assert.equal(calls.length,2);assert.equal(component.inspect().gateways[0].host,'172.31.1.2');
 });
 
 test('registry events refresh an idle list and defer to an open editor without changing its draft',async(t)=>{

@@ -2,22 +2,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as onboarding from './airzone-onboarding.js';
 
-const request = {instance:'airzone-2',host:'127.0.0.1',port:3000};
+const request = {instance:'airzone-2',host:'172.31.1.1',port:3000};
 const preview = {instance:'airzone-2',mac:'aabbccddeeff',gateway_type:'ws_az',api_version:null,firmware:'4.21',systems:2,zones:12,incomplete:false,read_only:true};
 const response = (data,status=200) => ({status,ok:status>=200&&status<300,json:async()=>data});
 
 test('the form normalizes local connection data without exposing writable options', () => {
   assert.equal(typeof onboarding.gatewayRequest,'function');
-  assert.deepEqual(onboarding.gatewayRequest({instance:' airzone-2 ',host:' 127.0.0.1 ',port:'3000',read_only:false,command:'on'}),{error:null,request});
-  for(const host of ['10.1.2.3','172.16.1.2','172.31.255.254','192.168.0.1','127.0.0.2']) assert.equal(onboarding.gatewayRequest({...request,host}).error,null);
+  assert.deepEqual(onboarding.gatewayRequest({instance:' airzone-2 ',host:' 172.31.1.1 ',port:'3000',read_only:false,command:'on'}),{error:null,request});
+  for(const host of ['10.1.2.3','172.16.1.2','172.31.255.254','192.168.0.1','172.31.1.2']) assert.equal(onboarding.gatewayRequest({...request,host}).error,null);
   const pin = 'AB:'.repeat(31)+'AB';
   assert.deepEqual(onboarding.gatewayRequest({...request,tls_fingerprint:pin}).request,{...request,tls_fingerprint:'ab'.repeat(32)});
 });
 
 test('bad hosts, reserved instances and malformed ports or certificates are refused before network access', async () => {
   assert.equal(typeof onboarding.gatewayRequest,'function');
-  for(const host of ['controller.local','8.8.8.8','169.254.169.254','0.0.0.0','224.0.0.1','172.15.1.1','172.32.1.1','256.1.1.1','127.01.0.1','https://127.0.0.1','127.0.0.1/path','127.0.0.1\n']) {
-    const expected = host === '127.0.0.1\n' ? null : 'invalid_host';
+  for(const host of ['controller.local','localhost','localhost.localdomain','127.0.0.1','127.0.0.2','127.255.255.255','::1','[::1]','::ffff:127.0.0.1','2130706433','0x7f000001','8.8.8.8','169.254.169.254','0.0.0.0','224.0.0.1','172.15.1.1','172.32.1.1','256.1.1.1','127.01.0.1','https://127.0.0.1','127.0.0.1/path','127.0.0.1\n','172.31.1.1\n']) {
+    const expected = host === '172.31.1.1\n' ? null : 'invalid_host';
     assert.equal(onboarding.gatewayRequest({...request,host}).error,expected,host);
   }
   for(const instance of ['core','assistant','automations','energie','charges','lumieres','personnes','bad/id','-first','a'.repeat(33),'']) assert.equal(onboarding.gatewayRequest({...request,instance}).error,'invalid_instance');
@@ -25,6 +25,13 @@ test('bad hosts, reserved instances and malformed ports or certificates are refu
   for(const tls_fingerprint of ['','ab','x'.repeat(64)]) assert.equal(onboarding.gatewayRequest({...request,tls_fingerprint}).error,'invalid_fingerprint');
   const noNetwork=()=>assert.fail('Invalid form must not reach the network');
   assert.equal((await onboarding.probeGateway({...request,host:'8.8.8.8'},noNetwork)).error,'invalid_host');
+  for(const host of ['localhost','127.0.0.1','127.0.0.2','127.255.255.255']) {
+    const input={...request,host};
+    assert.equal((await onboarding.probeGateway(input,noNetwork)).error,'invalid_host');
+    assert.equal((await onboarding.probeExistingGateway(input,noNetwork)).error,'invalid_host');
+    assert.equal((await onboarding.addGateway(input,preview.mac,noNetwork)).error,'invalid_host');
+    assert.equal((await onboarding.updateGateway(input,preview.mac,noNetwork)).error,'invalid_host');
+  }
   assert.equal((await onboarding.addGateway(request,'',noNetwork)).error,'expected_identity_required');
 });
 
@@ -70,7 +77,7 @@ test('auth, known conflicts and uncertain network outcomes stay distinct and nev
 
 test('lifecycle lists stored gateways independently of runtime and rejects malformed metadata',async()=>{
   assert.equal(typeof onboarding.listGateways,'function');
-  const gateway={instance:'airzone-2',host:'127.0.0.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:false,source:'configuration',read_only:false,running:false};
+  const gateway={instance:'airzone-2',host:'172.31.1.1',port:3000,tls_fingerprint:null,mac:preview.mac,enabled:false,source:'configuration',read_only:false,running:false};
   let sent;
   const result=await onboarding.listGateways(async(url,options)=>{sent={url,options};return response({gateways:[gateway]});});
   assert.deepEqual(result,{ok:true,data:{gateways:[gateway]}});

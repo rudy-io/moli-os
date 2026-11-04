@@ -1,8 +1,13 @@
-// One cancellable human approval for the exact configuration action requested.
+// One cancellable human approval for the exact gateway action requested.
 // Each component owns its lifetime; navigating away must not replay the action.
-export function gatewayApproval({ home, label, waiting, failed, current, perform }) {
+export function gatewayApproval({ home, label, waiting, failed, current, perform, reason = () => 'configuration' }) {
   let alive = true;
   let heldRetry = null;
+  function cancel() {
+    if (heldRetry && home.held?.custom === heldRetry) home.held = null;
+    heldRetry = null;
+    waiting(false);
+  }
   return {
     ask(intent) {
       if (!alive) return;
@@ -16,7 +21,7 @@ export function gatewayApproval({ home, label, waiting, failed, current, perform
       };
       heldRetry = retry;
       home.held = {
-        label:label(),reason:'configuration',custom:retry,
+        label:label(intent),reason:reason(intent),custom:retry,
         onCancel:() => {
           if (!alive || heldRetry !== retry) return;
           heldRetry = null;
@@ -25,10 +30,10 @@ export function gatewayApproval({ home, label, waiting, failed, current, perform
         },
       };
     },
+    cancel,
     destroy() {
       alive = false;
-      if (heldRetry && home.held?.custom === heldRetry) home.held = null;
-      heldRetry = null;
+      cancel();
     },
   };
 }

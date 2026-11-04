@@ -76,3 +76,12 @@ ajoute un inventaire borné à 8 Mio sur disque, enregistré avec les valeurs pa
 la tâche de persistance existante. Les observations restaurées ne sont pas
 rejouées comme des mesures fraîches dans l’historique ou les intégrales d’énergie.
 Le coût de l’image et les mesures après redémarrage sont consignés dans la PR.
+
+L’assistant de découverte porte le chunk Airzone à 82,99 Ko / 23,18 Ko gzip,
+sans nouvelle dépendance. La recherche est déclenchée explicitement : au plus
+deux sous-réseaux privés /24, 512 cibles, 16 connexions simultanées et quatre
+vérifications Airzone simultanées. Elle s’arrête après 18 secondes et une
+nouvelle recherche attend au moins 30 secondes depuis le début de la précédente.
+Il n’y a aucune tâche de scan quand l’assistant est inactif. Ces bornes ne
+constituent pas une mesure de CPU au repos ni une garantie de découverte derrière
+un réseau Docker isolé ; le formulaire manuel reste disponible.
