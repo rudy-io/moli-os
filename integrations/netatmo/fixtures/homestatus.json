@@ -1,0 +1,61 @@
+{
+  "homesdata": {
+    "body": {
+      "homes": [
+        {
+          "id": "000000000000000000000001",
+          "name": "Maison",
+          "rooms": [
+            {
+              "id": "10",
+              "name": "Extérieur"
+            },
+            {
+              "id": "20",
+              "name": "Entrée"
+            }
+          ],
+          "modules": [
+            {
+              "id": "aa:bb:cc:dd:ee:01",
+              "type": "NOC",
+              "name": "Jardin",
+              "room_id": "10"
+            },
+            {
+              "id": "aa:bb:cc:dd:ee:02",
+              "type": "NACamera",
+              "name": "Entrée",
+              "room_id": "20"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "homestatus": {
+    "body": {
+      "home": {
+        "id": "000000000000000000000001",
+        "modules": [
+          {
+            "id": "aa:bb:cc:dd:ee:01",
+            "type": "NOC",
+            "reachable": true,
+            "alim_status": "on",
+            "monitoring": "on",
+            "floodlight": "auto",
+            "light_mode_status": "off"
+          },
+          {
+            "id": "aa:bb:cc:dd:ee:02",
+            "type": "NACamera",
+            "reachable": true,
+            "alim_status": "on",
+            "monitoring": "on"
+          }
+        ]
+      }
+    }
+  }
+}

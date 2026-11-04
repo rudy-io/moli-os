@@ -595,5 +595,19 @@
   "pilotes.zwave.point_lu_seul": "point {point} is read-only",
   "pilotes.zwave.point_sans_cible": "point {point} has no write target",
   "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
-  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean",
+  "pilotes.netatmo.identifiants_manquants": "Netatmo: missing credentials ({missing}) in vault for instance “{instance}” (from https://dev.netatmo.com/apps/: moli-os secrets set {instance} client_id / client_secret / refresh_token)",
+  "pilotes.netatmo.camera": "Netatmo camera",
+  "pilotes.netatmo.surveillance": "Monitoring",
+  "pilotes.netatmo.projecteur": "Floodlight",
+  "pilotes.netatmo.lumiere": "Light on",
+  "pilotes.netatmo.personne": "Person",
+  "pilotes.netatmo.vehicule": "Vehicle",
+  "pilotes.netatmo.animal": "Animal",
+  "pilotes.netatmo.mouvement": "Motion",
+  "pilotes.netatmo.aucune_image": "no video URL available for this Netatmo camera",
+  "pilotes.netatmo.aucune_image_statut": "the Netatmo camera returned no image (HTTP {status})",
+  "pilotes.netatmo.camera_inconnue": "unknown Netatmo camera",
+  "pilotes.netatmo.point_inconnu": "{point} cannot be controlled",
+  "pilotes.netatmo.echec": "Netatmo could not run the command: {why}"
 }
