@@ -79,6 +79,7 @@ moli-androidtv = { path = "crates/moli-androidtv" }
 moli-appletv = { path = "crates/moli-appletv" }
 moli-esphome = { path = "crates/moli-esphome" }
 moli-alexa = { path = "crates/moli-alexa" }
+moli-netatmo = { path = "crates/moli-netatmo" }
 moli-demo = { path = "crates/moli-demo" }
 moli-weather = { path = "crates/moli-weather" }
 

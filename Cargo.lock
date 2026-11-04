@@ -2270,6 +2270,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-netatmo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-os"
 version = "0.1.0"
 dependencies = [
@@ -2318,6 +2335,7 @@ dependencies = [
  "moli-melcloud",
  "moli-moonraker",
  "moli-net",
+ "moli-netatmo",
  "moli-outdoor",
  "moli-overkiz",
  "moli-philips",
