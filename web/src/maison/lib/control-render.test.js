@@ -271,6 +271,28 @@ test('an empty shutter route explains the empty view and offers the ordinary roo
   assert.match(html, /href="#\/pieces"/);
 });
 
+test('the shutters view groups many individual cards by room without lighting summaries', () => {
+  const rooms = [['Studio', 38], ['Workshop', 2]];
+  const entries = rooms.flatMap(([room, count]) => Array.from({ length: count }, (_, index) => ({
+    id: `fixture:${room}-${index}`, model: 'Home Assistant cover',
+    label: { name: `${room} shade ${index + 1}`, room }, online: index !== 0,
+    points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+  })));
+  hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  for (const [room, count] of rooms) {
+    assert.match(html, new RegExp(`<h2[^>]*>.*?${room}.*?</h2>.*?${count} ouvrants`, 's'));
+    const list = html.match(new RegExp(`<ul[^>]*aria-label="${room}"[^>]*>(.*?)</ul>`, 's'))?.[1];
+    assert.ok(list, `${room} has its own accessible list`);
+    assert.equal((list.match(/<li\b/g) ?? []).length, count);
+    assert.match(list, /Injoignable/);
+  }
+  assert.doesNotMatch(html, /Tout est éteint|<button|<input/);
+  const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+  assert.match(normal, /Tout est éteint/);
+  assert.doesNotMatch(normal, /<ul[^>]*aria-label="Studio"/);
+});
+
 test('partial RTS shutter retains close and stop without inventing position or open', () => {
   const points = [point('control', enumeration('close', 'stop'))];
   const html = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter' });
