@@ -9,6 +9,9 @@
 //! [`Event`]: moli_core::Event
 
 mod addresses;
+mod device_cache;
+#[cfg(test)]
+mod device_cache_tests;
 mod driver;
 pub mod guard;
 mod hub;

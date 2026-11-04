@@ -296,12 +296,16 @@ impl Loads {
     }
 
     fn number(&self, point: &str) -> Option<f64> {
-        let state = self.hub.state(&PointId::from(point.to_owned()))?;
+        let state = self.hub.current_state(&PointId::from(point.to_owned()))?;
         state.value.as_f64()
     }
 
     fn switch(&self, point: &str) -> Option<bool> {
-        match self.hub.state(&PointId::from(point.to_owned()))?.value {
+        match self
+            .hub
+            .current_state(&PointId::from(point.to_owned()))?
+            .value
+        {
             Value::Bool(b) => Some(b),
             Value::Text(ref t) => match t.to_ascii_lowercase().as_str() {
                 "on" | "true" => Some(true),
@@ -326,7 +330,7 @@ impl Loads {
         }
         self.period
             .as_deref()
-            .and_then(|p| self.hub.state(&PointId::from(p.to_owned())))
+            .and_then(|p| self.hub.current_state(&PointId::from(p.to_owned())))
             .is_some_and(
                 |s| matches!(s.value, Value::Text(ref t) if period_key(t).starts_with("hc")),
             )
@@ -470,6 +474,124 @@ impl Loads {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct OfflineReadings;
+    impl Driver for OfflineReadings {
+        fn kind(&self) -> &'static str {
+            "load-test"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                let id = ctx.device_id("meter");
+                ctx.upsert_device(Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: "Synthetic meter".into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: None,
+                    members: vec![],
+                    points: vec![
+                        PointSpec {
+                            key: "power".into(),
+                            label: "Power".into(),
+                            kind: Kind::Numeric {
+                                min: None,
+                                max: None,
+                                step: None,
+                            },
+                            access: Access {
+                                read: true,
+                                write: false,
+                            },
+                            unit: None,
+                            semantic: Semantic::Other,
+                        },
+                        PointSpec {
+                            key: "on".into(),
+                            label: "On".into(),
+                            kind: Kind::Binary,
+                            access: Access {
+                                read: true,
+                                write: false,
+                            },
+                            unit: None,
+                            semantic: Semantic::Other,
+                        },
+                        PointSpec {
+                            key: "period".into(),
+                            label: "Period".into(),
+                            kind: Kind::Text,
+                            access: Access {
+                                read: true,
+                                write: false,
+                            },
+                            unit: None,
+                            semantic: Semantic::Other,
+                        },
+                    ],
+                });
+                ctx.set_state(&id, "power", Value::Float(-3000.0));
+                ctx.set_state(&id, "on", Value::Bool(false));
+                ctx.set_state(&id, "period", Value::Text("HC..".into()));
+                ctx.set_availability(&id, false);
+                ctx.ready();
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_readings_stay_visible_but_do_not_drive_loads() {
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let task = moli_runtime::spawn_driver(
+            &hub,
+            "synthetic".into(),
+            Arc::new(OfflineReadings),
+            cancel.clone(),
+        );
+        for _ in 0..200 {
+            if hub
+                .device(&DeviceId::from("synthetic:meter"))
+                .is_some_and(|view| view.online == Some(false))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(hub.state(&PointId::from("synthetic:meter/power")).is_some());
+        let loads = Loads::new(
+            hub,
+            vec![],
+            TimeZone::UTC,
+            Some("synthetic:meter/period".into()),
+        );
+        assert_eq!(loads.number("synthetic:meter/power"), None);
+        assert_eq!(loads.switch("synthetic:meter/on"), None);
+        let mut config = heater();
+        config.offpeak.clear();
+        assert!(!loads.offpeak(&config, now_ms()));
+        let mut memory = Memory::default();
+        for minute in [0, 3, 15] {
+            assert_ne!(
+                decide(
+                    &config,
+                    "auto",
+                    &mut memory,
+                    seen(minute, loads.number("synthetic:meter/power"), false, false)
+                )
+                .0,
+                Some(true),
+                "an old surplus must not energize a load"
+            );
+        }
+        cancel.cancel();
+        task.await.unwrap();
+    }
 
     fn heater() -> LoadConfig {
         LoadConfig {

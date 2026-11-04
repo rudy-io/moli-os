@@ -918,6 +918,7 @@ struct GuestHouse {
     pin: String,
     /// The guest's headers: from the Internet, its session.
     guest: String,
+    drivers: Vec<(CancellationToken, tokio::task::JoinHandle<()>)>,
 }
 
 const GUEST_ROOM: &str = "Chambre d'amis";
@@ -940,13 +941,11 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         ("salon", Arc::new(Lamp)),
         ("tel", Arc::new(Phone)),
     ];
+    let mut running = Vec::new();
     for (instance, driver) in drivers {
-        spawn_driver(
-            &hub,
-            InstanceId::from(instance),
-            driver,
-            CancellationToken::new(),
-        );
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(&hub, InstanceId::from(instance), driver, cancel.clone());
+        running.push((cancel, task));
     }
     for _ in 0..200 {
         if hub.stats().drivers_running == 3 {
@@ -1003,6 +1002,7 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         dir,
         pin,
         guest,
+        drivers: running,
     }
 }
 
@@ -1251,6 +1251,65 @@ async fn a_guest_follows_its_rooms_only_live() {
     assert_eq!(name, "snapshot");
     assert_eq!(device_ids(&snapshot), ["fake:lamp", "salon:lamp"]);
     let _ = std::fs::remove_dir_all(&house.dir);
+}
+
+#[tokio::test]
+async fn restored_cached_devices_are_scoped_to_the_guests_rooms_over_sse() {
+    struct DormantLamp;
+    impl Driver for DormantLamp {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let mut house = guest_house("restored-guest", |_| {}).await;
+    for (cancel, task) in house.drivers.drain(..) {
+        cancel.cancel();
+        task.await.unwrap();
+    }
+    let (status, mut guest) = live(&house.addr, "/api/events", &house.guest).await;
+    assert_eq!(status, 200);
+    assert_eq!(device_ids(&guest.next().await.1), ["fake:lamp"]);
+    let cancel = CancellationToken::new();
+    let outside = spawn_driver(
+        &house.hub,
+        "salon".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    let visible = spawn_driver(
+        &house.hub,
+        "fake".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let (_, event) = guest.next().await;
+            assert!(
+                !event.to_string().contains("salon:lamp"),
+                "private cached device leaked: {event}"
+            );
+            if event["type"] == "device_restored" {
+                assert_eq!(event["device"]["id"], "fake:lamp");
+                assert_eq!(event["label"]["room"], GUEST_ROOM);
+                assert_eq!(event["states"]["state"]["value"], false);
+                assert_eq!(event["device"]["points"][0]["access"]["write"], false);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    cancel.cancel();
+    outside.await.unwrap();
+    visible.await.unwrap();
+    std::fs::remove_dir_all(house.dir).unwrap();
 }
 
 /// A phone is paired without the code (a device of the home network is the
@@ -1877,4 +1936,24 @@ async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
     assert!(serde_json::from_str::<Json>(&body).unwrap()["drivers"][0]["warning"].is_null());
     cancel.cancel();
     supervisor.await.unwrap();
+}
+
+#[tokio::test]
+async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
+    let (addr, hub) = server().await;
+    let (_, mut first) = live(&addr, "/api/events", "").await;
+    let (_, mut second) = live(&addr, "/api/events", "").await;
+    first.next().await;
+    second.next().await;
+    let cancel = CancellationToken::new();
+    let task = spawn_driver(&hub, "new-driver".into(), Arc::new(Lamp), cancel.clone());
+    for stream in [&mut first, &mut second] {
+        let (_, event) = stream.next().await;
+        assert_eq!(event["type"], "driver_registered");
+        assert_eq!(event["instance"], "new-driver");
+        assert_eq!(event["kind"], "fake");
+        assert_eq!(event["integration"], "fake");
+    }
+    cancel.cancel();
+    task.await.unwrap();
 }
