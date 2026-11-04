@@ -125,8 +125,8 @@ base_topic = "zigbee2mqtt"
 # port = 8443
 # poll_secs = 5
 
-# Airzone Local API, one instance per controller. Read-only also defaults to
-# true on upgrade. See integrations/airzone/README.md for capabilities/limits.
+# Airzone Local API, one instance per controller. Omitted read_only defaults to
+# false, retaining only historical writes. See integrations/airzone/README.md.
 # [[driver]]
 # id = "airzone"
 # kind = "airzone"
@@ -136,6 +136,7 @@ base_topic = "zigbee2mqtt"
 # port = 3000
 # poll_secs = 30
 # read_only = true
+# write = "extended"          # opt in to new commands; read_only still takes priority
 # mac = "aa:bb:cc:dd:ee:ff"   # optional identity pin
 # dhw_units = 0               # only if DHW omits its unit: 0 Celsius, 1 Fahrenheit
 # For HTTPS: replace port with the controller's TLS port and explicitly pin:

@@ -129,9 +129,15 @@ contrôleur ; cette couverture ne garantit pas la compatibilité de tous les fir
 
 Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
 `read_only = false` est conservé pour ne pas désactiver les automatismes existants.
-Un essai d’observation configure explicitement `read_only = true`. Les commandes
-restent soumises aux gardes, aux membres
-affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
+Le défaut `write = "legacy"` conserve seulement `on`, `target_temperature`, `mode`
+et `fan_speed` (paramètre Airzone `speed`) sur les zones et leurs contrôles partagés
+historiques. `write = "extended"` active explicitement les nouvelles commandes :
+modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
+qualité de l’air et libellé d’intégration. Un essai d’observation configure
+explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
+transport. Les commandes restent soumises aux gardes, aux membres affectés et à
+une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
 démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
 au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient
 pas à cette API.
