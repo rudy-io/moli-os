@@ -7,7 +7,7 @@
   import { completionGuard } from '../lib/completion-guard.js';
 
   /** A shutter: open, stop, close (whatever the device offers). */
-  let { id, name = null } = $props();
+  let { id, name = null, standalone = false } = $props();
 
   const d = $derived(device(id));
   const available = $derived(!!d && d.online !== false);
@@ -79,7 +79,7 @@
   ];
 </script>
 
-<div class="cover">
+<div class="cover" class:standalone>
   <Icon name={available ? 'shutter' : 'offline'} size={22} />
   <span class="name">{label}<small class="muted">{status}</small></span>
   {#if !available || (!writableActions.length && !positionWritable)}
@@ -122,6 +122,8 @@
     color: var(--ink);
     min-width: 120px;
   }
+
+  .standalone { background: var(--surface); border: 1px solid var(--line); }
 
   small {
     font-weight: 500;
