@@ -35,6 +35,7 @@ enum Parameters {
     Empty,
     RtsDuration,
     Percent(Family),
+    SlowClosure(Option<f64>),
 }
 #[derive(Debug)]
 pub(super) struct Binding {
@@ -60,11 +61,21 @@ impl Binding {
             parameters: Parameters::Percent(family),
         }
     }
+    pub fn slow_closure(target: Option<f64>) -> Self {
+        Self {
+            name: "setClosureAndLinearSpeed",
+            parameters: Parameters::SlowClosure(target),
+        }
+    }
     pub fn encode(&self, value: &Value) -> Option<Json> {
         let parameters = match self.parameters {
             Parameters::Empty => json!([]),
             Parameters::RtsDuration => json!([0]),
             Parameters::Percent(family) => json!([family.convert(value.as_f64()?)?]),
+            Parameters::SlowClosure(target) => {
+                let opening = target.or_else(|| value.as_f64())?;
+                json!([Family::Closure.convert(opening)?, "lowspeed"])
+            }
         };
         Some(json!({"name":self.name,"parameters":parameters}))
     }

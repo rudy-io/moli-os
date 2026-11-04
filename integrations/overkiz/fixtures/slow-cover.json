@@ -1,0 +1,17 @@
+{
+  "deviceURL": "io://example/slow-cover",
+  "available": true,
+  "enabled": true,
+  "label": "Example shutter",
+  "definition": {
+    "uiClass": "RollerShutter",
+    "commands": [
+      { "commandName": "open", "nparams": 0 },
+      { "commandName": "close", "nparams": 0 },
+      { "commandName": "stop", "nparams": 0 },
+      { "commandName": "setClosure", "nparams": 1 },
+      { "commandName": "setClosureAndLinearSpeed", "nparams": 1, "paramsSig": "p1,*p2" }
+    ]
+  },
+  "states": [{ "name": "core:ClosureState", "value": 25 }]
+}
