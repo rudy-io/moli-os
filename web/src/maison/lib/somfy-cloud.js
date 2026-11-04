@@ -63,8 +63,12 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
   }
   async function load() {
     emit({ loading: true, error: '' });
-    try { await list(); } catch (e) { failed(e); }
+    try { await list(); return active && view.auth === 'owner'; } catch (e) { failed(e); return false; }
     finally { emit({ loading: false }); }
+  }
+  async function open() {
+    const loaded = await load();
+    if (loaded && active && view.instances.find(i => i.instance === view.selected)?.state?.scope) await catalog();
   }
   async function catalog(signal = lifetime.signal) {
     if (view.auth !== 'owner' || !view.selected || view.reading) return;
@@ -127,5 +131,5 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     selection++;
     emit({ selected: instance, catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false, error: '' });
   }
-  return { load, catalog, definition, send, select, stop() { active = false; lifetime.abort(); view = null; } };
+  return { load, open, catalog, definition, send, select, stop() { active = false; lifetime.abort(); view = null; } };
 }

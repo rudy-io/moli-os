@@ -166,3 +166,50 @@ test('the pending deadline also aborts a status fetch that never responds', asyn
   await sending;
   assert.equal(deadlineAborted, true);
 });
+
+
+test('opening a connected view reads the cached catalogue without a provider refresh or write', async () => {
+  const calls = [];
+  let view;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    calls.push({ url, method: options.method ?? 'GET' });
+    return url.endsWith('/catalog') ? Response.json({ revision: 'known', catalog: { collections: {} } })
+      : Response.json({ instances: [{ instance: 'demo', state: { scope: { site_oid: 'demo' } } }] });
+  });
+  await observer.open();
+  assert.equal(view.catalog.revision, 'known');
+  assert.deepEqual(calls.map(c => c.method), ['GET', 'GET']);
+  assert.ok(calls[1].url.endsWith('/catalog'));
+  observer.stop();
+});
+
+test('opening a locked or unbound view never requests the private catalogue', async () => {
+  for (const locked of [true, false]) {
+    let calls = 0;
+    const observer = createCloudObserver(() => {}, async () => {
+      calls++;
+      return locked ? Response.json({ auth_policy: 'pin_fallback' }, { status: 403 })
+        : Response.json({ instances: [{ instance: 'demo', state: { phase: 'disconnected' } }] });
+    });
+    await observer.open();
+    assert.equal(calls, 1);
+    observer.stop();
+  }
+});
+
+
+test('opening after a failed status refresh does not use the previous selection to read the catalogue', async () => {
+  let fail = false;
+  const calls = [];
+  const observer = createCloudObserver(() => {}, async url => {
+    calls.push(url);
+    if (fail) throw new Error('network');
+    return Response.json({ instances: [{ instance: 'demo', state: { scope: { site_oid: 'demo' } } }] });
+  });
+  await observer.load();
+  fail = true;
+  await observer.open();
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(url => !url.endsWith('/catalog')));
+  observer.stop();
+});
