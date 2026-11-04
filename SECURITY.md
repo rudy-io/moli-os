@@ -75,9 +75,10 @@ people installing Moli, and the model wins if they ever differ.
   address paired it.
 - **The assistant's model** (when a household sets one up, with its own key) is never given
   anyone's precise location or Wi-Fi name, and its key never travels over plain HTTP.
-- **Never expose Moli to the Internet directly**, and never put a reverse proxy on the same
-  machine in front of it (every request would look local; Moli treats a relayed local request
-  as coming from outside). For remote access: a VPN subnet router, or Cloudflare Access, whose
+- **Never expose Moli to the Internet directly**, and never put a reverse proxy in front of it,
+  on the same machine or on another of the home network (every request would look local or of
+  the house; Moli treats any relayed request, `X-Forwarded-For`, `Forwarded` or `X-Real-IP`, as
+  coming from outside). For remote access: a VPN subnet router, or Cloudflare Access, whose
   signed identity Moli verifies itself (`[server.access]`).
 - **DNS rebinding**: only the names configured in `allowed_hosts`, `localhost` and addresses
   typed as such are accepted in `Host`.
