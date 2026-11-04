@@ -1,8 +1,8 @@
 [integration]
 id = "tuya"
 name = "Tuya Wi-Fi en local"
-brands = ["Tuya"]
-models = []
+brands = ["Tuya", "Rowenta", "Tefal"]
+models = ["X-plorer Serie 75"]
 transport = "tcp"
 driver = "tuya"
 crate = "moli-tuya"
@@ -21,5 +21,8 @@ vars = []
 options = []
 
 [origin]
-reused = "aucun code repris : trames vérifiées octet par octet contre la sortie d'implémentations existantes (localtuya, tinytuya), test d'interopérabilité ; import des clés par le compte Tuya déjà lié à HA"
+reused = "aucun code repris : trames vérifiées octet par octet contre la sortie d'implémentations existantes (localtuya, tinytuya), test d'interopérabilité ; import des clés par le compte Tuya déjà lié à HA ; aspirateurs : points de données de tefal_xplorer_vacuum.yaml de make-all/tuya-local (MIT), lu comme référence et confirmé sur un vrai robot"
 author = "agent"
+
+[[fixture]]
+file = "fixtures/robot_status.json"

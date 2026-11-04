@@ -94,3 +94,22 @@ Le basculement de pilotage protégé par code porte le chunk Airzone à
 n'est ajoutée. Le changement de mode est ponctuel et sérialisé ; l'autorisation
 vérifie l'identité par une lecture, la révocation ne dépend d'aucune réponse
 réseau. Le superviseur précédent est arrêté avant le remplacement.
+
+## Synchronisation, Cloud et cartes Airzone — 2026-11-04
+
+Le lot cumulatif suivant ajoute la synchronisation détaillée, la consultation
+Cloud séparée, les intentions de commande confirmées et le diagnostic des alertes.
+Son chunk Airzone reste différé : 136,51 Ko / 38,20 Ko gzip avant le dernier
+raffinement des cartes, puis 144,07 Ko / 40,23 Ko gzip après celui-ci, avec les
+dépendances actuelles de `main`. Ces tailles proviennent des builds de validation ;
+elles ne mesurent ni la latence réseau ni le temps de rendu.
+
+Les cartes partagent le flux SSE existant. Les couleurs et l'animation d'entrée
+utilisent CSS, respectent la réduction des animations et n'ajoutent ni bibliothèque
+ni interrogation périodique. Le diagnostic d'alerte ne lit la passerelle qu'à la
+demande, avec annulation et délai borné. L'augmentation cumulée depuis le wizard
+inclut les fonctions de synchronisation et Cloud ; elle n'est pas attribuée au
+seul habillage des cartes. Le dépassement historique du budget d'image reste une
+limite connue ; la taille de la nouvelle image et les mesures locales sont
+rapportées séparément dans la PR, sans revendiquer une qualification sur Freebox
+ni un comparatif matériel avec Home Assistant.

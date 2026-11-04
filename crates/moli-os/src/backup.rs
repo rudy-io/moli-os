@@ -132,12 +132,18 @@ pub fn restore(data_dir: &Path, dir: &Path, force: bool) -> anyhow::Result<()> {
             );
         }
     }
-    let existing: Vec<&String> = names.iter().filter(|n| data_dir.join(n).exists()).collect();
-    if !existing.is_empty() && !force {
+    // An older backup has no authoritative cache. Keeping a newer sidecar
+    // would resurrect devices/readings instead of restoring its state.json.
+    let obsolete: Vec<_> = ["state.devices.json", "state.observations.json"]
+        .into_iter()
+        .filter(|name| !listed.contains_key(*name) && data_dir.join(name).exists())
+        .collect();
+    let existing = names.iter().filter(|n| data_dir.join(n).exists()).count() + obsolete.len();
+    if existing != 0 && !force {
         bail!(
             "{} already holds {} of these files: stop moli-os, then restore with --force",
             data_dir.display(),
-            existing.len()
+            existing
         );
     }
     std::fs::create_dir_all(data_dir)?;
@@ -153,6 +159,12 @@ pub fn restore(data_dir: &Path, dir: &Path, force: bool) -> anyhow::Result<()> {
             }
         }
         std::fs::copy(dir.join(name), &target).with_context(|| format!("cannot restore {name}"))?;
+    }
+    // Only after every manifest entry and the overwrite permission have been
+    // checked, and all listed files copied. No unrelated data is removed.
+    for name in obsolete {
+        std::fs::remove_file(data_dir.join(name))
+            .with_context(|| format!("cannot remove obsolete {name}"))?;
     }
     println!(
         "restored {} files into {} (taken {} ms since the epoch)",
@@ -234,5 +246,115 @@ mod tests {
         assert!(!other.join("history.db").exists(), "nothing half-restored");
         drop((db, back));
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[derive(Debug)]
+    struct OfflineFixture;
+    impl moli_runtime::Driver for OfflineFixture {
+        fn kind(&self) -> &'static str {
+            "synthetic"
+        }
+        fn run<'a>(
+            &'a self,
+            ctx: &'a mut moli_runtime::DriverCtx,
+        ) -> moli_runtime::BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+
+    async fn assert_newer_cache(data_dir: &Path, expected: Option<bool>) {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions {
+            state_path: Some(data_dir.join("state.json")),
+            ..moli_runtime::HubOptions::default()
+        })
+        .unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let task = moli_runtime::spawn_driver(
+            &hub,
+            "synthetic".into(),
+            std::sync::Arc::new(OfflineFixture),
+            cancel.clone(),
+        );
+        assert_eq!(
+            hub.device(&"synthetic:newer".into()).is_some(),
+            expected.is_some(),
+            "newer inventory must not resurrect"
+        );
+        assert_eq!(
+            hub.state(&moli_core::PointId::from("synthetic:newer/on"))
+                .map(|sample| sample.value),
+            expected.map(moli_core::Value::Bool),
+            "newer observations must not resurrect"
+        );
+        cancel.cancel();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn restoring_a_legacy_backup_removes_only_absent_state_sidecars_after_validation() {
+        let base = std::env::temp_dir().join(format!("moli-legacy-backup-{}", std::process::id()));
+        let (data, saved, target) = (base.join("data"), base.join("saved"), base.join("target"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        let old_state = br#"{"synthetic:older":{"on":{"value":false,"ts":1}}}"#;
+        std::fs::write(data.join("state.json"), old_state).unwrap();
+        std::fs::write(data.join("labels.toml"), "x = 1\n").unwrap();
+        backup(&data, &saved).unwrap();
+        // The sidecars are the only collisions: removing them also requires --force.
+        let sample = serde_json::json!({"on":{"value":true,"ts":2}});
+        let generation = [1_u8; 16];
+        let definitions = serde_json::to_vec(&serde_json::json!({
+            "version":2,"generation":generation,"unclaimed":{},
+            "devices":{"synthetic:newer":{
+                "kind":"synthetic","integration":"synthetic",
+                "device":{"id":"synthetic:newer","instance":"synthetic","native_name":"Newer device",
+                    "points":[{"key":"on","label":"On","kind":{"type":"binary"},
+                        "access":{"read":true,"write":true},"semantic":"on_off"}]},
+                "states":sample
+            }}
+        })).unwrap();
+        let observations = serde_json::to_vec(&serde_json::json!({
+            "version":2,"generation":generation,"states":{"synthetic:newer":sample}
+        }))
+        .unwrap();
+        let sidecars = [
+            ("state.devices.json", definitions),
+            ("state.observations.json", observations),
+        ];
+        for (name, content) in &sidecars {
+            std::fs::write(target.join(name), content).unwrap();
+        }
+        assert_newer_cache(&target, Some(true)).await;
+        std::fs::write(target.join("unrelated.txt"), b"keep me").unwrap();
+        assert!(restore(&target, &saved, false).is_err());
+        assert!(!target.join("state.json").exists());
+        // Neither an unknown path nor a damaged late entry may erase the cache.
+        let manifest_path = saved.join("manifest.json");
+        let manifest_bytes = std::fs::read(&manifest_path).unwrap();
+        let mut invalid: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+        invalid["files"]["unexpected.json"] = 0.into();
+        std::fs::write(&manifest_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(restore(&target, &saved, true).is_err());
+        std::fs::write(&manifest_path, manifest_bytes).unwrap();
+        std::fs::write(saved.join("state.json"), b"damaged").unwrap();
+        assert!(restore(&target, &saved, true).is_err());
+        for (name, content) in &sidecars {
+            assert_eq!(std::fs::read(target.join(name)).unwrap(), *content);
+        }
+        assert!(!target.join("labels.toml").exists());
+        std::fs::write(saved.join("state.json"), old_state).unwrap();
+        restore(&target, &saved, true).unwrap();
+        assert_eq!(std::fs::read(target.join("state.json")).unwrap(), old_state);
+        assert!(!target.join("state.devices.json").exists());
+        assert!(!target.join("state.observations.json").exists());
+        assert_newer_cache(&target, None).await;
+        assert_eq!(
+            std::fs::read(target.join("unrelated.txt")).unwrap(),
+            b"keep me"
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

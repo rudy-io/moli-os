@@ -158,12 +158,16 @@ fn static_gateway_override_preserves_options_and_withdrawal_survives_restart() {
     let (dir, _) = house();
     let path = dir.join("moli.toml");
     let mut toml = std::fs::read_to_string(&path).unwrap();
-    toml.push_str("\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.1'\nport = 3000\nmac = 'aabbccddeeff'\npoll_secs = 67\ndhw_units = 1\nread_only = false\n");
+    toml.push_str("\n[[driver]]\nid = 'configured'\nkind = 'airzone'\n[driver.options]\nhost = '127.0.0.1'\nport = 3000\nmac = 'aabbccddeeff'\npoll_secs = 67\ndhw_units = 1\nread_only = false\nwrite = 'extended'\n");
     std::fs::write(&path, &toml).unwrap();
     let registry = json!({"version":2,"gateways":[],"overrides":[{"instance":"configured","enabled":false,"connection":null}]});
     std::fs::write(dir.join(FILE), registry.to_string()).unwrap();
     let config = Config::load(&path).unwrap();
     assert_eq!(config.drivers.len(), 1);
+    assert_eq!(
+        config.drivers[0].options["write"].as_str(),
+        Some("extended")
+    );
     assert_eq!(config.drivers[0].enabled, Some(false));
     assert_eq!(
         config.drivers[0].options["poll_secs"].as_integer(),
@@ -189,6 +193,10 @@ fn static_gateway_override_preserves_options_and_withdrawal_survives_restart() {
     );
     assert_eq!(config.drivers[0].options["dhw_units"].as_integer(), Some(1));
     assert_eq!(config.drivers[0].options["read_only"].as_bool(), Some(true));
+    assert_eq!(
+        config.drivers[0].options["write"].as_str(),
+        Some("extended")
+    );
     assert_eq!(std::fs::read_to_string(path).unwrap(), toml);
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -289,7 +297,7 @@ async fn controller_with_identity(
             } else if first.contains("/webserver") {
                 json!({"mac":mac,"ws_type":"ws_az","ws_firmware":"4.21"})
             } else if first.contains("/hvac") {
-                json!({"data":[{"systemID":1,"zoneID":1,"on":1,"roomTemp":22.5,"units":0}]})
+                json!({"data":[{"systemID":1,"zoneID":1,"name":"Test zone","on":1,"roomTemp":22.5,"units":0}]})
             } else {
                 json!({})
             }

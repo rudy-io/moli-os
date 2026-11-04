@@ -907,6 +907,7 @@ fn housekeeping(hub: &Hub, cancel: &CancellationToken) -> tokio::task::JoinHandl
         let mut tick = tokio::time::interval(HOUSEKEEPING);
         let mut rounds = 0u32;
         let mut unmatched: Vec<String> = Vec::new();
+        let mut unmatched_devices: Vec<String> = Vec::new();
         loop {
             tokio::select! {
                 () = cancel.cancelled() => break,
@@ -922,6 +923,13 @@ fn housekeeping(hub: &Hub, cancel: &CancellationToken) -> tokio::task::JoinHandl
                     tracing::warn!(rooms = ?lost, "protected rooms match no device: protection not applying");
                 }
                 unmatched = lost;
+            }
+            let lost = hub.unmatched_protected_devices();
+            if rounds > 1 && lost != unmatched_devices {
+                if !lost.is_empty() {
+                    tracing::warn!(devices = ?lost, "protected devices unknown: protection not applying");
+                }
+                unmatched_devices = lost;
             }
             if !rounds.is_multiple_of(STATE_FLUSH_ROUNDS) {
                 continue;

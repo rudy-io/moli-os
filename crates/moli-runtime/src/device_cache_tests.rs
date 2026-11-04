@@ -170,6 +170,22 @@ async fn definitions_without_state_are_saved_and_removal_is_durable() {
 }
 
 #[tokio::test]
+async fn removing_an_absent_device_does_not_write_another_cache_generation() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    assert!(hub.persist_state().await.unwrap());
+    hub.remove_device(&"synthetic:missing".into());
+    assert!(!hub.persist_state().await.unwrap());
+    hub.remove_device(&id());
+    assert!(hub.persist_state().await.unwrap());
+    hub.remove_device(&id());
+    assert!(!hub.persist_state().await.unwrap());
+}
+
+#[tokio::test]
 async fn sidecar_uses_one_coherent_definition_and_sample_snapshot() {
     let f = Fixture::new();
     save_fixture(&f).await;

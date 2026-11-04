@@ -57,6 +57,29 @@ async fn command(hub: &Hub) -> Result<(), CommandError> {
     .await
 }
 
+async fn rejects_extended_name(hub: &Hub) {
+    assert!(
+        !hub.device(&zone())
+            .unwrap()
+            .device
+            .point("name")
+            .unwrap()
+            .access
+            .write
+    );
+    assert_eq!(
+        hub.command(
+            &PointId::new(&zone(), "name"),
+            Value::from("Renamed"),
+            Origin::Ui,
+            None
+        )
+        .await,
+        Err(CommandError::ReadOnly),
+        "authorizing or restoring control must not opt in to thermostat renaming"
+    );
+}
+
 #[tokio::test]
 async fn explicit_mode_round_trip_persists_and_only_authorized_mock_commands_write() {
     for configured in [false, true] {
@@ -85,6 +108,7 @@ async fn explicit_mode_round_trip_persists_and_only_authorized_mock_commands_wri
             .unwrap();
         assert!(allowed.stored && allowed.running && !allowed.read_only);
         writable(&hub, true).await;
+        rejects_extended_name(&hub).await;
         assert_eq!(
             writes.load(Ordering::Relaxed),
             0,
@@ -105,24 +129,17 @@ async fn explicit_mode_round_trip_persists_and_only_authorized_mock_commands_wri
         manager.shutdown().await;
 
         let reopened = Config::load(&dir.join("moli.toml")).unwrap();
-        assert_eq!(
-            reopened.drivers[0].options["read_only"].as_bool(),
-            Some(false)
-        );
+        let options = &reopened.drivers[0].options;
+        assert_eq!(options["read_only"].as_bool(), Some(false));
         if configured {
-            assert_eq!(
-                reopened.drivers[0].options["poll_secs"].as_integer(),
-                Some(67)
-            );
-            assert_eq!(
-                reopened.drivers[0].options["dhw_units"].as_integer(),
-                Some(1)
-            );
+            assert_eq!(options["poll_secs"].as_integer(), Some(67));
+            assert_eq!(options["dhw_units"].as_integer(), Some(1));
         }
         let hub = Hub::new(HubOptions::default()).unwrap();
         let reboot = Manager::new(hub.clone(), &reopened, CancellationToken::new()).unwrap();
         reboot.start_configured().unwrap();
         writable(&hub, true).await;
+        rejects_extended_name(&hub).await;
         let readonly = reboot
             .set_mode(INSTANCE.into(), mode(true, false), "person".into())
             .await

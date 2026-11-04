@@ -38,6 +38,7 @@ timezone = "Europe/Paris"
 # [guard]
 # dashboard = "trusted"
 # protected_rooms = ["Chambre", "Chambre des enfants"]
+# protected_devices = ["z2m:0x00124b0000aa0013"]   # whatever their room
 #
 # [guard.quiet_hours]
 # from = "21:00"

@@ -91,3 +91,30 @@
   d'un ordre vient de la passerelle, pas de l'appareil Zigbee : seul l'état renvoyé ensuite
   pour son `cid` prouve que l'ordre a été exécuté ; l'état de chaque sous-appareil n'est
   demandé qu'à la connexion, ensuite seul ce que la passerelle pousse arrive.
+
+## Aspirateurs robots : Rowenta et Tefal X-plorer Serie 75
+
+- Ces robots sont des appareils Tuya : ils passent par ce pilote (`src/vacuum.rs`),
+  **en local**, sans cloud une fois la clé obtenue.
+- Points : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`,
+  `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`.
+- La Serie 75 répond sur les points 101 à 144. Le cloud en décrit d'autres (`power_go` sur 2, `mode` sur 3,
+  `seek` sur 13) qu'elle ne renvoie pas : le produit `X-Plorer Serie 75` reçoit toujours la table de
+  `src/vacuum.rs`, y compris après un import. Table reprise de `tefal_xplorer_vacuum.yaml` de
+  `make-all/tuya-local` (MIT), confirmée sur un vrai robot.
+- Les Serie 75 S et 95 S utilisent d'autres numéros (1 à 31, d'après `xplorer-rs`) et n'ont pas de table ici.
+  Non essayés. Un robot décrit par le cloud avec les codes standards garde cette description.
+- Volontairement absents : effacer la carte, remettre à zéro les compteurs, conduire à la main, nettoyer
+  une zone ou une pièce (il faudrait lire la carte, un format brut non décodé ici).
+- Les ordres qui font bouger le robot sont des `Control` : un agent passe par l'accord d'un humain.
+- `fixtures/robot_status.json` : réponse d'un vrai robot, sans identifiant, pendant son retour à la base.
+- **Vérifié sur du vrai matériel** (3 novembre 2026, Rowenta X-Plorer Serie 75, protocole 3.3, à travers
+  Moli) : lecture, `clean`, `pause` dans les deux sens, `dock`, `fan_speed`, arrêt par `clean = false`, `locate` (son entendu).
+- Constaté : `clean = true` pendant une pause relance une session (la surface repart à 0), `pause = false`
+  reprend la session en cours. `clean_time` est en secondes mais n'avance que par minute. `clean = false` arrête
+  le robot sur place, après un bref `tocharge`.
+- Non vérifié : `mode = pose`, les noms des
+  défauts, repris de `tuya-local` et jamais vus en panne réelle. Un défaut `code 27`, absent de cette liste, a
+  été vu quand le robot s'est arrêté hors de sa base ; il a disparu une fois remis en charge, sens inconnu.
+- Tableau de bord : une carte sur l'accueil, avec seulement les ordres possibles dans l'état du robot. Rendu vérifié ; boutons Démarrer, Faire sonner et aspiration cliqués sur la vraie page, ordres interceptés, et ces mêmes ordres envoyés au robot par l'API.
+- Reste : carte et zones, langues, programmation, Serie 75 S et 95 S.
