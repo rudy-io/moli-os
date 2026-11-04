@@ -289,17 +289,18 @@
   {/each}
 
   {#each room.climates as d (d.id)}
+    {@const available = reachable(d.id)}
     {@const mode = pointOf(d, 'mode') ? value(d.id, 'mode') : null}
     {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
     {@const temperature = pointOf(d, 'temperature') ? value(d.id, 'temperature') : null}
     {@const target = pointOf(d, 'target_temperature') ? value(d.id, 'target_temperature') : null}
-    <button class="clim" class:on={on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
-      <Icon name="air-conditioner" size={18} />
+    <button class="clim" class:on={available && on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
+      <Icon name={available ? 'air-conditioner' : 'offline'} size={18} />
       <b>{nameOf(d.id)}</b>
-      {#if Number.isFinite(temperature) || Number.isFinite(target)}
+      {#if available && (Number.isFinite(temperature) || Number.isFinite(target))}
         <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, 'temperature')?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, 'target_temperature')?.unit ?? ''}{/if}</span>
       {/if}
-      <span class="state">{climateState(on, mode)}</span>
+      <span class="state">{available ? climateState(on, mode) : t('commun.piece.injoignable')}</span>
     </button>
     {#if openClim === d.id}
       <ClimateCard id={d.id} name={nameOf(d.id)} />
