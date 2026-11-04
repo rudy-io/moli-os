@@ -20,6 +20,11 @@ tracing.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+rcgen = "0.14"
+ring.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
 tokio-util.workspace = true
 
 [lints]
