@@ -13,6 +13,8 @@
   import { floorsOf } from '../lib/floors.js';
   import { t } from '../../lib/i18n.svelte.js';
 
+  let { route = 'pieces' } = $props();
+  const coversOnly = $derived(route === 'pieces/volets');
   let plan = $state(cachedPlan);
   onMount(async () => {
     try {
@@ -39,12 +41,15 @@
   }
 
   const all = $derived(roomList());
+  const coverCount = $derived(all.reduce((count, room) => count + room.covers.length, 0));
   const devices = $derived(
     all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.climates, ...r.media, ...r.sensors].filter(Boolean)),
   );
 
   /** A room with only what the filter keeps; null when nothing is left. */
   function only(r) {
+    // The direct link is a temporary view, independent of saved category choices.
+    if (coversOnly) return r.covers.length ? { ...r, group: null, lights: [], plugs: [], climates: [], media: [], sensors: [], lit: 0 } : null;
     if (!filter.length) return r;
     const on = (id) => filter.includes(id);
     const f = {
@@ -75,10 +80,16 @@
 
 <div class="pieces">
   <header>
-    <h1 class="page-title">{t('maison.pieces.titre')}</h1>
-    <p class="page-sub">{t('maison.pieces.sous_titre')}</p>
+    <h1 class="page-title">{t(coversOnly ? 'maison.pieces.volets' : 'maison.pieces.titre')}</h1>
+    <p class="page-sub">{coversOnly ? t('maison.pieces.volets_compte', { count: coverCount }) : t('maison.pieces.sous_titre')}</p>
+    {#if coversOnly}
+      <a class="section-link" href="#/pieces">{t('maison.pieces.toutes')}</a>
+    {:else if coverCount}
+      <a class="section-link" href="#/pieces/volets"><Icon name="shutter" size={18} />{t('maison.pieces.voir_volets')}</a>
+    {/if}
   </header>
 
+  {#if !coversOnly}
   <div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
     <div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
@@ -86,6 +97,9 @@
       <button role="radio" aria-checked={look === 'icons'} class:active={look === 'icons'} onclick={() => choose('icons')} title={t('maison.pieces.icones')}><Icon name="light" size={15} /></button>
     </div>
   </div>
+  {/if}
+
+  {#if coversOnly && !coverCount}<p class="page-sub">{t('maison.pieces.volets_vides')}</p>{/if}
 
   {#each floors as floor (floor.id)}
     <section class="floor" aria-label={floor.name ?? t('maison.pieces.titre')}>
@@ -106,6 +120,7 @@
 </div>
 
 <style>
+  .section-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--ink); font-size: 14px; text-underline-offset: 3px; }
   .pieces {
     display: grid;
     /* minmax(0, …): a plain column grows to the widest card and pushes the page

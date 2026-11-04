@@ -25,6 +25,7 @@ before(async () => {
   for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
+  components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
 });
 beforeEach(() => { home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -236,6 +237,38 @@ test('static cover capabilities stay partial and an unknown position stays expli
   assert.match(html, /Position non communiquée/);
   assert.match(html, /Stop.*Fermer/s);
   assert.doesNotMatch(html, /Ouvrir|<button|<input|0 %/);
+});
+
+test('the shutter route bypasses a stored lights filter without replacing it or deduplicating identities', () => {
+  const saved = '["lumieres"]';
+  const writes = [];
+  globalThis.localStorage = { getItem: () => saved, setItem: (...args) => writes.push(args) };
+  try {
+    const cover = (id) => ({
+      id, model: 'Home Assistant cover', label: { name: 'Twin shade', room: 'Studio' }, online: true,
+      points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+    });
+    const entries = [cover('fixture:one'), cover('fixture:two'), { ...cover('fixture:hidden'), label: { name: 'Hidden shade', room: 'Studio' } },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Fixture lamp', room: 'Studio' }, online: true, points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } }];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = { hidden: ['fixture:hidden'] };
+    const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+    assert.equal((focused.match(/Twin shade/g) ?? []).length, 2);
+    assert.doesNotMatch(focused, /Fixture lamp|Hidden shade/);
+    assert.match(focused, /href="#\/pieces"/);
+    const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.match(normal, /Fixture lamp/);
+    assert.doesNotMatch(normal, /Twin shade/);
+    assert.match(normal, /href="#\/pieces\/volets"/);
+    assert.deepEqual(writes, []);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('an empty shutter route explains the empty view and offers the ordinary rooms', () => {
+  hub.devices = {};
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  assert.match(html, /Aucun volet ni store à afficher/);
+  assert.match(html, /href="#\/pieces"/);
 });
 
 test('partial RTS shutter retains close and stop without inventing position or open', () => {
