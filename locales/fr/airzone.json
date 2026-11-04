@@ -35,5 +35,16 @@
   "airzone.read_only_status": "Mode lecture seule",
   "airzone.failures_count": "Lectures facultatives en échec",
   "airzone.certificate": "Le certificat Airzone ne correspond pas à l’empreinte configurée.",
-  "airzone.instance_missing": "Instance Airzone introuvable dans la configuration."
+  "airzone.instance_missing": "Instance Airzone introuvable dans la configuration.",
+  "airzone.sync_last_attempt": "Dernière tentative de synchronisation",
+  "airzone.sync_last_response": "Dernière réponse API réussie",
+  "airzone.sync_last_success": "Dernière lecture validée des zones",
+  "airzone.sync_last_received": "Dernière réception de ces données",
+  "airzone.sync_last_cycle": "Dernier cycle de lecture terminé",
+  "airzone.sync_generation": "Séquence de lecture",
+  "airzone.sync_poll_interval": "Intervalle de lecture (secondes)",
+  "airzone.sync_in_progress": "Lecture en cours",
+  "airzone.sync_last_error": "Dernière erreur de synchronisation",
+  "airzone.sync_last_command_generation": "Séquence avant confirmation de commande",
+  "airzone.target_temperature_on": "Allumer à cette température"
 }

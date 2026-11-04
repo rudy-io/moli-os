@@ -5,16 +5,17 @@
   import { climateMode } from '../lib/climate.js';
   import Icon from './Icon.svelte';
 
-  let { device, href } = $props();
+  let { device, href, sync = null } = $props();
 
   const zone = $derived(zoneSummary(device));
+  const live=$derived(zone.online&&(!sync||sync.state==='current'));
   const battery = $derived(batterySummary(device));
   const name = $derived(deviceName(device) || t('airzone_ui.unknown'));
   const titleId = $derived(`airzone-zone-${encodeURIComponent(device.id)}`);
   const room = $derived(device.label?.room || device.native_room);
   const mode = $derived(climateMode(zone.mode));
   const modeLabel = $derived(mode ? t(mode.label) : (zone.mode ?? t('airzone_ui.unknown')));
-  const tone = $derived(zone.online && zone.on !== false && zone.status !== 'unknown' ? (mode?.tone ?? 'neutral') : 'neutral');
+  const tone = $derived(live && zone.on !== false && zone.status !== 'unknown' ? (mode?.tone ?? 'neutral') : 'neutral');
   const targets = $derived(zone.target
     ? [{ reading: zone.target, label: 'airzone_ui.target' }]
     : [
@@ -24,7 +25,7 @@
   const shown = (reading) => reading ? formatValue(reading.point, reading.value) : '—';
 </script>
 
-<a class="zone-card" {href} aria-labelledby={titleId} data-tone={tone} data-status={zone.status} class:offline={zone.availability === 'offline'}>
+<a class="zone-card" {href} aria-labelledby={titleId} data-tone={tone} data-status={live?zone.status:'unknown'} class:offline={zone.availability === 'offline'||(sync&&sync.state!=='current')}>
   <header>
     <span class="climate-icon"><Icon name={zone.on === false ? 'power' : (mode?.icon ?? 'air-conditioner')} size={21} /></span>
     <div class="identity">
@@ -34,8 +35,8 @@
   </header>
 
   <div class="status-line">
-    <span class="status"><i aria-hidden="true"></i>{t(`airzone_ui.status.${zone.status}`)}</span>
-    {#if zone.online && zone.problem === true}
+    <span class="status"><i aria-hidden="true"></i>{!live&&zone.online?t('airzone_ui.latest'):t(`airzone_ui.status.${zone.status}`)}</span>
+    {#if live && zone.problem === true}
       <span class="problem"><Icon name="alert" size={15} />{t('airzone_ui.problem')}</span>
     {/if}
   </div>
@@ -68,7 +69,7 @@
   </div>
 
   <footer>
-    {#if zone.availability !== 'online'}<span class="freshness"><Icon name="clock" size={14} />{t('airzone_ui.latest')}</span>{/if}
+    {#if zone.availability !== 'online'||(sync&&sync.state!=='current')}<span class="freshness"><Icon name="clock" size={14} />{t('airzone_ui.latest')}</span>{/if}
     <span class="open-zone">{t('airzone_ui.details')}<Icon name="chevron-right" size={18} /></span>
   </footer>
 </a>

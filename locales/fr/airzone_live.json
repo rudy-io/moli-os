@@ -1,0 +1,21 @@
+{
+  "airzone_live.state.current": "Données reçues récemment",
+  "airzone_live.state.stale": "Données anciennes",
+  "airzone_live.state.offline": "Appareil indisponible · dernières valeurs",
+  "airzone_live.state.disconnected": "Connexion à Moli interrompue",
+  "airzone_live.state.unknown": "Fraîcheur non établie",
+  "airzone_live.received_ago": "Reçu {time}",
+  "airzone_live.in_progress": "Lecture en cours",
+  "airzone_live.attempt": "Dernière tentative",
+  "airzone_live.response": "Dernière réponse de la passerelle",
+  "airzone_live.success": "Dernière lecture complète des zones",
+  "airzone_live.entity_received": "Dernière réception de cet appareil",
+  "airzone_live.browser_received": "Dernière réception dans ce navigateur",
+  "airzone_live.interval": "Intervalle de lecture configuré",
+  "airzone_live.error": "Dernière erreur signalée",
+  "airzone_live.no_reported_error": "Aucune erreur signalée",
+  "airzone_live.retry": "Nouvelle tentative prévue dans",
+  "airzone_live.seconds": "{count} s",
+  "airzone_live.freshness_help": "Une valeur inchangée peut être récente. La réception de cet appareil est distincte de la dernière réponse de la passerelle et de sa réception dans le navigateur. Au-delà de deux intervalles de lecture et cinq secondes, elle est signalée comme ancienne.",
+  "airzone_live.details": "Synchronisation"
+}

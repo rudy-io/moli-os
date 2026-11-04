@@ -35,5 +35,16 @@
   "airzone.read_only_status": "Read-only mode",
   "airzone.failures_count": "Failed optional reads",
   "airzone.certificate": "The Airzone certificate does not match the configured fingerprint.",
-  "airzone.instance_missing": "Airzone instance not found in the configuration."
+  "airzone.instance_missing": "Airzone instance not found in the configuration.",
+  "airzone.sync_last_attempt": "Last synchronization attempt",
+  "airzone.sync_last_response": "Last successful API response",
+  "airzone.sync_last_success": "Last validated zone read",
+  "airzone.sync_last_received": "Last receipt of these data",
+  "airzone.sync_last_cycle": "Last completed read cycle",
+  "airzone.sync_generation": "Read sequence",
+  "airzone.sync_poll_interval": "Read interval (seconds)",
+  "airzone.sync_in_progress": "Reading in progress",
+  "airzone.sync_last_error": "Last synchronization error",
+  "airzone.sync_last_command_generation": "Sequence before command confirmation",
+  "airzone.target_temperature_on": "Turn on at this temperature"
 }

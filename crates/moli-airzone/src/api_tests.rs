@@ -296,7 +296,7 @@ async fn read_only_transport_never_sends_any_put() {
 }
 
 #[tokio::test]
-async fn exchange_rejects_unknown_paths_broadcast_writes_and_multiple_parameters() {
+async fn exchange_rejects_unknown_paths_broadcast_writes_and_unreviewed_batches() {
     let (config, task, calls) = recording_server().await;
     for (method, path, body) in [
         ("POST", "../outside", json!({})),
@@ -313,7 +313,7 @@ async fn exchange_rejects_unknown_paths_broadcast_writes_and_multiple_parameters
         (
             "PUT",
             "hvac",
-            json!({"systemID":1,"zoneID":2,"on":1,"setpoint":20}),
+            json!({"systemID":1,"zoneID":2,"on":1,"mode":3}),
         ),
     ] {
         assert!(
@@ -797,4 +797,30 @@ async fn thermostat_html_also_uses_the_explicit_certificate_pin() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     task.abort();
+}
+
+#[test]
+fn setpoint_and_turn_on_is_addressed_and_requires_both_acknowledgements() {
+    let command = json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1});
+    validate_write("hvac", &command).unwrap();
+    acknowledge(&json!({"data":command}), &command).unwrap();
+    for body in [
+        json!({"systemID":0,"zoneID":2,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"zoneID":0,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":0}),
+        json!({"systemID":1,"zoneID":2,"setpoint":"23.5","on":1}),
+        json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1,"mode":3}),
+    ] {
+        assert!(validate_write("hvac", &body).is_err());
+    }
+    for response in [
+        json!({"data":{"systemID":1,"zoneID":2}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.5}}),
+        json!({"data":{"systemID":1,"zoneID":2,"on":1}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.5,"on":0}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.0,"on":1}}),
+    ] {
+        assert!(acknowledge(&response, &command).is_err());
+    }
 }

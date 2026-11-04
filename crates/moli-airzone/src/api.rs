@@ -1,4 +1,4 @@
-//! Closed Local API operations. PUT is single, addressed and never retried.
+//! Closed Local API operations. A PUT is addressed and never retried.
 use crate::Config;
 use anyhow::{Context as _, ensure};
 use serde_json::{Value as Json, json};
@@ -18,6 +18,7 @@ pub(crate) enum Failure {
     Timeout,
     Transport,
     Certificate,
+    Identity,
     Api,
     InvalidResponse,
     InvalidRequest,
@@ -31,6 +32,7 @@ impl fmt::Display for Failure {
             Self::Timeout => moli_i18n::tr!("airzone.timeout"),
             Self::Transport => moli_i18n::tr!("airzone.transport_failed"),
             Self::Certificate => moli_i18n::tr!("airzone.certificate"),
+            Self::Identity => moli_i18n::tr!("airzone.identity"),
             Self::Api => moli_i18n::tr!("airzone.api_failed"),
             Self::InvalidResponse | Self::InvalidRequest => moli_i18n::tr!("airzone.invalid"),
             Self::ReadOnly => moli_i18n::tr!("airzone.read_only"),
@@ -140,10 +142,17 @@ fn validate_write(path: &str, body: &Json) -> anyhow::Result<()> {
         .iter()
         .filter(|(key, _)| !SELECTORS.contains(&key.as_str()))
         .collect::<Vec<_>>();
-    ensure!(parameter.len() == 1, Failure::InvalidRequest);
+    // The documented setpoint + turn-on action is the only composed write.
+    // Every other operation remains a single reviewed parameter.
+    let compound = parameter.len() == 2
+        && path == "hvac"
+        && body.get("on") == Some(&json!(1))
+        && body["setpoint"].is_number()
+        && body.get("zoneID").is_some();
+    ensure!(parameter.len() == 1 || compound, Failure::InvalidRequest);
     let (key, value) = parameter[0];
-    // Typed parameter validation and capability checks belong to the registry;
-    // the transport additionally forbids broadcast, nested and compound writes.
+    // Typed validation and capability checks belong to the registry; transport
+    // additionally forbids broadcasts, nested values and unreviewed batches.
     ensure!(
         value.is_boolean()
             || value.is_number()
@@ -314,6 +323,11 @@ pub(crate) fn acknowledge(value: &Json, command: &Json) -> anyhow::Result<()> {
         ensure!(data.get(key) == command.get(key), Failure::InvalidResponse);
     }
     let object = command.as_object().context(Failure::InvalidRequest)?;
+    let compound = object
+        .keys()
+        .filter(|key| !SELECTORS.contains(&key.as_str()))
+        .count()
+        > 1;
     for (key, want) in object {
         if SELECTORS.contains(&key.as_str()) {
             continue;
@@ -328,7 +342,7 @@ pub(crate) fn acknowledge(value: &Json, command: &Json) -> anyhow::Result<()> {
         } else {
             // Older HVAC firmware sometimes acknowledges IDs alone; integration
             // has no address IDs, so its echoed driver string is mandatory.
-            ensure!(!integration, Failure::InvalidResponse);
+            ensure!(!integration && !compound, Failure::InvalidResponse);
         }
     }
     Ok(())

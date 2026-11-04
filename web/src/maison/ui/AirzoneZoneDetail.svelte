@@ -4,10 +4,13 @@
   import { zoneSummary, batterySummary, readingOf } from '../lib/airzone.js';
   import { climateMode } from '../lib/climate.js';
   import Icon from './Icon.svelte';
+  import AirzoneSyncStatus from './AirzoneSyncStatus.svelte';
+  import AirzoneControls from './AirzoneControls.svelte';
   import AirzoneReadings from './AirzoneReadings.svelte';
 
-  let { zone, controls = [], onhistory } = $props();
+  let { zone, controls = [], onhistory, sync = null, now = Date.now(), syncFor = () => null, devices = [] } = $props();
   const summary = $derived(zoneSummary(zone));
+  const live=$derived(summary.online&&(!sync||sync.state==='current'));
   const battery = $derived(batterySummary(zone));
   const coverage = $derived(readingOf(zone, 'coverage'));
   const validCoverage = $derived(coverage?.unit === '%' && Number.isInteger(coverage.value)
@@ -37,16 +40,16 @@
   {#if summary.availability !== 'online'}
     <p class="notice" role="status"><Icon name="offline" size={20} /><span>{summary.availability === 'offline' ? t('airzone_ui.offline_help') : t('airzone_ui.availability_unknown')}</span></p>
   {/if}
-  {#if summary.online && summary.problem === true}
+  {#if live && summary.problem === true}
     <a class="notice problem" href="#/airzone/alerts"><Icon name="alert" size={20} /><span>{t('airzone_ui.problem')}</span><Icon name="chevron-right" size={18} /></a>
   {/if}
 
-  <section class="comfort-card" class:stale={!summary.online} aria-label={t('airzone_ui.measurements')}>
+  <section class="comfort-card" class:stale={!live} aria-label={t('airzone_ui.measurements')}>
     <header class="comfort-heading">
       <span class="section-label"><Icon name="thermometer" size={20} />{t('airzone_ui.measurements')}</span>
-      <span class="state-chip" class:active={summary.status === 'demand'}>{t(`airzone_ui.status.${summary.status}`)}</span>
+      <span class="state-chip" class:active={live&&summary.status === 'demand'}>{!live&&summary.online?t('airzone_ui.latest'):t(`airzone_ui.status.${summary.status}`)}</span>
     </header>
-    {#if !summary.online}<p class="latest">{t('airzone_ui.latest')}</p>{/if}
+    {#if !live}<p class="latest">{t('airzone_ui.latest')}</p>{/if}
     <div class="climate-metrics">
       {@render metric(t('airzone_ui.current'), summary.temperature, true)}
       <div class="targets" class:dual={dualTargets}>
@@ -64,13 +67,14 @@
     </dl>
   </section>
 
+  <AirzoneControls device={zone} {sync} />
   <div class="status-grid">
     <section class="activity-card" aria-label={t('airzone_ui.activity')}>
-      <header class="section-heading"><span class="section-icon"><Icon name="air-conditioner" size={22} /></span><div><h2>{t('airzone_ui.activity')}</h2><p class="activity-status">{!summary.online ? t('airzone_ui.latest') : t(summary.activity === 'demand' ? 'airzone_ui.status.demand' : summary.activity === 'no_reported_demand' ? 'airzone_ui.status.idle' : 'airzone_ui.unknown')}</p></div></header>
+      <header class="section-heading"><span class="section-icon"><Icon name="air-conditioner" size={22} /></span><div><h2>{t('airzone_ui.activity')}</h2><p class="activity-status">{!live ? t('airzone_ui.latest') : t(summary.activity === 'demand' ? 'airzone_ui.status.demand' : summary.activity === 'no_reported_demand' ? 'airzone_ui.status.idle' : 'airzone_ui.unknown')}</p></div></header>
       <dl class="demands">
         {#each summary.demands as demand (demand.key)}
           {@const point = zone.points.find((point) => point.key === demand.key)}
-          <div><dt><Icon name={demandIcons[demand.key]} size={18} />{t(`airzone_detail.demand.${demand.key}`)}</dt><dd class:reported={summary.online && demand.value}>{point ? formatValue(point, demand.value) : '—'}</dd></div>
+          <div><dt><Icon name={demandIcons[demand.key]} size={18} />{t(`airzone_detail.demand.${demand.key}`)}</dt><dd class:reported={live && demand.value}>{point ? formatValue(point, demand.value) : '—'}</dd></div>
         {/each}
       </dl>
       <p class="explanation">{t('airzone_ui.activity_help')}</p>
@@ -82,7 +86,7 @@
         <div><dt>{t('airzone_health.battery')}</dt><dd class="num">{battery.status === 'level' ? `${battery.percent} %` : battery.status === 'wired' ? t('airzone_detail.no_battery') : t('airzone_health.battery_missing')}</dd></div>
         {#if battery.radio !== false || validCoverage}<div><dt>{t('airzone_health.signal')}</dt><dd class="num">{validCoverage ? `${coverage.value} %` : t('airzone_ui.unknown')}</dd></div>{/if}
       </dl>
-      {#if !summary.online}<p class="latest">{t('airzone_ui.latest')}</p>{/if}
+      {#if !live}<p class="latest">{t('airzone_ui.latest')}</p>{/if}
       <p class="explanation">{t('airzone_health.battery_help')}</p>
     </section>
   </div>
@@ -92,14 +96,15 @@
   </a>
 
   <div class="technical-stack">
+    {#if sync}<details class="technical"><summary><span class="section-icon"><Icon name="clock" size={22}/></span><span><strong>{t('airzone_live.details')}</strong><small>{t(`airzone_live.state.${sync.state}`)}</small></span><span class="chevron"><Icon name="chevron-down" size={20}/></span></summary><div class="technical-content"><AirzoneSyncStatus {sync} {now} detailed/></div></details>{/if}
     <details class="technical">
       <summary><span class="section-icon"><Icon name="info" size={22} /></span><span><strong>{t('airzone_ui.parameters')}</strong><small>{t('airzone_detail.parameters_help')}</small></span><span class="chevron"><Icon name="chevron-down" size={20} /></span></summary>
-      <div class="technical-content"><AirzoneReadings device={zone} /></div>
+      <div class="technical-content"><AirzoneControls device={zone} {sync} variant="advanced"/><AirzoneReadings device={zone} /></div>
     </details>
     {#if controls.length}
       <details class="technical">
         <summary><span class="section-icon"><Icon name="branch" size={22} /></span><span><strong>{t('airzone_ui.shared')}</strong><small>{t('airzone_detail.shared_hint')}</small></span><span class="chevron"><Icon name="chevron-down" size={20} /></span></summary>
-        <div class="technical-content"><p class="explanation">{t('airzone_ui.shared_help')}</p>{#each controls as control (control.id)}<section class="shared-resource"><h3>{deviceName(control)}</h3><AirzoneReadings device={control} /></section>{/each}</div>
+        <div class="technical-content"><p class="explanation">{t('airzone_ui.shared_help')}</p>{#each controls as control (control.id)}<section class="shared-resource"><h3>{deviceName(control)}</h3><AirzoneControls device={control} sync={syncFor(control)} variant="all" members={devices.filter(device=>control.members?.includes(device.id))}/><AirzoneReadings device={control} /></section>{/each}</div>
       </details>
     {/if}
   </div>

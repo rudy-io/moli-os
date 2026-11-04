@@ -1,0 +1,21 @@
+{
+  "airzone_live.state.current": "Data received recently",
+  "airzone_live.state.stale": "Old readings",
+  "airzone_live.state.offline": "Device unavailable · last readings",
+  "airzone_live.state.disconnected": "Connection to Moli interrupted",
+  "airzone_live.state.unknown": "Freshness unknown",
+  "airzone_live.received_ago": "Received {time}",
+  "airzone_live.in_progress": "Reading in progress",
+  "airzone_live.attempt": "Last attempt",
+  "airzone_live.response": "Last gateway response",
+  "airzone_live.success": "Last complete zone read",
+  "airzone_live.entity_received": "Last receipt for this device",
+  "airzone_live.browser_received": "Last receipt in this browser",
+  "airzone_live.interval": "Configured polling interval",
+  "airzone_live.error": "Last reported error",
+  "airzone_live.no_reported_error": "No error reported",
+  "airzone_live.retry": "Next attempt in",
+  "airzone_live.seconds": "{count} s",
+  "airzone_live.freshness_help": "An unchanged value may be fresh. Receipt for this device is separate from the last gateway response and its receipt in this browser. After two polling intervals plus five seconds it is marked as old.",
+  "airzone_live.details": "Synchronization"
+}

@@ -78,24 +78,12 @@ const tags = (html, tag) => [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'
 const cardLinks = (html) => tags(html, 'a').filter((tag) => /class="zone-card\b/.test(tag));
 
 function observationOnly(html, filters = false) {
-  assert.doesNotMatch(html, /role="(?:switch|slider)"|type="(?:range|number|checkbox|submit)"|<form\b/);
-  for (const input of tags(html, 'input')) {
-    assert.ok(filters && /type="search"/.test(input), `unexpected editor: ${input}`);
-  }
-  for (const select of tags(html, 'select')) {
-    assert.ok(filters && /aria-label="Filtrer par système"/.test(select), `unexpected setting selector: ${select}`);
-  }
-  for (const button of tags(html, 'button')) {
-    if (filters && /class="filter-chip\b/.test(button)) {
-      assert.match(button, /aria-pressed="(?:true|false)"/);
-      continue;
-    }
-    if (filters && /class="filter-reset\b/.test(button)) continue;
-    if (/class="refresh\b/.test(button)) continue; // Stored configuration refresh, never an equipment command.
-    assert.match(button, /class="metric\b/, 'only observed metrics can use a button in the zone detail');
-    if (!/\bdisabled\b/.test(button)) {
-      assert.match(button, /aria-label="[^"]+Voir l’historique"/, 'available metrics name their history navigation');
-    }
+  // These legacy fixtures have no receipt metadata. Their new controls must
+  // stay disabled; filters, history and explicit diagnostic reads remain usable.
+  for(const tag of [...tags(html,'input'),...tags(html,'select'),...tags(html,'button')]) {
+    if(/id="airzone-control-/.test(tag))assert.match(tag,/\bdisabled\b/);
+    if(/class="metric\b/.test(tag)&&!/\bdisabled\b/.test(tag))assert.match(tag,/aria-label="[^"]+Voir l’historique"/);
+    if(filters&&/class="filter-chip\b/.test(tag))assert.match(tag,/aria-pressed="(?:true|false)"/);
   }
 }
 
@@ -126,7 +114,7 @@ test('overview counts only native visible zones and keeps equal system numbers i
   const visibleText = text(html);
   assert.equal(cardLinks(html).length, 4);
   assert.match(visibleText, /4 zones 3 systèmes 3 joignables/);
-  assert.doesNotMatch(visibleText, /Hidden zone|Bridge imitation zone|Synthetic gateway|Synthetic system metadata|Control for/);
+  assert.doesNotMatch(visibleText, /Hidden zone|Bridge imitation zone|Synthetic gateway|Synthetic system metadata/);
   const groups = [...html.matchAll(/<section class="system-zones\b[^>]*>([\s\S]*?)<\/section>/g)].map(([, group]) => text(group));
   assert.equal(groups.length, 3);
   assert.match(groups[0], /native-a · Système 1/);
@@ -145,21 +133,21 @@ test('overview encodes native identities in links and detail resolves the select
   assert.match(text(html), /Selected zone/);
   assert.match(text(html), /Control for selected zone/);
   assert.doesNotMatch(text(html), /Control for sibling zone|Foreign control|Other installation zone|Hidden zone/);
-  assert.equal(tags(html, 'button').length, 2, 'two observed main metrics link to history');
+  assert.equal(tags(html, 'button').filter(button=>/class="metric\b/.test(button)).length, 2, 'two observed main metrics link to history');
   observationOnly(html);
 });
 
 test('overview exposes labelled zone links, pressed activity filters and an explicit disconnected state', () => {
   house();
   let html = page();
-  const buttons = tags(html, 'button');
+  const buttons = tags(html, 'button').filter(button=>/class="(?:metric|filter-chip)\b/.test(button));
   assert.equal(buttons.length, 3);
   assert.equal(buttons.filter((b) => /aria-pressed="true"/.test(b)).length, 1);
   for (const card of cardLinks(html)) {
     const id = card.match(/aria-labelledby="([^"]+)"/)[1];
     assert.ok(html.includes(`id="${id}"`), 'every zone link has a visible accessible name');
   }
-  assert.match(text(html), /Toutes 4 En demande 1 Indisponibles 1/);
+  assert.match(text(html), /Toutes 4 En demande 0 Indisponibles 4/);
   hub.connected = false;
   html = page();
   assert.match(text(html), /Connexion à Moli interrompue/);
@@ -194,14 +182,14 @@ test('history buttons announce the actual primary value and its declared unit to
     selected.state.temperature.value = temperature;
     selected.state.target_temperature.value = target;
     const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
-    assert.deepEqual(tags(html, 'button').map((button) => button.match(/aria-label="([^"]+)"/)?.[1]), labels);
+    assert.deepEqual(tags(html, 'button').filter(button=>/class="metric\b/.test(button)).map((button) => button.match(/aria-label="([^"]+)"/)?.[1]), labels);
     observationOnly(html);
   }
   const { selected } = house();
   delete selected.state.temperature;
   delete selected.state.target_temperature;
   const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
-  const buttons = tags(html, 'button');
+  const buttons = tags(html, 'button').filter(button=>/class="(?:metric|filter-chip)\b/.test(button));
   assert.equal(buttons.length, 2);
   assert.ok(buttons.every((button) => /\bdisabled\b/.test(button)));
   assert.ok(buttons.every((button) => !/aria-label=/.test(button)), 'absent measurements retain their visible label without inventing an accessible value');
@@ -333,7 +321,7 @@ test('offline shared controls carry their own stale warning even when the select
   assert.equal(notices.length, 1);
   assert.match(notices[0], /Ressource injoignable.*Dernières valeurs connues.*2023/);
   assert.match(text(shared), /Reading mode Chaud/, 'the stale reported setting remains accessible');
-  assert.match(text(html), /Demande en cours/, 'the independent reachable zone keeps its current demand');
+  assert.doesNotMatch(text(html), /Demande en cours/, 'reachability alone cannot prove retained demand is current');
   observationOnly(html);
 });
 
@@ -493,11 +481,11 @@ test('journal renders gateway pause and reconfiguration without a label payload'
   }
 });
 
-test('Airzone describes the consultation view without falsely claiming all gateways are read-only',()=>{
+test('Airzone describes controls without falsely claiming all gateways are read-only',()=>{
   house();
   for(const route of ['airzone','airzone/installation','airzone/native-a%3Aaabbccddeeff_s1_z2']) {
     const html=page(route);
-    assert.match(text(html),/Vue de consultation/);
+    assert.match(text(html),/Suivi et réglages/);
     assert.doesNotMatch(text(html),/Équipements en lecture seule/);
   }
 });
@@ -512,7 +500,20 @@ test('gateway mode controls have truthful labels and explain where authorized co
   assert.match(action,/aria-label="[^"]*Autoriser le pilotage[^"]*172.31.1.1/);assert.doesNotMatch(action,/disabled/);
   html=render(Card,{props:{gateway:{...gateway,read_only:false}}}).body;
   assert.match(text(html),/Pilotage autorisé/);assert.match(text(html),/Revenir en lecture seule/);
-  assert.match(html,/href="#\/pieces"/);
+  for(const [language,label,scope,guard] of [
+    ['fr',/Ouvrir les réglages Airzone/,/réglages de cette passerelle dans Airzone/,/code lorsqu’une commande nécessite une validation/],
+    ['en',/Open Airzone controls/,/controls for this gateway in Airzone/,/code when a command requires approval/],
+  ]){
+    await words.setLanguage(language);
+    const authorized=render(Card,{props:{gateway:{...gateway,read_only:false}}}).body;
+    assert.match(authorized,/class="control-link[^>]+href="#\/airzone"/);
+    assert.match(text(authorized),label);
+    assert.doesNotMatch(authorized,/href="#\/pieces"/);
+    const location=words.t('airzone_gateways.controls_location');
+    assert.match(location,scope);assert.match(location,guard);
+    assert.doesNotMatch(location,/consultation|observation view|Pièces|Rooms|Atelier|Workshop/);
+  }
+  await words.setLanguage('fr');
   html=render(Card,{props:{gateway:{...gateway,enabled:false,running:false}}}).body;
   assert.match(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
   assert.match(text(html),/Réactivez la connexion avant/);

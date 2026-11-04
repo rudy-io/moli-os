@@ -31,6 +31,8 @@
       ? mode === 'new'
         ? t('commun.code.choisir', { min })
         : t('commun.code.seconde_fois')
+      : home.held?.reason === 'airzone_deny'
+        ? t('airzone_control.deny_pin')
       : /automatisme|automation/i.test(home.held?.reason ?? '')
         ? t('commun.code.raison_automatisme')
         : home.held?.reason === 'airzone_control'

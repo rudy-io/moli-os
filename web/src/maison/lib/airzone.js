@@ -267,7 +267,7 @@ function sectionOf(point) {
   if (COMFORT.has(key)) return 'comfort';
   if (ACTIVITY.has(key)) return 'activity';
   if (/(?:min|max)temp/i.test(key) || ['temp_step', 'coldangle', 'heatangle', 'double_sp'].includes(key)) return 'limits';
-  if (DIAGNOSTICS.has(key) || /_available$/.test(key)) return 'diagnostics';
+  if (DIAGNOSTICS.has(key) || key.startsWith('sync_') || /_available$/.test(key)) return 'diagnostics';
   if (EQUIPMENT.has(key) || /(?:firmware|version|thermos_)/.test(key)) return 'equipment';
   return 'other';
 }

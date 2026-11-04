@@ -9,6 +9,8 @@ export const hub = $state({
   layoutRevision: 0,
   /** Invalidates persisted integration lists after lifecycle changes or a snapshot. */
   driverRevision: 0,
+  /** Browser receipt time, separate from device-value change timestamps. */
+  airzoneReceivedAt: {},
   /** @type {Record<string, any>} device id → DeviceView */
   devices: {},
   /** @type {any[]} */
@@ -40,6 +42,9 @@ export const hub = $state({
 });
 
 const JOURNAL_MAX = 60;
+const airzoneObservers=new Set();
+export function observeAirzone(listener) {airzoneObservers.add(listener);return ()=>airzoneObservers.delete(listener);}
+const notifyAirzone=()=>{for(const listener of airzoneObservers)listener();};
 
 function applySnapshot(snapshot) {
   hub.layoutRevision += 1;
@@ -48,8 +53,11 @@ function applySnapshot(snapshot) {
   for (const d of snapshot.devices) devices[d.id] = d;
   hub.devices = devices;
   hub.drivers = snapshot.drivers;
+  const received=Date.now();
+  hub.airzoneReceivedAt=Object.fromEntries(hub.drivers.filter((driver) => driver.kind === 'airzone').map((driver) => [driver.instance,received]));
   hub.approvals = snapshot.approvals ?? [];
   hub.guard = snapshot.guard ?? null;
+  notifyAirzone();
 }
 
 function splitPoint(point) {
@@ -61,11 +69,13 @@ function applyEvent(e) {
   switch (e.type) {
     case 'device_upserted': {
       const prev = hub.devices[e.device.id];
+      const airzone=hub.drivers.some((driver)=>driver.instance===e.device.instance&&driver.kind==='airzone');
+      const state=airzone?Object.fromEntries(Object.entries(prev?.state ?? {}).filter(([key])=>e.device.points.some(point=>point.key===key))):prev?.state ?? {};
       hub.devices[e.device.id] = {
         ...e.device,
         label: prev?.label ?? {},
         online: prev?.online ?? null,
-        state: prev?.state ?? {},
+        state,
       };
       break;
     }
@@ -82,6 +92,12 @@ function applyEvent(e) {
       const [id, key] = splitPoint(e.point);
       const device = hub.devices[id];
       if (!device) break;
+      if (hub.drivers.some((driver) => driver.instance === device.instance && driver.kind === 'airzone')) {
+        // A snapshot may overtake an event already queued on the old stream.
+        // Keep later readings and never acknowledge an intention with old data.
+        if (Number.isFinite(device.state[key]?.ts) && e.ts < device.state[key].ts) break;
+        hub.airzoneReceivedAt[device.instance]=Date.now();
+      }
       device.state[key] = { value: e.value, ts: e.ts };
       hub.changed[e.point] = e.ts;
       // Only the requested value confirms a command; anything else may be
@@ -126,6 +142,28 @@ function applyEvent(e) {
       break;
     }
   }
+  notifyAirzone();
+}
+
+/** Reconcile a post-command REST view without letting a delayed response
+ * overwrite a later entity generation already received through SSE. */
+export function reconcileAirzoneDevice(device) {
+  const previous=hub.devices[device?.id];
+  if(!previous || device.instance!==previous.instance || !Array.isArray(device.points) || !device.state
+    || !hub.drivers.some(driver=>driver.kind==='airzone'&&driver.instance===device.instance))return false;
+  const generation=device.state.sync_generation?.value;
+  if(!Number.isSafeInteger(generation)||generation<(previous.state.sync_generation?.value ?? -1))return false;
+  // SSE owns capabilities/availability. A GET started before a mode change
+  // must never restore write access or revive a now-offline entity.
+  const advertised=new Set(device.points.map(point=>point.key));
+  const state=Object.fromEntries(previous.points.filter(point=>advertised.has(point.key)&&device.state[point.key]).map(point=>{
+    const next=device.state[point.key],prior=previous.state[point.key];
+    return [point.key,prior?.ts>next.ts?prior:next];
+  }));
+  hub.devices[device.id]={...previous,state};
+  hub.airzoneReceivedAt[device.instance]=Date.now();
+  notifyAirzone();
+  return true;
 }
 
 /** Merge by id, newest first: SSE entries and fetched pages never clobber each other. */
@@ -148,16 +186,32 @@ let linked = false;
 export function connect() {
   if (linked) return;
   linked = true;
-  const source = new EventSource('/api/events');
-  // Every snapshot (first connection, reconnection, catch-up after lag)
-  // may follow a gap: reload the journal too.
-  source.addEventListener('snapshot', (m) => {
-    hub.connected = true;
-    applySnapshot(JSON.parse(m.data));
-    loadJournal();
-  });
-  source.addEventListener('event', (m) => applyEvent(JSON.parse(m.data)));
-  source.onerror = () => (hub.connected = false); // EventSource reconnects on its own
+  let source;
+  function openSource() {
+    source?.close();
+    hub.connected=false;
+    notifyAirzone();
+    const current=new EventSource('/api/events');
+    source=current;
+    // Every snapshot (first connection, reconnection, catch-up after lag)
+    // may follow a gap: reload the journal too.
+    current.addEventListener('snapshot', (m) => {
+      if (source !== current) return;
+      hub.connected = true;
+      applySnapshot(JSON.parse(m.data));
+      loadJournal();
+    });
+    current.addEventListener('event', (m) => {if (source === current) applyEvent(JSON.parse(m.data));});
+    current.onerror = () => {if (source === current) {hub.connected = false;notifyAirzone();}}; // EventSource retries transport failures.
+  }
+  openSource();
+  // Mobile sleep can leave an EventSource apparently open with no traffic.
+  // An Airzone page returning to the foreground always obtains a new snapshot.
+  const resumeAirzone=() => {
+    if (document.visibilityState !== 'hidden' && hub.drivers.some((driver) => driver.kind === 'airzone')) openSource();
+  };
+  document.addEventListener?.('visibilitychange',resumeAirzone);
+  globalThis.addEventListener?.('online',resumeAirzone);
 
   const refresh = async () => {
     try {
