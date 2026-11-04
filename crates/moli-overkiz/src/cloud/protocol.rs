@@ -26,6 +26,7 @@ pub(crate) enum Endpoint {
     Location,
     Devices,
     Gateways,
+    Scenario,
 }
 impl Endpoint {
     pub(crate) fn route(self, region: Region) -> (&'static str, &'static str, &'static str) {
@@ -66,6 +67,7 @@ impl Endpoint {
             Self::Collection(CollectionKind::DelayedSchedule) => {
                 "/enduser-mobile-web/enduserAPI/exec/delayedTriggerSchedule"
             }
+            Self::Scenario => return ("POST", host, "/enduser-mobile-web/enduserAPI/exec"),
             Self::Location => "/enduser-mobile-web/enduserAPI/setup/location",
             Self::Devices => "/enduser-mobile-web/enduserAPI/setup/devices",
             Self::Gateways => "/enduser-mobile-web/enduserAPI/setup/gateways",
@@ -75,6 +77,7 @@ impl Endpoint {
     pub(crate) const fn body_limit(self) -> usize {
         match self {
             Self::Accounts | Self::Exchange | Self::Refresh => TOKEN_LIMIT,
+            Self::Scenario => 4096,
             _ => MAX_COLLECTION_BYTES,
         }
     }
@@ -124,12 +127,22 @@ pub(crate) enum Query {
     None,
     Offset(usize),
     Site(String),
+    Scenario(String),
 }
 impl Request {
     pub(super) fn path(&self) -> Result<String, Error> {
         let (_, _, path) = self.endpoint.route(self.region);
         Ok(match (&self.endpoint, &self.query) {
-            (_, Query::None) if self.endpoint != Endpoint::Directory => path.to_owned(),
+            (_, Query::None)
+                if !matches!(self.endpoint, Endpoint::Directory | Endpoint::Scenario) =>
+            {
+                path.to_owned()
+            }
+            (Endpoint::Scenario, Query::Scenario(oid))
+                if super::execution::valid_oid(oid) && self.body.is_empty() =>
+            {
+                format!("{path}/{oid}")
+            }
             (Endpoint::Directory, Query::Offset(offset))
                 if *offset < 200 && offset.is_multiple_of(20) =>
             {
@@ -173,7 +186,10 @@ impl Transport for Https {
             if request.endpoint == Endpoint::Directory {
                 builder = builder.header("x-api-key", BOB_KEY);
             }
-            if method == "POST" {
+            if matches!(
+                request.endpoint,
+                Endpoint::Accounts | Endpoint::Exchange | Endpoint::Refresh
+            ) {
                 builder = builder.header("content-type", "application/x-www-form-urlencoded");
             }
             let mut wire = moli_net::empty(builder).map_err(|_| Error::InvalidInput)?;

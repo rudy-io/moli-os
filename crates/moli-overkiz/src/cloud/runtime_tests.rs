@@ -1914,3 +1914,6 @@ async fn review_login_queued_before_long_or_indefinite_429_is_durably_rejected_w
         check(&rig, Check::QueuedQuota).await;
     }
 }
+
+#[path = "scenario_runtime_tests.rs"]
+mod scenario_execution_tests;

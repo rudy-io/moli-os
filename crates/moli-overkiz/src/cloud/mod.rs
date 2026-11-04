@@ -1,5 +1,6 @@
 //! Optional independent Somfy cloud observation, with a closed provider protocol.
 pub(crate) mod client;
+pub mod execution;
 mod protocol;
 pub(crate) mod session;
 mod types;

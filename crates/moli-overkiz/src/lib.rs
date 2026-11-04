@@ -51,7 +51,10 @@ pub struct Overkiz {
     config: Config,
 }
 impl Overkiz {
-    pub fn new(config: Config) -> anyhow::Result<Self> {
+    pub fn new(mut config: Config) -> anyhow::Result<Self> {
+        if let Some(cloud) = &mut config.cloud {
+            cloud.read_only = config.read_only;
+        }
         if (config.host.is_none() && config.cloud.is_none())
             || config.host.as_ref().is_some_and(|host| {
                 host.is_empty()
@@ -190,6 +193,12 @@ async fn run_sources(
         let outcome = tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()); };
+                if cloud::owns_device(&command.device.id) {
+                    if config.read_only { command.reply(Err(moli_i18n::tr!("overkiz.refused"))); }
+                    else if let Some(cloud) = &mut cloud { cloud.dispatch(ctx,command); }
+                    else { command.reply(Err(moli_i18n::tr!("overkiz.refused"))); }
+                    continue;
+                }
                 let Some(client) = native.as_ref().filter(|_| {
                     !cloud::owns_device(&command.device.id) && !config.read_only
                 }) else {

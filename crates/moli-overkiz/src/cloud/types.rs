@@ -8,13 +8,22 @@ use std::fmt;
 pub struct Config {
     #[serde(default = "poll")]
     pub poll_secs: u64,
+    /// Runtime fence copied from the enclosing Overkiz config, never a cloud TOML override.
+    #[serde(skip, default = "read_only")]
+    pub read_only: bool,
+}
+const fn read_only() -> bool {
+    true
 }
 const fn poll() -> u64 {
     1800
 }
 impl Default for Config {
     fn default() -> Self {
-        Self { poll_secs: poll() }
+        Self {
+            poll_secs: poll(),
+            read_only: true,
+        }
     }
 }
 impl Config {
@@ -44,6 +53,12 @@ pub enum PendingRequest {
     Refresh {
         generation: String,
     },
+    ScenarioPermission {
+        generation: String,
+        revision: String,
+        scenario_id: String,
+        enabled: bool,
+    },
 }
 impl fmt::Debug for PendingRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,6 +82,17 @@ impl PendingRequest {
                     && bounded_text(gateway_id, 256)
             }
             Self::Refresh { generation } => bounded_text(generation, 64),
+            Self::ScenarioPermission {
+                generation,
+                revision,
+                scenario_id,
+                ..
+            } => {
+                bounded_text(generation, 64)
+                    && revision.len() == 64
+                    && revision.bytes().all(|b| b.is_ascii_hexdigit())
+                    && super::execution::valid_oid(scenario_id)
+            }
         };
         if valid {
             Ok(())
@@ -303,6 +329,7 @@ pub enum Error {
     DiscoveryLimit,
     ScopeMismatch,
     Forbidden,
+    ExecutionUncertain,
     RateLimited { retry_after_secs: u64 },
 }
 impl fmt::Display for Error {
@@ -317,6 +344,7 @@ impl fmt::Display for Error {
             Self::DiscoveryLimit => moli_i18n::tr!("overkiz.cloud_discovery"),
             Self::ScopeMismatch => moli_i18n::tr!("overkiz.cloud_scope"),
             Self::Forbidden => moli_i18n::tr!("overkiz.cloud_forbidden"),
+            Self::ExecutionUncertain => moli_i18n::tr!("overkiz.cloud_execution_uncertain"),
             Self::RateLimited { .. } => moli_i18n::tr!("overkiz.cloud_rate"),
         };
         f.write_str(&message)

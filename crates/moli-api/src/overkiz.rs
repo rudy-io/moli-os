@@ -21,6 +21,8 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone)]
 pub(crate) struct Configured(pub Arc<BTreeMap<InstanceId, cloud::Config>>);
 struct Owner {
+    caller: Caller,
+    sessions: Arc<Sessions>,
     hub: Hub,
     configured: Configured,
 }
@@ -44,7 +46,7 @@ impl FromRequestParts<Hub> for Owner {
             };
             return Err((
                 StatusCode::FORBIDDEN,
-                Json(json!({"error":"owner_required", "auth_policy":policy})),
+                Json(json!({"error":"owner_required", "code":"owner_required", "auth_policy":policy})),
             )
                 .into_response());
         }
@@ -52,6 +54,8 @@ impl FromRequestParts<Hub> for Owner {
             .await
             .map_err(IntoResponse::into_response)?;
         Ok(Self {
+            caller,
+            sessions: humans,
             hub: hub.clone(),
             configured,
         })
@@ -59,6 +63,10 @@ impl FromRequestParts<Hub> for Owner {
 }
 pub(crate) fn routes() -> Router<Hub> {
     Router::new()
+        .route(
+            "/api/integrations/overkiz-cloud/{instance}/scenario-permission",
+            post(scenario_execution::update),
+        )
         .route("/api/integrations/overkiz-cloud", get(list))
         .route(
             "/api/integrations/overkiz-cloud/{instance}/catalog",
@@ -74,7 +82,7 @@ pub(crate) fn routes() -> Router<Hub> {
         )
 }
 fn error(status: StatusCode, code: &'static str) -> Response {
-    (status, Json(json!({"error": code}))).into_response()
+    (status, Json(json!({"error": code, "code":code}))).into_response()
 }
 fn unavailable() -> Response {
     error(StatusCode::SERVICE_UNAVAILABLE, "unavailable")
@@ -171,6 +179,7 @@ impl Owner {
             })
             .collect();
         Ok(Cached {
+            read_only: config.read_only,
             revision: hex(digest::digest(&digest::SHA256, bytes.as_bytes()).as_ref()),
             catalog,
             freshness: json!({"current":current,"observed_at_ms":state.last_observation_ms,"collections":fresh_collections}),
@@ -178,6 +187,7 @@ impl Owner {
     }
 }
 struct Cached {
+    read_only: bool,
     catalog: inventory::Catalog,
     revision: String,
     freshness: serde_json::Value,
@@ -222,7 +232,10 @@ async fn list(owner: Owner) -> Response {
 }
 async fn catalog(owner: Owner, Path(instance): Path<String>) -> Response {
     match owner.cached(&instance) {
-        Ok(cached) => Json(json!({"catalog":cached.catalog,"revision":cached.revision,"freshness":cached.freshness})).into_response(),
+        Ok(cached) => {
+            let execution = owner.execution(&cached);
+            Json(json!({"catalog":cached.catalog,"revision":cached.revision,"freshness":cached.freshness,"execution":execution})).into_response()
+        }
         Err((status, code)) => error(status, code),
     }
 }
@@ -279,6 +292,12 @@ async fn request(owner: Owner, Path(instance): Path<String>, request: Request) -
         Ok(request) => request,
         Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_request"),
     };
+    if matches!(request, cloud::PendingRequest::ScenarioPermission { .. }) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    enqueue(&owner, &instance, request).await
+}
+async fn enqueue(owner: &Owner, instance: &InstanceId, request: cloud::PendingRequest) -> Response {
     let mut random = [0_u8; 16];
     if SystemRandom::new().fill(&mut random).is_err() {
         return unavailable();
@@ -297,7 +316,7 @@ async fn request(owner: Owner, Path(instance): Path<String>, request: Request) -
     };
     match owner
         .hub
-        .insert_secret_if_absent(&instance, cloud::PENDING_KEY, &bytes)
+        .insert_secret_if_absent(instance, cloud::PENDING_KEY, &bytes)
         .await
     {
         Ok(true) => (
@@ -359,3 +378,6 @@ mod tests {
         }
     }
 }
+
+#[path = "overkiz_execution.rs"]
+mod scenario_execution;

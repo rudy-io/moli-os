@@ -240,7 +240,14 @@ fn request_and_state_are_bounded_and_debug_redacts_private_values() {
     );
     assert!(Config::default().validate().is_ok());
     for poll in [0, 299, 86401] {
-        assert!(Config { poll_secs: poll }.validate().is_err());
+        assert!(
+            Config {
+                poll_secs: poll,
+                ..Config::default()
+            }
+            .validate()
+            .is_err()
+        );
     }
     let state = ConnectionState::default();
     assert!(decode_state(&encode_state(&state).unwrap()).is_ok());
@@ -1278,3 +1285,6 @@ async fn review_outer_selection_timeout_is_recorded_in_connection_failure() {
     assert_eq!(before.elapsed(), std::time::Duration::from_secs(90));
     assert_eq!(c.state().failure, Some(Error::Deadline));
 }
+
+#[path = "scenario_transport_tests.rs"]
+mod scenario_transport_tests;

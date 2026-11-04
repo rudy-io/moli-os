@@ -23,6 +23,9 @@ impl Server {
         Self::configured(name, false).await
     }
     async fn configured(name: &str, cloud: bool) -> Self {
+        Self::mode(name, cloud, true).await
+    }
+    async fn mode(name: &str, cloud: bool, read_only: bool) -> Self {
         let dir =
             std::env::temp_dir().join(format!("moli-cloud-api-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -41,9 +44,13 @@ impl Server {
             ..moli_api::Options::default()
         };
         if cloud {
-            options
-                .overkiz_cloud
-                .insert("fixture".into(), moli_overkiz::cloud::Config::default());
+            options.overkiz_cloud.insert(
+                "fixture".into(),
+                moli_overkiz::cloud::Config {
+                    read_only,
+                    ..Default::default()
+                },
+            );
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
@@ -616,5 +623,172 @@ async fn status_qualifies_historical_ready_with_authoritative_session_and_curren
             .unwrap(),
         original
     );
+    task.abort();
+}
+
+#[tokio::test]
+async fn scenario_permission_requires_fresh_pin_and_respects_global_read_only() {
+    let server = Server::configured("scenario-policy", true).await;
+    let cookie = server.pin().await;
+    seed(&server).await;
+    let path = format!("{ROOT}/fixture/scenario-permission");
+    let (_, _, catalog) = server
+        .json(
+            "GET",
+            &format!("{ROOT}/fixture/catalog"),
+            Value::Null,
+            &cookie,
+        )
+        .await;
+    let body = json!({"generation":"generation-a","revision":catalog["revision"],"scenario_id":"same","enabled":true,"pin":"wrong-PIN-sentinel"});
+    assert_eq!(
+        server.request("POST", &path, &body.to_string(), "").await.0,
+        403
+    );
+    let (status, _, error) = server.json("POST", &path, body.clone(), &cookie).await;
+    assert_eq!(status, 401);
+    assert_eq!(error["code"], "invalid_pin");
+    assert!(!error.to_string().contains("sentinel"));
+    let mut correct = body;
+    correct["pin"] = json!("482915");
+    let (status, _, error) = server.json("POST", &path, correct.clone(), &cookie).await;
+    assert_eq!(status, 403);
+    assert_eq!(error["code"], "global_read_only");
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
+    correct["enabled"] = json!(false);
+    let (status, _, result) = server.json("POST", &path, correct, &cookie).await;
+    assert_eq!(status, 202);
+    assert!(result["request_id"].is_string());
+    let saved = server
+        .hub
+        .secret(&"fixture".into(), "cloud_pending_v1")
+        .unwrap();
+    assert!(!saved.contains("482915") && !saved.contains("pin"));
+    let envelope = moli_overkiz::cloud::decode_request(saved.as_bytes()).unwrap();
+    assert_eq!(envelope.request_id, result["request_id"]);
+}
+
+#[tokio::test]
+async fn generic_observation_requests_cannot_bypass_permission_pin() {
+    let server = Server::configured("scenario-bypass", true).await;
+    let cookie = server.pin().await;
+    let payload = json!({"kind":"scenario_permission","generation":"generation-a","revision":"a".repeat(64),"scenario_id":"same","enabled":true});
+    let (status, _, _) = server
+        .json(
+            "POST",
+            &format!("{ROOT}/fixture/requests"),
+            payload,
+            &cookie,
+        )
+        .await;
+    assert_eq!(status, 400);
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn consent_rejects_stale_catalogues_and_pin_brute_force_without_queueing() {
+    let server = Server::mode("scenario-stale-limit", true, false).await;
+    let cookie = server.pin().await;
+    seed(&server).await;
+    let path = format!("{ROOT}/fixture/scenario-permission");
+    let mut request = json!({"generation":"generation-stale","revision":"a".repeat(64),"scenario_id":"same","enabled":false,"pin":"482915"});
+    let (status, _, error) = server.json("POST", &path, request.clone(), &cookie).await;
+    assert_eq!(status, 409);
+    assert_eq!(error["code"], "catalog_changed");
+    request["pin"] = json!("WRONG_SENTINEL");
+    for _ in 0..5 {
+        let (status, _, error) = server.json("POST", &path, request.clone(), &cookie).await;
+        assert_eq!(status, 401);
+        assert_eq!(error["code"], "invalid_pin");
+        assert!(!error.to_string().contains("SENTINEL"));
+    }
+    request["pin"] = json!("482915");
+    let (status, _, error) = server.json("POST", &path, request, &cookie).await;
+    assert_eq!(status, 429);
+    assert_eq!(error["code"], "pin_rate_limited");
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
+    assert_eq!(
+        server
+            .json(
+                "GET",
+                &format!("{ROOT}/fixture/catalog"),
+                Value::Null,
+                &cookie
+            )
+            .await
+            .0,
+        200,
+        "a wrong PIN never revokes the existing owner session"
+    );
+}
+
+#[tokio::test]
+async fn enabling_requires_the_exact_current_revision_and_known_scenario() {
+    let server = Server::mode("scenario-exact", true, false).await;
+    let cookie = server.pin().await;
+    seed(&server).await;
+    let task = moli_runtime::spawn_driver(
+        &server.hub,
+        "fixture".into(),
+        std::sync::Arc::new(Summary),
+        CancellationToken::new(),
+    );
+    for _ in 0..100 {
+        if server.hub.device(&"fixture:cloud:summary".into()).is_some() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let (_, _, catalog) = server
+        .json(
+            "GET",
+            &format!("{ROOT}/fixture/catalog"),
+            Value::Null,
+            &cookie,
+        )
+        .await;
+    assert_eq!(catalog["execution"]["scenarios"][0]["executable"], false);
+    assert_eq!(
+        catalog["execution"]["scenarios"][0]["reason"],
+        "permission_required"
+    );
+    let path = format!("{ROOT}/fixture/scenario-permission");
+    let mut request = json!({"generation":"generation-a","revision":"a".repeat(64),"scenario_id":"same","enabled":true,"pin":"482915"});
+    let (status, _, error) = server.json("POST", &path, request.clone(), &cookie).await;
+    assert_eq!(status, 409);
+    assert_eq!(error["code"], "catalog_changed");
+    request["revision"] = catalog["revision"].clone();
+    request["scenario_id"] = json!("unknown");
+    assert_eq!(
+        server.json("POST", &path, request.clone(), &cookie).await.0,
+        400
+    );
+    request["scenario_id"] = json!("same");
+    assert_eq!(server.json("POST", &path, request, &cookie).await.0, 202);
+    let queued = server
+        .hub
+        .secret(&"fixture".into(), "cloud_pending_v1")
+        .unwrap();
+    assert!(!queued.contains("482915"));
+    let request = moli_overkiz::cloud::decode_request(queued.as_bytes()).unwrap();
+    assert!(matches!(
+        request.request,
+        moli_overkiz::cloud::PendingRequest::ScenarioPermission { enabled: true, .. }
+    ));
     task.abort();
 }

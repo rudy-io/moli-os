@@ -1221,7 +1221,8 @@ fn overkiz_cloud(
             .try_into()
             .with_context(|| format!("driver {:?} options", driver.id))?;
         moli_overkiz::Overkiz::new(options.clone())?;
-        if let Some(cloud) = options.cloud {
+        if let Some(mut cloud) = options.cloud {
+            cloud.read_only = options.read_only;
             enabled.insert(InstanceId::from(driver.id.as_str()), cloud);
         }
     }
@@ -1304,6 +1305,22 @@ mod tests {
         let mut invalid = driver("overkiz");
         invalid.options = toml::from_str("[cloud]\npoll_secs = 1").unwrap();
         assert!(overkiz_cloud(&[invalid]).is_err());
+    }
+
+    #[test]
+    fn cloud_api_registry_uses_the_global_control_policy() {
+        for read_only in [true, false] {
+            let mut cloud = driver("overkiz");
+            cloud.options = toml::from_str(&format!(
+                "read_only = {read_only}\n[cloud]\npoll_secs = 600"
+            ))
+            .unwrap();
+            let registry = overkiz_cloud(&[cloud]).unwrap();
+            assert_eq!(
+                registry.get(&InstanceId::from("t")).unwrap().read_only,
+                read_only
+            );
+        }
     }
 
     #[test]

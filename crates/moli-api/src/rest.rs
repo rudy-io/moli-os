@@ -935,3 +935,7 @@ mod home_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+#[path = "scenario_guest_tests.rs"]
+mod scenario_guest_tests;

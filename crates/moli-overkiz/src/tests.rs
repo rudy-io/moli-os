@@ -1400,3 +1400,21 @@ async fn refused_token_or_changed_certificate_waits_with_all_devices_offline() {
         );
     }
 }
+
+#[test]
+fn cloud_cannot_override_the_integrations_global_read_only_fence() {
+    for read_only in [true, false] {
+        let driver = Overkiz::new(Config {
+            host: None,
+            read_only,
+            cloud: Some(crate::cloud::Config {
+                read_only: !read_only,
+                ..Default::default()
+            }),
+            ..config()
+        })
+        .unwrap();
+        assert_eq!(driver.config.cloud.unwrap().read_only, read_only);
+    }
+    assert!(serde_json::from_str::<crate::cloud::Config>(r#"{"read_only":false}"#).is_err());
+}

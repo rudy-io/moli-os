@@ -18,6 +18,7 @@ const COMMAND_CAPACITY: usize = 1;
 pub(crate) enum Work {
     Request(RequestEnvelope),
     Observe,
+    Execute(moli_runtime::CommandRequest, Box<super::execution::Ticket>),
 }
 // Never derive Debug: session bytes and catalogues are private.
 pub(crate) enum Event {
@@ -114,6 +115,9 @@ fn spawn<T: Transport + 'static>(
                                 .await,
                             true,
                         ),
+                        PendingRequest::ScenarioPermission { .. } => {
+                            (id, Err(Error::InvalidInput), false)
+                        }
                         PendingRequest::Refresh { generation } => {
                             let result = if client.state().generation.as_ref() == Some(&generation)
                             {
@@ -126,6 +130,11 @@ fn spawn<T: Transport + 'static>(
                     }
                 }
                 Work::Observe => (None, client.retry_persistence(&mut sink).await, true),
+                Work::Execute(command, ticket) => (
+                    None,
+                    client.execute_command(command, &ticket, &mut sink).await,
+                    true,
+                ),
             };
             let mut observed = false;
             let result = if result.is_ok() && observe {
@@ -257,6 +266,23 @@ struct Job {
     task: JobTask,
     kind: JobKind,
 }
+#[derive(Clone, Copy)]
+enum ScenarioMode {
+    ReadOnly,
+    Consented,
+}
+impl ScenarioMode {
+    const fn new(read_only: bool) -> Self {
+        if read_only {
+            Self::ReadOnly
+        } else {
+            Self::Consented
+        }
+    }
+    const fn read_only(self) -> bool {
+        matches!(self, Self::ReadOnly)
+    }
+}
 pub(crate) struct Controller {
     actor: Option<Actor>,
     factory: Factory,
@@ -273,14 +299,18 @@ pub(crate) struct Controller {
     next_poll: Instant,
     gate: Gate,
     poll: Duration,
+    scenario_mode: ScenarioMode,
 }
 impl Controller {
     pub(crate) fn new(ctx: &DriverCtx, config: &super::Config) -> Self {
+        let read_only = config.read_only;
         Self::with_factory(
             ctx,
             config,
-            Box::new(|instance, epoch, session, catalog| {
-                spawn(CloudClient::new(instance)?, epoch, session, catalog)
+            Box::new(move |instance, epoch, session, catalog| {
+                let mut client = CloudClient::new(instance)?;
+                client.execution_read_only(read_only);
+                spawn(client, epoch, session, catalog)
             }),
         )
     }
@@ -290,16 +320,14 @@ impl Controller {
         config: &super::Config,
         transport: T,
     ) -> Self {
+        let read_only = config.read_only;
         Self::with_factory(
             ctx,
             config,
             Box::new(move |instance, epoch, session, catalog| {
-                spawn(
-                    CloudClient::with_transport(instance, transport.clone())?,
-                    epoch,
-                    session,
-                    catalog,
-                )
+                let mut client = CloudClient::with_transport(instance, transport.clone())?;
+                client.execution_read_only(read_only);
+                spawn(client, epoch, session, catalog)
             }),
         )
     }
@@ -329,6 +357,7 @@ impl Controller {
             next_poll: Instant::now(),
             gate,
             poll: Duration::from_secs(config.poll_secs),
+            scenario_mode: ScenarioMode::new(config.read_only),
         };
         this.restart(ctx, false);
         this.publish(ctx, None);
@@ -650,7 +679,14 @@ impl Controller {
         if self.actor.is_none() && Instant::now() >= self.next_poll {
             self.restart(ctx, false);
         }
-        if ctx.secret(super::PENDING_KEY).is_some() {
+        if let Some(pending) = ctx.secret(super::PENDING_KEY) {
+            if self.busy
+                && super::decode_request(pending.as_bytes()).is_ok_and(|request| {
+                    matches!(request.request, PendingRequest::ScenarioPermission { .. })
+                })
+            {
+                return;
+            }
             let permit = if self.gate.open() {
                 let Some(actor) = &self.actor else {
                     return;
@@ -692,6 +728,11 @@ impl Controller {
     fn consume(&mut self, ctx: &DriverCtx, permit: Option<mpsc::OwnedPermit<Work>>, bytes: &str) {
         match super::decode_request(bytes.as_bytes()) {
             Ok(request) => {
+                if matches!(request.request, PendingRequest::ScenarioPermission { .. }) {
+                    drop(permit);
+                    self.permission(ctx, request);
+                    return;
+                }
                 let Some(permit) = permit.filter(|_| self.gate.open()) else {
                     self.reject_input(ctx, request.request_id);
                     return;
@@ -760,6 +801,13 @@ impl Controller {
         ctx.set_availability(&summary, false);
     }
     fn publish(&self, ctx: &DriverCtx, catalog: Option<&Catalog>) {
+        super::execution::publish(
+            ctx,
+            catalog,
+            self.scenario_mode.read_only(),
+            self.live,
+            self.poll.as_secs(),
+        );
         let id = super::summary_device_id(ctx.instance());
         ctx.upsert_device(summary(ctx.instance()));
         ctx.set_state(
@@ -901,3 +949,6 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;
+
+#[path = "worker_execution.rs"]
+mod scenario_execution;
