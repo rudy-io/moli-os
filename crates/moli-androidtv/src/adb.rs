@@ -483,17 +483,27 @@ fn playback(state: &str, now_ms: Option<f64>) -> (u8, Option<String>, Option<f64
             .find_map(|kv| kv.strip_prefix(name)?.strip_prefix('='))
     };
     let number = |name: &str| field(name).and_then(|v| v.parse::<f64>().ok());
-    let word = field("state")
-        .and_then(|s| s.split('(').next())
-        .unwrap_or("");
-    let (rank, word) = match word {
-        "PLAYING" | "FAST_FORWARDING" | "REWINDING" => (3, "playing"),
-        "BUFFERING" | "CONNECTING" => (2, "buffering"),
-        "PAUSED" => (2, "paused"),
+    // Android 14 writes `PLAYING(3)`, Android 11 the bare code `3`.
+    let raw = field("state").unwrap_or("");
+    let code = raw
+        .split_once('(')
+        .map_or(raw, |(_, code)| code.trim_end_matches(')'));
+    let (rank, word) = match code.parse::<u8>().unwrap_or(0) {
+        // PLAYING, FAST_FORWARDING, REWINDING
+        3..=5 => (3, "playing"),
+        // BUFFERING, CONNECTING
+        6 | 8 => (2, "buffering"),
+        2 => (2, "paused"),
         _ => (0, "idle"),
     };
     let position = number("position").filter(|p| *p >= 0.0).map(|p| {
-        let speed = number("speed").unwrap_or(0.0);
+        // A stopped or paused session may still say `speed=1.0`: only a
+        // playing one moves on.
+        let speed = if rank == 3 {
+            number("speed").unwrap_or(0.0)
+        } else {
+            0.0
+        };
         let since = match (now_ms, number("updated")) {
             (Some(now), Some(at)) if now > at => now - at,
             _ => 0.0,
@@ -641,6 +651,23 @@ Audio playback (lastly played comes first)
             .replace("speed=1.0", "speed=0.0");
         let (_, p) = playing(&paused).unwrap();
         assert_eq!(p.state.as_deref(), Some("paused"));
+        assert!((p.position.unwrap() - 1.576).abs() < 0.01);
+    }
+
+    #[test]
+    fn android_11_writes_the_bare_code() {
+        // Seen on a Xiaomi Mi TV Stick 4K (Android 11), by Hogun974 in #112.
+        let (_, p) = playing(&DUMP.replace("PLAYING(3)", "3")).unwrap();
+        assert_eq!(p.state.as_deref(), Some("playing"));
+        assert!((p.position.unwrap() - 11.576).abs() < 0.01);
+        let (_, p) = playing(&DUMP.replace("PLAYING(3)", "2")).unwrap();
+        assert_eq!(p.state.as_deref(), Some("paused"));
+    }
+
+    #[test]
+    fn a_session_not_playing_keeps_its_position() {
+        // Paused, yet still telling `speed=1.0`: no drift.
+        let (_, p) = playing(&DUMP.replace("PLAYING(3)", "PAUSED(2)")).unwrap();
         assert!((p.position.unwrap() - 1.576).abs() < 0.01);
     }
 }
