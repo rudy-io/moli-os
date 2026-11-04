@@ -677,3 +677,98 @@ async fn installation_location_and_profile_models_match_official_shapes() {
     );
     assert_eq!(client.profile().await.unwrap().config["units"], 0);
 }
+
+fn installation_with_optional_device_names() -> Value {
+    json!({
+        "installation_id": "installation-example",
+        "location_id": "location-example",
+        "name": "Example installation",
+        "access_type": "basic",
+        "groups": [{
+            "group_id": "group-example",
+            "name": "Example group",
+            "devices": [
+                {"device_id":"system-example","type":"az_system","ws_id":"gateway-example"},
+                {"device_id":"zone-example","name":"Example zone","type":"az_zone","ws_id":"gateway-example"},
+                {"device_id":"system-null","name":null,"type":"az_system","ws_id":"gateway-example"}
+            ]
+        }]
+    })
+}
+
+#[tokio::test]
+async fn installation_keeps_unnamed_devices_without_fabricating_names() {
+    let (client, fake) = reader().await;
+    fake.reply(200, installation_with_optional_device_names());
+    let value = client.installation("installation-example").await.unwrap();
+    let devices = &value.groups[0].devices;
+    assert_eq!(devices.len(), 3);
+    assert_eq!(devices[0].device_id, "system-example");
+    assert_eq!(devices[1].device_id, "zone-example");
+    assert_eq!(devices[2].device_id, "system-null");
+    let published = serde_json::to_value(value).unwrap();
+    assert!(published["groups"][0]["devices"][0]["name"].is_null());
+    assert_eq!(published["groups"][0]["devices"][1]["name"], "Example zone");
+    assert!(published["groups"][0]["devices"][2]["name"].is_null());
+}
+
+#[tokio::test]
+async fn installation_rejects_malformed_names_and_required_identifiers() {
+    let (client, fake) = reader().await;
+    for bad_name in [json!(7), json!(false), json!([]), json!({})] {
+        let mut document = installation_with_optional_device_names();
+        document["groups"][0]["devices"][1]["name"] = bad_name;
+        fake.reply(200, document);
+        assert_eq!(
+            client
+                .installation("installation-example")
+                .await
+                .unwrap_err(),
+            Error::InvalidResponse
+        );
+    }
+    for key in ["device_id", "ws_id", "type"] {
+        for missing in [false, true] {
+            let mut document = installation_with_optional_device_names();
+            let device = document["groups"][0]["devices"][1].as_object_mut().unwrap();
+            if missing {
+                device.remove(key);
+            } else {
+                device.insert(key.into(), Value::Null);
+            }
+            fake.reply(200, document);
+            assert_eq!(
+                client
+                    .installation("installation-example")
+                    .await
+                    .unwrap_err(),
+                Error::InvalidResponse
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn installation_still_checks_identity_when_device_names_are_absent() {
+    let (client, fake) = reader().await;
+    let mut document = installation_with_optional_device_names();
+    document["installation_id"] = json!("another-installation");
+    fake.reply(200, document);
+    assert_eq!(
+        client
+            .installation("installation-example")
+            .await
+            .unwrap_err(),
+        Error::InvalidResponse
+    );
+    let mut document = installation_with_optional_device_names();
+    document["groups"][0]["devices"][0]["device_id"] = json!("../invalid-device");
+    fake.reply(200, document);
+    assert_eq!(
+        client
+            .installation("installation-example")
+            .await
+            .unwrap_err(),
+        Error::InvalidInput
+    );
+}

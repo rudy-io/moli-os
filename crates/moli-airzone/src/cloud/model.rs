@@ -95,7 +95,9 @@ pub struct Group {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Device {
     pub device_id: String,
-    pub name: String,
+    // System-level records may omit a display name; keep the device and its
+    // stable identity without manufacturing an equipment name.
+    pub name: Option<String>,
     #[serde(rename = "type")]
     pub kind: String,
     pub ws_id: String,
