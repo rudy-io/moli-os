@@ -19,6 +19,7 @@
   "airzone.cold_demand": "Cooling demand",
   "airzone.heat_demand": "Heating demand",
   "airzone.read_only": "Airzone is in read-only mode.",
+  "airzone.extended_writes_disabled": "This Airzone command requires write = \"extended\" in the instance configuration.",
   "airzone.timeout": "Airzone did not respond before the deadline.",
   "airzone.transport_failed": "Unable to connect to the Airzone controller.",
   "airzone.http_failed": "Airzone returned an HTTP error.",

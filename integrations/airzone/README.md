@@ -18,17 +18,27 @@ host = "controller.example"
 port = 3000
 poll_secs = 30
 read_only = true
+# write = "extended"    # optional new commands; read_only = true still blocks all writes
 mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 # dhw_units = 0          # only if DHW omits units: 0 Celsius, 1 Fahrenheit
 # port = 3443           # HTTPS: replace port above and set a verified fingerprint
 # tls_fingerprint = "<64 hexadecimal SHA-256 characters>"
 ```
 
-**TOML instances retain their existing command mode**: an omitted `read_only`
-defaults to `false`, preserving existing automations. Set `read_only = true` for
-an observation-only trial. That restriction applies to published capabilities,
-the executor and transport,
-including integration configuration. It is not merely a disabled UI button.
+**TOML instances retain their historical command scope**: an omitted `read_only`
+defaults to `false`, preserving existing automations. An omitted `write` defaults
+to `"legacy"`: only `on`, `target_temperature`, `mode` and `fan_speed` remain
+writable when advertised. These map to the Local API `on`, `setpoint`, `mode`
+and `speed` parameters on an addressed zone, including the historical master-zone
+controls. Reading additional fields never enables additional commands.
+
+Set `write = "extended"` explicitly to enable the newly covered commands:
+whole-system modes, hot water, renaming, installer stages/Q-Adapt, grille/slat,
+ventilation/IAQ and integration label settings. Advertised capabilities, current
+scope and guards still apply. Set `read_only = true` for an observation-only trial:
+it overrides either write mode and blocks every command. Both restrictions apply
+to published capabilities, the executor and transport, including integration
+configuration. They are not merely disabled UI buttons.
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains
 available, and Moli does not register itself automatically to fill that label.
@@ -71,7 +81,8 @@ never inferred from the first zone and never overriding a reported unit.
 `power` (documented ambiguously as kW/h) and `consumption_ue` are retained without
 inventing billable energy. `energy_data` leaves preserve their documented kW/kWh.
 Deprecated grille code 4 has no documented meaning and is not offered as a write.
-The metadata `driver` has a local 240-character bound and is not a firmware update.
+The metadata `driver` has a 120-character write bound (readings are retained up to
+240 characters) and is not a firmware update.
 
 ## Operations and diagnostics
 
@@ -192,8 +203,8 @@ state independently.
 ### Rollback compatibility
 
 Older driver binaries reject unknown TOML options. Before rolling back, restore
-a configuration compatible with that version: `read_only`, `tls_fingerprint` and
-`dhw_units` are not accepted by the original driver. Removing `read_only` does not
-make an older driver read-only; keep the instance disabled if observation-only
+a configuration compatible with that version: `read_only`, `write`,
+`tls_fingerprint` and `dhw_units` are not accepted by the original driver. Removing
+`read_only` does not make an older driver read-only; keep the instance disabled if observation-only
 operation is required. Keep the current configuration and encrypted store
 backed up first.
