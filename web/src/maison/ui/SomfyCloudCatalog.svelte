@@ -4,7 +4,8 @@
   import { createProgrammeContext } from '../lib/somfy-programmes.js';
   import SomfyCloudProgramme from './SomfyCloudProgramme.svelte';
   import Icon from './Icon.svelte';
-  let { observation, details = {}, busy = '', showDefinition, initialSection = 'scenarios' } = $props();
+  import SomfyScenarioControl from './SomfyScenarioControl.svelte';
+  let { observation, details = {}, busy = '', showDefinition, generation, pending = false, permission, initialSection = 'scenarios' } = $props();
   let expanded = $state({ scenarios: true, calendar_rules: true });
   let selected = $state(initialSection);
   const primary = $derived(selected === 'programmes' ? 'calendar_rules' : 'scenarios');
@@ -47,6 +48,7 @@
           {:else}
             <b>{definition.label ?? definition.id ?? `#${index + 1}`}</b>
           {/if}
+          {#if kind === 'scenarios' && permission}<SomfyScenarioControl {observation} {definition} {generation} {pending} {permission} />{/if}
           <details class="original">
             <summary>{t('systeme.somfy.programme.origin')}</summary>
             <p>{t('systeme.somfy.last', { date: date(collection?.last_observation_ms) })}</p>

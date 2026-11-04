@@ -154,7 +154,7 @@
     {#if page === 'salon'}
       <Salon />
     {:else if page === 'pieces'}
-      <Pieces />
+      <Pieces {route} />
     {:else if page === 'plan'}
       <Plan />
     {:else if page === 'carte'}

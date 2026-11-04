@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-let vite, render, Catalog, Status, Actions, Page, hub, setLanguage;
+let vite, render, Catalog, Status, Actions, Page, Control, hub, setLanguage;
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
 before(async () => {
@@ -14,6 +14,7 @@ before(async () => {
   Status = (await vite.ssrLoadModule('/src/maison/ui/SomfyCloudStatus.svelte')).default;
   Actions = (await vite.ssrLoadModule('/src/maison/ui/SomfyCloudActions.svelte')).default;
   Page = (await vite.ssrLoadModule('/src/maison/pages/Somfy.svelte')).default;
+  Control = (await vite.ssrLoadModule('/src/maison/ui/SomfyScenarioControl.svelte')).default;
   ({ hub } = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js'));
   ({ setLanguage } = await vite.ssrLoadModule('/src/lib/i18n.svelte.js'));
 });
@@ -154,4 +155,37 @@ test('TaHoma provides a direct equipment route and explains a cloud-only setup',
     assert.match(html, /Scénarios et programmations/);
     assert.doesNotMatch(html, /<button[^>]*>\s*(?:Lancer|Exécuter|Fermer)/);
   } finally { hub.devices = before; }
+});
+
+
+test('scenario cards offer Run only with current server and live Hub permission', () => {
+  const previous = hub.devices;
+  const connected = hub.connected;
+  hub.connected = true;
+  const row = { id: 'demo', permitted: true, executable: true, point: 'somfy:cloud:scenario:fixture/run', value: 'revision-token' };
+  const observation = { revision: 'revision', freshness: { current: true, collections: { scenarios: true } }, execution: { read_only: false, scenarios: [row] } };
+  const props = { observation, definition: { id: 'demo', label: '<script>demo</script>' }, generation: 'generation', permission() {} };
+  try {
+    hub.devices = { 'somfy:cloud:scenario:fixture': { online: true, points: [{ key: 'run', kind: { type: 'enum', values: ['revision-token'] }, access: { write: true } }] } };
+    const enabled = render(Control, { props }).body;
+    assert.match(enabled, /Lancer/);
+    assert.match(enabled, /Revenir en lecture seule/);
+    observation.execution.read_only = true;
+    const readonly = render(Control, { props }).body;
+    assert.doesNotMatch(readonly, />Lancer/);
+    assert.match(readonly, /configurée en lecture seule/);
+    observation.execution.read_only = false;
+    observation.execution.scenarios = [{ ...row, permitted: false, executable: false, reason: 'permission_required' }];
+    assert.match(render(Control, { props }).body, /Autoriser ce scénario/);
+    observation.execution.scenarios = [row];
+    hub.devices = {};
+    assert.doesNotMatch(render(Control, { props }).body, />Lancer/);
+  } finally { hub.devices = previous; hub.connected = connected; }
+});
+
+
+test('uncertain provider execution has a translated explanation and no completion claim', () => {
+  const html = render(Status, { props: { row: { online: true, session_phase: 'ready', state: { phase: 'ready', failure: { kind: 'execution_uncertain' } } } } }).body;
+  assert.match(html, /Vérifiez TaHoma avant de relancer/);
+  assert.doesNotMatch(html, /systeme\.somfy\.failure|terminé|completed/);
 });

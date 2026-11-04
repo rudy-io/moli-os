@@ -34,9 +34,19 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
   let view = { auth: null, instances: [], selected: '', loading: true, pending: null, error: '', catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false };
   const emit = (patch) => { if (active) { view = { ...view, ...patch }; change(view); } };
   const path = () => `${ROOT}/${encodeURIComponent(view.selected)}`;
-  async function call(url, options = {}) {
+  async function call(url, options = {}, policyChange = false) {
     const response = await transport(url, { cache: 'no-store', signal: lifetime.signal, ...options });
     if (!active) throw new DOMException('Aborted', 'AbortError');
+    if (policyChange && !response.ok) {
+      const body = await response.json().catch(() => ({}));
+      const codes = new Set(['invalid_pin', 'pin_disabled', 'pin_rate_limited', 'catalog_changed', 'global_read_only']);
+      if (codes.has(body.code)) throw new Error(body.code);
+      if (response.status === 403) {
+        emit({ auth: body.auth_policy === 'pin_fallback' ? 'pin_fallback' : 'owner_account', instances: [], selected: '', catalog: null, catalogText: '', details: {} });
+        throw new Error('owner');
+      }
+      throw new Error('unavailable');
+    }
     if (response.status === 403) {
       const body = await response.json().catch(() => ({}));
       emit({ auth: body.auth_policy === 'pin_fallback' ? 'pin_fallback' : 'owner_account', instances: [], selected: '', catalog: null, catalogText: '', details: {} });
@@ -45,7 +55,10 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     if (!response.ok) throw new Error(response.status === 409 ? 'changed_or_busy' : 'unavailable');
     return response;
   }
-  function failed(error) { if (active && error.name !== 'AbortError') emit({ error: error.message === 'owner' ? '' : error.message === 'changed_or_busy' ? 'changed_or_busy' : 'unavailable' }); }
+  function failed(error) {
+    const known = new Set(['changed_or_busy', 'invalid_pin', 'pin_disabled', 'pin_rate_limited', 'catalog_changed', 'global_read_only', 'permission_failed']);
+    if (active && error.name !== 'AbortError') emit({ error: error.message === 'owner' ? '' : known.has(error.message) ? error.message : 'unavailable' });
+  }
   async function list(signal = lifetime.signal) {
     const epoch = ++listEpoch;
     const body = await (await call(ROOT, { signal })).json();
@@ -93,8 +106,8 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     } catch (e) { if (epoch === selection) failed(e); }
     finally { if (epoch === selection) emit({ detailBusy: '' }); }
   }
-  async function send(input) {
-    if (sending || view.auth !== 'owner' || !view.selected) { if ('password' in input) input.password = ''; return; }
+  async function dispatch(input, endpoint) {
+    if (sending || view.auth !== 'owner' || !view.selected) { if ('password' in input) input.password = ''; if ('pin' in input) input.pin = ''; return; }
     sending = true;
     const deadline = new AbortController();
     const cancel = () => deadline.abort();
@@ -103,13 +116,14 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     emit({ pending: 'dispatch', error: '' });
     try {
       // Nothing secret enters a PIN continuation, a timer, or the observable view.
-      const request = call(`${path()}/requests`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' }, body: JSON.stringify(input), signal: deadline.signal });
-      if ('password' in input) input.password = '';
+      const request = call(`${path()}/${endpoint}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' }, body: JSON.stringify(input), signal: deadline.signal }, endpoint === 'scenario-permission');
+      if ('password' in input) input.password = ''; if ('pin' in input) input.pin = '';
       const { request_id: id } = await (await request).json();
       emit({ pending: id, catalog: null, catalogText: '', details: {} });
       for (let attempt = 0; attempt < 60 && active; attempt++) {
         await list(deadline.signal);
         if (requestFinished(view.instances.find(i => i.instance === view.selected), id)) {
+          if (endpoint === 'scenario-permission' && view.instances.find(i => i.instance === view.selected)?.state?.failure) throw new Error('permission_failed');
           if (view.instances.find(i => i.instance === view.selected)?.state?.scope) await catalog(deadline.signal);
           return;
         }
@@ -121,15 +135,20 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
       clearTimeout(timer);
       lifetime.signal.removeEventListener('abort', cancel);
       if (active && deadline.signal.aborted) emit({ error: 'pending_timeout' });
-      if ('password' in input) input.password = '';
+      if ('password' in input) input.password = ''; if ('pin' in input) input.pin = '';
       sending = false;
       emit({ pending: null });
     }
+  }
+  function send(input) { return dispatch(input, 'requests'); }
+  async function permission(input) {
+    await dispatch(input, 'scenario-permission');
+    return active ? view.error : 'unavailable';
   }
   function select(instance) {
     if (sending || !view.instances.some(i => i.instance === instance)) return;
     selection++;
     emit({ selected: instance, catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false, error: '' });
   }
-  return { load, open, catalog, definition, send, select, stop() { active = false; lifetime.abort(); view = null; } };
+  return { load, open, catalog, definition, send, permission, select, stop() { active = false; lifetime.abort(); view = null; } };
 }

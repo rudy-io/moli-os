@@ -131,7 +131,7 @@ actions pour les scénarios, journées et règles intégrées. Les noms viennent
 Les états déclarés restent distincts d'une activation effective. Les formats
 inconnus, données historiques et limites d'affichage sont explicitement qualifiés.
 Les détails longs s'ouvrent à la demande ; la définition JSON d'origine reste
-accessible. Aucun contrôle d'exécution, nouvelle requête ou minuterie n'est ajouté.
+accessible. Les programmations restent consultatives et ne créent aucune minuterie locale.
 
 ## Vérifier visuellement
 
@@ -155,3 +155,23 @@ propriétaire déjà collecté : elle ne déclenche pas de requête au fournisse
 Les informations techniques et le JSON d’origine restent disponibles à la demande.
 Le lien « Volets et stores » mène à `#/pieces/volets` : les commandes y dépendent
 des capacités réelles du pilote, indépendamment du catalogue cloud.
+
+
+## Lancer un scénario TaHoma
+
+Dans `#/somfy`, chaque scénario affiche ses actions puis son accès : lecture seule,
+autorisation nécessaire, indisponible ou bouton **Lancer**. L'autorisation demande
+un code Moli frais et un consentement explicite pour ce seul scénario ; elle ne
+l'exécute pas. Le bouton **Revenir en lecture seule** retire cette autorisation.
+Une connexion globalement en lecture seule ne peut pas être ouverte par ce formulaire.
+
+`SomfyScenarioControl` utilise le même client `act()` que les équipements : garde,
+approbations et journal restent centraux. Le helper `somfy-scenario-controls.js`
+vérifie la capacité du catalogue courant et celle du flux Hub vivant. Une ancienne
+carte ne permet pas d'utiliser un point retiré, devenu indisponible ou renouvelé.
+Le code est effacé avant toute attente réseau et n'entre jamais dans l'état partagé.
+Les messages distinguent demande acceptée, validation humaine et résultat incertain ;
+ils ne certifient pas le mouvement des équipements. Aucune relance automatique.
+
+Les tests de lancement utilisent uniquement des scénarios et transports fictifs.
+Les essais sur la maison conservent la lecture seule.

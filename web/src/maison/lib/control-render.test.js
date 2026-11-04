@@ -25,6 +25,7 @@ before(async () => {
   for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
+  components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
 });
 beforeEach(() => { home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -209,6 +210,89 @@ test('read-only shutter shows position without command buttons', () => {
   assert.equal(inputs(html).length, 0);
 });
 
+test('observed bridge covers explain read-only access and retain their advertised actions as text', () => {
+  const html = show('CoverTile', [
+    point('state', { type: 'text' }, false),
+    { ...point('control', enumeration('open', 'close', 'stop'), false, 'control'), access: { read: false, write: false } },
+    { ...point('percent_control', number(0, 100, 1), false, 'control'), unit: '%' },
+  ], { percent_control: 100 }, { model: 'Home Assistant cover' });
+  assert.match(html, /Lecture seule/);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.match(html, /Ouvert à 100 %/);
+  assert.match(html, /href="#\/systeme"/);
+  assert.doesNotMatch(html, /code Moli|<button|<input/);
+});
+
+test('unavailable covers mark retained positions as historical and never claim movement', () => {
+  const html = show('CoverTile', [point('opening', number(0, 100, 1), true, 'position'), point('state', enumeration('OPEN', 'STOP', 'CLOSE'))],
+    { opening: 42, moving: 'UP' }, { online: false });
+  assert.match(html, /Injoignable/);
+  assert.match(html, /Dernière position.*42/s);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<button|<input/);
+});
+
+test('static cover capabilities stay partial and an unknown position stays explicit', () => {
+  const html = show('CoverTile', [point('control', enumeration('close', 'stop'), false)], {}, { model: 'Overkiz RollerShutter' });
+  assert.match(html, /Position non communiquée/);
+  assert.match(html, /Stop.*Fermer/s);
+  assert.doesNotMatch(html, /Ouvrir|<button|<input|0 %/);
+});
+
+test('the shutter route bypasses a stored lights filter without replacing it or deduplicating identities', () => {
+  const saved = '["lumieres"]';
+  const writes = [];
+  globalThis.localStorage = { getItem: () => saved, setItem: (...args) => writes.push(args) };
+  try {
+    const cover = (id) => ({
+      id, model: 'Home Assistant cover', label: { name: 'Twin shade', room: 'Studio' }, online: true,
+      points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+    });
+    const entries = [cover('fixture:one'), cover('fixture:two'), { ...cover('fixture:hidden'), label: { name: 'Hidden shade', room: 'Studio' } },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Fixture lamp', room: 'Studio' }, online: true, points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } }];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = { hidden: ['fixture:hidden'] };
+    const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+    assert.equal((focused.match(/Twin shade/g) ?? []).length, 2);
+    assert.doesNotMatch(focused, /Fixture lamp|Hidden shade/);
+    assert.match(focused, /href="#\/pieces"/);
+    const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.match(normal, /Fixture lamp/);
+    assert.doesNotMatch(normal, /Twin shade/);
+    assert.match(normal, /href="#\/pieces\/volets"/);
+    assert.deepEqual(writes, []);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('an empty shutter route explains the empty view and offers the ordinary rooms', () => {
+  hub.devices = {};
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  assert.match(html, /Aucun volet ni store à afficher/);
+  assert.match(html, /href="#\/pieces"/);
+});
+
+test('the shutters view groups many individual cards by room without lighting summaries', () => {
+  const rooms = [['Studio', 38], ['Workshop', 2]];
+  const entries = rooms.flatMap(([room, count]) => Array.from({ length: count }, (_, index) => ({
+    id: `fixture:${room}-${index}`, model: 'Home Assistant cover',
+    label: { name: `${room} shade ${index + 1}`, room }, online: index !== 0,
+    points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+  })));
+  hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  for (const [room, count] of rooms) {
+    assert.match(html, new RegExp(`<h2[^>]*>.*?${room}.*?</h2>.*?${count} ouvrants`, 's'));
+    const list = html.match(new RegExp(`<ul[^>]*aria-label="${room}"[^>]*>(.*?)</ul>`, 's'))?.[1];
+    assert.ok(list, `${room} has its own accessible list`);
+    assert.equal((list.match(/<li\b/g) ?? []).length, count);
+    assert.match(list, /Injoignable/);
+  }
+  assert.doesNotMatch(html, /Tout est éteint|<button|<input/);
+  const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+  assert.match(normal, /Tout est éteint/);
+  assert.doesNotMatch(normal, /<ul[^>]*aria-label="Studio"/);
+});
+
 test('partial RTS shutter retains close and stop without inventing position or open', () => {
   const points = [point('control', enumeration('close', 'stop'))];
   const html = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter' });
@@ -286,7 +370,8 @@ test('case-preserving motor orders identify a cover without inventing a power sw
   assert.match(readonly, /en fermeture/);
   const offline = show('CoverTile', points, { moving: 'forward' }, { online: false });
   assert.equal(buttons(offline).length, 0);
-  assert.match(offline, /mouvement/);
+  assert.match(offline, /Injoignable/);
+  assert.doesNotMatch(offline, /mouvement/);
 });
 
 test('multiple position or motor-order candidates do not choose an arbitrary actuator', () => {
