@@ -353,7 +353,12 @@ export async function login(pin) {
   try {
     const res = await fetch('/api/session', { method: 'POST', headers, body: JSON.stringify({ pin }) });
     await refreshSession();
-    return res.ok ? null : ((await res.json()).error ?? res.statusText);
+    if (res.ok) return null;
+    // Origin checks and proxies may reject before the JSON API handler runs.
+    // Keep that refusal intact without displaying a JSON parser exception.
+    const body = await res.json().catch(() => null);
+    return typeof body?.error === 'string' && body.error
+      ? body.error : t('commun.code.erreur', { status: res.status });
   } catch (err) {
     return err.message;
   }
