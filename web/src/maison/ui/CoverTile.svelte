@@ -4,8 +4,9 @@
   import Icon from './Icon.svelte';
   import { canWrite, numericRange, quantize, writableChoices, positionPoint, coverOrder, enumChoice } from '../lib/capabilities.js';
 
-  /** A shutter: open, stop, close (whatever the device offers). */
-  let { id, name = null } = $props();
+  /** A shutter: open, stop, close (whatever the device offers). `icons`: the
+   *  names and words give way to icons (the rooms page's « icons only » look). */
+  let { id, name = null, icons = false } = $props();
 
   const d = $derived(device(id));
   const label = $derived(nameOf(id, name));
@@ -40,24 +41,26 @@
     const spelled = enumChoice(offers, command);
     if (spelled) act(`${id}/${order.key}`, spelled, t('commun.action', { label, action: t(key).toLowerCase() }));
   }
-  // [command sent to the device, catalogue key of its button]
+  // [command sent to the device, catalogue key of its button, its icon]
   const BUTTONS = [
-    ['open', 'commun.volet.ouvrir'],
-    ['stop', 'commun.volet.stop'],
-    ['close', 'commun.volet.fermer'],
-    ['cycle', 'commun.volet.impulsion'],
+    ['open', 'commun.volet.ouvrir', 'chevron-up'],
+    ['stop', 'commun.volet.stop', 'stop'],
+    ['close', 'commun.volet.fermer', 'chevron-down'],
+    ['cycle', 'commun.volet.impulsion', 'power'],
   ];
 </script>
 
-<div class="cover">
+<div class="cover" class:icons title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
   <Icon name="shutter" size={22} />
-  <span class="name">{label}<small class="muted">{status}</small></span>
-  {#each BUTTONS.filter(([cmd]) => enumChoice(offers, cmd)) as [cmd, key] (cmd)}
-    <button onclick={() => sendOrder(cmd, key)}>{t(key)}</button>
+  {#if !icons}<span class="name">{label}<small class="muted">{status}</small></span>{/if}
+  {#each BUTTONS.filter(([cmd]) => enumChoice(offers, cmd)) as [cmd, key, ico] (cmd)}
+    <button onclick={() => sendOrder(cmd, key)} title={icons ? t(key) : undefined} aria-label={icons ? t(key) : undefined}>
+      {#if icons}<Icon name={ico} size={18} />{:else}{t(key)}{/if}
+    </button>
   {/each}
   {#if positionWritable}
     <label class="position">
-      <span>{t('commun.volet.position')}</span>
+      {#if !icons}<span>{t('commun.volet.position')}</span>{/if}
       <input type="range" min={range.first} max={range.last} step={range.step} value={shown ?? range.first} disabled={pos == null} oninput={previewPosition} onchange={setPosition} aria-label={t('commun.volet.ouverture', { label })} />
     </label>
   {/if}
@@ -99,4 +102,21 @@
 
   .position { display: flex; align-items: center; gap: 10px; width: 100%; }
   .position input { flex: 1; min-width: 0; }
+
+  /* Icons only: the same row, without a word. */
+  .icons {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .icons button {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+  }
+  .icons .position {
+    flex: 1 1 110px;
+    width: auto;
+  }
 </style>

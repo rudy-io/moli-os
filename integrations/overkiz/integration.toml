@@ -19,3 +19,5 @@ reused = "Cover families and favourite design follow moli-os PR25 by ddcq; share
 author = "agent"
 [[fixture]]
 file = "fixtures/devices.json"
+[[fixture]]
+file = "fixtures/slow-cover.json"

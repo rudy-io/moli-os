@@ -29,12 +29,16 @@ struct Fixture {
     path: std::path::PathBuf,
     latency: Arc<AtomicU64>,
     supervisor: tokio::task::JoinHandle<()>,
+    config: Config,
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.cancel.cancel();
         self.server.abort();
         let _ = std::fs::remove_file(&self.path);
+        let state = self.path.with_extension("state.json");
+        let _ = std::fs::remove_file(state.with_extension("devices.json"));
+        let _ = std::fs::remove_file(state);
     }
 }
 
@@ -108,6 +112,7 @@ async fn start_with_configuration(
     ));
     let hub = Hub::new(HubOptions {
         secrets: Some((path.clone(), MasterKey::new("01".repeat(32)))),
+        state_path: Some(path.with_extension("state.json")),
         command_timeout,
         ..HubOptions::default()
     })
@@ -136,7 +141,7 @@ async fn start_with_configuration(
     let supervisor = spawn_driver(
         &hub,
         InstanceId::from("bridge"),
-        Arc::new(HomeAssistant::new(config).unwrap()),
+        Arc::new(HomeAssistant::new(config.clone()).unwrap()),
         cancel.clone(),
     );
     Fixture {
@@ -150,6 +155,7 @@ async fn start_with_configuration(
         path,
         latency,
         supervisor,
+        config,
     }
 }
 
@@ -228,6 +234,96 @@ async fn wait_value(f: &Fixture) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("no state: {:?}", f.hub.snapshot().drivers);
+}
+
+async fn restart_bridge(f: &mut Fixture) {
+    f.cancel.cancel();
+    (&mut f.supervisor).await.unwrap();
+    f.hub.persist_state().await.unwrap();
+    while f.requests.try_recv().is_ok() {}
+    f.hub = Hub::new(HubOptions {
+        secrets: Some((f.path.clone(), MasterKey::new("01".repeat(32)))),
+        state_path: Some(f.path.with_extension("state.json")),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    f.cancel = CancellationToken::new();
+    f.events = f.hub.subscribe();
+    f.supervisor = spawn_driver(
+        &f.hub,
+        InstanceId::from("bridge"),
+        Arc::new(HomeAssistant::new(f.config.clone()).unwrap()),
+        f.cancel.clone(),
+    );
+}
+
+#[tokio::test]
+async fn unavailable_entity_survives_restart_without_write_capability_then_recovers() {
+    let mut f = start(&["on"], true, 200).await;
+    wait_value(&f).await;
+    let before = f.hub.state(&PointId::from("bridge:stable/on")).unwrap();
+    f.raw.lock().unwrap().1["state"] = json!("unavailable");
+    restart_bridge(&mut f).await;
+    next_poll(&mut f).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let snapshot = f.hub.snapshot();
+    assert_eq!(snapshot.devices.len(), 1, "unavailable is not removed");
+    let device = &snapshot.devices[0];
+    assert_eq!(device.device.id.as_str(), "bridge:stable");
+    assert_eq!(device.online, Some(false));
+    assert!(device.device.points.iter().all(|p| !p.access.write));
+    assert_eq!(
+        f.hub.state(&PointId::from("bridge:stable/on")).unwrap(),
+        before
+    );
+    assert!(
+        f.hub
+            .command(
+                &PointId::from("bridge:stable/on"),
+                Value::Bool(true),
+                Origin::Ui,
+                None
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), f.requests.recv())
+            .await
+            .is_err()
+    );
+    f.raw.lock().unwrap().1["state"] = json!("on");
+    next_poll(&mut f).await;
+    wait_reading(&f, "on", Value::Bool(true)).await;
+    let snapshot = f.hub.snapshot();
+    assert_eq!(snapshot.devices.len(), 1);
+    assert_eq!(snapshot.devices[0].online, Some(true));
+    assert!(
+        snapshot.devices[0]
+            .device
+            .points
+            .iter()
+            .any(|p| p.key.as_ref() == "on" && p.access.write)
+    );
+}
+
+#[tokio::test]
+async fn removing_entity_from_bridge_config_does_not_restore_its_cached_card() {
+    let mut f = start(&[], true, 200).await;
+    wait_value(&f).await;
+    f.config.entities[0].native_id = "replacement".into();
+    f.raw.lock().unwrap().1["state"] = json!("unavailable");
+    restart_bridge(&mut f).await;
+    next_poll(&mut f).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        f.hub.snapshot().devices.is_empty(),
+        "explicit configuration removal is durable"
+    );
+    restart_bridge(&mut f).await;
+    next_poll(&mut f).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(f.hub.snapshot().devices.is_empty());
 }
 
 #[tokio::test]

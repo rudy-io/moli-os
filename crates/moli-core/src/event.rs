@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Device, DeviceId, InstanceId, Label, PointId, Value};
+use crate::{Device, DeviceId, InstanceId, Label, PointId, Sample, Value};
 
 /// Everything that happens in the system, as broadcast on the bus and
 /// streamed to the surfaces.
@@ -11,6 +12,12 @@ use crate::{Device, DeviceId, InstanceId, Label, PointId, Value};
 pub enum Event {
     DeviceUpserted {
         device: Arc<Device>,
+    },
+    /// A retained offline inventory snapshot, never a fresh measurement.
+    DeviceRestored {
+        device: Arc<Device>,
+        states: BTreeMap<Arc<str>, Sample>,
+        label: Label,
     },
     DeviceRemoved {
         device: DeviceId,
@@ -34,6 +41,12 @@ pub enum Event {
         /// Non-blocking information about this run, independent of its status.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         warning: Option<String>,
+    },
+    /// A newly registered integration, including its classification for live UIs.
+    DriverRegistered {
+        instance: InstanceId,
+        kind: String,
+        integration: Arc<str>,
     },
     LabelChanged {
         device: DeviceId,
