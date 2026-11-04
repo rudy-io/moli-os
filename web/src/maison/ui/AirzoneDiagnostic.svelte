@@ -1,4 +1,5 @@
 <script>
+  import {diagnosticRequest} from '../lib/airzone-diagnostic.js';
   import {t} from '../../lib/i18n.svelte.js';
   import {hub,home} from '../lib/home.svelte.js';
   let {instance,connected=true}=$props();
@@ -14,12 +15,10 @@
     if(['hvac','iaq'].includes(operation)){body.system=Number(system);body.get=get;}
     if(operation==='hvac'&&zone!=='')body.zone=Number(zone);
     if(operation==='iaq')body.sensor=Number(sensor);
-    try{
-      const response=await fetch(`/api/integrations/airzone/${encodeURIComponent(instance)}/diagnostic`,{method:'POST',headers:{'content-type':'application/json','x-moli-origin':'ui'},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
-      const data=await response.json().catch(()=>null);
-      if(!response.ok||data?.read_only!==true){if(response.status===401||response.status===403)hub.session.human=false;error=response.status===429?'busy':response.status===401||response.status===403?'auth':response.status===404?'missing':response.status===400||response.status===422?'invalid':'failed';return;}
-      result=data;
-    }catch{error='network';}finally{busy=false;}
+    const answer=await diagnosticRequest(instance,body);
+    if(answer.ok)result=answer.data;
+    else {if(answer.error==='auth')hub.session.human=false;error=answer.error==='timeout'||answer.error==='cancelled'?'network':answer.error;}
+    busy=false;
   }
 </script>
 <details class="diagnostic">
