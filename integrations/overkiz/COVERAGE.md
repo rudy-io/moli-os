@@ -1,7 +1,9 @@
 # TaHoma coverage and convergence
 
 This branch combines the local-driver convergence from [PR25](https://github.com/rudy-io/moli-os/pull/25)
-and the merged [PR99](https://github.com/rudy-io/moli-os/pull/99) with an optional read-only cloud observer.
+and the merged [PR99](https://github.com/rudy-io/moli-os/pull/99) with an optional cloud source.
+Cloud observation requires no execution consent; saved-scenario launches require
+separate owner authorization and remain subject to the global read-only option.
 It does not provide complete TaHoma application parity.
 The local comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd4062636a236efe3`.
 
@@ -15,7 +17,7 @@ The local comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd406
 | My/favourite recall | Published enum and encoder use the same binding | Only qualified arities; native acknowledgement is not completion |
 | Memorized favourite position | Genuine state read; one-parameter numeric setter | Invalid/absent values unknown; zero-parameter save-current meaning unqualified |
 | Gates/windows | Observation, exact identity/class opt-in for guarded writes | Every write keeps Control semantics; no change to core approval policy |
-| Global read-only option | All write permissions removed and execution refused before actuation | Explicit true required; false compatibility default |
+| Global read-only option | Both native and cloud execution refused before actuation | Explicit true required; false compatibility default does not grant cloud scenario consent |
 | Stateless known openers | Visible with opening_state unknown | Presence is not physical feedback |
 | Local pin/token failure | Local source parked and its devices offline; cloud source independent | Human verification required, no blind certificate replacement |
 | Partial snapshots | Missing devices offline immediately, removed after three successful absent snapshots | Reappearance resets the counter; failed reads do not count |
@@ -24,11 +26,11 @@ The local comparison was refreshed against PR25 at `131e41ed54cdabb4146a07cbd406
 | Events | Not implemented | Official API supports listeners; current snapshots every five seconds |
 | Tilt, combined axes, speed | Not mapped | Need distinct qualified bindings; two sequential commands may interrupt each other |
 | Lighting, sockets, sensors, climate, security | Not complete mappings | Local API varies by device; some data/functions require cloud or another platform |
-| Saved TaHoma scenarios | Cloud reads bounded action definitions; never executes/imports them | Somfy excludes local Developer Mode scenario execution; modern cloud availability still needs account qualification |
+| Saved TaHoma scenarios | Bounded cloud reads and opt-in launch of known saved IDs through Hub guard/journal | Fresh owner PIN and scope-bound consent; global read-only wins; no local execution or import into Moli automations |
 | Grouped immediate actions | No public batch point | Any future batch must validate each action and preserve opener guard |
 | Agenda / SMART / holidays | Cloud reads calendar days/rules, triggers and scheduled/delayed records | Opaque definitions, no recurrence evaluation, synchronization or guaranteed future horizon |
 | App notifications and administration | Not implemented | Moli rules/notifications and Somfy administration are separate concerns |
-| Optional cloud complement | Independent session, fixed read endpoints, bounded encrypted catalogue and owner-only viewing | Opt-in; no cloud physical devices or command path; real account compatibility is separately qualified |
+| Optional cloud complement | Independent session, bounded encrypted catalogue, owner-only viewing and guarded saved-scenario points | No duplicate physical devices, generic action payloads or fallback for local commands; provider compatibility is separately qualified |
 
 ## Evidence and qualification
 
@@ -38,7 +40,8 @@ before preflight. Fixtures are synthetic. A historical normalized inventory was 
 through the actual pure production model with all networking disabled. Its placeholder
 identities cannot route a live command or establish a writable-opener allowlist.
 
-No native authenticated Moli hardware commands were tested. This work does not establish
+The native validation described in README (2026-10-31) issued no authenticated
+Moli hardware commands. Synthetic cloud execution tests likewise do not establish
 physical operation, 100% house coverage, or complete replacement of Home Assistant.
 A scene label and identifier are not its action definition; an equivalent Moli scene needs
 all targets, commands, parameters, order and delays, followed by explicit review.
@@ -48,6 +51,9 @@ Classic route evidence is described in [CLOUD.md](CLOUD.md); neither that eviden
 nor fabricated responses prove that a modern account exposes all six collections.
 Failures retain last-good data with its observation time. Unknown definitions are
 preserved without evaluation; cached visibility is not a claim of live activation.
+The separate execution tests cover scoped consent, stale catalogue rejection,
+global read-only, guest exclusion, Hub guard/journal, cancellation and no POST replay.
+They use fabricated transports and do not prove physical completion.
 
 ## Sources and cloud boundary
 
@@ -61,9 +67,19 @@ preserved without evaluation; cached visibility is not a claim of live activatio
 The cloud extension uses its own session: sharing Home Assistant's rotating refresh
 token could invalidate that session. It scopes observations to an explicitly selected
 setup, verifies an anchor gateway and leaves native device identity unchanged. It
-publishes a read-only summary rather than duplicate physical devices. It cannot retry
-a local action through cloud, and opaque scenario definitions are never executable
-points. The cloud contribution is kept separate from the native convergence PR.
+publishes a read-only summary and generic saved-scenario devices, without duplicating
+physical devices. A scenario point is writable only with consent bound to the
+connection generation, setup and full definition, a current online observation,
+and global `read_only = false`. Its opaque command value also binds the catalogue
+revision. Private labels and definitions remain in the owner catalogue; guests
+cannot access scenario devices.
+
+Cloud execution cannot retry a local action or submit arbitrary action definitions.
+It rechecks membership and the saved definition immediately before one POST by ID.
+Somfy does not make that read and POST atomic; acknowledgement is not physical
+completion, and an uncertain result is never retried automatically. See
+[CLOUD.md](CLOUD.md#optional-saved-scenario-launches) for the provider boundary.
+The cloud contribution is kept separate from the native convergence PR.
 
 The proposed common driver retains the `overkiz` kind and SHA-256 identities for
 compatibility with existing fork installations. Raw-URL IDs collide after the core's

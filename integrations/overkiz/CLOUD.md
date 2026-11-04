@@ -1,10 +1,11 @@
-# Somfy cloud programme observation
+# Somfy cloud observation and saved-scenario launches
 
 The optional cloud source complements the local Overkiz source with saved TaHoma
 programmes. By default it only observes definitions. Saved scenarios may be launched through
 the separately authorized execution path below; programmes cannot be edited,
-deleted, rescheduled or imported as Moli automations. Local device identities and local
-control policy remain independent.
+deleted, rescheduled or imported as Moli automations. Local device identities and
+native command bindings remain unchanged. The global read-only option covers both
+sources; cloud scenario consent does not grant native device permissions.
 
 ## Protocol evidence and coverage
 
@@ -232,7 +233,8 @@ authenticated compatibility or the completeness of a real household inventory.
 ## Interface demonstration
 
 These screenshots use a fully fabricated setup with two scenarios and one entry
-in each other collection. They demonstrate the owner interface, not a successful
+in each other collection. They illustrate the observer-only interface; optional
+scenario launch controls are not shown. They do not demonstrate a successful
 connection to a real Somfy account. The displayed observation date and all labels,
 identifiers and definitions belong to that fixture.
 
@@ -246,9 +248,11 @@ Global `driver.options.read_only = true` always prevents execution. When the
 owner has explicitly enabled control for the integration, each saved scenario
 still requires separate consent with a fresh Moli PIN. Revocation remains
 available while globally read-only or offline. Consent is encrypted and bound to
-the account session, selected setup and full scenario definition; reconnecting or
+the connection generation, selected setup and full scenario definition; reconnecting or
 changing that definition requires authorization again. Starting Moli never
-replays a launch.
+replays a launch. Each opaque command value also binds the current catalogue
+revision. Revocation can cross a refresh without requiring the old revision;
+activation must match the exact current revision.
 
 The owner catalogue exposes a launch capability only when the source is online,
 the saved observation is current and the exact Hub point is writable. The UI

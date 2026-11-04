@@ -3,9 +3,11 @@
 The native source uses local HTTPS, a token from the encrypted vault and a certificate
 pinned before credentials leave. It has no cloud login or Home Assistant dependency.
 Network-free construction validates configuration. Disabled instances are not started
-by Moli. An optional [Somfy cloud observer](CLOUD.md) adds owner-only, read-only access
-to saved scenarios and programming, using an independent account session. It can
-run alone or alongside the native source without publishing duplicate physical devices.
+by Moli. An optional [Somfy cloud source](CLOUD.md) adds owner-only observation of
+saved scenarios and programming, using an independent account session. Known saved
+scenarios can also be launched after separate owner consent with a fresh Moli PIN,
+provided global `read_only` is false. The source can run alone or alongside the
+native source without publishing duplicate physical devices.
 
 Certificate pinning uses **trust on first use (TOFU)** when neither the
 configuration nor the encrypted vault contains `cert_sha256`. That first TLS
@@ -53,6 +55,8 @@ Set **`read_only = true`** for observation. All published write permissions are 
 and both the model and runtime refuse every write path, including stale writable metadata,
 before actuation. Readings and physical capability inference are retained. The default
 remains false for existing configurations; onboarding explicitly enables observation.
+The option covers both sources. Setting it to false does not itself authorize any
+cloud scenario; per-scenario consent is still required.
 Known covers, gates and windows remain visible with a read-only unknown `opening_state`
 when no state is reported, including stateless RTS gates. Unknown classes never gain writes.
 
@@ -115,9 +119,11 @@ Protocol sources consulted at pinned revisions (cover-family/favourite design al
 
 
 The official local API excludes saved TaHoma scenarios; even an execution ID from an
-undocumented local scene endpoint does not establish support. The optional cloud observer
-reads the provider's programme definitions and reports each collection's availability;
-it never runs or imports them as automations. See [cloud protocol and limits](CLOUD.md)
+undocumented local scene endpoint does not establish support. The optional cloud source
+reads programme definitions and reports each collection's availability. Its separate
+saved-ID execution path uses scope-bound consent, current catalogue capabilities
+and the Hub guard/journal; it never imports programmes as Moli automations or
+accepts arbitrary action payloads. See [cloud protocol and limits](CLOUD.md)
 and [coverage and remaining work](COVERAGE.md).
 The driver uses `Semantic::Position` introduced by
 [PR30](https://github.com/rudy-io/moli-os/pull/30); dedicated UI/card changes remain
