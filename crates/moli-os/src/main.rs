@@ -1,5 +1,6 @@
 //! Moli OS binary: one process, every surface.
 
+mod airzone;
 mod backup;
 mod catalogue;
 mod config;
@@ -44,6 +45,8 @@ enum Command {
     Serve,
     /// Validate the configuration and exit.
     CheckConfig,
+    /// Read-only Airzone diagnostics; demo data is never imported as devices.
+    AirzoneInspect(airzone::Inspect),
     /// Operator tools for the encrypted secret store (values are never shown).
     #[command(subcommand)]
     Secrets(SecretsCommand),
@@ -212,6 +215,7 @@ fn main() -> anyhow::Result<()> {
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
+        Command::AirzoneInspect(args) => airzone::run(&config, &args),
         Command::Secrets(SecretsCommand::Forget { instance, name }) => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",

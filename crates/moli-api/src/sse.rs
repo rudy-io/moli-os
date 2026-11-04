@@ -189,7 +189,8 @@ impl View {
             Event::DriverStatus { .. }
             | Event::DriverRegistered { .. }
             | Event::DriverUnregistered { .. }
-            | Event::ApprovalResolved { .. } => {
+            | Event::ApprovalResolved { .. }
+            | Event::LayoutChanged {} => {
                 return Pass::Event;
             }
             // The house's journal and notices are the household's.

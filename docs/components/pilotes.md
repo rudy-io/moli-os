@@ -118,6 +118,39 @@ l'exige).
 En cas d'empreinte différente, l'erreur contient `PIN_MISMATCH` : les pilotes passent alors
 en `waiting` avec la commande `moli-os secrets forget <instance> cert` (ou `cert_sha256`).
 
+## `airzone` : Airzone Local API (`crates/moli-airzone`)
+
+Le pilote natif couvre les 12 opérations de la Local API 1.78 : zones, systèmes,
+eau chaude sanitaire, capteurs de qualité d'air et informations du Webserver.
+Le [registre de couverture](../../integrations/airzone/coverage.json) recense les
+118 schémas de paramètres, dont 31 explicitement écrivables, et les 17 mesures
+d'énergie. Chaque point dépend des capacités effectivement annoncées par le
+contrôleur ; cette couverture ne garantit pas la compatibilité de tous les firmwares.
+
+Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
+`read_only = false` est conservé pour ne pas désactiver les automatismes existants.
+Un essai d’observation configure explicitement `read_only = true`. Les commandes
+restent soumises aux gardes, aux membres
+affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
+démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
+au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient
+pas à cette API.
+
+HTTP utilise le port 3000 par défaut. HTTPS demande un port explicite et
+`tls_fingerprint`, une empreinte SHA-256 vérifiée ; aucun repli en clair. Si l'eau
+chaude ne rapporte pas son unité, `dhw_units = 0` (°C) ou `1` (°F) permet de la
+déclarer explicitement. Sans unité connue, sa consigne reste en lecture seule.
+
+`moli-os airzone-inspect --instance airzone <opération>` donne un diagnostic
+strictement en lecture seule, avec identifiants et textes libres expurgés. Les
+opérations de diagnostic comprennent les variantes GET, la démonstration synthétique
+et la disponibilité de la page thermostat ; le HTML distant n'est pas affiché.
+Les programmations Cloud, l'installation du réseau, l'appairage et les mises à jour
+du firmware ne sont pas des opérations de la Local API.
+
+Configuration, garde des groupes, limites des réponses, commandes et restrictions :
+[guide Airzone](../../integrations/airzone/README.md).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.

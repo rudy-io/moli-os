@@ -1,8 +1,8 @@
 <script>
   import '@fontsource-variable/figtree';
   import './maison.css';
-  import { onMount } from 'svelte';
-  import { home, hub, start, value, savePref, watches, hidden } from './lib/home.svelte.js';
+  import { onMount, untrack } from 'svelte';
+  import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -24,8 +24,12 @@
   import Parler from './pages/Parler.svelte';
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
+  import { airzonePresent } from './lib/airzone.js';
 
   let { route } = $props();
+  $effect(() => {
+    if (hub.layoutRevision > 0) untrack(() => {void reloadLayout();});
+  });
 
   // Shown only if the link stays down a few seconds (a blink is not news).
   let offline = $state(false);
@@ -44,6 +48,7 @@
     { path: 'moli', name: 'Moli', orb: true },
     { path: 'salon', label: 'commun.nav.salon', icon: 'remote' },
     { path: 'pieces', label: 'commun.nav.pieces', icon: 'light-group' },
+    { path: 'airzone', label: 'airzone_ui.title', icon: 'air-conditioner', shown: () => airzonePresent(hub.drivers) },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
@@ -151,6 +156,8 @@
       <Salon />
     {:else if page === 'pieces'}
       <Pieces />
+    {:else if page === 'airzone'}
+      {#await import('./pages/Airzone.svelte') then { default: Airzone }}<Airzone {route} />{/await}
     {:else if page === 'plan'}
       <Plan />
     {:else if page === 'carte'}

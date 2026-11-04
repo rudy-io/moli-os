@@ -362,5 +362,7 @@
   "systeme.journal.pilote_ajoute": "{kind} driver added",
   "systeme.journal.pilote_pause": "{kind} driver paused",
   "systeme.journal.pilote_reconfigure_lecture_seule": "{kind} driver reconfigured as read-only",
-  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured"
+  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured",
+  "systeme.journal.masque": "Hidden in Moli",
+  "systeme.journal.restaure": "Restored in Moli"
 }

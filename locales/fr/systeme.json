@@ -362,5 +362,7 @@
   "systeme.journal.pilote_ajoute": "Pilote {kind} ajouté",
   "systeme.journal.pilote_pause": "Pilote {kind} mis en pause",
   "systeme.journal.pilote_reconfigure_lecture_seule": "Pilote {kind} reconfiguré en lecture seule",
-  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré"
+  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré",
+  "systeme.journal.masque": "Masqué dans Moli",
+  "systeme.journal.restaure": "Restauré dans Moli"
 }

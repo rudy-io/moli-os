@@ -1078,6 +1078,29 @@ impl Hub {
         );
     }
 
+    /// Records a persisted visibility edit and tells dashboards to reload the
+    /// layout only when it succeeded. No device capability or state changes.
+    pub fn record_visibility(
+        &self,
+        device: DeviceId,
+        hidden: bool,
+        origin: Origin,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        let saved = outcome == Outcome::Ok;
+        self.record(
+            origin,
+            actor,
+            Action::Visibility { device, hidden },
+            outcome,
+            Instant::now(),
+        );
+        if saved {
+            self.emit(Event::LayoutChanged {});
+        }
+    }
+
     /// Journals a human's persisted driver installation without its address.
     pub fn record_driver_added(
         &self,

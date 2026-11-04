@@ -1,0 +1,341 @@
+import { test, before, beforeEach, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
+
+// Render the actual page and its cards. Every synthetic point is writable:
+// this view must remain observational even when the driver allows commands.
+let vite;
+let render;
+let hub;
+let home;
+let words;
+let Page;
+let ZoneCard;
+let Readings;
+const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const document = Object.getOwnPropertyDescriptor(globalThis, 'document');
+
+before(async () => {
+  delete globalThis.localStorage;
+  globalThis.document = { querySelector: () => null, documentElement: {} };
+  vite = await createServer({
+    root: fileURLToPath(new URL('../../../', import.meta.url)),
+    server: { middlewareMode: true, watch: null, hmr: false },
+    logLevel: 'error',
+  });
+  ({ render } = await vite.ssrLoadModule('svelte/server'));
+  ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
+  ({ home } = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js'));
+  words = await vite.ssrLoadModule('/src/lib/i18n.svelte.js');
+  Page = (await vite.ssrLoadModule('/src/maison/pages/Airzone.svelte')).default;
+  ZoneCard = (await vite.ssrLoadModule('/src/maison/ui/AirzoneZoneCard.svelte')).default;
+  Readings = (await vite.ssrLoadModule('/src/maison/ui/AirzoneReadings.svelte')).default;
+});
+
+beforeEach(async () => {
+  await words.setLanguage('fr');
+  hub.devices = {};
+  hub.drivers = [];
+  hub.connected = true;
+  hub.chart = null;
+  home.config = {};
+});
+
+after(async () => {
+  await vite?.close();
+  delete globalThis.document;
+  if (document) Object.defineProperty(globalThis, 'document', document);
+  if (storage) Object.defineProperty(globalThis, 'localStorage', storage);
+});
+
+function device(id, name, values = {}, options = {}) {
+  const points = Object.entries(values).map(([key, value]) => ({
+    key,
+    label: `Reading ${key}`,
+    kind: key === 'mode' ? { type: 'enum', values: ['off', 'heat', 'cool'] }
+      : { type: typeof value === 'boolean' ? 'binary' : typeof value === 'number' ? 'numeric' : 'text' },
+    unit: ['temperature', 'target_temperature', 'heatsetpoint', 'coolsetpoint'].includes(key) ? '°C'
+      : key === 'humidity' ? '%' : null,
+    access: { read: true, write: true },
+    semantic: 'other',
+  }));
+  return {
+    id, instance: id.split(':')[0], native_name: name, label: {},
+    manufacturer: 'Airzone', model: 'Local API', online: true, members: [], points,
+    state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, ts: 1_700_000_000_000 }])),
+    ...options,
+  };
+}
+
+const driver = (instance, kind = 'airzone') => ({ instance, kind, status: { state: 'running' } });
+const setDevices = (devices) => { hub.devices = Object.fromEntries(devices.map((d) => [d.id, d])); };
+const page = (route = 'airzone') => render(Page, { props: { route } }).body;
+const text = (html) => html.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+const tags = (html, tag) => [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'))].map(([value]) => value);
+const cardLinks = (html) => tags(html, 'a').filter((tag) => /class="zone-card\b/.test(tag));
+
+function observationOnly(html, filters = false) {
+  assert.doesNotMatch(html, /role="(?:switch|slider)"|type="(?:range|number|checkbox|submit)"|<form\b/);
+  for (const input of tags(html, 'input')) {
+    assert.ok(filters && /type="search"/.test(input), `unexpected editor: ${input}`);
+  }
+  for (const select of tags(html, 'select')) {
+    assert.ok(filters && /aria-label="Filtrer par système"/.test(select), `unexpected setting selector: ${select}`);
+  }
+  for (const button of tags(html, 'button')) {
+    assert.match(button, /class="metric\b/, 'only observed metrics can use a button in the zone detail');
+    if (!/\bdisabled\b/.test(button)) {
+      assert.match(button, /aria-label="[^"]+Voir l’historique"/, 'available metrics name their history navigation');
+    }
+  }
+}
+
+function house() {
+  const selected = device('native-a:aabbccddeeff_s1_z2', 'Selected zone', {
+    systemID: 1, zoneID: 2, on: true, mode: 'heat', temperature: 20.5, target_temperature: 21,
+    humidity: 0, heat_demand: true, problem: false,
+  });
+  const sibling = device('native-a:aabbccddeeff_s1_z3', 'Sibling zone', { systemID: 1, zoneID: 3, temperature: 19 }, { online: false });
+  const upper = device('native-a:aabbccddeeff_s2_z1', 'Upper zone', { systemID: 2, zoneID: 1, temperature: 22 });
+  const other = device('native-b:112233445566_s1_z1', 'Other installation zone', { systemID: 1, zoneID: 1, temperature: 23 });
+  const hidden = device('native-a:aabbccddeeff_s1_z4', 'Hidden zone', { systemID: 1, zoneID: 4, temperature: 24 });
+  const bridge = device('bridge:climate_airzone', 'Bridge imitation zone', { systemID: 1, temperature: 25 });
+  const mine = device('native-a:scoped_control', 'Control for selected zone', { systemID: 1, mode: 'heat' }, { model: 'Airzone system', members: [selected.id] });
+  const unrelated = device('native-a:other_control', 'Control for sibling zone', { systemID: 1, mode: 'heat' }, { model: 'Airzone system', members: [sibling.id] });
+  const foreign = device('native-b:foreign_control', 'Foreign control', { systemID: 1, mode: 'cool' }, { model: 'Airzone system', members: [selected.id] });
+  const gateway = device('native-a:aabbccddeeff_gateway', 'Synthetic gateway', { dhw_available: false, iaq_available: true, driver: '' }, { model: 'Airzone Webserver' });
+  const metadata = device('native-a:aabbccddeeff_s1_system', 'Synthetic system metadata', { systemID: 1, version: '1.78' }, { model: 'Airzone Local API' });
+  hub.drivers = [driver('native-a'), driver('native-b'), driver('bridge', 'homeassistant')];
+  home.config = { hidden: [hidden.id] };
+  setDevices([selected, sibling, upper, other, hidden, bridge, mine, unrelated, foreign, gateway, metadata]);
+  return { selected, sibling, hidden, bridge, gateway };
+}
+
+test('overview counts only native visible zones and keeps equal system numbers in separate installations', () => {
+  house();
+  const html = page();
+  const visibleText = text(html);
+  assert.equal(cardLinks(html).length, 4);
+  assert.match(visibleText, /4 zones 3 systèmes 3 joignables/);
+  assert.doesNotMatch(visibleText, /Hidden zone|Bridge imitation zone|Synthetic gateway|Synthetic system metadata|Control for/);
+  const groups = [...html.matchAll(/<section class="system-zones\b[^>]*>([\s\S]*?)<\/section>/g)].map(([, group]) => text(group));
+  assert.equal(groups.length, 3);
+  assert.match(groups[0], /native-a · Système 1/);
+  assert.match(groups[0], /Selected zone/);
+  assert.match(groups[0], /Sibling zone/);
+  assert.doesNotMatch(groups[0], /Upper zone|Other installation zone/);
+  assert.match(groups[1], /native-a · Système 2.*Upper zone/);
+  assert.match(groups[2], /native-b · Système 1.*Other installation zone/);
+  observationOnly(html, true);
+});
+
+test('overview encodes native identities in links and detail resolves the selected zone without leaking other control scopes', () => {
+  house();
+  assert.ok(cardLinks(page()).some((tag) => tag.includes('href="#/airzone/native-a%3Aaabbccddeeff_s1_z2"')));
+  const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  assert.match(text(html), /Selected zone/);
+  assert.match(text(html), /Control for selected zone/);
+  assert.doesNotMatch(text(html), /Control for sibling zone|Foreign control|Other installation zone|Hidden zone/);
+  assert.equal(tags(html, 'button').length, 2, 'two observed main metrics link to history');
+  observationOnly(html);
+});
+
+test('zone detail preserves Fahrenheit for both primary readings and does not manufacture a missing unit', () => {
+  const { selected } = house();
+  for (const key of ['temperature', 'target_temperature']) selected.points.find((p) => p.key === key).unit = '°F';
+  selected.state.temperature.value = 70.5;
+  selected.state.target_temperature.value = 72;
+  let html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  const measurements = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  assert.deepEqual(measurements, ['70,5 °F', '72 °F']);
+  assert.doesNotMatch(html, /°C/);
+  for (const key of ['temperature', 'target_temperature']) selected.points.find((p) => p.key === key).unit = null;
+  html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  assert.doesNotMatch(html, /°F|°C/);
+  observationOnly(html);
+});
+
+test('history buttons announce the actual primary value and its declared unit to screen readers', () => {
+  for (const { unit, temperature, target, labels } of [
+    { unit: '°C', temperature: 20.5, target: 21, labels: ['Température mesurée : 20,5 °C. Voir l’historique', 'Consigne : 21 °C. Voir l’historique'] },
+    { unit: '°F', temperature: 70.5, target: 72, labels: ['Température mesurée : 70,5 °F. Voir l’historique', 'Consigne : 72 °F. Voir l’historique'] },
+    { unit: null, temperature: 20.5, target: 21, labels: ['Température mesurée : 20,5. Voir l’historique', 'Consigne : 21. Voir l’historique'] },
+  ]) {
+    const { selected } = house();
+    for (const key of ['temperature', 'target_temperature']) selected.points.find((p) => p.key === key).unit = unit;
+    selected.state.temperature.value = temperature;
+    selected.state.target_temperature.value = target;
+    const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+    assert.deepEqual(tags(html, 'button').map((button) => button.match(/aria-label="([^"]+)"/)?.[1]), labels);
+    observationOnly(html);
+  }
+  const { selected } = house();
+  delete selected.state.temperature;
+  delete selected.state.target_temperature;
+  const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  const buttons = tags(html, 'button');
+  assert.equal(buttons.length, 2);
+  assert.ok(buttons.every((button) => /\bdisabled\b/.test(button)));
+  assert.ok(buttons.every((button) => !/aria-label=/.test(button)), 'absent measurements retain their visible label without inventing an accessible value');
+  const measurements = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  assert.deepEqual(measurements, ['—', '—']);
+  observationOnly(html);
+});
+
+test('unknown, malformed, hidden, bridge and removed zone links all return a readable not-found view', () => {
+  const { selected } = house();
+  for (const route of [
+    'airzone/%E0%A4%A', 'airzone/unknown%3Azone', 'airzone/',
+    'airzone/native-a%3Aaabbccddeeff_s1_z4', 'airzone/bridge%3Aclimate_airzone',
+    'airzone/%3Cscript%3E',
+  ]) {
+    const html = page(route);
+    assert.match(text(html), /Cette zone n’est plus disponible/);
+    assert.match(html, /href="#\/airzone"/);
+    assert.doesNotMatch(html, /<script>|class="measurement\b/);
+    observationOnly(html);
+  }
+  delete hub.devices[selected.id];
+  assert.match(text(page('airzone/native-a%3Aaabbccddeeff_s1_z2')), /Cette zone n’est plus disponible/);
+});
+
+test('offline cards and details retain their readings but never describe the previous demand as current', () => {
+  const { selected } = house();
+  selected.online = false;
+  const card = render(ZoneCard, { props: { device: selected, href: '#/airzone/native-a%3Aaabbccddeeff_s1_z2' } }).body;
+  assert.match(text(card), /Injoignable/);
+  assert.match(text(card), /Dernières valeurs connues/);
+  assert.match(text(card), /20,5/);
+  assert.doesNotMatch(text(card), /Demande en cours/);
+  const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  assert.match(text(html), /Cette zone ne répond pas/);
+  assert.match(text(html), /Dernières valeurs connues/);
+  assert.doesNotMatch(text(html), /Demande en cours/);
+  observationOnly(card);
+  observationOnly(html);
+});
+
+test('missing temperatures and unknown availability cannot become zero or live controls', () => {
+  const zone = device('native-a:empty_zone', 'Unmeasured zone', { systemID: 1, zoneID: 1 }, { online: null });
+  hub.drivers = [driver('native-a')];
+  setDevices([zone]);
+  const card = render(ZoneCard, { props: { device: zone, href: '#/airzone/native-a%3Aempty_zone' } }).body;
+  assert.match(text(card), /État non communiqué/);
+  assert.match(text(card), /Température mesurée — Consigne —/);
+  assert.doesNotMatch(card, /°C|°F/);
+  const html = page('airzone/native-a%3Aempty_zone');
+  assert.match(text(html), /Disponibilité inconnue/);
+  assert.equal(tags(html, 'button').length, 2);
+  assert.ok(tags(html, 'button').every((button) => /\bdisabled\b/.test(button)), 'missing metrics cannot open invented history');
+  observationOnly(html);
+});
+
+test('double setpoints remain separate on the zone card and detail without a fabricated single target', () => {
+  const zone = device('native-a:dual', 'Dual zone', { systemID: 1, zoneID: 1, temperature: 20, heatsetpoint: 19, coolsetpoint: 24 });
+  hub.drivers = [driver('native-a')];
+  setDevices([zone]);
+  const card = render(ZoneCard, { props: { device: zone, href: '#/airzone/native-a%3Adual' } }).body;
+  assert.match(text(card), /19 °C/);
+  assert.match(text(card), /24 °C/);
+  const html = page('airzone/native-a%3Adual');
+  const metrics = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  assert.deepEqual(metrics, ['20 °C', '—', '19 °C', '24 °C']);
+  observationOnly(card);
+  observationOnly(html);
+});
+
+test('readings show every advertised point once, escape supplied text and distinguish unset from missing', () => {
+  const source = device('native-a:readings', 'Readings', {
+    temperature: 0, on: false, mode: 'heat', mintemp: 5, thermos_version: '2.0', driver: '',
+    future_field: '<script>synthetic</script>', missing_field: null,
+  });
+  source.points.find((p) => p.key === 'driver').label = '';
+  const html = render(Readings, { props: { device: source } }).body;
+  const visibleText = text(html);
+  for (const point of source.points) {
+    const label = point.label || point.key;
+    assert.equal(visibleText.split(label).length - 1, 1, `${point.key} is neither omitted nor duplicated`);
+  }
+  assert.match(visibleText, /Reading temperature 0 °C/);
+  assert.match(visibleText, /Reading on Non/);
+  assert.match(visibleText, /Reading mode Chaud/);
+  assert.match(visibleText, /driver Non renseigné/);
+  assert.match(visibleText, /Reading missing_field —/);
+  assert.match(html, /&lt;script/);
+  assert.doesNotMatch(html, /<script>synthetic/);
+  observationOnly(html);
+});
+
+test('installation diagnostics expose optional availability without treating unsupported DHW as an HVAC failure', () => {
+  const { gateway } = house();
+  let html = page('airzone/installation');
+  assert.match(text(html), /Synthetic gateway/);
+  assert.match(text(html), /Eau chaude sanitaire Non disponible/);
+  assert.match(text(html), /Capteurs de qualité d’air dédiés Disponible/);
+  assert.match(text(html), /Pilote démarré/);
+  assert.match(text(html), /Synthetic system metadata/);
+  assert.match(text(html), /Les programmations Airzone Cloud ne sont pas exposées/);
+  observationOnly(html);
+  gateway.online = false;
+  html = page('airzone/installation');
+  assert.match(text(html), /Eau chaude sanitaire Disponibilité inconnue/);
+  assert.match(text(html), /Capteurs de qualité d’air dédiés Disponibilité inconnue/);
+});
+
+test('offline shared controls carry their own stale warning even when the selected zone remains online', () => {
+  house();
+  hub.devices['native-a:scoped_control'].online = false;
+  const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
+  const shared = html.slice(html.indexOf('Control for selected zone'));
+  const notices = [...shared.matchAll(/<p\b[^>]*role="status"[^>]*>([\s\S]*?)<\/p>/g)].map(([, value]) => text(value));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /Ressource injoignable.*Dernières valeurs connues.*2023/);
+  assert.match(text(shared), /Reading mode Chaud/, 'the stale reported setting remains accessible');
+  assert.match(text(html), /Demande en cours/, 'the independent reachable zone keeps its current demand');
+  observationOnly(html);
+});
+
+test('gateway readings distinguish offline and unknown availability and label retained sample timestamps', () => {
+  const { gateway } = house();
+  for (const [online, expected] of [[false, /Ressource injoignable/], [null, /Disponibilité inconnue/]]) {
+    gateway.online = online;
+    const html = page('airzone/installation');
+    const notices = [...html.matchAll(/<p\b[^>]*role="status"[^>]*>([\s\S]*?)<\/p>/g)].map(([, value]) => text(value));
+    assert.equal(notices.length, 1);
+    assert.match(notices[0], expected);
+    assert.match(notices[0], /Dernières valeurs connues.*2023/);
+    assert.match(text(html), /driver Non renseigné/);
+    observationOnly(html);
+  }
+  for (const sample of Object.values(gateway.state)) delete sample.ts;
+  const html = render(Readings, { props: { device: gateway } }).body;
+  assert.match(text(html), /Disponibilité inconnue Dernières valeurs connues/);
+  assert.doesNotMatch(html, /Invalid Date|1970|2023/);
+});
+
+test('loading, empty native inventory and a disconnected hub communicate different states', () => {
+  hub.connected = false;
+  assert.match(text(page()), /Connexion à vos zones/);
+  hub.connected = true;
+  hub.drivers = [driver('bridge', 'homeassistant')];
+  setDevices([device('bridge:climate', 'Bridge zone', { temperature: 20 })]);
+  assert.match(text(page()), /Aucune zone Airzone native visible/);
+  assert.equal(cardLinks(page()).length, 0);
+  house();
+  hub.connected = false;
+  assert.match(text(page()), /Connexion à Moli interrompue/);
+  assert.equal(cardLinks(page()).length, 4, 'previous observations remain accessible under the disconnected warning');
+});
+
+test('the zone card and unset diagnostic values follow the selected English locale', async () => {
+  const { selected, gateway } = house();
+  await words.setLanguage('en');
+  const card = render(ZoneCard, { props: { device: selected, href: '#/airzone/native-a%3Aaabbccddeeff_s1_z2' } }).body;
+  assert.match(text(card), /Measured temperature/);
+  assert.match(text(card), /20\.5/);
+  assert.doesNotMatch(text(card), /Température mesurée|airzone_ui\./);
+  const html = render(Readings, { props: { device: gateway } }).body;
+  assert.match(text(html), /Not set/);
+  assert.doesNotMatch(text(html), /Non renseigné|airzone_ui\./);
+});
