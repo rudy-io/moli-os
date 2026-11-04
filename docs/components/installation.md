@@ -41,7 +41,9 @@ vers un fichier en mémoire, depuis un gestionnaire de secrets) : voir [exploita
 
 ## 4. Ajouter ses appareils
 
-Une intégration à la fois, dans `data/moli.toml` : un bloc `[[driver]]` par pont ou appareil, puis
+Pour une passerelle **Airzone compatible avec l’API locale**, ouvrir **Système → Ajouter une passerelle** : lancer la recherche, choisir la passerelle, puis confirmer son ajout en lecture seule. La saisie manuelle reste disponible si le réseau masque la passerelle. Moli conserve l’installation et démarre le pilote immédiatement. Aucun fichier à modifier ni redémarrage à effectuer ; le code Moli est requis. HTTPS demande une empreinte de certificat déjà vérifiée. L’appairage physique des thermostats reste du ressort du système Airzone.
+
+Pour les autres intégrations, une à la fois dans `data/moli.toml` : un bloc `[[driver]]` par pont ou appareil, puis
 `docker compose restart moli-os`.
 
 - Ce qui existe : `integrations/` (un dossier par intégration, avec son `onboarding.md`) et

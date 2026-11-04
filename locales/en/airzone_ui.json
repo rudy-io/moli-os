@@ -3,8 +3,8 @@
   "airzone_ui.subtitle": "Temperature and comfort in every zone, at a glance.",
   "airzone_ui.open": "Open Airzone view",
   "airzone_ui.workshop_link": "Find your temperatures and setpoints in the Airzone view.",
-  "airzone_ui.read_only": "Read-only view",
-  "airzone_ui.read_only_help": "View states and settings. This view does not send any commands.",
+  "airzone_ui.read_only": "Equipment read-only",
+  "airzone_ui.read_only_help": "No command is sent to equipment. Names, rooms and cards can be managed in Moli.",
   "airzone_ui.zones": "Zones",
   "airzone_ui.installation": "Installation and diagnostics",
   "airzone_ui.zone_count_one": "{count} zone",
@@ -78,5 +78,13 @@
   "airzone_ui.sections.limits": "Limits and setpoints",
   "airzone_ui.sections.equipment": "Equipment and thermostat",
   "airzone_ui.sections.diagnostics": "Diagnostics",
-  "airzone_ui.sections.other": "Other information"
+  "airzone_ui.sections.other": "Other information",
+  "airzone_ui.manage": "Manage devices",
+  "airzone_ui.manage_help": "Names and visibility in Moli, without changing your Airzone equipment.",
+  "airzone_ui.alerts": "Alerts",
+  "airzone_ui.alerts_help": "Reported issues and connections that need checking.",
+  "airzone_ui.add": "Add a device",
+  "airzone_ui.add_help": "Find a hidden device, a new zone or another gateway.",
+  "airzone_ui.alert_count_one": "{count} alert to review",
+  "airzone_ui.alert_count_other": "{count} alerts to review"
 }

@@ -26,8 +26,8 @@ mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 
 **TOML instances retain their existing command mode**: an omitted `read_only`
 defaults to `false`, preserving existing automations. Set `read_only = true` for
-an observation-only trial. That restriction applies to published capabilities,
-the executor and transport,
+an observation-only trial. Gateways added or edited from the dashboard explicitly
+use `read_only = true`. That restriction applies to published capabilities, the executor and transport,
 including integration configuration. It is not merely a disabled UI button.
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains
@@ -195,5 +195,5 @@ Older driver binaries reject unknown TOML options. Before rolling back, restore
 a configuration compatible with that version: `read_only`, `tls_fingerprint` and
 `dhw_units` are not accepted by the original driver. Removing `read_only` does not
 make an older driver read-only; keep the instance disabled if observation-only
-operation is required. Keep the current configuration and encrypted store
-backed up first.
+operation is required. Restore a matching managed-gateway registry/backup too.
+Keep the current configuration, registry and encrypted store backed up first.

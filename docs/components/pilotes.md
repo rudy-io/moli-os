@@ -129,7 +129,8 @@ contrôleur ; cette couverture ne garantit pas la compatibilité de tous les fir
 
 Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
 `read_only = false` est conservé pour ne pas désactiver les automatismes existants.
-Un essai d’observation configure explicitement `read_only = true`. Les commandes
+Un essai d’observation configure explicitement `read_only = true` ; les passerelles
+ajoutées ou modifiées depuis Moli imposent cette lecture seule. Les commandes
 restent soumises aux gardes, aux membres
 affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
 démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
