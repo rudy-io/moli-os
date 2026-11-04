@@ -1,8 +1,8 @@
 <script>
   import '@fontsource-variable/figtree';
   import './maison.css';
-  import { onMount } from 'svelte';
-  import { home, hub, start, value, savePref, watches, hidden } from './lib/home.svelte.js';
+  import { onMount, untrack } from 'svelte';
+  import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -26,6 +26,9 @@
   import { moli } from './lib/moli.svelte.js';
 
   let { route } = $props();
+  $effect(() => {
+    if (hub.layoutRevision > 0) untrack(() => {void reloadLayout();});
+  });
 
   // Shown only if the link stays down a few seconds (a blink is not news).
   let offline = $state(false);

@@ -121,14 +121,20 @@
 
   // ---- the room's temperature ----------------------------------------------------------
 
-  const temp = $derived.by(() => {
+  const roomTemperature = $derived.by(() => {
     const readings = [...room.sensors, ...room.climates]
       .filter((d) => d.online !== false)
       // Tuya's Zigbee probes say `va_temperature`.
-      .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current') ?? value(d.id, 'va_temperature'))
-      .filter((x) => typeof x === 'number');
-    return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
+      .map((d) => {
+        const key = ['temperature', 'temp_current', 'va_temperature'].find((key) => Number.isFinite(value(d.id, key)));
+        return { value: key ? value(d.id, key) : null, unit: pointOf(d, key)?.unit };
+      })
+      .filter((reading) => Number.isFinite(reading.value));
+    // An average cannot mix Celsius/Fahrenheit or readings without a known scale.
+    if (!readings.length || !readings[0].unit || readings.some((reading) => reading.unit !== readings[0].unit)) return null;
+    return { value: readings.reduce((sum, reading) => sum + reading.value, 0) / readings.length, unit: readings[0].unit };
   });
+  const temp = $derived(roomTemperature?.value ?? null);
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
   const gaugeAt = (deg) => Math.min(100, Math.max(0, ((deg - 14) / 16) * 100));
 
@@ -230,7 +236,7 @@
       <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
     </div>
     {#if temp != null}
-      <span class="temp {tone(temp)}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}°</b><i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i></span>
+      <span class="temp {roomTemperature.unit === '°C' ? tone(temp) : ''}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}{roomTemperature.unit}</b>{#if roomTemperature.unit === '°C'}<i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i>{/if}</span>
     {/if}
     {#if lamps.length}
       <button class="round" class:open={showLooks} onclick={() => (showLooks = !showLooks)} aria-expanded={showLooks} title={t('commun.piece.ambiances')} aria-label={t('commun.piece.ambiances_de', { name: room.name })}>
@@ -291,7 +297,7 @@
       <Icon name="air-conditioner" size={18} />
       <b>{nameOf(d.id)}</b>
       {#if Number.isFinite(temperature) || Number.isFinite(target)}
-        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}°{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}°{/if}</span>
+        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, 'temperature')?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, 'target_temperature')?.unit ?? ''}{/if}</span>
       {/if}
       <span class="state">{climateState(on, mode)}</span>
     </button>

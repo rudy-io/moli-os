@@ -132,6 +132,61 @@ test('Airzone system has translated mode and fan controls without a fake thermos
   assert.doesNotMatch(html, /class="dial/);
 });
 
+test('read-only climate ventilation remains visible without a selector', () => {
+  const html = show('ClimateCard', [point('mode', enumeration('off', 'heat'), false), point('fan_speed', enumeration('0', '1', '3'), false)], { mode: 'heat', fan_speed: '3' }, { model: 'Airzone system' });
+  assert.match(html, /Ventilation/);
+  assert.match(html, />3</);
+  assert.doesNotMatch(html, /<select\b/);
+});
+
+test('climate readings never invent a unit and preserve explicitly reported Fahrenheit', () => {
+  const temperature = point('temperature', { type: 'numeric' }, false);
+  const target = point('target_temperature', number(10, 100, 0.5), false);
+  for (const unit of [undefined, null]) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 20.4, target_temperature: 21.5 });
+    assert.match(html, /20,4/);
+    assert.match(html, /21,5/);
+    assert.doesNotMatch(html, /°/);
+  }
+  for (const unit of ['°C', '°F']) {
+    const html = show('ClimateCard', [{ ...temperature, unit }, { ...target, unit }], { temperature: 70, target_temperature: 72 });
+    assert.ok(html.includes(unit));
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+  }
+});
+
+test('room climate summaries use only the declared temperature units', () => {
+  for (const unit of [null, '°F']) {
+    const html = showRoom([{
+      id: 'fixture:climate', model: 'Home Assistant climate',
+      points: [{ ...point('temperature', { type: 'numeric' }, false), unit }, { ...point('target_temperature', { type: 'numeric' }, false), unit }],
+      values: { temperature: 70, target_temperature: 72 },
+    }]);
+    assert.match(html, /70/);
+    assert.match(html, /72/);
+    if (unit) assert.ok(html.includes(unit));
+    else assert.doesNotMatch(html, /°/);
+  }
+});
+
+test('room averages never combine temperature scales or grade Fahrenheit as Celsius', () => {
+  const entries = (units, values) => units.map((unit, index) => ({
+    id: `fixture:climate${index}`, model: 'Home Assistant climate',
+    points: [{ ...point('temperature', { type: 'numeric' }, false), unit }], values: { temperature: values[index] },
+  }));
+  const mixed = showRoom(entries(['°C', '°F'], [20, 68]));
+  assert.doesNotMatch(mixed, /<span class="temp /);
+  const unknown = showRoom(entries(['°C', null], [20, 68]));
+  assert.doesNotMatch(unknown, /<span class="temp /);
+  const celsius = showRoom(entries(['°C', '°C'], [20, 22]));
+  assert.match(celsius, /class="temp good/);
+  assert.match(celsius, /21,0°C/);
+  const fahrenheit = showRoom(entries(['°F', '°F'], [68, 72]));
+  assert.match(fahrenheit, /70,0°F/);
+  assert.doesNotMatch(fahrenheit, /class="temp hot/);
+});
+
 test('offline thermostat exposes no active commands', () => {
   const html = show('ClimateCard', [point('target_temperature', number(5, 35, 0.5)), point('on', { type: 'binary' }), point('mode', enumeration('chaud'))], { target_temperature: 21, on: true }, { online: false });
   assert.equal(buttons(html).length, 0);

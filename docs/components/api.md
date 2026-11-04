@@ -863,3 +863,14 @@ Restent ouverts (non urgents) :
 - le commentaire de `crates/moli-api/src/lib.rs` ne liste ni `/api/system`, ni
   `/api/home`, `/api/bench`, `/api/history`, `/api/devices/{id}/snapshot` ; la plupart des
   handlers de `rest.rs` et `automations.rs` n'ont pas de commentaire de documentation.
+
+## Visibilité locale des appareils
+
+| Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
+|---|---|---|---|---|---|
+| PUT | `/api/devices/{id}/visibility` | session humaine + origine `ui`, invités refusés | `{hidden:bool}`, champs inconnus refusés, 1 KiB maximum | `{hidden:bool}` | `403` non-humain ; `404` appareil inconnu ; `422` identifiant invalide ; `503` layout non configuré ; `500` sauvegarde impossible |
+
+Une session humaine du dashboard peut masquer ou restaurer un appareil dans Moli.
+La modification persiste dans `home.json`, ne commande pas l’appareil et ne retire
+ni sa définition ni son historique. Un succès diffuse `layout_changed` pour que
+les autres vues rechargent leur disposition, et journalise une action `visibility`.
