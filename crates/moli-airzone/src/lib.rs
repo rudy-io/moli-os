@@ -674,6 +674,7 @@ mod lifecycle_tests {
         delay: Arc<Mutex<u64>>,
         optional_delay: Arc<Mutex<u64>>,
         optional_started: Arc<AtomicUsize>,
+        optional_notified: Arc<tokio::sync::Notify>,
         response_status: Arc<AtomicUsize>,
         reads: Arc<AtomicUsize>,
     }
@@ -711,6 +712,7 @@ mod lifecycle_tests {
             delay: Arc::default(),
             optional_delay: Arc::default(),
             optional_started: Arc::default(),
+            optional_notified: Arc::default(),
             response_status: Arc::new(AtomicUsize::new(200)),
             reads: Arc::default(),
         };
@@ -720,6 +722,7 @@ mod lifecycle_tests {
                 any(|State(s): State<Sim>| async move {
                     let delay = *s.optional_delay.lock().unwrap();
                     s.optional_started.fetch_add(1, Ordering::SeqCst);
+                    s.optional_notified.notify_one();
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                     Reply(json!({"version":"1.78"}))
                 }),
@@ -801,9 +804,22 @@ mod lifecycle_tests {
     fn point(device: &str, key: &str) -> PointId {
         PointId::new(&DeviceId::from(device), key)
     }
+    async fn wait_for_optional_read(sim: &Sim, after: usize) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while sim.optional_started.load(Ordering::SeqCst) <= after {
+                sim.optional_notified.notified().await;
+            }
+        })
+        .await
+        .expect("optional read started");
+    }
     #[tokio::test]
     async fn slow_optional_metadata_does_not_delay_a_zone_command() {
         let (hub, cancel, sim, server) = start().await;
+        // Startup publishes the core before the optional phase. Observe that
+        // first request explicitly instead of assuming it preceded ready().
+        wait_for_optional_read(&sim, 0).await;
+        let optional_before = sim.optional_started.load(Ordering::SeqCst);
         *sim.optional_delay.lock().unwrap() = 6000;
         let started = Instant::now();
         hub.command(
@@ -816,16 +832,7 @@ mod lifecycle_tests {
         .unwrap();
         assert!(started.elapsed() < Duration::from_millis(1500));
         assert_eq!(sim.writes.lock().unwrap().len(), 1);
-        for _ in 0..100 {
-            if sim.optional_started.load(Ordering::SeqCst) > 1 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            sim.optional_started.load(Ordering::SeqCst) > 1,
-            "confirmation poll started"
-        );
+        wait_for_optional_read(&sim, optional_before).await;
         let started = Instant::now();
         hub.command(
             &point("az:aabbccddeeff_s1_z2", "on"),
