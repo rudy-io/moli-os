@@ -1,4 +1,4 @@
-//! Read-only gateways added by a person. A bounded sidecar leaves the hand-written
+//! Gateways managed by a person. A bounded sidecar leaves the hand-written
 //! configuration untouched. Persistence precedes registration; an owned task
 //! finishes a committed installation even if the HTTP client disconnects.
 
@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context as _, ensure};
 use moli_api::airzone_setup::{
-    AirzoneSetup, GatewayInstalled, GatewayList, GatewayPreview, GatewayRequest, GatewayStatus,
-    GatewayWithdrawn, SetupError,
+    AirzoneSetup, GatewayInstalled, GatewayList, GatewayModeChanged, GatewayModeRequest,
+    GatewayPreview, GatewayRequest, GatewayStatus, GatewayWithdrawn, SetupError,
 };
 use moli_core::{InstanceId, Outcome, Value};
 use moli_runtime::{BoxFuture, Hub, spawn_driver};
@@ -64,7 +64,7 @@ impl Gateway {
         options.insert("port".into(), i64::from(self.port).into());
         options.insert("poll_secs".into(), 30_i64.into());
         options.insert("mac".into(), self.mac.clone().into());
-        options.insert("read_only".into(), true.into());
+        options.insert("read_only".into(), self.read_only.into());
         if let Some(pin) = &self.tls_fingerprint {
             options.insert("tls_fingerprint".into(), pin.clone().into());
         }
@@ -87,7 +87,7 @@ struct Store {
 }
 
 /// A static entry remains in TOML. Only its explicitly managed connection and
-/// enabled state are overlaid, so unrelated native options survive edits.
+/// enabled and command states are overlaid, so unrelated native options survive edits.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct GatewayOverride {
@@ -97,11 +97,13 @@ struct GatewayOverride {
     mac: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     connection: Option<Gateway>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read_only: Option<bool>,
 }
 impl Default for Store {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             gateways: Vec::new(),
             overrides: Vec::new(),
         }
@@ -169,8 +171,11 @@ impl Registry {
                             && current.config.port == connection.port
                             && current.config.mac.as_deref() == Some(&connection.mac)
                             && current.config.tls_fingerprint == connection.tls_fingerprint
-                            && current.config.read_only
+                            && current.config.read_only == entry.read_only.unwrap_or(true)
                     })
+                    && entry
+                        .read_only
+                        .is_none_or(|read_only| current.config.read_only == read_only)
             });
             if matches && !self.suppress_all {
                 self.store.overrides.push(entry);
@@ -196,12 +201,12 @@ impl Registry {
 }
 
 fn valid_gateway(gateway: &Gateway) -> bool {
-    gateway.read_only
-        && normalize(gateway.request()).is_ok_and(|request| request == gateway.request())
+    normalize(gateway.request()).is_ok_and(|request| request == gateway.request())
 }
 
 fn valid_override(entry: &GatewayOverride) -> bool {
     !entry.instance.is_empty()
+        && (entry.read_only != Some(false) || entry.mac.is_some() || entry.connection.is_some())
         && entry
             .mac
             .as_deref()
@@ -278,7 +283,7 @@ fn read_store(path: &Path) -> Registry {
         registry.unreadable();
         return registry;
     };
-    if !matches!(parsed.version, 1 | 2)
+    if !matches!(parsed.version, 1..=3)
         || parsed.gateways.len() + parsed.overrides.len() > MAX_GATEWAYS
         || (parsed.version == 1 && !parsed.overrides.is_empty())
     {
@@ -303,6 +308,7 @@ fn read_store(path: &Path) -> Registry {
             serde_json::from_value::<GatewayOverride>((*raw).clone())
                 .ok()
                 .filter(valid_override)
+                .filter(|entry| parsed.version >= 3 || entry.read_only.is_none())
                 .is_some_and(|entry| {
                     registry.store.overrides.push(entry);
                     true
@@ -311,6 +317,9 @@ fn read_store(path: &Path) -> Registry {
             serde_json::from_value::<Gateway>((*raw).clone())
                 .ok()
                 .filter(valid_gateway)
+                // A false mode was invalid in older registries. Upgrading the
+                // executable must never turn that formerly rejected entry on.
+                .filter(|entry| parsed.version >= 3 || entry.read_only)
                 .is_some_and(|entry| {
                     registry.store.gateways.push(entry);
                     true
@@ -358,6 +367,9 @@ fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<Dri
         if let Some(pin) = &gateway.tls_fingerprint {
             table.insert("tls_fingerprint".into(), pin.clone().into());
         }
+    }
+    if let Some(read_only) = entry.read_only {
+        table.insert("read_only".into(), read_only.into());
     }
     moli_airzone::Airzone::new(options.clone().try_into()?)?;
     Ok(DriverConfig {
@@ -744,6 +756,9 @@ impl Manager {
                 if let Some(connection) = overlay.and_then(|entry| entry.connection.as_ref()) {
                     apply_connection(&mut config, &connection.request());
                 }
+                if let Some(read_only) = overlay.and_then(|entry| entry.read_only) {
+                    config.read_only = read_only;
+                }
                 EffectiveGateway {
                     instance: saved.instance.clone(),
                     config,
@@ -755,7 +770,11 @@ impl Manager {
             .collect();
         gateways.extend(state.store.gateways.iter().map(|saved| EffectiveGateway {
             instance: saved.instance.clone(),
-            config: native(&saved.request(), Some(saved.mac.clone())),
+            config: {
+                let mut config = native(&saved.request(), Some(saved.mac.clone()));
+                config.read_only = saved.read_only;
+                config
+            },
             enabled: saved.enabled,
             source: "moli",
             withdrawn: !saved.enabled,
@@ -953,7 +972,7 @@ impl Manager {
 
     async fn persist(&self, state: &mut State, mut next: Store) -> Result<(), SetupError> {
         state.editable()?;
-        next.version = 2;
+        next.version = 3;
         if next.gateways.len() + next.overrides.len() > MAX_GATEWAYS {
             return Err(SetupError::new("limit_reached"));
         }
@@ -994,7 +1013,7 @@ impl Manager {
             }
             if saved.request() == request {
                 self.persisted(&state).await?;
-                return Ok(installed(&request.instance, true));
+                return Ok(installed(&request.instance, true, saved.read_only));
             }
             return Err(SetupError::conflict(
                 "duplicate_instance",
@@ -1038,7 +1057,7 @@ impl Manager {
             Some(actor),
             Outcome::Ok,
         );
-        Ok(installed(&request.instance, false))
+        Ok(installed(&request.instance, false, true))
     }
 
     async fn verified_update(
@@ -1076,21 +1095,23 @@ impl Manager {
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
         state.editable()?;
-        let replay = state
-            .store
-            .gateways
-            .iter()
-            .any(|saved| saved.enabled && saved.request() == request)
-            || state.store.overrides.iter().any(|saved| {
-                saved.enabled
-                    && saved
-                        .connection
-                        .as_ref()
-                        .is_some_and(|connection| connection.request() == request)
-            });
+        let current = self.existing(&state, &request.instance)?;
+        let replay = current.config.read_only
+            && (state
+                .store
+                .gateways
+                .iter()
+                .any(|saved| saved.enabled && saved.request() == request)
+                || state.store.overrides.iter().any(|saved| {
+                    saved.enabled
+                        && saved
+                            .connection
+                            .as_ref()
+                            .is_some_and(|connection| connection.request() == request)
+                }));
         if replay {
             self.persisted(&state).await?;
-            return Ok(installed(&request.instance, true));
+            return Ok(installed(&request.instance, true, true));
         }
         self.verified_update(&state, &request).await?;
         self.available()?;
@@ -1111,6 +1132,7 @@ impl Manager {
                 enabled: true,
                 mac: request.expected_mac.clone(),
                 connection: Some(gateway(&request, true)),
+                read_only: Some(true),
             };
             if let Some(saved) = next
                 .overrides
@@ -1142,7 +1164,7 @@ impl Manager {
             },
         );
         saved?;
-        Ok(installed(&request.instance, false))
+        Ok(installed(&request.instance, false, true))
     }
 
     async fn commit_withdraw(
@@ -1188,6 +1210,7 @@ impl Manager {
                 enabled: false,
                 mac: self.known_mac(&current),
                 connection: None,
+                read_only: None,
             });
         }
         let saved = self.persist(&mut state, next).await;
@@ -1208,6 +1231,126 @@ impl Manager {
         );
         saved?;
         Ok(result)
+    }
+
+    fn mode_store(
+        state: &State,
+        current: &EffectiveGateway,
+        read_only: bool,
+        mac: Option<String>,
+    ) -> Store {
+        let mut next = state.store.clone();
+        if let Some(saved) = next
+            .gateways
+            .iter_mut()
+            .find(|saved| saved.instance == current.instance)
+        {
+            saved.read_only = read_only;
+        } else if let Some(saved) = next
+            .overrides
+            .iter_mut()
+            .find(|saved| saved.instance == current.instance)
+        {
+            saved.read_only = Some(read_only);
+            if mac.is_some() {
+                saved.mac = mac;
+            }
+        } else {
+            next.overrides.push(GatewayOverride {
+                instance: current.instance.clone(),
+                enabled: current.enabled,
+                mac,
+                connection: None,
+                read_only: Some(read_only),
+            });
+        }
+        next
+    }
+
+    async fn commit_mode(
+        &self,
+        instance: String,
+        request: GatewayModeRequest,
+        actor: String,
+    ) -> Result<GatewayModeChanged, SetupError> {
+        self.available()?;
+        let mut state = self
+            .0
+            .state
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| SetupError::new("busy"))?;
+        state.editable()?;
+        let current = self.existing(&state, &instance)?;
+        if request.expected_read_only != current.config.read_only {
+            return Err(SetupError::new("mode_conflict"));
+        }
+        if !request.read_only && !current.enabled {
+            return Err(SetupError::new("gateway_disabled"));
+        }
+        if request.read_only == current.config.read_only {
+            self.persisted(&state).await?;
+            return Ok(self.mode_result(&current, request.read_only));
+        }
+        let mac = self.known_mac(&current);
+        if !request.read_only {
+            let checked = GatewayRequest {
+                instance: instance.clone(),
+                host: current.config.host.clone(),
+                port: current.config.port,
+                tls_fingerprint: current.config.tls_fingerprint.clone(),
+                expected_mac: Some(
+                    mac.clone()
+                        .ok_or_else(|| SetupError::new("identity_unavailable"))?,
+                ),
+            };
+            self.verified(&state, &checked, Some(&instance)).await?;
+            self.available()?;
+        }
+        let mut config = current.config.clone();
+        config.read_only = request.read_only;
+        config.mac = mac.clone();
+        let driver =
+            moli_airzone::Airzone::new(config).map_err(|_| SetupError::new("probe_failed"))?;
+        let next = Self::mode_store(&state, &current, request.read_only, mac);
+        let saved = self.persist(&mut state, next).await;
+        if saved.is_ok() {
+            // Acknowledgement waits for the former supervisor and queued
+            // commands to finish; unregistering also revokes offline metadata.
+            self.stop(&instance).await;
+            if current.enabled {
+                self.start(&instance, driver);
+            }
+        }
+        self.0.hub.record_driver_configured(
+            InstanceId::from(instance.as_str()),
+            "airzone",
+            current.enabled,
+            request.read_only,
+            Some(actor),
+            if saved.is_ok() {
+                Outcome::Ok
+            } else {
+                Outcome::Err("persistence_failed".into())
+            },
+        );
+        saved?;
+        Ok(self.mode_result(&current, request.read_only))
+    }
+
+    fn mode_result(&self, gateway: &EffectiveGateway, read_only: bool) -> GatewayModeChanged {
+        GatewayModeChanged {
+            instance: gateway.instance.clone(),
+            stored: true,
+            read_only,
+            running: self
+                .0
+                .drivers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&gateway.instance)
+                .is_some_and(|running| !running.task.is_finished()),
+        }
     }
 
     async fn owned<T: Send + 'static>(
@@ -1260,11 +1403,11 @@ impl Manager {
     }
 }
 
-fn installed(instance: &str, already_installed: bool) -> GatewayInstalled {
+fn installed(instance: &str, already_installed: bool, read_only: bool) -> GatewayInstalled {
     GatewayInstalled {
         instance: instance.into(),
         stored: true,
-        read_only: true,
+        read_only,
         already_installed,
     }
 }
@@ -1417,6 +1560,19 @@ impl AirzoneSetup for Manager {
         Box::pin(async move {
             let this = self.clone();
             self.owned(async move { this.commit_withdraw(instance, actor).await })
+                .await
+        })
+    }
+
+    fn set_mode(
+        &self,
+        instance: String,
+        request: GatewayModeRequest,
+        actor: String,
+    ) -> BoxFuture<'_, Result<GatewayModeChanged, SetupError>> {
+        Box::pin(async move {
+            let this = self.clone();
+            self.owned(async move { this.commit_mode(instance, request, actor).await })
                 .await
         })
     }

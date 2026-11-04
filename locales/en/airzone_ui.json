@@ -86,5 +86,7 @@
   "airzone_ui.add": "Add a device",
   "airzone_ui.add_help": "Find a hidden device, a new zone or another gateway.",
   "airzone_ui.alert_count_one": "{count} alert to review",
-  "airzone_ui.alert_count_other": "{count} alerts to review"
+  "airzone_ui.alert_count_other": "{count} alerts to review",
+  "airzone_ui.observation_view": "Observation view",
+  "airzone_ui.observation_help": "This view shows equipment status. Control permission is configured separately for each gateway in Installation."
 }

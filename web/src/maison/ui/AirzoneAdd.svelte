@@ -207,7 +207,7 @@
     {#if editing && !installed}<p class="read-only"><Icon name="lock" size={16} />{t('airzone_gateways.save_read_only')}</p>{/if}
     {#if !connected}<p class="notice" role="status">{t('airzone_add.error.connection')}</p>{/if}
     {#if installed}
-      <div class="confirmed" role="status"><p><Icon name="lock" size={16} />{t('airzone_wizard.observation')}</p><a class="primary-link" href="#/airzone">{t('airzone_wizard.see_zones')}<Icon name="chevron-right" size={18} /></a></div>
+      <div class="confirmed" role="status"><p><Icon name={installed.read_only ? 'lock' : 'tune'} size={16} />{t(installed.read_only ? 'airzone_wizard.observation' : 'airzone_gateways.existing_control_kept')}</p><a class="primary-link" href="#/airzone">{t('airzone_wizard.see_zones')}<Icon name="chevron-right" size={18} /></a>{#if !installed.read_only}<a class="mode-link" href="#/airzone/installation">{t('airzone_gateways.manage')}</a>{/if}</div>
       {#if editing}<button type="button" class="secondary" onclick={onclose}>{t('airzone_gateways.back')}</button>{:else}<button type="button" class="quiet" onclick={restart}>{t('airzone_add.another')}</button>{/if}
     {:else}
       {#if checked}
@@ -305,6 +305,7 @@
   .notice,.error {padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line);margin-top:16px;}
   .notice,.error p {font-size:.875rem;line-height:1.5;}.error {color:var(--alert);}.error p {margin:0;overflow-wrap:anywhere;}.error p+p {margin-top:8px;}
   .confirmed {text-align:center;}.confirmed p {display:flex;gap:8px;justify-content:center;font-size:.875rem;margin:0 0 24px;}
+  .confirmed .mode-link {display:flex;justify-content:center;margin-top:10px;}
   .secondary-actions {display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px;}.secondary-actions .quiet {margin:0;}
   .search-status {text-align:center;margin:28px 0;}.search-status p {margin:12px 0 0;}.spinner {display:inline-block;width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--cool);border-radius:50%;animation:spin 900ms linear infinite;}
   .search-status+.secondary {display:flex;margin:auto;}

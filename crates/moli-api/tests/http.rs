@@ -1980,6 +1980,11 @@ async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unaut
             "/api/integrations/airzone/existing/withdraw",
             Some(json!({})),
         ),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/mode",
+            Some(json!({"read_only":false,"expected_read_only":true})),
+        ),
     ] {
         let (status, _) =
             request_with(&addr, method, path, body.as_ref(), "x-moli-origin: ui\r\n").await;
@@ -2090,6 +2095,28 @@ async fn airzone_discovery_refuses_browser_selected_targets_and_oversized_input(
 }
 
 impl moli_api::airzone_setup::AirzoneSetup for CountedAirzoneSetup {
+    fn set_mode(
+        &self,
+        instance: String,
+        request: moli_api::airzone_setup::GatewayModeRequest,
+        _actor: String,
+    ) -> BoxFuture<
+        '_,
+        Result<moli_api::airzone_setup::GatewayModeChanged, moli_api::airzone_setup::SetupError>,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async move {
+            if instance == "conflict" {
+                return Err(moli_api::airzone_setup::SetupError::new("mode_conflict"));
+            }
+            Ok(moli_api::airzone_setup::GatewayModeChanged {
+                instance,
+                stored: true,
+                read_only: request.read_only,
+                running: true,
+            })
+        })
+    }
     fn discover(
         &self,
     ) -> BoxFuture<
@@ -2228,7 +2255,7 @@ async fn airzone_routes_bind_authentication_bounded_typed_input_and_rate_budget(
     );
     let human = format!("{pin}x-moli-origin: ui\r\n");
     let mut invalid = body.clone();
-    invalid["read_only"] = json!(false);
+    invalid["unexpected_option"] = json!(false);
     assert_eq!(
         request_with(&addr, "POST", install, Some(&invalid), &human)
             .await
@@ -2348,6 +2375,11 @@ async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismat
             "/api/integrations/airzone/existing/withdraw",
             Some(json!({})),
         ),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/mode",
+            Some(json!({"read_only":false,"expected_read_only":true})),
+        ),
     ] {
         let hub = lamp_hub().await;
         let setup = Arc::new(CountedAirzoneSetup::default());
@@ -2370,7 +2402,7 @@ async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismat
         let human = format!("{pin}x-moli-origin: ui\r\n");
         if let Some(body) = &body {
             let mut invalid = body.clone();
-            invalid["read_only"] = json!(false);
+            invalid["unexpected_option"] = json!(false);
             assert_eq!(
                 request_with(&addr, method, path, Some(&invalid), &human)
                     .await
@@ -2443,6 +2475,7 @@ async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_co
         ("POST", "/api/integrations/airzone/existing/probe"),
         ("PUT", "/api/integrations/airzone/existing"),
         ("POST", "/api/integrations/airzone/existing/withdraw"),
+        ("POST", "/api/integrations/airzone/existing/mode"),
     ] {
         assert_eq!(
             request_with(
@@ -2479,4 +2512,123 @@ async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
     }
     cancel.cancel();
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn airzone_mode_changes_require_exact_booleans_and_bound_the_request() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let route = "/api/integrations/airzone/existing/mode";
+    for body in [
+        json!({}),
+        json!({"read_only":false}),
+        json!({"read_only":"false","expected_read_only":true}),
+        json!({"read_only":false,"expected_read_only":null}),
+    ] {
+        assert_eq!(
+            request_with(&addr, "POST", route, Some(&body), &human)
+                .await
+                .0,
+            422
+        );
+    }
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"read_only":false,"expected_read_only":true,"padding":"x".repeat(2048)})),
+            &human
+        )
+        .await
+        .0,
+        413
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        route,
+        Some(&json!({"read_only":false,"expected_read_only":true})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap(),
+        json!({"instance":"existing","stored":true,"read_only":false,"running":true})
+    );
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"read_only":true,"expected_read_only":false})),
+            &human
+        )
+        .await
+        .0,
+        429
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn airzone_mode_revocation_and_stale_mode_errors_are_explicit() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let body = json!({"read_only":true,"expected_read_only":false});
+    let (status, result) = request_with(
+        &addr,
+        "POST",
+        "/api/integrations/airzone/existing/mode",
+        Some(&body),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&result).unwrap()["read_only"],
+        true
+    );
+    let (status, result) = request_with(
+        &addr,
+        "POST",
+        "/api/integrations/airzone/conflict/mode",
+        Some(&body),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        serde_json::from_str::<Json>(&result).unwrap()["error"],
+        "mode_conflict"
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
 }

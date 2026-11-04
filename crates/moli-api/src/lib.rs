@@ -349,6 +349,10 @@ fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
             "/api/integrations/airzone/{instance}/withdraw",
             upload(post(airzone_setup::withdraw), 1024, humans),
         )
+        .route(
+            "/api/integrations/airzone/{instance}/mode",
+            upload(post(airzone_setup::set_mode), 1024, humans),
+        )
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {

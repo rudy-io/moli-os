@@ -87,3 +87,10 @@ nouvelle recherche attend au moins 30 secondes depuis le début de la précéden
 Il n’y a aucune tâche de scan quand l’assistant est inactif. Ces bornes ne
 constituent pas une mesure de CPU au repos ni une garantie de découverte derrière
 un réseau Docker isolé ; le formulaire manuel reste disponible.
+
+Le basculement de pilotage protégé par code porte le chunk Airzone à
+88,71 Ko / 24,43 Ko gzip (mesure du build local du 4 novembre 2026), contre
+82,99 Ko / 23,18 Ko gzip avant ce changement. Aucune dépendance supplémentaire
+n'est ajoutée. Le changement de mode est ponctuel et sérialisé ; l'autorisation
+vérifie l'identité par une lecture, la révocation ne dépend d'aucune réponse
+réseau. Le superviseur précédent est arrêté avant le remplacement.

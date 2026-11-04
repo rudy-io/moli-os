@@ -9,6 +9,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+mod modes;
+
 #[tokio::test]
 async fn discovery_never_uses_an_address_learned_for_an_old_configuration() {
     let (dir, mut config) = house();
@@ -278,7 +280,11 @@ async fn controller_with_identity(
             {
                 watched.fetch_add(1, Ordering::Relaxed);
             }
-            let body = if first.contains("/webserver") {
+            let body = if first.starts_with("PUT /api/v1/hvac ") {
+                let body: Json =
+                    serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+                json!({"data":[body]})
+            } else if first.contains("/webserver") {
                 json!({"mac":mac,"ws_type":"ws_az","ws_firmware":"4.21"})
             } else if first.contains("/hvac") {
                 json!({"data":[{"systemID":1,"zoneID":1,"on":1,"roomTemp":22.5,"units":0}]})
@@ -1371,7 +1377,7 @@ fn registry_is_restored_and_invalid_content_is_never_silently_reset() {
     let mut writable = stored.clone();
     writable["gateways"][0]["read_only"] = json!(false);
     let mut future = stored.clone();
-    future["version"] = json!(3);
+    future["version"] = json!(4);
     let mut duplicate = stored.clone();
     duplicate["gateways"]
         .as_array_mut()

@@ -86,5 +86,7 @@
   "airzone_ui.add": "Ajouter un appareil",
   "airzone_ui.add_help": "Retrouver un appareil masqué, une nouvelle zone ou une autre passerelle.",
   "airzone_ui.alert_count_one": "{count} alerte à consulter",
-  "airzone_ui.alert_count_other": "{count} alertes à consulter"
+  "airzone_ui.alert_count_other": "{count} alertes à consulter",
+  "airzone_ui.observation_view": "Vue de consultation",
+  "airzone_ui.observation_help": "Cette vue présente l’état des équipements. Le mode de pilotage se règle séparément pour chaque passerelle dans Installation."
 }

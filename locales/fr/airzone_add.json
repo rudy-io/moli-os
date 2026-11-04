@@ -76,5 +76,7 @@
   "airzone_add.error.not_found": "Cette passerelle n’est plus enregistrée. Actualisez la liste.",
   "airzone_add.error.instance_mismatch": "L’identifiant ne correspond pas à la connexion sélectionnée. Rouvrez son formulaire.",
   "airzone_add.error.gateway_disabled": "Cette connexion est en pause. Vérifiez-la avant de la réactiver.",
-  "airzone_add.error.unaddressable_instance": "Les identifiants historiques « . » et « .. » restent visibles, mais leur gestion depuis cette page nécessite une migration de configuration."
+  "airzone_add.error.unaddressable_instance": "Les identifiants historiques « . » et « .. » restent visibles, mais leur gestion depuis cette page nécessite une migration de configuration.",
+  "airzone_add.error.mode_conflict": "Le mode a changé dans une autre fenêtre. La liste a été actualisée ; choisissez à nouveau votre action.",
+  "airzone_add.error.invalid_mode": "Le mode demandé est invalide. Actualisez la liste avant de réessayer."
 }

@@ -1,7 +1,7 @@
 const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
-const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled']);
+const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict']);
 
 export function nextGatewayInstance(drivers = []) {
   const used = new Set(drivers.map((driver) => driver.instance));
@@ -68,8 +68,9 @@ export async function probeGateway(input, fetcher = globalThis.fetch, {signal} =
   return exchange('/api/integrations/airzone/probe', parsed.request, (data) => previewIsValid(data,parsed.request.instance), fetcher,'POST',signal);
 }
 
-function savedIsValid(data, instance) {
-  return data?.instance === instance && data.stored === true && data.read_only === true && typeof data.already_installed === 'boolean';
+function savedIsValid(data, instance, allowExistingMode = false) {
+  return data?.instance === instance && data.stored === true && typeof data.already_installed === 'boolean'
+    && (data.read_only === true || (allowExistingMode && data.already_installed && data.read_only === false));
 }
 
 async function saveGateway(input, expectedMac, updating, fetcher) {
@@ -78,7 +79,7 @@ async function saveGateway(input, expectedMac, updating, fetcher) {
   if (!expectedMac) return {ok:false,error:'expected_identity_required'};
   if (typeof expectedMac !== 'string' || !MAC.test(expectedMac)) return {ok:false,error:'invalid_identity'};
   const path = '/api/integrations/airzone' + (updating ? `/${encodeURIComponent(parsed.request.instance)}` : '');
-  return exchange(path, {...parsed.request,expected_mac:expectedMac}, (data) => savedIsValid(data,parsed.request.instance), fetcher, updating ? 'PUT' : 'POST');
+  return exchange(path, {...parsed.request,expected_mac:expectedMac}, (data) => savedIsValid(data,parsed.request.instance,!updating), fetcher, updating ? 'PUT' : 'POST');
 }
 
 export function addGateway(input, expectedMac, fetcher = globalThis.fetch) {
@@ -119,6 +120,16 @@ export async function withdrawGateway(instance, fetcher = globalThis.fetch) {
   if (!existingInstance(instance)) return {ok:false,error:'invalid_instance'};
   if (instance === '.' || instance === '..') return {ok:false,error:'unaddressable_instance'};
   return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/withdraw`,{},(data) => data?.instance === instance && data.stored === true && data.enabled === false && typeof data.read_only === 'boolean',fetcher);
+}
+
+/** A separate, PIN-approved permission change; connection editing stays read-only. */
+export async function changeGatewayMode(instance, readOnly, expectedReadOnly, fetcher = globalThis.fetch) {
+  if (!existingInstance(instance)) return {ok:false,error:'invalid_instance'};
+  if (instance === '.' || instance === '..') return {ok:false,error:'unaddressable_instance'};
+  if (typeof readOnly !== 'boolean' || typeof expectedReadOnly !== 'boolean') return {ok:false,error:'invalid_mode'};
+  return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/mode`,
+    {read_only:readOnly,expected_read_only:expectedReadOnly},
+    (data) => data?.instance === instance && data.stored === true && data.read_only === readOnly && typeof data.running === 'boolean',fetcher);
 }
 
 function gatewayIsValid(item) {

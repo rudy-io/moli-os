@@ -113,7 +113,7 @@
       <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_wizard.installation_title') : management ? t('airzone_ui.manage') : alerts ? t('airzone_ui.alerts') : adding ? t('airzone_add.gateway_title') : t('airzone_ui.title')}</h1>
       {#if !zone || zone.label?.room || zone.native_room}<p>{zone ? zone.label?.room || zone.native_room : installation ? t('airzone_wizard.installation_help') : management ? t('airzone_ui.manage_help') : alerts ? t('airzone_ui.alerts_help') : adding ? t('airzone_add.gateway_help') : t('airzone_ui.subtitle')}</p>{/if}
     </div>
-    <span class="read-only" title={t('airzone_ui.read_only_help')}><Icon name="lock" size={16} />{t('airzone_ui.read_only')}</span>
+    <span class="read-only" title={t('airzone_ui.observation_help')}><Icon name="info" size={16} />{t('airzone_ui.observation_view')}</span>
   </header>
 
   {#if !detail}

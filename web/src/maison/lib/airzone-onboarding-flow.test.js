@@ -137,3 +137,17 @@ test('editing a legacy configured ID preserves whitespace and punctuation in bot
   assert.equal(calls[0].body.instance,instance);assert.equal(calls[1].body.instance,instance);
   assert.equal(calls[1].url,'/api/integrations/airzone/'+encodeURIComponent(instance));
 });
+
+test('retrying a lost add response preserves and reports permission granted later in another window',async(t)=>{
+  let attempts=0;
+  const replay={...saved,already_installed:true,read_only:false};
+  const{component,calls}=fixture(t,(url)=>{
+    if(url.endsWith('/probe'))return response(preview);
+    if(++attempts===1)throw new Error('lost response');
+    return response(replay);
+  });
+  await component.runProbe();await component.runInstall();assert.equal(component.intent().uncertain,true);
+  await component.runInstall();
+  assert.deepEqual(component.intent().installed,replay);
+  assert.deepEqual(calls[1],calls[2]);
+});

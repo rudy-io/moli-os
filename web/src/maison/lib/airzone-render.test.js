@@ -469,7 +469,7 @@ test('gateway cards distinguish pause from offline and show actual writable conf
   const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
   const gateway={instance:'airzone-old',host:'172.31.1.1',port:3000,enabled:false,source:'configuration',read_only:false,running:false};
   let html=render(Card,{props:{gateway}}).body;
-  assert.match(text(html),/Suivi en pause/);assert.match(text(html),/Pilotage autorisé par la configuration/);
+  assert.match(text(html),/Suivi en pause/);assert.match(text(html),/Pilotage autorisé/);
   assert.match(text(html),/Vérifier et réactiver/);assert.doesNotMatch(text(html),/Hors ligne/);
   html=render(Card,{props:{gateway:{...gateway,enabled:true,running:true,read_only:true},connected:false}}).body;
   assert.match(text(html),/État à vérifier/);assert.ok(tags(html,'button').every(tag=>/disabled/.test(tag)));
@@ -491,4 +491,47 @@ test('journal renders gateway pause and reconfiguration without a label payload'
     hub.journal=[{id:3,ts:1700000000000,action:{kind:'driver_configured',instance:'airzone-old',driver_kind:'airzone',enabled,read_only:true},origin:'ui',outcome:{result:'ok'}}];
     assert.match(text(render(Journal).body),expected);
   }
+});
+
+test('Airzone describes the consultation view without falsely claiming all gateways are read-only',()=>{
+  house();
+  for(const route of ['airzone','airzone/installation','airzone/native-a%3Aaabbccddeeff_s1_z2']) {
+    const html=page(route);
+    assert.match(text(html),/Vue de consultation/);
+    assert.doesNotMatch(text(html),/Équipements en lecture seule/);
+  }
+});
+
+test('gateway mode controls have truthful labels and explain where authorized controls are available',async()=>{
+  const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
+  const gateway={instance:'airzone-example',host:'172.31.1.1',port:3000,enabled:true,source:'moli',read_only:true,running:true};
+  let html=render(Card,{props:{gateway}}).body;
+  assert.match(text(html),/Lecture seule/);assert.match(text(html),/Autoriser le pilotage/);
+  assert.doesNotMatch(text(html),/Pilotage autorisé/);
+  const action=tags(html,'button').find(tag=>/class="mode-action/.test(tag));
+  assert.match(action,/aria-label="[^"]*Autoriser le pilotage[^"]*172.31.1.1/);assert.doesNotMatch(action,/disabled/);
+  html=render(Card,{props:{gateway:{...gateway,read_only:false}}}).body;
+  assert.match(text(html),/Pilotage autorisé/);assert.match(text(html),/Revenir en lecture seule/);
+  assert.match(html,/href="#\/pieces"/);
+  html=render(Card,{props:{gateway:{...gateway,enabled:false,running:false}}}).body;
+  assert.match(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
+  assert.match(text(html),/Réactivez la connexion avant/);
+  html=render(Card,{props:{gateway:{...gateway,enabled:false,running:false,read_only:false}}}).body;
+  assert.doesNotMatch(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
+});
+
+test('the code sheet explains permission scope in both directions and both languages',async()=>{
+  const Sheet=(await vite.ssrLoadModule('/src/maison/ui/PinSheet.svelte')).default;
+  hub.session={pin_configured:true,owner:false,min_pin:6};
+  for(const [language,enable,disable] of [
+    ['fr',/autorise les commandes vers tous les équipements de cette passerelle/,/confirme le retour en lecture seule/],
+    ['en',/allows commands to all equipment on this gateway/,/confirms the return to read-only/],
+  ]) {
+    await words.setLanguage(language);
+    home.held={label:'Synthetic gateway',reason:'airzone_control'};
+    assert.match(text(render(Sheet).body),enable);
+    home.held={label:'Synthetic gateway',reason:'airzone_read_only'};
+    assert.match(text(render(Sheet).body),disable);
+  }
+  home.held=null;
 });

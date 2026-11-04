@@ -26,8 +26,14 @@ mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 
 **TOML instances retain their existing command mode**: an omitted `read_only`
 defaults to `false`, preserving existing automations. Set `read_only = true` for
-an observation-only trial. Gateways added or edited from the dashboard explicitly
-use `read_only = true`. That restriction applies to published capabilities, the executor and transport,
+an observation-only trial. Gateways added, edited or reactivated from the dashboard explicitly
+use `read_only = true`. In Installation, a person can then authorize control or
+return to read-only after confirming with their Moli PIN. The per-gateway choice
+is stored in registry v3, survives restart and leaves hand-written TOML untouched.
+Enabling verifies the pinned identity; revocation also works offline or while
+paused. Changing mode sends no physical command. Authorized commands still use
+Moli's existing guards; revoking does not stop the heating already running.
+Older v1/v2 entries declaring writable mode remain invalid. The restriction applies to published capabilities, the executor and transport,
 including integration configuration. It is not merely a disabled UI button.
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains

@@ -135,3 +135,29 @@ test('dot-only legacy IDs remain visible but never become normalized browser pat
     assert.equal((await onboarding.withdrawGateway(instance,noNetwork)).error,'unaddressable_instance');
   }
 });
+
+test('mode changes are separate, bind the observed mode and validate authoritative confirmation',async()=>{
+  const calls=[];
+  const result={instance:request.instance,stored:true,read_only:false,running:true};
+  const transport=async(url,options)=>{calls.push({url,...options});return response(result);};
+  assert.deepEqual(await onboarding.changeGatewayMode(request.instance,false,true,transport),{ok:true,data:result});
+  assert.deepEqual(calls,[{url:'/api/integrations/airzone/airzone-2/mode',method:'POST',headers:{'content-type':'application/json','x-moli-origin':'ui'},body:'{"read_only":false,"expected_read_only":true}'}]);
+  for(const data of [{...result,read_only:true},{...result,stored:false},{...result,instance:'another'},{...result,running:null},null]) {
+    assert.equal((await onboarding.changeGatewayMode(request.instance,false,true,async()=>response(data))).error,'response');
+  }
+  assert.deepEqual(await onboarding.changeGatewayMode(request.instance,false,true,async()=>response({error:'mode_conflict'},409)),{ok:false,error:'mode_conflict',status:409});
+  const noNetwork=()=>assert.fail('invalid mode intents never reach the server');
+  for(const instance of ['../other','core','']) assert.equal((await onboarding.changeGatewayMode(instance,false,true,noNetwork)).error,'invalid_instance');
+  for(const instance of ['.','..']) assert.equal((await onboarding.changeGatewayMode(instance,false,true,noNetwork)).error,'unaddressable_instance');
+  for(const [desired,expected] of [[null,true],[true,'false'],[0,false]]) assert.equal((await onboarding.changeGatewayMode(request.instance,desired,expected,noNetwork)).error,'invalid_mode');
+  const legacy='Airzone étage.v1';let path;
+  assert.equal((await onboarding.changeGatewayMode(legacy,true,false,async(url)=>{path=url;return response({instance:legacy,stored:true,read_only:true,running:false});})).ok,true);
+  assert.equal(path,`/api/integrations/airzone/${encodeURIComponent(legacy)}/mode`);
+});
+
+test('only an idempotent add replay can report a previously authorized gateway without resetting its mode',async()=>{
+  const alreadySaved={instance:request.instance,stored:true,already_installed:true,read_only:false};
+  assert.deepEqual(await onboarding.addGateway(request,preview.mac,async()=>response(alreadySaved)),{ok:true,data:alreadySaved});
+  assert.equal((await onboarding.updateGateway(request,preview.mac,async()=>response(alreadySaved))).error,'response');
+  assert.equal((await onboarding.addGateway(request,preview.mac,async()=>response({...alreadySaved,already_installed:false}))).error,'response');
+});

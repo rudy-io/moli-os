@@ -343,11 +343,12 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
 | POST | `/api/integrations/airzone/discover` | **humain**, origine `ui`, invités refusés | `{}`, champs inconnus refusés, 1 Kio maximum | `{gateways:[{host,port,tls_fingerprint,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true,existing_instance,existing_enabled}],scanned,target_count,incomplete}` | `403` session ; `422` saisie ; `429` recherche en cours ou trop récente ; `503` indisponible |
 | POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
-| POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only:true,already_installed}` ; enregistré et démarré, sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
+| POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only,already_installed}` ; nouvel ajout en lecture seule, reprise idempotente avec le mode courant ; sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
 | GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
 | POST | `/api/integrations/airzone/{instance}/probe` | **humain**, origine `ui`, invités refusés | saisie de connexion avec la même `instance` | même aperçu ; exige l’identité matérielle existante | `404` inconnue ; `409` identité modifiée ; `503` identité antérieure inconnue |
 | PUT | `/api/integrations/airzone/{instance}` | **humain**, origine `ui`, invités refusés | saisie de connexion + `expected_mac` issu de la vérification | même résultat que l’ajout ; met à jour ou réactive en lecture seule | mêmes refus, sauvegarde avant activation |
 | POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:true,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `500` sauvegarde |
+| POST | `/api/integrations/airzone/{instance}/mode` | **humain**, origine `ui`, invités refusés | `{read_only:bool,expected_read_only:bool}`, champs inconnus refusés, 1 Kio maximum | `{instance,stored:true,read_only,running}` ; ancien pilote arrêté avant réponse | `403` session ; `409` mode modifié ailleurs, passerelle en pause ou identité modifiée ; `422` saisie ; `429` occupé ; `500` sauvegarde ; `502` vérification ; `503` indisponible ou identité inconnue |
 
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
@@ -359,11 +360,30 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | POST | `/api/approvals/{id}` | **humain** + `x-moli-origin: ui` | `{approve: bool, point}` | `{ok:true}` | `403` ; `409` mauvais point ; `410` inconnue / expirée ; erreurs de commande si l'ordre approuvé échoue ; `400` id non numérique |
 
 La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateways.json`
-lit la version 1 et écrit la version 2 : connexions gérées, surcharges ciblées des
+lit les versions 1 et 2 et écrit la version 3 : connexions gérées, surcharges ciblées des
 entrées TOML et retraits réversibles. Une modification conserve les options natives
-non concernées (`poll_secs`, `dhw_units`), mais impose `read_only=true`. Une entrée
+non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`. Une entrée
 TOML jamais modifiée conserve son mode d’origine. `running` désigne la présence du
 superviseur, pas la disponibilité réseau de la passerelle.
+
+Le changement de mode ne prend aucune adresse réseau en entrée : il utilise la
+connexion déjà enregistrée. `expected_read_only` doit correspondre au mode actuel,
+sinon `mode_conflict` impose de relire la liste. L'autorisation de pilotage vérifie
+l'identité connue par une lecture avant de persister le choix ; elle est refusée
+pour une passerelle en pause. La révocation reste possible hors ligne ou en pause,
+sans vérification réseau, et conserve l'état activé/désactivé. Chaque transition
+persiste le choix, attend l'arrêt de l'ancien pilote et la révocation de ses
+capacités, puis relance le pilote si nécessaire. Elle est journalisée comme
+`driver_configured` et n'envoie aucune commande physique. Une sauvegarde impossible
+renvoie une erreur sans annoncer un mode qui n'a pas été appliqué.
+
+Le mode autorisé est conservé après redémarrage. Les anciennes entrées v1/v2
+marquées `read_only=false` restent invalides : la migration ne les transforme
+jamais en autorisation. Les commandes deviennent accessibles par les chemins
+habituels de Moli, avec leurs gardes et autorisations existantes. Le retour en
+lecture seule bloque les commandes suivantes ; il n'arrête pas le chauffage et
+n'annule pas une commande déjà exécutée.
+
 
 La saisie de connexion accepte uniquement une IPv4 privée en production : les
 noms DNS, les IP publiques et la boucle locale sont refusés. L’exception de boucle

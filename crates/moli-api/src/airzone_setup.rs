@@ -103,6 +103,23 @@ pub struct GatewayWithdrawn {
     pub read_only: bool,
 }
 
+/// An explicit mode change based on the mode the person just reviewed.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayModeRequest {
+    pub read_only: bool,
+    pub expected_read_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GatewayModeChanged {
+    pub instance: String,
+    pub stored: bool,
+    pub read_only: bool,
+    /// Supervision has restarted; network availability is reported separately.
+    pub running: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Withdrawal {}
@@ -137,7 +154,7 @@ impl IntoResponse for SetupError {
     fn into_response(self) -> Response {
         let status = match self.code {
             "duplicate_instance" | "duplicate_gateway" | "identity_changed"
-            | "gateway_disabled" => StatusCode::CONFLICT,
+            | "gateway_disabled" | "mode_conflict" => StatusCode::CONFLICT,
             "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
             "probe_failed" => StatusCode::BAD_GATEWAY,
@@ -152,6 +169,14 @@ impl IntoResponse for SetupError {
 }
 
 pub trait AirzoneSetup: Send + Sync + Debug {
+    fn set_mode(
+        &self,
+        _instance: String,
+        _request: GatewayModeRequest,
+        _actor: String,
+    ) -> BoxFuture<'_, Result<GatewayModeChanged, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
     fn discover(&self) -> BoxFuture<'_, Result<GatewayDiscovery, SetupError>> {
         Box::pin(async { Err(SetupError::new("unavailable")) })
     }
@@ -190,6 +215,27 @@ pub trait AirzoneSetup: Send + Sync + Debug {
 
 #[derive(Clone)]
 pub(crate) struct Setup(pub Option<Arc<dyn AirzoneSetup>>);
+
+pub(crate) async fn set_mode(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    Path(instance): Path<String>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(request): Json<GatewayModeRequest>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    match setup.set_mode(instance, request, caller.describe()).await {
+        Ok(changed) => Json(changed).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
 
 pub(crate) async fn discover(
     State(hub): State<Hub>,

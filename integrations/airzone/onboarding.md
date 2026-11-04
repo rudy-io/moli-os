@@ -31,10 +31,15 @@
 6. FR : Pour HTTPS, choisir le port et une empreinte SHA-256 vérifiée.
    EN: HTTPS uses an explicit certificate fingerprint; a changed certificate
    requires deliberate verification and configuration, never an automatic bypass.
-7. FR : Conserver la lecture seule pendant les essais. EN: For a separately
-   authorized actuation qualification only, explicitly opt in with
-   `read_only = false`, review every shared scope, use a neutral zone with a human
-   present, then restore its original state. Never test protected rooms.
+7. FR : Conserver la lecture seule pendant les essais. Pour autoriser ensuite le
+   pilotage, utiliser Installation → Autoriser le pilotage et confirmer avec le
+   code Moli. Le bouton Revenir en lecture seule bloque les commandes suivantes,
+   même hors ligne, sans arrêter le chauffage en cours.
+   EN: Keep setup trials read-only. A person can explicitly authorize gateway
+   control in Installation with their Moli PIN, then revoke it from the same card.
+   For separately authorized physical qualification, review every shared scope,
+   use a neutral zone with a human present, then restore its original state.
+   Never test protected rooms.
 8. FR : Qualifier séparément les coupures, reprises, horaires constructeurs et
    compatibilité du firmware. EN: Synthetic protocol tests do not establish
    physical execution, long-running reliability or all firmware compatibility.

@@ -164,6 +164,7 @@ mod tests {
             (Method::POST, "/api/integrations/airzone/existing/probe"),
             (Method::PUT, "/api/integrations/airzone/existing"),
             (Method::POST, "/api/integrations/airzone/existing/withdraw"),
+            (Method::POST, "/api/integrations/airzone/existing/mode"),
         ] {
             for dashboard in [false, true] {
                 assert_eq!(

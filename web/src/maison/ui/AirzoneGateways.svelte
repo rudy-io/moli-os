@@ -1,8 +1,8 @@
 <script>
-  import { onMount, onDestroy, untrack } from 'svelte';
+  import { onMount, onDestroy, tick, untrack } from 'svelte';
   import { t } from '../../lib/i18n.svelte.js';
   import { home } from '../lib/home.svelte.js';
-  import { listGateways, withdrawGateway } from '../lib/airzone-onboarding.js';
+  import { listGateways, withdrawGateway, changeGatewayMode } from '../lib/airzone-onboarding.js';
   import { gatewayApproval } from '../lib/gateway-approval.js';
   import AirzoneGatewayCard from './AirzoneGatewayCard.svelte';
   import AirzoneAdd from './AirzoneAdd.svelte';
@@ -19,6 +19,8 @@
   let replacement = $state(null);
   let withdrawn = $state(null);
   let uncertain = $state(false);
+  let modeResult = $state(null);
+  let confirmationHeading = $state(null);
   const busy = $derived(pending !== null || awaitingPin);
   let alive = true;
   let revision = 0;
@@ -38,28 +40,60 @@
       untrack(() => {load(true);});
     }
   });
-  const approval = gatewayApproval({home,label:() => t('airzone_gateways.title'),waiting:(value) => {awaitingPin=value;},failed:(error) => {failure={error};},current,perform});
+  $effect(() => {
+    const selection=confirmation;
+    if (selection) untrack(async () => {
+      await tick();
+      if (confirmation === selection) confirmationHeading?.focus();
+    });
+  });
+  const approval = gatewayApproval({home,
+    label:(intent) => intent.kind === 'mode' ? t('airzone_gateways.mode_pin_label',{action:t(intent.read_only ? 'airzone_gateways.restore_read_only' : 'airzone_gateways.allow_control'),instance:intent.instance}) : t('airzone_gateways.title'),
+    reason:(intent) => intent.kind === 'mode' ? intent.read_only ? 'airzone_read_only' : 'airzone_control' : 'configuration',
+    waiting:(value) => {awaitingPin=value;},failed:(error) => {failure={error};},current,perform});
 
   function current(intent) {return alive && intent.revision === revision;}
   async function perform(intent, authenticated = false) {
     if (!current(intent)) return;
     if (!connected) {failure={error:'connection'};return;}
+    if (intent.kind === 'list') refreshNeeded=false;
     pending = intent.kind;
     failure = null;
-    const result = intent.kind === 'list' ? await listGateways() : await withdrawGateway(intent.instance);
+    const result = intent.kind === 'list' ? await listGateways()
+      : intent.kind === 'mode' ? await changeGatewayMode(intent.instance,intent.read_only,intent.expected_read_only)
+      : await withdrawGateway(intent.instance);
     if (!current(intent)) return;
     pending = null;
     if (!result.ok) {
+      if (intent.kind === 'mode' && result.error === 'mode_conflict') {
+        confirmation=null;
+        uncertain=false;
+        await perform({kind:'list',revision,automatic:true,notice:result});
+        return;
+      }
       if (result.error === 'auth' && !authenticated && !intent.automatic) approval.ask(intent);
       else {
         failure=result;
-        uncertain=intent.kind !== 'list' && ['network','response','server'].includes(result.error);
+        if (intent.kind !== 'list') uncertain=['network','response','server',...(intent.kind === 'mode' ? ['persistence_failed','unavailable'] : [])].includes(result.error);
       }
       return;
     }
     uncertain=false;
-    if (intent.kind === 'list') gateways=result.data.gateways;
-    else {
+    if (intent.kind === 'list') {
+      gateways=result.data.gateways;
+      failure=intent.notice ?? null;
+      if (modeResult && !gateways.some((item) => item.instance === modeResult.instance && item.read_only === modeResult.read_only)) modeResult=null;
+      if (intent.verifyMode) {
+        confirmation=null;
+        const checked=gateways.find((item) => item.instance === intent.verifyMode);
+        if (checked) modeResult={instance:checked.instance,read_only:checked.read_only};
+        else failure={error:'not_found'};
+      }
+    } else if (intent.kind === 'mode') {
+      gateways=gateways.map((item) => item.instance === intent.instance ? {...item,read_only:result.data.read_only,running:result.data.running} : item);
+      confirmation=null;
+      modeResult={instance:intent.instance,read_only:result.data.read_only};
+    } else {
       gateways=gateways.map((item) => item.instance === intent.instance ? {...item,enabled:false,running:false,read_only:result.data.read_only} : item);
       confirmation=null;
       withdrawn=intent.instance;
@@ -74,27 +108,45 @@
   function choose(instance,kind) {
     if (busy || editing || creating || confirmation || !connected) return;
     const gateway=gateways?.find((item) => item.instance === instance);
-    if (!gateway || !['edit','withdraw','replace'].includes(kind)) return;
+    if (!gateway || !['edit','withdraw','replace','mode'].includes(kind)) return;
+    if (kind === 'mode' && gateway.read_only && !gateway.enabled) return;
     revision++;
     failure=null;
     uncertain=false;
     withdrawn=null;
     replacement=null;
+    modeResult=null;
     if (kind === 'edit') {editing={...gateway};return;}
+    if (kind === 'mode') {
+      confirmation={instance,kind,host:gateway.host,read_only:!gateway.read_only,expected_read_only:gateway.read_only};
+      return;
+    }
     // A disabled TOML entry has no withdrawal override yet. Persist it even
     // when the last list said paused; another tab may also have reactivated it.
     if (kind === 'replace' || gateway.enabled) confirmation={instance,kind};
   }
   async function confirmWithdrawal() {
-    if (busy || !confirmation) return;
+    if (busy || !confirmation || confirmation.kind === 'mode') return;
     await perform({kind:'withdraw',instance:confirmation.instance,replacing:confirmation.kind === 'replace',revision});
+  }
+  async function confirmMode() {
+    if (busy || confirmation?.kind !== 'mode' || !connected) return;
+    if (uncertain) {
+      await perform({kind:'list',revision,verifyMode:confirmation.instance});
+      return;
+    }
+    // A mode transition always asks for the person's code, even if this browser
+    // already has a session. The PIN never enters the gateway request.
+    approval.ask({...confirmation,revision});
   }
   function cancelSelection() {
     if (busy) return;
+    const checkMode=confirmation?.kind === 'mode' && uncertain;
     revision++;
     confirmation=null;
     uncertain=false;
     failure=null;
+    if (checkMode) load(true);
   }
   function startReplacement() {
     if (busy || editing || creating || !connected || !replacement || confirmation) return;
@@ -130,13 +182,27 @@
         {/each}
       </div>
     {/if}
-    {#if confirmation}
+    {#if confirmation?.kind === 'mode'}
+      <section class="confirmation" aria-labelledby="mode-title">
+        <h3 id="mode-title" bind:this={confirmationHeading} tabindex="-1">{t(confirmation.read_only ? 'airzone_gateways.read_only_title' : 'airzone_gateways.control_title')}</h3>
+        <p class="target">{t('airzone_gateways.mode_target',{instance:confirmation.instance,address:confirmation.host})}</p>
+        <p>{t(confirmation.read_only ? 'airzone_gateways.read_only_help' : 'airzone_gateways.control_help')}</p>
+        {#if !confirmation.read_only}<p>{t('airzone_gateways.control_scope')}</p>{/if}
+        {#if uncertain}<p role="status">{t('airzone_gateways.mode_uncertain')}</p>{/if}
+        <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmMode}>{t(pending === 'mode' ? 'airzone_gateways.mode_saving' : uncertain ? 'airzone_gateways.verify_mode' : 'airzone_gateways.confirm_with_code')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
+      </section>
+    {:else if confirmation}
       <div class="confirmation" aria-labelledby="withdraw-title">
-        <h3 id="withdraw-title">{t(confirmation.kind === 'replace' ? 'airzone_gateways.replace_title' : 'airzone_gateways.withdraw_title',{instance:confirmation.instance})}</h3>
+        <h3 id="withdraw-title" bind:this={confirmationHeading} tabindex="-1">{t(confirmation.kind === 'replace' ? 'airzone_gateways.replace_title' : 'airzone_gateways.withdraw_title',{instance:confirmation.instance})}</h3>
         <p>{t('airzone_gateways.withdraw_help')}</p>
         {#if confirmation.kind === 'replace'}<p>{t('airzone_gateways.replace_help')}</p>{/if}
         {#if uncertain}<p role="status">{t('airzone_gateways.uncertain')}</p>{/if}
         <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmWithdrawal}>{t(pending === 'withdraw' ? 'airzone_gateways.withdrawing' : uncertain ? 'airzone_gateways.retry_withdraw' : confirmation.kind === 'replace' ? 'airzone_gateways.withdraw_first' : 'airzone_gateways.withdraw_confirm')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
+      </div>
+    {/if}
+    {#if modeResult}
+      <div class="message" role="status"><strong>{t(modeResult.read_only ? 'airzone_gateways.read_only_saved' : 'airzone_gateways.control_saved',{instance:modeResult.instance})}</strong>
+        {#if !modeResult.read_only}<p>{t('airzone_gateways.controls_location')}</p><a href="#/pieces">{t('airzone_gateways.open_controls')}<Icon name="chevron-right" size={18} /></a>{/if}
       </div>
     {/if}
     {#if replacement}
