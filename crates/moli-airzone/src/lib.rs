@@ -8,6 +8,9 @@ mod onboarding;
 pub use onboarding::{GatewayProbe, probe_read_only};
 mod resources;
 mod synchronization;
+mod write_policy;
+#[cfg(test)]
+mod write_policy_tests;
 use anyhow::{Context as _, ensure};
 use model::Snapshot;
 use moli_core::{DeviceId, InstanceId};
@@ -16,6 +19,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
+pub use write_policy::WriteMode;
 const COMMAND_LIMIT: Duration = Duration::from_millis(4500);
 const POLL_LIMIT: Duration = Duration::from_secs(30);
 fn invalid_identity() -> String {
@@ -39,6 +43,9 @@ pub struct Config {
     pub mac: Option<String>,
     #[serde(default)]
     pub read_only: bool,
+    /// Explicit opt-in for commands beyond the four historical zone controls.
+    #[serde(default)]
+    pub write: WriteMode,
     /// Explicit DHW temperature unit when the controller omits it (0 Celsius, 1 Fahrenheit).
     #[serde(default)]
     pub dhw_units: Option<u8>,
@@ -138,9 +145,19 @@ struct LiveSnapshot {
     resources: resources::ResourceSnapshot,
 }
 impl LiveSnapshot {
-    fn entities(&self, instance: &moli_core::InstanceId, mac: &str) -> Vec<model::Entity> {
+    fn entities(
+        &self,
+        instance: &moli_core::InstanceId,
+        mac: &str,
+        config: &Config,
+    ) -> Vec<model::Entity> {
         let mut entities = self.zones.entities(instance, mac);
-        entities.extend(self.resources.entities(instance, mac, &self.zones, false));
+        config.restrict_writes(&mut entities, true);
+        let mut resources = self
+            .resources
+            .entities(instance, mac, &self.zones, config.read_only);
+        config.restrict_writes(&mut resources, false);
+        entities.extend(resources);
         entities
     }
     fn encode(
@@ -171,7 +188,7 @@ fn publish_resources(
     resources: &resources::ResourceSnapshot,
     zones: &Snapshot,
     mac: &str,
-    read_only: bool,
+    config: &Config,
     progress: &synchronization::Progress,
 ) {
     let prefix = format!("{}:{mac}_s", ctx.instance());
@@ -185,19 +202,15 @@ fn publish_resources(
         })
         .filter(|id| resources.attempted_device(id, mac))
         .collect::<Vec<_>>();
-    publish_entities(
-        ctx,
-        resources.entities(ctx.instance(), mac, zones, read_only),
-        read_only,
-        &managed,
-        progress,
-    );
+    let mut entities = resources.entities(ctx.instance(), mac, zones, config.read_only);
+    config.restrict_writes(&mut entities, false);
+    publish_entities(ctx, entities, &managed, progress);
 }
 fn publish_core(
     ctx: &DriverCtx,
     snapshot: &Snapshot,
     mac: &str,
-    read_only: bool,
+    config: &Config,
     progress: &synchronization::Progress,
 ) {
     let prefix = format!("{}:{mac}_s", ctx.instance());
@@ -210,31 +223,19 @@ fn publish_core(
                 .is_some_and(|tail| tail.contains("_z"))
         })
         .collect::<Vec<_>>();
-    publish_entities(
-        ctx,
-        snapshot.entities(ctx.instance(), mac),
-        read_only,
-        &managed,
-        progress,
-    );
+    let mut entities = snapshot.entities(ctx.instance(), mac);
+    config.restrict_writes(&mut entities, true);
+    publish_entities(ctx, entities, &managed, progress);
 }
 fn publish_entities(
     ctx: &DriverCtx,
     mut entities: Vec<model::Entity>,
-    read_only: bool,
     managed: &[DeviceId],
     progress: &synchronization::Progress,
 ) {
     for entity in &mut entities {
         let gateway = entity.0.id.as_str().ends_with("_gateway");
         progress.append(entity, ctx, gateway, true);
-    }
-    if read_only {
-        for (device, _) in &mut entities {
-            for point in &mut device.points {
-                point.access.write = false;
-            }
-        }
     }
     let present = entities
         .iter()
@@ -368,6 +369,10 @@ impl Airzone {
         command: &CommandRequest,
     ) -> anyhow::Result<()> {
         ensure!(!self.config.read_only, moli_i18n::tr!("airzone.read_only"));
+        ensure!(
+            self.config.write.allows_point(&command.key, true),
+            api::Failure::ExtendedWritesDisabled
+        );
         ensure!(!command.abandoned(), moli_i18n::tr!("airzone.expired"));
         let end = command.deadline.min(Instant::now() + COMMAND_LIMIT);
         let (reported, info) = self.reported_controller(end).await?;
@@ -379,13 +384,19 @@ impl Airzone {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .core();
-        publish_core(ctx, &zones, mac, self.config.read_only, &self.progress());
+        publish_core(ctx, &zones, mac, &self.config, &self.progress());
         self.track(ctx, |_| {});
-        let resources = if zones
+        let historical_resource = zones
             .entities(ctx.instance(), mac)
             .iter()
-            .any(|(device, _)| device.id == command.device.id)
-        {
+            .any(|(device, _)| device.id == command.device.id);
+        ensure!(
+            self.config
+                .write
+                .allows_point(&command.key, historical_resource),
+            api::Failure::ExtendedWritesDisabled
+        );
+        let resources = if historical_resource {
             resources::ResourceSnapshot::default()
         } else {
             let prefix = format!("{}:", ctx.instance());
@@ -408,11 +419,17 @@ impl Airzone {
             resources
         };
         let snapshot = LiveSnapshot { zones, resources };
-        let entities = snapshot.entities(ctx.instance(), mac);
+        let entities = snapshot.entities(ctx.instance(), mac, &self.config);
         let (current, _) = entities
             .iter()
             .find(|(d, _)| d.id == command.device.id)
             .context(moli_i18n::tr!("airzone.stale"))?;
+        ensure!(
+            current
+                .point(&command.key)
+                .is_some_and(|point| point.access.write),
+            moli_i18n::tr!("airzone.stale")
+        );
         ensure!(
             current.members == command.device.members,
             moli_i18n::tr!("airzone.stale")
@@ -534,7 +551,7 @@ impl Airzone {
                         &resources,
                         &core.zones,
                         &core.mac,
-                        self.config.read_only,
+                        &self.config,
                         &self.progress(),
                     );
                 }
@@ -565,13 +582,7 @@ impl Airzone {
             .unwrap_or_else(PoisonError::into_inner)
             .optional_systems = u64::try_from(core.zones.system_ids().len()).unwrap_or(32);
         let progress = self.progress();
-        publish_core(
-            ctx,
-            &core.zones,
-            &core.mac,
-            self.config.read_only,
-            &progress,
-        );
+        publish_core(ctx, &core.zones, &core.mac, &self.config, &progress);
         let gateway = ctx.device_id(&format!("{}_gateway", core.mac));
         if ctx.device(&gateway).is_none() {
             let initial = resources::ResourceSnapshot::from_webserver(&self.config, &core.info)
@@ -581,7 +592,9 @@ impl Airzone {
                     &core.zones,
                     self.config.read_only,
                 );
-            publish_entities(ctx, vec![initial], self.config.read_only, &[], &progress);
+            let mut entities = vec![initial];
+            self.config.restrict_writes(&mut entities, false);
+            publish_entities(ctx, entities, &[], &progress);
         } else {
             self.track(ctx, |_| {});
         }
@@ -604,10 +617,27 @@ mod tests {
     fn omitted_read_only_preserves_legacy_toml_command_mode() {
         let config: Config = serde_json::from_value(json!({"host":"controller.example"})).unwrap();
         assert!(!config.read_only);
+        assert_eq!(config.write, WriteMode::Legacy);
         let config: Config =
             serde_json::from_value(json!({"host":"controller.example", "read_only":false}))
                 .unwrap();
         assert!(!config.read_only);
+        assert_eq!(config.write, WriteMode::Legacy);
+    }
+    #[test]
+    fn extended_writes_require_a_recognized_explicit_option() {
+        let config: Config =
+            serde_json::from_value(json!({"host":"controller.example", "write":"extended"}))
+                .unwrap();
+        assert_eq!(config.write, WriteMode::Extended);
+        for write in [json!(true), json!("all"), json!(["name"]), json!(null)] {
+            assert!(
+                serde_json::from_value::<Config>(
+                    json!({"host":"controller.example", "write":write})
+                )
+                .is_err()
+            );
+        }
     }
     #[test]
     fn constructor_validates_without_network() {
@@ -617,6 +647,7 @@ mod tests {
             poll_secs: 30,
             mac: Some("aa:bb:cc:dd:ee:ff".into()),
             read_only: true,
+            write: WriteMode::Legacy,
             dhw_units: None,
             tls_fingerprint: None,
         };
@@ -696,12 +727,13 @@ mod lifecycle_tests {
         zones: Json,
         hub: Hub,
     ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
-        start_with_settings(zones, hub, false).await
+        start_with_settings(zones, hub, false, WriteMode::Legacy).await
     }
     async fn start_with_settings(
         zones: Json,
         hub: Hub,
         read_only: bool,
+        write: WriteMode,
     ) -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
         let sim = Sim {
             zones: Arc::new(Mutex::new(zones)),
@@ -786,6 +818,7 @@ mod lifecycle_tests {
                     poll_secs: 5,
                     mac: None,
                     read_only,
+                    write,
                     dhw_units: None,
                     tls_fingerprint: None,
                 })
@@ -851,13 +884,111 @@ mod lifecycle_tests {
         server.abort();
     }
     #[tokio::test]
+    async fn legacy_default_only_publishes_historical_commands() {
+        let (hub, cancel, sim, server) = start().await;
+        let snapshot = hub.snapshot();
+        let writable = snapshot
+            .devices
+            .iter()
+            .flat_map(|d| &d.device.points)
+            .filter(|p| p.access.write)
+            .map(|p| p.key.as_ref())
+            .collect::<Vec<_>>();
+        assert!(writable.contains(&"on"));
+        assert!(writable.contains(&"target_temperature"));
+        assert!(writable.contains(&"mode"));
+        assert!(writable.contains(&"fan_speed"));
+        assert!(
+            writable
+                .iter()
+                .all(|key| matches!(*key, "on" | "target_temperature" | "mode" | "fan_speed")),
+            "{writable:?}"
+        );
+        assert!(sim.writes.lock().unwrap().is_empty());
+        for (device, key, value) in [
+            ("az:aabbccddeeff_s1_z2", "on", Value::Bool(false)),
+            (
+                "az:aabbccddeeff_s1_z2",
+                "target_temperature",
+                Value::Float(22.5),
+            ),
+            ("az:aabbccddeeff_s1_z8_control", "mode", Value::from("heat")),
+            (
+                "az:aabbccddeeff_s2_z8_control",
+                "fan_speed",
+                Value::from("2"),
+            ),
+        ] {
+            hub.command(&point(device, key), value, Origin::Ui, None)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            *sim.writes.lock().unwrap(),
+            vec![
+                json!({"systemID":1,"zoneID":2,"on":0}),
+                json!({"systemID":1,"zoneID":2,"setpoint":22.5}),
+                json!({"systemID":1,"zoneID":8,"mode":3}),
+                json!({"systemID":2,"zoneID":8,"speed":2}),
+            ]
+        );
+        cancel.cancel();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn extended_opt_in_enables_renaming_but_read_only_still_dominates() {
+        for read_only in [false, true] {
+            let zones = serde_json::from_str(include_str!(
+                "../../../integrations/airzone/fixtures/zones.json"
+            ))
+            .unwrap();
+            let (hub, cancel, sim, server) = start_with_settings(
+                zones,
+                Hub::new(HubOptions::default()).unwrap(),
+                read_only,
+                WriteMode::Extended,
+            )
+            .await;
+            let device = hub
+                .device(&DeviceId::from("az:aabbccddeeff_s1_z2"))
+                .unwrap();
+            assert_eq!(
+                device.device.point("name").unwrap().access.write,
+                !read_only
+            );
+            let result = hub
+                .command(
+                    &point("az:aabbccddeeff_s1_z2", "name"),
+                    Value::from("Zone D"),
+                    Origin::Ui,
+                    None,
+                )
+                .await;
+            assert_eq!(result.is_ok(), !read_only);
+            assert_eq!(sim.writes.lock().unwrap().len(), usize::from(!read_only));
+            if !read_only {
+                assert_eq!(
+                    sim.writes.lock().unwrap()[0],
+                    json!({"systemID":1,"zoneID":2,"name":"Zone D"})
+                );
+            }
+            cancel.cancel();
+            server.abort();
+        }
+    }
+    #[tokio::test]
     async fn read_only_publishes_no_writable_points_and_rejects_every_origin() {
         let zones = serde_json::from_str(include_str!(
             "../../../integrations/airzone/fixtures/zones.json"
         ))
         .unwrap();
-        let (hub, cancel, sim, server) =
-            start_with_settings(zones, Hub::new(HubOptions::default()).unwrap(), true).await;
+        let (hub, cancel, sim, server) = start_with_settings(
+            zones,
+            Hub::new(HubOptions::default()).unwrap(),
+            true,
+            WriteMode::Legacy,
+        )
+        .await;
         assert!(
             hub.snapshot().devices.iter().all(|device| device
                 .device

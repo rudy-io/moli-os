@@ -293,7 +293,17 @@ async fn core_heartbeat_does_not_freshen_gateway_fields_waiting_for_optional_met
 
 #[tokio::test]
 async fn setpoint_and_turn_on_uses_one_guarded_put_and_no_fabricated_state() {
-    let (hub, cancel, sim, server) = start().await;
+    let zones = serde_json::from_str(include_str!(
+        "../../../../integrations/airzone/fixtures/zones.json"
+    ))
+    .unwrap();
+    let (hub, cancel, sim, server) = start_with_settings(
+        zones,
+        Hub::new(HubOptions::default()).unwrap(),
+        false,
+        WriteMode::Extended,
+    )
+    .await;
     let target = point(ZONE, "target_temperature_on");
     let original = hub.state(&point(ZONE, "target_temperature")).unwrap().value;
     hub.command(&target, Value::Float(23.5), Origin::Ui, None)
@@ -350,7 +360,8 @@ async fn composed_action_keeps_the_zone_guard_and_read_only_boundary() {
             ..HubOptions::default()
         })
         .unwrap();
-        let (hub, cancel, sim, server) = start_with_settings(zones, hub, read_only).await;
+        let (hub, cancel, sim, server) =
+            start_with_settings(zones, hub, read_only, WriteMode::Extended).await;
         let result = hub
             .command(
                 &point(ZONE, "target_temperature_on"),

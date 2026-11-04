@@ -23,6 +23,7 @@ pub(crate) enum Failure {
     InvalidResponse,
     InvalidRequest,
     ReadOnly,
+    ExtendedWritesDisabled,
     Expired,
 }
 impl fmt::Display for Failure {
@@ -36,6 +37,7 @@ impl fmt::Display for Failure {
             Self::Api => moli_i18n::tr!("airzone.api_failed"),
             Self::InvalidResponse | Self::InvalidRequest => moli_i18n::tr!("airzone.invalid"),
             Self::ReadOnly => moli_i18n::tr!("airzone.read_only"),
+            Self::ExtendedWritesDisabled => moli_i18n::tr!("airzone.extended_writes_disabled"),
             Self::Expired => moli_i18n::tr!("airzone.expired"),
         };
         f.write_str(&text)
@@ -233,6 +235,10 @@ pub(crate) async fn exchange(
         "PUT" => {
             ensure!(!config.read_only, Failure::ReadOnly);
             validate_write(path, body)?;
+            ensure!(
+                config.write.allows_wire(path, body),
+                Failure::ExtendedWritesDisabled
+            );
         }
         "GET" => {
             ensure!(matches!(path, "hvac" | "iaq"), Failure::InvalidRequest);

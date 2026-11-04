@@ -29,18 +29,32 @@ host = "controller.example"
 port = 3000
 poll_secs = 30
 read_only = true
+# write = "extended"    # optional new commands; read_only = true still blocks all writes
 mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 # dhw_units = 0          # only if DHW omits units: 0 Celsius, 1 Fahrenheit
 # port = 3443           # HTTPS: replace port above and set a verified fingerprint
 # tls_fingerprint = "<64 hexadecimal SHA-256 characters>"
 ```
 
-**TOML instances retain their existing command mode**: an omitted `read_only`
-defaults to `false`, preserving existing automations. Set `read_only = true` for
-an observation-only trial. Gateways added, edited or reactivated from the dashboard explicitly
+**TOML instances retain their historical command scope**: an omitted `read_only`
+defaults to `false`, preserving existing automations. An omitted `write` defaults
+to `"legacy"`: only `on`, `target_temperature`, `mode` and `fan_speed` remain
+writable when advertised. They map to the Local API `on`, `setpoint`, `mode` and
+`speed` parameters on an addressed zone, including historical master-zone controls.
+Reading additional fields never enables additional commands.
+
+Set `write = "extended"` explicitly to enable the newly covered commands:
+whole-system modes, hot water, renaming, installer stages/Q-Adapt, grille/slat,
+ventilation/IAQ, integration label and the combined setpoint + turn-on action.
+Current capabilities, scope and guards still apply. `read_only = true` overrides
+both write modes at publication, execution and transport boundaries.
+
+Set `read_only = true` for an observation-only trial. Gateways added, edited or reactivated from the dashboard explicitly
 use `read_only = true`. In Installation, a person can then authorize control or
 return to read-only after confirming with their Moli PIN. The per-gateway choice
 is stored in registry v3, survives restart and leaves hand-written TOML untouched.
+This button does not select `write = "extended"`; newly managed gateways retain
+the historical command scope. A pre-existing explicit TOML opt-in is preserved.
 Enabling verifies the pinned identity; revocation also works offline or while
 paused. Changing mode sends no physical command. Authorized commands still use
 Moli's existing guards; revoking does not stop the heating already running.
@@ -88,7 +102,8 @@ never inferred from the first zone and never overriding a reported unit.
 `power` (documented ambiguously as kW/h) and `consumption_ue` are retained without
 inventing billable energy. `energy_data` leaves preserve their documented kW/kWh.
 Deprecated grille code 4 has no documented meaning and is not offered as a write.
-The metadata `driver` has a local 240-character bound and is not a firmware update.
+The metadata `driver` has a 120-character write bound (readings are retained up to
+240 characters) and is not a firmware update.
 
 ## Operations and diagnostics
 
@@ -211,8 +226,8 @@ state independently.
 ### Rollback compatibility
 
 Older driver binaries reject unknown TOML options. Before rolling back, restore
-a configuration compatible with that version: `read_only`, `tls_fingerprint` and
-`dhw_units` are not accepted by the original driver. Removing `read_only` does not
+a configuration compatible with that version: `read_only`, `write`,
+`tls_fingerprint` and `dhw_units` are not accepted by the original driver. Removing `read_only` does not
 make an older driver read-only; keep the instance disabled if observation-only
 operation is required. Restore a matching managed-gateway registry/backup too.
 Keep the current configuration, registry and encrypted store backed up first.

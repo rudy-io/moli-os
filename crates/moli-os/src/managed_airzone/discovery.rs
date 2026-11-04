@@ -181,6 +181,7 @@ impl Inspector for Network {
                 poll_secs: 30,
                 mac: None,
                 read_only: true,
+                write: moli_airzone::WriteMode::Legacy,
                 dhw_units: None,
                 tls_fingerprint: target.tls_fingerprint.clone(),
             })

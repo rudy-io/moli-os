@@ -537,6 +537,7 @@ fn native(request: &GatewayRequest, mac: Option<String>) -> moli_airzone::Config
         poll_secs: 30,
         mac,
         read_only: true,
+        write: moli_airzone::WriteMode::Legacy,
         dhw_units: None,
         tls_fingerprint: request.tls_fingerprint.clone(),
     }

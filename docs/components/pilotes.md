@@ -129,7 +129,14 @@ contrôleur ; cette couverture ne garantit pas la compatibilité de tous les fir
 
 Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
 `read_only = false` est conservé pour ne pas désactiver les automatismes existants.
-Un essai d’observation configure explicitement `read_only = true` ; les passerelles
+Le défaut `write = "legacy"` conserve seulement `on`, `target_temperature`, `mode`
+et `fan_speed` (paramètre Airzone `speed`) sur les zones et leurs contrôles partagés
+historiques. `write = "extended"` active explicitement les nouvelles commandes :
+modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
+qualité de l’air, libellé d’intégration et action combinée consigne + marche.
+Les capacités publiées, l’exécuteur et le transport appliquent cette restriction.
+Un essai d’observation configure explicitement `read_only = true`, prioritaire
+sur les deux modes d’écriture ; les passerelles
 ajoutées ou modifiées depuis Moli imposent cette lecture seule. Les commandes
 restent soumises aux gardes, aux membres
 affectés et à une nouvelle lecture des capacités. Aucun PUT n'est envoyé au

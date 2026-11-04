@@ -154,6 +154,57 @@ fn fixture_zones() -> Snapshot {
 }
 
 #[test]
+fn optional_resource_commands_require_extended_opt_in() {
+    let snapshot = crate::LiveSnapshot {
+        zones: fixture_zones(),
+        resources: ResourceSnapshot {
+            read_only: false,
+            integration: Some(json!({"driver":"Moli test"})),
+            systems: vec![
+                json!({"systemID":1,"mode":3,"modes":[1,3],"user_mode":1}),
+                json!({"systemID":2}),
+            ],
+            systems_available: true,
+            dhw: Some(json!({"systemID":0,"acs_power":1,"acs_powerful":0})),
+            iaq: vec![json!({"systemID":1,"iaqsensorID":3,"name":"Sensor 03","iaq_mode_vent":2})],
+            ..ResourceSnapshot::default()
+        },
+    };
+    let instance = InstanceId::from("az");
+    let mut config: Config = serde_json::from_value(json!({"host":"controller.example"})).unwrap();
+    for (native, key) in [
+        ("aabbccddeeff_gateway", "driver"),
+        ("aabbccddeeff_s1_system", "mode"),
+        ("aabbccddeeff_s1_system", "user_mode"),
+        ("aabbccddeeff_dhw", "acs_power"),
+        ("aabbccddeeff_dhw", "acs_powerful"),
+        ("aabbccddeeff_s1_iaq3", "name"),
+        ("aabbccddeeff_s1_iaq3", "iaq_mode_vent"),
+    ] {
+        for (write, read_only, allowed) in [
+            (crate::WriteMode::Legacy, false, false),
+            (crate::WriteMode::Extended, false, true),
+            (crate::WriteMode::Legacy, true, false),
+            (crate::WriteMode::Extended, true, false),
+        ] {
+            config.write = write;
+            config.read_only = read_only;
+            let entities = snapshot.entities(&instance, "aabbccddeeff", &config);
+            let device = &entities
+                .iter()
+                .find(|(d, _)| d.id == DeviceId::new(&instance, native))
+                .unwrap()
+                .0;
+            assert_eq!(
+                device.point(key).unwrap().access.write,
+                allowed,
+                "{native} {key} {write:?} {read_only}"
+            );
+        }
+    }
+}
+
+#[test]
 fn unknown_system_metadata_cannot_shrink_installation_command_scope() {
     let zones = fixture_zones();
     let resources = ResourceSnapshot {

@@ -45,6 +45,7 @@ async fn server(response: Json) -> (Config, tokio::task::JoinHandle<()>, Arc<Ato
             poll_secs: 30,
             mac: None,
             read_only: false,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: None,
             dhw_units: None,
         },
@@ -134,6 +135,7 @@ async fn http_failures_invalid_json_and_timeout_are_not_success() {
             poll_secs: 30,
             mac: None,
             read_only: false,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: None,
             dhw_units: None,
         };
@@ -264,6 +266,7 @@ async fn recording_server() -> (Config, tokio::task::JoinHandle<()>, Arc<AtomicU
             poll_secs: 30,
             mac: None,
             read_only: false,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: None,
             dhw_units: None,
         },
@@ -273,22 +276,40 @@ async fn recording_server() -> (Config, tokio::task::JoinHandle<()>, Arc<AtomicU
 }
 
 #[tokio::test]
-async fn read_only_transport_never_sends_any_put() {
-    let (mut config, task, calls) = recording_server().await;
-    config.read_only = true;
+async fn legacy_default_never_sends_new_write_scopes() {
+    let (server_config, task, calls) = recording_server().await;
+    let config: Config = serde_json::from_value(json!({
+        "host":server_config.host,"port":server_config.port
+    }))
+    .unwrap();
     for (path, body) in [
-        ("hvac", json!({"systemID":1,"zoneID":2,"on":1})),
+        ("hvac", json!({"systemID":1,"zoneID":2,"name":"Zone"})),
+        ("hvac", json!({"systemID":1,"zoneID":2,"coldStage":1})),
+        ("hvac", json!({"systemID":1,"zoneID":2,"heatStage":1})),
+        ("hvac", json!({"systemID":1,"zoneID":2,"angle":1})),
+        ("hvac", json!({"systemID":1,"zoneID":2,"qAdapt":2})),
+        (
+            "hvac",
+            json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1}),
+        ),
+        ("hvac", json!({"systemID":1,"user_mode":2})),
+        ("hvac", json!({"systemID":1,"mode":3})),
+        ("hvac", json!({"systemID":1,"erv_mode":1})),
         ("hvac", json!({"systemID":0,"acs_power":1})),
+        ("hvac", json!({"systemID":0,"acs_powerful":1})),
         (
             "iaq",
             json!({"systemID":1,"iaqsensorID":2,"iaq_mode_vent":1}),
         ),
         ("integration", json!({"driver":"moli"})),
     ] {
-        assert!(
-            exchange(&config, "PUT", path, &body, Duration::from_secs(1))
-                .await
-                .is_err()
+        let error = exchange(&config, "PUT", path, &body, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<Failure>(),
+            Some(&Failure::ExtendedWritesDisabled),
+            "{path} {body}"
         );
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -296,8 +317,35 @@ async fn read_only_transport_never_sends_any_put() {
 }
 
 #[tokio::test]
+async fn read_only_transport_never_sends_any_put() {
+    let (mut config, task, calls) = recording_server().await;
+    config.read_only = true;
+    for write in [crate::WriteMode::Legacy, crate::WriteMode::Extended] {
+        config.write = write;
+        for (path, body) in [
+            ("hvac", json!({"systemID":1,"zoneID":2,"on":1})),
+            ("hvac", json!({"systemID":0,"acs_power":1})),
+            (
+                "iaq",
+                json!({"systemID":1,"iaqsensorID":2,"iaq_mode_vent":1}),
+            ),
+            ("integration", json!({"driver":"moli"})),
+        ] {
+            let error = exchange(&config, "PUT", path, &body, Duration::from_secs(1))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<Failure>(), Some(&Failure::ReadOnly));
+        }
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    task.abort();
+}
+
+#[tokio::test]
 async fn exchange_rejects_unknown_paths_broadcast_writes_and_unreviewed_batches() {
-    let (config, task, calls) = recording_server().await;
+    let (mut config, task, calls) = recording_server().await;
+    // Explicit opt-in never permits unreviewed batches or broadcast writes.
+    config.write = crate::WriteMode::Extended;
     for (method, path, body) in [
         ("POST", "../outside", json!({})),
         ("DELETE", "hvac", json!({"systemID":1,"zoneID":2})),
@@ -351,6 +399,7 @@ async fn typed_reads_use_exact_documented_paths_queries_and_bodies() {
         poll_secs: 30,
         mac: None,
         read_only: true,
+        write: crate::WriteMode::Legacy,
         tls_fingerprint: None,
         dhw_units: None,
     };
@@ -524,6 +573,7 @@ async fn each_documented_put_is_single_and_preserves_its_addressed_body() {
         poll_secs: 30,
         mac: None,
         read_only: false,
+        write: crate::WriteMode::Extended,
         tls_fingerprint: None,
         dhw_units: None,
     };
@@ -580,6 +630,7 @@ async fn transport_failures_are_typed_without_disclosing_addresses_or_response_d
             poll_secs: 30,
             mac: None,
             read_only: true,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: None,
             dhw_units: None,
         };
@@ -603,6 +654,7 @@ async fn transport_failures_are_typed_without_disclosing_addresses_or_response_d
         poll_secs: 30,
         mac: None,
         read_only: true,
+        write: crate::WriteMode::Legacy,
         tls_fingerprint: None,
         dhw_units: None,
     };
@@ -646,6 +698,7 @@ async fn thermostat_is_a_bounded_root_get_and_not_a_json_api_request() {
             poll_secs: 30,
             mac: None,
             read_only: true,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: None,
             dhw_units: None,
         };
@@ -732,6 +785,7 @@ async fn tls_server(
             poll_secs: 30,
             mac: None,
             read_only: false,
+            write: crate::WriteMode::Legacy,
             tls_fingerprint: Some(fingerprint),
             dhw_units: None,
         },
@@ -823,4 +877,38 @@ fn setpoint_and_turn_on_is_addressed_and_requires_both_acknowledgements() {
     ] {
         assert!(acknowledge(&response, &command).is_err());
     }
+}
+
+#[tokio::test]
+async fn composed_transport_requires_extended_and_read_only_always_dominates() {
+    let (mut config, task, calls) = recording_server().await;
+    let command = json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1});
+    for (write, read_only) in [
+        (crate::WriteMode::Legacy, false),
+        (crate::WriteMode::Extended, false),
+        (crate::WriteMode::Legacy, true),
+        (crate::WriteMode::Extended, true),
+    ] {
+        config.write = write;
+        config.read_only = read_only;
+        let before = calls.load(Ordering::SeqCst);
+        let result = exchange(&config, "PUT", "hvac", &command, Duration::from_secs(1)).await;
+        if read_only || write == crate::WriteMode::Legacy {
+            let expected = if read_only {
+                Failure::ReadOnly
+            } else {
+                Failure::ExtendedWritesDisabled
+            };
+            assert_eq!(
+                result.unwrap_err().downcast_ref::<Failure>(),
+                Some(&expected)
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), before);
+        } else {
+            result.unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+        }
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    task.abort();
 }
