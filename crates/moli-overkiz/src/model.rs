@@ -27,7 +27,15 @@ const COVER_CLASSES: [&str; 18] = [
     "UpDownScreen",
     "VenetianBlind",
 ];
-const CONTROLS: [&str; 5] = ["open", "close", "stop", "cycle", "favourite"];
+const CONTROLS: [&str; 7] = [
+    "open",
+    "close",
+    "stop",
+    "cycle",
+    "favourite",
+    "open_slow",
+    "close_slow",
+];
 const MEMORIZED: &str = "core:Memorized1PositionState";
 
 #[derive(Debug)]
@@ -128,14 +136,31 @@ impl Entry {
             _ => false,
         }
     }
-    fn arity(&self, name: &str) -> Option<u64> {
+    fn command(&self, name: &str) -> Option<&Json> {
         let commands = self.raw["definition"]["commands"].as_array()?;
         let mut matching = commands.iter().filter(|c| c["commandName"] == name);
         let command = matching.next()?;
         if matching.next().is_some() {
             return None;
         }
-        command["nparams"].as_u64()
+        Some(command)
+    }
+    fn arity(&self, name: &str) -> Option<u64> {
+        self.command(name)?["nparams"].as_u64()
+    }
+    fn slow_binding(&self, opening: Option<f64>) -> Option<Binding> {
+        if !self.io() || self.reviewed_class.is_some() {
+            return None;
+        }
+        let command = self.command("setClosureAndLinearSpeed")?;
+        let signature = command.get("paramsSig");
+        let supported = match (command["nparams"].as_u64(), signature) {
+            (Some(2), None) => true,
+            (Some(2), Some(Json::String(value))) => value == "p1,p2",
+            (Some(1), Some(Json::String(value))) => value == "p1,*p2",
+            _ => false,
+        };
+        supported.then(|| Binding::slow_closure(opening))
     }
     fn state(&self, name: &str) -> Option<&Json> {
         let mut states = self.raw["states"]
@@ -204,6 +229,9 @@ impl Entry {
             return None;
         }
         match key {
+            "percent_control_slow" => self.slow_binding(None),
+            "control" if control == "open_slow" => self.slow_binding(Some(100.0)),
+            "control" if control == "close_slow" => self.slow_binding(Some(0.0)),
             "percent_control" if self.io() => {
                 let family = self.family()?;
                 (self.arity(family.setter()) == Some(1))
@@ -305,6 +333,14 @@ impl Entry {
         {
             points.push(self.numeric_point("percent_control", moli_i18n::tr!("overkiz.position")));
         }
+        if self.binding("percent_control_slow", "").is_some() {
+            let mut point = self.numeric_point(
+                "percent_control_slow",
+                moli_i18n::tr!("overkiz.slow_position"),
+            );
+            point.access.read = false;
+            points.push(point);
+        }
         if self.has_state(MEMORIZED) || self.binding("favourite_position", "").is_some() {
             let mut point = self.numeric_point(
                 "favourite_position",
@@ -371,6 +407,9 @@ impl Entry {
 #[cfg(test)]
 #[path = "model_convergence_tests.rs"]
 mod convergence_tests;
+#[cfg(test)]
+#[path = "model_slow_tests.rs"]
+mod slow_tests;
 #[cfg(test)]
 #[path = "model_tests.rs"]
 mod tests;

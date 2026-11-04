@@ -257,5 +257,11 @@
   "commun.niveau.attention": "À surveiller",
   "commun.niveau.mauvais": "Mauvais",
   "commun.capteur.humidite": "Humidité",
-  "commun.code.raison_configuration": "Un changement de la maison : elle demande que ce soit bien toi."
+  "commun.code.raison_configuration": "Un changement de la maison : elle demande que ce soit bien toi.",
+  "commun.volet.vitesse": "Prochaine commande",
+  "commun.volet.vitesse_prochaine": "Vitesse de la prochaine commande",
+  "commun.volet.vitesse_normale": "Normal",
+  "commun.volet.vitesse_lente": "Lent",
+  "commun.volet.reconnexion": "Connexion à Moli…",
+  "commun.volet.commandes_de": "Commandes de {label}"
 }
