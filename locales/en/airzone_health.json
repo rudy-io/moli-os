@@ -61,5 +61,15 @@
   "airzone_health.check.errors.failed": "The gateway did not provide a usable response. Check its connection in Installation.",
   "airzone_health.check.errors.network": "The check did not complete. Check the connection to Moli and the gateway.",
   "airzone_health.check.errors.timeout": "The check timed out. Check the gateway connection before trying again.",
-  "airzone_health.check.errors.cancelled": "Check cancelled."
+  "airzone_health.check.errors.cancelled": "Check cancelled.",
+  "airzone_health.model": "Model",
+  "airzone_health.firmware": "Thermostat version",
+  "airzone_health.model.blueface": "Blueface",
+  "airzone_health.model.blueface_zero": "Blueface Zero",
+  "airzone_health.model.lite": "Lite",
+  "airzone_health.model.think": "Think",
+  "airzone_health.wired_help": "Battery and radio coverage do not apply to a wired connection.",
+  "airzone_health.metadata_missing": "Information not supplied by the Local API",
+  "airzone_health.metadata_help": "This zone does not report its thermostat connection type, battery or radio signal to Moli. This does not mean that its batteries are empty or its connection is weak. Compare this information in the Airzone app or on the thermostat.",
+  "airzone_health.inspect_gateway": "View gateway and diagnostics"
 }

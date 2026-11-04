@@ -61,5 +61,15 @@
   "airzone_health.check.errors.failed": "La passerelle n’a pas fourni de réponse exploitable. Vérifiez sa connexion dans Installation.",
   "airzone_health.check.errors.network": "La vérification n’a pas abouti. Vérifiez la connexion à Moli et à la passerelle.",
   "airzone_health.check.errors.timeout": "La vérification a dépassé le délai prévu. Vérifiez la connexion de la passerelle avant de réessayer.",
-  "airzone_health.check.errors.cancelled": "Vérification annulée."
+  "airzone_health.check.errors.cancelled": "Vérification annulée.",
+  "airzone_health.model": "Modèle",
+  "airzone_health.firmware": "Version du thermostat",
+  "airzone_health.model.blueface": "Blueface",
+  "airzone_health.model.blueface_zero": "Blueface Zero",
+  "airzone_health.model.lite": "Lite",
+  "airzone_health.model.think": "Think",
+  "airzone_health.wired_help": "La batterie et la couverture radio ne s’appliquent pas à une liaison filaire.",
+  "airzone_health.metadata_missing": "Informations non fournies par l’API locale",
+  "airzone_health.metadata_help": "Cette zone ne transmet pas son type de thermostat, sa batterie ni son signal radio à Moli. Cela ne signifie pas que les piles sont vides ou que la liaison est mauvaise. Comparez ces informations dans l’application Airzone ou sur le thermostat.",
+  "airzone_health.inspect_gateway": "Consulter la passerelle et ses diagnostics"
 }

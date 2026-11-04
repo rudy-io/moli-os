@@ -10,5 +10,6 @@
   "airzone_detail.demand.heat_demand": "Chauffage",
   "airzone_detail.demand.cold_demand": "Refroidissement",
   "airzone_detail.demand.air_demand": "Air",
-  "airzone_detail.demand.floor_demand": "Plancher"
+  "airzone_detail.demand.floor_demand": "Plancher",
+  "airzone_detail.comfort": "Votre confort"
 }

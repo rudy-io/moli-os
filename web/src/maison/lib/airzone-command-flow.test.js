@@ -2,15 +2,16 @@ import {test,before,after,beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 import {fileURLToPath} from 'node:url';
-let vite,hub,home,client,reconcileAirzoneDevice,counter=0;
+let vite,hub,home,client,reconcileAirzoneDevice,render,Controls,Detail,Page,counter=0;
 const originals=new Map(['document','localStorage','fetch'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
 before(async()=>{
  delete globalThis.localStorage;globalThis.document={querySelector:()=>null,documentElement:{}};
  vite=await createServer({root:fileURLToPath(new URL('../../../',import.meta.url)),server:{middlewareMode:true,watch:null,hmr:false},logLevel:'error'});
  ({hub,reconcileAirzoneDevice}=await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
  ({home}=await vite.ssrLoadModule('/src/maison/lib/home.svelte.js'));client=await vite.ssrLoadModule('/src/maison/lib/airzone-command.svelte.js');
+ ({render}=await vite.ssrLoadModule('svelte/server'));Controls=(await vite.ssrLoadModule('/src/maison/ui/AirzoneControls.svelte')).default;Detail=(await vite.ssrLoadModule('/src/maison/ui/AirzoneZoneDetail.svelte')).default;Page=(await vite.ssrLoadModule('/src/maison/pages/Airzone.svelte')).default;await (await vite.ssrLoadModule('/src/lib/i18n.svelte.js')).setLanguage('fr');
 });
-beforeEach(()=>{hub.devices={};hub.drivers=[{instance:'test-airzone',kind:'airzone'}];hub.connected=true;hub.session={human:true};home.held=null;});
+beforeEach(()=>{hub.devices={};hub.drivers=[{instance:'test-airzone',kind:'airzone'}];hub.connected=true;hub.session={human:true};home.held=null;home.config={};});
 after(async()=>{await vite?.close();for(const[key,value]of originals){if(value)Object.defineProperty(globalThis,key,value);else delete globalThis[key];}});
 const waitFor=async(test)=>{for(let i=0;i<100;i++){if(test())return;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('expected state not reached');};
 const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
@@ -68,4 +69,35 @@ test('an unresolved guard blocks another request on the same point and an offlin
  reconcileAirzoneDevice({...zone,state:{...zone.state,sync_generation:{value:4,ts:Date.now()},sync_last_received:{value:Date.now(),ts:Date.now()}}});
  assert.equal(client.hasPendingAirzone(point),true);assert.equal(client.requestAirzone(point,false),false);assert.equal(calls.filter(call=>call.url==='/api/command').length,1);
  globalThis.fetch=async()=>response({ok:true});client.denyPendingAirzone(point);const denial=home.held;home.held=null;await denial.custom();assert.equal(client.hasPendingAirzone(point),false);
+});
+
+test('a guarded target stays visible and refusable after presentation and permission changes',async()=>{
+ const zone=setup(),key='target_temperature',point=zone.id+'/'+key,calls=[];
+ globalThis.fetch=async(url,options)=>{calls.push({url,...options});return url==='/api/command'?response({pending:17,reason:'protected'},202):response({error:'human_only'},403);};
+ assert.equal(client.requestAirzone(point,22),true);await waitFor(()=>home.held?.id===17);
+ const held=home.held;home.held=null;await held.onCancel();await waitFor(()=>client.airzoneCommands[point]?.error==='approval_pending');
+ zone.points.push({...zone.points.find(p=>p.key===key),key:'heatsetpoint'},{...zone.points.find(p=>p.key===key),key:'coolsetpoint'},{key:'double_sp',kind:{type:'binary'},access:{read:true}});zone.state.double_sp={value:true};
+ zone.points.forEach(p=>p.access.write=false);
+ for(const sync of [{state:'current'},{state:'offline'}]){
+  const html=render(Controls,{props:{device:zone,sync}}).body;
+  assert.match(html,/data-retained-command="target_temperature"/);assert.match(html,/Refuser la demande avec mon code/);assert.doesNotMatch(html,/<input|<select|role="switch"/);
+ }
+ zone.points=zone.points.filter(p=>p.key!==key);
+ const removed=render(Controls,{props:{device:zone,sync:{state:'offline'}}}).body;assert.match(removed,/Refuser la demande avec mon code/);
+ zone.points=zone.points.filter(p=>!['on','mode','heatsetpoint','coolsetpoint'].includes(p.key));
+ const detail=render(Detail,{props:{zone,sync:{state:'offline'}}}).body;
+ assert.match(detail,/data-retained-command="target_temperature"/);assert.match(detail,/Refuser la demande avec mon code/);
+ for(const hidden of [[],[zone.id]]){
+  home.config={hidden};const overview=render(Page,{props:{route:'airzone'}}).body;
+  assert.match(overview,/Une demande attend encore/);assert.match(overview,/Refuser la demande avec mon code/);assert.doesNotMatch(overview,/class="control-row/);
+  if(hidden.length){
+   const hiddenDetail=render(Page,{props:{route:`airzone/${encodeURIComponent(zone.id)}`}}).body;
+   assert.match(hiddenDetail,/Une demande attend encore/);assert.match(hiddenDetail,/Refuser la demande avec mon code/);
+  }
+ }
+ home.config={};delete hub.devices[zone.id];
+ const removedDetail=render(Page,{props:{route:`airzone/${encodeURIComponent(zone.id)}`}}).body;
+ assert.match(removedDetail,/Une demande attend encore/);assert.match(removedDetail,/Refuser la demande avec mon code/);
+ assert.equal(calls.filter(call=>call.url==='/api/command').length,1);
+ globalThis.fetch=async()=>response({ok:true});assert.equal(client.denyPendingAirzone(point),true);const denial=home.held;home.held=null;await denial.custom();assert.equal(client.hasPendingAirzone(point),false);
 });

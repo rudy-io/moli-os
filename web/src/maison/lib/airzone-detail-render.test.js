@@ -112,3 +112,13 @@ test('missing samples stay unavailable and all new words are available in Englis
   assert.doesNotMatch(text(english), /airzone_detail\.|Voir l’historique|Nom, pièce|Chauffage/);
   assert.match(text(english), /View history/);
 });
+
+test('thermostat appearance uses the same mode and freshness rules as the cards',()=>{
+ const source=zone({on:true,mode:'cool',temperature:26,target_temperature:22,cold_demand:true});
+ const show=sync=>render(Detail,{props:{zone:source,sync}}).body;
+ assert.match(show({state:'current'}),/class="comfort-card[^>]+data-tone="cool" data-demand="true"/);
+ assert.match(show({state:'stale'}),/class="comfort-card[^>]+data-tone="neutral" data-demand="false"/);
+ source.state.on.value=false;assert.match(show({state:'current'}),/class="comfort-card[^>]+data-tone="neutral" data-demand="false"/);
+ source.state.on.value=true;delete source.state.cold_demand;
+ assert.match(show({state:'current'}),/data-tone="cool" data-demand="false"/);
+});

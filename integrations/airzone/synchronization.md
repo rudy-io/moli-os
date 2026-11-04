@@ -29,10 +29,21 @@ readback cannot restore a revoked capability or availability already changed by 
 
 ## Commands in the Airzone view
 
+The overview uses compact observation cards; opening a zone reveals its main
+setpoint and everyday controls. Separate heating/cooling targets remain explicit
+when the device advertises dual setpoints. Alternative targets, ventilation and
+technical settings stay available one level deeper. Read-only and offline devices
+show readable values instead of disabled forms. Pending command receipts remain
+visible independently of the currently displayed controls or capabilities.
+
 Controls use advertised kinds, bounds, steps, units and write permissions. Numeric
 intentions coalesce for 250 ms; at most one request for a point is in flight and
 the latest unsent intention wins. Reads yield to a queued command. Cancelling an
 old read phase prevents its response from overwriting post-command observations.
+
+Numeric editor formatting may shorten a float32 representation only when the
+shorter decimal maps back to exactly that same float32. Display formatting never
+quantizes an observation onto a command grid or changes the stored intention.
 
 A validated API ACK records `sync_last_command_generation` before replying to the
 caller. It does not publish the requested value as an equipment reading. The

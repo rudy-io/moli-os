@@ -105,7 +105,8 @@ implemented without first introducing broadcast writes.
 
 Battery and radio coverage are only reported for compatible radio thermostats
 (documented firmware prerequisites are preserved in the contract). A missing
-battery percentage must not become zero. IAQ naming is unavailable on Aidoo
+battery percentage must not become zero. See [thermostat metadata](thermostat-metadata.md)
+for field semantics and a read-only diagnosis procedure. IAQ naming is unavailable on Aidoo
 Pro; ventilation control additionally depends on active `iaq_vmc`. Hardware
 families, firmware limits, units, ranges and advertised enum choices constrain
 each write even when its field has a compiled encoder.

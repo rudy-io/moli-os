@@ -75,6 +75,8 @@ const setDevices = (devices) => { hub.devices = Object.fromEntries(devices.map((
 const page = (route = 'airzone') => render(Page, { props: { route } }).body;
 const text = (html) => html.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 const tags = (html, tag) => [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'))].map(([value]) => value);
+const primaryMeasurements=html=>[...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g),...html.matchAll(/<output[^>]*id="airzone-control-[^"]*-(?:target_temperature|heatsetpoint|coolsetpoint)"[^>]*>([\s\S]*?)<\/output>/g)].map(([,value])=>text(value));
+const historyButtons=html=>tags(html,'button').filter(button=>/class="(?:metric|history-action)\b/.test(button));
 const cardLinks = (html) => tags(html, 'a').filter((tag) => /class="zone-card\b/.test(tag));
 
 function observationOnly(html, filters = false) {
@@ -113,6 +115,7 @@ test('overview counts only native visible zones and keeps equal system numbers i
   const html = page();
   const visibleText = text(html);
   assert.equal(cardLinks(html).length, 4);
+  assert.doesNotMatch(html,/class="controls\b|data-point=|type="number"/,'overview contains no repeated command forms');
   assert.match(visibleText, /4 zones 3 systèmes 3 joignables/);
   assert.doesNotMatch(visibleText, /Hidden zone|Bridge imitation zone|Synthetic gateway|Synthetic system metadata/);
   const groups = [...html.matchAll(/<section class="system-zones\b[^>]*>([\s\S]*?)<\/section>/g)].map(([, group]) => text(group));
@@ -133,7 +136,7 @@ test('overview encodes native identities in links and detail resolves the select
   assert.match(text(html), /Selected zone/);
   assert.match(text(html), /Control for selected zone/);
   assert.doesNotMatch(text(html), /Control for sibling zone|Foreign control|Other installation zone|Hidden zone/);
-  assert.equal(tags(html, 'button').filter(button=>/class="metric\b/.test(button)).length, 2, 'two observed main metrics link to history');
+  assert.equal(historyButtons(html).length, 2, 'two observed main metrics link to history');
   observationOnly(html);
 });
 
@@ -162,7 +165,7 @@ test('zone detail preserves Fahrenheit for both primary readings and does not ma
   selected.state.temperature.value = 70.5;
   selected.state.target_temperature.value = 72;
   let html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
-  const measurements = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  const measurements = primaryMeasurements(html);
   assert.deepEqual(measurements, ['70,5 °F', '72 °F']);
   assert.doesNotMatch(html, /°C/);
   for (const key of ['temperature', 'target_temperature']) selected.points.find((p) => p.key === key).unit = null;
@@ -182,18 +185,18 @@ test('history buttons announce the actual primary value and its declared unit to
     selected.state.temperature.value = temperature;
     selected.state.target_temperature.value = target;
     const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
-    assert.deepEqual(tags(html, 'button').filter(button=>/class="metric\b/.test(button)).map((button) => button.match(/aria-label="([^"]+)"/)?.[1]), labels);
+    assert.deepEqual(historyButtons(html).map((button) => button.match(/aria-label="([^"]+)"/)?.[1]).sort(), [...labels].sort());
     observationOnly(html);
   }
   const { selected } = house();
   delete selected.state.temperature;
   delete selected.state.target_temperature;
   const html = page('airzone/native-a%3Aaabbccddeeff_s1_z2');
-  const buttons = tags(html, 'button').filter(button=>/class="(?:metric|filter-chip)\b/.test(button));
-  assert.equal(buttons.length, 2);
+  const buttons = historyButtons(html);
+  assert.equal(buttons.length, 1);
   assert.ok(buttons.every((button) => /\bdisabled\b/.test(button)));
   assert.ok(buttons.every((button) => !/aria-label=/.test(button)), 'absent measurements retain their visible label without inventing an accessible value');
-  const measurements = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  const measurements = primaryMeasurements(html);
   assert.deepEqual(measurements, ['—', '—']);
   observationOnly(html);
 });
@@ -254,7 +257,7 @@ test('double setpoints remain separate on the zone card and detail without a fab
   assert.match(text(card), /19 °C/);
   assert.match(text(card), /24 °C/);
   const html = page('airzone/native-a%3Adual');
-  const metrics = [...html.matchAll(/<span class="measurement\b[^>]*>([\s\S]*?)<\/span>/g)].map(([, value]) => text(value));
+  const metrics = primaryMeasurements(html);
   assert.deepEqual(metrics, ['20 °C', '19 °C', '24 °C']);
   observationOnly(card);
   observationOnly(html);
@@ -485,7 +488,8 @@ test('Airzone describes controls without falsely claiming all gateways are read-
   house();
   for(const route of ['airzone','airzone/installation','airzone/native-a%3Aaabbccddeeff_s1_z2']) {
     const html=page(route);
-    assert.match(text(html),/Suivi et réglages/);
+    if(route==='airzone/installation')assert.match(text(html),/Suivi et réglages/);
+    else assert.doesNotMatch(text(html),/Suivi et réglages/);
     assert.doesNotMatch(text(html),/Équipements en lecture seule/);
   }
 });
@@ -535,4 +539,15 @@ test('the code sheet explains permission scope in both directions and both langu
     assert.match(text(render(Sheet).body),disable);
   }
   home.held=null;
+});
+
+test('coloured cards describe the reported mode separately from actual demand and neutralise stale states',()=>{
+ for(const [mode,tone,label]of [['heat','warm','Chaud'],['cool','cool','Froid'],['fan','good','Ventilation']]){
+  const source=device('native-a:colour-example','Example zone',{on:true,mode,temperature:12,target_temperature:28,heat_demand:false});
+  const renderCard=sync=>render(ZoneCard,{props:{device:source,href:'#/airzone/example',sync,now:1000}}).body;
+  const idle=renderCard({state:'current',received:1000,age:0});assert.match(idle,new RegExp(`data-tone="${tone}" data-demand="false"`));assert.match(text(idle),new RegExp(label));assert.doesNotMatch(text(idle),/Demande en cours/);assert.doesNotMatch(idle,/<input|<button|<select/);
+  source.state.heat_demand.value=true;assert.match(renderCard({state:'current',received:1000,age:0}),/data-demand="true"/);
+  for(const state of ['stale','offline','disconnected','unknown']){const html=renderCard({state});assert.match(html,/data-tone="neutral" data-demand="false"/);assert.doesNotMatch(text(html),/Demande en cours/);}
+  source.state.on.value=false;assert.match(renderCard({state:'current',received:1000,age:0}),/data-tone="neutral" data-demand="false"/);
+ }
 });

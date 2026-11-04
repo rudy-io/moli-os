@@ -2,7 +2,9 @@
   import { tick, untrack, onMount } from 'svelte';
   import { hub, home, reloadLayout } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
-  import { deviceName } from '../../lib/format.js';
+  import {airzoneCommands,hasPendingAirzone,denyPendingAirzone} from '../lib/airzone-command.svelte.js';
+  import {commandPending} from '../lib/airzone-controls.js';
+  import { deviceName,formatValue } from '../../lib/format.js';
   import { airzoneInventory, readingOf, airzoneAlerts } from '../lib/airzone.js';
   import { filterZoneSystems, zoneActivityCounts } from '../lib/airzone-view.js';
   import Icon from '../ui/Icon.svelte';
@@ -34,6 +36,10 @@
   const inventory = $derived(airzoneInventory(hub.devices, hub.drivers, home.config?.hidden ?? []));
   const allInventory = $derived(airzoneInventory(hub.devices, hub.drivers));
   const nativeDevices = $derived([...allInventory.byId.values()]);
+  const pendingRequests=$derived(Object.entries(airzoneCommands).filter(([point,intent])=>hasPendingAirzone(point)||commandPending(intent)).map(([point,intent])=>{
+    const split=point.lastIndexOf('/'),id=point.slice(0,split),key=point.slice(split+1),device=hub.devices[id],spec=device?.points?.find(item=>item.key===key);
+    return {point,intent,name:deviceName(device??{})||id,label:spec?.label||key,value:spec?`${formatValue(spec,intent.value)}${spec.unit?` ${spec.unit}`:''}`:String(intent.value)};
+  }));
   const alertReport = $derived(airzoneAlerts(hub.devices, hub.drivers, {connected:hub.connected}));
   const systems = $derived(inventory.instances.flatMap((instance) => instance.systems.map((system) => ({ ...system, instance }))));
   const installation = $derived(route === 'airzone/installation');
@@ -122,8 +128,18 @@
       <h1 bind:this={heading} tabindex="-1">{zone ? deviceName(zone) : installation ? t('airzone_wizard.installation_title') : management ? t('airzone_ui.manage') : alerts ? t('airzone_ui.alerts') : adding ? t('airzone_add.gateway_title') : t('airzone_ui.title')}</h1>
       {#if !zone || zone.label?.room || zone.native_room}<p>{zone ? zone.label?.room || zone.native_room : installation ? t('airzone_wizard.installation_help') : management ? t('airzone_ui.manage_help') : alerts ? t('airzone_ui.alerts_help') : adding ? t('airzone_add.gateway_help') : t('airzone_ui.subtitle')}</p>{/if}
     </div>
-    <span class="read-only" title={t('airzone_ui.control_view_help')}><Icon name="info" size={16} />{t('airzone_ui.control_view')}</span>
+    {#if !detail && route!=='airzone'}<span class="read-only" title={t('airzone_ui.control_view_help')}><Icon name="info" size={16} />{t('airzone_ui.control_view')}</span>{/if}
   </header>
+
+  {#if (!detail||!zone)&&pendingRequests.length}
+    <section class="pending-requests" aria-label={t('airzone_control.pending_title')}>
+      <h2><Icon name="clock" size={18}/>{t('airzone_control.pending_title')}</h2>
+      {#each pendingRequests as request (request.point)}
+        <div class="pending-request"><div><strong>{request.name} · {request.label}</strong><p role="status">{request.intent.phase==='error'?t(`airzone_control.errors.${request.intent.error}`):t(`airzone_control.phase.${request.intent.phase}`,{value:request.value})}</p></div>
+        {#if hasPendingAirzone(request.point)}<button disabled={Boolean(home.held)} onclick={()=>denyPendingAirzone(request.point)}>{t('airzone_control.deny_pending')}</button>{/if}</div>
+      {/each}
+    </section>
+  {/if}
 
   {#if !detail}
     <nav class="view-tabs" aria-label={t('airzone_ui.title')}>
@@ -188,7 +204,6 @@
   {:else if detail && !zone}
     <div class="empty"><Icon name="air-conditioner" size={32} /><p>{t('airzone_ui.not_found')}</p><a href="#/airzone">{t('airzone_ui.back')}</a></div>
   {:else if zone}
-    <AirzoneSyncStatus sync={syncFor(zone)} {now} />
     <AirzoneZoneDetail {zone} {controls} {now} sync={syncFor(zone)} {syncFor} devices={nativeDevices} onhistory={(key) => { hub.chart = `${zone.id}/${key}`; }} />
   {:else if !inventory.zones.length}
     <a class="add-link" href="#/airzone/add">{t('airzone_navigation.add_gateway')}<Icon name="chevron-right" size={18} /></a>
@@ -216,8 +231,7 @@
     {#each visible as system (system.id)}
       <section class="system-zones">
         <header class="section-heading"><h2>{systemLabel(system)}</h2><span>{t('airzone_ui.zone_count', { count: system.zones.length })}</span></header>
-        {#if system.controls.length}<div class="system-controls">{#each system.controls as control (control.id)}<AirzoneControls device={control} sync={syncFor(control)} members={nativeDevices.filter(device=>control.members?.includes(device.id))}/>{/each}</div>{/if}
-        <div class="zone-grid">{#each system.zones as device (device.id)}<div class="zone-shell"><AirzoneZoneCard {device} sync={syncFor(device)} href={`#/airzone/${encodeURIComponent(device.id)}`} /><AirzoneSyncStatus sync={syncFor(device)} {now}/><AirzoneControls {device} sync={syncFor(device)} /></div>{/each}</div>
+        <div class="zone-grid">{#each system.zones as device (device.id)}<AirzoneZoneCard {device} {now} sync={syncFor(device)} href={`#/airzone/${encodeURIComponent(device.id)}`} />{/each}</div>
       </section>
     {:else}
       <div class="empty" role="status"><p>{t('airzone_ui.no_results')}</p></div>
@@ -231,9 +245,13 @@
 {/if}
 
 <style>
-  .system-controls {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;margin-bottom:16px}
-  .zone-shell {display:grid;align-content:start;gap:8px;min-width:0}
-  .airzone-page { max-width: 1240px; margin: 0 auto; padding: 8px 0 40px; }
+  .pending-requests {margin-bottom:20px;padding:16px 20px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);color:var(--ink)}
+  .pending-requests h2 {display:flex;align-items:center;gap:8px;font-size:1rem;font-weight:650;margin-bottom:12px}
+  .pending-request {display:flex;align-items:center;justify-content:space-between;gap:12px 20px;flex-wrap:wrap}.pending-request+.pending-request {border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+  .pending-request>div {flex:1;min-width:min(100%,240px)}.pending-request strong {font-size:.875rem;overflow-wrap:anywhere}.pending-request p {font-size:.875rem;line-height:1.5;margin-top:6px;color:var(--ink-2)}
+  .pending-request button {min-height:44px;padding:10px 14px;font:inherit;font-size:.875rem;cursor:pointer;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--ink)}.pending-request button:focus-visible {outline:3px solid var(--cool);outline-offset:3px}
+
+  .airzone-page { font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif; max-width: 1240px; margin: 0 auto; padding: 8px 0 40px; }
   .page-heading { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:26px; }
   .page-heading > div { min-width:0; }
   h1 { font-size:clamp(2rem,4vw,2.75rem); font-weight:700; line-height:1.1; letter-spacing:-.04em; overflow-wrap:anywhere; }

@@ -35,5 +35,8 @@
   "airzone_control.increase": "Increase {label}",
   "airzone_control.scope_unknown": "scope not reported; control unavailable.",
   "airzone_control.system_title": "Shared system controls",
-  "airzone_control.errors.approval_resolved": "This request is no longer pending. Check the device state before trying again."
+  "airzone_control.errors.approval_resolved": "This request is no longer pending. Check the device state before trying again.",
+  "airzone_control.read_only_short": "Read-only",
+  "airzone_control.enable": "Enable control",
+  "airzone_control.pending_title": "Requests in progress"
 }
