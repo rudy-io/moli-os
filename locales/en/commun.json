@@ -269,5 +269,9 @@
   "commun.niveau.attention": "Worth watching",
   "commun.niveau.mauvais": "Poor",
   "commun.capteur.humidite": "Humidity",
-  "commun.code.raison_configuration": "A change to the house: it wants to be sure it’s you."
+  "commun.code.raison_configuration": "A change to the house: it wants to be sure it’s you.",
+  "commun.volet.vitesse": "Next command",
+  "commun.volet.vitesse_prochaine": "Speed for the next command",
+  "commun.volet.vitesse_normale": "Normal",
+  "commun.volet.vitesse_lente": "Slow"
 }

@@ -27,7 +27,7 @@ before(async () => {
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
 });
-beforeEach(() => { home.home.config = null; energy.summary = null; });
+beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
   await vite?.close();
   delete globalThis.document;
