@@ -384,6 +384,35 @@ habituels de Moli, avec leurs gardes et autorisations existantes. Le retour en
 lecture seule bloque les commandes suivantes ; il n'arrête pas le chauffage et
 n'annule pas une commande déjà exécutée.
 
+### Diagnostics et complément cloud Airzone
+
+Toutes ces routes exigent une session humaine, l'origine `ui` et refusent les
+invités. Aucun appel ne permet une URL, méthode ou corps constructeur arbitraire.
+
+| Méthode | Chemin | Saisie et résultat |
+|---|---|---|
+| POST | `/api/integrations/airzone/{instance}/diagnostic` | 1 Kio ; enum `operation` : `hvac` (`system`, `zone?`, `get?`), `iaq` (`system`, `sensor`, `get?`), `version`, `webserver`, `integration`, `demo`, `thermostat`. Retour `{read_only:true,synthetic,response?}` ou disponibilité/taille HTML sans le HTML. |
+| GET | `/api/integrations/airzone/cloud/status` | `{state,expires_at?,read_only:true,persistence_available}`. Exception explicite : `expires_at` est en **secondes** Unix comme le JWT constructeur. |
+| POST | `/api/integrations/airzone/cloud/login` | 4 Kio ; `{email,password}`. Mot de passe utilisé uniquement pour cette connexion ; jetons dans le coffre chiffré, jamais dans la réponse. Retour du statut. |
+| POST | `/api/integrations/airzone/cloud/read` | 2 Kio ; enum fermé détaillé ci-dessous. Retour `{read_only:true,received_at,data}` avec `received_at` en millisecondes. |
+| POST | `/api/integrations/airzone/cloud/disconnect` | `{}` ; oublie la session Moli et les jetons du coffre. Ne revendique pas une révocation côté fournisseur. |
+
+Les lectures cloud sont `installations`, `installation` avec `installation_id`,
+`device_status` et `device_config` avec `installation_id`/`device_id` (configuration :
+`section=all|user|advanced`), `gateway_status` avec `installation_id`/`gateway_id` et
+`include_devices?`, `location` avec `location_id`, et `profile`. Le compte et le
+matériel déterminent les permissions. Aucun PUT/PATCH constructeur n'est exposé.
+
+Une lecture native manuelle vérifie l'identité puis effectue uniquement l'opération
+de lecture demandée. Elle n'alimente pas le Hub ; la démo reste synthétique. Une
+seule inspection manuelle et une seule opération cloud peuvent être en cours,
+indépendamment de la supervision locale. L'arrêt du manager annule les opérations
+cloud. Les états expirés, interdits, indisponibles et incomplets restent explicites.
+
+La Web API du compte classique ne publie pas de route de programmation ; ces routes
+appartiennent à l'Open API et nécessitent une application OAuth approuvée. Matrice
+complète : [couverture Airzone](../../integrations/airzone/coverage.md).
+
 
 La saisie de connexion accepte uniquement une IPv4 privée en production : les
 noms DNS, les IP publiques et la boucle locale sont refusés. L’exception de boucle

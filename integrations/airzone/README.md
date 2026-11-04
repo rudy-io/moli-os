@@ -1,11 +1,22 @@
 # Airzone Local API
 
 Native local integration of the documented Airzone Local API 1.78. One instance
-per controller, no Home Assistant or cloud dependency. The reviewed contract is
-in [coverage.json](coverage.json): 12 operations, 118 parameter schemas, 31
-explicitly writable parameters and 17 energy leaves. Descriptors also cover the
-known example/prose fields; these do not acquire write permission without a
-write contract. Coverage is conditional on what a controller actually reports.
+per controller, no Home Assistant or cloud dependency. The runtime field registry
+in [coverage.json](coverage.json) models 118 parameter schemas, 31 explicitly
+writable parameters and 17 energy leaves. Descriptors also cover known
+example/prose fields; these do not acquire write permission without a write
+contract. Coverage is conditional on what a controller actually reports.
+
+The [coverage audit](coverage.md) and [operation matrix](coverage-matrix.json)
+separately track the 12 Local API operations, unsupported variants, UI evidence,
+hardware validation and the documented Open/Web/MQTT/WebSocket extensions.
+Registry completeness alone does not establish 100% API or end-to-end coverage.
+
+[Continuous synchronization](synchronization.md) describes receipt freshness,
+command confirmation and deterministic regression evidence. An optional
+[Cloud Web API reader](../../crates/moli-airzone/src/cloud/README.md) is available
+in Installation for a normal Airzone account. It is separate, read-only and does
+not provide the Open API schedule operations.
 
 ## Configuration and migration
 
@@ -97,7 +108,9 @@ The metadata `driver` has a local 240-character bound and is not a firmware upda
 | GET / | Controller thermostat-page availability/size; no HTML execution or embedding |
 
 Paths except `/` are relative to `/api/v1/`. Moli deliberately sends one addressed
-parameter per hub command. Manufacturer multi-parameter and broadcast write
+parameter per hub command, except the targeted `target_temperature_on` action
+which sends and validates the documented addressed `on + setpoint` pair.
+Other manufacturer multi-parameter and broadcast write
 payloads are not exposed as a raw proxy; each documented writable parameter is
 covered individually. The special DHW `{systemID:0}` is an addressed resource,
 not a zone broadcast.

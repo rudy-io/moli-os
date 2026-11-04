@@ -52,6 +52,8 @@ jobs:
       # runner's own Python is enough, nothing to install.
       - run: python3 --version && python3 -m unittest discover -s tests -t .
         working-directory: tools/model
+      - name: Airzone documented API coverage integrity
+        run: python3 integrations/airzone/validate_coverage.py --test
 
   image:
     runs-on: ubuntu-latest
