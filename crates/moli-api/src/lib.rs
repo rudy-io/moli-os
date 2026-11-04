@@ -348,6 +348,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .merge(house_routes(&humans, options))
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
+        .route("/api/energy/price", put(rest::set_energy_price))
         .route("/api/energy/series", get(rest::energy_series))
         .merge(assistant_routes())
         .route(

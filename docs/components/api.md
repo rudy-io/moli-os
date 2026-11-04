@@ -305,6 +305,8 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 - `{"kind":"command","point":"…","value":…}`
 - `{"kind":"label","device":"…","label":{"name":"…","room":"…"}}` (label vide si refus)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
+- `{"kind":"setting","name":"energy.price","from":…?,"to":…}` : un réglage de la maison changé
+  par une personne (aujourd'hui le prix du kWh), avec sa valeur d'avant
 
 Stockage : `data/journal.jsonl` (ajout seul) + les 500 dernières entrées en mémoire.
 Lecture : `GET /api/journal`, outil MCP `get_journal`, événements SSE `journal`.
@@ -363,6 +365,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 |---|---|---|---|---|---|
 | GET | `/api/history` | libre ; un invité : les points de ses pièces | `?point=` (obligatoire), `hours` (défaut 24, borné 1 min → 366 j), `points` (défaut 300, borné 10 → 2 000) | `Series` (§ 2.3) | `404` history is disabled ; `400` requête ; `403` invité, hors de ses pièces ; `500` |
 | GET | `/api/energy` | libre | aucune | `Summary` : puissance instantanée, aujourd'hui, hier, mois, projection, mois dernier, par compteur | `404` no [energy] meters configured ; `500` |
+| PUT | `/api/energy/price` | personne (code) ou propriétaire | `{price}` : le prix d'un kWh de la maison, dans la devise (`0.2319`) | `{price, before?, prices:[{since, price}]}` ; compte à partir de maintenant, journalisé (`setting`) | `403` sans code ; `404` sans `[energy]` ; `422` prix invalide (≤ 0, ou > 5 : un prix en centimes) |
 | GET | `/api/energy/series` | libre | `?step=hour\|day\|month` (obligatoire), `count` (défaut 24 / 30 / 12 ; borné 1 → 8 784 / 3 660 / 600) | `Report` `{step, from, to, currency, timezone, meters, buckets:[{start, meters:{<id>:{kwh, cost?}}}]}` | `400` pas invalide ; `404` ; `500` |
 | GET | `/api/weather/forecast` | libre | aucune | Prévisions Open-Meteo (gardées 15 min) : `{timezone, utc_offset_seconds, hourly:{time, temperature_2m, weather_code, precipitation_probability, precipitation, cloud_cover, wind_speed_10m, is_day}, daily:{time, weather_code, temperature_2m_max/min, precipitation_sum, precipitation_probability_max, wind_speed_10m_max, sunrise, sunset}}` : 25 heures, 7 jours | `404` maison sans position ; `502` |
 | GET | `/api/weather/map` | libre | aucune | Carte météo, 400 × 300 km autour de la maison (centre arrondi au dixième de degré) : `{area:{south, west, north, east}, house:[x, y] (0..1), km:[400, 300], weather:{grid:[12, 9], hours, utc_offset_seconds, u, v, cloud, rain}, land:{z, x0, y0, x1, y1}\|null}`. Vent (km/h, est/nord), nuages (%), pluie (mm) en tableaux plats `[heure × points + point]` sur 24 h (Open-Meteo, une requête, gardée 1 h) ; `land` = tuiles d'altitude à lire (null tant qu'elles ne sont pas là) | `404` maison sans position ; `502` |
@@ -487,7 +490,8 @@ changements les plus récents et `truncated:true` pour un point non numérique).
 
 **`Summary`** (`/api/energy`) : `{currency, timezone, since?, period?, price_now?, period_point?,
 meters:[{id, name, role:"grid"|"total"|"circuit", point, power?, power_w?, power_ts?}],
-live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?}` ; chaque période =
+live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?,
+house_price?, house_prices?:[{since, price}]}` (`price_now` : le prix de la période tarifaire, sinon celui de la maison) ; chaque période =
 `{from, to, total:{kwh, cost?}, meters:{<id>:{kwh, cost?}}, unmeasured?}`.
 
 **Vue d'automatisme** (réponses de `/api/automations*`) :

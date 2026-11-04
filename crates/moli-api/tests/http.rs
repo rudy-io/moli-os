@@ -1878,3 +1878,87 @@ async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
     cancel.cancel();
     supervisor.await.unwrap();
 }
+
+/// The house's price of a kWh: changed by a person (the code), never typed
+/// in cents, counted from now on, and journaled with what it was.
+#[tokio::test]
+async fn only_a_person_changes_the_price_of_a_kwh_and_it_is_journaled() {
+    let dir = std::env::temp_dir().join(format!("moli-http-price-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let hub = lamp_hub().await;
+    let config: moli_energy::Config = serde_json::from_value(json!({
+        "meter": [{ "id": "plug", "name": "Plug", "point": "fake:lamp/power", "role": "appliance", "integrate": true }]
+    }))
+    .unwrap();
+    let (energy, _task) = moli_energy::Energy::start(
+        &hub,
+        &dir.join("energy.db"),
+        config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        energy: Some(energy.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let price = |p: f64| json!({ "price": p });
+
+    // The household's dashboard without the code: refused.
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(0.2319)), ui).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(energy.house_prices().is_empty());
+
+    // A person: a price in cents is refused, a price per kWh is kept.
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(23.19)), &pin).await;
+    assert_eq!(status, 422, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2287)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2319)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(answer["before"], json!(0.2287));
+
+    let (_, body) = request(&addr, "GET", "/api/energy", None).await;
+    let summary: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(summary["house_price"], json!(0.2319));
+    assert_eq!(summary["price_now"], json!(0.2319));
+    assert_eq!(summary["house_prices"].as_array().map(Vec::len), Some(2));
+
+    let changes: Vec<(Json, Json)> = hub
+        .journal(50)
+        .iter()
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } if name == "energy.price" => {
+                assert_eq!(e.origin, moli_core::Origin::Ui);
+                Some((json!(from), json!(to)))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        vec![(json!(0.2287), json!(0.2319)), (Json::Null, json!(0.2287))],
+        "newest first"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

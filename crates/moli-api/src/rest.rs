@@ -865,6 +865,72 @@ pub(crate) async fn energy(Extension(Metered(energy)): Extension<Metered>) -> Re
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PriceBody {
+    /// The house's price of a kWh, in the currency (0.2319).
+    price: f64,
+}
+
+/// More than this per kWh is a price typed in cents (23.19 for 0.2319).
+const MAX_HOUSE_PRICE: f64 = 5.0;
+
+/// The house's price of a kWh, for the meters without a price of their own:
+/// changed by a person (code) or an owner, from now on, journaled.
+pub(crate) async fn set_energy_price(
+    State(hub): State<Hub>,
+    Extension(Metered(energy)): Extension<Metered>,
+    Extension(humans): Humans,
+    Extension(persons): Extension<Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(body): Json<PriceBody>,
+) -> Response {
+    let Some(energy) = energy else {
+        return error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.energie.absente"),
+        );
+    };
+    let human = humans.is_human(&headers, &caller.key);
+    if !human && !crate::people_api::is_owner(&caller, &humans, &persons, &headers) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.energie.prix_humain"),
+        );
+    }
+    let price = body.price;
+    if !(price.is_finite() && price > 0.0 && price <= MAX_HOUSE_PRICE) {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!(
+                "serveur.energie.prix_invalide",
+                currency = energy.config().currency.as_str()
+            ),
+        );
+    }
+    match energy.set_house_price(price).await {
+        Ok(before) => {
+            let origin = if human {
+                Origin::Ui
+            } else {
+                origin(&hub, &headers, &humans, &caller)
+            };
+            hub.record_setting(
+                origin,
+                Some(caller.describe()),
+                "energy.price",
+                before.map(Value::from),
+                Value::from(price),
+            );
+            tracing::info!(client = %caller.describe(), price, "house price of a kWh changed");
+            Json(json!({ "price": price, "before": before, "prices": energy.house_prices() }))
+                .into_response()
+        }
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
 pub(crate) struct SeriesQuery {
     step: moli_energy::Step,
     /// How many buckets back, the current one included.

@@ -57,7 +57,7 @@ timezone = "Europe/Paris"
 # name = "Heures creuses"
 # point = "z2m:linky/current_tier1_summ_delivered"
 # role = "grid"
-# price = 0.14
+# price = 0.14           # optional: without it, the house's price chosen on the Energy page
 # reset = "never"        # an index; default "auto" handles daily counters
 
 # Without a local reading of the meter, the `enedis` driver reports yesterday's
