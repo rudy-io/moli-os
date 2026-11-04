@@ -326,6 +326,9 @@ struct Inner {
     published: Mutex<HashMap<String, (Instant, crate::media::Image)>>,
     /// The assistant voice satellites talk to (set after the drivers start).
     voice: std::sync::OnceLock<Arc<dyn crate::voice::VoiceBrain>>,
+    /// The music service speakers ask for stream addresses (set by its
+    /// driver while it runs).
+    music: RwLock<Option<Arc<dyn crate::music::MusicService>>>,
     opts: HubOptions,
     started: Instant,
 }
@@ -445,6 +448,7 @@ impl Hub {
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
             voice: std::sync::OnceLock::new(),
+            music: RwLock::new(None),
             opts,
             started: Instant::now(),
         })))
@@ -461,6 +465,22 @@ impl Hub {
     #[must_use]
     pub fn voice_brain(&self) -> Option<Arc<dyn crate::voice::VoiceBrain>> {
         self.0.voice.get().cloned()
+    }
+
+    /// The music service the speakers stream from, registered by the driver
+    /// that provides it (a restart replaces it).
+    pub fn set_music(&self, music: Arc<dyn crate::music::MusicService>) {
+        *self.0.music.write().unwrap_or_else(PoisonError::into_inner) = Some(music);
+    }
+
+    /// The home's music service, if a driver provides one.
+    #[must_use]
+    pub fn music(&self) -> Option<Arc<dyn crate::music::MusicService>> {
+        self.0
+            .music
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     // ---- reading -----------------------------------------------------------

@@ -34,6 +34,12 @@
   "salon.enceinte.arret": "Stopped",
   "salon.enceinte.son_tele": "TV sound",
   "salon.enceinte.rien": "Nothing playing",
+  "salon.enceinte.multimedia": "Media",
+  "salon.enceinte.lecteur": "Player",
+  "salon.enceinte.jouer_sur": "Play on {name}",
+  "salon.enceinte.basculer_vers": "Move playback to {name}",
+  "salon.enceinte.ajouter_lecteur": "Also play on {name}",
+  "salon.enceinte.rechercher": "Search for a track, artist or album on Qobuz…",
   "salon.enceinte.volume_annonce": "While announcing",
 
   "salon.tele.label": "Remote",

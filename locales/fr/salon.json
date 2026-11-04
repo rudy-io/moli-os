@@ -34,6 +34,12 @@
   "salon.enceinte.arret": "À l’arrêt",
   "salon.enceinte.son_tele": "Le son de la télé",
   "salon.enceinte.rien": "Rien en cours",
+  "salon.enceinte.multimedia": "Multimédia",
+  "salon.enceinte.lecteur": "Lecteur",
+  "salon.enceinte.jouer_sur": "Jouer sur {name}",
+  "salon.enceinte.basculer_vers": "Basculer la lecture vers {name}",
+  "salon.enceinte.ajouter_lecteur": "Jouer aussi sur {name}",
+  "salon.enceinte.rechercher": "Rechercher un titre, un artiste, un album sur Qobuz…",
   "salon.enceinte.volume_annonce": "Pendant une annonce",
 
   "salon.tele.label": "Télécommande",

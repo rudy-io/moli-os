@@ -1,0 +1,22 @@
+[integration]
+id = "lms"
+name = "piCorePlayer / Lyrion Music Server (Squeezebox)"
+brands = ["Lyrion", "Logitech", "piCorePlayer"]
+models = ["piCorePlayer", "SqueezeLite", "Squeezebox"]
+transport = "http"
+driver = "lms"
+crate = "moli-lms"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = [9000]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "API JSON-RPC Lyrion Music Server (/jsonrpc.js sur HTTP 9000)"
+author = "agent"

@@ -1,0 +1,22 @@
+[integration]
+id = "qobuz"
+name = "Qobuz (musique en streaming)"
+brands = ["Qobuz"]
+models = ["Studio", "Sublime"]
+transport = "https"
+driver = "qobuz"
+crate = "moli-qobuz"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["app_id", "app_secret", "email", "password"]
+vars = []
+options = ["format_id", "queue"]
+
+[origin]
+reused = "API web non officielle de Qobuz (www.qobuz.com/api.json/0.2 : user/login, track/search, album/get, track/getFileUrl signé MD5)"
+author = "agent"

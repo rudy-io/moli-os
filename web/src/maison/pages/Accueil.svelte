@@ -11,6 +11,7 @@
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
+  import SpeakerCard from '../ui/SpeakerCard.svelte';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
@@ -205,6 +206,10 @@
       <Routines />
     </div>
 
+    <div class="media">
+      <SpeakerCard />
+    </div>
+
     {#if (cfg.favorites?.climate ?? []).length}
       <section class="card climate">
         <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
@@ -328,6 +333,11 @@
 
   .side {
     grid-column: span 4;
+  }
+
+  .media {
+    grid-column: span 7;
+    min-width: 0;
   }
 
   .climate {
@@ -540,6 +550,7 @@
 
   @media (max-width: 1180px) {
     .lights,
+    .media,
     .climate {
       grid-column: span 12;
     }

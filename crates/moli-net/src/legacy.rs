@@ -71,6 +71,36 @@ pub(crate) fn v1_key(cert: &[u8]) -> Option<Key<'_>> {
     }
 }
 
+pub(crate) fn rsa_key(cert: &[u8]) -> Option<&[u8]> {
+    let (tag, cert, tail) = element(cert)?;
+    if tag != 0x30 || !tail.is_empty() {
+        return None;
+    }
+    let (tag, mut tbs, _) = element(cert)?;
+    if tag != 0x30 {
+        return None;
+    }
+    if tbs.first() == Some(&0xA0) {
+        tbs = element(tbs)?.2;
+    }
+    for _ in 0..5 {
+        tbs = element(tbs)?.2;
+    }
+    let (tag, spki, _) = element(tbs)?;
+    if tag != 0x30 {
+        return None;
+    }
+    let (tag, algorithm, after) = element(spki)?;
+    if tag != 0x30 || element(algorithm)?.1 != RSA {
+        return None;
+    }
+    let (tag, bits, tail) = element(after)?;
+    if tag != 0x03 || bits.first() != Some(&0) || !tail.is_empty() {
+        return None;
+    }
+    Some(&bits[1..])
+}
+
 fn algorithm(scheme: SignatureScheme, key: &Key<'_>) -> Option<&'static dyn VerificationAlgorithm> {
     Some(match (scheme, key) {
         (SignatureScheme::RSA_PKCS1_SHA256, Key::Rsa(_)) => &signature::RSA_PKCS1_2048_8192_SHA256,
@@ -154,6 +184,22 @@ mod tests {
             ),
             Some(false)
         );
+    }
+
+    #[test]
+    fn cast_keys_reject_truncated_certificates() {
+        let cert = station_cert();
+        assert_eq!(
+            rsa_key(&cert),
+            match v1_key(&cert) {
+                Some(Key::Rsa(key)) => Some(key),
+                _ => None,
+            }
+        );
+        for end in 0..cert.len() {
+            assert_eq!(rsa_key(&cert[..end]), None);
+        }
+        assert_eq!(rsa_key(b"not der"), None);
     }
 
     #[test]

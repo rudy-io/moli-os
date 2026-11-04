@@ -142,7 +142,11 @@
         </section>
       {/if}
 
-      {#if sp}<SpeakerCard id={sp} name={nameOf(sp, t('salon.barre_de_son'))} />{/if}
+      {#if sp}
+        <SpeakerCard id={sp} name={nameOf(sp, t('salon.barre_de_son'))} />
+      {:else}
+        <SpeakerCard />
+      {/if}
 
       <section class="card ambiance">
         <div class="card-head"><h2><Icon name="light-group" size={18} />{t('salon.ambiance')}</h2></div>

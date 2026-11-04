@@ -956,9 +956,12 @@ const KINDS: &[&str] = &[
     "philips",
     "frigate",
     "bambu",
+    "cast",
     "esphome",
     "alexa",
     "sonos",
+    "qobuz",
+    "lms",
     "airplay",
     "reolink",
     "tuya",
@@ -1151,6 +1154,9 @@ fn build_driver(
         "bambu" => Arc::new(moli_bambu::Bambu::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "cast" => Arc::new(moli_cast::Cast::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "esphome" => Arc::new(moli_esphome::Esphome::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1167,6 +1173,12 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "sonos" => Arc::new(moli_sonos::Sonos::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "qobuz" => Arc::new(moli_qobuz::Qobuz::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "lms" => Arc::new(moli_lms::Lms::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "airplay" => Arc::new(moli_airplay::Airplay::new(

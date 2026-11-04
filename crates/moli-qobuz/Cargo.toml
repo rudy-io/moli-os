@@ -1,0 +1,25 @@
+[package]
+name = "moli-qobuz"
+description = "Moli OS driver for Qobuz: a subscription's music, searched by phrase and streamed by the house's speakers (unofficial web API, like the Alexa driver)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+md-5.workspace = true
+moli-core.workspace = true
+moli-i18n.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

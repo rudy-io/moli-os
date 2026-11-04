@@ -1,0 +1,21 @@
+[package]
+name = "moli-cast"
+description = "Moli OS driver for Google Cast speakers (Google Home, Nest Mini, Smart Clock/Display): playback, volume, mute and spoken announcements."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+moli-androidtv.workspace = true
+moli-core.workspace = true
+moli-i18n.workspace = true
+moli-net.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

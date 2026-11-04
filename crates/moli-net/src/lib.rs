@@ -99,6 +99,25 @@ fn normalize(pin: &str) -> String {
         .to_ascii_lowercase()
 }
 
+pub fn certificate_fingerprint(cert: &[u8]) -> String {
+    fingerprint(&CertificateDer::from(cert))
+}
+
+pub fn verify_cast_signature(
+    cert: &[u8],
+    pin: &str,
+    message: &[u8],
+    signature: &[u8],
+) -> anyhow::Result<()> {
+    if fingerprint(&CertificateDer::from(cert)) != normalize(pin) {
+        bail!("Cast device identity does not match the pinned fingerprint");
+    }
+    let key = legacy::rsa_key(cert).context("Cast device certificate has no RSA key")?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::RSA_PKCS1_2048_8192_SHA256, key)
+        .verify(message, signature)
+        .map_err(|_| anyhow::anyhow!("invalid Cast device signature"))
+}
+
 fn fingerprint(cert: &CertificateDer<'_>) -> String {
     use std::fmt::Write as _;
     digest(&SHA256, cert.as_ref())
@@ -821,6 +840,33 @@ mod pin_tests {
         assert!(refused.to_string().contains(PIN_MISMATCH), "{refused}");
         assert_eq!(tls.pinned_fingerprint().as_ref(), Some(&pinned));
         assert!(verify(&tls, vec![1, 2, 3]).is_ok());
+    }
+
+    #[test]
+    fn cast_identity_accepts_signed_tls_rotation_but_not_replay_or_another_identity() {
+        fn hex(text: &str) -> Vec<u8> {
+            text.as_bytes()
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        }
+        let cert = hex(
+            "308202e8308201d0a0030201020214499e23948a2a70f7e2dc330c87cd82946bb4bd66300d06092a864886f70d01010b050030143112301006035504030c09636173742d74657374301e170d3236313130333230313730355a170d3236313130343230313730355a30143112301006035504030c09636173742d7465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100985fd9c83a2feafc952f86d588266fe4f6f09735dd62205824b79da91c2cd5478c53927b0ec1ac818bf02d0ea6798e9c88b8412ea78779ff314c98e5ab226b51cdb0ac7a00626bb99cb04f3eeab5a5a053b396f06eb8c99a107f9c7a2ff790415842798c6d7a1a889a227d18824c36ec0f56b3c72ee73358fd9835afe83845ae07fe58fc9c785abfd5d9c58f079fea4526059c27d7818961767067d7b144c372a588dd6d16f718b69c0d898238a437952f9fba95a52dbe8e1b0160068ad1e304a00811f032d03930a4a28e81c43637ea213744630b494ebff508bc27f1bc33dbc1c37c9386bd979c0b793ed016fe19bcdf18d6911db5c3f36931d796fa79a4290203010001a3323030301d0603551d0e0416041418ac473870e4e21f36f03081c2d3eedfbb0efd78300f0603551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005ac744724ed068091fe2025485abf42cd43a595185852423db0e9e497cac4b398194dc49389c203622130d0b41e5a4cfaab8856b5c7928439c42ac16522f7a970082574b96769def6a1f76a9e29975d895bdafcb9f689c2ac754356b4d288fb71d7436e25532673a101bca8758d918e07a7f1474410f9ce4b3dc29db8ade02e2eaffa53c16010e76f238e615e372f3e4e1845c919ceb238fdfbd6a7e8ccf4a337df6e088587733671b4f1b3c2da2ebc277216672d64ea61e65b43a9e92fb9640255d2bb0a40c9c35d0ed29b8c42887f000feb2dab2f50fac58a20f7a9174f6e90632d13c38faeb1c736171f2bd228ce4d564a722ecee1af062a5de080db7a391",
+        );
+        let before = hex(
+            "71e52e8a32857f9ba9f5bbbfe376780296d847116f05d6b70d7a623270f6f853646f73ca7ddd84a21853776d79e74b1e1ffc7218bb5ab5ed377bfbc48197b85cbf1ce97d676eebe8ea7690f76a44b0fb659fdfbc5600921b847406037ff8aa8ad13f9d3ebf2f85ed42bd811af543d26699b4e4fe189d6bde108d852d8140193801bea7114884f97bef91b6e1c1c81aca247d1686b339a6f3afa6b1234950e127e21cc25ff3520c13dc260e886905ba76e7256362f6f6e60a54d2ad75ca40b8c748d6d454db93e2d27a5f166dcf77c26bb9d261a8772618120dcb0ba78ff987237686f670465d82d44d99f545c8802f2fc1ac1ca5dca443e7d299a24d505916b6",
+        );
+        let after = hex(
+            "439d3f6c6e84d0756a48865a0ed0ecf789cad26f74a7437ea00f8928403469638b810c3e4ed002cd779583aba7ce12dddea3147198ed595ed737dbd922af2ef72b685e8bd8d9136ae0067b393db9dcc5fdf6dc4ffd722bd4dc464af22c4e7d56cab526119d2bba6161f0b80b310490d0570501c7d84959f26ced3fc1dfbc26c801f58126b85281273227ee4a412437ff556d6aa183ec9078a490b5556c7a87b0922e512658f0d4db82c3c74c6083fae7deefcb58b9f39d70cbb5b833a7bfe56d193b787d722c5262ec01293019536cbc294d86da2b2f79f795018ad8d72418403a3c9508196205cde07e3bc6efb7a724786dece5a46f763d6c214ff61098f3f9",
+        );
+        let pin = certificate_fingerprint(&cert);
+        assert!(verify_cast_signature(&cert, &pin, b"nonce:tls-before", &before).is_ok());
+        assert!(verify_cast_signature(&cert, &pin, b"nonce:tls-after", &after).is_ok());
+        assert!(verify_cast_signature(&cert, &pin, b"nonce:tls-after", &before).is_err());
+        assert!(verify_cast_signature(&cert, &pin, b"another-nonce:tls-after", &after).is_err());
+        assert!(verify_cast_signature(&cert, &"0".repeat(64), b"nonce:tls-after", &after).is_err());
     }
 
     #[test]

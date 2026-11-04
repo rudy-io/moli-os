@@ -181,6 +181,18 @@ impl DriverCtx {
         self.hub.voice_brain()
     }
 
+    /// Registers the music service this instance provides: the speaker
+    /// drivers find it through [`Self::music`].
+    pub fn set_music(&self, music: Arc<dyn crate::music::MusicService>) {
+        self.hub.set_music(music);
+    }
+
+    /// The home's music service, if a driver provides one.
+    #[must_use]
+    pub fn music(&self) -> Option<std::sync::Arc<dyn crate::music::MusicService>> {
+        self.hub.music()
+    }
+
     /// Declares that `device` (one of ours) can produce images on demand.
     pub fn provide_snapshots(
         &self,

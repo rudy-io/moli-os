@@ -15,6 +15,7 @@ mod hub;
 mod journal_log;
 mod labels;
 pub mod media;
+pub mod music;
 mod secrets;
 mod state_cache;
 mod stats;

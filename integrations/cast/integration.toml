@@ -1,0 +1,22 @@
+[integration]
+id = "cast"
+name = "Enceintes Google Cast (Google Home, Nest)"
+brands = ["Google", "Lenovo"]
+models = ["Google Home Mini", "Nest Mini", "Smart Clock", "Smart Display"]
+transport = "tcp"
+driver = "cast"
+crate = "moli-cast"
+
+[discovery]
+mdns = ["_googlecast._tcp"]
+ssdp = []
+ports = [8009]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "protocole Google Cast (TLS 8009, Default Media Receiver CC1AD845) partagé avec moli-androidtv"
+author = "agent"

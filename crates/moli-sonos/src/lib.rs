@@ -8,6 +8,7 @@
 
 mod announce;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
@@ -161,6 +162,30 @@ fn device(
                 Semantic::Other,
             ),
             point(
+                "image",
+                &moli_i18n::tr!("pilotes.sonos.pochette"),
+                Kind::Text,
+                false,
+                None,
+                Semantic::Other,
+            ),
+            point(
+                "next",
+                &moli_i18n::tr!("pilotes.sonos.suivant"),
+                Kind::Binary,
+                true,
+                None,
+                Semantic::Other,
+            ),
+            point(
+                "previous",
+                &moli_i18n::tr!("pilotes.sonos.precedent"),
+                Kind::Binary,
+                true,
+                None,
+                Semantic::Other,
+            ),
+            point(
                 "source",
                 &moli_i18n::tr!("pilotes.sonos.source"),
                 Kind::Enum {
@@ -172,6 +197,14 @@ fn device(
             ),
         ],
     };
+    device.points.push(point(
+        "play",
+        &moli_i18n::tr!("pilotes.sonos.jouer"),
+        Kind::Text,
+        true,
+        None,
+        Semantic::Other,
+    ));
     device.points.extend(announcements.points());
     device
 }
@@ -250,6 +283,10 @@ async fn poll(host: &str) -> anyhow::Result<Vec<(&'static str, Value)>> {
             "artist",
             text(tag(&meta, "creator")).map_or(Value::Null, |t| Value::Text(t.into())),
         ),
+        (
+            "image",
+            text(tag(&meta, "albumArtURI")).map_or(Value::Null, |t| Value::Text(t.into())),
+        ),
     ];
     if let Some(v) = tag(&volume, "CurrentVolume").and_then(|v| v.parse::<i64>().ok()) {
         values.push(("volume", Value::Int(v)));
@@ -257,12 +294,19 @@ async fn poll(host: &str) -> anyhow::Result<Vec<(&'static str, Value)>> {
     Ok(values)
 }
 
-async fn apply(host: &str, command: &CommandRequest) -> anyhow::Result<()> {
+async fn apply(
+    host: &str,
+    udn: &str,
+    music: Option<Arc<dyn moli_runtime::music::MusicService>>,
+    command: &CommandRequest,
+) -> anyhow::Result<()> {
     match (&*command.key, &command.value) {
         ("playing", Value::Bool(true)) => {
             soap(host, AV, "Play", &[("InstanceID", "0"), ("Speed", "1")]).await?
         }
         ("playing", Value::Bool(false)) => soap(host, AV, "Pause", &[("InstanceID", "0")]).await?,
+        ("next", _) => soap(host, AV, "Next", &[("InstanceID", "0")]).await?,
+        ("previous", _) => soap(host, AV, "Previous", &[("InstanceID", "0")]).await?,
         ("mute", Value::Bool(m)) => {
             soap(
                 host,
@@ -291,9 +335,80 @@ async fn apply(host: &str, command: &CommandRequest) -> anyhow::Result<()> {
             )
             .await?
         }
+        ("play", Value::Text(phrase)) => {
+            let music = music.context(moli_i18n::tr!("pilotes.sonos.sans_musique"))?;
+            let tracks = music
+                .resolve(phrase.trim())
+                .await
+                .map_err(anyhow::Error::msg)?;
+            enqueue(host, udn, &tracks).await?;
+            String::new()
+        }
         (key, _) => bail!(moli_i18n::tr!("pilotes.sonos.ne_se_regle_pas", point = key)),
     };
     Ok(())
+}
+
+/// Plays `tracks` on the speaker's own queue: emptied, filled, then played
+/// from the first (« play this » is always a fresh queue, like a streaming
+/// service on the Sonos app).
+async fn enqueue(
+    host: &str,
+    udn: &str,
+    tracks: &[moli_runtime::music::Track],
+) -> anyhow::Result<()> {
+    soap(host, AV, "RemoveAllTracksFromQueue", &[("InstanceID", "0")]).await?;
+    for track in tracks {
+        soap(
+            host,
+            AV,
+            "AddURIToQueue",
+            &[
+                ("InstanceID", "0"),
+                ("EnqueuedURI", &track.url),
+                ("EnqueuedURIMetaData", &didl(track)),
+                ("DesiredFirstTrackNumberEnqueued", "0"),
+                ("EnqueueAsNext", "0"),
+            ],
+        )
+        .await?;
+    }
+    soap(
+        host,
+        AV,
+        "SetAVTransportURI",
+        &[
+            ("InstanceID", "0"),
+            ("CurrentURI", &format!("x-rincon-queue:{udn}#0")),
+            ("CurrentURIMetaData", ""),
+        ],
+    )
+    .await?;
+    soap(host, AV, "Play", &[("InstanceID", "0"), ("Speed", "1")]).await?;
+    Ok(())
+}
+
+/// The `CurrentURIMetaData`/`EnqueuedURIMetaData` of a streamed track.
+fn didl(track: &moli_runtime::music::Track) -> String {
+    let art = track
+        .image
+        .as_deref()
+        .map(|u| format!("<upnp:albumArtURI>{}</upnp:albumArtURI>", xml(u)))
+        .unwrap_or_default();
+    format!(
+        "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"><item id=\"moli\" parentID=\"-1\" restricted=\"1\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator>{art}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo=\"http-get:*:{}:*\">{}</res></item></DIDL-Lite>",
+        xml(&track.title),
+        xml(&track.artist),
+        track.mime,
+        xml(&track.url)
+    )
+}
+
+/// What XML cannot take raw.
+fn xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
@@ -331,7 +446,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     command.reply(result);
                     continue;
                 }
-                let result = apply(host, &command).await.map_err(|e| format!("{e:#}"));
+                let result = apply(host, &udn, ctx.music(), &command)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
                 if result.is_ok() {
                     ctx.set_state(&id, &command.key, command.value.clone());
                 }
