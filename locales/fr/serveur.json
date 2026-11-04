@@ -90,6 +90,7 @@
   "serveur.systeme.surface.rest.quoi": "scripts et applications",
 
   "serveur.garde.piece_protegee": "pièce protégée ({room})",
+  "serveur.garde.appareil_protege": "appareil protégé ({name})",
   "serveur.garde.sans_piece_connue": "appareil sans pièce connue",
   "serveur.garde.heures_calmes": "heures calmes ({from} → {to})",
   "serveur.garde.machine": "ordre à une machine (imprimante, ordinateur) : un humain décide",
