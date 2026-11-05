@@ -15,6 +15,11 @@ npm ci --ignore-scripts --no-audit --no-fund
 MOLI_BIN=/absolute/path/to/moli-os ./run.sh
 ```
 
+Optionally set `E2E_MEASURE=1` for a 30-second idle sample with one virtual light
+after restart. Results are written to `.run/measurement.json`: RSS, anonymous
+process memory and CPU ticks. This is indicative process telemetry, not the
+upstream cgroup budget measurement or a hardware/Thread benchmark.
+
 Default binary: the debug binary in Cargo's configured target directory. The harness does
 not build or change the source tree. A musl binary also works on Linux if
 built for this architecture. Container networking is unnecessary.

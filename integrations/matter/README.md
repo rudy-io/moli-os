@@ -1,10 +1,12 @@
-# Matter natif / Native Matter (IP)
+# Matter natif expérimental / Experimental native Matter (IP)
 
 **Matériel non testé / hardware not tested.** Native Rust controller; no Matter Server
 or Python service. The standard build has no BlueZ/BLE dependency and supports devices
 already on an IP network, including Thread devices reachable through an existing border
 router. Optional `matter-ble` builds can provision a Thread device over Bluetooth using
 an existing border router's operational dataset; see [thread.md](thread.md).
+The release-image size currently exceeds the project's 25 MB budget; measurements
+and the unresolved comparison are recorded in `docs/PERFORMANCE.md`.
 
 ```toml
 [[driver]]
@@ -16,6 +18,11 @@ cd_roots = "/run/matter-trust/cd"
 ```
 
 Requires Rust 1.89 or newer (durable cross-process vault locking).
+The controller and codec are pinned to commit
+`429350c0171d62fbf911b7600231ba0480d4b875` of the contribution's matter-rust fork.
+It adds the absolute-deadline/cancellation API and durability fixes required here;
+registry `matter-controller` 0.18.3 alone does not provide that API. This is an
+experimental dependency choice to review before merging, not an upstream release claim.
 Both directories must contain production attestation roots accepted by
 `matter-controller::AttestationTrust::from_dirs`. Supply these explicitly and mount them
 read-only in containers. Example/test roots are never selected automatically.

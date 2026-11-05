@@ -1,35 +1,40 @@
-# Executed result — 2026-11-05
+# Executed release result — 2026-11-05
 
-**PASS**, genuine hardware-free Moli ↔ independent matter.js protocol test.
+**PASS**, Moli ↔ independent matter.js protocol test using the static binary
+extracted from the production Dockerfile image. Controller and codec resolve
+from Git revision `429350c0171d62fbf911b7600231ba0480d4b875`, without a sibling checkout.
 
-Command: `./e2e/run.sh` from project root. Node v26.7.0 / npm 12.2.0,
-`@matter/main` 0.18.0 with committed npm lockfile. Linux unprivileged user/network
-namespace, isolated veth pair, no uplink, no container host network.
+Reproduce after building and extracting the image’s `/moli-os`:
 
-Existing host debug binary used (no new full build):
-the Cargo target directory's `debug/moli-os`
+```sh
+cd tools/matter-e2e
+npm ci --ignore-scripts --no-audit --no-fund
+MOLI_BIN=/absolute/path/to/moli-os E2E_MEASURE=1 ./run.sh
+```
 
-SHA-256: `ce2bf6770b28b82f321673602f0a7d86997bf513482e2ac5b698473cecdfdc53`
+Binary SHA-256:
+`f385ea37dce2c2322ac26723dbd48d49ae5c8a08838d7d01cd7c74966e03bbf4`
 
-Observed stdout (exit 0):
+Binary size: 30 074 832 bytes. Uncompressed Podman image: 30 078 897 bytes.
+The image exceeds the 25 MB project target; see `docs/PERFORMANCE.md`.
+
+Observed exit code 0:
 
 ```text
+MEASURE: {"scope": "one virtual light; process memory, not cgroup; no BLE/OTBR", "seconds": 29.78, "rss_kib_peak": 17156, "anonymous_kib_peak": 3484, "cpu_percent_one_core": 0.0}
 PASS: commissioning, descriptor, OnOff, subscription, restart identity
 PASS: malformed state, invalid snapshot, wrong vault key rejected
 ```
 
-Commissioning completed with explicit test PAA/CD directories and attestation
-verification enabled. Moli logged successful CASE and CLI-origin REST commands;
-virtual accessory OnOff change events independently confirmed each requested state.
-Restarting Moli preserved device identity and restored operational control without
-supplying a new pairing code. Both `not-hex` and `00` controller snapshots produced
-Matter driver `status.state=backoff` with a 1000 ms retry, offline cached devices,
-and refused commands. Wrong master key made the secrets CLI exit nonzero.
+The accessory uses pinned matter.js 0.18.0 and explicit synthetic test PAA/CD
+trust roots. Attestation remains enabled. Test processes run in an isolated
+Linux user/network namespace with no physical uplink. OnOff changes are verified
+independently at the accessory and through Moli’s subscription. Restart preserves
+identity and control without a new code. Malformed hex, corrupt snapshots and the
+wrong vault key are rejected.
 
-Raw logs and failure status JSON are in ignored `e2e/.run/`. They are overwritten
-on rerun. The accessory is terminated when the launcher exits. Script syntax checks
-(`bash -n`, `node --check`, `python3 -m py_compile`) also passed.
-
-No claim about the parent's later release binary or subsequent driver changes:
-rerun against that binary with `MOLI_BIN=...`. No physical/Thread/BLE/sensor tests,
-performance measurement or full upstream check was performed here.
+These are process measurements over one short idle interval, not cgroup budget
+validation. No physical/Thread/BLE/battery/sensor hardware tests, multi-device
+stress tests, power-loss tests or Home Assistant comparison were performed.
+The wrong-key check exercises the CLI separately from the driver restart tests.
+Raw synthetic logs and measurement JSON remain in ignored `.run/`.

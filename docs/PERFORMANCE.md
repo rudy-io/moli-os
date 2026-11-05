@@ -13,6 +13,27 @@ Assistant.
 
 ## Budget
 
+### Contribution Matter expérimentale — 5 novembre 2026
+
+Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl
+x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 078 897 octets**
+non compressés ; binaire : **30 074 832 octets**. Cela **dépasse le budget de
+25 Mo**. L'écart est déclaré, pas considéré comme résolu. Il faut comparer au
+même commit de base sans Matter avant d'attribuer un delta à cette intégration,
+puis décider d'un découpage ou d'une réduction avant une livraison stable.
+
+Le binaire extrait de cette image a passé l'interopérabilité avec une lampe
+virtuelle matter.js, puis une fenêtre au repos de 29,78 s après redémarrage :
+RSS maximal échantillonné 17 156 Kio, mémoire anonyme du processus 3 484 Kio,
+CPU 0,000 % d'un cœur à la résolution des ticks Linux. Ce sont des mesures
+**du processus**, pas du cgroup : elles ne certifient pas les budgets ci-dessous.
+Aucun dashboard connecté pendant cette fenêtre ; un seul appareil virtuel,
+ni BLE ni OTBR. Pas de comparaison à Home Assistant, de p95 API, de mesure radio
+ou de test de charge multi-appareils. Reproduction et hash du binaire :
+`tools/matter-e2e/RESULTS.md` (`E2E_MEASURE=1`).
+
+### Objectifs du projet
+
 | Mesure | Budget | Pourquoi |
 |---|---|---|
 | Mémoire (mémoire **anonyme** du cgroup : tas et piles, aucun cache de fichiers ; **la même définition pour Moli et HA** ; le RSS de Moli est noté à côté) | ≤ 32 Mio (plafond conteneur 128) | HA : ~2,1 Gio. Rester sous 1/50. |
