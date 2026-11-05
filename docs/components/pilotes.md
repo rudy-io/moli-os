@@ -119,6 +119,45 @@ l'exige).
 En cas d'empreinte différente, l'erreur contient `PIN_MISMATCH` : les pilotes passent alors
 en `waiting` avec la commande `moli-os secrets forget <instance> cert` (ou `cert_sha256`).
 
+## `airzone` : Airzone Local API (`crates/moli-airzone`)
+
+Le pilote natif couvre les 12 opérations de la Local API 1.78 : zones, systèmes,
+eau chaude sanitaire, capteurs de qualité d'air et informations du Webserver.
+Le [registre de couverture](../../integrations/airzone/coverage.json) recense les
+118 schémas de paramètres, dont 31 explicitement écrivables, et les 17 mesures
+d'énergie. Chaque point dépend des capacités effectivement annoncées par le
+contrôleur ; cette couverture ne garantit pas la compatibilité de tous les firmwares.
+
+Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
+`read_only = false` est conservé pour ne pas désactiver les automatismes existants.
+Le défaut `write = "legacy"` conserve seulement `on`, `target_temperature`, `mode`
+et `fan_speed` (paramètre Airzone `speed`) sur les zones et leurs contrôles partagés
+historiques. `write = "extended"` active explicitement les nouvelles commandes :
+modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
+qualité de l’air et libellé d’intégration. Un essai d’observation configure
+explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
+transport. Les commandes restent soumises aux gardes, aux membres affectés et à
+une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
+démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
+au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient
+pas à cette API.
+
+HTTP utilise le port 3000 par défaut. HTTPS demande un port explicite et
+`tls_fingerprint`, une empreinte SHA-256 vérifiée ; aucun repli en clair. Si l'eau
+chaude ne rapporte pas son unité, `dhw_units = 0` (°C) ou `1` (°F) permet de la
+déclarer explicitement. Sans unité connue, sa consigne reste en lecture seule.
+
+`moli-os airzone-inspect --instance airzone <opération>` donne un diagnostic
+strictement en lecture seule, avec identifiants et textes libres expurgés. Les
+opérations de diagnostic comprennent les variantes GET, la démonstration synthétique
+et la disponibilité de la page thermostat ; le HTML distant n'est pas affiché.
+Les programmations Cloud, l'installation du réseau, l'appairage et les mises à jour
+du firmware ne sont pas des opérations de la Local API.
+
+Configuration, garde des groupes, limites des réponses, commandes et restrictions :
+[guide Airzone](../../integrations/airzone/README.md).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.
@@ -633,9 +672,10 @@ name = "Bambu A1"              # optionnel
 - **Protocole** : HTTP local, sans authentification (port 7125). Au premier contact : `printer/info` (nom d'hôte = identité), `printer/objects/list` (la **forme** : têtes `extruder…`, plateau, capteur d'enceinte `temperature_sensor cavity|chamber|chamber_temp`, lumière `led …`/`neopixel …`, table de filaments Snapmaker `print_task_config`, firmware Creality reconnu à sa sonde `prtouch…`), `machine/system_info` (modèle, s'il le dit ; une Creality ne le dit pas : « Creality K2 » est tiré de son nom d'hôte `K2-…`). Puis une seule requête `objects/query` toutes les **5 s en impression, 15 s sinon, 30 s éteinte** ; métadonnées du fichier à chaque nouveau travail (estimation du trancheur, vignette) ; totaux de l'historique toutes les 10 min.
 - **Configuration** : `host`, `port` (7125), `name` (par défaut le modèle annoncé, sinon le nom d'hôte).
 - **Points** : `state` (`standby`, `printing`, `paused`, `complete`, `cancelled`, `error` ; Klipper arrêté = `error` avec sa raison dans `message`), `printing`, `progress` (%), `remaining` (min : moyenne de l'estimation du trancheur et de l'avancée du fichier), `job`, `layer`, `total_layers`, `print_duration` (min), `filament_used` (m), `nozzle_temperature`/`nozzle_target` (tête active), `active_tool`, `tool<N>_temperature`/`_target`/`_filament` (« PLA Basic · Snapmaker », « vide »)/`_color` (`#rrggbb`), `bed_*`, `chamber_temperature`, `message`, `jobs_total`, `print_hours_total`, `filament_total` (m). **Écrivables** : `light` (`SET_LED … RED/GREEN/BLUE/WHITE`), `control` (`pause`, `resume`, `cancel` → `POST /printer/print/<ordre>`), de sémantique `control` : un agent attend un humain.
-- **Creality (K2)** : son `display_status.progress` est très en retard sur l'impression (19 % pour 44 %) : quand `virtual_sdcard.cur_print_data` est là, l'avancement est `virtual_sdcard.progress`, celui de son écran. Moonraker n'y lit pas le trancheur (`slicer: Unknown`, ni estimation ni vignette) : l'estimation vient de `cur_print_data.metadata.estimated_time`, les couches de `virtual_sdcard.layer`/`layer_count`.
+- **Creality (K2)** : son `display_status.progress` est très en retard sur l'impression (19 % pour 44 %) : pendant l'impression du fichier que `virtual_sdcard.cur_print_data` décrit (même nom de fichier que `print_stats`), l'avancement est `virtual_sdcard.progress`, celui de son écran. Moonraker n'y lit pas le trancheur (`slicer: Unknown`, ni estimation ni vignette) : l'estimation vient de `cur_print_data.metadata.estimated_time` (même condition), les couches de `virtual_sdcard.layer`/`layer_count`.
 - **Image** : la vignette du travail (la plus grande que le trancheur a mise dans le G-code) sert d'image de l'appareil (`/api/devices/{id}/snapshot`).
-- **Pas fait** : lancer une impression (le plateau doit être libre : un humain sur place), la caméra (le flux du U1 ne répond pas en HTTP local), le flux en direct par websocket (le relevé toutes les 5 s suffit).
+- **Caméra d'une Creality** (`src/creality.rs`) : WebRTC seulement, aucune image fixe (`/server/webcams/list` vide, le `/webcam/` de Fluidd sans rien derrière). Le **navigateur** lit la vidéo : Moli passe son offre au service caméra de l'imprimante (`POST :8000/call/webrtc_local`, `{type, sdp}` en JSON puis base64, comme go2rtc la lit) et rapporte la réponse (`/api/devices/{id}/live`, appareil `live: true`). La caméra ne lit une adresse que si elle est écrite comme go2rtc l'écrit (`… typ host ufrag … generation 0`) : Moli réécrit les lignes `a=candidate` de l'offre avec l'adresse du navigateur qu'il voit (`LiveSource::answer(offer, viewer)`, le nom `.local` du navigateur remplacé ; TCP et IPv6 retirés). La vidéo va de l'imprimante au navigateur : au réseau de la maison seulement (Moli ouvert par son adresse locale), et le navigateur doit joindre l'imprimante (UDP compris). La carte de l'imprimante la montre pendant une impression, à la demande sinon.
+- **Pas fait** : lancer une impression (le plateau doit être libre : un humain sur place), la caméra du U1 (son flux ne répond pas en HTTP local), le flux en direct par websocket (le relevé toutes les 5 s suffit).
 - **Tests** : réponses réelles du U1 et de la K2 (`integrations/klipper/fixtures/u1.json`, `k2.json`) → forme, points, valeurs ; estimation du temps restant ; Klipper arrêté ; ordres → requêtes.
 
 ## `shelly` : Shelly Gen2 et suivants (`crates/moli-shelly`)

@@ -22,5 +22,6 @@
   "overkiz.cloud_forbidden": "Accès cloud Somfy refusé.",
   "overkiz.cloud_rate": "Limite de requêtes cloud Somfy : réessayez plus tard.",
   "overkiz.cloud_summary": "Observation cloud Somfy",
-  "overkiz.cloud_status": "État des observations cloud"
+  "overkiz.cloud_status": "État des observations cloud",
+  "overkiz.slow_position": "Position d’ouverture à vitesse lente"
 }

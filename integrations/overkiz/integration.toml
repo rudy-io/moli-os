@@ -51,3 +51,6 @@ file = "fixtures/cloud-triggers.json"
 
 [[fixture]]
 file = "fixtures/cloud-unknown-trigger.json"
+
+[[fixture]]
+file = "fixtures/slow-cover.json"
