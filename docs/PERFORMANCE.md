@@ -18,9 +18,16 @@ Assistant.
 Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl
 x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 078 897 octets**
 non compressés ; binaire : **30 074 832 octets**. Cela **dépasse le budget de
-25 Mo**. L'écart est déclaré, pas considéré comme résolu. Il faut comparer au
-même commit de base sans Matter avant d'attribuer un delta à cette intégration,
-puis décider d'un découpage ou d'une réduction avant une livraison stable.
+25 Mo**. Comparaison construite séparément avec le Dockerfile inchangé de la
+base `9ce5868c7832f1e97010f84ffb7e33d7295840f4`, même architecture et toolchain :
+**27 737 521 octets** sans Matter (binaire **27 733 136 octets**). L'ajout de la
+contribution représente donc **2 341 376 octets (+8,44 %)** pour l'image.
+La base dépasse déjà 25 Mo ; la contribution accroît ce dépassement. Le budget
+reste non résolu : réduction/découpage ou arbitrage explicite avant livraison stable.
+SHA-256 du binaire de référence :
+`a435b60f0b76b50cff5a4383ac1976abe90015f777032b716b9ebdbc3e9743ae`.
+Ces chiffres concernent les builds de taille documentés, avant l'ajout du diagnostic
+d'appairage ; ce dernier n'a pas fait l'objet d'une nouvelle mesure de release.
 
 Le binaire extrait de cette image a passé l'interopérabilité avec une lampe
 virtuelle matter.js, puis une fenêtre au repos de 29,78 s après redémarrage :
