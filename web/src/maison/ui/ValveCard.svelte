@@ -3,6 +3,8 @@
   import { device, value, reachable, num, act } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import ScheduleEditor from './ScheduleEditor.svelte';
+  import { scheduleSpec } from '../lib/schedule.js';
   import { pointOf, canWrite, numericRange, quantize, writableChoices, climateKeys } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
 
@@ -19,6 +21,8 @@
   const target = $derived(value(id, keys.target));
   const mode = $derived(value(id, keys.mode));
   const writable = $derived(!!range && canWrite(d, keys.target));
+  const hasSchedule = $derived(!!scheduleSpec(d));
+  let editing = $state(false);
 
   // Taps on − / + add up; one order leaves once the finger rests.
   let wanted = $state(null);
@@ -102,6 +106,12 @@
   {:else if mode != null}
     <p class="muted">{t('commun.clim.mode')} <b>{modeLabel(mode)}</b></p>
   {/if}
+  {#if hasSchedule}
+    <button class="fold" onclick={() => (editing = !editing)} aria-expanded={editing}>{t('commun.vanne.prog.titre')}</button>
+    {#if editing}
+      <ScheduleEditor {id} {name} />
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -184,6 +194,18 @@
   .modes button.active {
     background: var(--ink);
     color: var(--surface);
+  }
+
+  .fold {
+    justify-self: start;
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12.5px;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .muted {
