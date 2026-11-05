@@ -9,20 +9,20 @@ claim of 100% Airzone coverage or physical validation of every device family.
 - [coverage-matrix.json](coverage-matrix.json) has 79 operation/RPC rows and 145
   native field rows. Each row separates implementation, Rust/model/UI evidence,
   test references and hardware validation.
-- [api-contract.json](api-contract.json) records every published operation,
-  request/response contract and named schema in the five interfaces below.
-  Common schemas share a content-addressed catalog. REST `$ref` values resolve
-  through the corresponding interface's schema-name map; AsyncAPI schemas use
-  complete property paths, including alternatives. These are protocol facts,
-  without copied explanatory prose, sample account identifiers or credentials.
+- [api-contract.json](api-contract.json) keeps REST operation contracts, the 127
+  Local API schema facts, and the operation/schema-name inventories of all five
+  interfaces. Full cloud/AsyncAPI schemas and repeated message payloads are not
+  vendored. Their fingerprints and source SHA-256 make the smaller inventory
+  reproducible; they do not establish complete field coverage of those APIs.
 - [coverage.json](coverage.json) is the **runtime field registry**, not an
   end-to-end coverage report. Its 145 entries include 118 named parameter
   schemas, flattened energy fields and 10 fields documented only in examples.
 - A field present in documentation is not necessarily available on a gateway.
   Missing, null, unsupported, failed and stale values must remain distinct.
   A test reference means the test exists; the task's actual test run is separate.
-- Every request and response field inherits its operation status unless a more
-  specific field mapping is recorded. Recording a schema never counts as implementation.
+- Local fields share four named evidence profiles in `field_evidence`; each row
+  retains its independent contract and implementation status. Recording a schema
+  or evidence profile never counts as hardware validation.
 
 The native field matrix includes all 118 named Local API parameters. Nine more
 Local API schemas describe envelopes/addressing rather than independent points.
@@ -131,11 +131,13 @@ Run from the repository root:
 ```sh
 python3 integrations/airzone/validate_coverage.py
 python3 integrations/airzone/validate_coverage.py --test
+python3 -m unittest discover -s integrations/airzone -p 'test_*.py'
 ```
 
 These offline checks detect missing operations/RPC variants, missing native
-fields, unresolved schema references, altered contract fingerprints, nonexistent
-test evidence, and a false complete status over unimplemented variants. The
+fields, unresolved retained schema references, altered Local API fingerprints,
+unknown evidence profiles, nonexistent test evidence, and a false complete status
+over unimplemented variants. The
 negative tests deliberately remove an operation/field or falsify evidence.
 They neither access a gateway nor replace Rust, UI, integration or physical
 tests. The full repository check remains required before publishing changes.
@@ -149,6 +151,22 @@ are stored per interface in `api-contract.json`:
 - MQTT and WebSocket: the public documentation pages above, using their embedded
   AsyncAPI JSON. The WebSocket page's separate YAML download returned HTTP 403
   during this audit; the readable embedded contract was used instead.
+
+To reproduce the compact contract, save those five source documents as
+`local-openapi.txt`, `open-api.yaml`, `web-api.yaml`, `mqtt-page.txt` and
+`websocket-page.txt` in an external directory. Install `PyYAML==6.0.3` in a
+temporary virtual environment for regeneration only, then run:
+
+```sh
+python3 integrations/airzone/generate_contract.py --source-dir /path/to/sources --check
+```
+
+The generator checks each source's exact SHA-256 before parsing it. Embedded
+AsyncAPI is decoded as JSON and never executed. `--output /path/to/contract.json`
+writes the same compact format for review. Downloads and large source documents
+remain outside Git; a changed manufacturer document requires an explicit review
+and checksum update. The runtime registry remains semantically unchanged, with
+one field per line; no driver reads the larger documentation catalog.
 
 For an upstream documentation update, first archive the new official source
 bytes and compare their SHA-256, operations, variants, schemas and constraints.
