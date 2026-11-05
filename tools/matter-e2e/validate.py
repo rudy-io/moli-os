@@ -50,6 +50,28 @@ def command(identity, value):
     wait(lambda:json.loads((D/'accessory-state.json').read_text())['on'] is value,
          'independent accessory state')
 
+def measure_idle(process):
+    if os.environ.get('E2E_MEASURE') != '1': return
+    samples = []
+    end = time.monotonic() + 30
+    while time.monotonic() < end:
+        assert process.poll() is None, 'Moli exited during measurement'
+        status = dict(line.split(':',1) for line in
+            pathlib.Path(f'/proc/{process.pid}/status').read_text().splitlines() if ':' in line)
+        fields = pathlib.Path(f'/proc/{process.pid}/stat').read_text().rsplit(')',1)[1].split()
+        samples.append((time.monotonic(), int(fields[11])+int(fields[12]),
+            int(status['VmRSS'].split()[0]), int(status['RssAnon'].split()[0])))
+        time.sleep(.25)
+    first, last = samples[0], samples[-1]
+    result = {'scope':'one virtual light; process memory, not cgroup; no BLE/OTBR',
+        'seconds':round(last[0]-first[0],2),
+        'rss_kib_peak':max(s[2] for s in samples),
+        'anonymous_kib_peak':max(s[3] for s in samples),
+        'cpu_percent_one_core':round(100*(last[1]-first[1]) /
+            os.sysconf('SC_CLK_TCK') / (last[0]-first[0]),3)}
+    (D/'measurement.json').write_text(json.dumps(result, indent=2))
+    print('MEASURE: '+json.dumps(result), flush=True)
+
 try:
     wait(lambda:(D/'accessory-ready').exists(), 'virtual accessory startup', 30)
     (D/'moli.toml').write_text(f'''[server]
@@ -76,6 +98,7 @@ cd_roots = "{D}/cd"
     try:
         wait(lambda:state(False), 'restart CASE and subscription', 120)
         assert device()['id'] == identity, 'device identity changed'
+        measure_idle(p)
         command(identity, True)
         command(identity, False)
     finally: stop(p)
