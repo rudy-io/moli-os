@@ -10,6 +10,10 @@ as possible; Moli is maintained on spare time, with no service-level promise.
 
 Moli runs a home: knowing its trust model helps you install it safely and find what matters.
 
+The reference for the rules (what is protected, against whom, and the invariants with their
+proof) is [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md); what follows is a summary for the
+people installing Moli, and the model wins if they ever differ.
+
 - **The home network is trusted by default, the bedrooms are not.** In the default `trusted`
   dashboard mode, a device on the local network commands the house without a code, like a light
   switch on the wall: anywhere but in a protected room, on a machine (a computer, a print at
