@@ -63,6 +63,8 @@ pub fn spawn_driver(
             }
             backoff = (backoff * 2).min(BACKOFF_MAX);
         }
+        ctx.drain("driver stopped");
+        hub.mark_instance_offline(&instance);
         hub.set_driver_status(&instance, DriverStatus::Stopped);
     })
 }

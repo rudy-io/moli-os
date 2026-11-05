@@ -3,6 +3,7 @@
   import { phase, PHASES, jobName, duration, cancelWord } from '../lib/printers.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import LiveVideo from './LiveVideo.svelte';
 
   /** One 3D printer: the print (image, progress, time left), its heads and
    *  filaments, temperatures, and the hand on it (pause, resume, cancel,
@@ -55,6 +56,11 @@
     noImage = false;
   });
 
+  // The camera, live (a Creality): on by itself while printing, at will
+  // otherwise; the choice is this card's while the page lives.
+  let liveChoice = $state(null);
+  const live = $derived(d?.live === true && ok && (liveChoice ?? active));
+
   let confirm = $state(false);
   let confirmTimer;
   function order(word, label) {
@@ -81,12 +87,21 @@
       {#if d?.model || d?.manufacturer}<span class="muted">{d.model ?? d.manufacturer}</span>{/if}
     </div>
     <span class="chip {look.tone}">{look.label}</span>
+    {#if d?.live && ok}
+      <button class="round" class:lit={live} onclick={() => (liveChoice = !live)} aria-pressed={live} title={t('salon.impression.camera')}>
+        <Icon name="camera" size={18} />
+      </button>
+    {/if}
     {#if can('light') && ok}
       <button class="round" class:lit={v('light') === true} onclick={() => act(`${id}/light`, v('light') !== true, t('salon.impression.act_lumiere', { nom: nameOf(id) }))} aria-pressed={v('light') === true} title={t('salon.impression.lumiere')}>
         <Icon name="light" size={18} />
       </button>
     {/if}
   </div>
+
+  {#if live}
+    <LiveVideo {id} />
+  {/if}
 
   <div class="job">
     <div class="thumb">

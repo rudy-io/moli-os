@@ -266,7 +266,7 @@ async fn step(
         Step::Set { point, value } => act(autos, a, point, Value::from_json(value), dry).await,
         Step::Toggle { point } => {
             let pid = PointId::from(point.as_str());
-            let next = match hub.state(&pid).map(|s| s.value) {
+            let next = match hub.current_state(&pid).map(|s| s.value) {
                 Some(Value::Bool(b)) => Value::Bool(!b),
                 Some(Value::Text(t)) if t.eq_ignore_ascii_case("on") => Value::Text("OFF".into()),
                 Some(Value::Text(t)) if t.eq_ignore_ascii_case("off") => Value::Text("ON".into()),
@@ -461,7 +461,7 @@ pub(crate) fn holds(autos: &Automations, rule: &Rule) -> bool {
             let Some(current) = autos
                 .0
                 .hub
-                .state(&PointId::from(point.as_str()))
+                .current_state(&PointId::from(point.as_str()))
                 .map(|s| s.value)
             else {
                 return false;
@@ -503,7 +503,9 @@ pub(crate) fn holds(autos: &Automations, rule: &Rule) -> bool {
             )
         }
         Rule::Sun { is } => {
-            let day = autos.is_day();
+            let Some(day) = autos.is_day() else {
+                return false;
+            };
             if *is == DayNight::Day { day } else { !day }
         }
         Rule::Stale { point, for_s } => {
@@ -535,20 +537,41 @@ pub(crate) fn in_window(m: u32, after: Option<u32>, before: Option<u32>) -> bool
 
 impl Automations {
     /// Sun up, from the house's position, else from a weather `daylight`.
-    pub(crate) fn is_day(&self) -> bool {
+    pub(crate) fn is_day(&self) -> Option<bool> {
         let now = jiff::Timestamp::now();
         if let Some((lat, lon)) = self.position() {
             let date = now.to_zoned(self.0.tz.clone()).date();
-            return crate::sun::times(date, lat, lon)
-                .is_some_and(|(rise, set)| rise <= now && now < set);
+            return Some(
+                crate::sun::times(date, lat, lon)
+                    .is_some_and(|(rise, set)| rise <= now && now < set),
+            );
         }
-        self.0
-            .hub
-            .snapshot()
+        let snapshot = self.0.hub.snapshot();
+        let daylight = |sample: moli_core::Sample| match sample.value {
+            Value::Bool(day) => Some((sample.ts, day)),
+            _ => None,
+        };
+        // Prefer any live observation before considering offline sources.
+        // Sun is an estimate when the house has no position: its last known
+        // daylight still lets day/night conditions work while weather is down.
+        snapshot
             .devices
             .iter()
-            .find_map(|d| d.state.get("daylight").map(|s| s.value.clone()))
-            .is_some_and(|v| matches!(v, Value::Bool(true)))
+            .filter_map(|d| {
+                self.0
+                    .hub
+                    .current_state(&PointId::new(&d.device.id, "daylight"))
+                    .and_then(daylight)
+            })
+            .max_by_key(|(ts, _)| *ts)
+            .or_else(|| {
+                snapshot
+                    .devices
+                    .iter()
+                    .filter_map(|d| d.state.get("daylight").cloned().and_then(daylight))
+                    .max_by_key(|(ts, _)| *ts)
+            })
+            .map(|(_, day)| day)
     }
 }
 

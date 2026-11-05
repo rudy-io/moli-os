@@ -52,12 +52,26 @@ async fn park(ctx: &DriverCtx, key: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> {
+fn reconcile_inventory(config: &Config, ctx: &DriverCtx) {
     // Restored readings are stale until independently refreshed in this run.
+    // This bridge has an explicit inventory: a removed configuration entry is
+    // intentional, unlike a configured entity that is temporarily unavailable.
     for id in ctx.known_devices() {
-        ctx.set_availability(&id, false);
+        if config
+            .entities
+            .iter()
+            .any(|entity| ctx.device_id(&entity.native_id) == id)
+        {
+            ctx.set_availability(&id, false);
+        } else {
+            ctx.remove_device(&id);
+        }
     }
+}
+
+async fn run(driver: &HomeAssistant, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let config = &driver.config;
+    reconcile_inventory(config, ctx);
     let Some(client) = client_for(config, ctx).await? else {
         return Ok(());
     };

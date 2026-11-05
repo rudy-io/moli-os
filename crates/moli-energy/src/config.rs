@@ -316,7 +316,7 @@ fn check_point(point: &str) -> Result<(), String> {
     }
 }
 
-fn check_price(price: f64) -> Result<(), String> {
+pub(crate) fn check_price(price: f64) -> Result<(), String> {
     if price.is_finite() && price >= 0.0 {
         Ok(())
     } else {

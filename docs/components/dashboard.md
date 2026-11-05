@@ -27,6 +27,16 @@ Le flux SSE `/api/events` est ouvert **une seule fois** et partagé (`web/src/li
 | Automatismes | `#/automatismes`, `#/automatismes/<id>` | liste, idées, éditeur à canevas (voir [automatismes.md](automatismes.md)) |
 | Système | `#/systeme` | **carte vivante** du système et comparaison avec HA (voir plus bas) |
 
+## Airzone : une vue de lecture dédiée
+
+`#/airzone` est chargé à la demande lorsque le pilote natif Airzone est configuré. La navigation Maison et un lien dans Atelier y donnent accès. Les cartes regroupent les zones par instance et système ; recherche par nom/pièce et filtre de système restent locaux au navigateur. Le pont Home Assistant reste dans ses vues existantes : le fabricant ou le nom ne suffisent pas à classer un appareil comme natif.
+
+La fiche `#/airzone/<identifiant encodé>` distingue température mesurée, consigne, humidité, mode, disponibilité et demandes effectivement signalées. Un appui sur une température/consigne ouvre l’historique existant. Les informations secondaires sont regroupées par thèmes ; les commandes communes sont présentées séparément, uniquement lorsque leurs membres contiennent la zone. `#/airzone/installation` regroupe passerelles, systèmes et ressources facultatives.
+
+**Cette vue est toujours consultative**, y compris pour un pilote dont les points sont inscriptibles : aucun contrôle ni chemin d’envoi d’ordre. Elle partage le flux SSE, les unités déclarées et les formats existants, sans relève supplémentaire. Les anciennes valeurs hors ligne sont signalées, les inconnues ne deviennent pas des zéros ou des degrés Celsius, et aucune demande n’est déduite d’un écart de température. Les programmations cloud ne sont pas annoncées comme disponibles localement.
+
+Le modèle pur `maison/lib/airzone.js` conserve les périmètres et les champs inconnus. Les composants `AirzoneZoneCard` et `AirzoneReadings` sont partagés entre aperçu, fiche et diagnostic. Les tests métier et SSR utilisent exclusivement des appareils fictifs ; les captures publiées sont celles d’une maison de démonstration.
+
 Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
 Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 
@@ -106,6 +116,9 @@ telles que les appareils les nomment).
   déconnexion du flux Moli. `#/pieces/volets` les regroupe par pièce en grille ;
   le détail d'accès renvoie à Système. Une position mesurée à 0 % dit « Fermé »,
   à 100 % « Ouvert » ; une lecture périmée est explicitement la dernière position.
+  Dans les pièces, le mode « icônes seules » place le nom et l'état dans l'infobulle ;
+  les boutons d'action et de vitesse gardent leur icône, leur nom accessible et une
+  cible tactile de 44 px. Le choix de présentation ne change ni les droits ni la vitesse.
   Le choix **Normal / Lent**, proposé seulement si annoncé, décrit la prochaine
   commande : `open_slow` / `close_slow` ou le point d'action facultatif
   `percent_control_slow` (pourcentage ouvert). Ce point n'est jamais une observation :

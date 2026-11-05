@@ -28,9 +28,10 @@ before(async () => {
           export function mount(id) {
             let card;
             const target = mutable_source(id);
-            const dispose = effect_root(() => { card = CoverTile(null, { get id() { return get(target); } }); });
+            const icons = mutable_source(false);
+            const dispose = effect_root(() => { card = CoverTile(null, { get id() { return get(target); }, get icons() { return get(icons); } }); });
             flushSync();
-            return { card, dispose, setId(next) { set(target, next); flushSync(); } };
+            return { card, dispose, setId(next) { set(target, next); flushSync(); }, setIcons(next) { set(icons, next); flushSync(); } };
           }
         `;
       },
@@ -239,4 +240,28 @@ test('a new device starts in Normal and a speed switch cannot redirect a previou
   setId('fixture:other');
   await card.sendOrder('open', 'commun.volet.ouvrir');
   assert.deepEqual(orders, [{ point: 'fixture:other/motor', value: 'OPEN' }]);
+});
+
+test('changing icons presentation preserves slow intent, Stop feedback and read-only guards', async (t) => {
+  const finish = [];
+  const { card, orders, device, setIcons } = fixture(t, () => new Promise((resolve) => finish.push(resolve)));
+  addSlow(device);
+  card.chooseSpeed('slow');
+  setIcons(true);
+  assert.deepEqual(orders, [], 'changing presentation does not command the device');
+  const open = card.sendOrder('open', 'commun.volet.ouvrir');
+  setIcons(false);
+  const stop = card.sendOrder('stop', 'commun.volet.stop');
+  assert.deepEqual(orders.map(({ value }) => value), ['OPEN_SLOW', 'STOP']);
+  finish[0](reply());
+  await open;
+  assert.equal(card.result(), 'sending');
+  finish[1](reply());
+  await stop;
+  assert.equal(card.result(), 'sent');
+  for (const point of device.points) point.access.write = false;
+  setIcons(true);
+  await card.sendOrder('close', 'commun.volet.fermer');
+  assert.equal(orders.length, 2);
+  assert.equal(device.state.opening.value, 40);
 });
