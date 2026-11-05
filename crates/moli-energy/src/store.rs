@@ -12,6 +12,7 @@ use std::sync::{Mutex, PoisonError};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::meter::Reading;
+use crate::price::HousePrice;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnergyError {
@@ -58,6 +59,12 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS meter_first (
         meter TEXT PRIMARY KEY,
         ts    INTEGER NOT NULL
+    ) STRICT;
+    -- The house's price of a kWh, chosen from the dashboard, from `since`
+    -- on (meters without a price of their own).
+    CREATE TABLE IF NOT EXISTS house_price (
+        since INTEGER PRIMARY KEY,
+        price REAL NOT NULL
     ) STRICT;
     -- Databases from before meter_first: the older of the last reading
     -- and the first recorded hour.
@@ -212,6 +219,29 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every price of the house, oldest first.
+    pub fn house_prices(&self) -> Result<Vec<HousePrice>, EnergyError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT since, price FROM house_price ORDER BY since")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(HousePrice {
+                since: unms(row.get(0)?),
+                price: row.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A new price of the house, from `price.since` on.
+    pub fn add_house_price(&self, price: HousePrice) -> Result<(), EnergyError> {
+        self.conn().execute(
+            "INSERT INTO house_price (since, price) VALUES (?1, ?2)
+             ON CONFLICT (since) DO UPDATE SET price = excluded.price",
+            params![ms(price.since), price.price],
+        )?;
+        Ok(())
+    }
+
     /// The first hour on record (for « depuis le … »).
     pub fn first_hour(&self) -> Result<Option<u64>, EnergyError> {
         let first: Option<Option<i64>> = self
@@ -263,6 +293,25 @@ mod tests {
         );
         assert_eq!(store.first_hour().unwrap(), Some(0));
         assert_eq!(Store::memory().first_hour().unwrap(), None);
+    }
+
+    #[test]
+    fn the_house_prices_are_kept_in_order() {
+        let store = Store::memory();
+        assert!(store.house_prices().unwrap().is_empty());
+        let (late, early) = (
+            HousePrice {
+                since: 20,
+                price: 0.25,
+            },
+            HousePrice {
+                since: 10,
+                price: 0.2,
+            },
+        );
+        store.add_house_price(late).unwrap();
+        store.add_house_price(early).unwrap();
+        assert_eq!(store.house_prices().unwrap(), vec![early, late]);
     }
 
     #[test]

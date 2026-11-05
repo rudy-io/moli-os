@@ -285,7 +285,7 @@
   {/if}
 
   {#each room.covers as d (d.id)}
-    <CoverTile id={d.id} />
+    <CoverTile id={d.id} {icons} />
   {/each}
 
   {#each room.climates as d (d.id)}

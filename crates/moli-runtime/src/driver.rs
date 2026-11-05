@@ -192,6 +192,14 @@ impl DriverCtx {
         }
     }
 
+    /// Declares that `device` (one of ours) has live video a browser plays
+    /// (WebRTC): `source` answers the browser's offer.
+    pub fn provide_live(&self, device: &DeviceId, source: Arc<dyn crate::media::LiveSource>) {
+        if self.owns(device) {
+            self.hub.provide_live(device, source);
+        }
+    }
+
     /// Declares that `device` (one of ours) prints documents.
     pub fn provide_printing(&self, device: &DeviceId, sink: Arc<dyn crate::media::PrintSink>) {
         if self.owns(device) {

@@ -8,6 +8,7 @@
   import EnergyChart from '../ui/EnergyChart.svelte';
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
+  import HousePrice from '../ui/HousePrice.svelte';
 
   onMount(useEnergy);
 
@@ -413,6 +414,8 @@
         {t('energie.histo.avant_moli')}
       </p>
     </section>
+
+    <HousePrice />
   {/if}
 </div>
 

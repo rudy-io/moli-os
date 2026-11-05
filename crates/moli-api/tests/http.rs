@@ -2494,6 +2494,90 @@ async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_co
     std::fs::remove_dir_all(house.dir).unwrap();
 }
 
+/// The house's price of a kWh: changed by a person (the code), never typed
+/// in cents, counted from now on, and journaled with what it was.
+#[tokio::test]
+async fn only_a_person_changes_the_price_of_a_kwh_and_it_is_journaled() {
+    let dir = std::env::temp_dir().join(format!("moli-http-price-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let hub = lamp_hub().await;
+    let config: moli_energy::Config = serde_json::from_value(json!({
+        "meter": [{ "id": "plug", "name": "Plug", "point": "fake:lamp/power", "role": "appliance", "integrate": true }]
+    }))
+    .unwrap();
+    let (energy, _task) = moli_energy::Energy::start(
+        &hub,
+        &dir.join("energy.db"),
+        config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        energy: Some(energy.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let price = |p: f64| json!({ "price": p });
+
+    // The household's dashboard without the code: refused.
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(0.2319)), ui).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(energy.house_prices().is_empty());
+
+    // A person: a price in cents is refused, a price per kWh is kept.
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(23.19)), &pin).await;
+    assert_eq!(status, 422, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2287)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2319)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(answer["before"], json!(0.2287));
+
+    let (_, body) = request(&addr, "GET", "/api/energy", None).await;
+    let summary: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(summary["house_price"], json!(0.2319));
+    assert_eq!(summary["price_now"], json!(0.2319));
+    assert_eq!(summary["house_prices"].as_array().map(Vec::len), Some(2));
+
+    let changes: Vec<(Json, Json)> = hub
+        .journal(50)
+        .iter()
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } if name == "energy.price" => {
+                assert_eq!(e.origin, moli_core::Origin::Ui);
+                Some((json!(from), json!(to)))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        vec![(json!(0.2287), json!(0.2319)), (Json::Null, json!(0.2287))],
+        "newest first"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
     let (addr, hub) = server().await;
@@ -2631,4 +2715,100 @@ async fn airzone_mode_revocation_and_stale_mode_errors_are_explicit() {
         "mode_conflict"
     );
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+}
+
+/// A camera with live video only: it answers an offer with an echo of it.
+struct LiveCam;
+
+#[derive(Debug)]
+struct Echo;
+
+impl moli_runtime::media::LiveSource for Echo {
+    fn answer(
+        &self,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> BoxFuture<'_, anyhow::Result<String>> {
+        // The viewer's address (this test's client, on this machine) comes along.
+        let to = viewer.map_or_else(|| "nobody".to_owned(), |ip| ip.to_string());
+        Box::pin(async move {
+            Ok(format!(
+                "{}a=viewer:{to}\r\n",
+                offer.replace("offer", "answer")
+            ))
+        })
+    }
+}
+
+impl Driver for LiveCam {
+    fn kind(&self) -> &'static str {
+        "livecam"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("printer");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "printer".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: Vec::new(),
+            });
+            ctx.provide_live(&id, Arc::new(Echo));
+            ctx.ready();
+            while ctx.next_command().await.is_some() {}
+            Ok(())
+        })
+    }
+}
+
+/// Live video: the browser's offer reaches the device, its answer comes
+/// back; a device without live video, or something else than an offer, is
+/// refused.
+#[tokio::test]
+async fn a_live_offer_reaches_the_device_and_its_answer_comes_back() {
+    let hub = lamp_hub().await;
+    spawn_driver(
+        &hub,
+        InstanceId::from("cam"),
+        Arc::new(LiveCam),
+        CancellationToken::new(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    let offer = json!({ "sdp": "v=0\r\ns=offer\r\n" });
+
+    let (_, body) = request(&addr, "GET", "/api/devices/cam:printer", None).await;
+    let view: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(view["live"], json!(true), "{body}");
+
+    let (status, body) =
+        request(&addr, "POST", "/api/devices/cam:printer/live", Some(&offer)).await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        answer["sdp"],
+        json!("v=0\r\ns=answer\r\na=viewer:127.0.0.1\r\n")
+    );
+
+    let (status, body) = request(&addr, "POST", "/api/devices/fake:lamp/live", Some(&offer)).await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/api/devices/cam:printer/live",
+        Some(&json!({ "sdp": "hello" })),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
 }

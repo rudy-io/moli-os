@@ -11,6 +11,7 @@ mod estimate;
 pub mod load;
 pub mod meter;
 pub mod points;
+mod price;
 pub mod report;
 mod store;
 
@@ -28,6 +29,8 @@ use tokio_util::sync::CancellationToken;
 
 pub use config::{Config, MeterConfig, Reset, Role, Tariff};
 use meter::{Integral, Outcome, Reading, Tracker};
+pub use price::HousePrice;
+use price::HousePrices;
 pub use report::{Amount, Bucket, Period, SolarShare, Step};
 pub use store::EnergyError;
 use store::{HourRow, Store};
@@ -44,6 +47,8 @@ struct Inner {
     config: Config,
     tz: TimeZone,
     hub: Hub,
+    /// The house's price of a kWh, shared with the recorder.
+    prices: HousePrices,
 }
 
 /// A meter as the surfaces show it, with its live power if known.
@@ -162,6 +167,13 @@ pub struct Summary {
     /// The point holding the monthly budget (a helper the dashboard sets).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_point: Option<String>,
+    /// The house's price of a kWh now (chosen from the dashboard), for the
+    /// meters without a price of their own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub house_price: Option<f64>,
+    /// Every price of the house, oldest first, with when it began.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub house_prices: Vec<HousePrice>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -191,7 +203,9 @@ impl Energy {
         // Subscribe before reading anything: no reading falls in between.
         let events = hub.subscribe();
         let last = store.last_readings()?;
-        let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store));
+        let prices = HousePrices::new(store.house_prices()?);
+        let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store))
+            .with_prices(prices.clone());
         let task = tokio::spawn(recorder.run(events, cancel));
         let energy = Self {
             inner: Arc::new(Inner {
@@ -199,9 +213,29 @@ impl Energy {
                 config,
                 tz,
                 hub: hub.clone(),
+                prices,
             }),
         };
         Ok((energy, task))
+    }
+
+    /// Every price of the house, oldest first.
+    #[must_use]
+    pub fn house_prices(&self) -> Vec<HousePrice> {
+        self.inner.prices.all()
+    }
+
+    /// A new price of the house, from now on: the hours already filed keep
+    /// theirs. Returns the price it replaces.
+    pub async fn set_house_price(&self, price: f64) -> Result<Option<f64>, EnergyError> {
+        config::check_price(price).map_err(EnergyError::Invalid)?;
+        let now = now_ms();
+        let before = self.inner.prices.at(now);
+        let new = HousePrice { since: now, price };
+        let store = Arc::clone(&self.inner.store);
+        blocking(move || store.add_house_price(new)).await?;
+        self.inner.prices.push(new);
+        Ok(before)
     }
 
     #[must_use]
@@ -295,7 +329,10 @@ impl Energy {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
             since,
-            price_now: period.as_deref().and_then(|p| config.period_price(p)),
+            price_now: period
+                .as_deref()
+                .and_then(|p| config.period_price(p))
+                .or_else(|| self.inner.prices.at(now)),
             period_point: config.tariff.as_ref().map(|t| t.period.clone()),
             period,
             flows: Flows::of(&meters),
@@ -312,6 +349,8 @@ impl Energy {
             last_month: Period::of(config, &rows, last_month, month),
             monthly_fee: config.monthly_fee,
             budget_point: config.budget.clone(),
+            house_price: self.inner.prices.at(now),
+            house_prices: self.inner.prices.all(),
         })
     }
 
@@ -426,12 +465,14 @@ pub fn import(
 ) -> Result<ImportReport, EnergyError> {
     config.check().map_err(EnergyError::Invalid)?;
     let tz = TimeZone::get(&config.timezone).map_err(|e| EnergyError::Invalid(e.to_string()))?;
-    let (priced, invalid) = price_rows(config, &tz, rows);
+    let store = Store::open(path)?;
+    let house = store.house_prices()?;
+    let (priced, invalid) = price_rows(config, &tz, &house, rows);
     let mut report = ImportReport {
         invalid,
         ..ImportReport::default()
     };
-    let (inserted, repriced, skipped) = Store::open(path)?.import(&priced)?;
+    let (inserted, repriced, skipped) = store.import(&priced)?;
     report.inserted = inserted;
     report.repriced = repriced;
     report.skipped = skipped;
@@ -439,7 +480,12 @@ pub fn import(
 }
 
 /// The rows that make sense, each with its price, and how many did not.
-fn price_rows(config: &Config, tz: &TimeZone, rows: &[ImportRow]) -> (Vec<HourRow>, usize) {
+fn price_rows(
+    config: &Config,
+    tz: &TimeZone,
+    house: &[HousePrice],
+    rows: &[ImportRow],
+) -> (Vec<HourRow>, usize) {
     let meters: HashMap<&str, &MeterConfig> =
         config.meters.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut invalid = 0;
@@ -489,6 +535,8 @@ fn price_rows(config: &Config, tz: &TimeZone, rows: &[ImportRow]) -> (Vec<HourRo
                     .copied()
                     .and_then(ratio)
                     .or_else(|| ratio(by_hour_of_day[local_hour(r.hour) % 24]))
+                    // The house's price in the middle of the hour.
+                    .or_else(|| price::at(house, r.hour + meter::HOUR_MS / 2))
             });
             HourRow {
                 meter: m.id.clone(),
@@ -594,6 +642,8 @@ struct Recorder {
     /// Estimated lights by the devices that move them (the light, a
     /// fixture's bulbs): most events concern none, and say so at once.
     lit_by: HashMap<moli_core::DeviceId, Vec<usize>>,
+    /// The house's price of a kWh, for the meters without one.
+    prices: HousePrices,
 }
 
 /// How often a held power is counted, even if it does not change: the
@@ -623,7 +673,13 @@ impl Recorder {
             integrals: HashMap::new(),
             started: now_ms(),
             lit_by: HashMap::new(),
+            prices: HousePrices::default(),
         }
+    }
+
+    fn with_prices(mut self, prices: HousePrices) -> Self {
+        self.prices = prices;
+        self
     }
 
     /// Which devices move which estimated light (at start, and when a
@@ -841,7 +897,7 @@ impl Recorder {
         let Ok(tz) = TimeZone::get(&self.config.timezone) else {
             return; // refused when the recorder started
         };
-        let (priced, invalid) = price_rows(&self.config, &tz, &rows);
+        let (priced, invalid) = price_rows(&self.config, &tz, &self.prices.all(), &rows);
         if invalid > 0 {
             tracing::warn!(meter = meter.id, invalid, "energy history: hours refused");
         }
@@ -936,6 +992,7 @@ impl Recorder {
                     self.periods
                         .at(middle)
                         .and_then(|p| self.config.period_price(p))
+                        .or_else(|| self.prices.at(middle))
                 });
                 HourRow {
                     meter: meter.id.clone(),
@@ -1111,6 +1168,50 @@ mod tests {
                 (12 * H, 4.0, Some(2.0)),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn the_house_price_prices_the_meters_without_one_from_its_time() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"plug\"\nname = \"Plug\"\npoint = \"t:p/e\"\nrole = \"total\"\n\
+             [[meter]]\nid = \"own\"\nname = \"Own\"\npoint = \"t:o/e\"\nrole = \"total\"\nprice = 0.5\n\
+             [[meter]]\nid = \"pv\"\nname = \"PV\"\npoint = \"t:s/e\"\nrole = \"solar\"\n",
+        )
+        .unwrap();
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let recorder = Recorder::new(
+            hub,
+            config.clone(),
+            HashMap::new(),
+            Arc::new(Store::memory()),
+        )
+        .with_prices(HousePrices::new(vec![HousePrice {
+            since: 2 * H,
+            price: 0.2,
+        }]));
+        let costs = |id: &str| -> Vec<Option<f64>> {
+            let meter = config.meters.iter().find(|m| m.id == id).unwrap();
+            recorder
+                .slices(meter, 3.0, H, 4 * H)
+                .iter()
+                .map(|s| s.cost.map(|c| (c * 1000.0).round() / 1000.0))
+                .collect()
+        };
+        // Before the price began, the hour has none; then 1 kWh × 0.2.
+        assert_eq!(costs("plug"), vec![None, Some(0.2), Some(0.2)]);
+        // A meter's own price comes first; the panels are never billed.
+        assert_eq!(costs("own"), vec![Some(0.5); 3]);
+        assert_eq!(costs("pv"), vec![None; 3]);
+        // A late report: each hour at the price of its own time.
+        let rows = [3 * H / 2 - H / 2, 2 * H].map(|hour| ImportRow {
+            meter: "plug".into(),
+            hour,
+            kwh: 1.0,
+        });
+        let tz = TimeZone::UTC;
+        let (priced, _) = price_rows(&config, &tz, &recorder.prices.all(), &rows);
+        let priced: Vec<Option<f64>> = priced.iter().map(|r| r.cost).collect();
+        assert_eq!(priced, vec![None, Some(0.2)]);
     }
 
     #[test]
