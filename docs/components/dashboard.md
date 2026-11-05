@@ -139,6 +139,9 @@ telles que les appareils les nomment).
   déconnexion du flux Moli. `#/pieces/volets` les regroupe par pièce en grille ;
   le détail d'accès renvoie à Système. Une position mesurée à 0 % dit « Fermé »,
   à 100 % « Ouvert » ; une lecture périmée est explicitement la dernière position.
+  Dans les pièces, le mode « icônes seules » place le nom et l'état dans l'infobulle ;
+  les boutons d'action et de vitesse gardent leur icône, leur nom accessible et une
+  cible tactile de 44 px. Le choix de présentation ne change ni les droits ni la vitesse.
   Le choix **Normal / Lent**, proposé seulement si annoncé, décrit la prochaine
   commande : `open_slow` / `close_slow` ou le point d'action facultatif
   `percent_control_slow` (pourcentage ouvert). Ce point n'est jamais une observation :

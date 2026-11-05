@@ -37,10 +37,10 @@ after(async () => {
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const number = (min, max, step) => ({ type: 'numeric', min, max, step });
 const enumeration = (...values) => ({ type: 'enum', values });
-function show(component, points, values, extra = {}) {
+function show(component, points, values, extra = {}, props = {}) {
   const d = { id: 'fixture:device', native_name: 'Fixture', model: null, label: {}, online: true, points, members: [], state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }])), ...extra };
   hub.devices = { [d.id]: d };
-  return render(components[component], { props: { id: d.id, name: 'Fixture' } }).body;
+  return render(components[component], { props: { id: d.id, name: 'Fixture', ...props } }).body;
 }
 function showRoom(entries) {
   hub.devices = Object.fromEntries(entries.map(({ id, points, values, ...extra }) => [id, {
@@ -271,6 +271,41 @@ test('a disconnected hub keeps cached positions historical and disables every ph
   assert.doesNotMatch(html, /en ouverture|Ouvert à|<input/);
   assert.equal(buttons(html).length, 3);
   assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+});
+
+test('icons-only covers put names and readings in a tooltip and label every icon button', () => {
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close', 'open_slow', 'close_slow')),
+    point('opening', number(0, 100, 1), true, 'position')], { opening: 42 }, {}, { icons: true });
+  assert.match(html, /title="Fixture · Ouvert à 42 %"/);
+  assert.equal(buttons(html).length, 5, 'three actions and two speed choices remain available');
+  for (const name of ['Ouvrir', 'Stop', 'Fermer', 'Normal', 'Lent']) assert.match(html, new RegExp(`aria-label="${name}"`));
+  const contents = [...html.matchAll(/<button\b[^>]*>(.*?)<\/button>/gs)].map(([, body]) => body);
+  assert.ok(contents.every((body) => /<svg\b/.test(body)));
+  assert.doesNotMatch(html, />Fixture<|>Ouvert à 42 %<|>Ouvrir<|>Stop<|>Fermer<|>Normal<|>Lent<|>Position<|>Prochaine commande</);
+  assert.equal(inputs(html).length, 1);
+});
+
+test('icons-only read-only and offline covers retain their safeguards and last-known tooltip', () => {
+  const points = [point('control', enumeration('open', 'stop', 'close', 'open_slow'), false),
+    point('opening', number(0, 100, 1), false, 'position')];
+  const readonly = show('CoverTile', points, { opening: 42 }, {}, { icons: true });
+  assert.match(readonly, /aria-label="Lecture seule"/);
+  assert.equal(buttons(readonly).filter((button) => /disabled/.test(button)).length, 3);
+  const offline = show('CoverTile', points, { opening: 42, moving: 'UP' }, { online: false }, { icons: true });
+  assert.match(offline, /title="Fixture · Dernière position : 42 %"/);
+  assert.match(offline, /aria-label="Injoignable"/);
+  assert.doesNotMatch(offline, /en ouverture/);
+  assert.equal(buttons(offline).filter((button) => /disabled/.test(button)).length, 3);
+});
+
+test('the rooms icons preference reaches each cover without changing the dedicated shutters view', () => {
+  show('CoverTile', [point('control', enumeration('open', 'stop', 'close'), false),
+    point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
+  const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
+  assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  assert.match(focused, />Fixture</);
+  assert.match(focused, />Ouvrir</);
 });
 
 test('the shutter route bypasses a stored lights filter without replacing it or deduplicating identities', () => {
