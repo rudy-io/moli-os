@@ -1,0 +1,23 @@
+[integration]
+id = "matter"
+name = "Matter (IP)"
+brands = ["Matter"]
+models = []
+transport = "native"
+driver = "matter"
+crate = "moli-matter"
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+[needs]
+secrets = ["pairing_code", "controller_snapshot", "thread_dataset"]
+vars = []
+options = ["paa_roots", "cd_roots", "ble_thread"]
+[origin]
+reused = "matter-controller (Apache-2.0), native Rust IP controller"
+author = "agent"
+
+# Replayed by moli-matter catalogue_descriptor_replay.
+[[fixture]]
+file = "fixtures/descriptor.csv"

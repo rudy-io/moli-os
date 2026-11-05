@@ -808,5 +808,17 @@
   "pilotes.engie.lecture_seule": "{point} cannot be set",
   "pilotes.engie.solde": "Available reward balance",
   "pilotes.engie.seuil_paiement": "Reward payout threshold",
-  "pilotes.engie.connecte_toi": "Sign the ENGIE account in from the dashboard: open ENGIE's page, sign in, then paste the address it ends on"
+  "pilotes.engie.connecte_toi": "Sign the ENGIE account in from the dashboard: open ENGIE's page, sign in, then paste the address it ends on",
+
+  "pilotes.matter.storage": "Cannot read or save the Matter vault.",
+  "pilotes.matter.failed": "Matter operation refused or unavailable.",
+  "pilotes.matter.waiting": "Matter is waiting for a device: use secrets set for pairing_code and restart this instance.",
+  "pilotes.matter.on": "On",
+  "pilotes.matter.temperature": "Temperature",
+  "pilotes.matter.humidity": "Humidity",
+  "pilotes.matter.contact": "Contact closed",
+  "pilotes.matter.leak": "Water leak",
+  "pilotes.matter.occupancy": "Occupancy",
+  "pilotes.matter.pairing_failed": "Matter pairing failed. The one-shot pairing request may have been consumed; inspect device fabric membership before retrying.",
+  "pilotes.matter.ble_unavailable": "Thread commissioning over Bluetooth requires a build with the matter-ble feature."
 }

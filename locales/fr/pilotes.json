@@ -808,5 +808,17 @@
   "pilotes.engie.lecture_seule": "{point} ne se règle pas",
   "pilotes.engie.solde": "Solde de récompenses disponible",
   "pilotes.engie.seuil_paiement": "Seuil de versement des récompenses",
-  "pilotes.engie.connecte_toi": "Connecte le compte ENGIE depuis le tableau de bord : ouvre la page ENGIE, connecte-toi, puis colle l'adresse de fin"
+  "pilotes.engie.connecte_toi": "Connecte le compte ENGIE depuis le tableau de bord : ouvre la page ENGIE, connecte-toi, puis colle l'adresse de fin",
+
+  "pilotes.matter.storage": "Impossible de lire ou sauvegarder le coffre Matter.",
+  "pilotes.matter.failed": "Opération Matter refusée ou indisponible.",
+  "pilotes.matter.waiting": "Matter attend un appareil : utilisez secrets set pour pairing_code puis redémarrez cette instance.",
+  "pilotes.matter.on": "Allumé",
+  "pilotes.matter.temperature": "Température",
+  "pilotes.matter.humidity": "Humidité",
+  "pilotes.matter.contact": "Contact fermé",
+  "pilotes.matter.leak": "Fuite d’eau",
+  "pilotes.matter.occupancy": "Présence",
+  "pilotes.matter.pairing_failed": "L’appairage Matter a échoué. La demande à usage unique a pu être consommée ; vérifier les contrôleurs associés à l’appareil avant de réessayer.",
+  "pilotes.matter.ble_unavailable": "L’appairage Thread par Bluetooth nécessite une compilation avec la fonctionnalité matter-ble."
 }
