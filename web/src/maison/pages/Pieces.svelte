@@ -5,14 +5,17 @@
 
 <script>
   import { onMount } from 'svelte';
-  import { roomList, roomNamed, savePref } from '../lib/home.svelte.js';
+  import { roomList, roomNamed, savePref, protectedRoom } from '../lib/home.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import RoomCard from '../ui/RoomCard.svelte';
+  import CoverTile from '../ui/CoverTile.svelte';
   import FilterChips from '../ui/FilterChips.svelte';
   import { categoryOf, loadFilter } from '../lib/filters.js';
   import { floorsOf } from '../lib/floors.js';
   import { t } from '../../lib/i18n.svelte.js';
 
+  let { route = 'pieces' } = $props();
+  const coversOnly = $derived(route === 'pieces/volets');
   let plan = $state(cachedPlan);
   onMount(async () => {
     try {
@@ -39,12 +42,15 @@
   }
 
   const all = $derived(roomList());
+  const coverCount = $derived(all.reduce((count, room) => count + room.covers.length, 0));
   const devices = $derived(
     all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.climates, ...r.media, ...r.sensors].filter(Boolean)),
   );
 
   /** A room with only what the filter keeps; null when nothing is left. */
   function only(r) {
+    // The direct link is a temporary view, independent of saved category choices.
+    if (coversOnly) return r.covers.length ? { ...r, group: null, lights: [], plugs: [], climates: [], media: [], sensors: [], lit: 0 } : null;
     if (!filter.length) return r;
     const on = (id) => filter.includes(id);
     const f = {
@@ -75,10 +81,16 @@
 
 <div class="pieces">
   <header>
-    <h1 class="page-title">{t('maison.pieces.titre')}</h1>
-    <p class="page-sub">{t('maison.pieces.sous_titre')}</p>
+    <h1 class="page-title">{t(coversOnly ? 'maison.pieces.volets' : 'maison.pieces.titre')}</h1>
+    <p class="page-sub">{coversOnly ? t('maison.pieces.volets_compte', { count: coverCount }) : t('maison.pieces.sous_titre')}</p>
+    {#if coversOnly}
+      <a class="section-link" href="#/pieces">{t('maison.pieces.toutes')}</a>
+    {:else if coverCount}
+      <a class="section-link" href="#/pieces/volets"><Icon name="shutter" size={18} />{t('maison.pieces.voir_volets')}</a>
+    {/if}
   </header>
 
+  {#if !coversOnly}
   <div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
     <div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
@@ -86,6 +98,9 @@
       <button role="radio" aria-checked={look === 'icons'} class:active={look === 'icons'} onclick={() => choose('icons')} title={t('maison.pieces.icones')}><Icon name="light" size={15} /></button>
     </div>
   </div>
+  {/if}
+
+  {#if coversOnly && !coverCount}<p class="page-sub">{t('maison.pieces.volets_vides')}</p>{/if}
 
   {#each floors as floor (floor.id)}
     <section class="floor" aria-label={floor.name ?? t('maison.pieces.titre')}>
@@ -96,16 +111,39 @@
           {#if lit}<small>{t('maison.pieces.allumees', { count: lit })}</small>{/if}
         </h2>
       {/if}
-      <div class="rooms">
-        {#each floor.rooms as room (room.name)}
-          <div class="slot"><RoomCard {room} every={filter.includes('capteurs')} icons={look === 'icons'} /></div>
-        {/each}
-      </div>
+      {#if coversOnly}
+        <div class="cover-rooms">
+          {#each floor.rooms as room (room.name)}
+            <div class="cover-room">
+              <header class="cover-heading">
+                <svelte:element this={floors.length > 1 && floor.name ? 'h3' : 'h2'} class="cover-title">
+                  <Icon name={room.icon} size={22} />
+                  <span>{room.name}</span>
+                  {#if protectedRoom(room.name)}<span title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}
+                </svelte:element>
+                <span class="muted">{t('maison.pieces.volets_piece', { count: room.covers.length })}</span>
+              </header>
+              <ul class="cover-grid" aria-label={room.name}>
+                {#each room.covers as cover (cover.id)}
+                  <li><CoverTile id={cover.id} standalone /></li>
+                {/each}
+              </ul>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="rooms">
+          {#each floor.rooms as room (room.name)}
+            <div class="slot"><RoomCard {room} every={filter.includes('capteurs')} icons={look === 'icons'} /></div>
+          {/each}
+        </div>
+      {/if}
     </section>
   {/each}
 </div>
 
 <style>
+  .section-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--ink); font-size: 14px; text-underline-offset: 3px; }
   .pieces {
     display: grid;
     /* minmax(0, …): a plain column grows to the widest card and pushes the page
@@ -192,6 +230,23 @@
     columns: 3 340px;
     column-gap: 20px;
   }
+
+  .cover-rooms { display: grid; gap: 24px; }
+  .cover-room { min-width: 0; }
+  .cover-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; }
+  .cover-heading > .muted { font-size: 14px; }
+  .cover-title { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; font-size: 18px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+  .cover-title > span { min-width: 0; }
+  .cover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+    align-items: start;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .cover-grid > li { min-width: 0; overflow-wrap: anywhere; }
 
   .slot {
     break-inside: avoid;

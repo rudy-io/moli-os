@@ -1,4 +1,15 @@
 {
+  "commun.volet.feedback.sending": "Envoi de la commande…",
+  "commun.volet.feedback.sent": "Commande envoyée · état à confirmer",
+  "commun.volet.feedback.held": "En attente de votre validation",
+  "commun.volet.feedback.error": "Commande non confirmée. Consultez le message d’erreur.",
+  "commun.volet.derniere_position": "Dernière position : {pct} %",
+  "commun.volet.position_inconnue": "Position non communiquée",
+  "commun.volet.lecture_seule": "Lecture seule",
+  "commun.volet.lecture_seule_aide": "Cette connexion transmet l’état du volet, sans autoriser son pilotage.",
+  "commun.volet.connexion_aide": "Le volet ne répond plus. Vérifiez sa connexion avant de le piloter.",
+  "commun.volet.voir_connexion": "Voir la connexion",
+  "commun.volet.actions_observees": "Commandes annoncées : {actions}",
   "commun.volet.impulsion": "Impulsion",
   "commun.clim.mode.auxiliaire": "Chauffage auxiliaire",
   "commun.clim.ventilation": "Ventilation",
@@ -249,5 +260,11 @@
   "commun.niveau.attention": "À surveiller",
   "commun.niveau.mauvais": "Mauvais",
   "commun.capteur.humidite": "Humidité",
-  "commun.code.raison_configuration": "Un changement de la maison : elle demande que ce soit bien toi."
+  "commun.code.raison_configuration": "Un changement de la maison : elle demande que ce soit bien toi.",
+  "commun.volet.vitesse": "Prochaine commande",
+  "commun.volet.vitesse_prochaine": "Vitesse de la prochaine commande",
+  "commun.volet.vitesse_normale": "Normal",
+  "commun.volet.vitesse_lente": "Lent",
+  "commun.volet.reconnexion": "Connexion à Moli…",
+  "commun.volet.commandes_de": "Commandes de {label}"
 }
