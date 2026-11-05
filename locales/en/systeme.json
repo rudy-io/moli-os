@@ -74,6 +74,8 @@
   "systeme.journal.etiquette": "label → {value}",
   "systeme.journal.effacee": "(cleared)",
   "systeme.journal.adresse": "found at a new address: {from} → {to}",
+  "systeme.journal.reglage.energy.price": "Price of a kWh",
+  "systeme.journal.reglage_change": "{from} → {to}",
   "systeme.historique.plage_6h": "6 h",
   "systeme.historique.plage_24h": "24 h",
   "systeme.historique.plage_7j": "7 d",

@@ -308,6 +308,8 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 - `{"kind":"driver_added","instance":"…","driver_kind":"airzone","read_only":true}` (installation locale d’une passerelle)
 - `{"kind":"driver_configured","instance":"…","driver_kind":"airzone","enabled":false,"read_only":true}` (connexion modifiée ou retrait réversible ; aucune adresse enregistrée dans le journal)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
+- `{"kind":"setting","name":"energy.price","from":…?,"to":…}` : un réglage de la maison changé
+  par une personne (aujourd'hui le prix du kWh), avec sa valeur d'avant
 
 Stockage : `data/journal.jsonl` (ajout seul) + les 500 dernières entrées en mémoire.
 Lecture : `GET /api/journal`, outil MCP `get_journal`, événements SSE `journal`.
@@ -333,6 +335,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | GET | `/api/health` | libre | aucune | `{name:"moli-os", version, stats, guard, drivers}` | aucune |
 | GET | `/api/devices` | libre ; un invité : ses pièces seulement (§ 3.1) | aucune | `Snapshot` : `{devices:[DeviceView], drivers:[DriverView], approvals:[ApprovalRequest], guard}` | aucune |
 | GET | `/api/devices/{id}` | libre ; un invité : ses pièces seulement | `id` = device_id | `DeviceView` | `404` unknown device ; `403` invité, hors de ses pièces |
+| POST | `/api/devices/{id}/live` | comme `/snapshot` (invités refusés ; **humain** dans une pièce protégée) | `{sdp}` : l'offre WebRTC du navigateur (64 Kio au plus) | `{sdp}` : la réponse de l'appareil ; la vidéo va ensuite de l'appareil au navigateur, sans passer par Moli (au réseau de la maison seulement : l'adresse du navigateur vue par Moli est passée à l'appareil) | `400` pas une offre ; `403` ; `404` appareil inconnu / pas de vidéo en direct ; `502` pas de réponse en 10 s ou échec |
 | GET | `/api/devices/{id}/snapshot` | libre ; **humain** si la caméra est dans une pièce protégée | aucune | image brute, `content-type` de la caméra, `cache-control: no-store` | `403` pièce protégée ; `404` appareil inconnu / pas une caméra ; `502` pas d'image en 20 s ou échec |
 | GET | `/api/home` | libre | aucune | contenu de `data/home.json` (disposition du dashboard famille), `{}` si absent | `500` JSON invalide |
 | GET | `/api/system` | libre | aucune | `{version, timezone, stats, drivers, bricks, surfaces, perf, coverage}` (carte du système, § 2.3) | aucune |
@@ -504,6 +507,7 @@ ni second superviseur ni seconde entrée de journal.
 |---|---|---|---|---|---|
 | GET | `/api/history` | libre ; un invité : les points de ses pièces | `?point=` (obligatoire), `hours` (défaut 24, borné 1 min → 366 j), `points` (défaut 300, borné 10 → 2 000) | `Series` (§ 2.3) | `404` history is disabled ; `400` requête ; `403` invité, hors de ses pièces ; `500` |
 | GET | `/api/energy` | libre | aucune | `Summary` : puissance instantanée, aujourd'hui, hier, mois, projection, mois dernier, par compteur | `404` no [energy] meters configured ; `500` |
+| PUT | `/api/energy/price` | personne (code) ou propriétaire | `{price}` : le prix d'un kWh de la maison, dans la devise (`0.2319`) | `{price, before?, prices:[{since, price}]}` ; compte à partir de maintenant, journalisé (`setting`) | `403` sans code ; `404` sans `[energy]` ; `422` prix invalide (≤ 0, ou > 5 : un prix en centimes) |
 | GET | `/api/energy/series` | libre | `?step=hour\|day\|month` (obligatoire), `count` (défaut 24 / 30 / 12 ; borné 1 → 8 784 / 3 660 / 600) | `Report` `{step, from, to, currency, timezone, meters, buckets:[{start, meters:{<id>:{kwh, cost?}}}]}` | `400` pas invalide ; `404` ; `500` |
 | GET | `/api/weather/forecast` | libre | aucune | Prévisions Open-Meteo (gardées 15 min) : `{timezone, utc_offset_seconds, hourly:{time, temperature_2m, weather_code, precipitation_probability, precipitation, cloud_cover, wind_speed_10m, is_day}, daily:{time, weather_code, temperature_2m_max/min, precipitation_sum, precipitation_probability_max, wind_speed_10m_max, sunrise, sunset}}` : 25 heures, 7 jours | `404` maison sans position ; `502` |
 | GET | `/api/weather/map` | libre | aucune | Carte météo, 400 × 300 km autour de la maison (centre arrondi au dixième de degré) : `{area:{south, west, north, east}, house:[x, y] (0..1), km:[400, 300], weather:{grid:[12, 9], hours, utc_offset_seconds, u, v, cloud, rain}, land:{z, x0, y0, x1, y1}\|null}`. Vent (km/h, est/nord), nuages (%), pluie (mm) en tableaux plats `[heure × points + point]` sur 24 h (Open-Meteo, une requête, gardée 1 h) ; `land` = tuiles d'altitude à lire (null tant qu'elles ne sont pas là) | `404` maison sans position ; `502` |
@@ -592,6 +596,7 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 | `online` | booléen ou `null` | `null` = disponibilité inconnue |
 | `state` | `{<clé>: {value, ts}}` | dernière valeur par point |
 | `camera` | `true`, présent seulement pour une caméra | image via `/snapshot` |
+| `live` | `true`, présent seulement pour une vidéo en direct | WebRTC via `/live` (le navigateur lit la vidéo) |
 
 **`PointSpec`** : `{key, label, kind, access:{read, write}, unit?, semantic}`.
 
@@ -628,7 +633,8 @@ changements les plus récents et `truncated:true` pour un point non numérique).
 
 **`Summary`** (`/api/energy`) : `{currency, timezone, since?, period?, price_now?, period_point?,
 meters:[{id, name, role:"grid"|"total"|"circuit", point, power?, power_w?, power_ts?}],
-live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?}` ; chaque période =
+live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?,
+house_price?, house_prices?:[{since, price}]}` (`price_now` : le prix de la période tarifaire, sinon celui de la maison) ; chaque période =
 `{from, to, total:{kwh, cost?}, meters:{<id>:{kwh, cost?}}, unmeasured?}`.
 
 **Vue d'automatisme** (réponses de `/api/automations*`) :

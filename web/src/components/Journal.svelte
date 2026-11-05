@@ -46,6 +46,11 @@
       const d = hub.devices[a.device];
       return {target:d ? deviceName(d) : a.device, detail:t(a.hidden ? 'systeme.journal.masque' : 'systeme.journal.restaure')};
     }
+    if (a.kind === 'setting') {
+      const SETTINGS = ['energy.price'];
+      const target = SETTINGS.includes(a.name) ? t(`systeme.journal.reglage.${a.name}`) : a.name;
+      return { target, detail: t('systeme.journal.reglage_change', { from: a.from ?? '—', to: a.to }) };
+    }
     const d = hub.devices[a.device];
     const parts = [a.label.name, a.label.room].filter(Boolean).join(' · ');
     return { target: d ? deviceName(d) : a.device, detail: t('systeme.journal.etiquette', { value: parts || t('systeme.journal.effacee') }) };
