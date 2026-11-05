@@ -285,16 +285,18 @@ mod tests {
 
     #[test]
     fn brightness_and_white_take_moli_scales() {
-        assert_eq!(percent(1000.0, 1000.0), 100.0);
-        assert_eq!(percent(10.0, 1000.0), 1.0);
-        assert_eq!(from_percent(50.0, 10.0, 1000.0), 500.0);
-        assert_eq!(from_percent(0.0, 10.0, 1000.0), 10.0);
+        const EPS: f64 = 1e-9;
+        assert!((percent(1000.0, 1000.0) - 100.0).abs() < EPS);
+        assert!((percent(10.0, 1000.0) - 1.0).abs() < EPS);
+        assert!((from_percent(50.0, 10.0, 1000.0) - 500.0).abs() < EPS);
+        assert!((from_percent(0.0, 10.0, 1000.0) - 10.0).abs() < EPS);
         // 0 warm (2700 K = 370 mired), max cool (6500 K = 154 mired).
-        assert_eq!(mired_bounds(), (154.0, 370.0));
-        assert_eq!(mired(0.0, 1000.0), 370.0);
-        assert_eq!(mired(1000.0, 1000.0), 154.0);
-        assert_eq!(from_mired(370.0, 1000.0), 0.0);
-        assert_eq!(from_mired(154.0, 1000.0), 1000.0);
+        let bounds = mired_bounds();
+        assert!((bounds.0 - 154.0).abs() < EPS && (bounds.1 - 370.0).abs() < EPS);
+        assert!((mired(0.0, 1000.0) - 370.0).abs() < EPS);
+        assert!((mired(1000.0, 1000.0) - 154.0).abs() < EPS);
+        assert!((from_mired(370.0, 1000.0) - 0.0).abs() < EPS);
+        assert!((from_mired(154.0, 1000.0) - 1000.0).abs() < EPS);
         // Whole mireds: back within a few steps of the bulb's 1000.
         let back = from_mired(mired(571.0, 1000.0), 1000.0);
         assert!((back - 571.0).abs() <= 3.0, "{back}");
@@ -304,11 +306,12 @@ mod tests {
     /// never divided by zero.
     #[test]
     fn a_maximum_of_zero_is_not_one() {
-        assert_eq!(percent(500.0, 0.0), 50.0);
-        assert_eq!(percent(500.0, -1.0), 50.0);
-        assert_eq!(from_percent(50.0, 10.0, 0.0), 500.0);
-        assert_eq!(mired(1000.0, 0.0), 154.0);
-        assert_eq!(from_mired(154.0, 0.0), 1000.0);
+        const EPS: f64 = 1e-9;
+        assert!((percent(500.0, 0.0) - 50.0).abs() < EPS);
+        assert!((percent(500.0, -1.0) - 50.0).abs() < EPS);
+        assert!((from_percent(50.0, 10.0, 0.0) - 500.0).abs() < EPS);
+        assert!((mired(1000.0, 0.0) - 154.0).abs() < EPS);
+        assert!((from_mired(154.0, 0.0) - 1000.0).abs() < EPS);
     }
 
     #[test]

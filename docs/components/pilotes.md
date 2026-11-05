@@ -906,3 +906,12 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |
+
+## Matter natif
+
+`moli-matter` contrôle les appareils Matter déjà sur le réseau IP, y compris les
+points d'un pont. OnOff en lecture/écriture ; température, humidité, occupation, contact et fuite
+en lecture seule. Les types du Descriptor déterminent le sens des booléens ;
+Reachable conditionne la disponibilité des appareils pontés. Racines d'attestation de production explicites et tissu dans le
+coffre chiffré, appairage humain par la CLI. BLE non pris en charge ; aucun essai
+matériel. Installation et limites : [Matter](../../integrations/matter/README.md).

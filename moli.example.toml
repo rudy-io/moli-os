@@ -182,3 +182,12 @@ base_topic = "zigbee2mqtt"
 # chat = "local"        # la conversation (obligatoire avec des fournisseurs)
 # # voice, builder : le même fournisseur que chat pour l'instant
 # # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
+
+# Native Matter: production attestation roots, pairing code only in encrypted vault.
+# See integrations/matter/README.md (IP / multi-admin; BLE not supported).
+# [[driver]]
+# id = "matter"
+# kind = "matter"
+# [driver.options]
+# paa_roots = "/run/matter-trust/paa"
+# cd_roots = "/run/matter-trust/cd"

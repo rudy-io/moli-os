@@ -357,7 +357,7 @@ async fn offline_cached_power_is_not_integrated_when_recording_starts() {
     f.driver
         .update(CachedUpdate::Sample("w", Value::Float(0.0)))
         .await;
-    assert_eq!(today_kwh(&energy).await.0, 0.0);
+    assert!((today_kwh(&energy).await.0 - 0.0).abs() < 1e-9);
     f.driver
         .update(CachedUpdate::Sample("w", Value::Float(3600.0)))
         .await;
@@ -390,9 +390,8 @@ async fn offline_cached_counter_is_not_replayed_when_the_first_tariff_arrives() 
     f.driver
         .update(CachedUpdate::Sample("e", Value::Float(1100.0)))
         .await;
-    assert_eq!(
-        today_kwh(&energy).await.0,
-        0.0,
+    assert!(
+        (today_kwh(&energy).await.0 - 0.0).abs() < 1e-9,
         "the first fresh counter is the reference"
     );
     f.driver

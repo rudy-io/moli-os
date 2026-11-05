@@ -618,5 +618,16 @@
   "pilotes.zwave.point_lu_seul": "point {point} is read-only",
   "pilotes.zwave.point_sans_cible": "point {point} has no write target",
   "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
-  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean",
+  "pilotes.matter.storage": "Cannot read or save the Matter vault.",
+  "pilotes.matter.failed": "Matter operation refused or unavailable.",
+  "pilotes.matter.waiting": "Matter is waiting for a device: use secrets set for pairing_code and restart this instance.",
+  "pilotes.matter.on": "On",
+  "pilotes.matter.temperature": "Temperature",
+  "pilotes.matter.humidity": "Humidity",
+  "pilotes.matter.contact": "Contact closed",
+  "pilotes.matter.leak": "Water leak",
+  "pilotes.matter.occupancy": "Occupancy",
+  "pilotes.matter.pairing_failed": "Matter pairing failed. The one-shot pairing request may have been consumed; inspect device fabric membership before retrying.",
+  "pilotes.matter.ble_unavailable": "Thread commissioning over Bluetooth requires a build with the matter-ble feature."
 }
