@@ -51,6 +51,15 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     exemple 9 000 pour un abonnement de 9 kVA), `warn` = à partir d'où la conso est
     « soutenue » (par exemple 2 000 ; défaut un quart de `max`) : la jauge vire à l'orange,
     puis au rouge au double. Sert la jauge « en direct » et la ligne du prompt de Moli.
+  - **Prix de la maison** (sans compteur connecté, ou un prix qui change chaque mois) : choisi
+    sur la page Énergie (carte « Prix du kWh ») ou par `PUT /api/energy/price`, par une
+    personne (code) ou un propriétaire ; chaque changement est journalisé (`setting`,
+    `energy.price`, avec le prix d'avant). Gardé dans `energy.db` (table `house_price`, chaque
+    prix avec sa date de début), il chiffre les compteurs sans `price`, quand la période
+    tarifaire n'en donne pas : un `price` de `moli.toml` reste prioritaire. Il compte **aux
+    heures qui suivent**, sans redémarrage ; une heure déjà comptée garde le prix de son
+    époque (rien n'est recalculé). Un prix au-dessus de 5 par kWh est refusé : c'est un prix
+    tapé en centimes.
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple

@@ -4300,6 +4300,8 @@ mod tests {
             month_projection: None,
             monthly_fee: None,
             budget_point: None,
+            house_price: None,
+            house_prices: Vec::new(),
         };
         if full {
             let mut light = meter("l", "Suspension", Role::Appliance, "s/e", None, Some(12.0));

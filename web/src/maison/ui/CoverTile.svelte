@@ -1,5 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
+  import { mdiSpeedometerMedium, mdiSpeedometerSlow } from '@mdi/js';
   import { device, value, act, nameOf, num } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import { hub } from '../../lib/hub.svelte.js';
@@ -8,8 +9,8 @@
   import { coverCommands, coverPositionTarget, hasSlowCoverControl } from '../lib/cover-controls.js';
   import { completionGuard } from '../lib/completion-guard.js';
 
-  /** A shutter: open, stop, close (whatever the device offers). */
-  let { id, name = null, standalone = false } = $props();
+  /** A shutter: advertised actions, with optional icons-only room presentation. */
+  let { id, name = null, standalone = false, icons = false } = $props();
 
   const d = $derived(device(id));
   const available = $derived(!!d && d.online !== false);
@@ -94,16 +95,19 @@
   };
 </script>
 
-<div class="cover" class:standalone>
+<div class="cover" class:standalone class:icons title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
   <div class="heading">
     <span class="device-icon" class:open={live && pos > 0} class:moving={live && !!going}>
       <Icon name={live ? 'shutter' : 'offline'} size={24} />
     </span>
-    <span class="name">{label}<small>{status}</small></span>
+    {#if !icons}<span class="name">{label}<small>{status}</small></span>{/if}
   </div>
   {#if accessReason}
+    {@const accessLabel = t(accessReason === 'injoignable' ? 'commun.piece.injoignable' : `commun.volet.${accessReason}`)}
     <details class="access">
-      <summary>{t(accessReason === 'injoignable' ? 'commun.piece.injoignable' : `commun.volet.${accessReason}`)}</summary>
+      <summary title={icons ? accessLabel : undefined} aria-label={icons ? accessLabel : undefined}>
+        {#if icons}<Icon name={accessReason === 'lecture_seule' ? 'lock' : 'offline'} size={20} />{:else}{accessLabel}{/if}
+      </summary>
       <p>{t(!connected ? 'commun.hors_ligne' : available ? 'commun.volet.lecture_seule_aide' : 'commun.volet.connexion_aide')}
         <a href="#/systeme">{t('commun.volet.voir_connexion')}</a></p>
     </details>
@@ -112,30 +116,41 @@
     <div class="actions" role="group" aria-label={t('commun.volet.commandes_de', { label })}>
       {#each actions as action (action.command)}
         <button type="button" data-cover-command={action.command}
+          title={icons ? t(action.labelKey) : undefined} aria-label={icons ? t(action.labelKey) : undefined}
           disabled={!live || !action.value || !canWrite(d, action.key) || sending?.key === action.key && sending.value === action.value}
           onclick={() => sendOrder(action.command, action.labelKey)}>
           <Icon name={action.icon} size={20} />
-          <span>{t(action.labelKey)}</span>
+          {#if !icons}<span>{t(action.labelKey)}</span>{/if}
         </button>
       {/each}
     </div>
   {/if}
   {#if hasSlow || speed === 'slow'}
     <div class="speed" role="group" aria-label={t('commun.volet.vitesse_prochaine')}>
-      <span>{t('commun.volet.vitesse')}</span>
+      {#if !icons}<span>{t('commun.volet.vitesse')}</span>{/if}
       <div class="segments">
-        <button type="button" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}>{t('commun.volet.vitesse_normale')}</button>
-        <button type="button" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}>{t('commun.volet.vitesse_lente')}</button>
+        <button type="button" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}
+          title={icons ? t('commun.volet.vitesse_normale') : undefined} aria-label={icons ? t('commun.volet.vitesse_normale') : undefined}>
+          {#if icons}<Icon path={mdiSpeedometerMedium} size={20} />{:else}{t('commun.volet.vitesse_normale')}{/if}
+        </button>
+        <button type="button" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}
+          title={icons ? t('commun.volet.vitesse_lente') : undefined} aria-label={icons ? t('commun.volet.vitesse_lente') : undefined}>
+          {#if icons}<Icon path={mdiSpeedometerSlow} size={20} />{:else}{t('commun.volet.vitesse_lente')}{/if}
+        </button>
       </div>
     </div>
   {/if}
   {#if positionWritable}
     <label class="position">
-      <span>{t('commun.volet.position')}</span>
+      {#if !icons}<span>{t('commun.volet.position')}</span>{/if}
       <input type="range" min={range.first} max={range.last} step={range.step} value={shown ?? range.first} disabled={pos == null} oninput={previewPosition} onchange={setPosition} aria-label={t('commun.volet.ouverture', { label })} />
     </label>
   {/if}
-  {#if feedback}<p class="feedback" role="status">{t(`commun.volet.feedback.${feedback}`)}</p>{/if}
+  {#if feedback}
+    <p class="feedback" role="status" title={icons ? t(`commun.volet.feedback.${feedback}`) : undefined} aria-label={icons ? t(`commun.volet.feedback.${feedback}`) : undefined}>
+      {#if icons}<Icon name={feedback === 'sending' ? 'clock' : feedback === 'sent' ? 'ok' : feedback === 'held' ? 'lock' : 'warning'} size={20} />{:else}{t(`commun.volet.feedback.${feedback}`)}{/if}
+    </p>
+  {/if}
 </div>
 
 <style>
@@ -203,6 +218,14 @@
   .segments { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-sm); background: var(--surface-3); }
   .segments button { min-height: 44px; min-width: 60px; border-color: transparent; background: transparent; }
   .segments button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+  /* Room preference: compact icons without shrinking the touch targets. */
+  .icons { display: flex; flex-wrap: wrap; align-items: center; padding: 8px 10px; gap: 8px; }
+  .icons .actions { flex-wrap: wrap; }
+  .icons button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+  .icons .access summary { display: grid; place-items: center; width: 44px; padding: 0; list-style: none; }
+  .icons .access summary::-webkit-details-marker { display: none; }
+  .icons .access[open] { flex-basis: 100%; }
+  .icons .position { flex: 1 1 110px; width: auto; }
   @keyframes moving { to { opacity: 0.6; } }
   @media (prefers-reduced-motion: reduce) {
     button { transition: none; }

@@ -91,7 +91,11 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
   après un redémarrage dans la même minute). L'heure sautée au passage à l'heure d'été ne
   tire pas (comme HA).
 - Soleil : calcul astronomique local (NOAA, ±1 min, vérifié contre un almanach) depuis
-  `[automations] latitude/longitude` ; à défaut, le point `daylight` de la météo.
+  `[automations] latitude/longitude` ; à défaut, le dernier point `daylight` frais
+  de la météo. Sans position ni mesure fraîche, les conditions jour/nuit utilisent
+  la dernière observation connue, même après redémarrage avec la météo hors ligne.
+  Ce repli est une estimation qui reste figée tant que la météo ne revient pas ;
+  il ne rend pas les autres conditions d'état ni les déclencheurs historiques actifs.
 - Exécution : parcours du graphe depuis le déclencheur, **branches dans l'ordre des liens**
   (qui fait partie de ce qu'on valide ; la position à l'écran n'y est pour rien), 100 étapes
   maximum. Chaque run a un jeton enfant de celui de l'automatisme : l'éteindre annule tout,

@@ -1177,9 +1177,13 @@ dependencies = [
  "moli-i18n",
  "moli-net",
  "moli-runtime",
+ "rcgen",
+ "ring",
+ "rustls",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "tracing",
 ]

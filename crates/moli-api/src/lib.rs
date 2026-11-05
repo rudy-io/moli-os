@@ -170,6 +170,7 @@ fn device_routes() -> Router<Hub> {
             put(visibility::put).layer(DefaultBodyLimit::max(1024)),
         )
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
+        .route("/api/devices/{id}/live", post(rest::live))
         .route(
             "/api/devices/{id}/print",
             post(rest::print).layer(DefaultBodyLimit::max(rest::MAX_PAGE)),
@@ -353,6 +354,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .merge(overkiz::routes())
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
+        .route("/api/energy/price", put(rest::set_energy_price))
         .route("/api/energy/series", get(rest::energy_series))
         .merge(assistant_routes())
         .route(
