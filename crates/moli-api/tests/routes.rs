@@ -1,6 +1,6 @@
-//! Every route of the API is listed in `routes.txt` with who may call it. A route added to the
-//! code and not listed (or listed and gone) fails here: whoever adds it decides its level, and
-//! the test then checks that the level holds.
+//! Every route of the API is listed in `routes.txt` with who may call it and whether it is reached
+//! from outside the house. A route added to the code and not listed (or listed and gone) fails
+//! here: whoever adds it decides, and the test then checks that the level holds.
 
 use std::time::Duration;
 
@@ -103,7 +103,7 @@ async fn every_route_is_listed_and_holds_its_level() {
         code.len()
     );
 
-    // `METHOD path level`, then free text.
+    // `METHOD path level remote`, then free text.
     let listed: Vec<(String, String, String)> = include_str!("routes.txt")
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
@@ -113,7 +113,16 @@ async fn every_route_is_listed_and_holds_its_level() {
                 w.next()
                     .unwrap_or_else(|| panic!("routes.txt: bad line {l:?}"))
             };
-            (next().to_owned(), next().to_owned(), next().to_owned())
+            let (method, path, level, remote) = (next(), next(), next(), next());
+            match (level, remote) {
+                (_, "oui" | "non") => {}
+                _ => panic!("routes.txt: remote is `oui` or `non`, not {remote:?}: {l:?}"),
+            }
+            // The sign-in is how a person comes in from outside (I3).
+            assert!(level != "public" || remote == "oui", "routes.txt: {l:?}");
+            // Agents stay at home unless the house decides otherwise (I4).
+            assert!(path != "/mcp" || remote == "non", "routes.txt: {l:?}");
+            (method.to_owned(), path.to_owned(), level.to_owned())
         })
         .collect();
 

@@ -1,100 +1,107 @@
-# Every route of the API and who may call it. `routes.rs` compares this list with the router and
-# checks each level against a live server (from the test's own machine, so "household").
+# Every route of the API, who may call it, and whether it is reached from outside the house.
+# `routes.rs` compares this list with the router and checks each level against a live server
+# (from the test's own machine, so "household"). The model behind it: docs/SECURITY-MODEL.md.
 #
+# Level:
 #   public  a stranger (Internet, no proof) is let through: sign-in and invitation only.
 #   foyer   a stranger is refused (403); the household's devices may call it.
 #   humain  as foyer, and the household too is refused (403) without a person signed in with the
 #           house's code (some of these also need an owner).
 #
+# Remote (`oui` / `non`): reached through a remote entry (VPN, proxy, tunnel) or not. Least
+# privilege (I4): what an agent, a satellite, a machine or the installation calls, and what writes
+# secrets, stays at home. Checked now: every route says it, the sign-in stays reachable, MCP stays
+# at home; enforced on the remote entries when they exist (docs/SECURITY-MODEL.md, step 2).
+#
 # Limit: a handler that reads the person only after the body is parsed cannot be probed with an
 # empty body (it answers 400/422 first); such routes are listed `foyer` until they get a probe.
-GET    /api/devices                        foyer
-GET    /api/devices/{id}                   foyer
-GET    /api/devices/{id}/snapshot          foyer
-POST   /api/devices/{id}/live              foyer   # same rules as the snapshot, checked after the body
-POST   /api/devices/{id}/print             humain
-PUT    /api/devices/{id}/visibility        foyer   # origin ui (a person) checked after the body
-GET    /api/infra                          foyer
-GET    /api/plan                           foyer
-PUT    /api/plan                           humain
-POST   /api/plan/images                    humain
-GET    /api/plan/images/{name}             foyer
-POST   /api/mobile/register                foyer
-POST   /api/phones/{id}/report             foyer   # a phone's own token lets it through (checked by the route)
-GET    /api/mobile/phones                  foyer
-PUT    /api/mobile/phones/{id}             foyer
-DELETE /api/phones/{id}                    foyer
-GET    /api/integrations/tuya-cloud        foyer
-PUT    /api/integrations/tuya-cloud        foyer
-PUT    /api/session/pin                    foyer
-GET    /api/people                         foyer
-POST   /api/people                         foyer
-PUT    /api/people/{id}                    foyer
-DELETE /api/people/{id}                    humain  # owner
-POST   /api/people/{id}/invite             humain  # owner
-PUT    /api/people/{id}/password           foyer
-PUT    /api/zones                          foyer
-POST   /api/invitation                     public
-POST   /api/session/setup                  foyer
-GET    /api/machines/{id}                  foyer
-POST   /api/machines/{id}/report           foyer
-POST   /api/machines/{id}/remote           foyer
-GET    /api/assistant                      foyer
-POST   /api/assistant                      foyer
-POST   /api/assistant/listen               foyer
-POST   /api/assistant/stop                 foyer
-POST   /api/assistant/speak                foyer
-GET    /api/assistant/exchanges            foyer
-POST   /api/assistant/recap                foyer
-POST   /api/assistant/proposals/{id}       foyer
-POST   /api/assistant/turns/{id}/undo      foyer
-GET    /api/assistant/turns/{id}/choices   foyer
-POST   /api/assistant/turns/{id}/correct   foyer
-GET    /api/assistant/rules                foyer
-PUT    /api/assistant/rules/{id}           foyer
-DELETE /api/assistant/rules/{id}           foyer
-PUT    /api/assistant/recording            foyer
-GET    /api/assistant/recordings/{name}    humain
-GET    /api/voice/{name}                   foyer
-GET    /api/assistant/settings             foyer
-PUT    /api/assistant/settings             foyer
-PUT    /api/assistant/key                  foyer
-GET    /api/health                         foyer
-GET    /api/media/{name}                   foyer
-POST   /api/command                        foyer
-GET    /api/ambiances                      foyer
-POST   /api/ambiance                       foyer
-PUT    /api/labels/{id}                    foyer
-GET    /api/journal                        foyer
-GET    /api/approvals                      foyer
-POST   /api/approvals/{id}                 foyer
-GET    /api/session                        public
-POST   /api/session                        public
-DELETE /api/session                        public
-GET    /api/history                        foyer
-GET    /api/bench                          foyer
-GET    /api/home                           foyer
-GET    /api/system                         foyer
-GET    /api/energy                         foyer
-PUT    /api/energy/price                   foyer   # a person (code) or an owner, checked after the body
-GET    /api/energy/series                  foyer
-GET    /api/automations                    foyer
-POST   /api/automations                    foyer
-POST   /api/automations/check              foyer
-POST   /api/automations/draft              foyer
-POST   /api/automations/import             humain
-GET    /api/automations/runs               foyer
-GET    /api/automations/live               foyer
-GET    /api/automations/{id}               foyer
-PUT    /api/automations/{id}               foyer
-DELETE /api/automations/{id}               foyer
-POST   /api/automations/{id}/approve       foyer
-POST   /api/automations/{id}/enabled       foyer
-POST   /api/automations/{id}/run           foyer
-POST   /api/automations/{id}/test          foyer
-POST   /api/automations/{id}/restore       foyer
-GET    /api/events                         foyer
-GET    /api/weather/forecast               foyer
-GET    /api/weather/map                    foyer
-GET    /api/weather/land/{z}/{x}/{y}       foyer
-POST   /mcp                                foyer
+GET    /api/devices                        foyer   oui
+GET    /api/devices/{id}                   foyer   oui
+GET    /api/devices/{id}/snapshot          foyer   oui
+POST   /api/devices/{id}/live              foyer   oui   # same rules as the snapshot, checked after the body
+POST   /api/devices/{id}/print             humain  oui
+PUT    /api/devices/{id}/visibility        foyer   oui   # origin ui (a person) checked after the body
+GET    /api/infra                          foyer   non
+GET    /api/plan                           foyer   oui
+PUT    /api/plan                           humain  oui
+POST   /api/plan/images                    humain  oui
+GET    /api/plan/images/{name}             foyer   oui
+POST   /api/mobile/register                foyer   oui
+POST   /api/phones/{id}/report             foyer   oui   # a phone's own token lets it through (checked by the route)
+GET    /api/mobile/phones                  foyer   oui
+PUT    /api/mobile/phones/{id}             foyer   oui
+DELETE /api/phones/{id}                    foyer   oui
+GET    /api/integrations/tuya-cloud        foyer   non
+PUT    /api/integrations/tuya-cloud        foyer   non
+PUT    /api/session/pin                    foyer   oui
+GET    /api/people                         foyer   oui
+POST   /api/people                         foyer   oui
+PUT    /api/people/{id}                    foyer   oui
+DELETE /api/people/{id}                    humain  oui   # owner
+POST   /api/people/{id}/invite             humain  oui   # owner
+PUT    /api/people/{id}/password           foyer   oui
+PUT    /api/zones                          foyer   oui
+POST   /api/invitation                     public  oui
+POST   /api/session/setup                  foyer   non
+GET    /api/machines/{id}                  foyer   non
+POST   /api/machines/{id}/report           foyer   non
+POST   /api/machines/{id}/remote           foyer   non
+GET    /api/assistant                      foyer   oui
+POST   /api/assistant                      foyer   oui
+POST   /api/assistant/listen               foyer   non
+POST   /api/assistant/stop                 foyer   oui
+POST   /api/assistant/speak                foyer   oui
+GET    /api/assistant/exchanges            foyer   oui
+POST   /api/assistant/recap                foyer   oui
+POST   /api/assistant/proposals/{id}       foyer   oui
+POST   /api/assistant/turns/{id}/undo      foyer   oui
+GET    /api/assistant/turns/{id}/choices   foyer   oui
+POST   /api/assistant/turns/{id}/correct   foyer   oui
+GET    /api/assistant/rules                foyer   oui
+PUT    /api/assistant/rules/{id}           foyer   oui
+DELETE /api/assistant/rules/{id}           foyer   oui
+PUT    /api/assistant/recording            foyer   oui
+GET    /api/assistant/recordings/{name}    humain  oui
+GET    /api/voice/{name}                   foyer   non
+GET    /api/assistant/settings             foyer   oui
+PUT    /api/assistant/settings             foyer   oui
+PUT    /api/assistant/key                  foyer   non
+GET    /api/health                         foyer   oui
+GET    /api/media/{name}                   foyer   oui
+POST   /api/command                        foyer   oui
+GET    /api/ambiances                      foyer   oui
+POST   /api/ambiance                       foyer   oui
+PUT    /api/labels/{id}                    foyer   oui
+GET    /api/journal                        foyer   oui
+GET    /api/approvals                      foyer   oui
+POST   /api/approvals/{id}                 foyer   oui
+GET    /api/session                        public  oui
+POST   /api/session                        public  oui
+DELETE /api/session                        public  oui
+GET    /api/history                        foyer   oui
+GET    /api/bench                          foyer   oui
+GET    /api/home                           foyer   oui
+GET    /api/system                         foyer   oui
+GET    /api/energy                         foyer   oui
+PUT    /api/energy/price                   foyer   oui   # a person (code) or an owner, checked after the body
+GET    /api/energy/series                  foyer   oui
+GET    /api/automations                    foyer   oui
+POST   /api/automations                    foyer   oui
+POST   /api/automations/check              foyer   oui
+POST   /api/automations/draft              foyer   oui
+POST   /api/automations/import             humain  non
+GET    /api/automations/runs               foyer   oui
+GET    /api/automations/live               foyer   oui
+GET    /api/automations/{id}               foyer   oui
+PUT    /api/automations/{id}               foyer   oui
+DELETE /api/automations/{id}               foyer   oui
+POST   /api/automations/{id}/approve       foyer   oui
+POST   /api/automations/{id}/enabled       foyer   oui
+POST   /api/automations/{id}/run           foyer   oui
+POST   /api/automations/{id}/test          foyer   oui
+POST   /api/automations/{id}/restore       foyer   oui
+GET    /api/events                         foyer   oui
+GET    /api/weather/forecast               foyer   oui
+GET    /api/weather/map                    foyer   oui
+GET    /api/weather/land/{z}/{x}/{y}       foyer   oui
+POST   /mcp                                foyer   non
