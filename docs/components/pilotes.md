@@ -241,7 +241,9 @@ base_topic = "zwave"        # défaut
     procédures de herdsman, puis vérification de `zoneState`), diviseurs de mesure. Un silence à
     n'importe quelle étape l'arrête, ce qu'elle a appris gardé dans le `store` : `ctx.warn` le dit,
     et la suivante repart de là, sans délai, au prochain message de l'appareil (1 min d'écart au
-    moins) ou toutes les 10 min. Une réponse sans l'attribut est une réponse. Un appareil du
+    moins) ou toutes les 10 min. Une réponse sans l'attribut est une réponse. Après 3 échecs, seuls
+    les descripteurs et l'inscription IAS retiennent l'appareil : une lampe sans modèle vaut mieux
+    que pas de lampe. Un appareil du
     `store` pas encore interrogé l'est au démarrage. Réussie, elle n'est refaite que si l'appareil
     rejoint « de rien » (`STANDARD_SECURITY_UNSECURED_JOIN`) : il a été réinitialisé et a tout
     oublié. Un appareil qui part sans avoir été interrogé est oublié.
@@ -259,13 +261,13 @@ base_topic = "zwave"        # défaut
     muet ne retient ni la boucle ni les autres. Réponse par défaut en erreur = refus rapporté à
     l'auteur ; accusé radio sans réponse = pris ; rien à 300 ms de l'échéance du hub = échec dit à
     l'auteur. Un appareil dormant : « remis » dès que la clé l'a pris (il le recevra à son réveil,
-    bien après les 5 s du hub). Valeur optimiste affichée dès que l'appareil l'a, confirmée par son
+    bien après les 5 s du hub), et un avis à la maison s'il ne l'a finalement pas. Valeur optimiste affichée dès que l'appareil l'a, confirmée par son
     rapport. Échec : ses valeurs sont relues.
   - **Disponibilité** (valeurs de Z2M) : tout message = en ligne ; à l'écoute et muet 10 min → une
     lecture (une par silence de 10 min, pas plus), sans réponse → hors ligne ; dormant muet 25 h →
     hors ligne (sa lecture manquée ne compte pas : il dort) ; parti du réseau → hors ligne, gardé
-    dans le `store`. Dernier message noté toutes les heures et à l'arrêt : les silences continuent
-    à travers un redémarrage. Lectures cadencées à 500 ms, toutes refaites au retour du réseau.
+    dans le `store`. Silence noté toutes les heures et à l'arrêt : il continue à travers un
+    redémarrage, sans compter le temps où Moli était arrêté. Lectures cadencées à 500 ms, toutes refaites au retour du réseau.
 - **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
   `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
   EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur

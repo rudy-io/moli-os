@@ -540,6 +540,7 @@
   "pilotes.zigbee.ordre_valeur": "cet appareil Zigbee ne peut pas prendre cette valeur",
   "pilotes.zigbee.ordre_echec": "l'ordre n'a pas atteint l'appareil Zigbee : {error}",
   "pilotes.zigbee.ordre_refuse": "l'appareil Zigbee a refusé l'ordre (statut {status})",
+  "pilotes.zigbee.ordre_tardif": "Zigbee natif : {device} n'a finalement pas pris l'ordre envoyé ({reason}).",
   "pilotes.shelly.signal": "Signal Wi-Fi",
   "pilotes.shelly.mise_a_jour": "Mise à jour disponible",
   "pilotes.shelly.redemarrage": "Redémarrage nécessaire",

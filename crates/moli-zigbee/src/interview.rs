@@ -133,7 +133,11 @@ pub struct Failed {
 
 /// Interviews the device at `nwk`, going on from what `record` holds of it:
 /// the same record, `interviewed`, with what the device said. `coordinator`
-/// is the IEEE address as it travels, for a sensor to enroll with.
+/// is the IEEE address as it travels, for a sensor to enroll with. `lenient`,
+/// after several tries: what is only worth knowing (its model, its colours,
+/// its ratios) no longer holds it up: a lamp without a model is better than
+/// no lamp. Never its descriptors or its enrollment: without them, it would
+/// only look fine.
 ///
 /// # Errors
 ///
@@ -144,8 +148,9 @@ pub async fn interview(
     nwk: u16,
     mut record: DeviceRecord,
     coordinator: [u8; 8],
+    lenient: bool,
 ) -> Result<DeviceRecord, Box<Failed>> {
-    match steps(link, nwk, &mut record, coordinator).await {
+    match steps(link, nwk, &mut record, coordinator, lenient).await {
         Ok(()) => {
             record.interviewed = true;
             Ok(record)
@@ -159,6 +164,7 @@ async fn steps(
     nwk: u16,
     record: &mut DeviceRecord,
     coordinator: [u8; 8],
+    lenient: bool,
 ) -> anyhow::Result<()> {
     if record.capability.is_none() {
         read_node(link, nwk, record).await?;
@@ -166,13 +172,17 @@ async fn steps(
     if record.endpoints.is_empty() {
         read_endpoints(link, nwk, record).await?;
     }
-    if record.model.is_none() && record.manufacturer.is_none() {
-        read_basic(link, nwk, record).await?;
-    }
+    read_basic(link, nwk, record, lenient).await?;
     if record.color.is_none()
         && let Some(endpoint) = endpoint_with(record, zcl::COLOR)
     {
-        record.color = Some(read_color(link, nwk, endpoint).await?);
+        match read_color(link, nwk, endpoint).await {
+            Ok(caps) => record.color = Some(caps),
+            Err(error) if lenient => {
+                tracing::warn!(device = %record.ieee, %error, "going on without its colours");
+            }
+            Err(error) => return Err(error),
+        }
     }
     if let Some(endpoint) = endpoint_with(record, zcl::IAS_ZONE) {
         if record.zone_type.is_none() {
@@ -185,7 +195,13 @@ async fn steps(
             .await
             .map_err(|error| step("enrollment", &error))?;
     }
-    read_scale(link, nwk, record).await
+    match read_scale(link, nwk, record).await {
+        Err(error) if lenient => {
+            tracing::warn!(device = %record.ieee, %error, "going on without its ratios");
+            Ok(())
+        }
+        result => result,
+    }
 }
 
 async fn read_node(link: &Link, nwk: u16, record: &mut DeviceRecord) -> anyhow::Result<()> {
@@ -241,33 +257,38 @@ async fn read_endpoints(link: &Link, nwk: u16, record: &mut DeviceRecord) -> any
     Ok(())
 }
 
-/// `Basic`, attribute by attribute. One attribute missing is fine; a device
-/// that answers none of them is not there yet.
-async fn read_basic(link: &Link, nwk: u16, record: &mut DeviceRecord) -> anyhow::Result<()> {
+/// `Basic`, attribute by attribute, what it does not know yet. An attribute
+/// the device does not have is an answer; a silence about its model or its
+/// manufacturer is not, or it would go without them for ever. Its firmware
+/// is not worth stopping for.
+async fn read_basic(
+    link: &Link,
+    nwk: u16,
+    record: &mut DeviceRecord,
+    lenient: bool,
+) -> anyhow::Result<()> {
     let Some(endpoint) = endpoint_with(record, zcl::BASIC) else {
         tracing::info!(device = %record.ieee, "no Basic cluster: nothing says what it is");
         return Ok(());
     };
-    let mut answered = false;
-    let mut last = None;
     for id in [MODEL_ID, MANUFACTURER_NAME, SW_BUILD_ID] {
+        let slot = match id {
+            MODEL_ID => &mut record.model,
+            MANUFACTURER_NAME => &mut record.manufacturer,
+            _ => &mut record.sw_build,
+        };
+        if slot.is_some() {
+            continue;
+        }
         match read(link, nwk, endpoint, zcl::BASIC, &[id]).await {
-            Ok(attributes) => {
-                answered = true;
-                let value = text(find(&attributes, id));
-                match id {
-                    MODEL_ID => record.model = value,
-                    MANUFACTURER_NAME => record.manufacturer = value,
-                    _ => record.sw_build = value,
-                }
+            Ok(attributes) => *slot = text(find(&attributes, id)),
+            Err(error) if lenient || id == SW_BUILD_ID => {
+                tracing::debug!(device = %record.ieee, id, %error, "going on without it");
             }
-            Err(error) => last = Some(error),
+            Err(error) => return Err(step("Basic", &error)),
         }
     }
-    match (answered, last) {
-        (false, Some(error)) => Err(step("Basic", &error)),
-        _ => Ok(()),
-    }
+    Ok(())
 }
 
 async fn read_color(link: &Link, nwk: u16, endpoint: u8) -> anyhow::Result<ColorCaps> {
@@ -421,8 +442,8 @@ pub async fn configure(link: &Link, nwk: u16, record: &DeviceRecord, coordinator
                 continue;
             }
         }
-        // One attribute per request: a real lamp (Innr RB 287 C) that cannot
-        // report one of a list refuses the others with it.
+        // One attribute per request: a real lamp (Innr RB 287 C) refusing one
+        // of a list (`colorMode`) refuses the others with it.
         for report in &binding.reports {
             let request = zcl::configure_reporting(std::slice::from_ref(report));
             match link
@@ -508,7 +529,9 @@ mod tests {
     async fn a_colour_lamp_says_what_it_is() {
         let (ncp, link) = linked().await;
         let _radio = FakeRadio::spawn(&ncp, lamp_answers());
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert!(record.interviewed);
         assert_eq!(record.model.as_deref(), Some("Some lamp"));
         assert_eq!(record.manufacturer.as_deref(), Some("Some maker"));
@@ -531,7 +554,9 @@ mod tests {
         let (ncp, link) = linked().await;
         let radio = FakeRadio::spawn(&ncp, lamp_answers());
         radio.lose_answers(1);
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert!(record.interviewed);
         assert_eq!(record.model.as_deref(), Some("Some lamp"));
     }
@@ -541,7 +566,7 @@ mod tests {
         let (ncp, link) = linked().await;
         let radio = FakeRadio::spawn(&ncp, lamp_answers());
         radio.lose_answers(usize::MAX);
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("node descriptor"));
@@ -558,7 +583,7 @@ mod tests {
                 lamp_answers()(request)
             }
         });
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("Basic"));
@@ -567,7 +592,7 @@ mod tests {
         // A sleepy device awake again, for a moment.
         radio.answer_with(lamp_answers());
         let before = radio.requests().len();
-        let record = interview(&link, NWK, failed.record, COORDINATOR)
+        let record = interview(&link, NWK, failed.record, COORDINATOR, false)
             .await
             .unwrap();
         assert!(record.interviewed);
@@ -577,6 +602,104 @@ mod tests {
                 .iter()
                 .all(|request| request.profile != zdo::PROFILE),
             "no descriptor asked again"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silence_about_its_model_alone_is_a_failure() {
+        let (ncp, link) = linked().await;
+        let radio = FakeRadio::spawn(&ncp, |request| {
+            if reads_first(request, zcl::BASIC, MODEL_ID) {
+                None
+            } else {
+                lamp_answers()(request)
+            }
+        });
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap_err();
+        assert!(failed.error.to_string().contains("Basic"));
+        assert_eq!(failed.record.model, None);
+        // Answering at last: asked of what it does not know yet.
+        radio.answer_with(lamp_answers());
+        let record = interview(&link, NWK, failed.record, COORDINATOR, false)
+            .await
+            .unwrap();
+        assert_eq!(record.model.as_deref(), Some("Some lamp"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn its_firmware_is_not_worth_stopping_for() {
+        let (ncp, link) = linked().await;
+        let _radio = FakeRadio::spawn(&ncp, |request| {
+            if reads_first(request, zcl::BASIC, SW_BUILD_ID) {
+                None
+            } else {
+                lamp_answers()(request)
+            }
+        });
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
+        assert!(record.interviewed);
+        assert_eq!(record.sw_build, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_several_tries_only_what_matters_holds_it_up() {
+        let (ncp, link) = linked().await;
+        // Silent for ever about its model, its colours.
+        let _radio = FakeRadio::spawn(&ncp, |request| {
+            if reads_first(request, zcl::BASIC, MODEL_ID)
+                || reads_first(request, zcl::COLOR, devices::COLOR_CAPABILITIES)
+            {
+                None
+            } else {
+                lamp_answers()(request)
+            }
+        });
+        let record = interview(&link, NWK, fresh(), COORDINATOR, true)
+            .await
+            .unwrap();
+        assert!(record.interviewed);
+        assert_eq!(record.model, None);
+        assert_eq!(record.color, None);
+        assert_eq!(record.manufacturer.as_deref(), Some("Some maker"));
+        // Silent about its ratios.
+        let (ncp, link) = linked().await;
+        let _radio = FakeRadio::spawn(&ncp, |request| {
+            if reads_first(request, zcl::ELECTRICAL, devices::POWER_MULTIPLIER) {
+                None
+            } else {
+                plug_answers()(request)
+            }
+        });
+        let record = interview(&link, NWK, fresh(), COORDINATOR, true)
+            .await
+            .unwrap();
+        assert!(record.interviewed);
+        assert_eq!(record.scale.power, None);
+        // Never about its descriptors, or its enrollment.
+        let (ncp, link) = linked().await;
+        let radio = FakeRadio::spawn(&ncp, lamp_answers());
+        radio.lose_answers(usize::MAX);
+        assert!(
+            interview(&link, NWK, fresh(), COORDINATOR, true)
+                .await
+                .is_err()
+        );
+        let (ncp, link) = linked().await;
+        let _radio = FakeRadio::spawn(&ncp, |request| {
+            if reads_first(request, zcl::IAS_ZONE, devices::IAS_CIE_ADDRESS) {
+                None
+            } else {
+                sensor_answers()(request)
+            }
+        });
+        assert!(
+            interview(&link, NWK, fresh(), COORDINATOR, true)
+                .await
+                .is_err()
         );
     }
 
@@ -594,7 +717,9 @@ mod tests {
                 lamp_answers()(request)
             }
         });
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert!(record.interviewed);
         assert_eq!(record.sw_build, None);
         assert_eq!(record.model.as_deref(), Some("Some lamp"));
@@ -610,7 +735,7 @@ mod tests {
                 lamp_answers()(request)
             }
         });
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("colour"));
@@ -631,7 +756,7 @@ mod tests {
                 lamp_answers()(request)
             }
         });
-        let record = interview(&link, NWK, failed.record, COORDINATOR)
+        let record = interview(&link, NWK, failed.record, COORDINATOR, false)
             .await
             .unwrap();
         let caps = record.color.unwrap();
@@ -642,7 +767,9 @@ mod tests {
     async fn a_sensor_is_told_where_to_send_its_alarms() {
         let (ncp, link) = linked().await;
         let radio = FakeRadio::spawn(&ncp, sensor_answers());
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert_eq!(record.zone_type, Some(0x0015));
         assert!(!record.mains() && !record.listening());
         let write = radio
@@ -679,7 +806,9 @@ mod tests {
         let told = Arc::new(AtomicBool::new(false));
         let seen = Arc::clone(&told);
         let _radio = FakeRadio::spawn(&ncp, move |request| waiting_to_be_told(request, &seen));
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert!(record.interviewed);
         assert!(told.load(Ordering::SeqCst), "the response was sent");
     }
@@ -699,7 +828,7 @@ mod tests {
                 sensor_answers()(request)
             }
         });
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("enrollment"));
@@ -727,7 +856,7 @@ mod tests {
                 sensor_answers()(request)
             }
         });
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("refuses"));
@@ -749,7 +878,9 @@ mod tests {
                 sensor_answers()(request)
             }
         });
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         assert!(record.interviewed);
         assert!(
             radio
@@ -764,7 +895,9 @@ mod tests {
     async fn a_plug_says_how_to_read_its_meter() {
         let (ncp, link) = linked().await;
         let _radio = FakeRadio::spawn(&ncp, plug_answers());
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         let thousandth = Some(Ratio {
             multiplier: 1,
             divisor: 1000,
@@ -789,7 +922,7 @@ mod tests {
                 plug_answers()(request)
             }
         });
-        let failed = interview(&link, NWK, fresh(), COORDINATOR)
+        let failed = interview(&link, NWK, fresh(), COORDINATOR, false)
             .await
             .unwrap_err();
         assert!(failed.error.to_string().contains("ratio"));
@@ -804,7 +937,9 @@ mod tests {
     async fn configuring_binds_then_asks_for_reports() {
         let (ncp, link) = linked().await;
         let radio = FakeRadio::spawn(&ncp, lamp_answers());
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         let before = radio.requests().len();
         assert!(configure(&link, NWK, &record, COORDINATOR).await);
         let sent = radio.requests()[before..].to_vec();
@@ -853,7 +988,9 @@ mod tests {
                 lamp_answers()(request)
             }
         });
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         let before = radio.requests().len();
         assert!(
             configure(&link, NWK, &record, COORDINATOR).await,
@@ -880,7 +1017,9 @@ mod tests {
     async fn a_silence_is_tried_again_a_refusal_is_not() {
         let (ncp, link) = linked().await;
         let radio = FakeRadio::spawn(&ncp, lamp_answers());
-        let record = interview(&link, NWK, fresh(), COORDINATOR).await.unwrap();
+        let record = interview(&link, NWK, fresh(), COORDINATOR, false)
+            .await
+            .unwrap();
         radio.answer_with(|request| {
             // Every binding refused (NOT_SUPPORTED), reports refused too.
             if request.cluster == zdo::BIND_REQUEST {

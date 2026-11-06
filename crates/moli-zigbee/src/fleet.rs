@@ -42,6 +42,8 @@ const INTERVIEW_RETRY: Duration = Duration::from_secs(10 * 60);
 /// A failed interview, tried again when the device speaks: a sleepy one only
 /// listens then.
 const INTERVIEW_RETRY_ON_MESSAGE: Duration = Duration::from_secs(60);
+/// After this many failed interviews, only what matters holds one up.
+const LENIENT_AFTER: u32 = 3;
 /// Bindings and reports that were not answered, tried again.
 const CONFIGURE_RETRY: Duration = Duration::from_secs(3600);
 /// An order is answered this long before the hub stops waiting: whoever
@@ -104,6 +106,7 @@ struct Tracked {
     online: Option<bool>,
     colors: HashMap<u8, ColorState>,
     interview_tried: Option<Instant>,
+    interview_failures: u32,
     configure_tried: Option<Instant>,
     ping_tried: Option<Instant>,
 }
@@ -115,6 +118,7 @@ impl Tracked {
             online: None,
             colors: HashMap::new(),
             interview_tried: None,
+            interview_failures: 0,
             configure_tried: None,
             ping_tried: None,
         }
@@ -186,8 +190,8 @@ impl Fleet {
 
     /// The network is ours: its known devices published and given a chance
     /// to say how they are; what was not interviewed yet is. Their silences
-    /// go on from before the restart (`unix_now`: the wall clock).
-    pub fn start(&mut self, ctx: &DriverCtx, store: &Store, unix_now: u64) {
+    /// go on from before the restart.
+    pub fn start(&mut self, ctx: &DriverCtx, store: &Store) {
         self.coordinator = store
             .network
             .as_ref()
@@ -198,9 +202,7 @@ impl Fleet {
             if let Some(nwk) = record.nwk {
                 self.by_nwk.insert(nwk, ieee.clone());
             }
-            let silence = record.last_seen.map_or(Duration::ZERO, |seen| {
-                Duration::from_secs(unix_now.saturating_sub(seen))
-            });
+            let silence = Duration::from_secs(record.silent_for.unwrap_or(0));
             let mut tracked = Tracked::new(now.checked_sub(silence).unwrap_or(now));
             let settled = record.interviewed && !record.left && record.listening();
             if settled && !record.configured {
@@ -276,11 +278,15 @@ impl Fleet {
                 .tracked
                 .get_mut(&ieee)
                 .is_some_and(|tracked| tracked.interview_tried.replace(Instant::now()).is_none());
+            let lenient = self
+                .tracked
+                .get(&ieee)
+                .is_some_and(|tracked| tracked.interview_failures >= LENIENT_AFTER);
             self.work.spawn(async move {
                 if first {
                     tokio::time::sleep(INTERVIEW_DELAY).await;
                 }
-                let result = interview::interview(&link, nwk, record, coordinator).await;
+                let result = interview::interview(&link, nwk, record, coordinator, lenient).await;
                 Done::Interview { ieee, result }
             });
             return;
@@ -354,17 +360,16 @@ impl Fleet {
         }
     }
 
-    /// Writes down when each device last spoke, for after a restart.
-    /// Whether anything changed (the store then needs saving).
-    pub fn remember_seen(&self, store: &mut Store, unix_now: u64) -> bool {
+    /// Writes down how long each device has been silent, for after a
+    /// restart. Whether anything changed (the store then needs saving).
+    pub fn remember_silences(&self, store: &mut Store) -> bool {
         let now = Instant::now();
         let mut changed = false;
         for (ieee, tracked) in &self.tracked {
             if let Some(record) = store.devices.get_mut(ieee) {
-                let silence = now.duration_since(tracked.last_seen).as_secs();
-                let seen = Some(unix_now.saturating_sub(silence));
-                changed |= record.last_seen != seen;
-                record.last_seen = seen;
+                let silence = Some(now.duration_since(tracked.last_seen).as_secs());
+                changed |= record.silent_for != silence;
+                record.silent_for = silence;
             }
         }
         changed
@@ -578,7 +583,7 @@ impl Fleet {
                 ieee,
                 outcome,
                 effects,
-            } => self.ordered(ctx, order, &ieee, outcome, effects),
+            } => self.ordered(ctx, store, order, &ieee, outcome, effects),
         }
     }
 
@@ -627,6 +632,9 @@ impl Fleet {
                 record.nwk = known_nwk.or(record.nwk);
                 store.devices.insert(ieee.clone(), record);
                 save(store, path);
+                if let Some(tracked) = self.tracked.get_mut(&ieee) {
+                    tracked.interview_failures += 1;
+                }
                 self.failing.insert(ieee);
                 self.say_failures(ctx);
             }
@@ -725,6 +733,7 @@ impl Fleet {
     fn ordered(
         &mut self,
         ctx: &DriverCtx,
+        store: &Store,
         order: Option<CommandRequest>,
         ieee: &str,
         outcome: OrderOutcome,
@@ -754,8 +763,25 @@ impl Fleet {
                 Err(moli_i18n::tr!("pilotes.zigbee.ordre_echec", error = error))
             }
         };
-        if let Some(order) = order {
-            order.reply(reply);
+        match (order, reply) {
+            (Some(order), reply) => order.reply(reply),
+            // Already told « handed over »: whoever asked is told otherwise.
+            (None, Err(reason)) => {
+                let device = store
+                    .devices
+                    .get(ieee)
+                    .and_then(|record| record.model.as_deref())
+                    .unwrap_or(ieee);
+                ctx.media_publisher().tell(
+                    &moli_i18n::tr!("pilotes.zigbee.coordinateur"),
+                    moli_i18n::tr!(
+                        "pilotes.zigbee.ordre_tardif",
+                        device = device,
+                        reason = reason
+                    ),
+                );
+            }
+            (None, Ok(())) => {}
         }
     }
 

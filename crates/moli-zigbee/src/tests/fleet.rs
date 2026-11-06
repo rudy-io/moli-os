@@ -481,6 +481,7 @@ async fn an_order_to_a_sleepy_device_is_handed_over() {
     let (ncp, run) = running_with(&store_with(valve())).await;
     let radio = FakeRadio::spawn(&ncp, lamp_answers());
     radio.deafen(OTHER_NWK);
+    let mut events = run.hub.subscribe();
     let started = tokio::time::Instant::now();
     run.order_to(OTHER, "occupied_heating_setpoint", Value::Float(20.5))
         .await
@@ -498,6 +499,14 @@ async fn an_order_to_a_sleepy_device_is_handed_over() {
     tokio::time::sleep(Duration::from_secs(60)).await;
     assert_eq!(run.value(OTHER, "occupied_heating_setpoint"), None);
     assert_eq!(run.online(OTHER), Some(true));
+    // Already told « handed over »: whoever asked hears otherwise.
+    let mut told = false;
+    while let Ok(event) = events.try_recv() {
+        if let moli_core::Event::Notice { notice } = event {
+            told = notice.message.contains(OTHER);
+        }
+    }
+    assert!(told, "the people at home are told");
     // It wakes, and takes the next one.
     radio.hear(OTHER_NWK);
     radio.answer_with(|request| Some(vec![0x18, request.payload[1], zcl::WRITE_RESPONSE, 0x00]));
@@ -567,6 +576,32 @@ async fn a_failed_interview_is_said_and_tried_again() {
     until("interviewed", || run.store().devices[LAMP].interviewed).await;
     assert!(run.view(LAMP).unwrap().device.point("state").is_some());
     until("no more warning", || run.warning().is_none()).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lamp_silent_for_ever_about_its_colours_gets_its_controls_in_the_end() {
+    let (ncp, run) = running_network().await;
+    let _radio = FakeRadio::spawn(&ncp, |request| {
+        let capabilities = request.cluster == zcl::COLOR
+            && request.payload[2] == 0x00
+            && request.payload[3..5] == [0x0A, 0x40];
+        if capabilities {
+            None
+        } else {
+            lamp_answers()(request)
+        }
+    });
+    ncp.callback(
+        ids::TRUST_CENTER_JOIN_HANDLER,
+        &trust_center_join(NWK, LAMP_BYTES, 1),
+    );
+    until("said", || run.warning().is_some()).await;
+    assert!(run.view(LAMP).unwrap().device.point("state").is_none());
+    // Three tries, ten minutes apart, then no longer held up.
+    tokio::time::sleep(Duration::from_secs(45 * 60)).await;
+    assert!(run.store().devices[LAMP].interviewed);
+    assert!(run.view(LAMP).unwrap().device.point("state").is_some());
+    assert_eq!(run.warning(), None);
 }
 
 #[tokio::test(start_paused = true)]
@@ -898,13 +933,13 @@ async fn a_sleepy_device_missing_its_read_is_not_gone() {
 #[tokio::test(start_paused = true)]
 async fn silences_go_on_across_a_restart() {
     let long_ago = store::DeviceRecord {
-        last_seen: Some(NOW - 26 * 3600),
+        silent_for: Some(26 * 3600),
         ..door()
     };
     let (_ncp, run) = running_with(&store_with(long_ago)).await;
     assert_eq!(run.online(OTHER), Some(false));
     let (_ncp, run) = running_with(&store_with(store::DeviceRecord {
-        last_seen: Some(NOW - 20 * 3600),
+        silent_for: Some(20 * 3600),
         ..door()
     }))
     .await;
@@ -925,7 +960,10 @@ async fn when_a_device_last_spoke_is_written_down() {
     );
     until("read", || run.value(OTHER, "battery").is_some()).await;
     tokio::time::sleep(Duration::from_secs(3600 + 60)).await;
-    until("written", || run.store().devices[OTHER].last_seen.is_some()).await;
+    until("written", || {
+        run.store().devices[OTHER].silent_for.is_some()
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]

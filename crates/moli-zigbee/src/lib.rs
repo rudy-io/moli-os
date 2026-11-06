@@ -260,7 +260,7 @@ async fn serve(
 ) -> anyhow::Result<()> {
     let aps = live.fleet.aps().clone();
     if live.checked {
-        live.fleet.start(ctx, live.store, (live.clock)());
+        live.fleet.start(ctx, live.store);
     }
     let mut chores = tokio::time::interval(fleet::CHORE_PACE);
     chores.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -537,7 +537,7 @@ impl Live<'_> {
             }
         }
         self.checked = true;
-        self.fleet.start(ctx, self.store, (self.clock)());
+        self.fleet.start(ctx, self.store);
         self.record_counter(ctx, aps, callbacks).await;
         None
     }
@@ -555,7 +555,7 @@ impl Live<'_> {
         if self.network != Network::Up {
             return;
         }
-        if self.fleet.remember_seen(self.store, (self.clock)())
+        if self.fleet.remember_silences(self.store)
             && let Err(error) = self.store.save(self.store_path)
         {
             // Kept in memory: the next change saves it too.

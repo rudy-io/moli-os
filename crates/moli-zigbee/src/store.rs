@@ -117,10 +117,11 @@ pub struct DeviceRecord {
     /// Whether its bindings and reports were set up.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub configured: bool,
-    /// When it last spoke, in unix seconds, to the hour: its availability
-    /// goes on counting across a restart.
+    /// How long it had been silent when last written down, in seconds, to
+    /// the hour: its availability goes on counting across a restart, without
+    /// the time Moli itself was away (it may have spoken then, to nobody).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_seen: Option<u64>,
+    pub silent_for: Option<u64>,
     /// It left the network and has not come back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub left: bool,
@@ -430,7 +431,7 @@ pub(crate) mod tests {
                     ..Scale::default()
                 },
                 configured: true,
-                last_seen: Some(1_800_000_000),
+                silent_for: Some(3600),
                 left: false,
             },
         );

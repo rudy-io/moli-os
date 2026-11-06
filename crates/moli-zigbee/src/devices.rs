@@ -133,9 +133,10 @@ fn channels(record: &DeviceRecord) -> Vec<Channel> {
 /// A plug's Electrical Measurement says its power, more often and better
 /// than its Metering: one source for the point, whatever they round to.
 fn power_is_electrical(record: &DeviceRecord) -> bool {
-    channels(record)
-        .iter()
-        .any(|channel| channel.cluster == zcl::ELECTRICAL)
+    record.scale.power.is_some()
+        && channels(record)
+            .iter()
+            .any(|channel| channel.cluster == zcl::ELECTRICAL)
 }
 
 fn suffix_of(record: &DeviceRecord, endpoint: u8, cluster: u16) -> Option<String> {
@@ -730,12 +731,13 @@ pub fn bindings(record: &DeviceRecord) -> Vec<Binding> {
 
 /// A report's threshold in a device's raw values: `amount` in the unit its
 /// ratio leads to (herdsman-converters' `genericMeter`: a plug that reports
-/// every 0.1 V would never be quiet), or `raw` for a device with no ratio.
+/// every 0.1 V would never be quiet), or `raw` for a device with no ratio;
+/// at most `limit`, what its data type holds.
 #[allow(clippy::cast_sign_loss)] // Clamped above zero.
-fn change_of(amount: f64, scale: Option<Ratio>, raw: u64) -> u64 {
+fn change_of(amount: f64, scale: Option<Ratio>, raw: u64, limit: i64) -> u64 {
     scale.map_or(raw, |ratio| {
         let raw = amount * f64::from(ratio.divisor.max(1)) / f64::from(ratio.multiplier.max(1));
-        whole(raw).clamp(1, i64::from(u32::MAX)) as u64
+        whole(raw).clamp(1, limit) as u64
     })
 }
 
@@ -768,11 +770,11 @@ fn reports_of(record: &DeviceRecord, cluster: u16) -> Option<Vec<Report>> {
         zcl::OCCUPANCY => vec![report(OCCUPANCY_STATE, zcl::BITMAP8, 0, HOUR, None)],
         zcl::METERING => {
             let scale = record.scale.metering;
-            let energy = Some(change_of(0.1, scale, 257));
+            let energy = Some(change_of(0.1, scale, 257, 0xFFFF_FFFF));
             let mut reports = vec![report(SUMMATION_DELIVERED, zcl::UINT48, 10, HOUR, energy)];
             if !power_is_electrical(record) {
                 // 5 W, in the kW its ratio leads to.
-                let power = Some(change_of(0.005, scale, 5));
+                let power = Some(change_of(0.005, scale, 5, 0x7F_FFFF));
                 reports.push(report(INSTANTANEOUS_DEMAND, zcl::INT24, 10, HOUR, power));
             }
             reports
@@ -785,21 +787,21 @@ fn reports_of(record: &DeviceRecord, cluster: u16) -> Option<Vec<Report>> {
                     zcl::INT16,
                     10,
                     HOUR,
-                    Some(change_of(5.0, scale.power, 5)),
+                    Some(change_of(5.0, scale.power, 5, 0x7FFF)),
                 ),
                 report(
                     RMS_VOLTAGE,
                     zcl::UINT16,
                     10,
                     HOUR,
-                    Some(change_of(5.0, scale.voltage, 5)),
+                    Some(change_of(5.0, scale.voltage, 5, 0xFFFF)),
                 ),
                 report(
                     RMS_CURRENT,
                     zcl::UINT16,
                     10,
                     HOUR,
-                    Some(change_of(0.05, scale.current, 5)),
+                    Some(change_of(0.05, scale.current, 5, 0xFFFF)),
                 ),
             ]
         }
@@ -1421,6 +1423,21 @@ pub(crate) mod tests {
         let metering = &bound.iter().find(|b| b.cluster == zcl::METERING).unwrap();
         assert_eq!(metering.reports[1].attribute, INSTANTANEOUS_DEMAND);
         assert_eq!(metering.reports[1].change, Some(5), "5 W");
+
+        // Electrical without a power of its own: Metering still says it.
+        plug.endpoints = vec![endpoint(1, &[zcl::ON_OFF, zcl::METERING, zcl::ELECTRICAL])];
+        plug.scale.power = None;
+        let values = read(&plug, zcl::METERING, INSTANTANEOUS_DEMAND, Data::Int(150));
+        assert_eq!(values["power"], Value::Float(150.0));
+
+        // A threshold never overflows what its type holds.
+        plug.scale.power = Some(Ratio {
+            multiplier: 1,
+            divisor: 10_000,
+        });
+        let bound = bindings(&plug);
+        let electrical = &bound.iter().find(|b| b.cluster == zcl::ELECTRICAL).unwrap();
+        assert_eq!(electrical.reports[0].change, Some(0x7FFF));
     }
 
     #[test]
