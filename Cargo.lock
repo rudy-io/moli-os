@@ -1736,6 +1736,7 @@ dependencies = [
  "moli-voltalis",
  "moli-weather",
  "moli-z2m",
+ "moli-zigbee",
  "moli-zwave",
  "rusqlite",
  "serde",
@@ -2027,6 +2028,23 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-zigbee"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "ring",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 

@@ -17,8 +17,15 @@ const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// A run lasting this long is considered healthy and resets the backoff.
 const HEALTHY_RUN: Duration = Duration::from_secs(60);
+/// Once Moli stops, how long a driver may still run after its
+/// `next_command()` ended (a last write to its device: the Zigbee driver
+/// records its frame counter); beyond, it is dropped where it stands. Under
+/// the 5 s the hub waits for an order: one still queued hears that its driver
+/// stopped, not a timeout.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(4);
 
-/// Registers `driver` under `instance` and runs it until `cancel` fires.
+/// Registers `driver` under `instance` and runs it until `cancel` fires
+/// (then for [`SHUTDOWN_GRACE`] at most, for it to finish cleanly).
 pub fn spawn_driver(
     hub: &Hub,
     instance: InstanceId,
@@ -33,10 +40,24 @@ pub fn spawn_driver(
         loop {
             hub.set_driver_status(&instance, DriverStatus::Starting);
             let started = Instant::now();
-            let outcome = tokio::select! {
-                () = cancel.cancelled() => break,
-                outcome = AssertUnwindSafe(driver.run(&mut ctx)).catch_unwind() => outcome,
+            let outcome = {
+                let mut run = std::pin::pin!(AssertUnwindSafe(driver.run(&mut ctx)).catch_unwind());
+                tokio::select! {
+                    outcome = &mut run => outcome,
+                    () = cancel.cancelled() => {
+                        // The driver sees its `next_command()` end: what it
+                        // finishes then gets a bounded grace.
+                        if tokio::time::timeout(SHUTDOWN_GRACE, run).await.is_err() {
+                            tracing::warn!(%instance, "driver still busy at shutdown: dropped");
+                        }
+                        break;
+                    }
+                }
             };
+            // Ended because Moli stops (its commands ended): not a failure.
+            if cancel.is_cancelled() {
+                break;
+            }
             let error = match outcome {
                 Ok(Ok(())) => "driver stopped unexpectedly".to_owned(),
                 Ok(Err(e)) => format!("{e:#}"),

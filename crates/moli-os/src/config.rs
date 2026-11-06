@@ -163,6 +163,14 @@ pub struct Server {
     /// made-up energy past is filed. Only with `demo = true`.
     #[serde(default)]
     pub demo_seed: Option<PathBuf>,
+    /// A mirror of a house that runs elsewhere: it reads every device, keeps
+    /// its history and runs its automations, but sends no order, so that
+    /// both can be compared without the house acting twice. Each order is
+    /// journaled, refused as « mirror ». Drivers that hold the only
+    /// connection a device allows, or a bot's only listener (Telegram), are
+    /// left out of its configuration.
+    #[serde(default)]
+    pub mirror: bool,
 }
 
 fn default_language() -> String {
@@ -186,6 +194,7 @@ impl Default for Server {
             language: default_language(),
             demo: false,
             demo_seed: None,
+            mirror: false,
         }
     }
 }
