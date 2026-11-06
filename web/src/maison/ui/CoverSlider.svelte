@@ -72,7 +72,9 @@
   function handlePointerUp(e) {
     if (!writable || !clickState || clickState.committed) return;
     container?.releasePointerCapture(e.pointerId);
-    oncommit?.(clickState.target);
+    // Pass speed based on final mouse Y position
+    const speed = clickState.mouseAboveTrack ? 'normal' : 'slow';
+    oncommit?.(clickState.target, speed);
     clickState = { ...clickState, committed: true };
   }
 

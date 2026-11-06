@@ -15,7 +15,7 @@
   import Icon from './Icon.svelte';
   import ShutterIcon from './ShutterIcon.svelte';
   import CoverSlider from './CoverSlider.svelte';
-  import { coverCommands, hasSlowCoverControl } from '../lib/cover-controls.js';
+  import { coverCommands, hasSlowCoverControl, coverPositionTarget } from '../lib/cover-controls.js';
   import { canWrite } from '../lib/capabilities.js';
 
   /** A shutter: tap to toggle open/close, advanced controls for precise positioning. */
@@ -34,6 +34,10 @@
   const posKey = $derived(coverPositionKey(id));
   const positionWritable = $derived(connected && posKey && canWrite(d, posKey));
   const busy = $derived(pending(id, posKey) || pending(id, 'control'));
+
+  // Get slow position key if available
+  const slowTarget = $derived(coverPositionTarget(d, 'slow'));
+  const slowKey = $derived(slowTarget?.point?.key);
 
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
@@ -164,7 +168,12 @@
         writable={positionWritable}
         isMoving={isMoving}
         label={t('commun.volet.position_label', { label })}
-        oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
+        oncommit={(target, speed) => {
+          // Use slow key if requested and available, otherwise normal key
+          const key = speed === 'slow' && slowKey ? slowKey : posKey;
+          const speedLabel = speed === 'slow' ? ` ${t('commun.volet.vitesse_lente')}` : '';
+          act(`${id}/${key}`, target, t('commun.action', { label, action: t('commun.volet.position') + speedLabel }));
+        }} />
     </div>
   {/if}
 </div>
