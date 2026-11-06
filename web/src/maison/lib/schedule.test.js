@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DAYS, scheduleSpec, hhmm, minutesOf, normalize, parseDay, formatDay, stepAt, addStep, moveStep, setStepDeg, removeStep, sameDay, suggestMinute } from './schedule.js';
+import { DAYS, scheduleSpec, hhmm, minutesOf, normalize, parseDay, formatDay, stepAt, addStep, moveStep, setStepDeg, removeStep, sameDay, suggestMinute, writeDays } from './schedule.js';
 
 const point = (key, kind, write = true) => ({ key, kind, access: { read: true, write }, semantic: 'other' });
 const text = { type: 'text' };
@@ -128,4 +128,22 @@ test('a suggested step goes in the middle of the longest stretch, on the grid', 
   const day = parseDay(spec, '00:00/17 00:15/18');
   assert.equal(day.length, 2);
   assert.equal(formatDay(spec, addStep(spec, day, suggestMinute(spec, day))), '00:00/17 00:15/18 12:15/18');
+});
+
+test('an emptied or unreadable setpoint changes nothing, it never becomes the valve\'s minimum', () => {
+  const day = parseDay(spec, '00:00/17 06:00/20');
+  for (const bad of ['', null, undefined, NaN, 'abc', Infinity]) assert.equal(formatDay(spec, setStepDeg(spec, day, 1, bad)), formatDay(spec, day));
+  assert.equal(formatDay(spec, setStepDeg(spec, day, 1, 0)), '00:00/17 06:00/4');
+});
+
+test('the days are written in turn and the first one not done stops the rest', async () => {
+  const sent = [];
+  const outcomes = { monday: 'ok', tuesday: 'held', wednesday: 'ok' };
+  const write = async (day) => (sent.push(day), outcomes[day]);
+  assert.deepEqual(await writeDays(['monday', 'tuesday', 'wednesday'], write), { written: ['monday'], stopped: 'held' });
+  assert.deepEqual(sent, ['monday', 'tuesday']);
+  assert.deepEqual(await writeDays(['monday'], write), { written: ['monday'], stopped: null });
+  assert.deepEqual(await writeDays([], write), { written: [], stopped: null });
+  assert.deepEqual(await writeDays(['x'], async () => undefined), { written: [], stopped: 'error' });
+  assert.deepEqual(await writeDays(['x', 'monday'], async (d) => (d === 'x' ? 'error' : 'ok')), { written: [], stopped: 'error' });
 });
