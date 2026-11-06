@@ -7,12 +7,17 @@ pub mod aps;
 pub mod ash;
 pub mod backup;
 pub mod coordinator;
+pub mod devices;
+pub mod exchange;
 pub mod ezsp;
+pub mod fleet;
+pub mod interview;
 pub mod network;
 #[cfg(test)]
 mod sim;
 pub mod store;
 pub mod transport;
+pub mod zcl;
 pub mod zdo;
 
 use std::path::{Path, PathBuf};
@@ -26,6 +31,7 @@ use tokio::sync::mpsc;
 use crate::aps::Aps;
 use crate::coordinator::{Event, Init, Network};
 use crate::ezsp::{Callback, Ezsp, EzspFailure, Version};
+use crate::fleet::Fleet;
 use crate::store::Store;
 
 /// The wall clock, in unix seconds ([`backup::unix_now`]; fixed in tests):
@@ -227,6 +233,7 @@ where
     ctx.ready();
     let live = Live {
         coordinator,
+        fleet: Fleet::new(Aps::new(ezsp.clone(), protocol)),
         protocol,
         network,
         // Up at startup: formed, restored, or resumed and checked to be
@@ -251,7 +258,17 @@ async fn serve(
     callbacks: &mut mpsc::Receiver<Callback>,
     mut live: Live<'_>,
 ) -> anyhow::Result<()> {
-    let aps = Aps::new(ezsp.clone(), live.protocol);
+    let aps = live.fleet.aps().clone();
+    if live.checked {
+        live.fleet.start(ctx, live.store, (live.clock)());
+    }
+    let mut chores = tokio::time::interval(fleet::CHORE_PACE);
+    chores.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut upkeep = tokio::time::interval_at(
+        tokio::time::Instant::now() + fleet::UPKEEP_PERIOD,
+        fleet::UPKEEP_PERIOD,
+    );
+    upkeep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // The first record was made at startup: the next one an hour later.
     let mut record_at = tokio::time::interval_at(
         tokio::time::Instant::now() + backup::COUNTER_RECORD_PERIOD,
@@ -283,6 +300,15 @@ async fn serve(
                     live.check_due = live.network == Network::Up;
                 }
             }
+            done = live.fleet.next_done(), if live.fleet.busy() => {
+                if let Some(done) = done {
+                    live.fleet.finished(ctx, live.store, live.store_path, done);
+                }
+            }
+            _ = chores.tick(), if live.settled() && live.fleet.has_chores() => {
+                live.fleet.next_chore(live.store);
+            }
+            _ = upkeep.tick(), if live.settled() => live.fleet.upkeep(ctx, live.store),
         }
         // The network came up after the startup: checked to be ours (the
         // startup rules) before its counter is recorded.
@@ -297,6 +323,8 @@ async fn serve(
 /// The running coordinator: what its callbacks and orders change.
 struct Live<'a> {
     coordinator: DeviceId,
+    /// The devices on the network, once it is checked to be the store's.
+    fleet: Fleet,
     protocol: u8,
     network: Network,
     /// Whether the dongle's network was checked to be the store's (at
@@ -314,9 +342,15 @@ struct Live<'a> {
 }
 
 impl Live<'_> {
+    /// The network is up and ours: devices can be talked to.
+    fn settled(&self) -> bool {
+        self.checked && self.network == Network::Up
+    }
+
     /// One callback: a `messageSentHandler` goes to the unicast awaiting
     /// it, the stack status to the `network` point, an arrival to the store
-    /// and the `joining` point; the rest is logged.
+    /// and the `joining` point, what a device says to the fleet; the rest is
+    /// logged.
     fn on_callback(&mut self, ctx: &DriverCtx, aps: &Aps, callback: &Callback) {
         if aps.on_message_sent(callback) {
             return;
@@ -329,9 +363,19 @@ impl Live<'_> {
                 if network != Network::Up && self.permit_until.is_some() {
                     self.joining_closed(ctx);
                 }
+                if network == Network::Up && self.checked {
+                    self.fleet.read_everyone(self.store);
+                }
             }
-            Some(Event::Arrival { nwk, ieee }) => self.arrival(ctx, nwk, ieee),
-            None => {}
+            Some(Event::Arrival { nwk, ieee, fresh }) => self.arrival(ctx, nwk, ieee, fresh),
+            Some(Event::Left { ieee }) if self.checked => {
+                let device = network::ieee(ieee);
+                self.fleet.left(ctx, self.store, self.store_path, &device);
+            }
+            Some(Event::Message(message)) if self.checked => {
+                self.fleet.on_message(ctx, self.store, &message);
+            }
+            _ => {}
         }
     }
 
@@ -339,15 +383,25 @@ impl Live<'_> {
     /// recorded (not interviewed yet; saved only when something changed)
     /// once the network is checked to be the store's: never into the store
     /// of another network.
-    fn arrival(&mut self, ctx: &DriverCtx, nwk: u16, ieee: [u8; 8]) {
+    fn arrival(&mut self, ctx: &DriverCtx, nwk: u16, ieee: [u8; 8], fresh: bool) {
         let device = network::ieee(ieee);
-        if !self.checked {
+        if self.checked {
+            let moved = self.store.record_join(&device, nwk);
+            // Joined from nothing while known: it was reset, and has lost its
+            // bindings, its reports and where to send its alarms.
+            let reset = fresh && self.store.forget_interview(&device);
+            if reset {
+                tracing::info!(%device, "a known device paired again: asked everything again");
+            }
+            if (moved || reset)
+                && let Err(error) = self.store.save(self.store_path)
+            {
+                // Kept in memory: the next change saves it too.
+                tracing::error!(%error, %device, "the zigbee store could not be saved");
+            }
+            self.fleet.arrived(ctx, self.store, &device, nwk, reset);
+        } else {
             tracing::info!(%device, "a device arrived on a network not checked yet: not recorded");
-        } else if self.store.record_join(&device, nwk)
-            && let Err(error) = self.store.save(self.store_path)
-        {
-            // Kept in memory: the next change saves it too.
-            tracing::error!(%error, %device, "the zigbee store could not be saved");
         }
         ctx.set_state(&self.coordinator, "joining", Value::Text(device.into()));
     }
@@ -356,6 +410,44 @@ impl Live<'_> {
         self.permit_until = None;
         ctx.set_state(&self.coordinator, "permit_join", Value::Bool(false));
         tracing::info!("joining closed");
+    }
+
+    /// An order to a device on the network: handed to the NCP here, so that
+    /// orders leave in the order they came; how it ends comes back later,
+    /// and the loop goes on meanwhile.
+    async fn device_order(
+        &mut self,
+        ctx: &mut DriverCtx,
+        aps: &Aps,
+        callbacks: &mut mpsc::Receiver<Callback>,
+        order: CommandRequest,
+    ) {
+        if !self.settled() {
+            order.reply(Err(moli_i18n::tr!("pilotes.zigbee.ordre_reseau_absent")));
+            return;
+        }
+        if order.abandoned() {
+            // Nobody waits for it any more: never run late.
+            return;
+        }
+        let prepared = match self.fleet.prepare_order(self.store, &order) {
+            Ok(prepared) => prepared,
+            Err(reason) => {
+                order.reply(Err(reason));
+                return;
+            }
+        };
+        let submit = prepared.submit(aps);
+        match self.draining(ctx, aps, callbacks, submit).await {
+            Ok(delivery) => self.fleet.follow_order(order, prepared, delivery),
+            Err(error) => {
+                tracing::warn!(%error, key = %order.key, "an order was not sent");
+                order.reply(Err(moli_i18n::tr!(
+                    "pilotes.zigbee.ordre_echec",
+                    error = error
+                )));
+            }
+        }
     }
 
     /// An order: `permit_join` is the coordinator's only writable point.
@@ -369,6 +461,10 @@ impl Live<'_> {
         callbacks: &mut mpsc::Receiver<Callback>,
         order: CommandRequest,
     ) {
+        if order.device.id != self.coordinator {
+            self.device_order(ctx, aps, callbacks, order).await;
+            return;
+        }
         let open = match permit_order(&order.key, &order.value) {
             Ok(open) => open,
             Err(reason) => {
@@ -441,6 +537,7 @@ impl Live<'_> {
             }
         }
         self.checked = true;
+        self.fleet.start(ctx, self.store, (self.clock)());
         self.record_counter(ctx, aps, callbacks).await;
         None
     }
@@ -457,6 +554,12 @@ impl Live<'_> {
     ) {
         if self.network != Network::Up {
             return;
+        }
+        if self.fleet.remember_seen(self.store, (self.clock)())
+            && let Err(error) = self.store.save(self.store_path)
+        {
+            // Kept in memory: the next change saves it too.
+            tracing::error!(%error, "the zigbee store could not be saved");
         }
         let read = network::network_key_info(aps.ezsp());
         let recorded = match self.draining(ctx, aps, callbacks, read).await {
@@ -987,6 +1090,8 @@ fn coordinator_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
 
 #[cfg(test)]
 mod tests {
+    mod fleet;
+
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -2106,12 +2211,18 @@ mod tests {
     /// The NCP of a known network, up and ready, also accepting what
     /// joining needs.
     async fn running_network() -> (FakeNcp, Running) {
+        running_with(&Setup::known()).await
+    }
+
+    /// A network up and checked, on what `setup` says.
+    async fn running_with(setup: &Setup) -> (FakeNcp, Running) {
         let (ncp, io) = forming_ncp(&[0x00]);
         ncp.respond(ids::IMPORT_TRANSIENT_KEY, &[0, 0, 0, 0]);
         ncp.respond(ids::CLEAR_TRANSIENT_LINK_KEYS, &[]);
         ncp.respond(ids::PERMIT_JOINING, &[0x00]);
         ncp.respond(ids::SEND_BROADCAST, &[0x00, 0x10]);
-        let run = Running::with(io, &Setup::known());
+        ncp.respond(ids::SEND_UNICAST, &[0x00, 0x2A]);
+        let run = Running::with(io, setup);
         ncp.wait_received(STARTUP).await;
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x90]);
         run.wait_ready().await;
@@ -2372,7 +2483,7 @@ mod tests {
         let device = store::DeviceRecord {
             ieee: name.into(),
             nwk: Some(0x1234),
-            interviewed: false,
+            ..store::DeviceRecord::default()
         };
         assert_eq!(run.store().devices.get(name), Some(&device));
         assert_eq!(
@@ -2392,7 +2503,8 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(run.store().devices[name].nwk, Some(0x5678));
-        // Another device; then the first one leaves: kept in the store (v1).
+        // Another device; then the first one leaves, never interviewed:
+        // forgotten.
         let other = [0x03, 0, 0, 0, 0, 0x4b, 0x12, 0x00];
         ncp.callback(
             ids::TRUST_CENTER_JOIN_HANDLER,
@@ -2406,8 +2518,8 @@ mod tests {
         ncp.callback(ids::STACK_STATUS_HANDLER, &[0x91]);
         run.wait_point("network", &text("down")).await;
         let devices = run.store().devices;
-        assert_eq!(devices.len(), 2);
-        assert!(devices.contains_key(name));
+        assert_eq!(devices.len(), 1);
+        assert!(!devices.contains_key(name));
         assert_eq!(run.point("joining"), Some(text("0x00124b0000000003")));
     }
 

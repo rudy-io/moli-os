@@ -10,6 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::aps::ApsFrame;
 use crate::ash::{Decoder, Frame};
 use crate::ezsp::{Version, decode, ids};
 
@@ -20,9 +21,322 @@ const RESET_POWER_ON: u8 = 0x02;
 /// ASH protocol version in RSTACK.
 const ASH_VERSION: u8 = 2;
 
+/// A request a device received through [`FakeRadio`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RadioRequest {
+    pub(crate) nwk: u16,
+    pub(crate) profile: u16,
+    pub(crate) cluster: u16,
+    pub(crate) endpoint: u8,
+    pub(crate) payload: Vec<u8>,
+}
+
+type Answers = Arc<dyn Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync>;
+
+#[derive(Default)]
+struct RadioState {
+    answers: Option<Answers>,
+    /// How many answers still get lost; a request delivered all the same.
+    lose: usize,
+    /// Devices that do not even acknowledge.
+    deaf: Vec<u16>,
+    requests: Vec<RadioRequest>,
+}
+
+/// The devices on the far side of a [`FakeNcp`] (EZSP 13 frames): every
+/// `sendUnicast` is acknowledged (`messageSentHandler`), then answered as a
+/// test says, through an `incomingMessageHandler`.
+pub(crate) struct FakeRadio {
+    state: Arc<Mutex<RadioState>>,
+    task: JoinHandle<()>,
+}
+
+impl FakeRadio {
+    pub(crate) fn spawn(
+        ncp: &FakeNcp,
+        answers: impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + 'static,
+    ) -> Self {
+        let state = Arc::new(Mutex::new(RadioState {
+            answers: Some(Arc::new(answers)),
+            ..RadioState::default()
+        }));
+        let script = Arc::clone(&ncp.script);
+        let control = ncp.control.clone();
+        let arrived = ncp.lock().arrived.clone();
+        let shared = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            let mut seen = 0;
+            loop {
+                arrived.notified().await;
+                let received = {
+                    let script = script.lock().unwrap_or_else(PoisonError::into_inner);
+                    script.received[seen..].to_vec()
+                };
+                seen += received.len();
+                for (id, params) in received {
+                    if id == ids::SEND_UNICAST {
+                        answer(&shared, &control, &params);
+                    }
+                }
+            }
+        });
+        Self { state, task }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, RadioState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The next `count` answers get lost.
+    pub(crate) fn lose_answers(&self, count: usize) {
+        self.lock().lose = count;
+    }
+
+    /// `nwk` stops acknowledging anything.
+    pub(crate) fn deafen(&self, nwk: u16) {
+        self.lock().deaf.push(nwk);
+    }
+
+    /// Answers `nwk` again.
+    pub(crate) fn hear(&self, nwk: u16) {
+        self.lock().deaf.retain(|&deaf| deaf != nwk);
+    }
+
+    /// Answers differently from now on.
+    pub(crate) fn answer_with(
+        &self,
+        answers: impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + 'static,
+    ) {
+        self.lock().answers = Some(Arc::new(answers));
+    }
+
+    /// Everything sent so far, in order.
+    pub(crate) fn requests(&self) -> Vec<RadioRequest> {
+        self.lock().requests.clone()
+    }
+}
+
+impl Drop for FakeRadio {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// One `sendUnicast` (v13 layout), acknowledged and answered.
+fn answer(state: &Arc<Mutex<RadioState>>, control: &mpsc::UnboundedSender<Control>, params: &[u8]) {
+    let nwk = u16::from_le_bytes([params[1], params[2]]);
+    let (frame, rest) = ApsFrame::decode(&params[3..]).unwrap();
+    let tag = rest[0];
+    let payload = rest[2..].to_vec();
+    let request = RadioRequest {
+        nwk,
+        profile: frame.profile,
+        cluster: frame.cluster,
+        endpoint: frame.dst_ep,
+        payload,
+    };
+    let reply = {
+        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.requests.push(request.clone());
+        if state.deaf.contains(&nwk) {
+            return;
+        }
+        if state.lose > 0 {
+            state.lose -= 1;
+            None
+        } else {
+            state.answers.clone().and_then(|answers| answers(&request))
+        }
+    };
+    let mut sent = vec![0, params[1], params[2]];
+    frame.encode(&mut sent);
+    sent.extend_from_slice(&[tag, 0x00, 0x00]);
+    let _ = control.send(Control::Callback(ids::MESSAGE_SENT_HANDLER, sent));
+    if let Some(reply) = reply {
+        let zdo = frame.profile == crate::zdo::PROFILE;
+        let message = incoming_from(
+            nwk,
+            frame.profile,
+            if zdo {
+                frame.cluster | 0x8000
+            } else {
+                frame.cluster
+            },
+            frame.dst_ep,
+            &reply,
+        );
+        let _ = control.send(Control::Callback(ids::INCOMING_MESSAGE_HANDLER, message));
+    }
+}
+
+/// The `incomingMessageHandler` (v13) of a message from `nwk`, LQI 200.
+pub(crate) fn incoming_from(
+    nwk: u16,
+    profile: u16,
+    cluster: u16,
+    endpoint: u8,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut params = vec![0x00];
+    ApsFrame {
+        profile,
+        cluster,
+        src_ep: endpoint,
+        dst_ep: 1,
+        ..ApsFrame::default()
+    }
+    .encode(&mut params);
+    params.push(200);
+    params.push(0xC4);
+    params.extend_from_slice(&nwk.to_le_bytes());
+    params.extend_from_slice(&[0xFF, 0xFF]);
+    params.push(u8::try_from(payload.len()).unwrap());
+    params.extend_from_slice(payload);
+    params
+}
+
+/// A value in a read response: its data type and bytes.
+type Stored = (u8, Vec<u8>);
+
+fn text_value(text: &str) -> Stored {
+    let mut bytes = vec![u8::try_from(text.len()).unwrap()];
+    bytes.extend_from_slice(text.as_bytes());
+    (0x42, bytes)
+}
+
+/// The usual answers of a device: `node` is its node descriptor (after the
+/// address), `simple` its clusters, `attribute` what its attributes hold.
+fn device_answers(
+    logical_type: u8,
+    capability: u8,
+    clusters: &'static [u16],
+    attribute: fn(u16, u16) -> Option<Stored>,
+) -> impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + Clone + 'static {
+    move |request: &RadioRequest| {
+        let payload = &request.payload;
+        if request.profile == crate::zdo::PROFILE {
+            let [seq, nwk0, nwk1, ..] = *payload.as_slice() else {
+                return Some(vec![payload[0], 0x00]);
+            };
+            return Some(match request.cluster {
+                crate::zdo::NODE_DESCRIPTOR_REQUEST => vec![
+                    seq,
+                    0x00,
+                    nwk0,
+                    nwk1,
+                    logical_type,
+                    0x40,
+                    capability,
+                    0x66,
+                    0x11,
+                    0x52,
+                    0x80,
+                    0x00,
+                    0x00,
+                    0x2C,
+                    0x80,
+                    0x00,
+                    0x00,
+                ],
+                crate::zdo::ACTIVE_ENDPOINTS_REQUEST => vec![seq, 0x00, nwk0, nwk1, 1, 1],
+                crate::zdo::SIMPLE_DESCRIPTOR_REQUEST => {
+                    let mut answer = vec![seq, 0x00, nwk0, nwk1, 0, 1, 0x04, 0x01, 0x0D, 0x01, 1];
+                    answer.push(u8::try_from(clusters.len()).unwrap());
+                    answer.extend(clusters.iter().flat_map(|id| id.to_le_bytes()));
+                    answer.push(0);
+                    answer
+                }
+                _ => vec![seq, 0x00],
+            });
+        }
+        let (control, seq, command) = (payload[0], payload[1], payload[2]);
+        if control & 0x01 == 1 {
+            // A cluster command: done.
+            return Some(vec![0x18, seq, 0x0B, command, 0x00]);
+        }
+        Some(match command {
+            0x00 => {
+                let mut answer = vec![0x18, seq, 0x01];
+                for id in payload[3..].as_chunks::<2>().0 {
+                    answer.extend_from_slice(id);
+                    match attribute(request.cluster, u16::from_le_bytes(*id)) {
+                        Some((data_type, bytes)) => {
+                            answer.extend_from_slice(&[0x00, data_type]);
+                            answer.extend_from_slice(&bytes);
+                        }
+                        None => answer.push(0x86),
+                    }
+                }
+                answer
+            }
+            0x02 => vec![0x18, seq, 0x04, 0x00],
+            0x06 => vec![0x18, seq, 0x07, 0x00],
+            _ => return None,
+        })
+    }
+}
+
+/// A mains colour lamp, on endpoint 1.
+pub(crate) fn lamp_answers() -> impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + Clone {
+    device_answers(
+        1,
+        0x8E,
+        &[0x0000, 0x0006, 0x0008, 0x0300],
+        |cluster, id| match (cluster, id) {
+            (0x0000, 0x0005) => Some(text_value("Some lamp")),
+            (0x0000, 0x0004) => Some(text_value("Some maker")),
+            (0x0000, 0x4000) => Some(text_value("1.2.3")),
+            (0x0006, 0x0000) => Some((0x10, vec![0x01])),
+            (0x0008, 0x0000) => Some((0x20, vec![0xFE])),
+            (0x0300, 0x0003 | 0x0004) => Some((0x21, vec![0x00, 0x60])),
+            (0x0300, 0x0007) => Some((0x21, vec![0x72, 0x01])),
+            (0x0300, 0x0008) => Some((0x30, vec![0x02])),
+            (0x0300, 0x400A) => Some((0x19, vec![0x1F, 0x00])),
+            (0x0300, 0x400B) => Some((0x21, vec![0x99, 0x00])),
+            (0x0300, 0x400C) => Some((0x21, vec![0x2C, 0x02])),
+            _ => None,
+        },
+    )
+}
+
+/// A mains plug measuring what it powers, on endpoint 1.
+pub(crate) fn plug_answers() -> impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + Clone {
+    device_answers(
+        1,
+        0x8E,
+        &[0x0000, 0x0006, 0x0702, 0x0B04],
+        |cluster, id| match (cluster, id) {
+            (0x0000, 0x0005) => Some(text_value("Some plug")),
+            (0x0000, 0x0004) => Some(text_value("Some maker")),
+            (0x0702, 0x0301) | (0x0B04, 0x0600 | 0x0602 | 0x0604) => Some((0x21, vec![1, 0])),
+            (0x0702, 0x0302) | (0x0B04, 0x0603) => Some((0x21, vec![0xE8, 0x03])),
+            (0x0B04, 0x0601 | 0x0605) => Some((0x21, vec![10, 0])),
+            _ => None,
+        },
+    )
+}
+
+/// A battery door sensor, on endpoint 1.
+pub(crate) fn sensor_answers() -> impl Fn(&RadioRequest) -> Option<Vec<u8>> + Send + Sync + Clone {
+    device_answers(2, 0x80, &[0x0000, 0x0001, 0x0500], |cluster, id| {
+        match (cluster, id) {
+            (0x0000, 0x0005) => Some(text_value("Some door")),
+            (0x0000, 0x0004) => Some(text_value("Some maker")),
+            (0x0001, 0x0020) => Some((0x20, vec![30])),
+            (0x0001, 0x0021) => Some((0x20, vec![200])),
+            (0x0500, 0x0000) => Some((0x30, vec![0x01])),
+            (0x0500, 0x0001) => Some((0x31, vec![0x15, 0x00])),
+            (0x0500, 0x0002) => Some((0x19, vec![0x00, 0x00])),
+            _ => None,
+        }
+    })
+}
+
 /// What a test scripted, and what the host sent so far.
 #[derive(Debug)]
 struct Script {
+    /// Told of each command received.
+    arrived: Arc<tokio::sync::Notify>,
     version: Version,
     /// Parameters of the response to each frame ID; an ID missing here is
     /// never answered (the command stays pending on the host).
@@ -56,6 +370,7 @@ impl FakeNcp {
     pub(crate) fn spawn(version: Version) -> (Self, DuplexStream) {
         let (host, ncp) = tokio::io::duplex(4096);
         let script = Arc::new(Mutex::new(Script {
+            arrived: Arc::new(tokio::sync::Notify::new()),
             version,
             responses: HashMap::new(),
             received: Vec::new(),
@@ -273,6 +588,7 @@ impl Link {
         };
         let mut script = self.lock();
         script.received.push((header.id, params.to_vec()));
+        script.arrived.notify_one();
         let reply = if header.id == ids::VERSION {
             let v = script.version;
             let [low, high] = v.stack_version.to_le_bytes();

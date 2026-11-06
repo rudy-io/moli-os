@@ -51,12 +51,13 @@ pub const IMPORT_TRANSIENT_KEY: u16 = 0x0111;
 
 // Trust center frames
 pub const TRUST_CENTER_JOIN_HANDLER: u16 = 0x0024;
+pub const ZIGBEE_KEY_ESTABLISHMENT_HANDLER: u16 = 0x009b;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL: [u16; 34] = [
+    const ALL: [u16; 35] = [
         VERSION,
         GET_CONFIGURATION_VALUE,
         SET_CONFIGURATION_VALUE,
@@ -91,6 +92,7 @@ mod tests {
         CLEAR_TRANSIENT_LINK_KEYS,
         IMPORT_TRANSIENT_KEY,
         TRUST_CENTER_JOIN_HANDLER,
+        ZIGBEE_KEY_ESTABLISHMENT_HANDLER,
     ];
 
     #[test]

@@ -1,0 +1,28 @@
+{
+  "_": "An Innr RB 287 C (colour E27), firmware 1.9.64, on a native network: its real frames, as the driver logged them. Anonymised: only its short address in the descriptors is replaced (0x1234). Transaction numbers are put back by whoever replays them.",
+  "zdo": {
+    "node_descriptor": "0100341201408e66114a5000002c500000",
+    "active_endpoints": "020034120201f2",
+    "simple_descriptors": {
+      "1": "030034121c0104010d01010800000300040005000600080000030010020a001900",
+      "242": "040034120af2e0a161000000012100"
+    }
+  },
+  "read_responses": [
+    { "cluster": 0, "first_attribute": 5, "frame": "18010105000042085242203238372043" },
+    { "cluster": 0, "first_attribute": 4, "frame": "1802010400004204696e6e72" },
+    { "cluster": 0, "first_attribute": 16384, "frame": "1803010040004206312e392e3634" },
+    { "cluster": 768, "first_attribute": 16394, "frame": "1804010a4000191f000b40002132000c400021e803" },
+    { "cluster": 6, "first_attribute": 0, "frame": "1805010000001001" },
+    { "cluster": 8, "first_attribute": 0, "frame": "18060100000020fe" },
+    { "cluster": 768, "first_attribute": 8, "frame": "180801080000300203000021b175040000211a69070000217201" }
+  ],
+  "reports": [
+    { "cluster": 6, "frame": "185a0a00001000", "expect": { "state": false } },
+    { "cluster": 6, "frame": "185b0a00001001", "expect": { "state": true } },
+    { "cluster": 8, "frame": "185c0a0000204c", "expect": { "brightness": 30 } },
+    { "cluster": 8, "frame": "185d0a000020fe", "expect": { "brightness": 100 } },
+    { "cluster": 768, "frame": "185e0a00002003010020eb0300215ab30400219f4c", "expect": { "color.x": 0.7006, "color.y": 0.2993 } },
+    { "cluster": 768, "frame": "18620a070021fa00", "expect": { "color_temp": 250 } }
+  ]
+}

@@ -284,7 +284,7 @@ impl OpenCoordinatorBackup {
                 devices.push(DeviceRecord {
                     ieee,
                     nwk,
-                    interviewed: false,
+                    ..DeviceRecord::default()
                 });
             }
         }
@@ -851,12 +851,12 @@ mod tests {
                 DeviceRecord {
                     ieee: "0x00124b0000000002".into(),
                     nwk: Some(0x4f2a),
-                    interviewed: false,
+                    ..DeviceRecord::default()
                 },
                 DeviceRecord {
                     ieee: "0x00124b0000000003".into(),
                     nwk: None,
-                    interviewed: false,
+                    ..DeviceRecord::default()
                 },
             ]
         );
@@ -1058,6 +1058,7 @@ mod tests {
                 ieee: "0x00124b0000000009".into(),
                 nwk: Some(0x1111),
                 interviewed: true,
+                ..DeviceRecord::default()
             },
         );
         let before = other.clone();
@@ -1091,6 +1092,7 @@ mod tests {
             ieee: "0x00124b0000000002".into(),
             nwk: Some(0x2222),
             interviewed: true,
+            ..DeviceRecord::default()
         };
         same.devices.insert(known.ieee.clone(), known.clone());
         import.apply(&mut same, false, NOW).unwrap();

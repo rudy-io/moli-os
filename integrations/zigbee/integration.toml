@@ -27,3 +27,8 @@ author = "agent"
 # adapter) writes it, read by `moli-os zigbee import`.
 [[fixture]]
 file = "fixtures/coordinator_backup.json"
+
+# Real: the frames of an Innr RB 287 C (firmware 1.9.64), its short address
+# replaced, replayed by the driver's tests.
+[[fixture]]
+file = "fixtures/innr_rb287c.json"

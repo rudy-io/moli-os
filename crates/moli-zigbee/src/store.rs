@@ -77,8 +77,8 @@ impl NetworkRecord {
     }
 }
 
-/// A device that joined the network.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A device that joined the network, and what its interview learnt of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceRecord {
     /// `0x` and 16 hex digits, as Zigbee2MQTT writes it.
     pub ieee: String,
@@ -88,6 +88,123 @@ pub struct DeviceRecord {
     pub nwk: Option<u16>,
     /// Whether its descriptors and `Basic` cluster were read.
     pub interviewed: bool,
+    /// `Basic`: `manufacturerName`, `modelId`, `swBuildId`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manufacturer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sw_build: Option<String>,
+    /// Node descriptor: manufacturer code, 0 coordinator / 1 router / 2 end
+    /// device, MAC capability flags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manufacturer_code: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_type: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<EndpointRecord>,
+    /// What a lamp's Color Control says it can do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorCaps>,
+    /// IAS Zone: what the sensor is (`zoneType`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_type: Option<u16>,
+    /// What turns raw metering and electrical values into units.
+    #[serde(default, skip_serializing_if = "Scale::is_empty")]
+    pub scale: Scale,
+    /// Whether its bindings and reports were set up.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub configured: bool,
+    /// When it last spoke, in unix seconds, to the hour: its availability
+    /// goes on counting across a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<u64>,
+    /// It left the network and has not come back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub left: bool,
+}
+
+/// MAC capability flag: mains-powered.
+const MAC_MAINS: u8 = 0x04;
+/// MAC capability flag: its receiver stays on when idle.
+const MAC_RECEIVER_ON: u8 = 0x08;
+
+impl DeviceRecord {
+    /// Mains-powered (the node descriptor said so).
+    #[must_use]
+    pub fn mains(&self) -> bool {
+        self.capability.is_some_and(|flags| flags & MAC_MAINS != 0)
+    }
+
+    /// Always listening: can be read on demand, unlike a sleepy device.
+    #[must_use]
+    pub fn listening(&self) -> bool {
+        self.capability
+            .is_some_and(|flags| flags & MAC_RECEIVER_ON != 0)
+    }
+}
+
+/// One endpoint's simple descriptor.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointRecord {
+    pub endpoint: u8,
+    pub profile: u16,
+    pub device_id: u16,
+    #[serde(default)]
+    pub in_clusters: Vec<u16>,
+    #[serde(default)]
+    pub out_clusters: Vec<u16>,
+}
+
+/// What a lamp's Color Control says it can do (`colorCapabilities`, the
+/// physical range of its white).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColorCaps {
+    pub xy: bool,
+    pub temp: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_min: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_max: Option<u16>,
+}
+
+/// A raw value times `multiplier`, over `divisor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ratio {
+    pub multiplier: u32,
+    pub divisor: u32,
+}
+
+impl Ratio {
+    /// `raw` in the unit this ratio leads to; a divisor of 0 (a device that
+    /// does not know) counts as 1.
+    #[must_use]
+    pub fn apply(self, raw: f64) -> f64 {
+        raw * f64::from(self.multiplier) / f64::from(self.divisor.max(1))
+    }
+}
+
+/// `seMetering` and `haElectricalMeasurement` ratios, as the device reports
+/// them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Scale {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metering: Option<Ratio>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voltage: Option<Ratio>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<Ratio>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<Ratio>,
+}
+
+impl Scale {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The whole file.
@@ -183,9 +300,10 @@ impl Store {
     /// (the store then needs saving).
     pub fn record_join(&mut self, ieee: &str, nwk: u16) -> bool {
         match self.devices.get_mut(ieee) {
-            Some(device) if device.nwk == Some(nwk) => false,
+            Some(device) if device.nwk == Some(nwk) && !device.left => false,
             Some(device) => {
                 device.nwk = Some(nwk);
+                device.left = false;
                 true
             }
             None => {
@@ -194,12 +312,32 @@ impl Store {
                     DeviceRecord {
                         ieee: ieee.to_owned(),
                         nwk: Some(nwk),
-                        interviewed: false,
+                        ..DeviceRecord::default()
                     },
                 );
                 true
             }
         }
+    }
+}
+
+impl Store {
+    /// A known device joined from nothing: it was reset, and has forgotten
+    /// its bindings, its reports and where to send its alarms. What was
+    /// learnt of it no longer holds. Returns whether anything was forgotten
+    /// (the store then needs saving).
+    pub fn forget_interview(&mut self, ieee: &str) -> bool {
+        let Some(device) = self.devices.get_mut(ieee) else {
+            return false;
+        };
+        let blank = DeviceRecord {
+            ieee: device.ieee.clone(),
+            nwk: device.nwk,
+            ..DeviceRecord::default()
+        };
+        let changed = *device != blank;
+        *device = blank;
+        changed
     }
 }
 
@@ -264,6 +402,36 @@ pub(crate) mod tests {
                 ieee: "0x00124b0000000002".into(),
                 nwk: Some(0x4f2a),
                 interviewed: true,
+                manufacturer: Some("Some maker".into()),
+                model: Some("Some lamp".into()),
+                sw_build: Some("1.0".into()),
+                manufacturer_code: Some(0x1166),
+                logical_type: Some(1),
+                capability: Some(0x8E),
+                endpoints: vec![EndpointRecord {
+                    endpoint: 1,
+                    profile: 0x0104,
+                    device_id: 0x010D,
+                    in_clusters: vec![0x0000, 0x0006, 0x0008, 0x0300],
+                    out_clusters: vec![0x0019],
+                }],
+                color: Some(ColorCaps {
+                    xy: true,
+                    temp: true,
+                    temp_min: Some(153),
+                    temp_max: Some(556),
+                }),
+                zone_type: None,
+                scale: Scale {
+                    power: Some(Ratio {
+                        multiplier: 1,
+                        divisor: 10,
+                    }),
+                    ..Scale::default()
+                },
+                configured: true,
+                last_seen: Some(1_800_000_000),
+                left: false,
             },
         );
         store
@@ -332,21 +500,91 @@ pub(crate) mod tests {
             DeviceRecord {
                 ieee: "0x00124b0000000003".into(),
                 nwk: Some(0x1234),
-                interviewed: false,
+                ..DeviceRecord::default()
             }
         );
         // Its announce after its join: nothing new.
         assert!(!store.record_join("0x00124b0000000003", 0x1234));
         // A known device at a new address keeps its interview.
+        let before = store.devices["0x00124b0000000002"].clone();
         assert!(store.record_join("0x00124b0000000002", 0x0001));
         assert_eq!(
             store.devices["0x00124b0000000002"],
             DeviceRecord {
-                ieee: "0x00124b0000000002".into(),
                 nwk: Some(0x0001),
-                interviewed: true,
+                ..before
             }
         );
+    }
+
+    #[test]
+    fn a_device_coming_back_or_reset() {
+        let mut store = full();
+        let known = "0x00124b0000000002";
+        // Back at the same address, after leaving: something changed.
+        store.devices.get_mut(known).unwrap().left = true;
+        assert!(store.record_join(known, 0x4f2a));
+        assert!(!store.devices[known].left);
+        // Reset: only who and where it is remain, and only once.
+        assert!(store.forget_interview(known));
+        assert_eq!(
+            store.devices[known],
+            DeviceRecord {
+                ieee: known.into(),
+                nwk: Some(0x4f2a),
+                ..DeviceRecord::default()
+            }
+        );
+        assert!(!store.forget_interview(known));
+        assert!(!store.forget_interview("0x00124b00000000ff"));
+    }
+
+    #[test]
+    fn a_record_without_an_interview_reads_as_before() {
+        // What a store of the previous phase holds.
+        let json = r#"{"version":1,"devices":{"0x00124b0000000002":
+            {"ieee":"0x00124b0000000002","nwk":4660,"interviewed":false}}}"#;
+        let store: Store = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            store.devices["0x00124b0000000002"],
+            DeviceRecord {
+                ieee: "0x00124b0000000002".into(),
+                nwk: Some(4660),
+                ..DeviceRecord::default()
+            }
+        );
+        // And nothing more is written back for it.
+        let text = serde_json::to_string(&store.devices["0x00124b0000000002"]).unwrap();
+        assert_eq!(
+            text,
+            r#"{"ieee":"0x00124b0000000002","nwk":4660,"interviewed":false}"#
+        );
+    }
+
+    #[test]
+    fn what_a_device_is_comes_from_its_capabilities() {
+        let lamp = DeviceRecord {
+            capability: Some(0x8E),
+            ..DeviceRecord::default()
+        };
+        assert!(lamp.mains() && lamp.listening());
+        let sensor = DeviceRecord {
+            capability: Some(0x80),
+            ..DeviceRecord::default()
+        };
+        assert!(!sensor.mains() && !sensor.listening());
+        let unknown = DeviceRecord::default();
+        assert!(!unknown.mains() && !unknown.listening());
+        let ratio = Ratio {
+            multiplier: 3,
+            divisor: 2,
+        };
+        assert!((ratio.apply(10.0) - 15.0).abs() < 1e-9);
+        let unset = Ratio {
+            multiplier: 1,
+            divisor: 0,
+        };
+        assert!((unset.apply(10.0) - 10.0).abs() < 1e-9);
     }
 
     #[test]

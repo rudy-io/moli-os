@@ -485,6 +485,21 @@ pub fn ieee(mut eui64: [u8; 8]) -> String {
     format!("0x{}", hex(&eui64))
 }
 
+/// An address as people read it (`0x` and 16 hex digits) as it travels:
+/// [`ieee`] the other way.
+#[must_use]
+pub fn eui64(ieee: &str) -> Option<[u8; 8]> {
+    let digits = ieee.strip_prefix("0x")?;
+    if digits.len() != 16 || !digits.is_ascii() {
+        return None;
+    }
+    let mut bytes = [0; 8];
+    for (byte, at) in bytes.iter_mut().rev().zip((0..16).step_by(2)) {
+        *byte = u8::from_str_radix(&digits[at..at + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
 pub(crate) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut out, byte| {

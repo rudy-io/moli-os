@@ -490,34 +490,69 @@ async fn broadcast_permit(aps: &Aps, seconds: u8) -> anyhow::Result<()> {
 }
 
 /// What a callback means to the running coordinator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// The stack reported the network up or down.
     Network(Network),
     /// A device joined or rejoined (`trustCenterJoinHandler`, or its
-    /// device announce).
-    Arrival { nwk: u16, ieee: [u8; 8] },
+    /// device announce). `fresh`: it joined from nothing, not rejoined: a
+    /// known device has been reset.
+    Arrival {
+        nwk: u16,
+        ieee: [u8; 8],
+        fresh: bool,
+    },
+    /// A device left the network (kept in the store: it may come back).
+    Left { ieee: [u8; 8] },
+    /// Anything else a device sent the coordinator.
+    Message(Incoming),
 }
 
 /// Classify a callback (a `messageSentHandler` is the APS layer's): the
-/// rest is logged, a device leaving included (kept in the store in v1).
+/// rest is logged.
 #[must_use]
 pub fn event(callback: &Callback, protocol: u8) -> Option<Event> {
     match callback.id {
         ids::TRUST_CENTER_JOIN_HANDLER => trust_center_join(&callback.params),
         ids::INCOMING_MESSAGE_HANDLER => match Incoming::decode(&callback.params, protocol) {
-            Ok(message) => incoming(&message),
+            Ok(message) => Some(incoming(message)),
             Err(error) => {
                 tracing::warn!(%error, "unreadable incoming message");
                 None
             }
         },
+        ids::ZIGBEE_KEY_ESTABLISHMENT_HANDLER => {
+            key_establishment(&callback.params);
+            None
+        }
         // The stack status; anything else is logged there.
         _ => network_change(callback, protocol).map(Event::Network),
     }
 }
 
-/// `EmberDeviceUpdate.DEVICE_LEFT`, `EmberJoinDecision.DENY_JOIN` (`enums.ts`).
+/// `zigbeeKeyEstablishmentHandler`: partner, then `EmberKeyStatus` (herdsman's
+/// `ezsp.ts`). Only logged: a device asking for its trust center link key, as
+/// [`TRUST_CENTER_POLICIES`] let it. From `TC_RESPONSE_TO_KEY_REQUEST_FAILED`
+/// on (8), or a timeout (4) or a full table (5), it did not get it, and it
+/// may leave again.
+fn key_establishment(params: &[u8]) {
+    let Some((partner, &[status, ..])) = params.split_first_chunk::<8>() else {
+        tracing::warn!(
+            len = params.len(),
+            "unreadable zigbeeKeyEstablishmentHandler"
+        );
+        return;
+    };
+    let device = network::ieee(*partner);
+    if matches!(status, 4 | 5 | 8..=11 | 13..=16) {
+        tracing::warn!(%device, status, "a device's key could not be established");
+    } else {
+        tracing::debug!(%device, status, "key establishment");
+    }
+}
+
+/// `EmberDeviceUpdate`, `EmberJoinDecision.DENY_JOIN` (`enums.ts`).
+const UNSECURED_JOIN: u8 = 1;
 const DEVICE_LEFT: u8 = 2;
 const DENY_JOIN: u8 = 2;
 
@@ -535,9 +570,8 @@ fn trust_center_join(params: &[u8]) -> Option<Event> {
     let parent = u16::from_le_bytes([raw[12], raw[13]]);
     let device = network::ieee(ieee);
     if status == DEVICE_LEFT {
-        // Kept in the store (v1): it may come back.
         tracing::info!(%device, nwk = format_args!("{nwk:#06x}"), "a device left the network");
-        return None;
+        return Some(Event::Left { ieee });
     }
     if decision == DENY_JOIN {
         tracing::warn!(
@@ -554,15 +588,19 @@ fn trust_center_join(params: &[u8]) -> Option<Event> {
         status,
         "a device joined"
     );
-    Some(Event::Arrival { nwk, ieee })
+    Some(Event::Arrival {
+        nwk,
+        ieee,
+        fresh: status == UNSECURED_JOIN,
+    })
 }
 
-/// An incoming message: a device announce is an arrival; the rest is only
-/// logged until the interview and ZCL read them.
-fn incoming(message: &Incoming) -> Option<Event> {
+/// An incoming message: a readable device announce is an arrival; anything
+/// else is for whoever reads messages.
+fn incoming(message: Incoming) -> Event {
     let frame = &message.frame;
     if frame.profile == zdo::PROFILE && frame.cluster == zdo::DEVICE_ANNOUNCE {
-        return match zdo::DeviceAnnounce::parse(&message.payload) {
+        match zdo::DeviceAnnounce::parse(&message.payload) {
             Ok(announce) => {
                 tracing::debug!(
                     device = %network::ieee(announce.ieee),
@@ -570,16 +608,14 @@ fn incoming(message: &Incoming) -> Option<Event> {
                     capability = announce.capability,
                     "device announce"
                 );
-                Some(Event::Arrival {
+                return Event::Arrival {
                     nwk: announce.nwk,
                     ieee: announce.ieee,
-                })
+                    fresh: false,
+                };
             }
-            Err(error) => {
-                tracing::warn!(%error, "unreadable device announce");
-                None
-            }
-        };
+            Err(error) => tracing::warn!(%error, "unreadable device announce"),
+        }
     }
     tracing::debug!(
         from = format_args!("{:#06x}", message.nwk),
@@ -587,10 +623,10 @@ fn incoming(message: &Incoming) -> Option<Event> {
         cluster = format_args!("{:#06x}", frame.cluster),
         endpoint = frame.src_ep,
         lqi = message.lqi,
-        len = message.payload.len(),
+        payload = %network::hex(&message.payload),
         "incoming message"
     );
-    None
+    Event::Message(message)
 }
 
 /// Why the link ended, once its callback channel closed: the client fails
@@ -1030,15 +1066,22 @@ mod tests {
 
     #[test]
     fn events() {
-        let arrival = Some(Event::Arrival {
-            nwk: 0x1234,
-            ieee: IEEE,
-        });
-        // Unsecured join, secured rejoin: arrivals.
-        assert_eq!(event(&trust_center_join(1, 0), 13), arrival);
-        assert_eq!(event(&trust_center_join(0, 4), 14), arrival);
-        // A device left: logged only; a join denied: no arrival.
-        assert_eq!(event(&trust_center_join(2, 3), 13), None);
+        let arrival = |fresh| {
+            Some(Event::Arrival {
+                nwk: 0x1234,
+                ieee: IEEE,
+                fresh,
+            })
+        };
+        // A join from nothing, a secured rejoin, an unsecured rejoin.
+        assert_eq!(event(&trust_center_join(1, 0), 13), arrival(true));
+        assert_eq!(event(&trust_center_join(0, 4), 14), arrival(false));
+        assert_eq!(event(&trust_center_join(3, 1), 13), arrival(false));
+        // A device left; a join denied: no arrival.
+        assert_eq!(
+            event(&trust_center_join(2, 3), 13),
+            Some(Event::Left { ieee: IEEE })
+        );
         assert_eq!(event(&trust_center_join(1, 2), 13), None);
         // Too short: logged.
         let mut cut = trust_center_join(1, 0);
@@ -1050,10 +1093,33 @@ mod tests {
         announce.push(0x8E);
         assert_eq!(
             event(&incoming_zdo(zdo::DEVICE_ANNOUNCE, &announce), 13),
-            arrival
+            arrival(false)
         );
-        // Other messages: logged (phase 3 reads them).
-        assert_eq!(event(&incoming_zdo(zdo::BIND_RESPONSE, &[1, 0]), 13), None);
+        // Other messages: for whoever reads them.
+        let Some(Event::Message(message)) = event(&incoming_zdo(zdo::BIND_RESPONSE, &[1, 0]), 13)
+        else {
+            panic!("a message");
+        };
+        assert_eq!(message.frame.cluster, zdo::BIND_RESPONSE);
+        assert_eq!(message.payload, [1, 0]);
+        // An announce too short to read: not an arrival.
+        assert!(matches!(
+            event(&incoming_zdo(zdo::DEVICE_ANNOUNCE, &[1, 2]), 13),
+            Some(Event::Message(_))
+        ));
+        // A key established (logged), or too short to read: nothing happens.
+        let mut key = IEEE.to_vec();
+        key.push(6);
+        let established = Callback {
+            id: ids::ZIGBEE_KEY_ESTABLISHMENT_HANDLER,
+            params: key,
+        };
+        assert_eq!(event(&established, 13), None);
+        let cut = Callback {
+            id: ids::ZIGBEE_KEY_ESTABLISHMENT_HANDLER,
+            params: vec![1, 2],
+        };
+        assert_eq!(event(&cut, 13), None);
         // The stack status, as before.
         let up = Callback {
             id: ids::STACK_STATUS_HANDLER,

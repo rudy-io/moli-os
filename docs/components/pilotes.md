@@ -228,11 +228,44 @@ base_topic = "zwave"        # défaut
 
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 
-- **Couvre** (phases 1-2 sur simulateur ; matériel à vérifier) : la clé coordinateur et son
-  réseau (formé s'il n'existe pas, repris sinon, restauré depuis une sauvegarde importée),
-  l'appairage ouvert depuis Moli et les appareils qui arrivent, notés dans le `store`, l'import
-  et l'export d'une sauvegarde Zigbee2MQTT ; l'interview des appareils et leurs points sont la
-  phase 3 : d'ici là, `z2m` reste le pilote des appareils.
+- **Couvre** (phases 1 à 3, essayées sur une clé ZBDongle-E et une ampoule Innr RB 287 C ;
+  capteurs et prises sur simulateur à ce jour) : la clé coordinateur et son réseau (formé s'il
+  n'existe pas, repris sinon, restauré depuis une sauvegarde importée), l'appairage ouvert depuis
+  Moli, l'import et l'export d'une sauvegarde Zigbee2MQTT, et les appareils (voir **Appareils**).
+  Pas encore : familles propriétaires (Tuya, Xiaomi, Lixee), actions des télécommandes, retrait
+  d'un appareil depuis Moli (phase 4) : d'ici là, `z2m` reste le pilote d'une maison.
+- **Appareils** (`src/fleet.rs`, `src/interview.rs`, `src/devices.rs`, `src/zcl.rs`) :
+  - **Interview** à l'arrivée, une à la fois, 2 s après l'annonce : descripteur de nœud, endpoints,
+    descripteurs simples (3 essais chacun : la 1re requête après un appairage se perd souvent),
+    `Basic` attribut par attribut, capacités de couleur, type de zone et inscription IAS (les deux
+    procédures de herdsman, puis vérification de `zoneState`), diviseurs de mesure. Un silence à
+    n'importe quelle étape l'arrête, ce qu'elle a appris gardé dans le `store` : `ctx.warn` le dit,
+    et la suivante repart de là, sans délai, au prochain message de l'appareil (1 min d'écart au
+    moins) ou toutes les 10 min. Une réponse sans l'attribut est une réponse. Un appareil du
+    `store` pas encore interrogé l'est au démarrage. Réussie, elle n'est refaite que si l'appareil
+    rejoint « de rien » (`STANDARD_SECURITY_UNSECURED_JOIN`) : il a été réinitialisé et a tout
+    oublié. Un appareil qui part sans avoir été interrogé est oublié.
+  - **Points** : génériques par cluster, mêmes clés et mêmes unités que `moli-z2m`
+    (`brightness` en %, `contact` vrai = fermé, `color` en `#rrggbb` avec `color.x`, `color.y`
+    en lecture). Un 2e endpoint porte son numéro (`state_2`). `color_temp` vaut `Null` tant que
+    la lampe est en couleur : elle continue d'en rapporter une, au bout de sa plage. Sa plage
+    est bornée à 150-600 mired : une lampe peut déclarer bien plus qu'elle ne fait.
+  - **Rapports** : bind vers l'endpoint 1 du coordinateur et configure reporting (valeurs de
+    `reporting.ts` de herdsman-converters ; pour une prise, 5 W, 5 V, 50 mA et 0,1 kWh, ramenés aux
+    diviseurs de l'appareil, comme `genericMeter`, et `power` lu sur Electrical s'il existe) ; un
+    refus est une réponse, un silence se retente (1 h d'écart). Un rapport qui demande une réponse
+    par défaut la reçoit, jamais un broadcast.
+  - **Ordres** : remis à la clé dans l'ordre reçu par la boucle, puis suivis à part : un appareil
+    muet ne retient ni la boucle ni les autres. Réponse par défaut en erreur = refus rapporté à
+    l'auteur ; accusé radio sans réponse = pris ; rien à 300 ms de l'échéance du hub = échec dit à
+    l'auteur. Un appareil dormant : « remis » dès que la clé l'a pris (il le recevra à son réveil,
+    bien après les 5 s du hub). Valeur optimiste affichée dès que l'appareil l'a, confirmée par son
+    rapport. Échec : ses valeurs sont relues.
+  - **Disponibilité** (valeurs de Z2M) : tout message = en ligne ; à l'écoute et muet 10 min → une
+    lecture (une par silence de 10 min, pas plus), sans réponse → hors ligne ; dormant muet 25 h →
+    hors ligne (sa lecture manquée ne compte pas : il dort) ; parti du réseau → hors ligne, gardé
+    dans le `store`. Dernier message noté toutes les heures et à l'arrêt : les silences continuent
+    à travers un redémarrage. Lectures cadencées à 500 ms, toutes refaites au retour du réseau.
 - **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
   `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
   EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
@@ -881,7 +914,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | Pilote | Crate | Protocole | Écriture possible | Vérifié sur du vrai matériel |
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
-| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent) ; points des appareils en phase 3 | pas encore (phases 1-2 sur simulateur ; cible : ZBDongle-E) |
+| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent), `state`, `brightness`, `color_temp`, `color`, thermostat | ZBDongle-E (EmberZNet 7.4.4.0) + Innr RB 287 C |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |

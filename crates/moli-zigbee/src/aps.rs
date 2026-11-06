@@ -25,6 +25,10 @@ pub const SENT_TIMEOUT: Duration = Duration::from_secs(10);
 /// ENABLE_ADDRESS_DISCOVERY` (`enums.ts`, `EmberApsOption`).
 pub const DEFAULT_OPTIONS: u16 = 0x0040 | 0x0100 | 0x1000;
 
+/// `EmberIncomingMessageType` (`enums.ts`).
+const BROADCAST: u8 = 4;
+const BROADCAST_LOOPBACK: u8 = 5;
+
 /// `EmberOutgoingMessageType.DIRECT` (`enums.ts`).
 const OUTGOING_DIRECT: u8 = 0;
 
@@ -92,6 +96,8 @@ pub struct Incoming {
     pub frame: ApsFrame,
     /// Link quality of the last hop.
     pub lqi: u8,
+    /// Sent to everyone, not to the coordinator: answered by nobody.
+    pub broadcast: bool,
     pub payload: Vec<u8>,
 }
 
@@ -101,7 +107,7 @@ impl Incoming {
     /// indexes; from v14 on an `EmberRxPacketInfo` (sender, its EUI64, the
     /// indexes, LQI, RSSI, timestamp). Then the payload, its length first.
     pub fn decode(params: &[u8], protocol: u8) -> Result<Self, EzspError> {
-        let (_kind, rest) = params.split_first().ok_or(EzspError::TooShort)?;
+        let (&kind, rest) = params.split_first().ok_or(EzspError::TooShort)?;
         let (frame, rest) = ApsFrame::decode(rest)?;
         let (nwk, lqi, rest) = if protocol < SL_STATUS_VERSION {
             // lqi, rssi, sender (2), binding index, address index
@@ -118,6 +124,7 @@ impl Incoming {
             nwk,
             frame,
             lqi,
+            broadcast: matches!(kind, BROADCAST | BROADCAST_LOOPBACK),
             payload: payload.to_vec(),
         })
     }
@@ -266,6 +273,22 @@ impl Aps {
         tag: u8,
         payload: &[u8],
     ) -> anyhow::Result<()> {
+        self.submit(nwk, frame, tag, payload).await?.wait().await
+    }
+
+    /// The first half of a unicast: the NCP took the message. Orders leave
+    /// in the order this is awaited, however long each then takes to arrive.
+    ///
+    /// # Errors
+    ///
+    /// The link failing, or the NCP refusing the message.
+    pub async fn submit(
+        &self,
+        nwk: u16,
+        frame: &ApsFrame,
+        tag: u8,
+        payload: &[u8],
+    ) -> anyhow::Result<Delivery> {
         let len = u8::try_from(payload.len())
             .map_err(|_| anyhow::anyhow!("APS payload of {} bytes", payload.len()))?;
         let mut params = vec![OUTGOING_DIRECT];
@@ -275,19 +298,18 @@ impl Aps {
         params.push(len);
         params.extend_from_slice(payload);
         // Before sending: the callback may come before the response.
-        let (_waiting, receiver) = self.wait_for(tag);
+        let (waiting, receiver) = self.wait_for(tag);
         let answer = self.ezsp.call(ids::SEND_UNICAST, &params).await?;
         let (status, _) = read_status(&answer, self.protocol)?;
         ensure!(
             status == SlStatus::Ok,
             "sendUnicast to {nwk:#06x} refused: {status:?}"
         );
-        match tokio::time::timeout(SENT_TIMEOUT, receiver).await {
-            Ok(Ok(SlStatus::Ok)) => Ok(()),
-            Ok(Ok(status)) => bail!("message to {nwk:#06x} not delivered: {status:?}"),
-            Ok(Err(_)) => bail!("message to {nwk:#06x}: its tag was taken back"),
-            Err(_) => bail!("message to {nwk:#06x}: no messageSentHandler within {SENT_TIMEOUT:?}"),
-        }
+        Ok(Delivery {
+            _waiting: waiting,
+            receiver,
+            nwk,
+        })
     }
 
     /// Sends `payload` to a broadcast address (`sendBroadcast`, no alias)
@@ -340,11 +362,11 @@ impl Aps {
     }
 
     /// Registers `tag` as awaited until the guard is dropped.
-    fn wait_for(&self, tag: u8) -> (Waiting<'_>, oneshot::Receiver<SlStatus>) {
+    fn wait_for(&self, tag: u8) -> (Waiting, oneshot::Receiver<SlStatus>) {
         let (sender, receiver) = oneshot::channel();
         self.lock().waiting.insert(u16::from(tag), sender);
         let waiting = Waiting {
-            aps: self,
+            tags: Arc::clone(&self.tags),
             tag: u16::from(tag),
         };
         (waiting, receiver)
@@ -378,14 +400,44 @@ impl Aps {
 }
 
 /// A tag awaited; released however the wait ends (even a dropped future).
-struct Waiting<'a> {
-    aps: &'a Aps,
+#[derive(Debug)]
+struct Waiting {
+    tags: Arc<Mutex<Tags>>,
     tag: u16,
 }
 
-impl Drop for Waiting<'_> {
+impl Drop for Waiting {
     fn drop(&mut self) {
-        self.aps.lock().waiting.remove(&self.tag);
+        self.tags
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .waiting
+            .remove(&self.tag);
+    }
+}
+
+/// A message the NCP took: how it ends.
+#[derive(Debug)]
+pub struct Delivery {
+    _waiting: Waiting,
+    receiver: oneshot::Receiver<SlStatus>,
+    nwk: u16,
+}
+
+impl Delivery {
+    /// Waits up to [`SENT_TIMEOUT`] for its `messageSentHandler`.
+    ///
+    /// # Errors
+    ///
+    /// No `messageSentHandler` in time, or one reporting a failed delivery.
+    pub async fn wait(self) -> anyhow::Result<()> {
+        let nwk = self.nwk;
+        match tokio::time::timeout(SENT_TIMEOUT, self.receiver).await {
+            Ok(Ok(SlStatus::Ok)) => Ok(()),
+            Ok(Ok(status)) => bail!("message to {nwk:#06x} not delivered: {status:?}"),
+            Ok(Err(_)) => bail!("message to {nwk:#06x}: its tag was taken back"),
+            Err(_) => bail!("message to {nwk:#06x}: no messageSentHandler within {SENT_TIMEOUT:?}"),
+        }
     }
 }
 
@@ -478,10 +530,15 @@ pub(crate) mod tests {
                     nwk: 0x1234,
                     frame: on_off(),
                     lqi: 200,
+                    broadcast: false,
                     payload: vec![0x18, 0x01, 0x0A],
                 },
                 "v{protocol}"
             );
+            let mut sent_to_everyone = incoming(protocol);
+            sent_to_everyone[0] = 0x04;
+            let message = Incoming::decode(&sent_to_everyone, protocol).unwrap();
+            assert!(message.broadcast, "v{protocol}");
         }
         // Read with the other version's layout, a frame is too short or wrong.
         assert_ne!(
