@@ -22,19 +22,19 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 
 ## Validation logicielle
 
-- `sh scripts/check.sh` passe : **1 322 tests Moli** et **916 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
+- `sh scripts/check.sh` passe : **1 323 tests Moli** et **916 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
 - Le contrôle standard rejoue maintenant les tests des trois bibliothèques localement modifiées : controller, interaction et commissioning. Les bibliothèques BLE système ne sont pas requises pour ce contrôle.
 - Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
 - **24 tests** du pilote avec l'option BLE compilée passent ; aucun essai radio n'est revendiqué.
-- **178 tests frontend**, build et contrôle FR/EN (3 617 clés) passent.
+- **191 tests frontend**, build et contrôle FR/EN (3 623 clés) passent.
 - `cargo check --locked -p moli-os` passe sous **Rust 1.89.0**, avec uniquement la source Moli et le cache registry, sans cache Git.
 - `cargo-audit` 0.22.2 passe après actualisation RustSec ; les cinq exceptions TLS préexistantes restent contrôlées par le garde d'audit et ses 15 tests. Avertissement connu : `rustls-pemfile` 2.2.0 non maintenu ; aucun nouvel ignore.
 - Les binaires de production **standard et compact** passent l'interopérabilité indépendante étendue : toutes les familles ci-dessus, validation des consignes, contrôle de serrure approuvé, refus sans transmission, changement de politique PIN, reprise, état corrompu et mauvaise clé. [Résultats, reproduction et hash](../../tools/matter-e2e/RESULTS.md).
 
 ## Taille et arbitrages
 
-Image compacte mesurée : **24 946 096 octets**, sous 25 Mo (marge 53 904 octets).
-Image standard : **30 260 144 octets**. Le choix par défaut conserve les symboles ;
+Image compacte mesurée : **24 954 289 octets**, sous 25 Mo (marge 45 711 octets).
+Image standard : **30 268 337 octets**. Le choix par défaut conserve les symboles ;
 la variante compacte retire les noms des backtraces locales, sans retirer de pilote.
 L'artefact diagnostics est identique au binaire standard. [Mesures et limites](../../docs/PERFORMANCE.md).
 Le minimum Rust 1.89 est nécessaire aux verrous de fichiers et validé ; les deux

@@ -19,17 +19,17 @@ Les variantes de production construites depuis le dépôt Moli seul mesurent :
 
 | Variante x86_64 musl | Image non compressée | Binaire |
 |---|---:|---:|
-| Standard avec symboles | 30 260 144 octets | 30 256 048 octets |
-| Compacte explicite | **24 946 096 octets** | 24 941 712 octets |
+| Standard avec symboles | 30 268 337 octets | 30 264 240 octets |
+| Compacte explicite | **24 954 289 octets** | 24 949 904 octets |
 
-La compacte respecte 25 Mo avec 53 904 octets de marge. Le standard reste au-dessus
+La compacte respecte 25 Mo avec 45 711 octets de marge. Le standard reste au-dessus
 pour conserver les symboles. Les nouvelles fonctions et la source de la pile sont
 dans Moli ; la copie des sources n'ajoute pas de service ni de dépendance Git.
 Les deux binaires passent les essais protocolaires étendus. Diagnostics correspond
 au binaire standard. Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
 
-Sur 29,79 s au repos avec les familles virtuelles : 17 256 Kio RSS, 3 544 Kio anonymes,
-0,034 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
+Sur 29,79 s au repos avec les familles virtuelles : 17 280 Kio RSS, 3 544 Kio anonymes,
+0,067 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
 budget cgroup, d'un essai de charge, d'une mesure radio ou d'une comparaison HA.
 Les mesures historiques ci-dessous restent rattachées à leurs versions précédentes.
 
