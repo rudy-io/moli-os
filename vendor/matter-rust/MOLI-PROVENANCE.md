@@ -67,3 +67,20 @@ occurrence and must never bypass the private denylist or exempt this directory.
 These adaptations are maintained inside Moli, not fetched from a personal fork.
 
 - Guarded attribute writes additionally use a strict write-response parser, rejecting duplicate or mismatched acknowledgements.
+- Subscription priming and steady-state reports honor parsed `SuppressResponse`:
+  Success remains reliable when requested; suppressed final steady-state reports
+  flush their standalone MRP ACK and close, while priming/chunks retain their
+  follow-up exchange semantics. A focused actor regression covers delivery,
+  standalone ACKs, handshake completion and repeated-report exchange reclamation.
+  Trace diagnostics contain only max interval, suppression and attribute count.
+- The host idle-report failure was traced to firewall drops at the ephemeral
+  UDP listener, not established as a liveness-grace defect. The five-second
+  grace is unchanged; no timeout increase or periodic polling was introduced.
+
+- Controller builder `listen_port(u16)` selects the operational UDP bind port in
+  both default and custom discovery paths. The default and `MatterController::open`
+  retain port `0` (ephemeral); commissioning keeps its separate transient socket.
+  This supports administrator-managed scoped inbound firewall rules for idle
+  subscription reports without polling/keepalives or SDK firewall changes.
+  Focused builder tests check the default and the actual configured socket port
+  through the custom-discovery spawn seam, without mDNS or hardware.

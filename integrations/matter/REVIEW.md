@@ -12,8 +12,14 @@ verrou de transaction borné à trois secondes et échec explicite si le systèm
 fichiers ne fournit pas les verrous. Le diff Matter conserve provisoirement ce
 préalable jusqu’à son intégration. La redécouverte conserve les endpoints survivants
 et leurs lectures compatibles ; seuls les endpoints disparus sont supprimés.
-La documentation BLE/matériel a été harmonisée. Les grands ponts restent non
-mesurés et la limite de l’abonnement unique est documentée.
+La documentation BLE/matériel a été harmonisée. Le blocage Hue ultérieur est
+maintenant localisé et corrigé : requête d’abonnement trop grande, puis pare-feu
+hôte bloquant les rapports vers le port éphémère. Les filtres wildcard compactent
+la requête (212 → 28) et `udp_port` permet une règle hôte ciblée. Le pilote ne
+modifie jamais le pare-feu. Le contrôle réel OnOff/restauration et les 190 secondes
+au repos sans coupure sont documentés dans HARDWARE.md. SuppressResponse est aussi
+respecté dans la pile, avec une régression de transport. Les très grands ponts
+hétérogènes restent bornés par le transport et les tampons, sans promesse universelle.
 
 Les tailles et hash ci-dessous concernent le jalon de production identifié dans
 RESULTS.md, avant ces corrections de revue. Ils ne constituent pas une nouvelle
@@ -36,9 +42,9 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 
 ## Validation logicielle
 
-- `sh scripts/check.sh` passe : **1 325 tests Moli** et **916 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
+- `sh scripts/check.sh` passe : **1 326 tests Moli** et **919 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
 - Le contrôle standard rejoue maintenant les tests des trois bibliothèques localement modifiées : controller, interaction et commissioning. Les bibliothèques BLE système ne sont pas requises pour ce contrôle.
-- Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
+- Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passaient au jalon précédent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
 - **24 tests** du pilote avec l'option BLE compilée passent ; aucun essai radio n'est revendiqué.
 - **191 tests frontend**, build et contrôle FR/EN (3 623 clés) passent.
 - `cargo check --locked -p moli-os` passe sous **Rust 1.89.0**, avec uniquement la source Moli et le cache registry, sans cache Git.

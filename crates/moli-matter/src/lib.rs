@@ -23,6 +23,9 @@ use tokio::{sync::mpsc, task::JoinSet};
 pub struct Config {
     pub paa_roots: PathBuf,
     pub cd_roots: PathBuf,
+    /// Stable listening port for hosts with an inbound firewall; zero is ephemeral.
+    #[serde(default)]
+    pub udp_port: u16,
     /// Opt-in initial Thread provisioning over BLE. The standard image keeps
     /// the Bluetooth/D-Bus dependency disabled.
     #[serde(default)]
@@ -395,7 +398,18 @@ fn subscription_paths(
         })
         .collect()
 }
+// Attribute reports carry their concrete endpoint. Subscribe once per cluster/
+// attribute across the node instead of repeating identical filters per endpoint;
+// dispatch still accepts only discovered endpoints and their validated capabilities.
+fn compact_subscription_paths(paths: &mut Vec<ReadPath>) {
+    for path in paths.iter_mut() {
+        path.endpoint = None;
+    }
+    paths.sort_unstable_by_key(|p| (p.cluster, p.attribute));
+    paths.dedup_by_key(|p| (p.cluster, p.attribute));
+}
 async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()> {
+    tracing::debug!("Matter descriptor read started");
     let mut report = tokio::time::timeout(
         Duration::from_secs(30),
         node.read(&[
@@ -407,6 +421,7 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
     .await
     .map_err(|_| failure())?
     .map_err(|_| failure())?;
+    tracing::debug!(reports = report.len(), "Matter descriptor read complete");
     let metadata_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     for paths in features::discovery_paths(&report).chunks(32) {
         if let Ok(Ok(values)) = tokio::time::timeout_at(metadata_deadline, node.read(paths)).await {
@@ -416,6 +431,7 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
             break;
         }
     }
+    tracing::debug!(reports = report.len(), "Matter capability read complete");
     let endpoints = endpoints(&report);
     let mut paths = subscription_paths(&report, &endpoints);
     let empty = paths.is_empty();
@@ -431,18 +447,25 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
         ReadPath::new(None, Some(0x1d), Some(1)),
         ReadPath::new(None, Some(0x39), Some(5)),
     ]);
-    paths.sort_unstable_by_key(|p| (p.endpoint, p.cluster, p.attribute));
-    paths.dedup_by_key(|p| (p.endpoint, p.cluster, p.attribute));
+    compact_subscription_paths(&mut paths);
     let mut color_modes: BTreeMap<_, _> = report
         .iter()
         .filter(|(p, _)| p.cluster == 0x300 && [8, 0x4001].contains(&p.attribute))
         .map(|(p, v)| ((p.endpoint, p.attribute), v.clone()))
         .collect();
+    tracing::debug!(paths = paths.len(), "Matter subscription started");
     let mut sub = tokio::time::timeout(Duration::from_secs(30), node.subscribe(&paths, &[], 1, 60))
         .await
         .map_err(|_| failure())?
-        .map_err(|_| failure())?;
+        .map_err(|error| {
+            tracing::warn!(kinds = %pairing::error_kinds(&format!("{error:?}")), "Matter subscription failed");
+            failure()
+        })?;
+    tracing::debug!("Matter subscription established");
     while let Some(event) = sub.next().await {
+        if let SubscriptionEvent::Established { max_interval, .. } = &event {
+            tracing::debug!(max_interval, "Matter subscription interval negotiated");
+        }
         if let Some(online) = connection(&event) {
             tx.send(Update::Online(node.node_id(), online))
                 .await
@@ -529,6 +552,7 @@ impl Matter {
             .map_err(|_| failure())?;
         let controller = MatterController::builder(Arc::new(store))
             .attestation_trust(trust)
+            .listen_port(self.config.udp_port)
             .build()
             .await
             .map_err(|_| failure())?;
@@ -649,6 +673,38 @@ async fn execute_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bridge_subscription_filters_do_not_grow_with_endpoint_count() {
+        let mut paths: Vec<_> = (1..=100)
+            .flat_map(|ep| {
+                [
+                    ReadPath::concrete(ep, 6, 0),
+                    ReadPath::concrete(ep, 0x39, 0x11),
+                ]
+            })
+            .collect();
+        paths.push(ReadPath::new(None, Some(0x1d), Some(0)));
+        paths.push(ReadPath::new(None, Some(0x1d), Some(1)));
+        compact_subscription_paths(&mut paths);
+        assert_eq!(paths.len(), 4);
+        assert!(paths.iter().all(|p| p.endpoint.is_none()));
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.cluster == Some(0x1d) && p.attribute == Some(0))
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.cluster == Some(0x1d) && p.attribute == Some(1))
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.cluster == Some(0x39) && p.attribute == Some(0x11))
+        );
+    }
+
     #[test]
     fn rediscovery_preserves_survivors_and_replaces_changed_definitions() {
         let report = vec![

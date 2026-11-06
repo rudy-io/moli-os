@@ -82,6 +82,7 @@ impl MatterController {
             crate::builder::DEFAULT_ADMIN_VENDOR_ID,
             None,
             crate::actor::DEFAULT_RESPONSE_DEADLINE,
+            0,
         )
         .await
     }
@@ -92,9 +93,10 @@ impl MatterController {
         admin_vendor_id: u16,
         multicast_if: Option<u32>,
         response_deadline: std::time::Duration,
+        listen_port: u16,
     ) -> Result<Self, Error> {
         let transport =
-            matter_transport::TokioUdpTransport::bind_with_multicast_if(0, multicast_if)
+            matter_transport::TokioUdpTransport::bind_with_multicast_if(listen_port, multicast_if)
                 .await
                 .map_err(|e| Error::Operational(format!("bind: {e}")))?;
         let discovery = matter_transport::MdnsSdDiscovery::new()
