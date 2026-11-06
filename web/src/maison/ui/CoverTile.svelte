@@ -130,16 +130,28 @@
         <Icon path={mdiChevronDownCircleOutline} size={20} />
       </button>
     {:else}
-      <!-- Position intermédiaire : tous les boutons de base -->
-      <button class="action-btn" onclick={() => sendOrder('open', 'commun.volet.ouvrir')}
+      <!-- Position intermédiaire : tous les boutons -->
+      <button class="action-btn" onclick={() => sendOrderWithSpeed('open', 'normal', 'commun.volet.ouvrir')}
         title={t('commun.volet.ouvrir')} aria-label={t('commun.volet.ouvrir')}>
         <Icon path={mdiChevronDoubleUp} size={20} />
       </button>
+      {#if hasSlow}
+        <button class="action-btn" onclick={() => sendOrderWithSpeed('open', 'slow', 'commun.volet.ouvrir')}
+          title={t('commun.volet.vitesse_lente')} aria-label={`${t('commun.volet.ouvrir')} ${t('commun.volet.vitesse_lente')}`}>
+          <Icon path={mdiChevronUp} size={20} />
+        </button>
+      {/if}
       <button class="action-btn" onclick={() => sendOrder('stop', 'commun.volet.stop')}
         title={t('commun.volet.stop')} aria-label={t('commun.volet.stop')}>
         <Icon path={mdiSquare} size={20} />
       </button>
-      <button class="action-btn" onclick={() => sendOrder('close', 'commun.volet.fermer')}
+      {#if hasSlow}
+        <button class="action-btn" onclick={() => sendOrderWithSpeed('close', 'slow', 'commun.volet.fermer')}
+          title={t('commun.volet.vitesse_lente')} aria-label={`${t('commun.volet.fermer')} ${t('commun.volet.vitesse_lente')}`}>
+          <Icon path={mdiChevronDown} size={20} />
+        </button>
+      {/if}
+      <button class="action-btn" onclick={() => sendOrderWithSpeed('close', 'normal', 'commun.volet.fermer')}
         title={t('commun.volet.fermer')} aria-label={t('commun.volet.fermer')}>
         <Icon path={mdiChevronDoubleDown} size={20} />
       </button>
