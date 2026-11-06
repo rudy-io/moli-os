@@ -1,16 +1,17 @@
 # Résultat actuel — pile intégrée et familles étendues, 2026-11-06
 
 **PASS** sur les deux binaires de production construits à partir du seul dépôt Moli.
+Sources applicatives : `5d4915f` (synchronisation officielle jusqu’à `1288d93`).
 La pile est locale dans `vendor/matter-rust` ; le lockfile ne contient aucune source Git.
 Les résultats historiques plus bas décrivent les jalons antérieurs et leurs propres hash.
 
 | Variante | Image (octets) | Binaire (octets) | SHA-256 binaire |
 |---|---:|---:|---|
-| Standard | 30 260 144 | 30 256 048 | `12c849606e18204ad7df8f744a78821305dfea72eca0562560fd8250440341a9` |
-| Compacte | 24 946 096 | 24 941 712 | `b8c0f488c659c79d094c11277fbbfdd12c5fc79abf7ba43ff4d3121dd8b475d6` |
+| Standard | 30 268 337 | 30 264 240 | `27f5f3c349cb67cfef5b105b77b5032e4b00878a45c0e751307e520f4b2c3a02` |
+| Compacte | 24 954 289 | 24 949 904 | `122a7b893294d5fefeadf2a6384121a8b4537f94cdeed6e28b5bdad254b08045` |
 
 L'artefact diagnostics correspond exactement au standard. La marge de l'image
-compacte sous 25 Mo est de 53 904 octets ; ces chiffres valent pour ce build x86_64 musl.
+compacte sous 25 Mo est de 45 711 octets ; ces chiffres valent pour ce build x86_64 musl.
 
 Reproduction (matter.js 0.18.0, `npm ci`, puis binaire extrait du build) :
 
@@ -34,7 +35,7 @@ PASS: malformed state, invalid snapshot, wrong vault key rejected
 ```
 
 Fenêtre indicative du processus compact au repos avec les familles virtuelles,
-après redémarrage : 29,79 s, RSS 17 256 Kio, anonyme 3 544 Kio, CPU 0,034 % d'un cœur
+après redémarrage : 29,79 s, RSS 17 280 Kio, anonyme 3 544 Kio, CPU 0,067 % d'un cœur
 à la résolution des ticks. **Pas une mesure cgroup ni une validation radio.**
 L'essai Hue physique reste distinct et historique ; aucune serrure, aucun thermostat
 ni store physique n'a été actionné par cette suite.

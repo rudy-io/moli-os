@@ -78,7 +78,8 @@ if (process.env.E2E_EXTENDED === '1') {
  for (const [id, enabled] of [['lock',true],['readonly-lock',false]]) {
   const lock = new Endpoint(DoorLockDevice.with(Lock), {id, doorLock:{
    lockState:1,lockType:0,actuatorEnabled:enabled,operatingMode:0,
-   requirePinForRemoteOperation:false,wrongCodeEntryLimit:3,userCodeTemporaryDisableTime:10}});
+   requirePinForRemoteOperation:false,wrongCodeEntryLimit:3,userCodeTemporaryDisableTime:10,
+   supportedOperatingModes:{normal:false,vacation:false,privacy:false,passage:false,noRemoteLockUnlock:true,alwaysSet:2047}}});
   await node.add(lock);
   const state = lock.state.doorLock;
   policy[id] = {actuatorEnabled:state.actuatorEnabled,operatingMode:state.operatingMode,
