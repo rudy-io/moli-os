@@ -39,3 +39,33 @@ stress tests, power-loss tests or Home Assistant comparison. Separate real Matte
 evidence is recorded in `integrations/matter/HARDWARE.md`.
 The wrong-key check exercises the CLI separately from the driver restart tests.
 Raw synthetic logs and measurement JSON remain in ignored `.run/`.
+
+## Compact packaging variant — 2026-11-06
+
+Built alongside the standard/diagnostics variants from the same Rust sources and
+locked dependencies, using `--build-arg MOLI_STRIP_SYMBOLS=true`. The Rust sources
+include two equivalent syntax rewrites needed for the full application to pass
+`cargo check --locked -p moli-os` on Rust 1.89.0. The default keeps its symbols.
+
+- Compact binary: **24 822 928 bytes**; image: **24 827 312 bytes**.
+- Compact binary SHA-256:
+  `f3ba71b6b8f9be4c3de8096e565df86cddb7e8f846af74760fd1f9d4cd7993a6`.
+- Matching standard/diagnostics binary: **30 109 520 bytes**, SHA-256
+  `1048eb243be4529834863959b5764b94f917f7bd65e1ad9d623bb718b8bc5f8a`.
+  The standard image is **30 113 712 bytes**. Both delivered variants passed the
+  protocol checks; the earlier standard result above predates the MSRV rewrites.
+- Invalid build-argument values were rejected with exit code 2.
+- Code, read-only data and unwind/exception sections were compared byte for byte:
+  `.text`, `.rodata`, `.eh_frame`, `.eh_frame_hdr`, `.gcc_except_table` all match.
+
+The compact binary passed the same isolated protocol checks (exit 0):
+
+```text
+MEASURE: {"scope": "one virtual light; process memory, not cgroup; no BLE/OTBR", "seconds": 29.78, "rss_kib_peak": 17340, "anonymous_kib_peak": 3476, "cpu_percent_one_core": 0.0}
+PASS: commissioning, descriptor, OnOff, subscription, restart identity
+PASS: malformed state, invalid snapshot, wrong vault key rejected
+```
+
+The size saving removes symbol names for in-process backtraces; it does not remove
+features. Preserve the matching diagnostics artifact for postmortem address analysis.
+This compact run did not perform further physical-device actions or radio tests.

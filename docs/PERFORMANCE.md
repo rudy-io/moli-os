@@ -40,6 +40,36 @@ ni BLE ni OTBR. Pas de comparaison à Home Assistant, de p95 API, de mesure radi
 ou de test de charge multi-appareils. Reproduction et hash du binaire :
 `tools/matter-e2e/RESULTS.md` (`E2E_MEASURE=1`).
 
+### Variante compacte facultative et compatibilité minimale — 6 novembre 2026
+
+Les deux variantes ci-dessous utilisent les mêmes sources/fonctionnalités, après
+les corrections de compatibilité Rust 1.89 ; seule l'option de symboles diffère :
+
+| Variante x86_64 musl | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard, symboles conservés (défaut inchangé) | 30 113 712 octets | 30 109 520 octets |
+| Compacte, table de symboles retirée | **24 827 312 octets** | 24 822 928 octets |
+
+La variante compacte respecte 25 Mo avec une marge mesurée de 172 688 octets.
+Elle conserve tous les pilotes et le mécanisme de déroulement/interception des panics,
+mais les backtraces locales perdent les noms de fonctions. Les sections de code,
+données constantes et métadonnées d'exception/unwind sont identiques octet pour octet.
+Le target `diagnostics` exporte le binaire avec symboles : son SHA-256 correspond
+exactement à celui du build standard. Il n'est pas inclus dans l'image compacte.
+Le choix du profil par défaut reste un arbitrage de diagnostic/exploitation.
+L'application complète passe `cargo check --locked -p moli-os` avec Rust 1.89.0,
+fonctionnalités par défaut. Deux match guards trop récents ont été remplacés par
+des expressions équivalentes ; le contrôle de pièce de l'assistant reste avant
+l'envoi d'une commande. Les tests existants et une revue ciblée couvrent ce point.
+
+Le binaire compact a passé le même test indépendant matter.js : commissioning avec
+attestation, Descriptor, OnOff confirmé par l'accessoire, abonnements, reprise après
+redémarrage et refus des états corrompus/mauvaise clé. Mesure indicative de processus
+avec une lampe virtuelle sur 29,78 s : 17 340 Kio RSS, 3 476 Kio anonymes, CPU 0,000 %
+à la résolution des ticks. Ce n'est pas une certification du budget cgroup ni radio.
+Commandes de build/export : `docs/components/exploitation.md` ; hash et résultat :
+`tools/matter-e2e/RESULTS.md`.
+
 ### Objectifs du projet
 
 | Mesure | Budget | Pourquoi |

@@ -5,8 +5,9 @@ or Python service. The standard build has no BlueZ/BLE dependency and supports d
 already on an IP network, including Thread devices reachable through an existing border
 router. Optional `matter-ble` builds can provision a Thread device over Bluetooth using
 an existing border router's operational dataset; see [thread.md](thread.md).
-The release-image size currently exceeds the project's 25 MB budget; measurements
-and the unresolved budget overrun are recorded in `docs/PERFORMANCE.md`.
+The default release image exceeds the project's 25 MB budget. An optional compact
+build is measured below that budget, at the cost of symbolized local backtraces; see
+`docs/components/exploitation.md` and `docs/PERFORMANCE.md`.
 
 ```toml
 [[driver]]
@@ -17,7 +18,9 @@ paa_roots = "/run/matter-trust/paa"
 cd_roots = "/run/matter-trust/cd"
 ```
 
-Requires Rust 1.89 or newer (durable cross-process vault locking).
+Requires Rust 1.89 or newer (durable cross-process vault locking). The complete
+default-feature application passes `cargo check --locked -p moli-os` on Rust 1.89.0;
+this minimum-version check does not validate BLE hardware.
 The controller and codec are pinned to commit
 `d80b1a3fd2204119ddf47406f4bb59916ba7576b` of the contribution's matter-rust fork.
 It adds the absolute-deadline/cancellation API and durability fixes required here;
