@@ -21,7 +21,7 @@ fn failed(error: &matter_controller::Error) -> anyhow::Error {
 // Keep only leading enum variant names, never fields, quoted strings or numbers.
 // The pinned stack's nested Debug enums expose the failing protocol phase this way
 // without adding a dependency on its internal error types.
-fn error_kinds(mut debug: &str) -> String {
+pub(super) fn error_kinds(mut debug: &str) -> String {
     let mut kinds = Vec::new();
     for _ in 0..6 {
         let end = debug

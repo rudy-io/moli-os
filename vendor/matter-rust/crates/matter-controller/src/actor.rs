@@ -6938,6 +6938,14 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
         entry.liveness_deadline =
             now + std::time::Duration::from_secs(u64::from(entry.max_interval)) + LIVENESS_GRACE;
         let peer = entry.peer;
+        let suppress_response = rd.suppress_response;
+        let more_chunked_messages = rd.more_chunked_messages;
+        tracing::trace!(
+            max_interval = entry.max_interval,
+            suppress_response,
+            attrs = rd.items.len(),
+            "subscription report"
+        );
         // Events have no merge semantics — forward them immediately, bypassing the
         // attribute reassembler. Take them out before `push_parsed` consumes `rd`.
         // Both the event loop and `push_parsed` borrow `entry` mutably, so the
@@ -6984,9 +6992,16 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
             .await;
             return;
         }
-        let _ = self
-            .send_status_ack(session_id, exchange_id, is_local_initiator, peer)
-            .await;
+        if !suppress_response {
+            let _ = self
+                .send_status_ack(session_id, exchange_id, is_local_initiator, peer)
+                .await;
+        } else if !more_chunked_messages {
+            // No application reply will piggyback the ACK. Close only a final
+            // steady-state report; chunks still share this exchange.
+            self.finish_exchange_as(session_id, exchange_id, is_local_initiator, peer)
+                .await;
+        }
     }
 
     /// Parse a steady-state report and find the subscription it belongs to
@@ -7304,7 +7319,19 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
                 return;
             }
         };
-        if let Some(peer) = self.pending.get(&key).map(|p| p.peer) {
+        tracing::trace!(
+            suppress_response = rd.suppress_response,
+            attrs = rd.items.len(),
+            "priming report"
+        );
+        // Suppression affects IM only: MRP's standalone-ACK timer still runs.
+        // Keep the subscribe exchange pending for SubscribeResponse (or chunks).
+        if let Some(peer) = self
+            .pending
+            .get(&key)
+            .filter(|_| !rd.suppress_response)
+            .map(|p| p.peer)
+        {
             // A priming report arrives on our subscribe exchange.
             if let Ok(counter) = self.send_status_ack(key.0, key.1, true, peer).await {
                 self.note_reliable_send(key, counter);
@@ -25253,6 +25280,73 @@ mod tests {
         );
         assert_eq!(w.next_frame(NOTHING_QUEUED_WITHIN).await, None);
         assert!(w.actor.pending.contains_key(&(w.sid, 0x64)));
+    }
+
+    /// Suppression skips IM Success, not MRP ACKs or report delivery. The
+    /// subscribe exchange stays usable until SubscribeResponse; completed
+    /// device exchanges must not accumulate in the session table.
+    #[tokio::test]
+    async fn suppressed_priming_and_steady_reports_are_delivered_without_status() {
+        let mut w = wired_actor();
+        let mut reply = seed_initial_subscribe(&mut w.actor, (w.sid, 0x65), 1, 0x42, far_future());
+        w.actor.pending.get_mut(&(w.sid, 0x65)).unwrap().peer = w.dev.local_addr();
+        let mut report = build_report_data(1, 0x06, 0x0000, &matter_codec::Value::Bool(true));
+        // Append SuppressResponse (context tag 4) inside ReportData.
+        report.pop();
+        report.extend_from_slice(&[0x29, 0x04, 0x18]);
+        assert!(
+            matter_interaction::parse_report_data(&report)
+                .unwrap()
+                .suppress_response
+        );
+        let (exchange, counter) = w
+            .deliver_counted(
+                Some(0x65),
+                ProtocolId::INTERACTION_MODEL,
+                OP_REPORT_DATA,
+                &report,
+            )
+            .await;
+        assert_eq!(w.next_frame(NOTHING_QUEUED_WITHIN).await, None);
+        assert!(w.actor.pending.contains_key(&(w.sid, 0x65)));
+        // Advance only the MRP clock: the owed standalone ACK still fires.
+        for event in w
+            .actor
+            .sessions
+            .handle_timeout(Instant::now() + Duration::from_secs(1))
+        {
+            w.actor
+                .send_ack_event(event, Some(w.dev.local_addr()))
+                .await;
+        }
+        w.expect_ack(exchange, counter).await;
+        let (exchange, counter) = w
+            .deliver_counted(
+                Some(0x65),
+                ProtocolId::INTERACTION_MODEL,
+                OP_SUBSCRIBE_RESPONSE,
+                &build_subscribe_response(0x1234_5678, 30),
+            )
+            .await;
+        w.expect_ack(exchange, counter).await;
+        let (mut receivers, _) = reply.try_recv().unwrap().unwrap();
+        assert!(matches!(
+            receivers.report_rx.try_recv(),
+            Ok(SubscriptionEvent::Report(_))
+        ));
+        // More than the 256-exchange cap: leaked final exchanges would reject
+        // a later report instead of acknowledging and delivering all of them.
+        for _ in 0..300 {
+            let (exchange, counter) = w
+                .deliver_counted(None, ProtocolId::INTERACTION_MODEL, OP_REPORT_DATA, &report)
+                .await;
+            w.expect_ack(exchange, counter).await;
+            assert!(matches!(
+                receivers.report_rx.try_recv(),
+                Ok(SubscriptionEvent::Report(_))
+            ));
+        }
+        assert_eq!(w.next_frame(NOTHING_QUEUED_WITHIN).await, None);
     }
 
     impl Wired {

@@ -48,9 +48,10 @@ pub struct MatterControllerBuilder {
     multicast_if: Option<u32>,
     response_deadline: std::time::Duration,
     /// `None` — the default — means no discovery was supplied, and
-    /// [`Self::build`] takes the untouched default path through
+    /// [`Self::build`] takes the default discovery path through
     /// `MatterController::spawn_default`.
     spawn_with_discovery: Option<SpawnWithDiscovery>,
+    listen_port: u16,
 }
 
 impl MatterControllerBuilder {
@@ -62,6 +63,7 @@ impl MatterControllerBuilder {
             multicast_if: None,
             response_deadline: crate::actor::DEFAULT_RESPONSE_DEADLINE,
             spawn_with_discovery: None,
+            listen_port: 0,
         }
     }
 
@@ -76,6 +78,17 @@ impl MatterControllerBuilder {
     #[must_use]
     pub fn admin_vendor_id(mut self, vid: u16) -> Self {
         self.admin_vendor_id = vid;
+        self
+    }
+
+    /// Set the controller's operational UDP listen port (default `0`, ephemeral).
+    ///
+    /// A stable port lets the host administrator scope inbound firewall rules
+    /// for unsolicited subscription reports. This SDK does not modify firewall
+    /// rules. Commissioning uses a separate transient socket, unaffected here.
+    #[must_use]
+    pub fn listen_port(mut self, port: u16) -> Self {
+        self.listen_port = port;
         self
     }
 
@@ -241,23 +254,25 @@ impl MatterControllerBuilder {
             multicast_if,
             response_deadline,
             spawn_with_discovery,
+            listen_port,
         } = self;
 
         let Some(spawn) = spawn_with_discovery else {
-            // Untouched default path: bind the socket AND start `mdns-sd`.
+            // Default discovery path: bind the socket AND start `mdns-sd`.
             return MatterController::spawn_default(
                 store,
                 trust,
                 admin_vendor_id,
                 multicast_if,
                 response_deadline,
+                listen_port,
             )
             .await;
         };
 
         // Same bind as `spawn_default` — only the discovery differs.
         let transport =
-            matter_transport::TokioUdpTransport::bind_with_multicast_if(0, multicast_if)
+            matter_transport::TokioUdpTransport::bind_with_multicast_if(listen_port, multicast_if)
                 .await
                 .map_err(|e| Error::Operational(format!("bind: {e}")))?;
         spawn(SpawnParts {
@@ -334,6 +349,40 @@ mod tests {
             ),
             issue_icac: false,
         }
+    }
+
+    #[test]
+    fn listen_port_defaults_to_ephemeral() {
+        let builder = MatterController::builder(Arc::new(MemStore::default()));
+        assert_eq!(builder.listen_port, 0);
+        assert_eq!(builder.listen_port(12345).listen_port(0).listen_port, 0);
+    }
+
+    #[tokio::test]
+    async fn configured_listen_port_is_bound() {
+        use matter_transport::Transport;
+
+        // Ask the OS for an available port, never assume a fixed test port is
+        // free. Retry only the reservation-to-build race with another process.
+        for _ in 0..10 {
+            let reservation = std::net::UdpSocket::bind("[::]:0").unwrap();
+            let port = reservation.local_addr().unwrap().port();
+            let mut builder = MatterController::builder(Arc::new(MemStore::default()))
+                .listen_port(port)
+                .discovery(RecordingDiscovery(Arc::new(AtomicUsize::new(0))));
+            builder.spawn_with_discovery = Some(Box::new(move |parts| {
+                assert_eq!(parts.transport.local_address().port(), port);
+                // Inspect the real bound transport before spawning an actor.
+                Err(Error::Operational(SENTINEL.to_string()))
+            }));
+            drop(reservation);
+            match builder.build().await {
+                Err(Error::Operational(message)) if message == SENTINEL => return,
+                Err(Error::Operational(message)) if message.starts_with("bind:") => continue,
+                _ => panic!("expected the spawn seam to inspect the bound socket"),
+            }
+        }
+        panic!("could not bind an OS-selected test port after ten attempts");
     }
 
     /// The seam works: a `Discovery` handed to the builder is the one the actor

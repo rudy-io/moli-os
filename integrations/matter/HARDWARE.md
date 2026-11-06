@@ -32,11 +32,43 @@ Its SHA-256 is `1504a03ed30432cd4e38c115e99a6fcd96741d0694b65d92fdf8c2cf416929bf
 Its independent isolated protocol result and measurements are in
 `tools/matter-e2e/RESULTS.md` and `docs/PERFORMANCE.md`.
 
-## Later discovery attempt — unresolved
+## Later live diagnosis and corrected subscription — 2026-11-06
 
-A subsequent session established CASE but timed out during Descriptor discovery.
-That attempt did not complete an OnOff validation. Its root cause has not been
-established; it must not be attributed to bridge non-conformance or networking
-without further evidence. The successful runs above remain historical evidence
-for their identified binaries. No new hardware action was performed while
-addressing the maintainer's vault and rediscovery review.
+Phase diagnostics corrected the previous, unproven Descriptor-timeout diagnosis.
+Secure CASE, Descriptor and capability reads succeeded. The subscription failed
+locally with `Transport/PayloadTooLarge`: 212 repeated endpoint-specific filters
+exceeded the transport limit. Deduplicated endpoint-wildcard filters reduced that
+request to 28 while retaining concrete report paths and endpoint command gates.
+
+With that correction, the bridge's devices became online. One explicitly
+authorized neutral-room light completed OnOff through Moli REST/Matter under
+ordinary API origin. Independent read-only Hue observations confirmed the change
+and restoration of the exact initial OnOff state, with brightness/color unchanged.
+No Hue write endpoint was used. The debug binary for this actuation was SHA-256
+`81c6bfe8dc97ddcdf1686cdf23c3e6c919940936cd87d70079ed5c38f5df66b2`.
+
+Restart without a new pairing code retained identity and state. An intermediate
+90-second idle observation found one liveness timeout and ten offline samples.
+That observation prompted a separate protocol audit: subscription reports were
+always answered with IM Success even when `SuppressResponse` requested no reply.
+The protocol correction retains standalone MRP acknowledgements and exchange
+cleanup. Its causal relationship to the earlier lost heartbeat requires observation;
+it is not inferred solely from the code defect.
+
+The repeated idle loss was then traced to the host firewall: kernel UFW logs
+showed five blocked transmission attempts for the publisher's first idle report
+aimed at the controller's ephemeral UDP listener. Reads and commands had succeeded
+while the outgoing connection-tracking entry was alive. A configurable fixed
+`udp_port` and a source-restricted host rule allow unsolicited reports without
+periodic polling, increased timeouts or changes to device policies. Moli itself
+never edits firewall rules. The corrected listener's idle validation is recorded
+below; no household addresses or rule contents are published.
+
+The fixed-port debug binary (SHA-256 `023b7a653089057629154c66229c674680f9c30c03214e7306f7c16ce8d286bf`) recovered the same identity and initial
+state without a pairing code. Over 190 one-second samples after recovery it
+remained online throughout: three idle periodic reports, one subscription
+establishment, zero liveness timeouts and zero offline samples. The intermediate
+suppression-only build still lost the first heartbeat; the firewall evidence and
+fixed-port result distinguish the actual idle-loss cause from that separate
+protocol correction. This is a bounded observation, not a long-term reliability
+or radio certification claim.

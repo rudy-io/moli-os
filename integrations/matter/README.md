@@ -18,6 +18,7 @@ kind = "matter"
 [driver.options]
 paa_roots = "/run/matter-trust/paa"
 cd_roots = "/run/matter-trust/cd"
+# udp_port = 5541 # Optional fixed listener; scope the host firewall accordingly.
 ```
 
 Requires Rust 1.89 or newer (durable cross-process vault locking). The complete
@@ -84,15 +85,33 @@ puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel s
 restent non validées. La compilation standard ne contient pas Bluetooth ; le mode optionnel
 `matter-ble` peut transmettre un dataset existant, sans créer ni administrer le routeur Thread.
 
-### Large bridges and incomplete discovery
+### Bridges and bounded subscriptions
 
-Discovery metadata reads are bounded and batched, but subscriptions currently use
-one combined path list per node. A bridge with many endpoints may reject that
-request or exceed the 30-second discovery/subscription deadline. No large-bridge
-capacity limit has been measured. A rejected subscription leaves the node offline
-and retries; it must not be presented as complete hardware compatibility.
+Subscription filters use endpoint wildcards and are deduplicated per
+cluster/attribute. Reports retain concrete endpoint paths; dispatch accepts only
+discovered endpoints and command planning still checks their own capabilities and
+policies. This avoids repeating identical filters for every bridged endpoint.
+A synthetic 100-endpoint regression checks this filter-count bound; it is not a
+100-device hardware capacity claim. Distinct cluster/attribute count and the SDK's
+bounded report buffering still limit very large or heterogeneous bridges.
 
-A later Hue session established CASE but timed out during Descriptor discovery.
-The root cause is unresolved; neither bridge non-conformance nor a network-only
-cause has been established. The earlier successful hardware run remains historical
-evidence, not a guarantee that the current build recovers this installation.
+The later Hue failure was localized with phase diagnostics: Descriptor and
+capability reads succeeded, but 212 repeated subscription paths caused
+`Transport/PayloadTooLarge`. Compacting them to 28 filters restored subscription
+and live OnOff, with independent read-only observation and state restoration.
+It was an application request-size defect, not evidence of bridge non-conformance
+or a network-only failure. See [hardware evidence](HARDWARE.md).
+
+### Host firewall and UDP listening port
+
+`udp_port` is optional and defaults to `0` (an ephemeral port, preserving existing
+behavior). Set a free fixed port, for example `udp_port = 5541`, when the host
+firewall needs an explicit inbound rule. Allow UDP to that port only from the
+intended Matter devices or trusted device network; IPv4/IPv6 and mDNS discovery
+need rules appropriate to the deployment. Moli never changes the host firewall.
+
+An established outgoing UDP flow can expire before the publisher's next report:
+initial reads and commands may succeed while the first idle subscription report
+and its MRP retries are blocked. Diagnose this using the firewall logs and the
+negotiated reporting interval rather than lengthening timeouts or polling battery
+devices. A fixed listener and a narrow inbound rule preserve unsolicited reports.

@@ -13,7 +13,7 @@ ports = []
 [needs]
 secrets = ["pairing_code", "controller_snapshot", "thread_dataset"]
 vars = []
-options = ["paa_roots", "cd_roots", "ble_thread"]
+options = ["paa_roots", "cd_roots", "ble_thread", "udp_port"]
 [origin]
 reused = "matter-controller (Apache-2.0), native Rust IP controller"
 author = "agent"
