@@ -8,16 +8,23 @@
   import Icon from './Icon.svelte';
 
   /**
-   * A cover position slider showing actual position and target on click.
-   * - writable: click to set target, shows button with directional icon
+   * A cover position slider showing actual position and target during drag.
+   * - writable: drag to set target, button follows mouse and persists while moving
    * - read-only: shows only actual position marker, no interaction
    */
-  let { min = 0, max = 100, step = 1, value, label, writable = false, oncommit } = $props();
+  let { min = 0, max = 100, step = 1, value, label, writable = false, isMoving = false, oncommit } = $props();
 
   let container = $state();
-  let clickState = $state(null); // { target, mouseAboveTrack }
+  let clickState = $state(null); // { target, mouseAboveTrack, committed }
 
   const actualPercent = $derived(max > min ? ((value - min) / (max - min)) * 100 : 50);
+
+  // Clear button when cover stops moving (after commit)
+  $effect(() => {
+    if (clickState?.committed && !isMoving) {
+      clickState = null;
+    }
+  });
 
   // Determine icon based on target vs actual and mouse position
   const icon = $derived.by(() => {
@@ -30,25 +37,39 @@
     return mdiChevronDown;
   });
 
-  function handlePointerDown(e) {
-    if (!writable || !container) return;
-
+  function updateTarget(e) {
+    if (!container) return null;
     const rect = container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const percent = (x / rect.width) * 100;
     const target = Math.round(min + (percent / 100) * (max - min));
-
-    // Check if mouse is above or below the track centerline
     const trackCenterY = rect.top + rect.height / 2;
     const mouseAboveTrack = e.clientY < trackCenterY;
-
-    clickState = { target, mouseAboveTrack };
+    return { target, mouseAboveTrack };
   }
 
-  function handlePointerUp() {
-    if (!writable || !clickState) return;
+  function handlePointerDown(e) {
+    if (!writable) return;
+    const state = updateTarget(e);
+    if (state) {
+      clickState = { ...state, committed: false };
+      container?.setPointerCapture(e.pointerId);
+    }
+  }
+
+  function handlePointerMove(e) {
+    if (!writable || !clickState || clickState.committed) return;
+    const state = updateTarget(e);
+    if (state) {
+      clickState = { ...state, committed: false };
+    }
+  }
+
+  function handlePointerUp(e) {
+    if (!writable || !clickState || clickState.committed) return;
+    container?.releasePointerCapture(e.pointerId);
     oncommit?.(clickState.target);
-    clickState = null;
+    clickState = { ...clickState, committed: true };
   }
 
   function handlePointerCancel() {
@@ -67,6 +88,7 @@
     aria-valuemax={max}
     aria-valuenow={value}
     onpointerdown={handlePointerDown}
+    onpointermove={handlePointerMove}
     onpointerup={handlePointerUp}
     onpointercancel={handlePointerCancel}
     style="--actual: {actualPercent}%">

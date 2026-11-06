@@ -162,6 +162,7 @@
         step={1}
         value={pos ?? 0}
         writable={positionWritable}
+        isMoving={isMoving}
         label={t('commun.volet.position_label', { label })}
         oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
     </div>
