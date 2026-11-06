@@ -1,6 +1,6 @@
 # Matter natif expérimental / Experimental native Matter (IP)
 
-**Matériel non testé / hardware not tested.** Native Rust controller; no Matter Server
+**Matter IP testé sur pont Hue / Hue IP validation: [hardware report](HARDWARE.md).** Native Rust controller; no Matter Server
 or Python service. The standard build has no BlueZ/BLE dependency and supports devices
 already on an IP network, including Thread devices reachable through an existing border
 router. Optional `matter-ble` builds can provision a Thread device over Bluetooth using
@@ -19,7 +19,7 @@ cd_roots = "/run/matter-trust/cd"
 
 Requires Rust 1.89 or newer (durable cross-process vault locking).
 The controller and codec are pinned to commit
-`429350c0171d62fbf911b7600231ba0480d4b875` of the contribution's matter-rust fork.
+`d80b1a3fd2204119ddf47406f4bb59916ba7576b` of the contribution's matter-rust fork.
 It adds the absolute-deadline/cancellation API and durability fixes required here;
 registry `matter-controller` 0.18.3 alone does not provide that API. This is an
 experimental dependency choice to review before merging, not an upstream release claim.
@@ -44,6 +44,8 @@ fails closed. An empty fabric reports a clear waiting status and exposes no comm
 
 Descriptor DeviceTypeList (attribute 0) and ServerList (attribute 1) are read together.
 Endpoint 0 and aggregator containers are excluded; child IDs use node ID plus endpoint.
+Bridged NodeLabel is used as a display name when present and bounded; renaming
+refreshes discovery without changing identity. Missing labels keep the generated name.
 Rediscovery removes previous node devices before recreating the descriptor snapshot,
 clearing obsolete points and samples. Supported points: OnOff (read/write), temperature,
 humidity, occupancy, contact and leak (read-only). BooleanState is contact only for device
@@ -69,6 +71,6 @@ No new HTTP endpoint is introduced.
 
 FR : configurer explicitement les racines d'attestation de production, ouvrir le partage
 Matter depuis le contrôleur existant, saisir le code via l'entrée standard de `secrets set`,
-puis redémarrer. Le coffre chiffré conserve le tissu Matter ; aucun essai matériel n'a été
-réalisé. La compilation standard ne contient pas Bluetooth ; le mode optionnel
+puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel sur pont Hue est documenté dans `HARDWARE.md` ; les radios Thread/BLE
+restent non validées. La compilation standard ne contient pas Bluetooth ; le mode optionnel
 `matter-ble` peut transmettre un dataset existant, sans créer ni administrer le routeur Thread.
