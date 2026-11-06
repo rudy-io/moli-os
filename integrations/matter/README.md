@@ -6,7 +6,7 @@ already on an IP network, including Thread devices reachable through an existing
 router. Optional `matter-ble` builds can provision a Thread device over Bluetooth using
 an existing border router's operational dataset; see [thread.md](thread.md).
 The release-image size currently exceeds the project's 25 MB budget; measurements
-and the unresolved comparison are recorded in `docs/PERFORMANCE.md`.
+and the unresolved budget overrun are recorded in `docs/PERFORMANCE.md`.
 
 ```toml
 [[driver]]

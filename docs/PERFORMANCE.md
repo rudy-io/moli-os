@@ -13,25 +13,26 @@ Assistant.
 
 ## Budget
 
-### Contribution Matter expérimentale — 5 novembre 2026
+### Contribution Matter expérimentale — 6 novembre 2026
 
 Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl
-x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 078 897 octets**
-non compressés ; binaire : **30 074 832 octets**. Cela **dépasse le budget de
+x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 113 713 octets**
+non compressés ; binaire : **30 109 368 octets**. Cela **dépasse le budget de
 25 Mo**. Comparaison construite séparément avec le Dockerfile inchangé de la
 base `9ce5868c7832f1e97010f84ffb7e33d7295840f4`, même architecture et toolchain :
 **27 737 521 octets** sans Matter (binaire **27 733 136 octets**). L'ajout de la
-contribution représente donc **2 341 376 octets (+8,44 %)** pour l'image.
+contribution représente donc **2 376 192 octets (+8,57 %)** pour l'image.
 La base dépasse déjà 25 Mo ; la contribution accroît ce dépassement. Le budget
 reste non résolu : réduction/découpage ou arbitrage explicite avant livraison stable.
 SHA-256 du binaire de référence :
 `a435b60f0b76b50cff5a4383ac1976abe90015f777032b716b9ebdbc3e9743ae`.
-Ces chiffres concernent les builds de taille documentés, avant l'ajout du diagnostic
-d'appairage ; ce dernier n'a pas fait l'objet d'une nouvelle mesure de release.
+Build final de la contribution : `d6add50616518a84cdb139ba01a58e6871f7ccaf`,
+avec le correctif d’attestation et les noms bridgés. Hash du binaire et reproduction :
+`tools/matter-e2e/RESULTS.md`.
 
 Le binaire extrait de cette image a passé l'interopérabilité avec une lampe
 virtuelle matter.js, puis une fenêtre au repos de 29,78 s après redémarrage :
-RSS maximal échantillonné 17 156 Kio, mémoire anonyme du processus 3 484 Kio,
+RSS maximal échantillonné 17 324 Kio, mémoire anonyme du processus 3 460 Kio,
 CPU 0,000 % d'un cœur à la résolution des ticks Linux. Ce sont des mesures
 **du processus**, pas du cgroup : elles ne certifient pas les budgets ci-dessous.
 Aucun dashboard connecté pendant cette fenêtre ; un seul appareil virtuel,
