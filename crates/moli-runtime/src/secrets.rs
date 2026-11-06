@@ -425,18 +425,14 @@ pub(crate) fn sync_parent_directory(_: &Path) -> io::Result<()> {
 /// Every writer, including the CLI in another process, holds this lock through
 /// read/merge/rename. A lock on the data inode would be lost across rename.
 fn lock_file(path: &Path) -> io::Result<std::fs::File> {
-<<<<<<< HEAD
     lock_file_with_timeout(path, Duration::from_secs(3))
 }
 
 fn lock_file_with_timeout(path: &Path, timeout: Duration) -> io::Result<std::fs::File> {
-=======
->>>>>>> e165a2e (feat(matter): add native controller with durable vault and optional Thread commissioning)
     std::fs::create_dir_all(parent_dir(path))?;
     let mut lock = path.as_os_str().to_owned();
     lock.push(".lock");
     let file = private_file(Path::new(&lock), false)?;
-<<<<<<< HEAD
     let started = Instant::now();
     loop {
         match file.try_lock() {
@@ -456,10 +452,6 @@ fn lock_file_with_timeout(path: &Path, timeout: Duration) -> io::Result<std::fs:
             }
         }
     }
-=======
-    file.lock()?;
-    Ok(file)
->>>>>>> e165a2e (feat(matter): add native controller with durable vault and optional Thread commissioning)
 }
 
 fn parent_dir(path: &Path) -> &Path {

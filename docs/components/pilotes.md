@@ -1288,9 +1288,13 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 
 ## Matter natif
 
-`moli-matter` contrôle les appareils Matter déjà sur le réseau IP, y compris les
-points d'un pont. OnOff en lecture/écriture ; température, humidité, occupation, contact et fuite
-en lecture seule. Les types du Descriptor déterminent le sens des booléens ;
-Reachable conditionne la disponibilité des appareils pontés. Racines d'attestation de production explicites et tissu dans le
-coffre chiffré, appairage humain par la CLI. BLE non pris en charge ; aucun essai
-matériel. Installation et limites : [Matter](../../integrations/matter/README.md).
+`moli-matter` contrôle les appareils Matter sur le réseau IP, directement ou derrière
+un pont. Les capacités annoncées activent OnOff, variation/couleur, stores de levage,
+thermostats et serrures sous garde ; température, humidité, occupation, contact et
+fuite restent en lecture seule. Reachable conditionne les endpoints pontés.
+Le tissu utilise le coffre chiffré et des racines d'attestation explicites.
+L'appairage humain passe par la CLI ; le provisionnement BLE/Thread est optionnel
+via BlueZ et nécessite un routeur Thread externe. Un essai physique historique Hue
+valide OnOff ; les familles étendues sont testées sur serveurs virtuels indépendants.
+La radio BLE/Thread reste non validée sur matériel.
+Installation et limites : [Matter](../../integrations/matter/README.md).

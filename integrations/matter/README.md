@@ -52,8 +52,8 @@ Descriptor DeviceTypeList (attribute 0) and ServerList (attribute 1) are read to
 Endpoint 0 and aggregator containers are excluded; child IDs use node ID plus endpoint.
 Bridged NodeLabel is used as a display name when present and bounded; renaming
 refreshes discovery without changing identity. Missing labels keep the generated name.
-Rediscovery removes previous node devices before recreating the descriptor snapshot,
-clearing obsolete points and samples. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
+Rediscovery preserves surviving devices and compatible samples; only disappeared
+endpoints are removed. Upsert prunes obsolete or incompatible point readings. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
 and sensor measurements. The exact capability gates and limitations are in
 [COMPATIBILITY.md](COMPATIBILITY.md). BooleanState is contact only for device
 type 0x0015 (true = closed), leak only for 0x0043 (true = water detected). Unknown or
@@ -83,3 +83,16 @@ Matter depuis le contrôleur existant, saisir le code via l'entrée standard de 
 puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel sur pont Hue est documenté dans `HARDWARE.md` ; les radios Thread/BLE
 restent non validées. La compilation standard ne contient pas Bluetooth ; le mode optionnel
 `matter-ble` peut transmettre un dataset existant, sans créer ni administrer le routeur Thread.
+
+### Large bridges and incomplete discovery
+
+Discovery metadata reads are bounded and batched, but subscriptions currently use
+one combined path list per node. A bridge with many endpoints may reject that
+request or exceed the 30-second discovery/subscription deadline. No large-bridge
+capacity limit has been measured. A rejected subscription leaves the node offline
+and retries; it must not be presented as complete hardware compatibility.
+
+A later Hue session established CASE but timed out during Descriptor discovery.
+The root cause is unresolved; neither bridge non-conformance nor a network-only
+cause has been established. The earlier successful hardware run remains historical
+evidence, not a guarantee that the current build recovers this installation.

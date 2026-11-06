@@ -31,3 +31,12 @@ with the same IDs and online state, without another code or further light comman
 Its SHA-256 is `1504a03ed30432cd4e38c115e99a6fcd96741d0694b65d92fdf8c2cf416929bf`.
 Its independent isolated protocol result and measurements are in
 `tools/matter-e2e/RESULTS.md` and `docs/PERFORMANCE.md`.
+
+## Later discovery attempt — unresolved
+
+A subsequent session established CASE but timed out during Descriptor discovery.
+That attempt did not complete an OnOff validation. Its root cause has not been
+established; it must not be attributed to bridge non-conformance or networking
+without further evidence. The successful runs above remain historical evidence
+for their identified binaries. No new hardware action was performed while
+addressing the maintainer's vault and rediscovery review.
