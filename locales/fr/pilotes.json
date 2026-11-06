@@ -620,5 +620,19 @@
   "pilotes.zwave.point_lu_seul": "le point {point} est en lecture seule",
   "pilotes.zwave.point_sans_cible": "le point {point} n'a pas de cible d'écriture",
   "pilotes.zwave.niveau_attend_nombre": "le point niveau attend un nombre",
-  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen"
+  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen",
+  "pilotes.netatmo.identifiants_manquants": "Netatmo : identifiants manquants ({missing}) dans le coffre de l'instance « {instance} » (depuis https://dev.netatmo.com/apps/ : moli-os secrets set {instance} client_id / client_secret / refresh_token)",
+  "pilotes.netatmo.camera": "Caméra Netatmo",
+  "pilotes.netatmo.surveillance": "Surveillance",
+  "pilotes.netatmo.projecteur": "Projecteur",
+  "pilotes.netatmo.lumiere": "Lumière allumée",
+  "pilotes.netatmo.personne": "Personne",
+  "pilotes.netatmo.vehicule": "Véhicule",
+  "pilotes.netatmo.animal": "Animal",
+  "pilotes.netatmo.mouvement": "Mouvement",
+  "pilotes.netatmo.aucune_image": "aucune adresse vidéo disponible pour cette caméra Netatmo",
+  "pilotes.netatmo.aucune_image_statut": "la caméra Netatmo n'a pas renvoyé d'image (HTTP {status})",
+  "pilotes.netatmo.camera_inconnue": "caméra Netatmo inconnue",
+  "pilotes.netatmo.point_inconnu": "{point} ne se commande pas",
+  "pilotes.netatmo.echec": "Netatmo n'a pas pu exécuter la commande : {why}"
 }
