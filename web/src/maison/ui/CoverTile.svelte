@@ -141,7 +141,7 @@
         <Icon path={mdiChevronDownCircleOutline} size={20} />
       </button>
     {:else}
-      <!-- Position intermédiaire : tous les boutons -->
+      <!-- Position intermédiaire : boutons directionnels uniquement (pas de stop à l'arrêt) -->
       <button class="action-btn" onclick={() => sendOrderWithSpeed('open', 'normal', 'commun.volet.ouvrir')}
         title={t('commun.volet.ouvrir')} aria-label={t('commun.volet.ouvrir')}>
         <Icon path={mdiChevronDoubleUp} size={20} />
@@ -152,10 +152,6 @@
           <Icon path={mdiChevronUp} size={20} />
         </button>
       {/if}
-      <button class="action-btn" onclick={() => sendOrder('stop', 'commun.volet.stop')}
-        title={t('commun.volet.stop')} aria-label={t('commun.volet.stop')}>
-        <Icon path={mdiSquare} size={20} />
-      </button>
       {#if hasSlow}
         <button class="action-btn" onclick={() => sendOrderWithSpeed('close', 'slow', 'commun.volet.fermer')}
           title={t('commun.volet.vitesse_lente')} aria-label={`${t('commun.volet.fermer')} ${t('commun.volet.vitesse_lente')}`}>
