@@ -25,5 +25,8 @@ battery devices, power-loss recovery, every cluster or a full production deploym
 Stack revision: `d80b1a3fd2204119ddf47406f4bb59916ba7576b`.
 Test binary: musl development build, SHA-256
 `4d7bf1195e39ac7e5599af125feef2cd91f7054cb12f983fb06bc65199512853`.
-The release-image size measurements in `docs/PERFORMANCE.md` precede this fix;
-they are not a size or memory measurement of this development binary.
+The final production-image binary also resumed the existing real Matter fabric
+with the same IDs and online state, without another code or further light commands.
+Its SHA-256 is `1504a03ed30432cd4e38c115e99a6fcd96741d0694b65d92fdf8c2cf416929bf`.
+Its independent isolated protocol result and measurements are in
+`tools/matter-e2e/RESULTS.md` and `docs/PERFORMANCE.md`.
