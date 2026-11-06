@@ -8,18 +8,16 @@
   import Icon from './Icon.svelte';
 
   /**
-   * A cover position slider showing both target (on click) and actual position.
+   * A cover position slider showing actual position and target on click.
    * - writable: click to set target, shows button with directional icon
    * - read-only: shows only actual position marker, no interaction
    */
-  let { min = 0, max = 100, step = 1, value, targetValue = null, label, writable = false, oncommit } = $props();
+  let { min = 0, max = 100, step = 1, value, label, writable = false, oncommit } = $props();
 
   let container = $state();
   let clickState = $state(null); // { target, mouseAboveTrack }
 
   const actualPercent = $derived(max > min ? ((value - min) / (max - min)) * 100 : 50);
-  const displayTarget = $derived(writable ? (targetValue ?? value) : value);
-  const targetPercent = $derived(max > min ? ((displayTarget - min) / (max - min)) * 100 : 50);
 
   // Determine icon based on target vs actual and mouse position
   const icon = $derived.by(() => {
@@ -71,7 +69,7 @@
     onpointerdown={handlePointerDown}
     onpointerup={handlePointerUp}
     onpointercancel={handlePointerCancel}
-    style="--actual: {actualPercent}%; --target: {targetPercent}%">
+    style="--actual: {actualPercent}%">
     <div class="track"></div>
     <div class="actual-marker"></div>
     {#if clickState}

@@ -35,17 +35,6 @@
   const positionWritable = $derived(connected && posKey && canWrite(d, posKey));
   const busy = $derived(pending(id, posKey) || pending(id, 'control'));
 
-  // Track user's target vs actual position
-  let pendingTarget = $state(null);
-  const targetPos = $derived(pendingTarget ?? pos);
-
-  // Clear pending target when position reaches it
-  $effect(() => {
-    if (pendingTarget != null && pos != null && Math.abs(pos - pendingTarget) < 1) {
-      pendingTarget = null;
-    }
-  });
-
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
     moving === 'UP' ? t('commun.volet.monte')
@@ -172,13 +161,9 @@
         max={100}
         step={1}
         value={pos ?? 0}
-        targetValue={targetPos}
         writable={positionWritable}
         label={t('commun.volet.position_label', { label })}
-        oncommit={(v) => {
-          pendingTarget = v;
-          act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }));
-        }} />
+        oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
     </div>
   {/if}
 </div>
