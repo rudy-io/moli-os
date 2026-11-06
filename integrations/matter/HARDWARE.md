@@ -2,6 +2,7 @@
 
 Experimental validation with a Philips Hue Bridge v2 (BSB002), production
 attestation roots and one explicitly authorized neutral-room bridged light.
+Firmware observed at handoff: `1978545030` (Hue API `1.78.0`).
 No household identifiers, pairing codes, certificate subjects or raw captures
 are included in this report.
 
