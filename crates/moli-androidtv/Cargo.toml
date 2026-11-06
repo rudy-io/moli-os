@@ -8,10 +8,16 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+moli-core.workspace = true
+moli-i18n.workspace = true
 moli-net.workspace = true
+moli-runtime.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
