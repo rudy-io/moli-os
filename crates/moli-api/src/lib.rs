@@ -37,6 +37,7 @@ mod session;
 pub mod settings;
 mod sse;
 mod system;
+mod visibility;
 mod weather;
 
 use std::sync::Arc;
@@ -160,7 +161,12 @@ fn device_routes() -> Router<Hub> {
     Router::new()
         .route("/api/devices", get(rest::devices))
         .route("/api/devices/{id}", get(rest::device))
+        .route(
+            "/api/devices/{id}/visibility",
+            put(visibility::put).layer(DefaultBodyLimit::max(1024)),
+        )
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
+        .route("/api/devices/{id}/live", post(rest::live))
         .route(
             "/api/devices/{id}/print",
             post(rest::print).layer(DefaultBodyLimit::max(rest::MAX_PAGE)),
@@ -343,6 +349,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .merge(house_routes(&humans, options))
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
+        .route("/api/energy/price", put(rest::set_energy_price))
         .route("/api/energy/series", get(rest::energy_series))
         .merge(assistant_routes())
         .route(

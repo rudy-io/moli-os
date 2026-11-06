@@ -568,6 +568,244 @@ async fn pin_session(addr: &str, pin: &str) -> String {
     format!("Cookie: {}\r\n", cookie.unwrap())
 }
 
+async fn visibility_house(name: &str) -> (String, Hub, std::path::PathBuf, String) {
+    let dir = std::env::temp_dir().join(format!("moli-visibility-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("home.json");
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        home_path: Some(path.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let human = format!(
+        "{}X-Moli-Origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    (addr, hub, path, human)
+}
+
+#[tokio::test]
+async fn visibility_is_persisted_reversible_and_announced_without_removing_the_device() {
+    let (addr, hub, path, human) = visibility_house("roundtrip").await;
+    std::fs::write(
+        &path,
+        r#"{"hidden":["other:device"],"rooms":[{"name":"Salon"}],"future":{"keep":true}}"#,
+    )
+    .unwrap();
+    let mut events = hub.subscribe();
+    let (status, mut dashboard) = live(&addr, "/api/events", "").await;
+    assert_eq!(status, 200);
+    assert_eq!(dashboard.next().await.0, "snapshot");
+    for (hidden, expected) in [
+        (true, json!(["other:device", "fake:lamp"])),
+        (true, json!(["other:device", "fake:lamp"])),
+        (false, json!(["other:device"])),
+        (false, json!(["other:device"])),
+    ] {
+        let (status, body) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake%3Alamp/visibility",
+            Some(&json!({"hidden": hidden})),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Json>(&body).unwrap(),
+            json!({"hidden": hidden})
+        );
+        let saved: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved,
+            json!({"hidden": expected, "rooms":[{"name":"Salon"}], "future":{"keep":true}})
+        );
+        let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+        assert_eq!(
+            entry["action"],
+            json!({"kind":"visibility", "device":"fake:lamp", "hidden":hidden})
+        );
+        assert_eq!(entry["origin"], "ui");
+        assert_eq!(entry["outcome"]["result"], "ok");
+        let mut notified = false;
+        while let Ok(event) = events.try_recv() {
+            notified |= serde_json::to_value(event).unwrap()["type"] == "layout_changed";
+        }
+        assert!(
+            notified,
+            "other dashboards must reload their layout after a successful save"
+        );
+        assert_eq!(dashboard.next().await.1["type"], "journal");
+        assert_eq!(
+            dashboard.next().await,
+            ("event".into(), json!({"type":"layout_changed"}))
+        );
+        assert!(hub.device(&"fake:lamp".into()).is_some());
+        assert_eq!(
+            hub.state(&"fake:lamp/state".into()).unwrap().value,
+            Value::Bool(false)
+        );
+    }
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_requires_a_human_dashboard_and_rejects_invalid_input() {
+    let (addr, hub, path, human) = visibility_house("validation").await;
+    let body = json!({"hidden":true});
+    for headers in [
+        "",
+        "X-Moli-Origin: ui\r\n",
+        human.split("X-Moli-Origin").next().unwrap(),
+    ] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&body),
+            headers,
+        )
+        .await;
+        assert_eq!(status, 403, "a cookie and the UI origin are both needed");
+    }
+    for malformed in [
+        json!({}),
+        json!({"hidden":null}),
+        json!({"hidden":"true"}),
+        json!({"hidden":true,"extra":false}),
+    ] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&malformed),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 422);
+    }
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/missing:lamp/visibility",
+        Some(&body),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 404);
+    for id in ["x".repeat(257), "fake%00lamp".into()] {
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            &format!("/api/devices/{id}/visibility"),
+            Some(&body),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 422);
+    }
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true,"extra":"x".repeat(2048)})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 413);
+    assert!(!path.exists(), "refused requests never write the layout");
+    assert!(hub.device(&"fake:lamp".into()).is_some());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_preserves_invalid_layouts_and_does_not_announce_failed_writes() {
+    let (addr, hub, path, human) = visibility_house("broken-file").await;
+    for original in ["{broken", r#"{"hidden":{}}"#, "[]"] {
+        std::fs::write(&path, original).unwrap();
+        let mut events = hub.subscribe();
+        let (status, _) = request_with(
+            &addr,
+            "PUT",
+            "/api/devices/fake:lamp/visibility",
+            Some(&json!({"hidden":true})),
+            &human,
+        )
+        .await;
+        assert_eq!(status, 500);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        while let Ok(event) = events.try_recv() {
+            assert_ne!(
+                serde_json::to_value(event).unwrap()["type"],
+                "layout_changed"
+            );
+        }
+        let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+        assert_eq!(entry["action"]["kind"], "visibility");
+        assert_eq!(entry["outcome"]["result"], "err");
+    }
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_is_not_a_guests_setting_even_with_the_house_code() {
+    let house = guest_house("visibility-guest", |_| {}).await;
+    let (status, session, _) = request_cookie(
+        &house.addr,
+        "POST",
+        "/api/session",
+        &json!({"pin":"482915"}),
+        &house.guest,
+        "moli_session",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let guest = house
+        .guest
+        .replace("Cookie: ", &format!("Cookie: {}; ", session.unwrap()));
+    let (status, body) = request_with(&house.addr, "GET", "/api/session", None, &guest).await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Json>(&body).unwrap()["human"], true);
+    let (status, _) = request_with(
+        &house.addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true})),
+        &guest,
+    )
+    .await;
+    assert_eq!(status, 403);
+    assert!(!house.dir.join("home.json").exists());
+    std::fs::remove_dir_all(house.dir).unwrap();
+}
+
+#[tokio::test]
+async fn visibility_needs_a_persistent_layout_location() {
+    let hub = lamp_hub().await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let human = format!(
+        "{}X-Moli-Origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let (status, _) = request_with(
+        &addr,
+        "PUT",
+        "/api/devices/fake:lamp/visibility",
+        Some(&json!({"hidden":true})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 503);
+    assert!(hub.device(&"fake:lamp".into()).is_some());
+}
+
 /// What the satellites heard: switched on and listened to by a person only,
 /// never by any device of the house.
 #[tokio::test]
@@ -680,6 +918,7 @@ struct GuestHouse {
     pin: String,
     /// The guest's headers: from the Internet, its session.
     guest: String,
+    drivers: Vec<(CancellationToken, tokio::task::JoinHandle<()>)>,
 }
 
 const GUEST_ROOM: &str = "Chambre d'amis";
@@ -702,13 +941,11 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         ("salon", Arc::new(Lamp)),
         ("tel", Arc::new(Phone)),
     ];
+    let mut running = Vec::new();
     for (instance, driver) in drivers {
-        spawn_driver(
-            &hub,
-            InstanceId::from(instance),
-            driver,
-            CancellationToken::new(),
-        );
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(&hub, InstanceId::from(instance), driver, cancel.clone());
+        running.push((cancel, task));
     }
     for _ in 0..200 {
         if hub.stats().drivers_running == 3 {
@@ -765,6 +1002,7 @@ async fn guest_house(name: &str, more: impl FnOnce(&mut moli_api::Options)) -> G
         dir,
         pin,
         guest,
+        drivers: running,
     }
 }
 
@@ -1013,6 +1251,65 @@ async fn a_guest_follows_its_rooms_only_live() {
     assert_eq!(name, "snapshot");
     assert_eq!(device_ids(&snapshot), ["fake:lamp", "salon:lamp"]);
     let _ = std::fs::remove_dir_all(&house.dir);
+}
+
+#[tokio::test]
+async fn restored_cached_devices_are_scoped_to_the_guests_rooms_over_sse() {
+    struct DormantLamp;
+    impl Driver for DormantLamp {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                ctx.cancelled().await;
+                Ok(())
+            })
+        }
+    }
+    let mut house = guest_house("restored-guest", |_| {}).await;
+    for (cancel, task) in house.drivers.drain(..) {
+        cancel.cancel();
+        task.await.unwrap();
+    }
+    let (status, mut guest) = live(&house.addr, "/api/events", &house.guest).await;
+    assert_eq!(status, 200);
+    assert_eq!(device_ids(&guest.next().await.1), ["fake:lamp"]);
+    let cancel = CancellationToken::new();
+    let outside = spawn_driver(
+        &house.hub,
+        "salon".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    let visible = spawn_driver(
+        &house.hub,
+        "fake".into(),
+        Arc::new(DormantLamp),
+        cancel.child_token(),
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let (_, event) = guest.next().await;
+            assert!(
+                !event.to_string().contains("salon:lamp"),
+                "private cached device leaked: {event}"
+            );
+            if event["type"] == "device_restored" {
+                assert_eq!(event["device"]["id"], "fake:lamp");
+                assert_eq!(event["label"]["room"], GUEST_ROOM);
+                assert_eq!(event["states"]["state"]["value"], false);
+                assert_eq!(event["device"]["points"][0]["access"]["write"], false);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    cancel.cancel();
+    outside.await.unwrap();
+    visible.await.unwrap();
+    std::fs::remove_dir_all(house.dir).unwrap();
 }
 
 /// A phone is paired without the code (a device of the home network is the
@@ -1639,4 +1936,214 @@ async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
     assert!(serde_json::from_str::<Json>(&body).unwrap()["drivers"][0]["warning"].is_null());
     cancel.cancel();
     supervisor.await.unwrap();
+}
+
+/// The house's price of a kWh: changed by a person (the code), never typed
+/// in cents, counted from now on, and journaled with what it was.
+#[tokio::test]
+async fn only_a_person_changes_the_price_of_a_kwh_and_it_is_journaled() {
+    let dir = std::env::temp_dir().join(format!("moli-http-price-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let hub = lamp_hub().await;
+    let config: moli_energy::Config = serde_json::from_value(json!({
+        "meter": [{ "id": "plug", "name": "Plug", "point": "fake:lamp/power", "role": "appliance", "integrate": true }]
+    }))
+    .unwrap();
+    let (energy, _task) = moli_energy::Energy::start(
+        &hub,
+        &dir.join("energy.db"),
+        config,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        energy: Some(energy.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let price = |p: f64| json!({ "price": p });
+
+    // The household's dashboard without the code: refused.
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(0.2319)), ui).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(energy.house_prices().is_empty());
+
+    // A person: a price in cents is refused, a price per kWh is kept.
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) =
+        request_with(&addr, "PUT", "/api/energy/price", Some(&price(23.19)), &pin).await;
+    assert_eq!(status, 422, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2287)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    // Price periods are keyed by milliseconds; this assertion needs two
+    // distinct periods rather than two replacements of the same instant.
+    let first_since = energy.house_prices()[0].since;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while moli_core::now_ms() <= first_since {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("clock did not advance to a new price period");
+    let (status, body) = request_with(
+        &addr,
+        "PUT",
+        "/api/energy/price",
+        Some(&price(0.2319)),
+        &pin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(answer["before"], json!(0.2287));
+
+    let (_, body) = request(&addr, "GET", "/api/energy", None).await;
+    let summary: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(summary["house_price"], json!(0.2319));
+    assert_eq!(summary["price_now"], json!(0.2319));
+    assert_eq!(summary["house_prices"].as_array().map(Vec::len), Some(2));
+
+    let changes: Vec<(Json, Json)> = hub
+        .journal(50)
+        .iter()
+        .filter_map(|e| match &e.action {
+            moli_core::Action::Setting { name, from, to } if name == "energy.price" => {
+                assert_eq!(e.origin, moli_core::Origin::Ui);
+                Some((json!(from), json!(to)))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        vec![(json!(0.2287), json!(0.2319)), (Json::Null, json!(0.2287))],
+        "newest first"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
+    let (addr, hub) = server().await;
+    let (_, mut first) = live(&addr, "/api/events", "").await;
+    let (_, mut second) = live(&addr, "/api/events", "").await;
+    first.next().await;
+    second.next().await;
+    let cancel = CancellationToken::new();
+    let task = spawn_driver(&hub, "new-driver".into(), Arc::new(Lamp), cancel.clone());
+    for stream in [&mut first, &mut second] {
+        let (_, event) = stream.next().await;
+        assert_eq!(event["type"], "driver_registered");
+        assert_eq!(event["instance"], "new-driver");
+        assert_eq!(event["kind"], "fake");
+        assert_eq!(event["integration"], "fake");
+    }
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+/// A camera with live video only: it answers an offer with an echo of it.
+struct LiveCam;
+
+#[derive(Debug)]
+struct Echo;
+
+impl moli_runtime::media::LiveSource for Echo {
+    fn answer(
+        &self,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> BoxFuture<'_, anyhow::Result<String>> {
+        // The viewer's address (this test's client, on this machine) comes along.
+        let to = viewer.map_or_else(|| "nobody".to_owned(), |ip| ip.to_string());
+        Box::pin(async move {
+            Ok(format!(
+                "{}a=viewer:{to}\r\n",
+                offer.replace("offer", "answer")
+            ))
+        })
+    }
+}
+
+impl Driver for LiveCam {
+    fn kind(&self) -> &'static str {
+        "livecam"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("printer");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "printer".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: Vec::new(),
+            });
+            ctx.provide_live(&id, Arc::new(Echo));
+            ctx.ready();
+            while ctx.next_command().await.is_some() {}
+            Ok(())
+        })
+    }
+}
+
+/// Live video: the browser's offer reaches the device, its answer comes
+/// back; a device without live video, or something else than an offer, is
+/// refused.
+#[tokio::test]
+async fn a_live_offer_reaches_the_device_and_its_answer_comes_back() {
+    let hub = lamp_hub().await;
+    spawn_driver(
+        &hub,
+        InstanceId::from("cam"),
+        Arc::new(LiveCam),
+        CancellationToken::new(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    let offer = json!({ "sdp": "v=0\r\ns=offer\r\n" });
+
+    let (_, body) = request(&addr, "GET", "/api/devices/cam:printer", None).await;
+    let view: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(view["live"], json!(true), "{body}");
+
+    let (status, body) =
+        request(&addr, "POST", "/api/devices/cam:printer/live", Some(&offer)).await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Json = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        answer["sdp"],
+        json!("v=0\r\ns=answer\r\na=viewer:127.0.0.1\r\n")
+    );
+
+    let (status, body) = request(&addr, "POST", "/api/devices/fake:lamp/live", Some(&offer)).await;
+    assert_eq!(status, 404, "{body}");
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/api/devices/cam:printer/live",
+        Some(&json!({ "sdp": "hello" })),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
 }

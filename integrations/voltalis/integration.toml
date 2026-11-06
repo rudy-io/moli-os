@@ -1,0 +1,29 @@
+[integration]
+id = "voltalis"
+name = "Voltalis (radiateurs)"
+brands = ["Voltalis"]
+models = ["Radiateurs pilotés par un modulateur Voltalis (VX_WIRE)"]
+transport = "http"
+driver = "voltalis"
+crate = "moli-voltalis"
+
+[discovery]
+# No discovery: a cloud account.
+mdns = []
+ssdp = []
+ports = [443]
+
+[needs]
+secrets = ["username", "password"]
+vars = []
+options = ["poll_seconds"]
+
+[origin]
+reused = "aucun code repris : requêtes et champs observés sur un compte réel, voltalis-homeassistant (MIT) lu comme référence du protocole"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/managed_appliance.json"
+
+[[fixture]]
+file = "fixtures/autodiag.json"

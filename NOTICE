@@ -19,3 +19,9 @@ This product includes data derived from ha-solarman
 register map in crates/moli-solarman/src/deye.rs.
 Copyright (c) 2024 David Rapan and Contributors. Licensed under the MIT
 License; see licenses/ha-solarman-MIT.txt.
+
+This product includes data derived from tuya-local
+(https://github.com/make-all/tuya-local): the X-plorer Serie 75 data points
+in crates/moli-tuya/src/vacuum.rs.
+Copyright 2018 Nik Rolls, 2026 Jason Rumney, 2022-2026 other contributors.
+Licensed under the MIT License; see licenses/tuya-local-MIT.txt.

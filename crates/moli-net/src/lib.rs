@@ -595,6 +595,18 @@ pub fn json_body(
         .body(Full::new(Bytes::from(body.to_string())))?)
 }
 
+/// A plain text body for a request builder (`content_type` as the device
+/// wants it).
+pub fn text_body(
+    builder: http::request::Builder,
+    content_type: &str,
+    body: String,
+) -> anyhow::Result<Request<Full<Bytes>>> {
+    Ok(builder
+        .header("content-type", content_type)
+        .body(Full::new(Bytes::from(body)))?)
+}
+
 /// An empty body for a request builder.
 pub fn empty(builder: http::request::Builder) -> anyhow::Result<Request<Full<Bytes>>> {
     Ok(builder.body(Full::new(Bytes::new()))?)

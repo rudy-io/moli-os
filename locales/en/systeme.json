@@ -74,6 +74,8 @@
   "systeme.journal.etiquette": "label → {value}",
   "systeme.journal.effacee": "(cleared)",
   "systeme.journal.adresse": "found at a new address: {from} → {to}",
+  "systeme.journal.reglage.energy.price": "Price of a kWh",
+  "systeme.journal.reglage_change": "{from} → {to}",
   "systeme.historique.plage_6h": "6 h",
   "systeme.historique.plage_24h": "24 h",
   "systeme.historique.plage_7j": "7 d",
@@ -357,5 +359,7 @@
   "systeme.alexa.connecter": "Connect",
   "systeme.alexa.verification": "Connecting…",
   "systeme.alexa.aide": "Moli never sees your password: it shows up as a \"Moli\" device of your Amazon account, and keeps an encrypted token in its secret store.",
-  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice."
+  "systeme.alexa.officieux": "Amazon offers no official interface to drive Echo music: Moli uses the Alexa app's, which may change without notice.",
+  "systeme.journal.masque": "Hidden in Moli",
+  "systeme.journal.restaure": "Restored in Moli"
 }

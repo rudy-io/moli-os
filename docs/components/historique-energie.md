@@ -36,6 +36,11 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     repart de zéro à chaque envoi et n'est pas un compteur fiable.
   - `estimate = true` (appareil seulement, sans `integrate` ni `power`) : une **lumière connectée** qui ne mesure rien ; `point` = un point de la lampe ou d'un luminaire `lumieres:…`. Moli estime sa puissance d'après le profil mesuré de son modèle (powercalc, licence MIT, condensé par `scripts/light-profiles.py` dans `crates/moli-energy/src/estimate.rs` : LCA006, LTW001, LWA017, L530) : luminosité, blanc ou couleur, veille éteinte, **0 quand elle est coupée au mur** ; un luminaire = la somme de ses ampoules. Comptée dans le temps comme `integrate`, jamais ajoutée aux totaux, `estimated: true` dans l'API, « ≈ estimé » à l'écran. Modèle inconnu : pas d'estimation (jamais de chiffre inventé).
   - Pas repris de HA : ses capteurs « powercalc » (estimations, pas des mesures).
+  - `history = true` : `point` donne une consommation déjà découpée par heure, en texte JSON
+    (`[{"hour": ms, "kwh": …}]`), pour un service qui répond un jour après (pilote `enedis`). Chaque
+    heure est classée à sa place, jamais étalée sur le moment du relevé ; ce qui est déjà classé
+    reste. Le prix vient de `price`, pas de la période tarifaire. Si tous les compteurs `grid` et
+    `total` sont ainsi en retard, la projection du mois s'arrête à la dernière heure reçue.
   - `feeds = ["<device id>"]` : les appareils qu'un compteur alimente (par exemple le
     circuit d'une clim → cette clim) : leur carte montre sa puissance (« circuit partagé »
     s'il alimente autre chose). Les adaptateurs Daikin BRP069 vérifiés ne mesurent **pas**
@@ -46,6 +51,15 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     exemple 9 000 pour un abonnement de 9 kVA), `warn` = à partir d'où la conso est
     « soutenue » (par exemple 2 000 ; défaut un quart de `max`) : la jauge vire à l'orange,
     puis au rouge au double. Sert la jauge « en direct » et la ligne du prompt de Moli.
+  - **Prix de la maison** (sans compteur connecté, ou un prix qui change chaque mois) : choisi
+    sur la page Énergie (carte « Prix du kWh ») ou par `PUT /api/energy/price`, par une
+    personne (code) ou un propriétaire ; chaque changement est journalisé (`setting`,
+    `energy.price`, avec le prix d'avant). Gardé dans `energy.db` (table `house_price`, chaque
+    prix avec sa date de début), il chiffre les compteurs sans `price`, quand la période
+    tarifaire n'en donne pas : un `price` de `moli.toml` reste prioritaire. Il compte **aux
+    heures qui suivent**, sans redémarrage ; une heure déjà comptée garde le prix de son
+    époque (rien n'est recalculé). Un prix au-dessus de 5 par kWh est refusé : c'est un prix
+    tapé en centimes.
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple

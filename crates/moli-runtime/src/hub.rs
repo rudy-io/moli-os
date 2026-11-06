@@ -1,6 +1,6 @@
 //! The hub: single source of truth for the live model of the home.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::addresses::{self, KnownAddress};
+use crate::device_cache::{self, CachedDevice};
 use crate::driver::CommandRequest;
 use crate::guard::{GuardPolicy, GuardStatus, Verdict};
 use crate::journal_log::JournalLog;
@@ -283,6 +284,9 @@ pub struct DeviceView {
     /// Prints documents (`/api/devices/{id}/print`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub printer: bool,
+    /// Live video the browser plays (`/api/devices/{id}/live`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub live: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -322,11 +326,15 @@ struct Inner {
     /// Serializes address writes so the file always matches the book.
     address_write: tokio::sync::Mutex<()>,
     journal_log: Option<JournalLog>,
-    secrets: Option<SecretStore>,
+    secrets: Option<Arc<SecretStore>>,
     /// Why there is no secret store, in words a human can act on.
     secrets_problem: Option<String>,
     /// Values changed since the state cache was last written.
     state_dirty: AtomicBool,
+    /// Definitions changed independently of their frequently updated samples.
+    definitions_dirty: AtomicBool,
+    /// Serializes cache replacements and retains the committed inventory generation.
+    state_write: Arc<tokio::sync::Mutex<device_cache::Generation>>,
     /// The last image of each camera, shared by every viewer for a second.
     images: Mutex<HashMap<DeviceId, LastImage>>,
     /// Short-lived media a device fetches back (an announcement's sound).
@@ -335,6 +343,24 @@ struct Inner {
     voice: std::sync::OnceLock<Arc<dyn crate::voice::VoiceBrain>>,
     opts: HubOptions,
     started: Instant,
+}
+
+/// A failed or panicking writer must not consume the only retry signal.
+struct CacheWriteRetry {
+    hub: Hub,
+    definitions_changed: bool,
+    completed: bool,
+}
+
+impl Drop for CacheWriteRetry {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.hub.0.state_dirty.store(true, Ordering::Release);
+            if self.definitions_changed {
+                self.hub.0.definitions_dirty.store(true, Ordering::Release);
+            }
+        }
+    }
 }
 
 /// Two screens showing the same camera live cost one fetch, not two.
@@ -355,6 +381,14 @@ struct Model {
     /// Cached values not yet claimed by a device (its driver has not
     /// published it yet in this run).
     restored: States,
+    /// Original definitions and coherent samples, including dormant instances.
+    cached_devices: device_cache::Devices,
+    /// Restored/retired definitions cannot be revived by availability alone.
+    /// The bool records an explicit offline report since restoration.
+    unconfirmed: HashMap<DeviceId, bool>,
+    /// Retained values are displayable, but not usable as current observations
+    /// until each point receives its first sample from this driver run.
+    awaiting_samples: HashMap<DeviceId, BTreeSet<Arc<str>>>,
     availability: HashMap<DeviceId, bool>,
     /// Devices taken offline because their driver failed, with what they
     /// were before: given back when the driver runs again, unless it said
@@ -365,6 +399,7 @@ struct Model {
     labels: BTreeMap<DeviceId, Label>,
     snapshots: HashMap<DeviceId, Arc<dyn crate::media::SnapshotSource>>,
     printers: HashMap<DeviceId, Arc<dyn crate::media::PrintSink>>,
+    lives: HashMap<DeviceId, Arc<dyn crate::media::LiveSource>>,
 }
 
 #[derive(Debug)]
@@ -394,13 +429,26 @@ impl Hub {
             Some(path) => labels::load(path)?,
             None => BTreeMap::new(),
         };
-        let restored = match &opts.state_path {
+        let mut restored = match &opts.state_path {
             Some(path) => state_cache::load(path).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "state cache unreadable, starting empty");
                 States::new()
             }),
             None => States::new(),
         };
+        let inventory = opts.state_path.as_deref().map(device_cache::load)
+            .transpose().unwrap_or_else(|error| {
+                tracing::warn!(%error, "device inventory cache unreadable; waiting for fresh definitions");
+                None
+            }).flatten();
+        let generation = inventory.as_ref().map_or([0; 16], |cache| cache.generation);
+        let migrate_inventory = inventory.is_some() && generation == [0; 16];
+        // A sidecar definition and its samples are one generation. Never pair
+        // it with state.json from an interrupted older/newer replacement.
+        let cached_devices = inventory.map_or_else(device_cache::Devices::new, |inventory| {
+            restored = inventory.unclaimed;
+            inventory.devices
+        });
         let (journal_log, past) = match &opts.journal_path {
             Some(path) => {
                 let (log, past) = JournalLog::open(path, opts.journal_capacity)?;
@@ -421,7 +469,7 @@ impl Hub {
             Some((path, master)) => match secrets::master_key_bytes(master)
                 .and_then(|key| SecretStore::open(path.clone(), &key))
             {
-                Ok(store) => (Some(store), None),
+                Ok(store) => (Some(Arc::new(store)), None),
                 Err(e) => {
                     tracing::error!(error = %e, "secret store unavailable");
                     (
@@ -436,6 +484,7 @@ impl Hub {
         Ok(Self(Arc::new(Inner {
             model: RwLock::new(Model {
                 restored,
+                cached_devices,
                 labels,
                 ..Model::default()
             }),
@@ -452,6 +501,8 @@ impl Hub {
             addresses: Mutex::new(book),
             address_write: tokio::sync::Mutex::new(()),
             state_dirty: AtomicBool::new(false),
+            definitions_dirty: AtomicBool::new(migrate_inventory),
+            state_write: Arc::new(tokio::sync::Mutex::new(generation)),
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
             voice: std::sync::OnceLock::new(),
@@ -530,6 +581,23 @@ impl Hub {
     pub fn state(&self, point: &PointId) -> Option<Sample> {
         let (device, key) = point.split()?;
         self.read().states.get(&device)?.get(key).cloned()
+    }
+
+    /// A usable current observation, for consumers that may act on it.
+    #[must_use]
+    pub fn current_state(&self, point: &PointId) -> Option<Sample> {
+        let (device, key) = point.split()?;
+        let model = self.read();
+        if model.availability.get(&device) == Some(&false)
+            || model.unconfirmed.contains_key(&device)
+            || model
+                .awaiting_samples
+                .get(&device)
+                .is_some_and(|keys| keys.contains(key))
+        {
+            return None;
+        }
+        model.states.get(&device)?.get(key).cloned()
     }
 
     /// Most recent journal entries first.
@@ -672,6 +740,17 @@ impl Hub {
         if agent && self.is_control(point) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.machine"));
         }
+        // A protected device is the same call, on every point of it: a
+        // countdown cuts a plug as surely as its switch.
+        if agent
+            && let Some((device, _)) = point.split()
+            && let Some(name) = self.protected_device(&device)
+        {
+            return Verdict::Approval(moli_i18n::tr!(
+                "serveur.garde.appareil_protege",
+                name = name
+            ));
+        }
         let rooms = point
             .split()
             .map(|(device, _)| self.rooms_of(&device))
@@ -784,6 +863,53 @@ impl Hub {
             .protected_rooms
             .iter()
             .filter(|p| !known.iter().any(|k| crate::guard::same_room(p, k)))
+            .cloned()
+            .collect()
+    }
+
+    /// The name of the protected device this order reaches (itself, or a
+    /// member if it is a group), if any.
+    #[must_use]
+    pub fn protected_device(&self, device: &DeviceId) -> Option<String> {
+        let protected = &self.0.opts.guard.protected_devices;
+        if protected.is_empty() {
+            return None;
+        }
+        let model = self.read();
+        // Groups may nest (a group of fixtures): walk them all, once each.
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![device];
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if protected.iter().any(|p| p == id.as_str()) {
+                return Some(
+                    model
+                        .labels
+                        .get(id)
+                        .and_then(|l| l.name.clone())
+                        .unwrap_or_else(|| id.as_str().to_owned()),
+                );
+            }
+            if let Some(d) = model.devices.get(id) {
+                todo.extend(&d.members);
+            }
+        }
+        None
+    }
+
+    /// Protected devices the hub does not know: a typo, or a device gone.
+    /// Then protection silently stopped applying — say so.
+    #[must_use]
+    pub fn unmatched_protected_devices(&self) -> Vec<String> {
+        let model = self.read();
+        self.0
+            .opts
+            .guard
+            .protected_devices
+            .iter()
+            .filter(|p| !model.devices.keys().any(|id| id.as_str() == p.as_str()))
             .cloned()
             .collect()
     }
@@ -1024,6 +1150,29 @@ impl Hub {
         );
     }
 
+    /// Records a persisted visibility edit and tells dashboards to reload the
+    /// layout only when it succeeded. No device capability or state changes.
+    pub fn record_visibility(
+        &self,
+        device: DeviceId,
+        hidden: bool,
+        origin: Origin,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        let saved = outcome == Outcome::Ok;
+        self.record(
+            origin,
+            actor,
+            Action::Visibility { device, hidden },
+            outcome,
+            Instant::now(),
+        );
+        if saved {
+            self.emit(Event::LayoutChanged {});
+        }
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {
@@ -1078,6 +1227,28 @@ impl Hub {
                 device,
                 from: from.to_owned(),
                 to: to.to_owned(),
+            },
+            Outcome::Ok,
+            Instant::now(),
+        );
+    }
+
+    /// Journals a setting of the house changed by a person.
+    pub fn record_setting(
+        &self,
+        origin: Origin,
+        actor: Option<String>,
+        name: &str,
+        from: Option<Value>,
+        to: Value,
+    ) {
+        self.record(
+            origin,
+            actor,
+            Action::Setting {
+                name: name.to_owned(),
+                from,
+                to,
             },
             Outcome::Ok,
             Instant::now(),
@@ -1159,6 +1330,7 @@ impl Hub {
     pub fn guard_status(&self) -> GuardStatus {
         let mut status = self.0.opts.guard.status(jiff::Timestamp::now());
         status.unmatched_protected_rooms = self.unmatched_protected_rooms();
+        status.unmatched_protected_devices = self.unmatched_protected_devices();
         status
     }
 
@@ -1390,6 +1562,13 @@ impl Hub {
         self.0.secrets.is_some()
     }
 
+    pub(crate) fn durable_secrets(&self, instance: &InstanceId) -> Option<secrets::DurableSecrets> {
+        Some(secrets::DurableSecrets::new(
+            self.0.secrets.as_ref()?.clone(),
+            instance.to_string(),
+        ))
+    }
+
     pub(crate) fn secrets_problem(&self) -> Option<&str> {
         self.0.secrets_problem.as_deref()
     }
@@ -1436,21 +1615,86 @@ impl Hub {
         integration: Arc<str>,
     ) -> mpsc::Receiver<CommandRequest> {
         let (commands, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.write().drivers.insert(
-            instance.clone(),
-            DriverSlot {
-                kind,
-                integration,
-                status: DriverStatus::Starting,
-                warning: None,
-                commands,
-            },
-        );
+        let restored = {
+            let mut model = self.write();
+            model.drivers.insert(
+                instance.clone(),
+                DriverSlot {
+                    kind,
+                    integration: integration.clone(),
+                    status: DriverStatus::Starting,
+                    warning: None,
+                    commands,
+                },
+            );
+            let foreign: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && (&*cached.kind != kind || cached.integration != integration)
+                })
+                .map(|cached| cached.device.id.clone())
+                .collect();
+            let mut restored = Vec::new();
+            for id in foreign {
+                if model.devices.remove(&id).is_some() {
+                    model.states.remove(&id);
+                    model.availability.remove(&id);
+                    model.unconfirmed.remove(&id);
+                    model.awaiting_samples.remove(&id);
+                    model.held_offline.remove(&id);
+                    restored.push(Event::DeviceRemoved { device: id });
+                }
+            }
+            let cached: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && &*cached.kind == kind
+                        && cached.integration == integration
+                })
+                .cloned()
+                .collect();
+            for cached in cached {
+                let mut device = (*cached.device).clone();
+                for point in &mut device.points {
+                    point.access.write = false;
+                }
+                let device = Arc::new(device);
+                let id = device.id.clone();
+                let states = model.states.get(&id).cloned().unwrap_or(cached.states);
+                model.devices.insert(id.clone(), Arc::clone(&device));
+                model.states.insert(id.clone(), states.clone());
+                model
+                    .awaiting_samples
+                    .insert(id.clone(), states.keys().cloned().collect());
+                model.availability.insert(id.clone(), false);
+                model.unconfirmed.insert(id.clone(), false);
+                model.held_offline.remove(&id);
+                let label = model.labels.get(&id).cloned().unwrap_or_default();
+                restored.push(Event::DeviceRestored {
+                    device,
+                    states,
+                    label,
+                });
+            }
+            restored
+        };
+        self.emit(Event::DriverRegistered {
+            instance: instance.clone(),
+            kind: kind.to_owned(),
+            integration,
+        });
         self.emit(Event::DriverStatus {
             instance: instance.clone(),
             status: DriverStatus::Starting,
             warning: None,
         });
+        for event in restored {
+            self.emit(event);
+        }
         rx
     }
 
@@ -1480,10 +1724,11 @@ impl Hub {
                     .held_offline
                     .keys()
                     .filter(|d| {
-                        model
-                            .devices
-                            .get(*d)
-                            .is_some_and(|d| &d.instance == instance)
+                        !model.unconfirmed.contains_key(*d)
+                            && model
+                                .devices
+                                .get(*d)
+                                .is_some_and(|d| &d.instance == instance)
                     })
                     .cloned()
                     .collect();
@@ -1534,26 +1779,52 @@ impl Hub {
 
     pub(crate) fn upsert_device(&self, device: Device) {
         let device = Arc::new(device);
-        let restored = {
+        let (restored, revived) = {
             let mut model = self.write();
-            if model
-                .devices
-                .get(&device.id)
-                .is_some_and(|d| **d == *device)
+            let unconfirmed = model.unconfirmed.remove(&device.id);
+            let revived = unconfirmed == Some(false);
+            if revived {
+                model.availability.insert(device.id.clone(), true);
+                model.held_offline.remove(&device.id);
+            }
+            if unconfirmed.is_none()
+                && model
+                    .devices
+                    .get(&device.id)
+                    .is_some_and(|d| **d == *device)
             {
                 return;
+            }
+            let identity = model
+                .drivers
+                .get(&device.instance)
+                .map(|slot| (Arc::<str>::from(slot.kind), slot.integration.clone()));
+            if model.cached_devices.get(&device.id).is_some_and(|cached| {
+                identity.as_ref().is_some_and(|(kind, integration)| {
+                    &cached.kind != kind || &cached.integration != integration
+                })
+            }) {
+                model.states.remove(&device.id);
+                model.restored.remove(&device.id);
             }
             // Claim cached values for the points this definition declares.
             // The rest stays cached: a device first published without its
             // definition (interview in progress) must not lose its history.
             let mut cached = model.restored.remove(&device.id).unwrap_or_default();
             let states = model.states.entry(device.id.clone()).or_default();
-            states.retain(|key, _| device.point(key).is_some());
+            states.retain(|key, sample| {
+                device
+                    .point(key)
+                    .is_some_and(|point| device_cache::sample_matches(&point.kind, &sample.value))
+            });
             let mut restored = Vec::new();
+            let mut awaiting = Vec::new();
             for point in &device.points {
                 if let Some(sample) = cached.remove(&point.key)
                     && !states.contains_key(&point.key)
+                    && device_cache::sample_matches(&point.kind, &sample.value)
                 {
+                    awaiting.push(point.key.clone());
                     restored.push(Event::State {
                         point: PointId::new(&device.id, &point.key),
                         value: sample.value.clone(),
@@ -1566,10 +1837,32 @@ impl Hub {
             if !cached.is_empty() {
                 model.restored.insert(device.id.clone(), cached);
             }
+            let pending = model.awaiting_samples.entry(device.id.clone()).or_default();
+            pending.retain(|key| device.point(key).is_some());
+            pending.extend(awaiting);
+            if let Some((kind, integration)) = identity {
+                let cached = CachedDevice {
+                    kind,
+                    integration,
+                    device: Arc::clone(&device),
+                    states: BTreeMap::new(),
+                };
+                if model.cache_definition(cached) {
+                    self.0.definitions_dirty.store(true, Ordering::Release);
+                }
+            }
             model.devices.insert(device.id.clone(), Arc::clone(&device));
-            restored
+            self.0.state_dirty.store(true, Ordering::Release);
+            (restored, revived)
         };
+        let id = device.id.clone();
         self.emit(Event::DeviceUpserted { device });
+        if revived {
+            self.emit(Event::Availability {
+                device: id,
+                online: true,
+            });
+        }
         for event in restored {
             self.emit(event);
         }
@@ -1581,30 +1874,72 @@ impl Hub {
         let Some(path) = &self.0.opts.state_path else {
             return Ok(false);
         };
-        if !self.0.state_dirty.swap(false, Ordering::AcqRel) {
-            return Ok(false);
-        }
-        let all = {
+        let mut generation = Arc::clone(&self.0.state_write).lock_owned().await;
+        let (all, devices, definitions_changed) = {
             let model = self.read();
+            // Consume flags while holding the same lock as mutations: changes
+            // during the subsequent async writes remain dirty for the next flush.
+            let states_changed = self.0.state_dirty.swap(false, Ordering::AcqRel);
+            let definitions_changed = self.0.definitions_dirty.swap(false, Ordering::AcqRel);
+            if !states_changed && !definitions_changed {
+                return Ok(false);
+            }
+            let definitions_changed = definitions_changed || *generation == [0; 16];
             let mut all = model.restored.clone();
-            all.extend(model.states.iter().map(|(k, v)| (k.clone(), v.clone())));
-            all
+            for (id, states) in &model.states {
+                all.entry(id.clone()).or_default().extend(states.clone());
+            }
+            // Disabled instances keep their samples without cloning definitions.
+            for (id, cached) in &model.cached_devices {
+                if !model.states.contains_key(id) {
+                    all.entry(id.clone())
+                        .or_default()
+                        .extend(cached.states.clone());
+                }
+            }
+            let devices = definitions_changed.then(|| model.cached_devices.clone());
+            (all, devices, definitions_changed)
         };
-        if let Err(e) = state_cache::save(path, &all).await {
-            self.0.state_dirty.store(true, Ordering::Release);
-            return Err(e);
-        }
-        Ok(true)
+        let path = path.clone();
+        let mut retry = CacheWriteRetry {
+            hub: self.clone(),
+            definitions_changed,
+            completed: false,
+        };
+        // Tokio filesystem operations can outlive a cancelled caller. Keep the
+        // writer and its owned lock alive together so a subsequent flush cannot
+        // race an unfinished .tmp write or lose a committed generation.
+        tokio::spawn(async move {
+            device_cache::save_snapshot(&path, devices, all, &mut generation).await?;
+            retry.completed = true;
+            drop(retry);
+            Ok(true)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     pub(crate) fn remove_device(&self, id: &DeviceId) {
         let removed = {
             let mut model = self.write();
-            model.states.remove(id);
+            let states_removed = model.states.remove(id).is_some();
+            let restored_removed = model.restored.remove(id).is_some();
+            let cached_removed = model.cached_devices.remove(id).is_some();
+            model.unconfirmed.remove(id);
+            model.awaiting_samples.remove(id);
+            model.held_offline.remove(id);
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
-            model.devices.remove(id).is_some()
+            model.lives.remove(id);
+            let removed = model.devices.remove(id).is_some();
+            if states_removed || restored_removed || cached_removed || removed {
+                self.0.state_dirty.store(true, Ordering::Release);
+            }
+            if cached_removed || removed {
+                self.0.definitions_dirty.store(true, Ordering::Release);
+            }
+            removed
         };
         self.0
             .images
@@ -1622,6 +1957,42 @@ impl Hub {
         source: Arc<dyn crate::media::SnapshotSource>,
     ) {
         self.write().snapshots.insert(device.clone(), source);
+    }
+
+    pub(crate) fn provide_live(
+        &self,
+        device: &DeviceId,
+        source: Arc<dyn crate::media::LiveSource>,
+    ) {
+        self.write().lives.insert(device.clone(), source);
+    }
+
+    /// The device's answer to a browser's offer for its live video. The
+    /// source is called without the model lock.
+    pub async fn live_answer(
+        &self,
+        device: &DeviceId,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> Result<String, crate::media::LiveError> {
+        use crate::media::LiveError;
+        let source = {
+            let model = self.read();
+            if !model.devices.contains_key(device) {
+                return Err(LiveError::UnknownDevice);
+            }
+            model.lives.get(device).cloned().ok_or(LiveError::NoLive)?
+        };
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            source.answer(offer, viewer),
+        )
+        .await
+        {
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(e)) => Err(LiveError::Failed(format!("{e:#}"))),
+            Err(_) => Err(LiveError::Timeout),
+        }
     }
 
     pub(crate) fn provide_printing(
@@ -1737,8 +2108,16 @@ impl Hub {
             .keys()
             .chain(model.labels.keys())
             .chain(model.restored.keys())
+            .chain(model.cached_devices.keys())
             .chain(model.states.keys())
-            .filter(|id| &id.instance() == instance)
+            .filter(|id| {
+                &id.instance() == instance
+                    && model.cached_devices.get(*id).is_none_or(|cached| {
+                        model.drivers.get(instance).is_some_and(|slot| {
+                            slot.kind == &*cached.kind && slot.integration == cached.integration
+                        })
+                    })
+            })
             .collect();
         ids.into_iter().cloned().collect()
     }
@@ -1764,8 +2143,12 @@ impl Hub {
             };
             let key = spec.key.clone();
             self.0.state_dirty.store(true, Ordering::Release);
+            let first_live = model
+                .awaiting_samples
+                .get_mut(device)
+                .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || states.get(&key).is_none_or(|s| s.value != value);
+            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
             states.insert(
                 key.clone(),
                 Sample {
@@ -1789,6 +2172,12 @@ impl Hub {
         let changed = {
             let mut model = self.write();
             if !model.devices.contains_key(device) {
+                return;
+            }
+            if let Some(explicit_offline) = model.unconfirmed.get_mut(device) {
+                if !online {
+                    *explicit_offline = true;
+                }
                 return;
             }
             // The driver speaks for it again.
@@ -1855,6 +2244,32 @@ impl Hub {
 }
 
 impl Model {
+    /// Returns whether the persistent definition set actually changed.
+    fn cache_definition(&mut self, cached: CachedDevice) -> bool {
+        let id = &cached.device.id;
+        if !device_cache::valid_definition(id, &cached) {
+            tracing::warn!("invalid definition omitted from device inventory cache");
+            return self.cached_devices.remove(id).is_some();
+        }
+        if self.cached_devices.get(id).is_some_and(|previous| {
+            previous.device == cached.device
+                && previous.kind == cached.kind
+                && previous.integration == cached.integration
+        }) {
+            return false;
+        }
+        if !self.cached_devices.contains_key(id)
+            && self.cached_devices.len() >= device_cache::MAX_DEVICES
+        {
+            tracing::warn!(
+                "device inventory cache full; fresh discovery will be required for additional devices"
+            );
+            return false;
+        }
+        self.cached_devices.insert(id.clone(), cached);
+        true
+    }
+
     fn view(&self, device: &Arc<Device>) -> DeviceView {
         DeviceView {
             device: Arc::clone(device),
@@ -1863,6 +2278,7 @@ impl Model {
             state: self.states.get(&device.id).cloned().unwrap_or_default(),
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),
+            live: self.lives.contains_key(&device.id),
         }
     }
 }

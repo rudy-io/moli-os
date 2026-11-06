@@ -1,4 +1,5 @@
 # Les pilotes
+- **Aspirateurs robots** (catégorie `sd`, `src/vacuum.rs`, Rowenta et Tefal X-plorer Serie 75) : seule une table de points existe, sous les mêmes clés pour tous : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`, `mop`, `volume` (selon le robot), `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`. Effacer la carte, conduire à la main et nettoyer une zone n'existent pas, même si le cloud les dit écrivables. Ce qui fait bouger le robot est un `Control`. Le produit `X-Plorer Serie 75` reçoit toujours sa table, car la description du cloud nomme des points qu'il ne renvoie pas. Un robot a sa carte sur l'accueil (`web/src/maison/ui/VacuumCard.svelte`) : il passe par toutes les pièces, il n'appartient à aucune.
 
 Un pilote relie un système extérieur (pont Zigbee, box, caméra, télé…) au hub. Chaque
 pilote est une crate `crates/moli-<nom>` et un paquet du catalogue `integrations/<kind>/`
@@ -118,6 +119,45 @@ l'exige).
 En cas d'empreinte différente, l'erreur contient `PIN_MISMATCH` : les pilotes passent alors
 en `waiting` avec la commande `moli-os secrets forget <instance> cert` (ou `cert_sha256`).
 
+## `airzone` : Airzone Local API (`crates/moli-airzone`)
+
+Le pilote natif couvre les 12 opérations de la Local API 1.78 : zones, systèmes,
+eau chaude sanitaire, capteurs de qualité d'air et informations du Webserver.
+Le [registre de couverture](../../integrations/airzone/coverage.json) recense les
+118 schémas de paramètres, dont 31 explicitement écrivables, et les 17 mesures
+d'énergie. Chaque point dépend des capacités effectivement annoncées par le
+contrôleur ; cette couverture ne garantit pas la compatibilité de tous les firmwares.
+
+Une instance par contrôleur, avec `host` explicite. Le défaut TOML historique
+`read_only = false` est conservé pour ne pas désactiver les automatismes existants.
+Le défaut `write = "legacy"` conserve seulement `on`, `target_temperature`, `mode`
+et `fan_speed` (paramètre Airzone `speed`) sur les zones et leurs contrôles partagés
+historiques. `write = "extended"` active explicitement les nouvelles commandes :
+modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
+qualité de l’air et libellé d’intégration. Un essai d’observation configure
+explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
+transport. Les commandes restent soumises aux gardes, aux membres affectés et à
+une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
+démarrage, et une commande n'est jamais rejouée. Les nouvelles zones déjà associées
+au contrôleur sont découvertes lors des lectures ; l'appairage physique n'appartient
+pas à cette API.
+
+HTTP utilise le port 3000 par défaut. HTTPS demande un port explicite et
+`tls_fingerprint`, une empreinte SHA-256 vérifiée ; aucun repli en clair. Si l'eau
+chaude ne rapporte pas son unité, `dhw_units = 0` (°C) ou `1` (°F) permet de la
+déclarer explicitement. Sans unité connue, sa consigne reste en lecture seule.
+
+`moli-os airzone-inspect --instance airzone <opération>` donne un diagnostic
+strictement en lecture seule, avec identifiants et textes libres expurgés. Les
+opérations de diagnostic comprennent les variantes GET, la démonstration synthétique
+et la disponibilité de la page thermostat ; le HTML distant n'est pas affiché.
+Les programmations Cloud, l'installation du réseau, l'appairage et les mises à jour
+du firmware ne sont pas des opérations de la Local API.
+
+Configuration, garde des groupes, limites des réponses, commandes et restrictions :
+[guide Airzone](../../integrations/airzone/README.md).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.
@@ -138,7 +178,7 @@ base_topic = "zigbee2mqtt"  # défaut
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
@@ -414,12 +454,77 @@ host = "192.168.1.x"
 - **Pièges** : un renommage ou un changement de pièce/zone déclenche un rechargement complet. Flux muet 10 min : réouverture et rechargement. Un message SSE (ou une ligne) qui dépasse 1 Mio sans fin : flux fermé, rouvert et rechargement complet. Les commandes tournent à côté du flux avec un budget de 4,5 s (sous les 5 s du hub). Le message « certificat changé » montre l'empreinte épinglée et celle présentée, et donne la commande `secrets forget <instance> cert_sha256` avec l'identifiant réel de l'instance (la clé part avec l'empreinte). Avec `app_key_env` configuré (même si la variable manque) ou une empreinte de la configuration, il ne conseille pas d'oublier l'empreinte : il dit de refaire la clé, ou de changer `cert_sha256` (les empreintes complètes sont dans le journal). `Bridge` n'affiche jamais la clé en `Debug`.
 - **Tests** : `src/model.rs` sur `integrations/hue/fixtures/resources.json` (pont réel) : pièces commandables, zones jamais, boutons, capteurs, événements partiels, encodage ; `src/bridge.rs` : parseur SSE découpé en morceaux, plafond de 1 Mio (ligne sans fin, `data:` sans ligne vide).
 
+## `melcloud` : climatiseurs Mitsubishi Electric (`crates/moli-melcloud`)
+
+- **Couvre** : les unités air-air du MELCloud classique, en lecture et en commande. MELCloud Home est un autre service, non couvert.
+- **Config** : `kind = "melcloud"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secret `token` : la clé de contexte du compte, jamais le mot de passe.
+- **Points** : `on`, `mode`, `target_temperature`, `fan_speed`, `vertical_vane`, `horizontal_vane` **écrivables** selon ce que l'unité annonce ; `temperature` en lecture. Un invité ou un réglage verrouillé reste en lecture.
+- **Commandes** : `Device/Get`, puis `Device/SetAta` avec tout l'état et le drapeau du seul champ changé. L'unité applique l'ordre à son prochain contact ; la liste retarde, donc ce qui a été commandé fait foi 150 s. Budget de 4,5 s, sous les 5 s du hub. La consigne est arrondie au pas et refusée hors de la plage du mode en cours.
+- **Identité** : `DeviceID` du service.
+- **Pièges** : API web non officielle, dépendante d'Internet ; `Offline` varie d'une réponse à l'autre, d'où 3 réponses de suite avant de passer hors ligne. Une clé refusée (401, 403) met le pilote en attente d'un humain.
+- **Tests** : `src/model.rs` sur `integrations/melcloud/fixtures/list_devices.json`, plus les emplacements (zones, étages), les doublons et les valeurs absurdes.
+
+## `overkiz` : Somfy TaHoma en local (`crates/moli-overkiz`)
+
+- **Couvre** : volets, stores, rideaux, écrans, pergolas et auvents compatibles avec
+  l’API locale du mode développeur ; favoris « My » selon les commandes annoncées.
+  Portails et fenêtres sont observés en lecture seule par défaut. Les scénarios
+  enregistrés, programmations et autres fonctions cloud ne sont pas implémentés ici.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "somfy"
+kind = "overkiz"
+[driver.options]
+host = "gateway-example.local"
+read_only = true
+# port = 8443
+# poll_secs = 5
+```
+
+- **Secrets** : jeton du mode développeur dans `token`, empreinte dans `cert_sha256`,
+  rangés sous l’identifiant d’instance. Le certificat est épinglé avant l’envoi du
+  jeton ; le premier contact TOFU exige un réseau de confiance ou une empreinte
+  vérifiée configurée à l’avance. Un jeton refusé ou un certificat changé place
+  le pilote en `waiting`, appareils hors ligne.
+- **Points et garde** : `percent_control` est le pourcentage ouvert (100 = ouvert),
+  de sens `Position` pour les ouvrants ordinaires ; `control` propose seulement les
+  commandes natives qualifiées, `favourite_position` reste une configuration.
+  RTS ne reçoit jamais de position mesurée inventée. Toute écriture d’un portail
+  ou d’une fenêtre exige l’autorisation explicite `writable_openers` par URL exacte
+  et classe ; tous ses points inscriptibles gardent le sens `Control`, curseur
+  compris. `read_only` refuse aussi les commandes admises sur des métadonnées anciennes.
+- **Identité et disponibilité** : SHA-256 de l’URL native exacte, indépendante du
+  nom. Une absence met immédiatement l’appareil hors ligne ; sa suppression exige
+  trois lectures réussies consécutives sans lui. Un retour conserve ses étiquettes
+  et remet le compteur à zéro ; une lecture échouée ne compte pas.
+- **Commandes** : prélecture des capacités et de la disponibilité, budget commun
+  de 4,5 s maximum, un seul `exec/apply` sans rejeu. Un refus isolé ne redémarre pas
+  le pilote. L’accusé natif ne confirme pas le mouvement physique.
+- **Tests et limites** : fixtures synthétiques, vrai Hub et serveur TLS simulé ;
+  inventaire historique anonymisé rejoué hors réseau. Les commandes matérielles
+  restent à qualifier pour cette implémentation.
+  [Détails et convergence](../../integrations/overkiz/README.md),
+  [couverture restante](../../integrations/overkiz/COVERAGE.md).
+
+## `voltalis` : radiateurs Voltalis (`crates/moli-voltalis`)
+
+- **Couvre** : les radiateurs d'un site Voltalis, en lecture et en commande.
+- **Config** : `kind = "voltalis"`, `poll_seconds` en option (300 par défaut, de 60 à 3600). Secrets `username` et `password` : le service n'a pas de clé durable ; le jeton de session reste en mémoire.
+- **Points** : `on`, `mode` (les modes que le radiateur annonce), `target_temperature` (s'il a le mode `temperature`), `automatic` (sur le programme du service) **écrivables** ; `fault` (tout diagnostic autre que `OK`) en lecture.
+- **Commandes** : `GET manualsetting` pour trouver le réglage du radiateur, puis `PUT manualsetting/{id}`, jusqu'à nouvel ordre ; `automatic = true` ferme le réglage manuel. Un mode ou une consigne allume le radiateur ; éteindre garde le mode. Session finie : reconnexion et un second essai ; refus à la reconnexion : le pilote s'arrête. Budget de 4,5 s, sous les 5 s du hub.
+- **Identité** : `id` de l'appareil dans le service.
+- **Pièges** : API web non officielle, dépendante d'Internet. Un compte refusé arrête le pilote jusqu'à l'intervention d'un humain, pour ne pas bloquer le compte ; une session expirée est rouverte au relevé suivant.
+- **Tests** : `src/model.rs` sur `integrations/voltalis/fixtures/`, plus les statuts inconnus et les valeurs absurdes.
+
 ## `dirigera` : hub IKEA Dirigera (`crates/moli-dirigera`)
 
 - **Couvre** : lampes (marche, luminosité, température de couleur, couleur), prises (marche,
   puissance, courant, tension, énergie), capteurs (température, humidité, PM2,5, COV, CO₂,
-  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis) et batteries.
-  Pas encore : stores, purificateurs, enceintes, pièces et scènes IKEA.
+  mouvement, éclairement, ouverture, fuite d'eau), boutons de raccourci (appuis), stores
+  (position, ouvrir / stop / fermer, mouvement ; non vérifiés sur un vrai store) et batteries.
+  Pas encore : purificateurs, enceintes, pièces et scènes IKEA.
 - **Protocole** : API locale **non officielle**, HTTPS sur **8443**, certificat épinglé (un
   certificat d'usine P-384 valable jusqu'en 2071). Chargement complet `GET /v1/home`, puis
   WebSocket `wss://<hub>:8443/v1` (événements `deviceStateChanged`, `remotePressEvent`…), un
@@ -462,9 +567,20 @@ host = "192.168.1.x"
   ; **écrivables** si l'attribut est dans `capabilities.canReceive`. En mode couleur,
   `color_temp` vaut `null` ; en mode blanc (`colorMode: temperature`), `color` vaut `null`. Prise : `on` ✎, `power`, `current`, `voltage`, `energy` (kWh).
   Capteurs : `temperature`, `humidity`, `pm25`, `voc_index`, `co2`, `motion` (`isDetected`),
-  `illuminance`, `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
-  (`single`, `double`, `long`, en `pulse`). `battery` partout où il y a une pile.
-  Disponibilité : `isReachable` (aussi dans chaque événement).
+  `illuminance` (lux, converti depuis la mesure Matter ou Zigbee `10000·log10(lux)+1` comme
+  pour Hue ; 0, trop sombre pour mesurer, donne 0 lx ; 0xFFFF, aucune mesure, `null`),
+  `contact` (vrai = fermé, comme Hue), `leak`. Bouton de raccourci : `button`
+  (`single`, `double`, `long`, en `pulse`). Store : `position` ✎ (sens `position`, 0-100 %,
+  100 = ouvert ; le hub compte à l'envers, 0 = en haut : lue dans `blindsCurrentLevel`,
+  envoyée en `blindsTargetLevel`, inversée), `control` ✎ (`open` / `stop` / `close`, un ordre
+  jamais relu, envoyé en `blindsState` `up` / `stopped` / `down`), `moving` (`UP` / `DOWN` /
+  `STOP` depuis `blindsState`, `null` pour une valeur inconnue) ; reconnu comme volet par le
+  tableau de bord et l'assistant. `battery` partout où il y a une pile.
+  Disponibilité : `isReachable` (aussi dans chaque événement). **Migration** : au
+  déploiement, l'historique `illuminance` des capteurs Dirigera passe de la mesure brute
+  (jusqu'à 40001) aux lux (jusqu'à 10 000) ; les anciennes valeurs restent brutes dans les
+  graphiques. Une automatisation écrite avec un seuil brut (`< 20000`, environ 100 lx) est à
+  reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
   native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
@@ -485,7 +601,17 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, types inconnus ignorés, encodage des commandes.
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
+  ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
+
+## `enedis` : compteur Linky par la Conso API (`crates/moli-enedis`)
+
+- **Couvre** : la consommation d'un compteur Linky, heure par heure, avec un jour de retard. Lecture seule.
+- **Config** : `kind = "enedis"`, `prm` (les 14 chiffres du compteur). Secret `token` : le jeton de la Conso API.
+- **Points** : `last_day` (date du dernier jour complet), `last_day_kwh`, `last_day_peak`, `hours` (les heures reçues, en JSON, pour un compteur `history = true` de `[energy]`).
+- **Identité** : un appareil `linky` par instance.
+- **Pièges** : service gratuit, non officiel, au quota partagé : une requête par jour à une heure propre au compteur, une seconde vers 14 h si la veille manque, aucune de plus au redémarrage (sauf au tout premier). Une mesure manquante écarte son heure et son jour. Les heures sont locales et nomment la fin de la mesure ; au passage à l'heure d'hiver, la même heure revient deux fois. Un jeton refusé arrête le pilote jusqu'à l'intervention d'un humain.
+- **Tests** : `src/model.rs` sur `integrations/enedis/fixtures/`, plus les changements d'heure, les mesures absurdes et le calendrier des requêtes.
 
 ## `tuya` : Tuya Wi-Fi en local (`crates/moli-tuya`)
 
@@ -710,9 +836,10 @@ name = "Bambu A1"              # optionnel
 - **Protocole** : HTTP local, sans authentification (port 7125). Au premier contact : `printer/info` (nom d'hôte = identité), `printer/objects/list` (la **forme** : têtes `extruder…`, plateau, capteur d'enceinte `temperature_sensor cavity|chamber|chamber_temp`, lumière `led …`/`neopixel …`, table de filaments Snapmaker `print_task_config`, firmware Creality reconnu à sa sonde `prtouch…`), `machine/system_info` (modèle, s'il le dit ; une Creality ne le dit pas : « Creality K2 » est tiré de son nom d'hôte `K2-…`). Puis une seule requête `objects/query` toutes les **5 s en impression, 15 s sinon, 30 s éteinte** ; métadonnées du fichier à chaque nouveau travail (estimation du trancheur, vignette) ; totaux de l'historique toutes les 10 min.
 - **Configuration** : `host`, `port` (7125), `name` (par défaut le modèle annoncé, sinon le nom d'hôte).
 - **Points** : `state` (`standby`, `printing`, `paused`, `complete`, `cancelled`, `error` ; Klipper arrêté = `error` avec sa raison dans `message`), `printing`, `progress` (%), `remaining` (min : moyenne de l'estimation du trancheur et de l'avancée du fichier), `job`, `layer`, `total_layers`, `print_duration` (min), `filament_used` (m), `nozzle_temperature`/`nozzle_target` (tête active), `active_tool`, `tool<N>_temperature`/`_target`/`_filament` (« PLA Basic · Snapmaker », « vide »)/`_color` (`#rrggbb`), `bed_*`, `chamber_temperature`, `message`, `jobs_total`, `print_hours_total`, `filament_total` (m). **Écrivables** : `light` (`SET_LED … RED/GREEN/BLUE/WHITE`), `control` (`pause`, `resume`, `cancel` → `POST /printer/print/<ordre>`), de sémantique `control` : un agent attend un humain.
-- **Creality (K2)** : son `display_status.progress` est très en retard sur l'impression (19 % pour 44 %) : quand `virtual_sdcard.cur_print_data` est là, l'avancement est `virtual_sdcard.progress`, celui de son écran. Moonraker n'y lit pas le trancheur (`slicer: Unknown`, ni estimation ni vignette) : l'estimation vient de `cur_print_data.metadata.estimated_time`, les couches de `virtual_sdcard.layer`/`layer_count`.
+- **Creality (K2)** : son `display_status.progress` est très en retard sur l'impression (19 % pour 44 %) : pendant l'impression du fichier que `virtual_sdcard.cur_print_data` décrit (même nom de fichier que `print_stats`), l'avancement est `virtual_sdcard.progress`, celui de son écran. Moonraker n'y lit pas le trancheur (`slicer: Unknown`, ni estimation ni vignette) : l'estimation vient de `cur_print_data.metadata.estimated_time` (même condition), les couches de `virtual_sdcard.layer`/`layer_count`.
 - **Image** : la vignette du travail (la plus grande que le trancheur a mise dans le G-code) sert d'image de l'appareil (`/api/devices/{id}/snapshot`).
-- **Pas fait** : lancer une impression (le plateau doit être libre : un humain sur place), la caméra (le flux du U1 ne répond pas en HTTP local), le flux en direct par websocket (le relevé toutes les 5 s suffit).
+- **Caméra d'une Creality** (`src/creality.rs`) : WebRTC seulement, aucune image fixe (`/server/webcams/list` vide, le `/webcam/` de Fluidd sans rien derrière). Le **navigateur** lit la vidéo : Moli passe son offre au service caméra de l'imprimante (`POST :8000/call/webrtc_local`, `{type, sdp}` en JSON puis base64, comme go2rtc la lit) et rapporte la réponse (`/api/devices/{id}/live`, appareil `live: true`). La caméra ne lit une adresse que si elle est écrite comme go2rtc l'écrit (`… typ host ufrag … generation 0`) : Moli réécrit les lignes `a=candidate` de l'offre avec l'adresse du navigateur qu'il voit (`LiveSource::answer(offer, viewer)`, le nom `.local` du navigateur remplacé ; TCP et IPv6 retirés). La vidéo va de l'imprimante au navigateur : au réseau de la maison seulement (Moli ouvert par son adresse locale), et le navigateur doit joindre l'imprimante (UDP compris). La carte de l'imprimante la montre pendant une impression, à la demande sinon.
+- **Pas fait** : lancer une impression (le plateau doit être libre : un humain sur place), la caméra du U1 (son flux ne répond pas en HTTP local), le flux en direct par websocket (le relevé toutes les 5 s suffit).
 - **Tests** : réponses réelles du U1 et de la K2 (`integrations/klipper/fixtures/u1.json`, `k2.json`) → forme, points, valeurs ; estimation du temps restant ; Klipper arrêté ; ordres → requêtes.
 
 ## `shelly` : Shelly Gen2 et suivants (`crates/moli-shelly`)
@@ -919,7 +1046,11 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent), `state`, `brightness`, `color_temp`, `color`, thermostat | ZBDongle-E (EmberZNet 7.4.4.0) + Innr RB 287 C |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
-| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, autres capteurs : pas encore |
+| `melcloud` | `moli-melcloud` | HTTPS vers le MELCloud classique, clé de contexte | oui : marche, mode, consigne, ventilateur, ailettes | deux unités air-air (lecture) ; commandes sur l'une |
+| `overkiz` | `moli-overkiz` | HTTPS local 8443, certificat épinglé | selon capacités ; portails/fenêtres explicitement revus et gardés | modèle rejoué hors réseau ; transport et commandes sur simulateur TLS |
+| `voltalis` | `moli-voltalis` | HTTPS vers le service, compte puis jeton de session | oui : marche, mode, consigne, programme | quatre radiateurs `VX_WIRE` (lecture) ; commandes sur l'un |
+| `dirigera` | `moli-dirigera` | HTTPS 8443 + WebSocket, local, épinglé (API non officielle) | oui : lampes, prises, stores | hub Dirigera (firmware 2.975) : lampes TRADFRI et ORMANAS (commandes comprises), détecteur MYGGSPRAY (lecture), redémarrage du hub ; prises, boutons, stores, autres capteurs : pas encore |
+| `enedis` | `moli-enedis` | HTTPS vers la Conso API, jeton du client | non | un compteur Linky (lecture, pas de 15 minutes) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |

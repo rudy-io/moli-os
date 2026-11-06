@@ -73,6 +73,7 @@ async fn bedroom_with(dir: &std::path::Path, dashboard: Dashboard) -> Hub {
         )),
         guard: GuardPolicy {
             protected_rooms: vec!["Chambre".into()],
+            protected_devices: vec![],
             quiet_hours: None,
             protect_unassigned: false,
             dashboard,

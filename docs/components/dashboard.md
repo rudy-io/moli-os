@@ -27,6 +27,16 @@ Le flux SSE `/api/events` est ouvert **une seule fois** et partagé (`web/src/li
 | Automatismes | `#/automatismes`, `#/automatismes/<id>` | liste, idées, éditeur à canevas (voir [automatismes.md](automatismes.md)) |
 | Système | `#/systeme` | **carte vivante** du système et comparaison avec HA (voir plus bas) |
 
+## Airzone : une vue de lecture dédiée
+
+`#/airzone` est chargé à la demande lorsque le pilote natif Airzone est configuré. La navigation Maison et un lien dans Atelier y donnent accès. Les cartes regroupent les zones par instance et système ; recherche par nom/pièce et filtre de système restent locaux au navigateur. Le pont Home Assistant reste dans ses vues existantes : le fabricant ou le nom ne suffisent pas à classer un appareil comme natif.
+
+La fiche `#/airzone/<identifiant encodé>` distingue température mesurée, consigne, humidité, mode, disponibilité et demandes effectivement signalées. Un appui sur une température/consigne ouvre l’historique existant. Les informations secondaires sont regroupées par thèmes ; les commandes communes sont présentées séparément, uniquement lorsque leurs membres contiennent la zone. `#/airzone/installation` regroupe passerelles, systèmes et ressources facultatives.
+
+**Cette vue est toujours consultative**, y compris pour un pilote dont les points sont inscriptibles : aucun contrôle ni chemin d’envoi d’ordre. Elle partage le flux SSE, les unités déclarées et les formats existants, sans relève supplémentaire. Les anciennes valeurs hors ligne sont signalées, les inconnues ne deviennent pas des zéros ou des degrés Celsius, et aucune demande n’est déduite d’un écart de température. Les programmations cloud ne sont pas annoncées comme disponibles localement.
+
+Le modèle pur `maison/lib/airzone.js` conserve les périmètres et les champs inconnus. Les composants `AirzoneZoneCard` et `AirzoneReadings` sont partagés entre aperçu, fiche et diagnostic. Les tests métier et SSR utilisent exclusivement des appareils fictifs ; les captures publiées sont celles d’une maison de démonstration.
+
 Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
 Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 
@@ -83,6 +93,43 @@ telles que les appareils les nomment).
 
 ## Bibliothèques partagées (`web/src/maison/lib/`)
 
+- `capabilities.js` : droits d'écriture par point et disponibilité, choix réellement
+  proposés, plages numériques et arrondi sur le pas annoncé. Les limites du pilote
+  priment ; les anciens contrats sans bornes gardent les replis des contrôles de
+  volume (0–100) et de consigne (16–30, pas 0,5, seulement en °C ou sans unité
+  déclarée). Le volume d'annonce conserve son
+  pas de 5 en l'absence d'un pas explicite. Une borne invalide n'est jamais remplacée
+  par un repli ; un point absent, en lecture seule ou hors ligne ne devient pas
+  commandable pour autant. L'origine des pas est le minimum déclaré, ou zéro à
+  défaut : un minimum de présentation ne la décale pas. Les curseurs affichent
+  les premier et dernier crans dans les limites conservées du contrat ; le
+  validateur du cœur contrôle ces limites mais n'impose pas de grille de pas.
+  Les volets sont reconnus par le sens `position` (0–100 %, 100 = ouvert), ou
+  leur ordre ouvrir/fermer, sans devenir des interrupteurs. Le curseur exige
+  un point `position` inscriptible et une mesure valide ; les limites annoncées
+  restent respectées. Le repli Tuya `percent_control` est seulement informatif
+  et ne remplace jamais un sens `position` déclaré. Les ordres conservent la
+  casse du pilote (`OPEN` ou `open`) ; une cible ou une casse ambiguë ne produit
+  pas de commande. Le mouvement reste affiché, même sans position mesurée.
+- `CoverTile.svelte` et `cover-controls.js` : les actions annoncées restent visibles
+  avec icône et libellé, désactivées en lecture seule, hors ligne ou pendant une
+  déconnexion du flux Moli. `#/pieces/volets` les regroupe par pièce en grille ;
+  le détail d'accès renvoie à Système. Une position mesurée à 0 % dit « Fermé »,
+  à 100 % « Ouvert » ; une lecture périmée est explicitement la dernière position.
+  Dans les pièces, le mode « icônes seules » place le nom et l'état dans l'infobulle ;
+  les boutons d'action et de vitesse gardent leur icône, leur nom accessible et une
+  cible tactile de 44 px. Le choix de présentation ne change ni les droits ni la vitesse.
+  Le choix **Normal / Lent**, proposé seulement si annoncé, décrit la prochaine
+  commande : `open_slow` / `close_slow` ou le point d'action facultatif
+  `percent_control_slow` (pourcentage ouvert). Ce point n'est jamais une observation :
+  l'état reste lu sur le point de position habituel. Aucune vitesse persistante n'est
+  déduite. Une capacité lente retirée ne déclenche jamais un ordre normal en repli.
+  **Stop** conserve son ordre propre, même pendant l'envoi d'une autre commande.
+  L'acceptation, la validation demandée et l'erreur ont des retours distincts ;
+  l'interface attend les lectures du pilote pour confirmer le déplacement.
+  Captures d'une installation **fictive** : [jour](../images/tahoma-shutter-quick-actions-light-demo.png),
+  [nuit](../images/tahoma-shutter-quick-actions-demo.png),
+  [mobile](../images/tahoma-shutter-quick-actions-mobile-demo.png).
 - `home.svelte.js` : état de la maison (config, ordres retenus, toasts, thème), lecture des
   valeurs, `powerKey` (le point qui allume/éteint), `deviceKind`, `roomList`, `act` (envoie
   un ordre, gère le 202 de la garde), `confirmHeld` (code PIN), formats français.
@@ -115,3 +162,23 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
 - Télé : applis et clavier non disponibles (JointSpace ne le permet pas ; protocole
   Android TV Remote v2 à faire).
 - Clims : lecture seule tant que les écritures Daikin n'ont pas été testées physiquement.
+- **Vannes thermostatiques** : une vanne **Zigbee2MQTT** (SONOFF TRVZB, TRV-ZBT) est un climat
+  reconnu à ses points `occupied_heating_setpoint` et `system_mode`, sans rien déclarer. Sa carte
+  (`ui/ValveCard.svelte`) montre la température mesurée (`local_temperature`), la consigne (bornes
+  et pas lus dans le point) et les modes que la vanne accepte ; chaque ordre passe par le chemin
+  normal du hub, donc par la garde. Une vanne d'un autre
+  protocole peut nommer ses points autrement : une Danfoss Z-Wave expose `temperature` et
+  `occupied_heating_setpoint` mais pas `system_mode`, elle n'est pas reconnue.
+  La **table horaire** (`ui/ScheduleEditor.svelte`, calcul pur dans `lib/schedule.js`) s'ouvre sous
+  la carte quand la vanne énonce `weekly_schedule_<jour>` en écriture : un jour à la fois, les
+  créneaux `HH:mm/°C`, un « appliquer aussi à » pour d'autres jours. Chaque jour écrit est un ordre
+  comme un autre (`act`, donc la garde). Les bornes de température sont celles de la consigne de la
+  vanne ; le nombre de créneaux par jour n'est pas un point : 6 (SONOFF TRVZB), 12 si la vanne a
+  des groupes de programmes (TRV-ZBT), d'après les convertisseurs de Zigbee2MQTT. Une TRVZB ne
+  renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
+  garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
+  quand ce n'est pas le groupe suivi par la vanne.
+  La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
+  ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
+  échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
+  n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).

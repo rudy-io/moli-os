@@ -9,6 +9,9 @@
 //! [`Event`]: moli_core::Event
 
 mod addresses;
+mod device_cache;
+#[cfg(test)]
+mod device_cache_tests;
 mod driver;
 pub mod guard;
 mod hub;
@@ -28,6 +31,8 @@ pub use hub::{
     LabelError, LabelPatch, MAX_LABEL, MAX_PENDING, MAX_PENDING_PER_CALLER, Opener, Snapshot,
     opener,
 };
-pub use secrets::{MasterKey, forget_secret, read_secret, set_secret};
+pub use secrets::{
+    DurableLease, DurableSecrets, MasterKey, forget_secret, read_secret, set_secret,
+};
 pub use stats::Stats;
 pub use supervisor::spawn_driver;

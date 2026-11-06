@@ -19,8 +19,10 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RUN: Duration = Duration::from_secs(60);
 /// Once Moli stops, how long a driver may still run after its
 /// `next_command()` ended (a last write to its device: the Zigbee driver
-/// records its frame counter); beyond, it is dropped where it stands.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// records its frame counter); beyond, it is dropped where it stands. Under
+/// the 5 s the hub waits for an order: one still queued hears that its driver
+/// stopped, not a timeout.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(4);
 
 /// Registers `driver` under `instance` and runs it until `cancel` fires
 /// (then for [`SHUTDOWN_GRACE`] at most, for it to finish cleanly).
@@ -82,6 +84,8 @@ pub fn spawn_driver(
             }
             backoff = (backoff * 2).min(BACKOFF_MAX);
         }
+        ctx.drain("driver stopped");
+        hub.mark_instance_offline(&instance);
         hub.set_driver_status(&instance, DriverStatus::Stopped);
     })
 }

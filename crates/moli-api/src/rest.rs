@@ -703,6 +703,64 @@ pub(crate) async fn media(
 
 // ---- camera images ----------------------------------------------------------
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LiveBody {
+    /// The browser's WebRTC offer (SDP).
+    sdp: String,
+}
+
+/// An SDP is a few kilobytes; more is not an offer.
+const MAX_SDP: usize = 64 * 1024;
+
+/// Live video the browser plays (WebRTC): the browser's offer goes to the
+/// device, its answer comes back; the video itself never passes through
+/// Moli. Who may see a camera's image may see this.
+pub(crate) async fn live(
+    State(hub): State<Hub>,
+    Extension(humans): Humans,
+    caller: Caller,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<LiveBody>,
+) -> Response {
+    use moli_runtime::media::LiveError;
+    let id = DeviceId::from(id);
+    if caller
+        .person
+        .as_ref()
+        .is_some_and(crate::people::PersonRef::is_guest)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.personnes.invite_limite"),
+        );
+    }
+    if let Some(room) = hub.protected_room(&id)
+        && !humans.is_human(&headers, &caller.key)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.camera.piece_protegee", room = room),
+        );
+    }
+    if body.sdp.len() > MAX_SDP || !body.sdp.starts_with("v=0") {
+        return error(StatusCode::BAD_REQUEST, "not a WebRTC offer (SDP)");
+    }
+    // The browser's address, when it is on the home network: the device
+    // sends its video there.
+    let viewer = matches!(caller.via, Via::Lan | Via::Loopback)
+        .then(|| caller.key.parse::<std::net::IpAddr>().ok())
+        .flatten();
+    match hub.live_answer(&id, body.sdp, viewer).await {
+        Ok(sdp) => Json(json!({ "sdp": sdp })).into_response(),
+        Err(e @ (LiveError::UnknownDevice | LiveError::NoLive)) => {
+            error(StatusCode::NOT_FOUND, &e.to_string())
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    }
+}
+
 /// A fresh camera image. A camera in a protected room shows itself only to
 /// a human session (PIN): an agent or a script never looks into a bedroom.
 pub(crate) async fn snapshot(
@@ -862,6 +920,72 @@ pub(crate) async fn energy(Extension(Metered(energy)): Extension<Metered>) -> Re
     match energy.summary().await {
         Ok(summary) => Json(summary).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PriceBody {
+    /// The house's price of a kWh, in the currency (0.2319).
+    price: f64,
+}
+
+/// More than this per kWh is a price typed in cents (23.19 for 0.2319).
+const MAX_HOUSE_PRICE: f64 = 5.0;
+
+/// The house's price of a kWh, for the meters without a price of their own:
+/// changed by a person (code) or an owner, from now on, journaled.
+pub(crate) async fn set_energy_price(
+    State(hub): State<Hub>,
+    Extension(Metered(energy)): Extension<Metered>,
+    Extension(humans): Humans,
+    Extension(persons): Extension<Arc<crate::people::People>>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(body): Json<PriceBody>,
+) -> Response {
+    let Some(energy) = energy else {
+        return error(
+            StatusCode::NOT_FOUND,
+            &moli_i18n::tr!("serveur.energie.absente"),
+        );
+    };
+    let human = humans.is_human(&headers, &caller.key);
+    if !human && !crate::people_api::is_owner(&caller, &humans, &persons, &headers) {
+        return error(
+            StatusCode::FORBIDDEN,
+            &moli_i18n::tr!("serveur.energie.prix_humain"),
+        );
+    }
+    let price = body.price;
+    if !(price.is_finite() && price > 0.0 && price <= MAX_HOUSE_PRICE) {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &moli_i18n::tr!(
+                "serveur.energie.prix_invalide",
+                currency = energy.config().currency.as_str()
+            ),
+        );
+    }
+    match energy.set_house_price(price).await {
+        Ok(before) => {
+            let origin = if human {
+                Origin::Ui
+            } else {
+                origin(&hub, &headers, &humans, &caller)
+            };
+            hub.record_setting(
+                origin,
+                Some(caller.describe()),
+                "energy.price",
+                before.map(Value::from),
+                Value::from(price),
+            );
+            tracing::info!(client = %caller.describe(), price, "house price of a kWh changed");
+            Json(json!({ "price": price, "before": before, "prices": energy.house_prices() }))
+                .into_response()
+        }
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &e.to_string()),
     }
 }
 

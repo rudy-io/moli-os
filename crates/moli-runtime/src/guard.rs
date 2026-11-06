@@ -22,6 +22,9 @@ use unicode_normalization::UnicodeNormalization as _;
 pub struct GuardPolicy {
     /// Rooms where agents never act without a human's approval.
     pub protected_rooms: Vec<String>,
+    /// Devices where the same goes, whatever their room (a plug feeding the
+    /// internet box). Ids, as in `z2m:0x…`.
+    pub protected_devices: Vec<String>,
     pub quiet_hours: Option<QuietHours>,
     /// Treat devices with no room at all as protected (nobody can tell
     /// where they are, so nobody should act on them unattended).
@@ -70,6 +73,11 @@ pub struct GuardStatus {
     /// Protected rooms matching no device: protection silently not applying.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unmatched_protected_rooms: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub protected_devices: Vec<String>,
+    /// Protected devices the hub does not know: same silence.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unmatched_protected_devices: Vec<String>,
     pub protect_unassigned: bool,
     pub dashboard: Dashboard,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -204,6 +212,8 @@ impl GuardPolicy {
         GuardStatus {
             protected_rooms: self.protected_rooms.clone(),
             unmatched_protected_rooms: Vec::new(),
+            protected_devices: self.protected_devices.clone(),
+            unmatched_protected_devices: Vec::new(),
             protect_unassigned: self.protect_unassigned,
             dashboard: self.dashboard,
             quiet_hours: self.quiet_hours.as_ref().map(|q| QuietStatus {
@@ -256,6 +266,7 @@ mod tests {
     fn policy() -> GuardPolicy {
         GuardPolicy {
             protected_rooms: vec!["Chambre à coucher".into(), "Petite chambre".into()],
+            protected_devices: vec![],
             quiet_hours: Some(QuietHours::parse("21:00", "07:30", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
@@ -311,6 +322,7 @@ mod tests {
         let noon = at("2026-10-03T10:00:00Z");
         let pin = GuardPolicy {
             protected_rooms: vec![],
+            protected_devices: vec![],
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: Dashboard::Pin,
@@ -405,6 +417,7 @@ mod tests {
     fn quiet_hours_can_target_rooms() {
         let p = GuardPolicy {
             protected_rooms: vec![],
+            protected_devices: vec![],
             quiet_hours: Some(
                 QuietHours::parse("21:00", "07:30", "Europe/Paris", vec!["Salon".into()]).unwrap(),
             ),
@@ -464,6 +477,7 @@ mod tests {
         assert!(strict.room_change_needs_human(&[]).is_some());
         let quiet_salon = GuardPolicy {
             protected_rooms: vec![],
+            protected_devices: vec![],
             quiet_hours: Some(
                 QuietHours::parse("21:00", "07:30", "Europe/Paris", vec!["Salon".into()]).unwrap(),
             ),
@@ -478,6 +492,7 @@ mod tests {
     fn equal_bounds_mean_all_day() {
         let p = GuardPolicy {
             protected_rooms: vec![],
+            protected_devices: vec![],
             quiet_hours: Some(QuietHours::parse("00:00", "00:00", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,

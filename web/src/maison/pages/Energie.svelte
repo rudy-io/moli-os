@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { home, hub, value, isOn, nameOf, deviceKind, doorOpen, act } from '../lib/home.svelte.js';
+  import { isValve } from '../lib/capabilities.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
   import { offPeak, nextChange, clockText, minutesText, windowText, baseload, typicalDay, todayByHour, prices, advise } from '../lib/energy-advice.js';
   import { t } from '../../lib/i18n.svelte.js';
@@ -8,6 +9,7 @@
   import EnergyChart from '../ui/EnergyChart.svelte';
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
+  import HousePrice from '../ui/HousePrice.svelte';
 
   onMount(useEnergy);
 
@@ -181,7 +183,7 @@
 
   const climates = $derived(
     Object.values(hub.devices)
-      .filter((d) => deviceKind(d) === 'climate')
+      .filter((d) => deviceKind(d) === 'climate' && !isValve(d))
       .map((d) => ({
         name: nameOf(d.id),
         on: value(d.id, 'on') === true,
@@ -413,6 +415,8 @@
         {t('energie.histo.avant_moli')}
       </p>
     </section>
+
+    <HousePrice />
   {/if}
 </div>
 

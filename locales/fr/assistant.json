@@ -21,6 +21,7 @@
   "assistant.recap.interrompu": "interrompu",
   "assistant.recap.fin": "(conversation close)",
   "assistant.recap.more": "et {n} échanges plus tôt (voir le tableau de bord)",
+  "assistant.recap.own": "et {n} questions posées depuis le tableau de bord",
   "assistant.power.total": "Électricité en direct : {watts} pour toute la maison (compteur général, ce n'est pas un appareil)",
   "assistant.power.unknown": "Électricité en direct : inconnue",
   "assistant.power.circuits": " ; circuits mesurés : {circuits} ; le reste de la maison (non mesuré à part) : {rest}",

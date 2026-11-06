@@ -179,12 +179,17 @@ impl View {
             Event::ApprovalRequested { request } => {
                 (request.point.split().map(|(id, _)| id), false)
             }
-            Event::DeviceUpserted { device } => (Some(device.id.clone()), true),
+            Event::DeviceUpserted { device } | Event::DeviceRestored { device, .. } => {
+                (Some(device.id.clone()), true)
+            }
             Event::DeviceRemoved { device } | Event::LabelChanged { device, .. } => {
                 (Some(device.clone()), true)
             }
             // A driver's state, a decision on a request: no room in them.
-            Event::DriverStatus { .. } | Event::ApprovalResolved { .. } => return Pass::Event,
+            Event::DriverStatus { .. }
+            | Event::DriverRegistered { .. }
+            | Event::ApprovalResolved { .. }
+            | Event::LayoutChanged {} => return Pass::Event,
             // The house's journal and notices are the household's.
             Event::Journal { .. } | Event::Notice { .. } => return Pass::Drop,
         };

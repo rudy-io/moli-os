@@ -1,5 +1,6 @@
 //! Moli OS binary: one process, every surface.
 
+mod airzone;
 mod backup;
 mod catalogue;
 mod config;
@@ -44,6 +45,8 @@ enum Command {
     Serve,
     /// Validate the configuration and exit.
     CheckConfig,
+    /// Read-only Airzone diagnostics; demo data is never imported as devices.
+    AirzoneInspect(airzone::Inspect),
     /// Operator tools for the encrypted secret store (values are never shown).
     #[command(subcommand)]
     Secrets(SecretsCommand),
@@ -254,6 +257,7 @@ fn main() -> anyhow::Result<()> {
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
+        Command::AirzoneInspect(args) => airzone::run(&config, &args),
         Command::Secrets(SecretsCommand::Forget { instance, name }) => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
@@ -1118,6 +1122,7 @@ fn housekeeping(hub: &Hub, cancel: &CancellationToken) -> tokio::task::JoinHandl
         let mut tick = tokio::time::interval(HOUSEKEEPING);
         let mut rounds = 0u32;
         let mut unmatched: Vec<String> = Vec::new();
+        let mut unmatched_devices: Vec<String> = Vec::new();
         loop {
             tokio::select! {
                 () = cancel.cancelled() => break,
@@ -1133,6 +1138,13 @@ fn housekeeping(hub: &Hub, cancel: &CancellationToken) -> tokio::task::JoinHandl
                     tracing::warn!(rooms = ?lost, "protected rooms match no device: protection not applying");
                 }
                 unmatched = lost;
+            }
+            let lost = hub.unmatched_protected_devices();
+            if rounds > 1 && lost != unmatched_devices {
+                if !lost.is_empty() {
+                    tracing::warn!(devices = ?lost, "protected devices unknown: protection not applying");
+                }
+                unmatched_devices = lost;
             }
             if !rounds.is_multiple_of(STATE_FLUSH_ROUNDS) {
                 continue;
@@ -1170,11 +1182,16 @@ const KINDS: &[&str] = &[
     "zigbee",
     "zwave",
     "hue",
+    "overkiz",
     "dirigera",
+    "enedis",
     "homeassistant",
     "igd",
+    "melcloud",
     "tapo",
+    "voltalis",
     "shelly",
+    "airzone",
     "izypower",
     "solarman",
     "philips",
@@ -1312,6 +1329,7 @@ fn spawn_drivers(
     Ok((tasks, gates))
 }
 
+#[allow(clippy::too_many_lines)] // one short arm per kind of driver
 fn build_driver(
     config: &DriverConfig,
     data_dir: &std::path::Path,
@@ -1340,18 +1358,29 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "homeassistant" => configured_driver(config, moli_homeassistant::HomeAssistant::new)?,
+        "overkiz" => configured_driver(config, moli_overkiz::Overkiz::new)?,
         "dirigera" => Arc::new(moli_dirigera::Dirigera::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "enedis" => Arc::new(moli_enedis::Enedis::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "igd" => Arc::new(moli_igd::Igd::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "melcloud" => Arc::new(moli_melcloud::Melcloud::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "tapo" => Arc::new(moli_tapo::Tapo::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "voltalis" => Arc::new(moli_voltalis::Voltalis::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "shelly" => Arc::new(moli_shelly::Shelly::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "airzone" => configured_driver(config, moli_airzone::Airzone::new)?,
         "izypower" => Arc::new(moli_izypower::Izypower::new(
             config.options.clone().try_into().with_context(context)?,
         )),

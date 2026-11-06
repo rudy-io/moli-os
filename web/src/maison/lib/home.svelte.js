@@ -3,8 +3,9 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
+import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve } from './capabilities.js';
 
-export { hub };
+export { hub, positionPoint, coverOrder };
 
 export const home = $state({
   /** @type {any} layout from /api/home ({} = automatic) */
@@ -115,31 +116,8 @@ export function nameOf(id, fallback) {
   return fallback || d?.label?.name || d?.native_name || t('commun.appareil');
 }
 
-/** How far a shutter is open: the point of the `position` sense (Zigbee2MQTT). */
-export function positionPoint(d) {
-  return d?.points.find((p) => p.semantic === 'position') ?? null;
-}
-
-/** The point that orders a shutter to open, stop or close: a writable enum
- *  that offers both « open » and « close » (`OPEN` / `CLOSE` on Zigbee2MQTT),
- *  whatever the case. It also tells a plain open / close / stop motor, which
- *  has no `position`, from a switch. */
-export function coverOrder(d) {
-  const offers = (p, word) => p.kind.values?.some((v) => v.toLowerCase() === word);
-  return d?.points.find((p) => p.access?.write && p.kind.type === 'enum' && offers(p, 'open') && offers(p, 'close')) ?? null;
-}
-
 /** The point that switches the device on and off. */
-export function powerKey(d) {
-  if (!d) return null;
-  // A shutter is not a switch: its `state` is an order, never « on ».
-  if (positionPoint(d) || coverOrder(d)) return null;
-  const writable = d.points.filter((p) => p.access?.write);
-  const p =
-    writable.find((p) => p.semantic === 'on_off' && p.kind.type === 'binary') ??
-    writable.find((p) => ['on', 'switch_1', 'switch', 'state'].includes(p.key));
-  return p?.key ?? null;
-}
+export const powerKey = powerPoint;
 
 const truthy = (v) => v === true || v === 'ON' || v === 'on' || v === 1;
 
@@ -150,7 +128,7 @@ export function isOn(id, point = null) {
   const d = device(id);
   if (!d || d.online === false) return false;
   if (!point && isGroup(d) && d.members?.length) return d.members.some((m) => m !== id && isOn(m));
-  const key = point ?? powerKey(d);
+  const key = point ?? powerKey(d, false);
   return key ? truthy(value(id, key)) : false;
 }
 
@@ -246,19 +224,14 @@ export function deviceKind(d) {
   // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
   if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
-  if (has(d, 'target_temperature')) return 'climate';
-  if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
-  // A shutter is recognised by the `position` sense, or by its open / close
-  // order (a plain motor has no position). Tuya's own names stay until that
-  // driver labels its opening point with the sense.
-  if (
-    has(d, 'percent_control') ||
-    positionPoint(d) ||
-    coverOrder(d) ||
-    (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open'))
-  )
+  const known = knownDeviceKind(d);
+  if (known) return known;
+  if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
+  if (has(d, 'target_temperature') || isValve(d)) return 'climate';
+  if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
+  if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
     return 'cover';
-  if (powerKey(d)) {
+  if (powerKey(d, false)) {
     if (isGroup(d)) return 'group';
     if (isFixture(d)) return 'light';
     const name = d.label?.name || d.native_name;
@@ -401,7 +374,7 @@ function humanError(message) {
 export function toggle(id, label, point = null) {
   const d = device(id);
   const key = point ?? powerKey(d);
-  if (!key) return;
+  if (!key || !canWrite(d, key)) return;
   const current = value(id, key);
   const next = typeof current === 'string' ? (truthy(current) ? 'OFF' : 'ON') : !truthy(current);
   return act(`${id}/${key}`, next, label ?? nameOf(id));

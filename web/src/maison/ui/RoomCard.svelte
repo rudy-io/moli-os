@@ -1,12 +1,15 @@
 <script>
-  import { hub, value, act, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
+  import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
+  import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
+  import { climateMode } from '../lib/climate.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
    *  head, its lights and plugs as small pads (a ⚙ opens a lamp's dimmer,
@@ -119,22 +122,30 @@
 
   // ---- the room's temperature ----------------------------------------------------------
 
-  const temp = $derived.by(() => {
+  const roomTemperature = $derived.by(() => {
     const readings = [...room.sensors, ...room.climates]
       .filter((d) => d.online !== false)
       // Tuya's Zigbee probes say `va_temperature`.
-      .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current') ?? value(d.id, 'va_temperature'))
-      .filter((x) => typeof x === 'number');
-    return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
+      .map((d) => {
+        const key = ['temperature', 'temp_current', 'va_temperature'].find((key) => Number.isFinite(value(d.id, key)));
+        return { value: key ? value(d.id, key) : null, unit: pointOf(d, key)?.unit };
+      })
+      .filter((reading) => Number.isFinite(reading.value));
+    // An average cannot mix Celsius/Fahrenheit or readings without a known scale.
+    if (!readings.length || !readings[0].unit || readings.some((reading) => reading.unit !== readings[0].unit)) return null;
+    return { value: readings.reduce((sum, reading) => sum + reading.value, 0) / readings.length, unit: readings[0].unit };
   });
+  const temp = $derived(roomTemperature?.value ?? null);
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
   const gaugeAt = (deg) => Math.min(100, Math.max(0, ((deg - 14) / 16) * 100));
 
   // ---- the room's switch: its lights, never its TV or plugs (D12) -----------------------
 
+  const writableLights = $derived(room.lights.filter((d) => canWrite(d, powerKey(d))));
+  const writableLit = $derived(writableLights.some((d) => isOn(d.id)));
   function roomPower() {
-    const on = !room.lit;
-    for (const d of room.lights) {
+    const on = !writableLit;
+    for (const d of writableLights) {
       if (isOn(d.id) === on || (on && unpowered(d.id) && !isFixture(d))) continue;
       const key = powerKey(d);
       if (key) act(`${d.id}/${key}`, typeof value(d.id, key) === 'string' ? (on ? 'ON' : 'OFF') : on, t(on ? 'commun.piece.label_allumer' : 'commun.piece.label_eteindre', { name: room.name }));
@@ -172,6 +183,9 @@
     return [{ d, point: ALL, outlets }, ...outlets.map((o) => ({ d, point: o.key, name: o.name }))];
   };
   const litCount = (outlets, id) => outlets.filter((o) => isOn(id, o.key)).length;
+  const canTap = (d, point, outlets) => outlets
+    ? outlets.some((o) => canWrite(d, o.key))
+    : canWrite(d, point ?? powerKey(d));
 
   /** The pads: lights, then TV and speakers, then plugs. */
   const pads = $derived([
@@ -193,6 +207,7 @@
   }
 
   function tap(d, point, outlets, name) {
+    if (!canTap(d, point, outlets)) return;
     if (unpowered(d.id) && !isFixture(d)) {
       note(t('commun.lampe.coupee_note', { label: nameOf(d.id) }));
       return;
@@ -200,27 +215,17 @@
     if (outlets) {
       // All on → all off; otherwise everything on.
       const on = litCount(outlets, d.id) < outlets.length;
-      for (const o of outlets) if (isOn(d.id, o.key) !== on) act(`${d.id}/${o.key}`, on, `${nameOf(d.id)} · ${o.name}`);
+      for (const o of outlets) if (canWrite(d, o.key) && isOn(d.id, o.key) !== on) act(`${d.id}/${o.key}`, on, `${nameOf(d.id)} · ${o.name}`);
       return;
     }
-    if (name) {
-      act(`${d.id}/${point}`, !isOn(d.id, point), `${nameOf(d.id)} · ${name}`);
-      return;
-    }
-    const key = point ?? powerKey(d);
-    if (!key) return;
-    const cur = value(d.id, key);
-    act(`${d.id}/${key}`, typeof cur === 'string' ? (isOn(d.id, point) ? 'OFF' : 'ON') : !isOn(d.id, point), nameOf(d.id));
+    toggle(d.id, name ? `${nameOf(d.id)} · ${name}` : nameOf(d.id), point);
   }
 
-  // The unit's modes (as it says them) → the catalogue key of their short name.
-  const MODES = {
-    froid: 'commun.piece.mode.froid',
-    chaud: 'commun.piece.mode.chaud',
-    auto: 'commun.piece.mode.auto',
-    déshumidification: 'commun.piece.mode.deshumidification',
-    ventilation: 'commun.piece.mode.ventilation',
-  };
+  function climateState(on, mode) {
+    if (on === false || mode === 'off') return t('commun.piece.eteinte');
+    const style = climateMode(mode);
+    return style ? t(style.label) : mode ?? (on === true ? t('commun.piece.en_marche') : '—');
+  }
   let openClim = $state(null);
 </script>
 
@@ -232,7 +237,7 @@
       <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
     </div>
     {#if temp != null}
-      <span class="temp {tone(temp)}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}°</b><i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i></span>
+      <span class="temp {roomTemperature.unit === '°C' ? tone(temp) : ''}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}{roomTemperature.unit}</b>{#if roomTemperature.unit === '°C'}<i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i>{/if}</span>
     {/if}
     {#if lamps.length}
       <button class="round" class:open={showLooks} onclick={() => (showLooks = !showLooks)} aria-expanded={showLooks} title={t('commun.piece.ambiances')} aria-label={t('commun.piece.ambiances_de', { name: room.name })}>
@@ -240,7 +245,7 @@
       </button>
     {/if}
     {#if room.lights.length}
-      <button class="room-switch" class:on={room.lit} onclick={roomPower} aria-pressed={!!room.lit} title={room.lit ? t('commun.piece.tout_eteindre') : t('commun.piece.tout_allumer')} aria-label={t(room.lit ? 'commun.piece.label_eteindre' : 'commun.piece.label_allumer', { name: room.name })}><i></i></button>
+      <button class="room-switch" class:on={writableLit} disabled={!writableLights.length} onclick={roomPower} aria-pressed={writableLit} title={writableLit ? t('commun.piece.tout_eteindre') : t('commun.piece.tout_allumer')} aria-label={t(writableLit ? 'commun.piece.label_eteindre' : 'commun.piece.label_allumer', { name: room.name })}><i></i></button>
     {/if}
   </div>
 
@@ -262,7 +267,7 @@
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} onclick={() => tap(d, point, outlets, name)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets) })}>
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets) })}>
               <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets)}</small>{/if}
             </button>
@@ -281,19 +286,25 @@
   {/if}
 
   {#each room.covers as d (d.id)}
-    <CoverTile id={d.id} />
+    <CoverTile id={d.id} {icons} />
   {/each}
 
   {#each room.climates as d (d.id)}
-    {@const on = isOn(d.id)}
-    <button class="clim" class:on onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
+    {@const keys = climateKeys(d)}
+    {@const mode = pointOf(d, keys.mode) ? value(d.id, keys.mode) : null}
+    {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
+    {@const temperature = pointOf(d, keys.temperature) ? value(d.id, keys.temperature) : null}
+    {@const target = pointOf(d, keys.target) ? value(d.id, keys.target) : null}
+    <button class="clim" class:on={on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
       <Icon name="air-conditioner" size={18} />
       <b>{nameOf(d.id)}</b>
-      <span class="num">{num(value(d.id, 'temperature'), 0)}° → {num(value(d.id, 'target_temperature'), 1)}°</span>
-      <span class="state">{on ? (MODES[value(d.id, 'mode')] ? t(MODES[value(d.id, 'mode')]) : t('commun.piece.en_marche')) : t('commun.piece.eteinte')}</span>
+      {#if Number.isFinite(temperature) || Number.isFinite(target)}
+        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, keys.temperature)?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, keys.target)?.unit ?? ''}{/if}</span>
+      {/if}
+      <span class="state">{climateState(on, mode)}</span>
     </button>
     {#if openClim === d.id}
-      <ClimateCard id={d.id} name={nameOf(d.id)} />
+      {#if isValve(d)}<ValveCard id={d.id} name={nameOf(d.id)} />{:else}<ClimateCard id={d.id} name={nameOf(d.id)} />{/if}
     {/if}
   {/each}
 

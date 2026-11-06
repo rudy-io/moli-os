@@ -1,0 +1,22 @@
+[
+  {
+    "status": "NOK",
+    "csApplianceId": 1000,
+    "consumptionStatus": "OK"
+  },
+  {
+    "status": "OK",
+    "csApplianceId": 1001,
+    "consumptionStatus": "OK"
+  },
+  {
+    "status": "OK",
+    "csApplianceId": 1002,
+    "consumptionStatus": "OK"
+  },
+  {
+    "status": "OK",
+    "csApplianceId": 1003,
+    "consumptionStatus": "OK"
+  }
+]

@@ -124,6 +124,11 @@ pub struct MeterConfig {
     /// any point of the light, or of a fixture `lumieres:…`). Shown « ≈ ».
     #[serde(default)]
     pub estimate: bool,
+    /// `point` holds consumption already split by hour, as JSON text
+    /// (`[{"hour": ms, "kwh": …}]`): a service that reports a day late. Each
+    /// hour is filed as it is, never spread over the time of the report.
+    #[serde(default)]
+    pub history: bool,
 }
 
 impl MeterConfig {
@@ -236,6 +241,13 @@ impl Config {
                     m.id
                 ));
             }
+            if m.history && (!m.role.consumes() || m.integrate || m.estimate || m.period.is_some())
+            {
+                return Err(format!(
+                    "meter {:?}: `history` is for a meter that consumes, without `integrate`, `estimate` nor `period`",
+                    m.id
+                ));
+            }
             if let Some(price) = m.price {
                 check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
             }
@@ -304,7 +316,7 @@ fn check_point(point: &str) -> Result<(), String> {
     }
 }
 
-fn check_price(price: f64) -> Result<(), String> {
+pub(crate) fn check_price(price: f64) -> Result<(), String> {
     if price.is_finite() && price >= 0.0 {
         Ok(())
     } else {
@@ -355,6 +367,9 @@ mod tests {
         );
         let circuit = "[[meter]]\nid = \"c3\"\nname = \"Circuit 3\"\npoint = \"em:x/e3\"\nrole = \"circuit\"\n";
         parse(&format!("{ok}{circuit}{plug}within = \"c3\"\n")).unwrap();
+        let late = "[[meter]]\nid = \"linky\"\nname = \"Linky\"\npoint = \"enedis:linky/hours\"\nrole = \"grid\"\nhistory = true\n";
+        assert!(parse(&format!("{ok}{late}")).is_ok());
+        assert!(parse(&format!("{ok}{late}integrate = true\n")).is_err());
         let lamp = "[[meter]]\nid = \"lampe\"\nname = \"Lampe\"\npoint = \"hue:l/on\"\nrole = \"appliance\"\nestimate = true\n";
         parse(&format!("{ok}{lamp}")).unwrap();
         assert!(parse(&format!("{ok}{}", lamp.replace("appliance", "circuit"))).is_err());

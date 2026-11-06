@@ -284,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn brightness_and_white_take_moli_scales() {
         assert_eq!(percent(1000.0, 1000.0), 100.0);
         assert_eq!(percent(10.0, 1000.0), 1.0);
@@ -303,6 +304,7 @@ mod tests {
     /// A bulb that says `max = 0` (or less) is read on Tuya's usual 1000,
     /// never divided by zero.
     #[test]
+    #[allow(clippy::float_cmp)]
     fn a_maximum_of_zero_is_not_one() {
         assert_eq!(percent(500.0, 0.0), 50.0);
         assert_eq!(percent(500.0, -1.0), 50.0);

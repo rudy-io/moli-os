@@ -229,7 +229,7 @@ fn hold_until(
         let now = autos2
             .0
             .hub
-            .state(&PointId::from(point.as_str()))
+            .current_state(&PointId::from(point.as_str()))
             .map(|s| s.value);
         lock(&autos2.0.holds).remove(&(a_id.clone(), trigger2.clone()));
         if now.as_ref().is_some_and(&still)
