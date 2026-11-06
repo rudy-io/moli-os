@@ -1,5 +1,7 @@
 # Matter natif expérimental / Experimental native Matter (IP)
 
+[Guide de revue et matrice de validation / Maintainer handoff](REVIEW.md).
+
 **Matter IP testé sur pont Hue / Hue IP validation: [hardware report](HARDWARE.md).** Native Rust controller; no Matter Server
 or Python service. The standard build has no BlueZ/BLE dependency and supports devices
 already on an IP network, including Thread devices reachable through an existing border
