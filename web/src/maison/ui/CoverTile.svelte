@@ -181,9 +181,7 @@
         label={t('commun.volet.position_label', { label })}
         oncommit={(v) => {
           pendingTarget = v;
-          act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') })).then(() => {
-            pendingTarget = null;
-          });
+          act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }));
         }} />
     </div>
   {/if}
