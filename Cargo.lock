@@ -1223,7 +1223,11 @@ name = "moli-androidtv"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "http",
  "moli-net",
+ "num-bigint",
+ "num-traits",
+ "ring",
  "serde_json",
  "tokio",
  "tracing",

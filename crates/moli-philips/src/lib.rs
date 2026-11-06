@@ -2,7 +2,9 @@
 //! authentication with the pairing credentials): power, volume, mute,
 //! current app. Turning on from standby also sends a Wake-on-LAN packet.
 //! Their Android side ([`android`]) opens apps, says what plays, and takes
-//! the remote's keys while it is up (JointSpace when it is not).
+//! the remote's keys while it is up (JointSpace when it is not), held keys
+//! included; with `adb = true`, what any app plays (network debugging);
+//! with `overlay = true`, notifications over the picture (TvOverlay).
 
 mod android;
 
@@ -63,6 +65,15 @@ pub struct Config {
     pub mac: Option<String>,
     #[serde(default = "default_api")]
     pub api_version: u8,
+    /// What any app plays (title, playing or paused, position), through
+    /// ADB: the TV's « network debugging » must be on, and the TV asks
+    /// once on its screen whether to allow Moli.
+    #[serde(default)]
+    pub adb: bool,
+    /// Notifications drawn over whatever plays (point `notify`), by the
+    /// TvOverlay app installed on the TV.
+    #[serde(default)]
+    pub overlay: bool,
 }
 
 fn default_api() -> u8 {
@@ -278,8 +289,8 @@ fn spec(key: &str, label: &str, kind: Kind, write: bool, semantic: Semantic) -> 
 }
 
 #[allow(clippy::too_many_lines)] // one entry per point
-fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64) -> Device {
-    Device {
+fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64, overlay: bool) -> Device {
+    let mut device = Device {
         id: id.clone(),
         instance: ctx.instance().clone(),
         native_name: name.into(),
@@ -355,6 +366,18 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64) -> Device
                 unit: None,
                 semantic: Semantic::Other,
             },
+            // A key held down until `release` (a video seeks faster).
+            PointSpec {
+                key: "hold".into(),
+                label: moli_i18n::tr!("pilotes.philips.touche_maintenue").into(),
+                kind: enumeration(&android::HOLD_KEYS),
+                access: Access {
+                    read: false,
+                    write: true,
+                },
+                unit: None,
+                semantic: Semantic::Other,
+            },
             spec(
                 "media_app",
                 &moli_i18n::tr!("pilotes.philips.appli_en_lecture"),
@@ -407,7 +430,23 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64) -> Device
                 semantic: Semantic::Other,
             },
         ],
+    };
+    if overlay {
+        // Written: a notification over the picture (text, or TvOverlay's
+        // JSON: a camera's live video in a corner…).
+        device.points.push(PointSpec {
+            key: "notify".into(),
+            label: moli_i18n::tr!("pilotes.philips.notification").into(),
+            kind: Kind::Text,
+            access: Access {
+                read: false,
+                write: true,
+            },
+            unit: None,
+            semantic: Semantic::Other,
+        });
     }
+    device
 }
 
 fn enumeration(values: &[&str]) -> Kind {
@@ -558,6 +597,29 @@ async fn order(
         command.reply(Err(e));
         return;
     }
+    if let ("notify", Value::Text(text)) = (&*command.key, &command.value)
+        && config.overlay
+    {
+        // The TV asleep: its overlay too (and the order would wait for a
+        // timeout on the way).
+        if online != Some(true) {
+            command.reply(Err(moli_i18n::tr!("pilotes.philips.ecran_eteint")));
+            return;
+        }
+        let host = config.host.clone();
+        let notification = moli_androidtv::overlay::notification(text);
+        // Off the driver's loop: the TV answers when it can.
+        tokio::spawn(async move {
+            let result = match notification {
+                Ok(n) => {
+                    moli_androidtv::overlay::notify(&host, moli_androidtv::overlay::PORT, &n).await
+                }
+                Err(e) => Err(e),
+            };
+            command.reply(result.map_err(|e| format!("{e:#}")));
+        });
+        return;
+    }
     if let ("app", Value::Text(target)) = (&*command.key, &command.value) {
         let target = target.to_string();
         android.launch(&target, android::Waiting::order(command));
@@ -627,6 +689,7 @@ async fn apply(
             }
         },
         ("text", Value::Text(text)) => android.write(text)?,
+        ("hold", Value::Text(key)) => android.hold(key)?,
         ("ambilight", Value::Bool(on)) => {
             tv.request(
                 Method::POST,
@@ -723,8 +786,13 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         .and_then(|s| s["name"].as_str())
         .map_or_else(|| moli_i18n::tr!("pilotes.philips.tele"), str::to_owned);
     let mut max = 60.0;
-    ctx.upsert_device(device(ctx, &id, &name, max));
-    let (mut android, mut ups) = android::Android::start(ctx, &config.host);
+    ctx.upsert_device(device(ctx, &id, &name, max, config.overlay));
+    let adb_key = if config.adb {
+        android::adb_key(ctx).await
+    } else {
+        None
+    };
+    let (mut android, mut ups) = android::Android::start(ctx, &config.host, adb_key);
     ctx.ready();
     let mut tick = tokio::time::interval(POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -748,7 +816,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     waking.woke(&tv, &values, ctx).await;
                     if (seen_max - max).abs() > f64::EPSILON {
                         max = seen_max;
-                        ctx.upsert_device(device(ctx, &id, &name, max));
+                        ctx.upsert_device(device(ctx, &id, &name, max, config.overlay));
                     }
                     if online != Some(true) {
                         online = Some(true);
