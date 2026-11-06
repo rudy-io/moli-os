@@ -5,6 +5,20 @@ Les dépendances Matter utilisent des chemins internes : aucun fork personnel,
 checkout voisin ou source Git n'est nécessaire au build. Les dépendances ordinaires
 crates.io restent verrouillées. [Provenance et adaptations locales](../../vendor/matter-rust/MOLI-PROVENANCE.md).
 
+## Suite à la revue des mainteneurs
+
+Le coffre est extrait dans la [PR #148](https://github.com/rudy-io/moli-os/pull/148) :
+verrou de transaction borné à trois secondes et échec explicite si le système de
+fichiers ne fournit pas les verrous. Le diff Matter conserve provisoirement ce
+préalable jusqu’à son intégration. La redécouverte conserve les endpoints survivants
+et leurs lectures compatibles ; seuls les endpoints disparus sont supprimés.
+La documentation BLE/matériel a été harmonisée. Les grands ponts restent non
+mesurés et la limite de l’abonnement unique est documentée.
+
+Les tailles et hash ci-dessous concernent le jalon de production identifié dans
+RESULTS.md, avant ces corrections de revue. Ils ne constituent pas une nouvelle
+mesure de l’image de cette révision.
+
 ## Parcours de revue
 
 1. [Coffre durable](../../crates/moli-runtime/src/secrets.rs) et [adaptateur](../../crates/moli-matter/src/store.rs) : fsync/rename, verrou de transaction partagé, lease exclusive et relecture au changement de propriétaire.
@@ -22,7 +36,7 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 
 ## Validation logicielle
 
-- `sh scripts/check.sh` passe : **1 323 tests Moli** et **916 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
+- `sh scripts/check.sh` passe : **1 325 tests Moli** et **916 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
 - Le contrôle standard rejoue maintenant les tests des trois bibliothèques localement modifiées : controller, interaction et commissioning. Les bibliothèques BLE système ne sont pas requises pour ce contrôle.
 - Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
 - **24 tests** du pilote avec l'option BLE compilée passent ; aucun essai radio n'est revendiqué.

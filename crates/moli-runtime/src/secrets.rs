@@ -11,6 +11,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -299,12 +300,33 @@ impl SecretStore {
 /// Every writer, including the CLI in another process, holds this lock through
 /// read/merge/rename. A lock on the data inode would be lost across rename.
 fn lock_file(path: &Path) -> io::Result<std::fs::File> {
+    lock_file_with_timeout(path, Duration::from_secs(3))
+}
+
+fn lock_file_with_timeout(path: &Path, timeout: Duration) -> io::Result<std::fs::File> {
     std::fs::create_dir_all(parent_dir(path))?;
     let mut lock = path.as_os_str().to_owned();
     lock.push(".lock");
     let file = private_file(Path::new(&lock), false)?;
-    file.lock()?;
-    Ok(file)
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            // Unsupported filesystems and other I/O failures must fail closed:
+            // never read/merge/write without exclusive ownership.
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "timed out acquiring secret store write lock",
+                    ));
+                }
+                std::thread::sleep(remaining.min(Duration::from_millis(25)));
+            }
+        }
+    }
 }
 
 fn parent_dir(path: &Path) -> &Path {
@@ -395,6 +417,32 @@ mod tests {
     use super::*;
 
     const KEY: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+
+    #[test]
+    fn contended_write_lock_times_out_without_changing_the_vault() {
+        let dir = std::env::temp_dir().join(format!("moli-lock-timeout-{}", std::process::id()));
+        let path = dir.join("secrets.enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = parse_master_key(KEY).unwrap();
+        let store = SecretStore::open(path.clone(), &key).unwrap();
+        let mut values = BTreeMap::new();
+        values.insert("matter/snapshot".into(), "reserved-counters".into());
+        let bytes = encrypt(&store.key, &values).unwrap();
+        write_durable(&path, &bytes).unwrap();
+
+        let held = lock_file(&path).unwrap();
+        let timeout = Duration::from_millis(40);
+        let started = Instant::now();
+        let error = lock_file_with_timeout(&path, timeout).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() >= timeout);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        drop(held);
+        let acquired = lock_file_with_timeout(&path, timeout).unwrap();
+        drop(acquired);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn round_trip_and_wrong_key() {

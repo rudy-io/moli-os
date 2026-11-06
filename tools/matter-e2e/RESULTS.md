@@ -1,3 +1,22 @@
+# Corrections de revue — 2026-11-06
+
+Le binaire de développement contenant le verrou borné du coffre et la réconciliation
+des endpoints passe la suite étendue : éclairage, stores, thermostat, serrures avec
+approbation, politiques PIN réactives, refus sans transmission, reprise et états
+invalides. SHA-256 : `5eb70aff168a6b3c8b8c3f16868328348ffaff9cb72523ad0f5b96cf35bd1f19`.
+
+Une première exécution a échoué avant toute commande pendant l'appairage
+(`Driver/Commissioning/DeviceImStatus`). Le binaire de production précédemment
+validé a ensuite passé la même fixture, puis une nouvelle exécution du binaire
+actuel a passé la suite entière. Le refus initial n'est pas reproduit ni expliqué ;
+il reste une limite de stabilité à investiguer, pas une preuve de réussite continue.
+Les deux nouvelles régressions unitaires (contention du coffre et redécouverte)
+passent dans le contrôle complet : 2 241 tests Rust au total.
+Aucune action matérielle n'a été réalisée pour ces corrections.
+
+Les mesures suivantes concernent les artefacts de production antérieurs à ces
+corrections ; aucun nouveau poids d'image n'est revendiqué.
+
 # Résultat actuel — pile intégrée et familles étendues, 2026-11-06
 
 **PASS** sur les deux binaires de production construits à partir du seul dépôt Moli.

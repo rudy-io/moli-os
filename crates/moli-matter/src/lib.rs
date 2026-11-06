@@ -96,6 +96,8 @@ struct Endpoint {
     reachable: bool,
     connected: bool,
     extra: features::Expanded,
+    // Discovery baseline excludes samples accumulated by `state_updates`.
+    discovered_extra: features::Expanded,
     extra_keys: BTreeSet<String>,
 }
 impl Endpoint {
@@ -227,6 +229,7 @@ fn endpoints(report: &[(AttributePath, Tlv)]) -> BTreeMap<u16, Endpoint> {
                 bridged: ids.contains(&0x13) || list.contains(&Tlv::Uint(0x39)),
                 reachable: false,
                 connected: false,
+                discovered_extra: extra.clone(),
                 extra,
                 extra_keys,
             },
@@ -326,6 +329,35 @@ enum Update {
     Discovered(u64, BTreeMap<u16, Endpoint>),
     State(u64, AttributePath, Tlv),
     Online(u64, bool),
+}
+// Keep runtime state for surviving endpoints; upsert handles obsolete point readings.
+fn rediscover(
+    node: u64,
+    endpoints: BTreeMap<u16, Endpoint>,
+    devices: &mut BTreeMap<DeviceId, (u64, u16, Endpoint)>,
+    device_id: impl Fn(u16) -> DeviceId,
+) -> Vec<DeviceId> {
+    let removed: Vec<_> = devices
+        .iter()
+        .filter(|(_, (n, ep, _))| *n == node && !endpoints.contains_key(ep))
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &removed {
+        devices.remove(id);
+    }
+    for (ep, mut meta) in endpoints {
+        let id = device_id(ep);
+        if let Some((_, _, previous)) = devices.get(&id) {
+            meta.connected = previous.connected;
+            // A newly bridged endpoint must obtain its own Reachable report.
+            meta.reachable = previous.bridged && previous.reachable;
+            if meta.discovered_extra == previous.discovered_extra {
+                meta.extra = previous.extra.clone();
+            }
+        }
+        devices.insert(id, (node, ep, meta));
+    }
+    removed
 }
 async fn watch(node: Node, tx: mpsc::Sender<Update>) {
     let id = node.node_id();
@@ -538,13 +570,13 @@ impl Matter {
                 },
                 Some(update) = rx.recv() => match update {
                     Update::Discovered(node,endpoints) => {
-                        let removed: Vec<_> = devices.iter().filter(|(_, (n,_,_))| *n == node).map(|(id,_)|id.clone()).collect();
-                        for id in removed { devices.remove(&id); ctx.remove_device(&id); }
-                        for (ep,meta) in endpoints {
-                        let id = ctx.device_id(&native(node,ep));
-                        ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:meta.label.clone().unwrap_or_else(|| format!("Matter {node:016x} / {ep}")).into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.points() });
-                        ctx.set_availability(&id,false);
-                        devices.insert(id,(node,ep,meta));
+                        for id in rediscover(node, endpoints, &mut devices, |ep| ctx.device_id(&native(node, ep))) {
+                            ctx.remove_device(&id);
+                        }
+                        for (id, (n, ep, meta)) in &devices {
+                            if *n != node { continue; }
+                            ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:meta.label.clone().unwrap_or_else(|| format!("Matter {node:016x} / {ep}")).into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.points() });
+                            ctx.set_availability(id,meta.online());
                         }
                     },
                     Update::Online(node,online) => for (id,(n,_,meta)) in &mut devices { if *n == node { meta.set_connection(online); ctx.set_availability(id,meta.online()); } },
@@ -617,6 +649,75 @@ async fn execute_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rediscovery_preserves_survivors_and_replaces_changed_definitions() {
+        let report = vec![
+            (path(1, 0x1d, 0), Tlv::Array(vec![])),
+            (
+                path(1, 0x1d, 1),
+                Tlv::Array(vec![Tlv::Uint(6), Tlv::Uint(0x300)]),
+            ),
+            (path(1, 0x300, 0xfffc), Tlv::Uint(1)),
+            (path(1, 0x300, 0xfffd), Tlv::Uint(1)),
+            (
+                path(1, 0x300, 0xfffb),
+                Tlv::Array(vec![0, 1, 8, 0x400a].into_iter().map(Tlv::Uint).collect()),
+            ),
+            (path(1, 0x300, 0xfff9), Tlv::Array(vec![Tlv::Uint(6)])),
+            (path(1, 0x300, 0x400a), Tlv::Uint(1)),
+        ];
+        let id = |node, ep| DeviceId::from(format!("test:{}", native(node, ep)));
+        let mut devices = BTreeMap::new();
+        assert!(rediscover(1, endpoints(&report), &mut devices, |ep| id(1, ep)).is_empty());
+        let meta = &mut devices.get_mut(&id(1, 1)).unwrap().2;
+        meta.set_connection(true);
+        meta.state_updates(path(1, 0x300, 8), &Tlv::Uint(0));
+        meta.state_updates(path(1, 0x300, 0), &Tlv::Uint(50));
+        meta.state_updates(path(1, 0x300, 1), &Tlv::Uint(200));
+        assert_ne!(meta.extra, meta.discovered_extra);
+        let previous = meta.clone();
+        // Neither a sibling endpoint nor another node may be removed by replay.
+        devices.insert(id(1, 2), (1, 2, previous.clone()));
+        devices.insert(id(2, 1), (2, 1, previous.clone()));
+        assert_eq!(
+            rediscover(1, endpoints(&report), &mut devices, |ep| id(1, ep)),
+            vec![id(1, 2)]
+        );
+        assert_eq!(devices[&id(1, 1)].2, previous);
+        assert_eq!(devices[&id(2, 1)].2, previous);
+        assert!(rediscover(1, endpoints(&report), &mut devices, |ep| id(1, ep)).is_empty());
+        assert_eq!(devices[&id(1, 1)].2, previous);
+
+        let mut changed = report.clone();
+        changed[1].1 = Tlv::Array(vec![Tlv::Uint(0x45)]);
+        changed[0].1 = Tlv::Array(vec![Tlv::Structure(vec![(
+            Tag::Context(0),
+            Tlv::Uint(0x43),
+        )])]);
+        // Remove color metadata as well as the server; add a new identity label.
+        changed.retain(|(p, _)| p.cluster != 0x300);
+        changed.push((path(1, 0x39, 5), Tlv::Utf8("Renamed endpoint".into())));
+        assert!(rediscover(1, endpoints(&changed), &mut devices, |ep| id(1, ep)).is_empty());
+        let meta = &devices[&id(1, 1)].2;
+        assert!(meta.online());
+        assert_eq!(meta.label.as_deref(), Some("Renamed endpoint"));
+        assert_eq!(
+            meta.points()
+                .iter()
+                .map(|p| p.key.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["leak"]
+        );
+        assert!(meta.plan("on", &Value::Bool(true), false).is_none());
+        assert_eq!(meta.extra, features::Expanded::default());
+        assert_eq!(
+            rediscover(1, BTreeMap::new(), &mut devices, |ep| id(1, ep)),
+            vec![id(1, 1)]
+        );
+        assert_eq!(devices.len(), 1);
+        assert!(devices.contains_key(&id(2, 1)));
+    }
+
     #[test]
     fn refusal_and_reconnect() {
         assert_eq!(
@@ -830,6 +931,7 @@ mod tests {
             reachable: false,
             connected: true,
             extra: features::Expanded::default(),
+            discovered_extra: features::Expanded::default(),
             extra_keys: BTreeSet::new(),
         };
         assert!(!meta.online());
