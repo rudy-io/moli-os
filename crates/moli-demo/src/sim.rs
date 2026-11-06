@@ -139,6 +139,8 @@ struct Live {
     points: Vec<Point>,
     /// The values as the simulation knows them (orders included).
     values: HashMap<String, Value>,
+    /// Cover target position (0-100) and speed factor (normal = 1.0, slow = 0.5).
+    cover_target: Option<(f64, f64)>,
 }
 
 impl Live {
@@ -355,6 +357,7 @@ impl World {
                 specs: p.device.points.clone(),
                 points,
                 values,
+                cover_target: None,
             });
         }
         #[allow(clippy::cast_sign_loss)]
@@ -418,17 +421,30 @@ impl World {
                 let state = if *b { "playing" } else { "paused" };
                 Self::set(ctx, live, "state", Value::Text(state.into()));
             }
-            // Cover position update (percent_control): already set by the generic code above.
+            // Cover position update (percent_control): set by the generic code above if directly written.
             ("control", Value::Text(t)) => {
                 let t = t.to_ascii_lowercase();
                 // Cover control (shutters): open, close, stop
                 if live.has("percent_control") {
+                    let current = live.num("percent_control").unwrap_or(50.0);
+                    let speed = if t.contains("slow") { 0.5 } else { 1.0 };
+
                     if t.contains("open") {
-                        Self::set(ctx, live, "percent_control", Value::Float(100.0));
+                        live.cover_target = Some((100.0, speed));
+                        Self::set(ctx, live, "moving", Value::Text("UP".into()));
                     } else if t.contains("close") {
-                        Self::set(ctx, live, "percent_control", Value::Float(0.0));
+                        live.cover_target = Some((0.0, speed));
+                        Self::set(ctx, live, "moving", Value::Text("DOWN".into()));
+                    } else if t.contains("stop") {
+                        live.cover_target = None;
+                        Self::set(ctx, live, "moving", Value::Text("STOP".into()));
+                    } else if t.contains("cycle") {
+                        // Toggle: if closed or closing, open; otherwise close
+                        let target = if current < 50.0 { 100.0 } else { 0.0 };
+                        live.cover_target = Some((target, speed));
+                        let direction = if target > current { "UP" } else { "DOWN" };
+                        Self::set(ctx, live, "moving", Value::Text(direction.into()));
                     }
-                    // stop: keep current position
                 } else if t.contains("pause") {
                     Self::set(ctx, live, "printing", Value::Bool(false));
                     if live.has("state") {
@@ -526,6 +542,25 @@ impl World {
         let running = live.running();
         let mut updates: Vec<(String, Value)> = Vec::new();
         let printing = live.flag("printing").unwrap_or(false);
+
+        // Cover movement simulation: progress toward target at ~20%/s (normal) or ~10%/s (slow)
+        if let Some((target, speed)) = live.cover_target {
+            if let Some(current) = live.num("percent_control") {
+                let rate = 20.0 * speed; // percent per second
+                let delta = (target - current).signum() * (rate * dt).min((target - current).abs());
+                let next = current + delta;
+
+                // Reached target? Stop movement
+                if (target - next).abs() < 0.5 {
+                    live.cover_target = None;
+                    Self::set(ctx, live, "percent_control", Value::Float(target));
+                    Self::set(ctx, live, "moving", Value::Text("STOP".into()));
+                } else {
+                    Self::set(ctx, live, "percent_control", Value::Float(next.round()));
+                }
+            }
+        }
+
         for p in &mut live.points {
             let Some(spec) = live.specs.iter().find(|s| *s.key == p.key) else {
                 continue;

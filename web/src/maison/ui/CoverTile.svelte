@@ -14,7 +14,7 @@
   import { hub } from '../../lib/hub.svelte.js';
   import Icon from './Icon.svelte';
   import ShutterIcon from './ShutterIcon.svelte';
-  import Slider from './Slider.svelte';
+  import CoverSlider from './CoverSlider.svelte';
   import { coverCommands, hasSlowCoverControl } from '../lib/cover-controls.js';
   import { canWrite } from '../lib/capabilities.js';
 
@@ -34,6 +34,10 @@
   const posKey = $derived(coverPositionKey(id));
   const positionWritable = $derived(connected && posKey && canWrite(d, posKey));
   const busy = $derived(pending(id, posKey) || pending(id, 'control'));
+
+  // Track user's target vs actual position
+  let pendingTarget = $state(null);
+  const targetPos = $derived(pendingTarget ?? pos);
 
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
@@ -158,15 +162,22 @@
     {/if}
   </div>
 
-  {#if positionWritable}
+  {#if posKey}
     <div class="slider-row">
-      <Slider
+      <CoverSlider
         min={0}
         max={100}
         step={1}
         value={pos ?? 0}
+        targetValue={targetPos}
+        writable={positionWritable}
         label={t('commun.volet.position_label', { label })}
-        oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
+        oncommit={(v) => {
+          pendingTarget = v;
+          act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') })).then(() => {
+            pendingTarget = null;
+          });
+        }} />
     </div>
   {/if}
 </div>

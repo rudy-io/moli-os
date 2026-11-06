@@ -352,6 +352,23 @@
      "semantic": "other"
     },
     {
+     "key": "moving",
+     "label": "En mouvement",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "STOP",
+       "UP",
+       "DOWN"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
      "key": "cur_calibration",
      "label": "Cur calibration",
      "kind": {
@@ -387,7 +404,8 @@
    "native_room": "Salon",
    "state": {
     "percent_control": 100,
-    "control": "stop"
+    "control": "stop",
+    "moving": "STOP"
    }
   },
   {
