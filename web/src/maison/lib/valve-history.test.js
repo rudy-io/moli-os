@@ -13,8 +13,13 @@ const spec = scheduleSpec({
 
 test('a bucketed window is drawn from its averages, an unbucketed one from its changes', () => {
   assert.deepEqual(seriesPoints({ from: 0, to: 100, buckets: [{ ts: 10, avg: 19 }, { ts: 50, avg: 20 }], raw: [] }), [[10, 19], [50, 20]]);
-  assert.deepEqual(seriesPoints({ from: 0, to: 100, buckets: [], raw: [[10, 19], [50, 20]] }), [[10, 19], [50, 20]]);
+  assert.deepEqual(seriesPoints({ from: 0, to: 100, buckets: [], raw: [[10, 19], [50, 20]] }), [[10, 19], [50, 20], [100, 20]]);
   assert.deepEqual(seriesPoints(null), []);
+});
+
+test('a temperature that never moved over the window still draws a line', () => {
+  assert.deepEqual(seriesPoints({ from: 0, to: 100, before: [-5, 19], buckets: [], raw: [] }), [[0, 19], [100, 19]]);
+  assert.deepEqual(seriesPoints({ from: 0, to: 100, buckets: [], raw: [] }), []);
 });
 
 test('a step series starts from the value held before the window, unless a hole hides it', () => {

@@ -11,7 +11,10 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 export function seriesPoints(series) {
   if (!series) return [];
   if (series.buckets?.length) return series.buckets.filter((b) => finite(b.avg)).map((b) => [b.ts, b.avg]);
-  return seriesSteps(series);
+  const steps = seriesSteps(series);
+  const last = steps.at(-1);
+  // Without this, a room whose temperature never moved has one point: no line at all.
+  return last && last[0] < series.to ? [...steps, [series.to, last[1]]] : steps;
 }
 
 /** A numeric value that holds until the next change, as `[ts, value]` steps. */
@@ -94,6 +97,7 @@ export function timeTicks(from, to, hours) {
   const d = new Date(from);
   d.setMinutes(0, 0, 0);
   d.setHours(stepHours === 24 ? 0 : Math.ceil(d.getHours() / stepHours) * stepHours);
-  for (let ts = d.getTime(); ts <= to; ts = new Date(ts + stepHours * 3_600_000).getTime()) if (ts >= from) ticks.push(ts);
+  // On the clock, not by adding milliseconds: a clock change would shift every later tick.
+  for (; d.getTime() <= to; d.setHours(d.getHours() + stepHours)) if (d.getTime() >= from) ticks.push(d.getTime());
   return ticks;
 }
