@@ -15,6 +15,7 @@
    [driver.options]
    port = "/dev/linky"
    mode = "standard"        # ou "historique" (1 200 bauds)
+   # publish_seconds = 10   # puissance et courants au plus toutes les 10 s (0 : tout publier)
    ```
 
 4. Tester : en quelques secondes, `apparent_power` suit la consommation de la maison (allumer une bouilloire :

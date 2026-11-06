@@ -12,6 +12,7 @@
 //! driver. A group whose checksum fails is dropped; the next frame carries it again.
 
 mod frame;
+mod pacer;
 
 use std::io::{ErrorKind, Read};
 use std::time::Duration;
@@ -19,6 +20,7 @@ use std::time::Duration;
 use frame::{Event, Group, Mode, Reader};
 use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
+use pacer::Pacer;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -26,6 +28,10 @@ use tokio::time::Instant;
 /// How long a read waits for bytes before looking again whether anyone still listens.
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const DEFAULT_SILENCE: u64 = 30;
+/// Seconds between two publications of a fast point (power, currents, voltage).
+const DEFAULT_PUBLISH: u64 = 10;
+/// The reading thread is given this long to close the port before the driver gives up waiting.
+const PORT_CLOSE_WAIT: Duration = Duration::from_secs(2);
 /// A frame can take two seconds at 1200 baud: below this, the meter would look dead.
 const MIN_SILENCE: u64 = 5;
 /// Energy indexes a meter can hold (`EASF01` to `EASF10`).
@@ -33,6 +39,10 @@ const INDEXES: u8 = 10;
 
 fn default_silence() -> u64 {
     DEFAULT_SILENCE
+}
+
+fn default_publish() -> u64 {
+    DEFAULT_PUBLISH
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -46,6 +56,11 @@ pub struct Config {
     /// Seconds without a valid group before the port is reopened (at least 5).
     #[serde(default = "default_silence")]
     pub silence_seconds: u64,
+    /// Seconds between two publications of the power, the currents and the voltage, which
+    /// change with almost every frame (0: every change). A step of a real size goes out at
+    /// once. The energy indexes are never paced.
+    #[serde(default = "default_publish")]
+    pub publish_seconds: u64,
 }
 
 #[derive(Debug)]
@@ -299,14 +314,29 @@ async fn run(driver: &LinkyTic, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         return Ok(());
     }
     let mode = driver.config.mode;
-    let silence = Duration::from_secs(driver.config.silence_seconds.max(MIN_SILENCE));
-    let (tx, mut rx) = mpsc::channel::<Chunk>(32);
-    // Not awaited: the thread ends by itself, within a read timeout, once `rx` is gone.
-    drop(tokio::task::spawn_blocking(move || {
+    let (tx, rx) = mpsc::channel::<Chunk>(32);
+    let reader = tokio::task::spawn_blocking(move || {
         read_port(&port, mode, &tx);
-    }));
+    });
     ctx.ready();
     ctx.set_availability(&id, false);
+    let outcome = listen(ctx, &id, &driver.config, rx).await;
+    // `rx` is gone: the thread sees it within a read timeout and lets go of the port.
+    // Wait for it, so that the port is free when the supervisor restarts the driver
+    // (the port is opened exclusively: a second open would fail as busy).
+    let _ = tokio::time::timeout(PORT_CLOSE_WAIT, reader).await;
+    outcome
+}
+
+async fn listen(
+    ctx: &DriverCtx,
+    id: &DeviceId,
+    config: &Config,
+    mut rx: mpsc::Receiver<Chunk>,
+) -> anyhow::Result<()> {
+    let mode = config.mode;
+    let silence = Duration::from_secs(config.silence_seconds.max(MIN_SILENCE));
+    let mut pacer = Pacer::new(Duration::from_secs(config.publish_seconds));
     let mut reader = Reader::new(mode);
     let mut online = false;
     let mut last_group = Instant::now();
@@ -314,7 +344,7 @@ async fn run(driver: &LinkyTic, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         tokio::select! {
             () = ctx.cancelled() => return Ok(()),
             () = tokio::time::sleep_until(last_group + silence) => {
-                ctx.set_availability(&id, false);
+                ctx.set_availability(id, false);
                 anyhow::bail!(moli_i18n::tr!(
                     "pilotes.linky_tic.silence",
                     secondes = silence.as_secs()
@@ -325,13 +355,16 @@ async fn run(driver: &LinkyTic, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     for event in reader.push(&bytes) {
                         match event {
                             Event::Group(group) => {
-                                last_group = Instant::now();
+                                let now = Instant::now();
+                                last_group = now;
                                 for (key, value) in readings(mode, &group) {
-                                    ctx.set_state(&id, &key, value);
+                                    if pacer.allow(&key, &value, now) {
+                                        ctx.set_state(id, &key, value);
+                                    }
                                 }
                                 if !online {
                                     online = true;
-                                    ctx.set_availability(&id, true);
+                                    ctx.set_availability(id, true);
                                 }
                             }
                             Event::Dropped(fault) => {
@@ -342,7 +375,7 @@ async fn run(driver: &LinkyTic, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     }
                 }
                 Some(Chunk::Failed(message)) => {
-                    ctx.set_availability(&id, false);
+                    ctx.set_availability(id, false);
                     anyhow::bail!(message);
                 }
                 None => anyhow::bail!(moli_i18n::tr!("pilotes.linky_tic.port_ferme")),
@@ -552,6 +585,7 @@ mod tests {
         let config: Config = toml::from_str("port = \"/dev/ttyACM0\"").unwrap();
         assert_eq!(config.mode, Mode::Standard);
         assert_eq!(config.silence_seconds, DEFAULT_SILENCE);
+        assert_eq!(config.publish_seconds, DEFAULT_PUBLISH);
         let historic: Config = toml::from_str(
             "port = \"/dev/ttyUSB0\"
 mode = \"historique\"",

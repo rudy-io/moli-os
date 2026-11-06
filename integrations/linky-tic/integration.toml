@@ -16,7 +16,7 @@ ports = []
 [needs]
 secrets = []
 vars = []
-options = ["port", "mode", "silence_seconds"]
+options = ["port", "mode", "silence_seconds", "publish_seconds"]
 
 [origin]
 reused = "aucun code repris : spécification TIC d'Enedis (trames, somme de contrôle), réglages série et somme lus dans linkytic (MIT) comme référence ; trames de test fabriquées"

@@ -15,6 +15,10 @@
 - **Heures creuses et pleines** : les index sont ceux du contrat. Selon le fournisseur, 01 et 02 se suivent
   (creuses, pleines) ou non : relever `tariff` et `tariff_index` en changeant de période avant de déclarer les compteurs
   de `[energy]`.
+- **Historique ménagé** : la puissance, les courants et la tension bougent à presque chaque trame (une ou deux
+  secondes) et l'historique garde chaque changement. Ces points ne sortent donc qu'**une fois toutes les `publish_seconds`**
+  (10 par défaut ; 0 : tout publier), sauf un vrai saut (200 VA, 1 A ou 5 V), publié aussitôt : une bouilloire qu'on
+  allume se voit tout de suite. Les index d'énergie, la période et le total ne sont jamais espacés.
 - **Ligne muette** : sans groupe valide pendant `silence_seconds` (30 par défaut, 5 au minimum), l'appareil passe hors
   ligne et le port est fermé puis rouvert (le superviseur relance le pilote). Un module qui se fige, un câble à moitié
   débranché ou un mauvais `mode` sont ainsi signalés au lieu de laisser une valeur périmée.
