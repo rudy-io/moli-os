@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import ScheduleEditor from './ScheduleEditor.svelte';
+  import ValveChart from './ValveChart.svelte';
   import { scheduleSpec } from '../lib/schedule.js';
   import { pointOf, canWrite, numericRange, quantize, writableChoices, climateKeys } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
@@ -23,6 +24,7 @@
   const writable = $derived(!!range && canWrite(d, keys.target));
   const hasSchedule = $derived(!!scheduleSpec(d));
   let editing = $state(false);
+  let charting = $state(false);
 
   // Taps on − / + add up; one order leaves once the finger rests.
   let wanted = $state(null);
@@ -105,6 +107,12 @@
     </div>
   {:else if mode != null}
     <p class="muted">{t('commun.clim.mode')} <b>{modeLabel(mode)}</b></p>
+  {/if}
+  {#if pointOf(d, keys.temperature) || pointOf(d, keys.target)}
+    <button class="fold" onclick={() => (charting = !charting)} aria-expanded={charting}>{t('commun.vanne.courbe.titre')}</button>
+    {#if charting}
+      <ValveChart {id} {name} />
+    {/if}
   {/if}
   {#if hasSchedule}
     <button class="fold" onclick={() => (editing = !editing)} aria-expanded={editing}>{t('commun.vanne.prog.titre')}</button>

@@ -166,7 +166,7 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   reconnu à ses points `occupied_heating_setpoint` et `system_mode`, sans rien déclarer. Sa carte
   (`ui/ValveCard.svelte`) montre la température mesurée (`local_temperature`), la consigne (bornes
   et pas lus dans le point) et les modes que la vanne accepte ; chaque ordre passe par le chemin
-  normal du hub, donc par la garde. Pas de graphique pour l'instant. Une vanne d'un autre
+  normal du hub, donc par la garde. Une vanne d'un autre
   protocole peut nommer ses points autrement : une Danfoss Z-Wave expose `temperature` et
   `occupied_heating_setpoint` mais pas `system_mode`, elle n'est pas reconnue.
   La **table horaire** (`ui/ScheduleEditor.svelte`, calcul pur dans `lib/schedule.js`) s'ouvre sous
@@ -178,3 +178,7 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
   garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
   quand ce n'est pas le groupe suivi par la vanne.
+  La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
+  ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
+  échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
+  n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
