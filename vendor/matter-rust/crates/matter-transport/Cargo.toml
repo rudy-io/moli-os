@@ -1,0 +1,58 @@
+[package]
+name = "matter-transport"
+version = "0.7.4"
+description = "Matter protocol network transport: UDP, mDNS, framing, MRP."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "udp", "mdns", "mrp", "iot"]
+categories = ["network-programming"]
+readme = "README.md"
+
+[features]
+default = ["tokio", "mdns-sd"]
+tokio = ["dep:tokio", "dep:socket2"]
+mdns-sd = ["dep:mdns-sd"]
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-codec = { path = "../matter-codec", version = "0.3.0" }
+matter-crypto = { path = "../matter-crypto", version = "0.5.0" }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt", "io-util"], optional = true }
+socket2 = { version = "0.6", default-features = false, optional = true }
+mdns-sd = { version = "0.21.6", default-features = false, optional = true }
+# Diagnostics only. `tracing`'s macros compile to a cheap dispatcher check when
+# no subscriber is installed, so a caller that never sets one pays effectively
+# nothing — and a caller debugging discovery gets the record-by-record trace the
+# mDNS adapter emits (target `matter_transport::mdns`).
+#
+# DELIBERATELY UNGATED, unlike `matter-commissioning`, which puts `tracing`
+# behind a feature. Two reasons. (1) The value here is a bug report from someone
+# who did not build with a special feature: discovery failures are reported by
+# adopters, not reproduced by us (issue #113), and a diagnostic that has to be
+# recompiled in is a diagnostic that is not there when it is needed. (2) It
+# costs the sans-IO core nothing: `just embedded` builds this crate with
+# `--no-default-features`, which drops `tokio`/`mdns-sd` but not `std` — this
+# crate is not `no_std` — and `tracing` with default features off is a
+# leaf-level dependency with no runtime and no allocation on the disabled path.
+# Revisit if `no_std` is ever taken up (ADR 0002 defers it): then gate it.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+hex = { version = "0.4", default-features = false, features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0"
+tokio = { workspace = true, features = ["net", "rt", "io-util", "macros", "time", "rt-multi-thread"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "frame"
+harness = false

@@ -51,6 +51,11 @@ impl CommandRequest {
         self.reply.is_closed() || Instant::now() >= self.deadline
     }
 
+    /// Resolves when the caller no longer waits for this command.
+    pub async fn cancelled(&mut self) {
+        self.reply.closed().await;
+    }
+
     /// Reports the outcome. Dropping the request without replying is
     /// reported to the caller as a driver failure.
     pub fn reply(self, result: Result<(), String>) {
@@ -127,6 +132,13 @@ impl DriverCtx {
     #[must_use]
     pub fn can_store_secrets(&self) -> bool {
         self.hub.has_secret_store()
+    }
+
+    /// Durable protocol snapshots, scoped to this instance. Synchronous writes
+    /// must run on a blocking worker; no second vault or master key is needed.
+    #[must_use]
+    pub fn durable_secrets(&self) -> Option<crate::DurableSecrets> {
+        self.hub.durable_secrets(&self.instance)
     }
 
     /// A secret previously stored by this instance.
@@ -330,5 +342,67 @@ impl MediaPublisher {
             from: Some(from.to_owned()),
             ts: moli_core::now_ms(),
         });
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn caller_disappearance_drops_in_flight_operation() {
+        // A pending library operation must be dropped, not just left running.
+        struct Pending(Option<oneshot::Sender<()>>);
+        impl Drop for Pending {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+
+        let (reply, receiver) = oneshot::channel();
+        let (tx, mut rx) = mpsc::channel(1);
+        let id: DeviceId = "synthetic:device".into();
+        tx.send(CommandRequest {
+            point: PointId::new(&id, "on"),
+            device: Arc::new(Device {
+                id,
+                instance: "synthetic".into(),
+                native_name: "Synthetic".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: vec![],
+                points: vec![],
+            }),
+            key: "on".into(),
+            value: Value::Bool(true),
+            deadline: Instant::now() + std::time::Duration::from_secs(60),
+            reply,
+        })
+        .await
+        .unwrap();
+        let mut command = rx.recv().await.unwrap();
+        let (dropped, observed) = oneshot::channel();
+        let guard = Pending(Some(dropped));
+        let operation = async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        };
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), command.cancelled())
+                .await
+                .is_err()
+        );
+        drop(receiver);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            tokio::select! {
+                () = command.cancelled() => {},
+                () = operation => panic!("operation unexpectedly completed"),
+            }
+            observed.await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

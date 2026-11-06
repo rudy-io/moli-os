@@ -4,6 +4,7 @@
   import { energy, useEnergy, watts, euros } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import ClimateSetpoint from './ClimateSetpoint.svelte';
   import { pointOf, canWrite, numericRange, quantize, writableChoices } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
   import { climateMode as modeStyle } from '../lib/climate.js';
@@ -243,6 +244,11 @@
           <button onclick={() => nudge(STEP)} aria-label={t('commun.clim.plus_chaud')} disabled={shownTarget >= MAX}>+</button>
         </div>
       {/if}
+      {#each ['heat_setpoint', 'cool_setpoint'] as pointKey (pointKey)}
+        {#if pointOf(d, pointKey)}
+          <ClimateSetpoint {id} {name} {pointKey} label={t(`commun.clim.${pointKey}`)} />
+        {/if}
+      {/each}
       {#if modes.length}
         <div class="modes" role="group" aria-label={t('commun.clim.mode')}>
           {#each modes as key (key)}

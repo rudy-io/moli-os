@@ -1,0 +1,45 @@
+[package]
+name = "matter-commissioning-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Not a workspace member — kept separate so it can require nightly Rust
+# without dragging the rest of the workspace's MSRV up. Matches the
+# `crates/matter-codec/fuzz` layout.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+matter-commissioning = { path = ".." }
+
+[[bin]]
+name = "fuzz_parse_qr"
+path = "fuzz_targets/fuzz_parse_qr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_parse_manual"
+path = "fuzz_targets/fuzz_parse_manual.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_dac_from_der"
+path = "fuzz_targets/fuzz_dac_from_der.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "nocsr_parse"
+path = "fuzz_targets/nocsr_parse.rs"
+test = false
+doc = false
+bench = false

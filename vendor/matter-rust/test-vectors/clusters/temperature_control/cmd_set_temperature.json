@@ -1,0 +1,15 @@
+{
+  "cluster": "TemperatureControl",
+  "cluster_id": 86,
+  "command": "SetTemperature",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "TargetTemperature",
+      "id": 0,
+      "value": -1250
+    }
+  ],
+  "note": "a negative signed request field, the optional TargetTemperatureLevel omitted (encoded with matter.js TlvSetTemperatureRequest)",
+  "payload_tlv_b64": "FSEAHvsY"
+}

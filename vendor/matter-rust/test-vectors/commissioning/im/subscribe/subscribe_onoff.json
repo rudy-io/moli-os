@@ -1,0 +1,13 @@
+{
+  "keep_subscriptions": false,
+  "min_interval_floor": 1,
+  "max_interval_ceiling": 30,
+  "paths": [
+    {
+      "endpoint": 1,
+      "cluster": 6,
+      "attribute": 0
+    }
+  ],
+  "expected_message_b64": "FSgAJAEBJAIeNgMXJAIBJAMGJAQAGBgoByT/Cxg="
+}

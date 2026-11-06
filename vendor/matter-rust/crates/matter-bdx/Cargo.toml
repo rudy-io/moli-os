@@ -1,0 +1,20 @@
+[package]
+name = "matter-bdx"
+version = "0.3.1"
+description = "Matter Bulk Data Exchange (BDX) protocol: message codecs + receiver-driven sender."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "bdx", "ota", "iot", "file-transfer"]
+categories = ["network-programming", "embedded"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+thiserror = { workspace = true }

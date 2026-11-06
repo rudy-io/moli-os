@@ -1,0 +1,20 @@
+{
+  "cluster": "ValveConfigurationAndControl",
+  "cluster_id": 129,
+  "command": "Open",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "OpenDuration",
+      "id": 0,
+      "value": null
+    },
+    {
+      "name": "TargetLevel",
+      "id": 1,
+      "value": 50
+    }
+  ],
+  "note": "an optional nullable request field sent as null (open until closed), TargetLevel 50 (encoded with matter.js TlvOpenRequest)",
+  "payload_tlv_b64": "FTQAJAEyGA=="
+}

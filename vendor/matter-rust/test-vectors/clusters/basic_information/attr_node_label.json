@@ -1,0 +1,10 @@
+{
+  "cluster": "BasicInformation",
+  "cluster_id": 40,
+  "attribute": "NodeLabel",
+  "attribute_id": 5,
+  "type": "string",
+  "writable": true,
+  "note": "writable UTF-8 string attribute",
+  "value_tlv_b64": "DAttYXR0ZXItcnVzdA=="
+}

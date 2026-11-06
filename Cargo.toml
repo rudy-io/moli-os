@@ -1,15 +1,17 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor/matter-rust"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/rudy-io/moli-os"
-rust-version = "1.88"
+rust-version = "1.89"
 
 [workspace.dependencies]
+moli-matter = { path = "crates/moli-matter" }
 moli-core = { path = "crates/moli-core" }
 moli-runtime = { path = "crates/moli-runtime" }
 moli-audio = { path = "crates/moli-audio" }

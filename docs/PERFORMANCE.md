@@ -13,6 +13,85 @@ Assistant.
 
 ## Budget
 
+### Build actuel — pile locale et familles étendues, 6 novembre 2026
+
+Les variantes de production construites depuis le dépôt Moli seul mesurent :
+
+| Variante x86_64 musl | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard avec symboles | 30 268 337 octets | 30 264 240 octets |
+| Compacte explicite | **24 954 289 octets** | 24 949 904 octets |
+
+La compacte respecte 25 Mo avec 45 711 octets de marge. Le standard reste au-dessus
+pour conserver les symboles. Les nouvelles fonctions et la source de la pile sont
+dans Moli ; la copie des sources n'ajoute pas de service ni de dépendance Git.
+Les deux binaires passent les essais protocolaires étendus. Diagnostics correspond
+au binaire standard. Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
+
+Sur 29,79 s au repos avec les familles virtuelles : 17 280 Kio RSS, 3 544 Kio anonymes,
+0,067 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
+budget cgroup, d'un essai de charge, d'une mesure radio ou d'une comparaison HA.
+Les mesures historiques ci-dessous restent rattachées à leurs versions précédentes.
+
+### Contribution Matter expérimentale — 6 novembre 2026
+
+Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl
+x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 113 713 octets**
+non compressés ; binaire : **30 109 368 octets**. Cela **dépasse le budget de
+25 Mo**. Comparaison construite séparément avec le Dockerfile inchangé de la
+base `9ce5868c7832f1e97010f84ffb7e33d7295840f4`, même architecture et toolchain :
+**27 737 521 octets** sans Matter (binaire **27 733 136 octets**). L'ajout de la
+contribution représente donc **2 376 192 octets (+8,57 %)** pour l'image.
+La base dépasse déjà 25 Mo ; la contribution accroît ce dépassement. Le budget
+reste non résolu : réduction/découpage ou arbitrage explicite avant livraison stable.
+SHA-256 du binaire de référence :
+`a435b60f0b76b50cff5a4383ac1976abe90015f777032b716b9ebdbc3e9743ae`.
+Build final de la contribution : `d6add50616518a84cdb139ba01a58e6871f7ccaf`,
+avec le correctif d’attestation et les noms bridgés. Hash du binaire et reproduction :
+`tools/matter-e2e/RESULTS.md`.
+
+Le binaire extrait de cette image a passé l'interopérabilité avec une lampe
+virtuelle matter.js, puis une fenêtre au repos de 29,78 s après redémarrage :
+RSS maximal échantillonné 17 324 Kio, mémoire anonyme du processus 3 460 Kio,
+CPU 0,000 % d'un cœur à la résolution des ticks Linux. Ce sont des mesures
+**du processus**, pas du cgroup : elles ne certifient pas les budgets ci-dessous.
+Aucun dashboard connecté pendant cette fenêtre ; un seul appareil virtuel,
+ni BLE ni OTBR. Pas de comparaison à Home Assistant, de p95 API, de mesure radio
+ou de test de charge multi-appareils. Reproduction et hash du binaire :
+`tools/matter-e2e/RESULTS.md` (`E2E_MEASURE=1`).
+
+### Variante compacte facultative et compatibilité minimale — 6 novembre 2026
+
+Les deux variantes ci-dessous utilisent les mêmes sources/fonctionnalités, après
+les corrections de compatibilité Rust 1.89 ; seule l'option de symboles diffère :
+
+| Variante x86_64 musl | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard, symboles conservés (défaut inchangé) | 30 113 712 octets | 30 109 520 octets |
+| Compacte, table de symboles retirée | **24 827 312 octets** | 24 822 928 octets |
+
+La variante compacte respecte 25 Mo avec une marge mesurée de 172 688 octets.
+Elle conserve tous les pilotes et le mécanisme de déroulement/interception des panics,
+mais les backtraces locales perdent les noms de fonctions. Les sections de code,
+données constantes et métadonnées d'exception/unwind sont identiques octet pour octet.
+Le target `diagnostics` exporte le binaire avec symboles : son SHA-256 correspond
+exactement à celui du build standard. Il n'est pas inclus dans l'image compacte.
+Le choix du profil par défaut reste un arbitrage de diagnostic/exploitation.
+L'application complète passe `cargo check --locked -p moli-os` avec Rust 1.89.0,
+fonctionnalités par défaut. Deux match guards trop récents ont été remplacés par
+des expressions équivalentes ; le contrôle de pièce de l'assistant reste avant
+l'envoi d'une commande. Les tests existants et une revue ciblée couvrent ce point.
+
+Le binaire compact a passé le même test indépendant matter.js : commissioning avec
+attestation, Descriptor, OnOff confirmé par l'accessoire, abonnements, reprise après
+redémarrage et refus des états corrompus/mauvaise clé. Mesure indicative de processus
+avec une lampe virtuelle sur 29,78 s : 17 340 Kio RSS, 3 476 Kio anonymes, CPU 0,000 %
+à la résolution des ticks. Ce n'est pas une certification du budget cgroup ni radio.
+Commandes de build/export : `docs/components/exploitation.md` ; hash et résultat :
+`tools/matter-e2e/RESULTS.md`.
+
+### Objectifs du projet
+
 | Mesure | Budget | Pourquoi |
 |---|---|---|
 | Mémoire (mémoire **anonyme** du cgroup : tas et piles, aucun cache de fichiers ; **la même définition pour Moli et HA** ; le RSS de Moli est noté à côté) | ≤ 32 Mio (plafond conteneur 128) | HA : ~2,1 Gio. Rester sous 1/50. |

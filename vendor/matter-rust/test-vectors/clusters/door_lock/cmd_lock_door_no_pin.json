@@ -1,0 +1,9 @@
+{
+  "cluster": "DoorLock",
+  "cluster_id": 257,
+  "command": "LockDoor",
+  "command_id": 0,
+  "fields": [],
+  "note": "command with optional octstr field ABSENT (tag omitted)",
+  "payload_tlv_b64": "FRg="
+}

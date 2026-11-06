@@ -1,0 +1,120 @@
+[package]
+name = "matter-commissioning"
+version = "0.10.2"
+description = "Matter commissioning state machine: setup payload, attestation, NOC issuance, network commissioning."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "commissioning", "iot", "smart-home"]
+categories = ["network-programming", "embedded"]
+readme = "README.md"
+
+[features]
+default = []
+## Expose cursor-jump helpers used exclusively by the crate's own
+## integration tests (tests/state_machine_network.rs and similar).
+## Double-underscore prefix follows the Tokio/Serde convention: "internal,
+## do not depend on". Never enable in production builds.
+__test_shortcuts = []
+## Enable `tracing` instrumentation spans on `Commissioner`'s public
+## methods (`poll`, `on_response`, `on_case_established`), plus the driver's
+## debug events. Those events record directions, session and exchange ids,
+## protocols and opcodes (some also lengths), but no message payload bytes. (Public
+## certificates and CASE Sigma2 messages are still dumped; see the crate
+## docs.)
+## Off by default; opt-in per Matter-rust's zero-cost-when-unused policy.
+tracing = ["dep:tracing"]
+## Async Tokio commissioning driver — the IO layer that runs the state
+## machine for real. Pulls in `tokio` and the `matter-transport` IO layer.
+## Off by default: the sans-IO state machine, codecs, and `im` module do not
+## require an async runtime.
+driver = ["dep:tokio"]
+## Enables `matter_commissioning::test_support` — a canned-`CommissionedFabric`
+## constructor for downstream crates whose tests need a successful
+## commissioning outcome without driving a full PASE/CASE handshake
+## (`CommissionedFabric` is `#[non_exhaustive]`, so no other crate can build
+## one by struct literal). Mirrors `matter_cert::test_support`. NOT part of
+## the stable public API — production callers must not enable this feature.
+test-support = []
+## JSON-lines wire-trace capture (`JsonlLayer`) for cross-verification
+## against matter.js. Implies `tracing`. Tooling-grade, not wire-format code.
+## DEBUGGING ONLY, NEVER IN PRODUCTION: with this on, the driver's
+## `matter_wire` debug events record the full decrypted plaintext of every
+## commissioning exchange as hex, INCLUDING the IPK (`AddNOC`), the Wi-Fi
+## passphrase and the Thread operational dataset, network key included.
+wiretrace = ["tracing", "dep:tracing-subscriber", "dep:serde_json"]
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-codec = { path = "../matter-codec", version = "0.3.2" }
+matter-cert = { path = "../matter-cert", version = "0.3.0" }
+matter-crypto = { path = "../matter-crypto", version = "0.5.0" }
+matter-transport = { path = "../matter-transport", version = "0.7.4" }
+matter-interaction = { path = "../matter-interaction", version = "0.4.3" }
+cms = { workspace = true }
+der = { workspace = true }
+x509-parser = { workspace = true }
+rustls-webpki = { workspace = true }
+rustls-pki-types = { workspace = true }
+ring = { workspace = true }
+base64 = { workspace = true }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+tracing = { version = "0.1", optional = true, default-features = false, features = ["attributes", "std"] }
+tokio = { workspace = true, optional = true, features = ["macros", "time", "sync"] }
+# Crate-level override of the workspace entry: adds `registry` (needed by
+# `JsonlLayer` via `tracing_subscriber::registry()`) to the feature set the
+# workspace entry omits (`default-features = false` there).
+tracing-subscriber = { workspace = true, optional = true, features = ["registry"] }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Dev-only: the `control_onoff` example and the generated-codec parity test
+# (`tests/generated_codec_parity.rs`, which checks this crate's hand-written
+# GeneralCommissioning and NetworkCommissioning encoders against the
+# generated ones; those clusters exist from matter-clusters 0.6.0) use the
+# generated cluster codecs. Kept out of the main dependency graph so
+# matter-clusters' own crate independence is preserved.
+matter-clusters = { path = "../matter-clusters", version = "0.6.0" }
+# Test-only: the `pase_over_btp` floor test drives PASE through two real
+# `BtpSession`s to prove reassembly + MRP-off end to end. Dev-dep ONLY —
+# matter-ble must never enter the runtime graph (and a dep on matter-controller
+# would be a cycle, so the BtpSession→AsyncDatagram shim is test-local).
+matter-ble = { path = "../matter-ble", version = "0.3.4" }
+hex = { workspace = true }
+proptest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+p256 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time", "sync", "test-util"] }
+# Enable matter-cert test-support so the #[cfg(test)] blocks in driver/case.rs
+# can use matter_cert::test_support::{build_unsigned, with_signature, TestCertFields}.
+matter-cert = { path = "../matter-cert", version = "0.3.0", features = ["test-support"] }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["registry"] }
+# CMS / DER construction for the CD-verifier unit tests: build synthetic
+# Certification Declarations (incl. dac_origin tag 9/10 overrides) signed by
+# the bundled CSA-test root. Mirrors xtask/src/capture_cd.rs. These are
+# already in the lockfile as transitive deps of `cms`; naming them here only
+# makes them addressable from `#[cfg(test)]`.
+const-oid = "0.9"
+spki = "0.7"
+x509-cert = "0.2"
+
+[[test]]
+name = "state_machine_network"
+required-features = ["__test_shortcuts"]
+
+[[example]]
+name = "commission_ip"
+required-features = ["driver"]
+
+[[example]]
+name = "control_onoff"
+required-features = ["driver"]

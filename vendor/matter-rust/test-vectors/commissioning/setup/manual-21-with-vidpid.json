@@ -1,0 +1,15 @@
+{
+  "intent": "21-digit form, with VID/PID",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [],
+    "discriminator": 3840,
+    "passcode": 20202021
+  },
+  "expected": {
+    "manual": "749701123365521327687"
+  }
+}

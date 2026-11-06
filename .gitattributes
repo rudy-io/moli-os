@@ -1,3 +1,10 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+
+# Keep the full third-party source available while focusing default PR diffs on Moli.
+vendor/matter-rust/** -text linguist-vendored=true
+
+# Raw TLV/fuzzer inputs remain binary even when a seed consists of tabs or newlines.
+vendor/matter-rust/**/*.bin binary
+vendor/matter-rust/**/fuzz/corpus/** binary

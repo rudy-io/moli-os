@@ -1,0 +1,24 @@
+{
+  "cluster": "ContentLauncher",
+  "cluster_id": 1290,
+  "command": "LaunchURL",
+  "command_id": 1,
+  "fields": [
+    {
+      "name": "ContentURL",
+      "id": 0,
+      "value": "u"
+    },
+    {
+      "name": "PlaybackPreferences",
+      "id": 3,
+      "value": {
+        "playbackPosition": 42,
+        "textTrack": null,
+        "audioTracks": null
+      }
+    }
+  ],
+  "note": "LaunchURL PlaybackPreferences: a non-null uint64, a null nested struct and a null whole list (encoded with matter.js TlvLaunchUrlRequest)",
+  "payload_tlv_b64": "FSwAAXU1AyQAKjQBNAIYGA=="
+}

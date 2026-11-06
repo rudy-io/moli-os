@@ -1,0 +1,10 @@
+{
+  "cluster": "GroupKeyManagement",
+  "cluster_id": 63,
+  "attribute": "GroupKeyMap",
+  "attribute_id": 0,
+  "type": "GroupKeyMapStruct (list entry, write form)",
+  "writable": true,
+  "note": "GroupKeyMapStruct { GroupId 0x0101, GroupKeySetId 0x01A1 } with no FabricIndex (matter.js GroupKeyManagement.TlvGroupKeyMap, forWriteInteraction)",
+  "value_tlv_b64": "FSUBAQElAqEBGA=="
+}

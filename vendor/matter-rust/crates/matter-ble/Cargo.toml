@@ -1,0 +1,37 @@
+[package]
+name = "matter-ble"
+version = "0.3.4"
+description = "Matter BLE commissioning transport: BTP (Bluetooth Transport Protocol) sans-IO engine and BLE central role"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "ble", "btp", "commissioning", "iot"]
+categories = ["network-programming", "embedded"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[features]
+# The BLE central role (scan / GATT / BTP channel pump). Heavy and
+# platform-specific (btleplug pulls libdbus on Linux, CoreBluetooth on macOS),
+# so it is opt-in. The sans-IO BTP core (advert/handshake/session) is always
+# compiled and needs none of these.
+central = ["dep:btleplug", "dep:tokio", "dep:uuid", "dep:futures"]
+
+[dependencies]
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+
+# --- `central` feature only ---------------------------------------------------
+# `btleplug` speaks `uuid::Uuid` in its public API, so `uuid` is a transitive
+# API dependency; `futures` is needed to poll btleplug's notification / event
+# streams. Neither is on the project's short list of pre-approved dependencies,
+# so both are confined to this optional feature.
+btleplug = { version = "=0.12.0", optional = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"], optional = true }
+uuid = { version = "1", optional = true }
+futures = { version = "0.3", optional = true }

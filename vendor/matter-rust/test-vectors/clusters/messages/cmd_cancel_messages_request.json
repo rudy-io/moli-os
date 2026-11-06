@@ -1,0 +1,18 @@
+{
+  "cluster": "Messages",
+  "cluster_id": 151,
+  "command": "CancelMessagesRequest",
+  "command_id": 1,
+  "fields": [
+    {
+      "name": "MessageIDs",
+      "id": 0,
+      "value": [
+        "000102030405060708090a0b0c0d0e0f",
+        "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+      ]
+    }
+  ],
+  "note": "a request list of two 16-byte octstr message ids (encoded with matter.js TlvCancelMessagesRequest)",
+  "payload_tlv_b64": "FTYAEBAAAQIDBAUGBwgJCgsMDQ4PEBDw8fLz9PX29/j5+vv8/f7/GBg="
+}

@@ -1,0 +1,9 @@
+{
+  "cluster": "OnOff",
+  "cluster_id": 6,
+  "command": "Toggle",
+  "command_id": 2,
+  "fields": [],
+  "note": "fieldless command (empty anonymous struct)",
+  "payload_tlv_b64": "FRg="
+}

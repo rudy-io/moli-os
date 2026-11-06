@@ -1,0 +1,41 @@
+{
+  "cluster": "Thermostat",
+  "cluster_id": 513,
+  "command": "SetWeeklySchedule",
+  "command_id": 1,
+  "fields": [
+    {
+      "name": "NumberOfTransitionsForSequence",
+      "id": 0,
+      "value": 2
+    },
+    {
+      "name": "DayOfWeekForSequence",
+      "id": 1,
+      "value": 10
+    },
+    {
+      "name": "ModeForSequence",
+      "id": 2,
+      "value": 1
+    },
+    {
+      "name": "Transitions",
+      "id": 3,
+      "value": [
+        {
+          "TransitionTime": 360,
+          "HeatSetpoint": 2000,
+          "CoolSetpoint": null
+        },
+        {
+          "TransitionTime": 1410,
+          "HeatSetpoint": 1600,
+          "CoolSetpoint": null
+        }
+      ]
+    }
+  ],
+  "note": "list of structs whose CoolSetpoint is null, two bitmaps (Monday|Wednesday, heat only); encoded with matter.js 0.16.11 TlvSetWeeklyScheduleRequest",
+  "payload_tlv_b64": "FSQAAiQBCiQCATYDFSUAaAEhAdAHNAIYFSUAggUhAUAGNAIYGBg="
+}

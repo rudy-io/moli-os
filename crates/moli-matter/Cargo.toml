@@ -1,0 +1,20 @@
+[package]
+name = "moli-matter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[features]
+ble = ["matter-controller/ble"]
+[dependencies]
+moli-core.workspace = true
+moli-runtime.workspace = true
+moli-i18n.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+matter-controller = { path = "../../vendor/matter-rust/crates/matter-controller", version = "=0.18.3", default-features = false }
+matter-codec = { path = "../../vendor/matter-rust/crates/matter-codec", version = "=0.3.2" }
+[lints]
+workspace = true
