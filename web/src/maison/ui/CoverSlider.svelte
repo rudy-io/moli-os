@@ -26,11 +26,13 @@
     }
   });
 
-  // Determine icon based on target vs actual and mouse position
+  // Icon updates live during drag based on:
+  // - Direction: target position vs actual position (up/down chevron)
+  // - Speed: mouse Y coordinate vs track center (double/simple chevron)
   const icon = $derived.by(() => {
     if (!clickState) return null;
     const goingUp = clickState.target > value;
-    const fast = clickState.mouseAboveTrack;
+    const fast = clickState.mouseAboveTrack; // Updated every pointermove
     if (goingUp && fast) return mdiChevronDoubleUp;
     if (goingUp && !fast) return mdiChevronUp;
     if (!goingUp && fast) return mdiChevronDoubleDown;
@@ -40,9 +42,11 @@
   function updateTarget(e) {
     if (!container) return null;
     const rect = container.getBoundingClientRect();
+    // X coordinate → target position
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
     const percent = (x / rect.width) * 100;
     const target = Math.round(min + (percent / 100) * (max - min));
+    // Y coordinate → speed intent (above track = fast, below = slow)
     const trackCenterY = rect.top + rect.height / 2;
     const mouseAboveTrack = e.clientY < trackCenterY;
     return { target, mouseAboveTrack };
