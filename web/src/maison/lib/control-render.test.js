@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -682,4 +682,47 @@ test('a room lists its valve as a climate and opens the valve card, not the air-
   const html = showRoom([{ id: 'fixture:valve', points: valvePoints(), values: { occupied_heating_setpoint: 18.5, local_temperature: 19.2, system_mode: 'heat' } }]);
   assert.match(html, /19/);
   assert.doesNotMatch(html, /class="dial/);
+});
+
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const schedulePoints = (write = true, groups = false) => [
+  ...valvePoints(),
+  ...DAYS.map((day) => point(`weekly_schedule_${day}`, { type: 'text' }, write)),
+  ...(groups ? [point('schedule_group_to_edit', enumeration('1', '2', '3')), point('schedule_active_group', enumeration('1', '2', '3'))] : []),
+];
+const valveValues = { occupied_heating_setpoint: 18.5, local_temperature: 19, system_mode: 'auto' };
+
+test('a valve that states its days offers the schedule, one that does not offers nothing', () => {
+  assert.match(show('ValveCard', schedulePoints(), valveValues), /aria-expanded="false"[^>]*>Table horaire/);
+  assert.doesNotMatch(show('ValveCard', valvePoints(), valveValues), /Table horaire/);
+  assert.doesNotMatch(show('ValveCard', schedulePoints(false), valveValues), /Table horaire/);
+});
+
+test('the editor shows the day the valve states: seven days, a time and a setpoint per step', () => {
+  const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_monday: '00:00/17 06:00/20 22:00/16' });
+  assert.equal(buttons(html).filter((tag) => tag.includes('aria-pressed')).length, 7);
+  // The 00:00 step is shown but fixed.
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 3);
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"') && tag.includes('disabled')).length, 1);
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="number"')).length, 3);
+  assert.match(html, /00:00/);
+  assert.doesNotMatch(html, /remplace celle de la vanne/);
+  // Nothing to save until something changes.
+  assert.doesNotMatch(html, /Enregistrer/);
+});
+
+test('a valve that never reports its schedule says saving replaces it', () => {
+  assert.match(show('ScheduleEditor', schedulePoints(), valveValues), /remplace celle de la vanne/);
+});
+
+test('a read-only schedule shows no editor', () => {
+  assert.equal(show('ScheduleEditor', schedulePoints(false), valveValues).includes('<ul'), false);
+});
+
+test('editing a group the valve does not follow is said', () => {
+  const html = show('ScheduleEditor', schedulePoints(true, true), { ...valveValues, weekly_schedule_monday: '00:00/17', schedule_group_to_edit: '2', schedule_active_group: '1' });
+  assert.match(html, /groupe 2/);
+  assert.match(html, /groupe 1/);
+  const same = show('ScheduleEditor', schedulePoints(true, true), { ...valveValues, weekly_schedule_monday: '00:00/17', schedule_group_to_edit: '1', schedule_active_group: '1' });
+  assert.doesNotMatch(same, /La vanne suit|la vanne suit/);
 });
