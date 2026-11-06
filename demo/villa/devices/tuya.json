@@ -307,7 +307,10 @@
       "values": [
        "open",
        "stop",
-       "close"
+       "close",
+       "cycle",
+       "open_slow",
+       "close_slow"
       ]
      },
      "access": {
@@ -330,6 +333,39 @@
       "write": true
      },
      "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control_slow",
+     "label": "Ouverture lente",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "moving",
+     "label": "En mouvement",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "STOP",
+       "UP",
+       "DOWN"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
      "semantic": "other"
     },
     {
@@ -368,7 +404,8 @@
    "native_room": "Salon",
    "state": {
     "percent_control": 100,
-    "control": "stop"
+    "control": "stop",
+    "moving": "STOP"
    }
   },
   {

@@ -139,6 +139,8 @@ struct Live {
     points: Vec<Point>,
     /// The values as the simulation knows them (orders included).
     values: HashMap<String, Value>,
+    /// Cover target position (0-100) and speed factor (normal = 1.0, slow = 0.5).
+    cover_target: Option<(f64, f64)>,
 }
 
 impl Live {
@@ -355,6 +357,7 @@ impl World {
                 specs: p.device.points.clone(),
                 points,
                 values,
+                cover_target: None,
             });
         }
         #[allow(clippy::cast_sign_loss)]
@@ -399,6 +402,25 @@ impl World {
         let Some(spec) = live.specs.iter().find(|s| &*s.key == key).cloned() else {
             return;
         };
+
+        // Special handling for cover position writes: start progressive movement
+        match key {
+            "percent_control" | "percent_control_slow" => {
+                if let Some(target) = value.as_f64() {
+                    let speed = if key == "percent_control_slow" { 0.5 } else { 1.0 };
+                    let current = live.num("percent_control").unwrap_or(50.0);
+
+                    if (target - current).abs() > 0.5 {
+                        live.cover_target = Some((target, speed));
+                        let direction = if target > current { "UP" } else { "DOWN" };
+                        Self::set(ctx, live, "moving", Value::Text(direction.into()));
+                    }
+                }
+                return; // Don't apply immediately
+            }
+            _ => {}
+        }
+
         // A pure order (a remote's key, an announcement): nothing to keep.
         if spec.access.read {
             Self::set(ctx, live, key, value.clone());
@@ -418,9 +440,31 @@ impl World {
                 let state = if *b { "playing" } else { "paused" };
                 Self::set(ctx, live, "state", Value::Text(state.into()));
             }
+            // Cover position update (percent_control): set by the generic code above if directly written.
             ("control", Value::Text(t)) => {
                 let t = t.to_ascii_lowercase();
-                if t.contains("pause") {
+                // Cover control (shutters): open, close, stop
+                if live.has("percent_control") {
+                    let current = live.num("percent_control").unwrap_or(50.0);
+                    let speed = if t.contains("slow") { 0.5 } else { 1.0 };
+
+                    if t.contains("open") {
+                        live.cover_target = Some((100.0, speed));
+                        Self::set(ctx, live, "moving", Value::Text("UP".into()));
+                    } else if t.contains("close") {
+                        live.cover_target = Some((0.0, speed));
+                        Self::set(ctx, live, "moving", Value::Text("DOWN".into()));
+                    } else if t.contains("stop") {
+                        live.cover_target = None;
+                        Self::set(ctx, live, "moving", Value::Text("STOP".into()));
+                    } else if t.contains("cycle") {
+                        // Toggle: if closed or closing, open; otherwise close
+                        let target = if current < 50.0 { 100.0 } else { 0.0 };
+                        live.cover_target = Some((target, speed));
+                        let direction = if target > current { "UP" } else { "DOWN" };
+                        Self::set(ctx, live, "moving", Value::Text(direction.into()));
+                    }
+                } else if t.contains("pause") {
                     Self::set(ctx, live, "printing", Value::Bool(false));
                     if live.has("state") {
                         Self::set(ctx, live, "state", Value::Text("paused".into()));
@@ -517,6 +561,26 @@ impl World {
         let running = live.running();
         let mut updates: Vec<(String, Value)> = Vec::new();
         let printing = live.flag("printing").unwrap_or(false);
+
+        // Cover movement simulation: progress toward target at ~5%/s (normal) or ~2.5%/s (slow)
+        // Full travel: 20s normal, 40s slow (realistic shutter timing)
+        if let Some((target, speed)) = live.cover_target {
+            if let Some(current) = live.num("percent_control") {
+                let rate = 5.0 * speed; // percent per second
+                let delta = (target - current).signum() * (rate * dt).min((target - current).abs());
+                let next = current + delta;
+
+                // Reached target? Stop movement
+                if (target - next).abs() < 0.5 {
+                    live.cover_target = None;
+                    Self::set(ctx, live, "percent_control", Value::Float(target));
+                    Self::set(ctx, live, "moving", Value::Text("STOP".into()));
+                } else {
+                    Self::set(ctx, live, "percent_control", Value::Float(next.round()));
+                }
+            }
+        }
+
         for p in &mut live.points {
             let Some(spec) = live.specs.iter().find(|s| *s.key == p.key) else {
                 continue;

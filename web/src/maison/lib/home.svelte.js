@@ -5,7 +5,7 @@ import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelt
 import { t, locale } from '../../lib/i18n.svelte.js';
 import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve } from './capabilities.js';
 
-export { hub, positionPoint, coverOrder };
+export { hub };
 
 export const home = $state({
   /** @type {any} layout from /api/home ({} = automatic) */
@@ -156,6 +156,23 @@ export function pending(id, point = null) {
   return key ? `${id}/${key}` in hub.pending : false;
 }
 
+/** A cover's position: percent_control or position (0-100), whichever is available. */
+export function coverPosition(id) {
+  const pct = value(id, 'percent_control');
+  if (pct != null) return pct;
+  return value(id, 'position');
+}
+
+/** The point a cover's position can be written to, if any. */
+export function coverPositionKey(id) {
+  const d = device(id);
+  if (!d) return null;
+  const p = d.points.find((p) => p.key === 'percent_control' && p.access?.write);
+  if (p) return 'percent_control';
+  const pos = d.points.find((p) => p.key === 'position' && p.access?.write);
+  return pos ? 'position' : null;
+}
+
 // ---- rooms ---------------------------------------------------------------------
 
 const norm = (s) =>
@@ -271,6 +288,10 @@ export function roomList() {
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        opened: by('cover').filter((d) => {
+          const pct = coverPosition(d.id);
+          return pct != null && pct >= 50;
+        }).length,
       };
     });
 }
