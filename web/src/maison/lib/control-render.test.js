@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -659,7 +659,7 @@ test('a Zigbee valve is a climate shown with its measured temperature, setpoint 
   assert.match(html, /19[.,]2/);
   assert.match(html, /18[.,]5/);
   // − and +, then one button per mode the valve accepts: no preset, no extra mode.
-  assert.equal(buttons(html).length, 5);
+  assert.equal(buttons(html).filter((tag) => !tag.includes('class="fold')).length, 5);
   assert.match(html, /aria-pressed="true"[^>]*>Programme/);
   assert.doesNotMatch(html, /class="dial/);
 });
@@ -674,7 +674,8 @@ test('a valve setpoint stops at the bounds its own contract states', () => {
 
 test('a read-only valve shows its setpoint and mode without any control', () => {
   const html = show('ValveCard', valvePoints(false, false), { occupied_heating_setpoint: 18.5, local_temperature: 19, system_mode: 'heat' });
-  assert.equal(buttons(html).length, 0);
+  // Only the read-only chart is left to open.
+  assert.equal(buttons(html).filter((tag) => !tag.includes('class="fold')).length, 0);
   assert.match(html, /18[.,]5/);
 });
 
@@ -743,4 +744,13 @@ test('dual setpoints classify without a brand and render independent numeric con
   assert.equal(buttons(html).filter(tag => /disabled/.test(tag)).length, 3);
   const offline = show('ClimateCard', points, { heat_setpoint: 20 }, { online: false });
   assert.ok(inputs(offline).every(tag => /disabled/.test(tag)));
+});
+
+test('a valve offers its chart, which opens on its three periods', () => {
+  assert.match(show('ValveCard', valvePoints(), valveValues), /aria-expanded="false"[^>]*>Courbe/);
+  const html = show('ValveChart', valvePoints(), valveValues);
+  assert.equal(buttons(html).length, 3);
+  assert.match(html, /aria-pressed="true"[^>]*>24 h/);
+  // Nothing is drawn before the hub has answered.
+  assert.doesNotMatch(html, /<svg/);
 });

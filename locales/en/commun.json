@@ -237,6 +237,12 @@
   "commun.vanne.prog.enregistrer": "Save",
   "commun.vanne.prog.inconnu": "This valve's current schedule can't be read: saving replaces the one on the valve.",
   "commun.vanne.prog.groupe": "Changes apply to group {edit}; the valve follows group {active}.",
+  "commun.vanne.courbe.titre": "Chart",
+  "commun.vanne.courbe.periode": "Period",
+  "commun.vanne.courbe.programme": "Schedule (current table)",
+  "commun.vanne.courbe.vide": "No history for this valve yet.",
+  "commun.vanne.courbe.erreur": "History unavailable.",
+  "commun.vanne.courbe.resume": "{name}: temperature, setpoint and schedule, {range}",
 
   "commun.jour.jusqua": "Today until {h}:00",
   "commun.jour.habitude": "usually {kwh} kWh",

@@ -1,7 +1,7 @@
 <script>
   import { device, value, reachable, act } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
-  import { scheduleSpec, parseDay, formatDay, sameDay, addStep, moveStep, setStepDeg, removeStep, hhmm, minutesOf, suggestMinute, GRID } from '../lib/schedule.js';
+  import { scheduleSpec, parseDay, formatDay, sameDay, addStep, moveStep, setStepDeg, removeStep, writeDays, hhmm, minutesOf, suggestMinute, GRID } from '../lib/schedule.js';
 
   // A valve's weekly schedule, one day at a time. Writing it is an order like any
   // other: it goes through `act`, the hub's normal path and the guard.
@@ -42,16 +42,29 @@
     if (!spec || !dirty || saving || !reachable(id)) return;
     const text = formatDay(spec, edited);
     saving = true;
-    let ok = true;
-    for (const key of targets) {
-      if (!spec.days.includes(key)) continue;
-      ok = (await act(`${id}/weekly_schedule_${key}`, text, t('commun.vanne.prog.label', { name }))) === 'ok' && ok;
-    }
+    const { stopped } = await writeDays(
+      targets.filter((key) => spec.days.includes(key)),
+      (key) => act(`${id}/weekly_schedule_${key}`, text, t('commun.vanne.prog.label', { name })),
+    );
     saving = false;
-    if (ok) {
+    if (!stopped) {
       edited = null;
       applyTo = [];
     }
+  }
+
+  // A field the table did not take back shows what the table holds again.
+  function moveTo(e, i) {
+    const min = minutesOf(e.currentTarget.value);
+    const next = min == null ? steps : moveStep(spec, steps, i, min);
+    if (!sameDay(spec, next, steps)) edit(next);
+    else e.currentTarget.value = hhmm(steps[i].min);
+  }
+
+  function setDeg(e, i) {
+    const next = setStepDeg(spec, steps, i, e.currentTarget.value === '' ? null : e.currentTarget.valueAsNumber);
+    if (!sameDay(spec, next, steps)) edit(next);
+    else e.currentTarget.value = String(steps[i].deg);
   }
 </script>
 
@@ -78,7 +91,7 @@
             value={hhmm(step.min)}
             disabled={i === 0}
             aria-label={t('commun.vanne.prog.heure')}
-            onchange={(e) => minutesOf(e.currentTarget.value) != null && edit(moveStep(spec, steps, i, minutesOf(e.currentTarget.value)))}
+            onchange={(e) => moveTo(e, i)}
           />
           <input
             class="num deg"
@@ -88,7 +101,7 @@
             step={spec.step}
             value={step.deg}
             aria-label={t('commun.clim.consigne')}
-            onchange={(e) => edit(setStepDeg(spec, steps, i, e.currentTarget.valueAsNumber))}
+            onchange={(e) => setDeg(e, i)}
           />
           {#if i > 0}
             <button class="remove" aria-label={t('commun.vanne.prog.supprimer', { time: hhmm(step.min) })} onclick={() => edit(removeStep(spec, steps, i))}>×</button>

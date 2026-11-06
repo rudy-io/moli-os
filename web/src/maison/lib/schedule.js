@@ -130,7 +130,23 @@ export function moveStep(spec, steps, index, min) {
 /** The setpoint of the step at `index`. */
 export function setStepDeg(spec, steps, index, deg) {
   const day = normalize(spec, steps);
+  // An emptied field is no setpoint: it never falls back to the valve's minimum.
+  if (deg == null || deg === '' || !Number.isFinite(Number(deg))) return day;
   return index < 0 || index >= day.length ? day : day.map((s, i) => (i === index ? { ...s, deg: snapDeg(spec, deg) } : s));
+}
+
+/** Writes the days one after the other and stops at the first one that is not done:
+ *  the guard keeps only the last held order, so going on would leave the earlier
+ *  days silently unwritten. `write(day)` resolves `'ok'` when the order went through.
+ *  Returns the days written and the outcome that stopped it (null when none did). */
+export async function writeDays(days, write) {
+  const written = [];
+  for (const day of days) {
+    const outcome = await write(day);
+    if (outcome !== 'ok') return { written, stopped: outcome ?? 'error' };
+    written.push(day);
+  }
+  return { written, stopped: null };
 }
 
 /** The step at `index` removed. The 00:00 one stays. */
