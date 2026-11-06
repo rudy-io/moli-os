@@ -726,3 +726,21 @@ test('editing a group the valve does not follow is said', () => {
   const same = show('ScheduleEditor', schedulePoints(true, true), { ...valveValues, weekly_schedule_monday: '00:00/17', schedule_group_to_edit: '1', schedule_active_group: '1' });
   assert.doesNotMatch(same, /La vanne suit|la vanne suit/);
 });
+
+test('dual setpoints classify without a brand and render independent numeric contracts', () => {
+  const points = [
+    { ...point('heat_setpoint', number(5, 25, 0.5)), unit: '°C' },
+    { ...point('cool_setpoint', number(60, 90, 1), false), unit: '°F' },
+  ];
+  const html = show('ClimateCard', points, { heat_setpoint: 25, cool_setpoint: null });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'climate');
+  const [heat, cool] = inputs(html);
+  assert.match(heat, /min="5".*max="25".*step="0.5"/);
+  assert.match(heat, /value="25"/);
+  assert.doesNotMatch(heat, /disabled/);
+  assert.match(cool, /disabled/);
+  assert.doesNotMatch(cool, /value="0"/);
+  assert.equal(buttons(html).filter(tag => /disabled/.test(tag)).length, 3);
+  const offline = show('ClimateCard', points, { heat_setpoint: 20 }, { online: false });
+  assert.ok(inputs(offline).every(tag => /disabled/.test(tag)));
+});

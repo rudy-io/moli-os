@@ -23,11 +23,12 @@ cd_roots = "/run/matter-trust/cd"
 Requires Rust 1.89 or newer (durable cross-process vault locking). The complete
 default-feature application passes `cargo check --locked -p moli-os` on Rust 1.89.0;
 this minimum-version check does not validate BLE hardware.
-The controller and codec are pinned to commit
-`d80b1a3fd2204119ddf47406f4bb59916ba7576b` of the contribution's matter-rust fork.
-It adds the absolute-deadline/cancellation API and durability fixes required here;
-registry `matter-controller` 0.18.3 alone does not provide that API. This is an
-experimental dependency choice to review before merging, not an upstream release claim.
+The corrected Matter library is included inside Moli at `vendor/matter-rust`.
+Controller/codec and their sibling crates resolve through local paths. Building
+Moli requires no personal fork or sibling checkout. Apache-2.0 license, upstream
+origin, export boundaries and local adaptations are recorded in
+[`MOLI-PROVENANCE.md`](../../vendor/matter-rust/MOLI-PROVENANCE.md).
+
 Both directories must contain production attestation roots accepted by
 `matter-controller::AttestationTrust::from_dirs`. Supply these explicitly and mount them
 read-only in containers. Example/test roots are never selected automatically.
@@ -52,8 +53,9 @@ Endpoint 0 and aggregator containers are excluded; child IDs use node ID plus en
 Bridged NodeLabel is used as a display name when present and bounded; renaming
 refreshes discovery without changing identity. Missing labels keep the generated name.
 Rediscovery removes previous node devices before recreating the descriptor snapshot,
-clearing obsolete points and samples. Supported points: OnOff (read/write), temperature,
-humidity, occupancy, contact and leak (read-only). BooleanState is contact only for device
+clearing obsolete points and samples. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
+and sensor measurements. The exact capability gates and limitations are in
+[COMPATIBILITY.md](COMPATIBILITY.md). BooleanState is contact only for device
 type 0x0015 (true = closed), leak only for 0x0043 (true = water detected). Unknown or
 contradictory contact/leak types are ignored. Known invalid/null sensor samples publish
 Null to clear stale readings. Bridged endpoints (type 0x0013 or server 0x0039) remain
@@ -69,8 +71,10 @@ Fixtures are synthetic protocol descriptors, not captures or hardware validation
 
 There are at most 64 node workers, 128 endpoints per node and 128 queued updates.
 Subscriptions mark devices offline during reconnect, retry failed discovery/subscription
-after ten seconds, and rebuild after lag. Commands require a known online OnOff endpoint,
-a boolean and a live caller deadline; `invoke_before` checks the deadline before transport.
+after ten seconds, and rebuild after lag. Commands require a known online capability, validated input and a live caller deadline.
+Invokes, explicitly timed lock operations and attribute writes carry that deadline
+through queueing, reconnect and retransmissions; acknowledgements must be unambiguous
+and match the expected path.
 No optimistic state update is published. Restart after adding a node to enumerate it.
 No new HTTP endpoint is introduced.
 

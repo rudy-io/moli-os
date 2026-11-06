@@ -1,0 +1,10 @@
+{
+  "cluster": "OnOff",
+  "cluster_id": 6,
+  "attribute": "OnOff",
+  "attribute_id": 0,
+  "type": "bool",
+  "writable": false,
+  "note": "boolean attribute value",
+  "value_tlv_b64": "CQ=="
+}

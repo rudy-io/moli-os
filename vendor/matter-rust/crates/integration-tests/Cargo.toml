@@ -1,0 +1,17 @@
+[package]
+name = "integration-tests"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-controller = { path = "../matter-controller", version = "0.18.0", features = ["ota"] }
+matter-codec = { path = "../matter-codec", version = "0.3.0" }
+matter-clusters = { path = "../matter-clusters", version = "0.6.0" }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
+anyhow = { workspace = true }

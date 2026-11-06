@@ -1,0 +1,20 @@
+{
+  "cluster": "DoorLock",
+  "cluster_id": 257,
+  "command": "LockDoor",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "PinCode",
+      "id": 0,
+      "value": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  ],
+  "note": "command with optional octstr field PRESENT",
+  "payload_tlv_b64": "FTAABAECAwQY"
+}

@@ -1,0 +1,32 @@
+{
+  "scenario": "handshake-max-iter",
+  "inputs": {
+    "pin": 20202021,
+    "iterations": 100000,
+    "salt_hex": "5555555555555555555555555555555555555555555555555555555555555555",
+    "initiator_session_id": 100,
+    "responder_session_id": 101,
+    "initiator_random_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "responder_random_hex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "x_scalar_hex": "00000000000000000000000000000000000000000000000000000000000000c8",
+    "y_scalar_hex": "00000000000000000000000000000000000000000000000000000000000000c9"
+  },
+  "intermediates": {
+    "w0_hex": "8f10950227903d0dd20c5a5204a6733dc7493b7d82312fd03e90cbbe1a153a75",
+    "w1_hex": "cefa14e23ac6e8baf08cace7d9ff860245d62adb8d5d77760170ff545c2bf9d3",
+    "L_hex": "04222f60dca430c9fff25f9fe93bbd6d3c3e82a4a8c4219caa6fa197fb9bf89b7fbe883e8b11c3bdeed18832c2b410f8a0c301fe163a238579a55e590c17f644ef",
+    "X_hex": "044d65655b303dff472c25acd55bd3f8e4d5d0002f645859aa19a7ff3cc61ec6690a21ef3b413262b34653ebeaa853028fba9e64d171f6370d062ff5a013aa131a",
+    "Y_hex": "04db3d0e4aadf81a96489f6919a6983acd83627ee27a7d8c09cb3d215790c3c22fb4142b5b68e0ffee2582bd45bb681b6f3fc563f762345e86482c959a34944707",
+    "context_hex": "22fcb9f38784f68f80ff802d367fc9317d6ef9eff421e7155647b463b1b96299",
+    "Ke_hex": "a86046a092c3aa4f0686bc3433926e23",
+    "hBX_hex": "4c12163d8f42a4608f785d506b456e4e12e94f4d94af37f12cbec4c65784ba40",
+    "hAY_hex": "e34ae7976f164d740a9891193e0bd2c161532776b97c90b8da08eba36e86e86b"
+  },
+  "messages": {
+    "pbkdf_param_request_hex": "15300120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa240264240300280418",
+    "pbkdf_param_response_hex": "15300120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa300220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb24036535042601a086010030022055555555555555555555555555555555555555555555555555555555555555551818",
+    "pake1_hex": "15300141044d65655b303dff472c25acd55bd3f8e4d5d0002f645859aa19a7ff3cc61ec6690a21ef3b413262b34653ebeaa853028fba9e64d171f6370d062ff5a013aa131a18",
+    "pake2_hex": "1530014104db3d0e4aadf81a96489f6919a6983acd83627ee27a7d8c09cb3d215790c3c22fb4142b5b68e0ffee2582bd45bb681b6f3fc563f762345e86482c959a349447073002204c12163d8f42a4608f785d506b456e4e12e94f4d94af37f12cbec4c65784ba4018",
+    "pake3_hex": "15300120e34ae7976f164d740a9891193e0bd2c161532776b97c90b8da08eba36e86e86b18"
+  }
+}

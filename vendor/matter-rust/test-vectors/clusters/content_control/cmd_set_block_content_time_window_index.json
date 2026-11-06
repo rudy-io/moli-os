@@ -1,0 +1,26 @@
+{
+  "cluster": "ContentControl",
+  "cluster_id": 1295,
+  "command": "SetBlockContentTimeWindow",
+  "command_id": 15,
+  "fields": [
+    {
+      "name": "TimeWindow",
+      "id": 0,
+      "value": {
+        "timeWindowIndex": 7,
+        "dayOfWeek": 1,
+        "timePeriod": [
+          {
+            "startHour": 6,
+            "startMinute": 15,
+            "endHour": 7,
+            "endMinute": 45
+          }
+        ]
+      }
+    }
+  ],
+  "note": "TimeWindowStruct with TimeWindowIndex 7, DayOfWeek Sunday and one TimePeriodStruct entry (encoded with matter.js TlvSetBlockContentTimeWindowRequest)",
+  "payload_tlv_b64": "FTUAJAAHJAEBNgIVJAAGJAEPJAIHJAMtGBgYGA=="
+}

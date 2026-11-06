@@ -1,4 +1,5 @@
 //! Native IP Matter controller. Fabric private keys live only in the encrypted vault.
+mod features;
 mod pairing;
 mod store;
 use matter_codec::Tag;
@@ -10,7 +11,7 @@ use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value
 use moli_runtime::{BoxFuture, Driver, DriverCtx};
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -88,13 +89,53 @@ fn mapped(
 #[derive(Debug, Clone, PartialEq)]
 struct Endpoint {
     clusters: Vec<u32>,
+    family_clusters: Vec<u32>,
     label: Option<String>,
     boolean: Option<&'static str>,
     bridged: bool,
     reachable: bool,
     connected: bool,
+    extra: features::Expanded,
+    extra_keys: BTreeSet<String>,
 }
 impl Endpoint {
+    fn points(&self) -> Vec<PointSpec> {
+        self.clusters
+            .iter()
+            .filter(|c| CLUSTERS.iter().any(|(known, _)| known == *c))
+            .map(|c| point(*c, self.boolean))
+            .filter(|p| !self.extra_keys.contains(p.key.as_ref()))
+            .chain(self.extra.points())
+            .collect()
+    }
+    fn plan(&self, key: &str, value: &Value, abandoned: bool) -> Option<features::Plan> {
+        if !self.online()
+            || abandoned
+            || !self
+                .points()
+                .iter()
+                .any(|p| p.key.as_ref() == key && p.access.write)
+        {
+            return None;
+        }
+        on_command(key, value, true, &self.clusters, false)
+            .map(|command| features::Plan::Invoke {
+                cluster: 6,
+                command,
+                fields: Tlv::Structure(vec![]),
+                timed: false,
+            })
+            .or_else(|| self.extra.plan(key, value))
+    }
+    fn state_updates(&mut self, path: AttributePath, value: &Tlv) -> Vec<(&'static str, Value)> {
+        let mut updates = self.extra.update(path, value);
+        if let Some((key, value)) = mapped(path, value, self.boolean)
+            && !self.extra_keys.contains(key)
+        {
+            updates.push((key, value));
+        }
+        updates
+    }
     fn set_connection(&mut self, online: bool) {
         self.connected = online;
         if !online {
@@ -158,9 +199,21 @@ fn endpoints(report: &[(AttributePath, Tlv)]) -> BTreeMap<u16, Endpoint> {
                     .then_some(*c)
             })
             .collect();
-        if clusters.is_empty() {
+        let extra = features::Expanded::discover(p.endpoint, report);
+        let extra_keys = extra
+            .points()
+            .iter()
+            .map(|p| p.key.to_string())
+            .collect::<BTreeSet<_>>();
+        if clusters.is_empty() && extra_keys.is_empty() {
             continue;
         }
+        let family_clusters = list
+            .iter()
+            .filter_map(features::uint)
+            .filter_map(|c| u32::try_from(c).ok())
+            .filter(|c| features::supported_cluster(*c))
+            .collect();
         if found.len() == 128 && !found.contains_key(&p.endpoint) {
             continue;
         }
@@ -168,11 +221,14 @@ fn endpoints(report: &[(AttributePath, Tlv)]) -> BTreeMap<u16, Endpoint> {
             p.endpoint,
             Endpoint {
                 clusters,
+                family_clusters,
                 label: endpoint_label(report, p.endpoint),
                 boolean,
                 bridged: ids.contains(&0x13) || list.contains(&Tlv::Uint(0x39)),
                 reachable: false,
                 connected: false,
+                extra,
+                extra_keys,
             },
         );
     }
@@ -282,8 +338,33 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
         tokio::time::sleep(Duration::from_secs(if result.is_err() { 10 } else { 1 })).await;
     }
 }
+fn subscription_paths(
+    report: &[(AttributePath, Tlv)],
+    endpoints: &BTreeMap<u16, Endpoint>,
+) -> Vec<ReadPath> {
+    endpoints
+        .iter()
+        .flat_map(|(ep, meta)| {
+            meta.clusters
+                .iter()
+                .filter(|c| CLUSTERS.iter().any(|(known, _)| known == *c))
+                .map(|c| ReadPath::concrete(*ep, *c, 0))
+                .chain(meta.bridged.then_some(ReadPath::concrete(*ep, 0x39, 0x11)))
+                .chain(meta.extra.paths(*ep))
+                .chain(features::policy_paths(*ep, report))
+                .chain(
+                    meta.family_clusters
+                        .iter()
+                        .filter(|c| features::supported_cluster(**c))
+                        .flat_map(|c| {
+                            [0xfff9, 0xfffb, 0xfffc, 0xfffd].map(|a| ReadPath::concrete(*ep, *c, a))
+                        }),
+                )
+        })
+        .collect()
+}
 async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()> {
-    let report = tokio::time::timeout(
+    let mut report = tokio::time::timeout(
         Duration::from_secs(30),
         node.read(&[
             ReadPath::new(None, Some(0x1d), Some(0)),
@@ -294,16 +375,17 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
     .await
     .map_err(|_| failure())?
     .map_err(|_| failure())?;
+    let metadata_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    for paths in features::discovery_paths(&report).chunks(32) {
+        if let Ok(Ok(values)) = tokio::time::timeout_at(metadata_deadline, node.read(paths)).await {
+            report.extend(values);
+        }
+        if tokio::time::Instant::now() >= metadata_deadline {
+            break;
+        }
+    }
     let endpoints = endpoints(&report);
-    let mut paths: Vec<_> = endpoints
-        .iter()
-        .flat_map(|(ep, meta)| {
-            meta.clusters
-                .iter()
-                .map(move |c| ReadPath::concrete(*ep, *c, 0))
-                .chain(meta.bridged.then_some(ReadPath::concrete(*ep, 0x39, 0x11)))
-        })
-        .collect();
+    let mut paths = subscription_paths(&report, &endpoints);
     let empty = paths.is_empty();
     tx.send(Update::Discovered(node.node_id(), endpoints))
         .await
@@ -317,6 +399,13 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
         ReadPath::new(None, Some(0x1d), Some(1)),
         ReadPath::new(None, Some(0x39), Some(5)),
     ]);
+    paths.sort_unstable_by_key(|p| (p.endpoint, p.cluster, p.attribute));
+    paths.dedup_by_key(|p| (p.endpoint, p.cluster, p.attribute));
+    let mut color_modes: BTreeMap<_, _> = report
+        .iter()
+        .filter(|(p, _)| p.cluster == 0x300 && [8, 0x4001].contains(&p.attribute))
+        .map(|(p, v)| ((p.endpoint, p.attribute), v.clone()))
+        .collect();
     let mut sub = tokio::time::timeout(Duration::from_secs(30), node.subscribe(&paths, &[], 1, 60))
         .await
         .map_err(|_| failure())?
@@ -327,11 +416,19 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
                 .await
                 .map_err(|_| failure())?;
         }
+        let mut refresh = vec![];
         let update = match event {
             SubscriptionEvent::Report(r) => {
                 // Initial subscription reports echo discovery; only changes rebuild.
                 if descriptor_changed(&report, r.path, &r.value) {
                     return Ok(());
+                }
+                if r.path.cluster == 0x300 && [8, 0x4001].contains(&r.path.attribute) {
+                    let key = (r.path.endpoint, r.path.attribute);
+                    if color_modes.get(&key) != Some(&r.value) {
+                        refresh = features::color_refresh_paths(r.path, &r.value, &report);
+                        color_modes.insert(key, r.value.clone());
+                    }
                 }
                 Update::State(node.node_id(), r.path, r.value)
             }
@@ -342,12 +439,23 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
             _ => continue,
         };
         tx.send(update).await.map_err(|_| failure())?;
+        if !refresh.is_empty()
+            && let Ok(Ok(values)) =
+                tokio::time::timeout(Duration::from_secs(5), node.read(&refresh)).await
+        {
+            for (path, value) in values {
+                tx.send(Update::State(node.node_id(), path, value))
+                    .await
+                    .map_err(|_| failure())?;
+            }
+        }
     }
     Err(failure())
 }
 fn descriptor_changed(report: &[(AttributePath, Tlv)], path: AttributePath, value: &Tlv) -> bool {
     ((path.cluster == 0x1d && matches!(path.attribute, 0 | 1))
-        || (path.cluster == 0x39 && path.attribute == 5))
+        || (path.cluster == 0x39 && path.attribute == 5)
+        || features::metadata_attribute(path))
         && !report.iter().any(|(p, v)| *p == path && v == value)
 }
 async fn ensure_fabric(controller: &MatterController) -> anyhow::Result<()> {
@@ -415,17 +523,14 @@ impl Matter {
                     let Some(mut command) = command else { return Ok(()); };
                     let target = devices.get(&command.device.id);
                     let result = if let Some((node,ep,meta)) = target {
-                        if let Some(on) = on_command(&command.key,&command.value,meta.online(),&meta.clusters,command.abandoned()) {
+                        if let Some(plan) = meta.plan(&command.key,&command.value,command.abandoned()) {
                             let node = controller.node(*node);
                             let deadline = command.deadline;
                             tokio::select! {
                                 biased;
                                 () = ctx.cancelled() => return Ok(()),
                                 () = command.cancelled() => continue,
-                                result = node.invoke_before(CommandPath { endpoint:*ep,cluster:6,command:on },Tlv::Structure(vec![]),deadline) => match result {
-                                    Ok(InvokeResult::Status(ImStatus::Success)) => Ok(()),
-                                    _ => Err(failure().to_string()),
-                                }
+                                result = execute_plan(&node,*ep,plan,deadline) => result,
                             }
                         } else { Err(failure().to_string()) }
                     } else { Err(failure().to_string()) };
@@ -437,7 +542,7 @@ impl Matter {
                         for id in removed { devices.remove(&id); ctx.remove_device(&id); }
                         for (ep,meta) in endpoints {
                         let id = ctx.device_id(&native(node,ep));
-                        ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:meta.label.clone().unwrap_or_else(|| format!("Matter {node:016x} / {ep}")).into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.clusters.iter().map(|c|point(*c,meta.boolean)).collect() });
+                        ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:meta.label.clone().unwrap_or_else(|| format!("Matter {node:016x} / {ep}")).into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.points() });
                         ctx.set_availability(&id,false);
                         devices.insert(id,(node,ep,meta));
                         }
@@ -449,13 +554,64 @@ impl Matter {
                             if meta.bridged && path.cluster == 0x39 && path.attribute == 0x11 {
                                 meta.set_reachable(&value);
                                 ctx.set_availability(&id,meta.online());
-                            } else if meta.clusters.contains(&path.cluster)
-                                && let Some((key,value)) = mapped(path,&value,meta.boolean) { ctx.set_state(&id,key,value); }
+                            } else if meta.clusters.contains(&path.cluster) || meta.family_clusters.contains(&path.cluster) {
+                                for (key,value) in meta.state_updates(path,&value) { ctx.set_state(&id,key,value); }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+async fn execute_plan(
+    node: &Node,
+    endpoint: u16,
+    plan: features::Plan,
+    deadline: std::time::Instant,
+) -> Result<(), String> {
+    let success = match plan {
+        features::Plan::Invoke {
+            cluster,
+            command,
+            fields,
+            timed,
+        } => {
+            let path = CommandPath {
+                endpoint,
+                cluster,
+                command,
+            };
+            let result = if timed {
+                node.invoke_timed_before(path, fields, None, deadline).await
+            } else {
+                node.invoke_before(path, fields, deadline).await
+            };
+            matches!(result, Ok(InvokeResult::Status(ImStatus::Success)))
+        }
+        features::Plan::Write {
+            cluster,
+            attribute,
+            value,
+        } => {
+            let path = AttributePath {
+                endpoint,
+                cluster,
+                attribute,
+            };
+            node.write_before(&[(path, value)], deadline)
+                .await
+                .is_ok_and(|statuses| {
+                    statuses.len() == 1
+                        && statuses[0].0 == path
+                        && statuses[0].1 == ImStatus::Success
+                })
+        }
+    };
+    if success {
+        Ok(())
+    } else {
+        Err(failure().to_string())
     }
 }
 #[cfg(test)]
@@ -501,7 +657,7 @@ mod tests {
     }
     #[test]
     fn catalogue_descriptor_replay() {
-        // Synthetic catalogue records: endpoint, device types, servers, expected point.
+        // Synthetic records: endpoint, device types, servers, exact expected points.
         for line in include_str!("../../../integrations/matter/fixtures/descriptor.csv")
             .lines()
             .filter(|l| !l.starts_with('#'))
@@ -533,9 +689,45 @@ mod tests {
                 continue;
             }
             let meta = &found[&ep];
+            let points: Vec<_> = meta
+                .clusters
+                .iter()
+                .map(|cluster| point(*cluster, meta.boolean))
+                .collect();
+            let keys: Vec<_> = points.iter().map(|p| p.key.as_ref()).collect();
             assert_eq!(
-                point(meta.clusters[0], meta.boolean).key.as_ref(),
-                fields[3]
+                keys,
+                fields[3].split_whitespace().collect::<Vec<_>>(),
+                "{line}"
+            );
+            for spec in &points {
+                assert!(spec.access.read, "{line}");
+                assert_eq!(spec.access.write, spec.key.as_ref() == "on", "{line}");
+            }
+            // Vendor/product identity is not a capability filter. Both identities
+            // must yield the same descriptor mapping (including bridged endpoints).
+            for vendor in [0xfff1, 0xfff2] {
+                let mut branded = report.to_vec();
+                branded.extend([
+                    (path(0, 0x28, 2), Tlv::Uint(vendor)),
+                    (path(0, 0x28, 4), Tlv::Uint(0x8000)),
+                ]);
+                assert_eq!(endpoints(&branded), found, "{line}");
+            }
+            for server in nums(fields[2]) {
+                let cluster = u32::try_from(server).unwrap();
+                if !meta.clusters.contains(&cluster) {
+                    assert_eq!(
+                        mapped(path(ep, cluster, 0), &Tlv::Bool(true), meta.boolean),
+                        None,
+                        "unclaimed server in {line}"
+                    );
+                }
+            }
+            assert_eq!(
+                on_command("on", &Value::Bool(true), true, &meta.clusters, false),
+                keys.contains(&"on").then_some(1),
+                "{line}"
             );
             for state in [true, false] {
                 if let Some(key) = meta.boolean {
@@ -631,11 +823,14 @@ mod tests {
     fn bridge_availability_blocks_writes_until_primed() {
         let mut meta = Endpoint {
             clusters: vec![6],
+            family_clusters: vec![],
             label: None,
             boolean: None,
             bridged: true,
             reachable: false,
             connected: true,
+            extra: features::Expanded::default(),
+            extra_keys: BTreeSet::new(),
         };
         assert!(!meta.online());
         assert_eq!(

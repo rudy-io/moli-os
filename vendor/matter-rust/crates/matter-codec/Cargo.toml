@@ -1,0 +1,33 @@
+[package]
+name = "matter-codec"
+version = "0.3.2"
+description = "Matter protocol TLV (Tag-Length-Value) encoder and decoder."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "tlv", "codec", "iot"]
+categories = ["encoding", "embedded"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "decode"
+harness = false
+
+[[bench]]
+name = "encode"
+harness = false

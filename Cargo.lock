@@ -1561,7 +1561,6 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 [[package]]
 name = "matter-ble"
 version = "0.3.4"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "bitflags 2.13.2",
  "btleplug",
@@ -1574,7 +1573,6 @@ dependencies = [
 [[package]]
 name = "matter-cert"
 version = "0.3.2"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "bitflags 2.13.2",
  "der 0.7.10",
@@ -1586,7 +1584,6 @@ dependencies = [
 [[package]]
 name = "matter-clusters"
 version = "0.6.0"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "bitflags 2.13.2",
  "matter-codec",
@@ -1596,7 +1593,6 @@ dependencies = [
 [[package]]
 name = "matter-codec"
 version = "0.3.2"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1604,7 +1600,6 @@ dependencies = [
 [[package]]
 name = "matter-commissioning"
 version = "0.10.2"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "base64",
  "bitflags 2.13.2",
@@ -1626,7 +1621,6 @@ dependencies = [
 [[package]]
 name = "matter-controller"
 version = "0.18.3"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "matter-ble",
  "matter-cert",
@@ -1645,7 +1639,6 @@ dependencies = [
 [[package]]
 name = "matter-crypto"
 version = "0.5.1"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "aes 0.9.2",
  "ccm",
@@ -1661,7 +1654,6 @@ dependencies = [
 [[package]]
 name = "matter-interaction"
 version = "0.4.3"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "matter-codec",
  "thiserror 2.0.21",
@@ -1670,7 +1662,6 @@ dependencies = [
 [[package]]
 name = "matter-transport"
 version = "0.7.4"
-source = "git+https://github.com/Roddygithub/matter-rust?rev=d80b1a3fd2204119ddf47406f4bb59916ba7576b#d80b1a3fd2204119ddf47406f4bb59916ba7576b"
 dependencies = [
  "bitflags 2.13.2",
  "matter-codec",

@@ -1,0 +1,17 @@
+{
+  "intent": "discriminator = 0",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 0,
+    "passcode": 20202021
+  },
+  "expected": {
+    "qr": "MT:Y.K90AFN00YZ.548G00"
+  }
+}

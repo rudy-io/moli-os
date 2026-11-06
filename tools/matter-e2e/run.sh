@@ -8,7 +8,11 @@ if [[ -z ${MOLI_BIN:-} ]]; then
 fi
 export MOLI_BIN
 if [[ ${1:-} != --inside ]]; then
-  test -x "$MOLI_BIN"
+  # One owner per disposable directory, including across separate network namespaces.
+  lock_id=$(printf '%s' "$PWD" | sha256sum | cut -c1-16)
+  exec 9>"${TMPDIR:-/tmp}/moli-matter-e2e-${lock_id}.lock"
+  flock -n 9 || { echo 'Another harness owns this .run directory' >&2; exit 1; }
+  [[ ${E2E_FIXTURE_ONLY:-0} == 1 ]] || test -x "$MOLI_BIN"
   test -d node_modules || { echo 'Run npm ci --ignore-scripts in e2e first' >&2; exit 1; }
   exec unshare --user --map-root-user --net "$PWD/run.sh" --inside
 fi
@@ -29,5 +33,26 @@ rm -rf "$E2E_DIR"
 mkdir "$E2E_DIR"
 node accessory.mjs >"$E2E_DIR/accessory.log" 2>&1 &
 accessory=$!
-trap 'kill "$accessory" 2>/dev/null || true; wait "$accessory" 2>/dev/null || true' EXIT
+cleanup() {
+  kill "$accessory" 2>/dev/null || true
+  for ((i=0; i<30; i++)); do
+    kill -0 "$accessory" 2>/dev/null || break
+    sleep .1
+  done
+  kill -KILL "$accessory" 2>/dev/null || true
+  wait "$accessory" 2>/dev/null || true
+}
+trap cleanup EXIT
+if [[ ${E2E_FIXTURE_ONLY:-0} == 1 ]]; then
+  for ((i=0; i<60; i++)); do
+    if [[ -f "$E2E_DIR/accessory-ready" ]]; then
+      echo 'PASS: isolated accessory startup only (no Moli assertions)'
+      exit 0
+    fi
+    kill -0 "$accessory" || { cat "$E2E_DIR/accessory.log" >&2; exit 1; }
+    sleep .5
+  done
+  echo 'FAIL: accessory startup timeout' >&2
+  exit 1
+fi
 python3 validate.py

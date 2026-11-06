@@ -1,0 +1,25 @@
+{
+  "keep_subscriptions": false,
+  "min_interval_floor": 1,
+  "max_interval_ceiling": 30,
+  "paths": [
+    {
+      "endpoint": 1,
+      "cluster": 6,
+      "attribute": 0
+    }
+  ],
+  "event_paths": [
+    {
+      "endpoint": 0,
+      "cluster": 40,
+      "event": 0
+    }
+  ],
+  "event_filters": [
+    {
+      "event_min": 0
+    }
+  ],
+  "expected_message_b64": "FSgAJAEBJAIeNgMXJAIBJAMGJAQAGBg2BBckAQAkAigkAwAYGDYFFSQBABgYKAck/wsY"
+}

@@ -1,0 +1,12 @@
+{
+  "subscription_id": 305419896,
+  "attributes": [
+    {
+      "endpoint": 1,
+      "cluster": 6,
+      "attribute": 0,
+      "bool": true
+    }
+  ],
+  "response_message_b64": "FSYAeFY0EjYBFTUBNwEkAgEkAwYkBAAYKQIYGBgk/wsY"
+}

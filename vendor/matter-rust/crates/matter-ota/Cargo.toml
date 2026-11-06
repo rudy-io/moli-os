@@ -1,0 +1,25 @@
+[package]
+name = "matter-ota"
+version = "0.6.0"
+description = "Matter OTA Software Update Provider: OtaProvider (0x0029) command handlers."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "ota", "firmware", "iot", "smart-home"]
+categories = ["network-programming", "embedded"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-codec = { path = "../matter-codec", version = "0.3.2" }
+matter-interaction = { path = "../matter-interaction", version = "0.4.0" }
+matter-clusters = { path = "../matter-clusters", version = "0.6.0" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }

@@ -1,4 +1,6 @@
 {
+  "commun.clim.heat_setpoint": "Heating setpoint",
+  "commun.clim.cool_setpoint": "Cooling setpoint",
   "commun.volet.feedback.sending": "Sending command…",
   "commun.volet.feedback.sent": "Command sent · state not yet confirmed",
   "commun.volet.feedback.held": "Waiting for your approval",

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "encode_standalone_ack_one_packet",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:308-341",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "080100",
+    "precondition": "Engine receives one complete single-fragment message (flags 0x05 Begin|End, seq 0x01, payload 0xff) via HandleCharacteristicReceived before EncodeStandAloneAck is called (TestBtpEngine.cpp:311-327); HasUnackedData() is true.",
+    "expect": {
+      "ack_num": 1
+    },
+    "provisional": false
+  },
+  {
+    "name": "encode_standalone_ack_no_unacked_data",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:344-358",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "080000",
+    "precondition": "Engine is freshly initialized (SetUp: Init(nullptr, false)); no data has been received; EncodeStandAloneAck is called immediately with no prior HandleCharacteristicReceived call.",
+    "expect": {
+      "ack_num": 0
+    },
+    "provisional": false
+  },
+  {
+    "name": "encode_standalone_ack_multi_fragment_message",
+    "source": "chip:src/ble/tests/TestBtpEngine.cpp:373-428",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "080300",
+    "precondition": "Engine receives a complete 3-fragment message (seq 0x01 Begin, seq 0x02 Continue, seq 0x03 End; payload fd/fe/ff) via three HandleCharacteristicReceived calls (TestBtpEngine.cpp:395-414) before EncodeStandAloneAck is called.",
+    "expect": {
+      "ack_num": 3
+    },
+    "provisional": false
+  }
+]

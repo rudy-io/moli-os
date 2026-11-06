@@ -1,0 +1,17 @@
+{
+  "intent": "discriminator = 0xFFF (max 12-bit)",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 4095,
+    "passcode": 20202021
+  },
+  "expected": {
+    "qr": "MT:Y.K90SO527DB0648G00"
+  }
+}

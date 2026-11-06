@@ -1,3 +1,46 @@
+# Résultat actuel — pile intégrée et familles étendues, 2026-11-06
+
+**PASS** sur les deux binaires de production construits à partir du seul dépôt Moli.
+La pile est locale dans `vendor/matter-rust` ; le lockfile ne contient aucune source Git.
+Les résultats historiques plus bas décrivent les jalons antérieurs et leurs propres hash.
+
+| Variante | Image (octets) | Binaire (octets) | SHA-256 binaire |
+|---|---:|---:|---|
+| Standard | 30 260 144 | 30 256 048 | `12c849606e18204ad7df8f744a78821305dfea72eca0562560fd8250440341a9` |
+| Compacte | 24 946 096 | 24 941 712 | `b8c0f488c659c79d094c11277fbbfdd12c5fc79abf7ba43ff4d3121dd8b475d6` |
+
+L'artefact diagnostics correspond exactement au standard. La marge de l'image
+compacte sous 25 Mo est de 53 904 octets ; ces chiffres valent pour ce build x86_64 musl.
+
+Reproduction (matter.js 0.18.0, `npm ci`, puis binaire extrait du build) :
+
+```sh
+cd tools/matter-e2e
+E2E_EXTENDED=1 MOLI_BIN=/absolute/path/to/moli-os ./run.sh
+```
+
+L'accessoire est isolé sans uplink physique. Les états sont vérifiés indépendamment
+sur les serveurs simulés et dans les abonnements Moli ; l'approbation des commandes
+sensibles utilise une session/PIN de fixture via les vraies routes de l'API.
+
+```text
+PASS: extended lighting dimming, CT, RGB wire state + subscriptions
+PASS: covering inverted position, open/close/stop + subscriptions
+PASS: thermostat absolute heat/cool, modes + subscriptions
+PASS: lock approval does not transmit; approved CLI timed lock/unlock + subscription
+PASS: real accessory PIN policy withdraws/restores control; refusal does not transmit
+PASS: commissioning, descriptor, OnOff, subscription, restart identity
+PASS: malformed state, invalid snapshot, wrong vault key rejected
+```
+
+Fenêtre indicative du processus compact au repos avec les familles virtuelles,
+après redémarrage : 29,79 s, RSS 17 256 Kio, anonyme 3 544 Kio, CPU 0,034 % d'un cœur
+à la résolution des ticks. **Pas une mesure cgroup ni une validation radio.**
+L'essai Hue physique reste distinct et historique ; aucune serrure, aucun thermostat
+ni store physique n'a été actionné par cette suite.
+
+---
+
 # Executed release result — 2026-11-06
 
 **PASS**, Moli ↔ independent matter.js protocol test using the static binary

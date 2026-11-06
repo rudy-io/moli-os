@@ -1,0 +1,25 @@
+{
+  "cluster": "OnOff",
+  "cluster_id": 6,
+  "command": "OnWithTimedOff",
+  "command_id": 66,
+  "fields": [
+    {
+      "name": "OnOffControl",
+      "id": 0,
+      "value": 1
+    },
+    {
+      "name": "OnTime",
+      "id": 1,
+      "value": 60
+    },
+    {
+      "name": "OffWaitTime",
+      "id": 2,
+      "value": 0
+    }
+  ],
+  "note": "command with bitmap(map8) + two uint16 fields",
+  "payload_tlv_b64": "FSQAASQBPCQCABg="
+}

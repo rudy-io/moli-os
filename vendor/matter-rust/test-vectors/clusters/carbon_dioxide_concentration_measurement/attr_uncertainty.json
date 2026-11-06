@@ -1,0 +1,10 @@
+{
+  "cluster": "CarbonDioxideConcentrationMeasurement",
+  "cluster_id": 1037,
+  "attribute": "Uncertainty",
+  "attribute_id": 7,
+  "type": "single",
+  "writable": false,
+  "note": "non-nullable float32 (single)",
+  "value_tlv_b64": "CgAAgD4="
+}
