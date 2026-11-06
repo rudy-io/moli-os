@@ -419,7 +419,13 @@ host = "192.168.1.x"
   reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
-  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
+  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub peut
+  ne donner cette pièce qu'à un appareil d'un produit (un MYGGSPRAY ou un VALLHORN : la présence,
+  pas la lumière) : un appareil en lecture seule sans pièce reprend celle de son `relationId`,
+  sauf si le produit est réparti sur deux pièces. Un appareil qu'on peut commander ne reprend
+  rien : une pièce dit aussi qui peut le commander. Comme toute pièce native, celle-ci s'efface à
+  l'affichage devant une pièce choisie dans Moli, mais la garde et l'accès des invités comptent
+  les deux. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
   lampes elles-mêmes) ne publient que leur pile, ou rien.
 - **Pièges** : un renommage, un changement de pièce, un ajout ou un retrait recharge tout. Le
   WebSocket coupé (redémarrage du hub) ou muet 95 s : rechargement complet puis reconnexion ;
@@ -437,7 +443,7 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), pièce partagée par un produit (ordre, deux pièces, lecture seule, déplacement), store (points et sens, position inversée dans les deux sens,
   ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `enedis` : compteur Linky par la Conso API (`crates/moli-enedis`)
