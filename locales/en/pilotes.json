@@ -820,5 +820,17 @@
   "pilotes.matter.leak": "Water leak",
   "pilotes.matter.occupancy": "Occupancy",
   "pilotes.matter.pairing_failed": "Matter pairing failed. The one-shot pairing request may have been consumed; inspect device fabric membership before retrying.",
-  "pilotes.matter.ble_unavailable": "Thread commissioning over Bluetooth requires a build with the matter-ble feature."
+  "pilotes.matter.ble_unavailable": "Thread commissioning over Bluetooth requires a build with the matter-ble feature.",
+  "pilotes.matter.brightness": "Brightness",
+  "pilotes.matter.color_temp": "Color temperature",
+  "pilotes.matter.color": "Color",
+  "pilotes.matter.position": "Opening position",
+  "pilotes.matter.cover_control": "Cover movement",
+  "pilotes.matter.target_temperature": "Target temperature",
+  "pilotes.matter.heat_setpoint": "Heating setpoint",
+  "pilotes.matter.cool_setpoint": "Cooling setpoint",
+  "pilotes.matter.mode": "Mode",
+  "pilotes.matter.locked": "Locked",
+  "pilotes.matter.lock_state": "Lock state",
+  "pilotes.matter.control": "Control"
 }

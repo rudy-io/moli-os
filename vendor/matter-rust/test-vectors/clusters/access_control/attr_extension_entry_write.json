@@ -1,0 +1,10 @@
+{
+  "cluster": "AccessControl",
+  "cluster_id": 31,
+  "attribute": "Extension",
+  "attribute_id": 1,
+  "type": "AccessControlExtensionStruct (list entry, write form)",
+  "writable": true,
+  "note": "AccessControlExtensionStruct { Data 15 18 } with no FabricIndex (matter.js AccessControl.TlvAccessControlExtension, forWriteInteraction)",
+  "value_tlv_b64": "FTABAhUYGA=="
+}

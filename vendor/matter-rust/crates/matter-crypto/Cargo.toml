@@ -1,0 +1,57 @@
+[package]
+name = "matter-crypto"
+version = "0.5.1"
+description = "Matter protocol session establishment: PASE (SPAKE2+) and CASE (SIGMA)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "spake2", "sigma", "iot", "cryptography"]
+categories = ["cryptography"]
+readme = "README.md"
+
+[features]
+# Enables `matter_crypto::test_support` — used by this crate's own tests
+# to inject fixed SPAKE2+ scalars for matter.js byte-parity verification.
+# NOT part of the stable public API. Production callers must not enable.
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-cert = { path = "../matter-cert", version = "0.3.0" }
+matter-codec = { path = "../matter-codec", version = "0.3.0" }
+aes = { workspace = true }
+ccm = { workspace = true }
+p256 = { workspace = true }
+ring = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+hex = { version = "0.4", default-features = false, features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0"
+# Self-reference so test compilation enables the test-support feature,
+# making the test_support module visible to tests/* without exposing
+# it to downstream crates.
+#
+# Deliberately carries NO `version` key: cargo strips a path-only
+# dev-dependency when packaging, which is what keeps this publishable.
+# With a version, `cargo publish` tries to resolve matter-crypto from
+# crates.io while packaging matter-crypto itself, and fails.
+matter-crypto = { path = ".", features = ["test-support"] }
+# Enable test-support on matter-cert so that unit tests in this crate
+# can construct synthetic MatterCertificate values via
+# `matter_cert::test_support::build_unsigned`.
+matter-cert = { path = "../matter-cert", version = "0.3.0", features = ["test-support"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "case"
+harness = false

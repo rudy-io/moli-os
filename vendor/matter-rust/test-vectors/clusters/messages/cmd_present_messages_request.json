@@ -1,0 +1,54 @@
+{
+  "cluster": "Messages",
+  "cluster_id": 151,
+  "command": "PresentMessagesRequest",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "MessageId",
+      "id": 0,
+      "value": "000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "name": "Priority",
+      "id": 1,
+      "value": 2
+    },
+    {
+      "name": "MessageControl",
+      "id": 2,
+      "value": 3
+    },
+    {
+      "name": "StartTime",
+      "id": 3,
+      "value": null
+    },
+    {
+      "name": "Duration",
+      "id": 4,
+      "value": 60000
+    },
+    {
+      "name": "MessageText",
+      "id": 5,
+      "value": "Dinner is ready"
+    },
+    {
+      "name": "Responses",
+      "id": 6,
+      "value": [
+        {
+          "MessageResponseId": 1,
+          "Label": "Coming"
+        },
+        {
+          "MessageResponseId": 2,
+          "Label": "Later"
+        }
+      ]
+    }
+  ],
+  "note": "High priority, confirmation and response required, start now (null), 60 s, two responses: the first optional request list (encoded with matter.js TlvPresentMessagesRequest)",
+  "payload_tlv_b64": "FTAAEAABAgMEBQYHCAkKCwwNDg8kAQIkAgM0AyUEYOosBQ9EaW5uZXIgaXMgcmVhZHk2BhUkAAEsAQZDb21pbmcYFSQAAiwBBUxhdGVyGBgY"
+}

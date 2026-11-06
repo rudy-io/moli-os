@@ -1,0 +1,23 @@
+[package]
+name = "matter-codec-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Not a workspace member — kept separate so it can require nightly Rust
+# without dragging the rest of the workspace's MSRV up.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+matter-codec = { path = ".." }
+
+[[bin]]
+name = "fuzz_decode"
+path = "fuzz_targets/fuzz_decode.rs"
+test = false
+doc = false
+bench = false

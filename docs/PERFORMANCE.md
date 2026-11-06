@@ -13,6 +13,26 @@ Assistant.
 
 ## Budget
 
+### Build actuel — pile locale et familles étendues, 6 novembre 2026
+
+Les variantes de production construites depuis le dépôt Moli seul mesurent :
+
+| Variante x86_64 musl | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard avec symboles | 30 260 144 octets | 30 256 048 octets |
+| Compacte explicite | **24 946 096 octets** | 24 941 712 octets |
+
+La compacte respecte 25 Mo avec 53 904 octets de marge. Le standard reste au-dessus
+pour conserver les symboles. Les nouvelles fonctions et la source de la pile sont
+dans Moli ; la copie des sources n'ajoute pas de service ni de dépendance Git.
+Les deux binaires passent les essais protocolaires étendus. Diagnostics correspond
+au binaire standard. Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
+
+Sur 29,79 s au repos avec les familles virtuelles : 17 256 Kio RSS, 3 544 Kio anonymes,
+0,034 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
+budget cgroup, d'un essai de charge, d'une mesure radio ou d'une comparaison HA.
+Les mesures historiques ci-dessous restent rattachées à leurs versions précédentes.
+
 ### Contribution Matter expérimentale — 6 novembre 2026
 
 Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl

@@ -1,0 +1,18 @@
+{
+  "source": "spec-derived",
+  "description": "Single-chunk WriteRequestMessage for AccessControl.Acl (endpoint=0, cluster=0x001F, attribute=0x0000) with one entry: Administer/CASE/subjects=[1]/targets=null/fabric_index=omitted. Derived from build_list_write_chunks with big budget (>= element count) which is byte-identical to build_write_request on the same path+array. Verified by the write_acl_single_chunk_byte_parity test in matter-controller.",
+  "path": {
+    "endpoint": 0,
+    "cluster": "0x001F",
+    "attribute": "0x0000"
+  },
+  "entry": {
+    "privilege": 5,
+    "auth_mode": 2,
+    "subjects": [1],
+    "targets": null,
+    "fabric_index": null
+  },
+  "entry_tlv_hex": "152401052402023603040118340418",
+  "expected_message_hex": "1528002801360215370124020024031f24040018360215240105240202360304011834041818181824ff0b18"
+}

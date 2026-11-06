@@ -1,0 +1,60 @@
+{
+  "cluster": "Channel",
+  "cluster_id": 1284,
+  "command": "GetProgramGuide",
+  "command_id": 4,
+  "fields": [
+    {
+      "name": "StartTime",
+      "id": 0,
+      "value": 1000
+    },
+    {
+      "name": "EndTime",
+      "id": 1,
+      "value": 4600
+    },
+    {
+      "name": "ChannelList",
+      "id": 2,
+      "value": [
+        {
+          "majorNumber": 6,
+          "minorNumber": 0,
+          "name": "ABC"
+        }
+      ]
+    },
+    {
+      "name": "PageToken",
+      "id": 3,
+      "value": {
+        "limit": 10,
+        "after": "a",
+        "before": "b"
+      }
+    },
+    {
+      "name": "RecordingFlag",
+      "id": 5,
+      "value": 3
+    },
+    {
+      "name": "ExternalIDList",
+      "id": 6,
+      "value": [
+        {
+          "name": "imdb",
+          "value": "tt0001"
+        }
+      ]
+    },
+    {
+      "name": "Data",
+      "id": 7,
+      "value": "0102"
+    }
+  ],
+  "note": "every field, at the specification ids (RecordingFlag 5, ExternalIDList 6, Data 7), with a copied AdditionalInfoStruct list (encoded with matter.js TlvGetProgramGuideRequest)",
+  "payload_tlv_b64": "FSUA6AMlAfgRNgIVJAAGJAEALAIDQUJDGBg1AyQACiwBAWEsAgFiGCQFAzYGFSwABGltZGIsAQZ0dDAwMDEYGDAHAgECGA=="
+}

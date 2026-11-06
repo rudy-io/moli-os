@@ -820,5 +820,17 @@
   "pilotes.matter.leak": "Fuite d’eau",
   "pilotes.matter.occupancy": "Présence",
   "pilotes.matter.pairing_failed": "L’appairage Matter a échoué. La demande à usage unique a pu être consommée ; vérifier les contrôleurs associés à l’appareil avant de réessayer.",
-  "pilotes.matter.ble_unavailable": "L’appairage Thread par Bluetooth nécessite une compilation avec la fonctionnalité matter-ble."
+  "pilotes.matter.ble_unavailable": "L’appairage Thread par Bluetooth nécessite une compilation avec la fonctionnalité matter-ble.",
+  "pilotes.matter.brightness": "Luminosité",
+  "pilotes.matter.color_temp": "Température de couleur",
+  "pilotes.matter.color": "Couleur",
+  "pilotes.matter.position": "Ouverture",
+  "pilotes.matter.cover_control": "Déplacement",
+  "pilotes.matter.target_temperature": "Température cible",
+  "pilotes.matter.heat_setpoint": "Consigne de chauffage",
+  "pilotes.matter.cool_setpoint": "Consigne de refroidissement",
+  "pilotes.matter.mode": "Mode",
+  "pilotes.matter.locked": "Verrouillé",
+  "pilotes.matter.lock_state": "État de la serrure",
+  "pilotes.matter.control": "Commande"
 }

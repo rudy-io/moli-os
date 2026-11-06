@@ -1,0 +1,94 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/matter-codec",
+    "crates/matter-cert",
+    "crates/matter-crypto",
+    "crates/matter-transport",
+    "crates/matter-interaction",
+    "crates/matter-commissioning",
+    "crates/matter-clusters",
+    "crates/matter-controller",
+    "crates/matter-ota",
+    "crates/matter-bdx",
+    "crates/matter-ble",
+    "crates/integration-tests",
+]
+
+# Shared metadata picked up by each crate via `field.workspace = true`.
+# The crate `version` is intentionally NOT shared — every crate is versioned
+# independently and bumps on its own milestone cadence (see README).
+[workspace.package]
+edition = "2021"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://github.com/phunapps/matter-rust"
+homepage = "https://github.com/phunapps/matter-rust"
+authors = ["matter-rust contributors"]
+keywords = ["matter", "smart-home", "iot", "csa", "thread"]
+categories = ["network-programming", "embedded", "cryptography"]
+
+# Lints enforced workspace-wide. Each crate opts in with `[lints] workspace = true`.
+# CI runs clippy with `-D warnings` so any of these becoming a warning fails the build.
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+missing_safety_doc = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+undocumented_unsafe_blocks = "warn"
+# General hygiene
+pedantic = { level = "warn", priority = -1 }
+# Pedantic lints that produce too much noise for a library at this stage.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_const_for_fn = "allow"
+
+# Common dependency versions, so every member crate pulls the same release.
+# Add to this table — do not bump per-crate without discussion.
+[workspace.dependencies]
+aes = { version = "0.9", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+bitflags = "2"
+ccm = { version = "0.6", default-features = false, features = ["alloc"] }
+cms = "0.2"
+der = { version = "0.7", default-features = false, features = ["oid", "alloc"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh", "ecdsa", "pkcs8"] }
+subtle = { version = "2", default-features = false }
+tokio = { version = "1", default-features = false }
+proptest = "1"
+ring = "0.17"
+rustls-webpki = { version = "0.103", default-features = false, features = ["std", "ring"] }
+# rustls-pki-types ships the `CertificateDer` / `TrustAnchor` types
+# that rustls-webpki 0.103 takes by reference — unlike webpki 0.102,
+# webpki 0.103 does NOT re-export these as `webpki::types::*`, so any
+# crate that names them in a signature needs pki-types as a direct
+# dependency. Version is pinned to the same minor `rustls-webpki`
+# resolves, so we stay byte-compatible with the trust-anchor types
+# webpki's `anchor_from_trusted_cert` returns.
+rustls-pki-types = { version = "1", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "1.1"
+zeroize = { version = "1", default-features = false, features = ["zeroize_derive", "alloc"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+# Benchmarks only (dev-dependency in the benched crates). `just bench` runs
+# them; they are NOT part of the gate.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+x509-parser = { version = "0.18", default-features = false }
+
+# Release profile defaults. Keep these conservative; consumers can override.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"

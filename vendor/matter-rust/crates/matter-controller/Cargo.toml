@@ -1,0 +1,115 @@
+[package]
+name = "matter-controller"
+version = "0.18.3"
+description = "High-level Matter controller API: commission, read, write, invoke, subscribe."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "controller", "smart-home", "iot"]
+categories = ["api-bindings", "network-programming"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[features]
+default = ["ota"]
+
+# OTA provider role: `serve_ota*`, `announce_ota_provider`, and the BDX
+# transfer engine. On by default; `default-features = false` sheds the
+# matter-ota + matter-bdx dependencies for controllers that never serve
+# firmware images.
+ota = ["dep:matter-ota", "dep:matter-bdx"]
+
+# BLE/BTP commissioning (`MatterController::commission_ble`). Pulls the
+# `matter-ble` central role (btleplug + libdbus on Linux / CoreBluetooth on
+# macOS), so it is opt-in. The default IP commissioning path needs none of it.
+ble = ["dep:matter-ble", "matter-ble/central"]
+
+# UNSTABLE, not covered by semver. Exposes the low-level provider-server
+# building blocks (`ProviderServer`, `build_operational_service`) and
+# `MatterController::serve_provider_once` — a generic CASE/IM responder for
+# power users building a custom server. The supported, stable OTA path is
+# `MatterController::serve_ota`, which needs none of this. May change or be
+# removed in any release.
+unstable-provider = []
+
+[dependencies]
+matter-codec = { path = "../matter-codec", version = "0.3.0" }
+matter-cert = { path = "../matter-cert", version = "0.3.0" }
+matter-crypto = { path = "../matter-crypto", version = "0.5.0" }
+matter-transport = { path = "../matter-transport", version = "0.7.4" }
+matter-commissioning = { path = "../matter-commissioning", version = "0.10.1", features = ["driver"] }
+matter-interaction = { path = "../matter-interaction", version = "0.4.3" }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+matter-clusters = { path = "../matter-clusters", version = "0.6.0" }
+matter-ota = { path = "../matter-ota", version = "0.6.0", optional = true }
+matter-bdx = { path = "../matter-bdx", version = "0.3.0", optional = true }
+matter-ble = { path = "../matter-ble", version = "0.3.4", optional = true }
+thiserror = { workspace = true }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+# SHA-256 only, for the commissioner-identity fingerprint stamped on each
+# stored CASE resumption record. Already in the tree via matter-crypto /
+# matter-cert; declared directly here so the use is visible.
+ring = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Test-only: enables `matter_commissioning::test_support`'s canned
+# `CommissionedFabric` constructor so actor.rs's unit tests can exercise a
+# successful-commission completion without a full PASE/CASE handshake.
+# Mirrors matter-commissioning's own dev-dependency on matter-cert's
+# `test-support`. Cargo unifies this into the lib build only under
+# `cargo test` (dev-dependencies never apply to a plain `cargo build`).
+matter-commissioning = { path = "../matter-commissioning", version = "0.10.1", features = ["driver", "test-support"] }
+
+[[example]]
+name = "controller_quickstart"
+
+[[example]]
+name = "power"
+
+[[example]]
+name = "dump_attributes"
+
+[[example]]
+name = "fabric_management"
+
+[[example]]
+name = "d_hardware_extras"
+
+[[example]]
+name = "e3_group_multicast"
+
+[[example]]
+name = "group_acl_test"
+
+[[example]]
+name = "open_window"
+
+[[example]]
+name = "provider_server"
+required-features = ["unstable-provider"]
+
+[[example]]
+name = "serve_ota"
+required-features = ["ota"]
+
+[[example]]
+name = "ble_scan"
+required-features = ["ble"]
+
+[[example]]
+name = "commission_ble_thread"
+required-features = ["ble"]
+
+[[example]]
+name = "commission_ble_wifi"
+required-features = ["ble"]

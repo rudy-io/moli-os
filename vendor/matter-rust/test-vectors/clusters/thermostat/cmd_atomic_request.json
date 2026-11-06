@@ -1,0 +1,28 @@
+{
+  "cluster": "Thermostat",
+  "cluster_id": 513,
+  "command": "AtomicRequest",
+  "command_id": 254,
+  "fields": [
+    {
+      "name": "RequestType",
+      "id": 0,
+      "value": 0
+    },
+    {
+      "name": "AttributeRequests",
+      "id": 1,
+      "value": [
+        5,
+        6
+      ]
+    },
+    {
+      "name": "Timeout",
+      "id": 2,
+      "value": 1000
+    }
+  ],
+  "note": "request with a list<attrib-id> field (new list-command-encode codepath)",
+  "payload_tlv_b64": "FSQAADYBBAUEBhglAugDGA=="
+}

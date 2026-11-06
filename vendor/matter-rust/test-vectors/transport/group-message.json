@@ -1,0 +1,32 @@
+{
+  "source": {
+    "oracle": "matter.js",
+    "packages": "@matter/protocol@0.16.11 (MessageCodec.encodePacketHeader + Session.generateNonce) + Node native aes-128-ccm",
+    "mirrors": "GroupSession.encode (src/session/GroupSession.ts lines 165-186)"
+  },
+  "notes": {
+    "nonce": "u8(securityFlags) || u32_LE(messageId) || u64_LE(sourceNodeId) — 13 bytes; node id == SOURCE node id for group",
+    "security_flags": "securityFlags byte == SessionType.Group == 0x01 (no privacy/control/extension bits)",
+    "message_flags": "header byte 0: version(0)<<4 | HasDestGroupId(0x02) | HasSourceNodeId(0x04) == 0x06",
+    "aad": "AAD == the exact encoded packet-header bytes (header_hex below)",
+    "key": "AES-128-CCM key == operational_group_key (16 B); auth tag 16 B; output == ciphertext||tag"
+  },
+  "inputs": {
+    "operational_group_key": "4e6f436f6e74726f6c4d61747465724b",
+    "session_id": 1,
+    "group_id": 4660,
+    "message_counter": 5,
+    "source_node_id": "DEADBEEFCAFEBABE",
+    "payload_hex": "052102d10a0001003501290218"
+  },
+  "expected": {
+    "header_hex": "0601000105000000bebafecaefbeadde3412",
+    "security_flags_byte": 1,
+    "message_flags_byte": 6,
+    "nonce_hex": "0105000000bebafecaefbeadde",
+    "ciphertext_hex": "9506e3d4b7267e33e078a21650",
+    "tag_hex": "d79c70db886e5ddfc1398a6ee2212fb5",
+    "ciphertext_and_tag_hex": "9506e3d4b7267e33e078a21650d79c70db886e5ddfc1398a6ee2212fb5",
+    "wire_hex": "0601000105000000bebafecaefbeadde34129506e3d4b7267e33e078a21650d79c70db886e5ddfc1398a6ee2212fb5"
+  }
+}

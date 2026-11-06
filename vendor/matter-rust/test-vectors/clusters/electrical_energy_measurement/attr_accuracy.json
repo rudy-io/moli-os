@@ -1,0 +1,10 @@
+{
+  "cluster": "ElectricalEnergyMeasurement",
+  "cluster_id": 145,
+  "attribute": "Accuracy",
+  "attribute_id": 0,
+  "type": "MeasurementAccuracyStruct",
+  "writable": false,
+  "note": "struct with a list-of-struct field carrying optional members (present + absent)",
+  "value_tlv_b64": "FSQAACkBIQLoAyIDUMMAADYEFSAAACEBECclAvQBGBUhABEnIgFQwwAAJAVkGBgY"
+}

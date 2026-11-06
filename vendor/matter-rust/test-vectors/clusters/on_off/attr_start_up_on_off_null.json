@@ -1,0 +1,10 @@
+{
+  "cluster": "OnOff",
+  "cluster_id": 6,
+  "attribute": "StartUpOnOff",
+  "attribute_id": 16387,
+  "type": "enum8",
+  "writable": true,
+  "note": "nullable enum, TLV null",
+  "value_tlv_b64": "FA=="
+}

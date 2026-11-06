@@ -1,0 +1,8 @@
+{
+  "kind": "oversized-dn-attribute",
+  "nocsr_elements_b64": "FTABvjCBuzBiAgEAMAAwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR3UzIzPy5dj2QaOf+Lj0NThW6eDbOxZ7FY6c00j5n6Svkhvk2Wd9K340YzZ2BHAhJkzm1mLMRNCkRBZExxgqZdoAAwCgYIKoZIzj0EAwIDSQAwRgIhALhA+BdsPPxBeHui5QCxXbe/HA2vjM/emPlXj4H0yhz3AiEA5Ff2lfRdr6nxpSsbW+XANFwfGMNvlyokpj+QD2QcTmIwAiAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMxg=",
+  "attestation_signature_b64": "YBVSoPGNBKQ0+aPfOXWTeFymOthmOGSnE78JODHbG9rVCy7GVG7hKs5uKKNsnIZS4tiFRP5LqwbOWd3YwcGy3A==",
+  "expected_csr_nonce_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "attestation_challenge_hex": "77777777777777777777777777777777",
+  "dac_public_key_b64": "BCL1HRAJnnqcMX9MJ5Vb91yJ875a8U7OlmVgugrU8MeTVEauBjF9xnKxWDvKxip4NR9DnzK9+Z7V6j4bXIlbjTs="
+}
