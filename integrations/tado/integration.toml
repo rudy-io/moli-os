@@ -1,0 +1,26 @@
+[integration]
+id = "tado"
+name = "Thermostats et têtes thermostatiques tado°"
+brands = ["tado°"]
+models = ["Smart Thermostat", "Smart Radiator Thermostat", "Smart AC Control"]
+transport = "https"
+driver = "tado"
+crate = "moli-tado"
+
+[discovery]
+mdns = ["_hap._tcp"]
+ssdp = []
+ports = []
+
+[needs]
+# Written by the driver itself once the person authorizes the OAuth2 device code.
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = "tado° OAuth2 Device Code flow (help.tado.com) and v2 REST API (my.tado.com)"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/zone_state.json"

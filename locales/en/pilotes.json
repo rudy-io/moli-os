@@ -618,5 +618,21 @@
   "pilotes.zwave.point_lu_seul": "point {point} is read-only",
   "pilotes.zwave.point_sans_cible": "point {point} has no write target",
   "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
-  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean",
+  "pilotes.tado.coffre_indisponible": "Tado: secret store unavailable (a master key is required to keep the token)",
+  "pilotes.tado.autoriser": "Open {url} (code {code}) to authorize Moli OS on your tado° account",
+  "pilotes.tado.pas_connecte": "the tado° account is not connected yet",
+  "pilotes.tado.thermostat": "tado° thermostat",
+  "pilotes.tado.marche": "On",
+  "pilotes.tado.mode": "Mode",
+  "pilotes.tado.consigne": "Target temperature",
+  "pilotes.tado.temperature": "Indoor temperature",
+  "pilotes.tado.temperature_exterieure": "Outdoor temperature",
+  "pilotes.tado.humidite": "Humidity",
+  "pilotes.tado.puissance_chauffe": "Heating power",
+  "pilotes.tado.fenetre_ouverte": "Open window",
+  "pilotes.tado.pile_faible": "Battery low",
+  "pilotes.tado.zone_inconnue": "unknown tado° zone",
+  "pilotes.tado.point_inconnu": "{point} cannot be controlled",
+  "pilotes.tado.echec": "tado° could not run the command: {why}"
 }
