@@ -556,6 +556,7 @@ fn summarize(series: &moli_history::Series) -> Json {
 }
 
 // Macro arguments must be literals; the version comes from this crate.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 #[tool_handler(
     name = "moli-os",
     instructions = "Moli OS controls a real home. Point ids look like `<device_id>/<key>`. Call list_devices first; only points marked writable accept send_command. Every write is journaled with your actor name. Prefer harmless points when testing and restore the previous value."
