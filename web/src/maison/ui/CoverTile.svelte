@@ -1,12 +1,21 @@
 <script>
-  import { mdiSpeedometerMedium, mdiSpeedometerSlow } from '@mdi/js';
+  import {
+    mdiChevronDoubleUp,
+    mdiChevronUp,
+    mdiChevronUpCircleOutline,
+    mdiSquare,
+    mdiSquareOutline,
+    mdiChevronDoubleDown,
+    mdiChevronDown,
+    mdiChevronDownCircleOutline,
+  } from '@mdi/js';
   import { device, value, act, nameOf, num, pending, reachable, coverPosition, coverPositionKey } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import { hub } from '../../lib/hub.svelte.js';
   import Icon from './Icon.svelte';
   import ShutterIcon from './ShutterIcon.svelte';
   import Slider from './Slider.svelte';
-  import { coverCommands, coverPositionTarget, hasSlowCoverControl } from '../lib/cover-controls.js';
+  import { coverCommands, hasSlowCoverControl } from '../lib/cover-controls.js';
   import { canWrite } from '../lib/capabilities.js';
 
   /** A shutter: tap to toggle open/close, advanced controls for precise positioning. */
@@ -19,15 +28,12 @@
   const ok = $derived(reachable(id));
   const label = $derived(nameOf(id, name));
 
-  // Speed control
-  let speedChoice = $state(null);
-  const speed = $derived(speedChoice?.id === id ? speedChoice.speed : 'normal');
   const hasSlow = $derived(hasSlowCoverControl(d));
 
   const pos = $derived(coverPosition(id));
   const posKey = $derived(coverPositionKey(id));
+  const positionWritable = $derived(connected && posKey && canWrite(d, posKey));
   const busy = $derived(pending(id, posKey) || pending(id, 'control'));
-  const offers = $derived(d?.points.find((p) => p.key === 'control')?.kind.values ?? []);
 
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
@@ -36,7 +42,11 @@
         : moving && String(moving).toLowerCase() !== 'stop' ? t('commun.volet.mouvement') : '',
   );
 
+  const isClosed = $derived(pos === 0);
+  const isFullyOpen = $derived(pos === 100);
+  const isMoving = $derived(!!going);
   const isOpen = $derived(pos != null && pos >= 50);
+
   const status = $derived.by(() => {
     const parts = [];
     if (pos != null) parts.push(t('commun.volet.ouvert_a', { pct: num(pos) }));
@@ -44,31 +54,26 @@
     return parts.join(' · ');
   });
 
-  function selectSpeed(next) {
-    if (next === 'normal' || next === 'slow' && hasSlow) {
-      speedChoice = { id, speed: next };
+  function tap() {
+    const cmd = isOpen ? 'close' : 'open';
+    const commands = coverCommands(d, 'normal');
+    const action = commands.find(c => c.command === cmd);
+    if (action?.value && canWrite(d, action.key)) {
+      act(`${id}/${action.key}`, action.value, t('commun.action', { label, action: t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase() }));
     }
   }
 
-  function tap() {
-    const cmd = isOpen ? 'close' : 'open';
-    if (!offers.includes(cmd)) return;
-    const action = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
-    act(`${id}/control`, cmd, t('commun.action', { label, action }));
+  function sendOrderWithSpeed(command, speed, labelKey) {
+    const commands = coverCommands(d, speed);
+    const action = commands.find(c => c.command === command);
+    if (action?.value && connected && canWrite(d, action.key)) {
+      act(`${id}/${action.key}`, action.value, t('commun.action', { label, action: t(labelKey).toLowerCase() }));
+    }
   }
 
-  function sendOrder(command, key) {
-    if (!offers.includes(command)) return;
-    act(`${id}/control`, command, t('commun.action', { label, action: t(key).toLowerCase() }));
+  function sendOrder(command, labelKey) {
+    sendOrderWithSpeed(command, 'normal', labelKey);
   }
-
-  // [command sent to the device, catalogue key of its button, its icon]
-  const BUTTONS = [
-    ['open', 'commun.volet.ouvrir', 'chevron-up'],
-    ['stop', 'commun.volet.stop', 'stop'],
-    ['close', 'commun.volet.fermer', 'chevron-down'],
-    ['cycle', 'commun.volet.impulsion', 'power'],
-  ];
 </script>
 
 <div class="tile" class:open={isOpen} class:busy class:off-grid={!ok || !d} class:compact>
@@ -81,24 +86,68 @@
     <span class="switch" aria-hidden="true"><i></i></span>
   </button>
 
-  {#if hasSlow || speed === 'slow'}
-    <div class="speed" role="group" aria-label={t('commun.volet.vitesse_prochaine')}>
-      <span class="speed-label">{t('commun.volet.vitesse')}</span>
-      <div class="segments">
-        <button type="button" class="speed-btn" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}
-          title={t('commun.volet.vitesse_normale')} aria-label={t('commun.volet.vitesse_normale')}>
-          <Icon path={mdiSpeedometerMedium} size={18} />
+  <div class="controls">
+    {#if isClosed}
+      <!-- Volet fermé : ouvrir normal, ouvrir lent, impulsion haut -->
+      <button class="action-btn" onclick={() => sendOrderWithSpeed('open', 'normal', 'commun.volet.ouvrir')}
+        title={t('commun.volet.ouvrir')} aria-label={t('commun.volet.ouvrir')}>
+        <Icon path={mdiChevronDoubleUp} size={20} />
+      </button>
+      {#if hasSlow}
+        <button class="action-btn" onclick={() => sendOrderWithSpeed('open', 'slow', 'commun.volet.ouvrir')}
+          title={t('commun.volet.vitesse_lente')} aria-label={`${t('commun.volet.ouvrir')} ${t('commun.volet.vitesse_lente')}`}>
+          <Icon path={mdiChevronUp} size={20} />
         </button>
-        <button type="button" class="speed-btn" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}
-          title={t('commun.volet.vitesse_lente')} aria-label={t('commun.volet.vitesse_lente')}>
-          <Icon path={mdiSpeedometerSlow} size={18} />
+      {/if}
+      <button class="action-btn" onclick={() => sendOrder('cycle', 'commun.volet.impulsion')}
+        title={t('commun.volet.impulsion')} aria-label={t('commun.volet.impulsion')}>
+        <Icon path={mdiChevronUpCircleOutline} size={20} />
+      </button>
+    {:else if isMoving}
+      <!-- En mouvement : stop, impulsion -->
+      <button class="action-btn" onclick={() => sendOrder('stop', 'commun.volet.stop')}
+        title={t('commun.volet.stop')} aria-label={t('commun.volet.stop')}>
+        <Icon path={mdiSquare} size={20} />
+      </button>
+      <button class="action-btn" onclick={() => sendOrder('cycle', 'commun.volet.impulsion')}
+        title={t('commun.volet.impulsion')} aria-label={t('commun.volet.impulsion')}>
+        <Icon path={mdiSquareOutline} size={20} />
+      </button>
+    {:else if isFullyOpen}
+      <!-- Volet ouvert : fermer normal, fermer lent, impulsion bas -->
+      <button class="action-btn" onclick={() => sendOrderWithSpeed('close', 'normal', 'commun.volet.fermer')}
+        title={t('commun.volet.fermer')} aria-label={t('commun.volet.fermer')}>
+        <Icon path={mdiChevronDoubleDown} size={20} />
+      </button>
+      {#if hasSlow}
+        <button class="action-btn" onclick={() => sendOrderWithSpeed('close', 'slow', 'commun.volet.fermer')}
+          title={t('commun.volet.vitesse_lente')} aria-label={`${t('commun.volet.fermer')} ${t('commun.volet.vitesse_lente')}`}>
+          <Icon path={mdiChevronDown} size={20} />
         </button>
-      </div>
-    </div>
-  {/if}
+      {/if}
+      <button class="action-btn" onclick={() => sendOrder('cycle', 'commun.volet.impulsion')}
+        title={t('commun.volet.impulsion')} aria-label={t('commun.volet.impulsion')}>
+        <Icon path={mdiChevronDownCircleOutline} size={20} />
+      </button>
+    {:else}
+      <!-- Position intermédiaire : tous les boutons de base -->
+      <button class="action-btn" onclick={() => sendOrder('open', 'commun.volet.ouvrir')}
+        title={t('commun.volet.ouvrir')} aria-label={t('commun.volet.ouvrir')}>
+        <Icon path={mdiChevronDoubleUp} size={20} />
+      </button>
+      <button class="action-btn" onclick={() => sendOrder('stop', 'commun.volet.stop')}
+        title={t('commun.volet.stop')} aria-label={t('commun.volet.stop')}>
+        <Icon path={mdiSquare} size={20} />
+      </button>
+      <button class="action-btn" onclick={() => sendOrder('close', 'commun.volet.fermer')}
+        title={t('commun.volet.fermer')} aria-label={t('commun.volet.fermer')}>
+        <Icon path={mdiChevronDoubleDown} size={20} />
+      </button>
+    {/if}
+  </div>
 
-  {#if posKey}
-    <div class="controls">
+  {#if positionWritable}
+    <div class="slider-row">
       <Slider
         min={0}
         max={100}
@@ -106,11 +155,6 @@
         value={pos ?? 0}
         label={t('commun.volet.position_label', { label })}
         oncommit={(v) => act(`${id}/${posKey}`, v, t('commun.action', { label, action: t('commun.volet.position') }))} />
-      {#each BUTTONS.filter(([cmd]) => offers.includes(cmd)) as [cmd, key, ico] (cmd)}
-        <button class="action-btn" onclick={() => sendOrder(cmd, key)} title={t(key)} aria-label={t(key)}>
-          <Icon name={ico} size={18} />
-        </button>
-      {/each}
     </div>
   {/if}
 </div>
@@ -236,66 +280,28 @@
     opacity: 0.55;
   }
 
-  .speed {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin: 0 16px 12px;
-  }
-
-  .speed-label {
-    font-size: 12px;
-    color: var(--ink-2);
-    font-weight: 550;
-  }
-
-  .segments {
-    display: flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: var(--r-sm);
-    background: var(--surface-3);
-  }
-
-  .speed-btn {
-    all: unset;
-    box-sizing: border-box;
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    border-radius: var(--r-xs);
-    transition: all 0.2s var(--ease);
-  }
-
-  .speed-btn[aria-pressed="true"] {
-    background: var(--surface);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
-  }
-
-  .speed-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
   .controls {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 12px;
-    margin: -6px 16px 16px;
+    margin: 0 16px 12px;
+  }
+
+  .slider-row {
+    margin: 0 16px 16px;
   }
 
   .action-btn {
     all: unset;
     box-sizing: border-box;
     flex: none;
-    width: 34px;
-    height: 34px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
-    background: var(--surface-2);
-    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
     display: grid;
     place-items: center;
     cursor: pointer;
@@ -320,8 +326,7 @@
     .hit,
     .switch,
     .switch i,
-    .action-btn,
-    .speed-btn {
+    .action-btn {
       transition: none;
     }
     .busy :global(.shutter-icon) {
