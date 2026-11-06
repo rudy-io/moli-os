@@ -88,6 +88,7 @@ fn mapped(
 #[derive(Debug, Clone, PartialEq)]
 struct Endpoint {
     clusters: Vec<u32>,
+    label: Option<String>,
     boolean: Option<&'static str>,
     bridged: bool,
     reachable: bool,
@@ -167,6 +168,7 @@ fn endpoints(report: &[(AttributePath, Tlv)]) -> BTreeMap<u16, Endpoint> {
             p.endpoint,
             Endpoint {
                 clusters,
+                label: endpoint_label(report, p.endpoint),
                 boolean,
                 bridged: ids.contains(&0x13) || list.contains(&Tlv::Uint(0x39)),
                 reachable: false,
@@ -175,6 +177,20 @@ fn endpoints(report: &[(AttributePath, Tlv)]) -> BTreeMap<u16, Endpoint> {
         );
     }
     found
+}
+fn endpoint_label(report: &[(AttributePath, Tlv)], endpoint: u16) -> Option<String> {
+    report.iter().find_map(|(path, value)| {
+        if path.endpoint == endpoint
+            && path.cluster == 0x39
+            && path.attribute == 5
+            && let Tlv::Utf8(label) = value
+            && !label.trim().is_empty()
+            && label.len() <= 128
+        {
+            return Some(label.clone());
+        }
+        None
+    })
 }
 fn point(cluster: u32, boolean: Option<&'static str>) -> PointSpec {
     let key = if cluster == 0x45 {
@@ -272,6 +288,7 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
         node.read(&[
             ReadPath::new(None, Some(0x1d), Some(0)),
             ReadPath::new(None, Some(0x1d), Some(1)),
+            ReadPath::new(None, Some(0x39), Some(5)),
         ]),
     )
     .await
@@ -298,6 +315,7 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
     paths.extend([
         ReadPath::new(None, Some(0x1d), Some(0)),
         ReadPath::new(None, Some(0x1d), Some(1)),
+        ReadPath::new(None, Some(0x39), Some(5)),
     ]);
     let mut sub = tokio::time::timeout(Duration::from_secs(30), node.subscribe(&paths, &[], 1, 60))
         .await
@@ -328,8 +346,8 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
     Err(failure())
 }
 fn descriptor_changed(report: &[(AttributePath, Tlv)], path: AttributePath, value: &Tlv) -> bool {
-    path.cluster == 0x1d
-        && matches!(path.attribute, 0 | 1)
+    ((path.cluster == 0x1d && matches!(path.attribute, 0 | 1))
+        || (path.cluster == 0x39 && path.attribute == 5))
         && !report.iter().any(|(p, v)| *p == path && v == value)
 }
 async fn ensure_fabric(controller: &MatterController) -> anyhow::Result<()> {
@@ -419,7 +437,7 @@ impl Matter {
                         for id in removed { devices.remove(&id); ctx.remove_device(&id); }
                         for (ep,meta) in endpoints {
                         let id = ctx.device_id(&native(node,ep));
-                        ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:format!("Matter {node:016x} / {ep}").into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.clusters.iter().map(|c|point(*c,meta.boolean)).collect() });
+                        ctx.upsert_device(Device { id:id.clone(),instance:ctx.instance().clone(),native_name:meta.label.clone().unwrap_or_else(|| format!("Matter {node:016x} / {ep}")).into(),manufacturer:None,model:None,description:None,native_room:None,members:vec![],points:meta.clusters.iter().map(|c|point(*c,meta.boolean)).collect() });
                         ctx.set_availability(&id,false);
                         devices.insert(id,(node,ep,meta));
                         }
@@ -593,9 +611,27 @@ mod tests {
         assert_eq!(mapped(path(3, 0x402, 1), &Tlv::Null, None), None);
     }
     #[test]
+    fn bridged_labels_are_bounded_and_refresh_on_change() {
+        let p = path(2, 0x39, 5);
+        let report = vec![(p, Tlv::Utf8("Test light".into()))];
+        assert_eq!(endpoint_label(&report, 2).as_deref(), Some("Test light"));
+        assert_eq!(endpoint_label(&report, 3), None);
+        assert!(!descriptor_changed(
+            &report,
+            p,
+            &Tlv::Utf8("Test light".into())
+        ));
+        assert!(descriptor_changed(&report, p, &Tlv::Utf8("Renamed".into())));
+        for value in [Tlv::Null, Tlv::Utf8(" ".into()), Tlv::Utf8("x".repeat(129))] {
+            assert_eq!(endpoint_label(&[(p, value)], 2), None);
+        }
+    }
+
+    #[test]
     fn bridge_availability_blocks_writes_until_primed() {
         let mut meta = Endpoint {
             clusters: vec![6],
+            label: None,
             boolean: None,
             bridged: true,
             reachable: false,

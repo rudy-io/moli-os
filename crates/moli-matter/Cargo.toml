@@ -14,7 +14,7 @@ anyhow.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-matter-controller = { git = "https://github.com/Roddygithub/matter-rust", rev = "429350c0171d62fbf911b7600231ba0480d4b875", version = "=0.18.3", default-features = false }
-matter-codec = { git = "https://github.com/Roddygithub/matter-rust", rev = "429350c0171d62fbf911b7600231ba0480d4b875", version = "=0.3.2" }
+matter-controller = { git = "https://github.com/Roddygithub/matter-rust", rev = "d80b1a3fd2204119ddf47406f4bb59916ba7576b", version = "=0.18.3", default-features = false }
+matter-codec = { git = "https://github.com/Roddygithub/matter-rust", rev = "d80b1a3fd2204119ddf47406f4bb59916ba7576b", version = "=0.3.2" }
 [lints]
 workspace = true
