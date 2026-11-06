@@ -20,6 +20,9 @@ transcribe_model = "gpt-4o-mini-transcribe"   # voix → texte ; "" = pas de voi
 
 L'heure que Moli connaît est celle de la maison : `[server] timezone`.
 
+`quiet_during_tv = true` : un boîtier vocal se tait tant qu'un écran joue dans sa pièce, sauf s'il a fait
+quelque chose (voir [satellite-vocal.md](satellite-vocal.md)).
+
 Clé : `moli-os secrets set assistant api_key` (une clé déjà donnée à l'intégration
 `openai_conversation` de HA peut être reprise, toujours par tube). Elle ne part qu'en
 https : un `base_url` en `http://` ne la reçoit jamais, même rangée dans le coffre. Les modèles « à
