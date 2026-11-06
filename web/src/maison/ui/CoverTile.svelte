@@ -39,6 +39,13 @@
   let pendingTarget = $state(null);
   const targetPos = $derived(pendingTarget ?? pos);
 
+  // Clear pending target when position reaches it
+  $effect(() => {
+    if (pendingTarget != null && pos != null && Math.abs(pos - pendingTarget) < 1) {
+      pendingTarget = null;
+    }
+  });
+
   const moving = $derived(value(id, 'moving'));
   const going = $derived(
     moving === 'UP' ? t('commun.volet.monte')

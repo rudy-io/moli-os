@@ -402,6 +402,25 @@ impl World {
         let Some(spec) = live.specs.iter().find(|s| &*s.key == key).cloned() else {
             return;
         };
+
+        // Special handling for cover position writes: start progressive movement
+        match key {
+            "percent_control" | "percent_control_slow" => {
+                if let Some(target) = value.as_f64() {
+                    let speed = if key == "percent_control_slow" { 0.5 } else { 1.0 };
+                    let current = live.num("percent_control").unwrap_or(50.0);
+
+                    if (target - current).abs() > 0.5 {
+                        live.cover_target = Some((target, speed));
+                        let direction = if target > current { "UP" } else { "DOWN" };
+                        Self::set(ctx, live, "moving", Value::Text(direction.into()));
+                    }
+                }
+                return; // Don't apply immediately
+            }
+            _ => {}
+        }
+
         // A pure order (a remote's key, an announcement): nothing to keep.
         if spec.access.read {
             Self::set(ctx, live, key, value.clone());
@@ -543,10 +562,11 @@ impl World {
         let mut updates: Vec<(String, Value)> = Vec::new();
         let printing = live.flag("printing").unwrap_or(false);
 
-        // Cover movement simulation: progress toward target at ~20%/s (normal) or ~10%/s (slow)
+        // Cover movement simulation: progress toward target at ~5%/s (normal) or ~2.5%/s (slow)
+        // Full travel: 20s normal, 40s slow (realistic shutter timing)
         if let Some((target, speed)) = live.cover_target {
             if let Some(current) = live.num("percent_control") {
-                let rate = 20.0 * speed; // percent per second
+                let rate = 5.0 * speed; // percent per second
                 let delta = (target - current).signum() * (rate * dt).min((target - current).abs());
                 let next = current + delta;
 

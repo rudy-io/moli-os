@@ -144,6 +144,7 @@ id = "tuya"
 kind = "demo"
 [driver.options]
 fixture = "devices/tuya.json"
+tick_s = 1
 
 [[driver]]
 id = "z2m"
