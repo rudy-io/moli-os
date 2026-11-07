@@ -41,8 +41,42 @@ export const PHASES = {
 };
 
 /** A printer: a print's progress and a nozzle. */
-export const isPrinter = (d) =>
-  !!d && d.points.some((p) => p.key === 'progress') && d.points.some((p) => p.key === 'nozzle_temperature');
+// Some printers (a Creality profile) say the same things in French words,
+// with times in seconds: the cards read them through these names.
+const ALIAS = {
+  progress: 'progression',
+  nozzle_temperature: 'buse',
+  nozzle_target: 'buse_cible',
+  bed_temperature: 'plateau',
+  bed_target: 'plateau_cible',
+  chamber_temperature: 'caisson',
+  job: 'fichier',
+  remaining: 'reste',
+  print_duration: 'duree',
+  light: 'lumiere',
+  state: 'etat',
+};
+const IN_SECONDS = new Set(['reste', 'duree']);
+const hasKey = (d, k) => !!d?.points?.some((p) => p.key === k);
+
+/** The key a printer really uses for one of the card's words. */
+export const keyOf = (d, k) => (!hasKey(d, k) && ALIAS[k] && hasKey(d, ALIAS[k]) ? ALIAS[k] : k);
+export const hasPoint = (d, k) => hasKey(d, keyOf(d, k));
+
+/** One value, in the card's words and units (minutes, a state word). */
+export function readPrinter(d, k, read) {
+  const key = keyOf(d, k);
+  const raw = read(key);
+  if (key === 'etat') {
+    // Creality: a number. Printing is told apart by its own flag.
+    if (read('en_impression') === true) return 'printing';
+    return Number(raw) === 2 ? 'complete' : 'standby';
+  }
+  if (IN_SECONDS.has(key) && typeof raw === 'number') return raw / 60;
+  return raw;
+}
+
+export const isPrinter = (d) => !!d && hasPoint(d, 'progress') && hasPoint(d, 'nozzle_temperature');
 
 /** « Calibration_cube_PLA_8h16m » → « Calibration cube ». The slicer
  *  appends the filament and its time estimate: noise on a card. */

@@ -202,15 +202,26 @@
   .parler {
     display: grid;
     gap: 22px;
-    max-width: 920px;
+    max-width: 1180px;
   }
 
   .compose {
     display: grid;
     gap: 12px;
-    padding: 16px 18px;
-    border-radius: var(--r-md);
-    background: var(--surface-2);
+    padding: 18px 20px;
+    border-radius: var(--r-lg);
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+    animation: parler-in 0.6s var(--ease) backwards;
+  }
+
+  @keyframes parler-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
   }
 
   textarea {
@@ -223,6 +234,13 @@
     border: 1px solid var(--line, rgba(0, 0, 0, 0.15));
     background: var(--surface);
     color: inherit;
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
   }
 
   .row {
@@ -249,8 +267,13 @@
   }
 
   .btn.primary {
-    background: var(--warm);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #fff;
+    box-shadow: 0 10px 20px -10px var(--accent-2);
+  }
+
+  .btn.primary:not(:disabled):hover {
+    transform: translateY(-2px);
   }
 
   .btn:disabled {
@@ -281,7 +304,14 @@
 
   .targets {
     display: grid;
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+    align-items: start;
+    gap: 18px 16px;
+  }
+
+  .targets > :global(h2),
+  .targets > .door {
+    grid-column: 1 / -1;
   }
 
   .door {
@@ -349,7 +379,9 @@
     padding: 12px 14px;
     border-radius: 14px;
     border: 2px solid transparent;
-    background: var(--surface-2);
+    background: var(--glass);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+    transition: transform 0.25s var(--ease), border-color 0.2s, background 0.2s, box-shadow 0.25s var(--ease);
     color: inherit;
     font: inherit;
     text-align: left;
@@ -357,9 +389,29 @@
     min-width: 0;
   }
 
+  .target > :global(svg:first-child) {
+    box-sizing: content-box;
+    padding: 9px;
+    border-radius: 12px;
+    color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .target.on > :global(svg:first-child) {
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  }
+
+  .target:not(:disabled):hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line);
+  }
+
   .target.on {
-    border-color: var(--warm);
-    background: var(--warm-soft);
+    border-color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    box-shadow: 0 10px 22px -12px var(--accent-2);
   }
 
   .target:disabled {

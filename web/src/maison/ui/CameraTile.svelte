@@ -143,6 +143,12 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform 0.6s var(--ease);
+  }
+
+  /* Pointed at: the picture comes slightly closer. */
+  .frame:hover img {
+    transform: scale(1.04);
   }
 
   .placeholder {

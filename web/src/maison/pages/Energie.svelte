@@ -10,6 +10,7 @@
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
+  import Donut from '../ui/Donut.svelte';
 
   onMount(useEnergy);
 
@@ -136,6 +137,14 @@
   });
   const partsMax = $derived(Math.max(0.01, ...parts.map((p) => p.kwh)));
   const partsTotal = $derived(parts.reduce((t, p) => t + p.kwh, 0));
+
+  // Look only: one colour per line, shared by its bar and its slice of the ring.
+  const HUES = ['#e9a23b', '#5b8def', '#3fae7c', '#c46ad8', '#e0705a', '#2fb3b8', '#8c7ae6', '#d4a373'];
+  const REST = '#9aa1b1';
+  const hued = (list) => list.map((x, i) => ({ ...x, color: x.rest ? REST : HUES[i % HUES.length] }));
+  const drawsHued = $derived(hued(draws));
+  const partsHued = $derived(hued(parts));
+  const drawsTotal = $derived(draws.reduce((t, d) => t + d.w, 0));
   // This month, the share billed off-peak.
   const offShare = $derived.by(() => {
     const grid = (s?.meters ?? []).filter((m) => m.role === 'grid');
@@ -329,15 +338,24 @@
       <section class="card">
         <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.direct.titre')}</h2></div>
         {#if draws.length}
+          <div class="ring">
+            <Donut
+              items={drawsHued.map((d) => ({ id: d.id, label: d.name, value: d.w, color: d.color }))}
+              center={watts(now ?? drawsTotal)}
+              sub={t('energie.now.titre')}
+              format={watts}
+              label={t('energie.direct.titre')}
+            />
+          </div>
           <ul class="bars">
-            {#each draws as d (d.id)}
-              <li class:rest={d.rest}>
-                <span class="name">{d.name}{#if d.estimated} <small class="muted" title={t('energie.estime_ampoules')}>{t('energie.estime')}</small>{/if}</span>
+            {#each drawsHued as d (d.id)}
+              <li class:rest={d.rest} style:--hue={d.color}>
+                <span class="name"><i class="dot"></i>{d.name}{#if d.estimated} <small class="muted" title={t('energie.estime_ampoules')}>{t('energie.estime')}</small>{/if}</span>
                 <span class="track"><i style="width:{(d.w / drawMax) * 100}%"></i></span>
                 <b class="num">{watts(d.w)}</b>
               </li>
               {#each d.subs as a (a.id)}
-                <li class="sub">
+                <li class="sub" style:--hue={d.color}>
                   <span class="name">{t('energie.dont', { name: a.name })}{#if a.estimated} <small class="muted" title={t('energie.estime_ampoule')}>{t('energie.estime')}</small>{/if}</span>
                   <span class="track"><i style="width:{(a.w / drawMax) * 100}%"></i></span>
                   <b class="num">{watts(a.w)}</b>
@@ -360,16 +378,25 @@
           </div>
         </div>
         {#if parts.length}
+          <div class="ring">
+            <Donut
+              items={partsHued.map((p) => ({ id: p.id, label: p.name, value: p.kwh, color: p.color }))}
+              center="{kwh(partsTotal)} kWh"
+              sub={t(SPANS.find(([key]) => key === span)?.[1] ?? 'energie.span.today')}
+              format={(v) => `${kwh(v)} kWh`}
+              label={t('energie.repartition.titre')}
+            />
+          </div>
           <ul class="bars">
-            {#each parts as p (p.id)}
-              <li class:rest={p.rest}>
-                <span class="name">{p.name} <small class="muted">{t('energie.pct', { n: Math.round((p.kwh / partsTotal) * 100) })}{p.estimated ? ' ≈' : ''}</small></span>
+            {#each partsHued as p (p.id)}
+              <li class:rest={p.rest} style:--hue={p.color}>
+                <span class="name"><i class="dot"></i>{p.name} <small class="muted">{t('energie.pct', { n: Math.round((p.kwh / partsTotal) * 100) })}{p.estimated ? ' ≈' : ''}</small></span>
                 <span class="track"><i style="width:{(p.kwh / partsMax) * 100}%"></i></span>
                 <b class="num">{kwh(p.kwh)} kWh</b>
                 {#if p.cost != null}<small class="muted num cost">{euros(p.cost, cur)}</small>{/if}
               </li>
               {#each p.subs as a (a.id)}
-                <li class="sub">
+                <li class="sub" style:--hue={p.color}>
                   <span class="name">{t('energie.dont', { name: a.name })}{#if a.estimated} <small class="muted" title={t('energie.estime_ampoule')}>{t('energie.estime')}</small>{/if}</span>
                   <span class="track"><i style="width:{(a.kwh / partsMax) * 100}%"></i></span>
                   <b class="num">{kwh(a.kwh)} kWh</b>
@@ -703,12 +730,36 @@
     display: block;
     height: 100%;
     border-radius: 999px;
-    background: var(--warm);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--hue, var(--warm)) 70%, #fff), var(--hue, var(--warm)));
+    box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--hue, var(--warm)) 60%, transparent);
     transition: width 0.6s var(--ease);
+    animation: bar-grow 1s var(--ease) backwards;
   }
 
-  .rest .track i {
-    background: var(--ink-3);
+  @keyframes bar-grow {
+    from {
+      width: 0;
+    }
+  }
+
+  .ring {
+    display: grid;
+    place-items: center;
+    margin: 0 0 18px;
+  }
+
+  .name .dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    margin-right: 8px;
+    vertical-align: 1px;
+    background: var(--hue, var(--warm));
+  }
+
+  .sub .track i {
+    opacity: 0.6;
   }
 
   .rest .name {

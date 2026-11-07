@@ -5,6 +5,8 @@
   import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
+  import { isPrinter } from './lib/printers.js';
+  import { isPaperPrinter } from './lib/paper.js';
   import PinSheet from './ui/PinSheet.svelte';
   import Correct from './moli/Correct.svelte';
   import Setup from './ui/Setup.svelte';
@@ -25,6 +27,7 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { icon } from './lib/icons.js';
 
   let { route } = $props();
   $effect(() => {
@@ -52,9 +55,10 @@
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
-    { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
+    // Only when the house has something that speaks, or something that prints.
+    { path: 'parler', label: 'commun.nav.parler', icon: 'talk', shown: () => Object.values(hub.devices).some((d) => !hidden(d.id) && d.points?.some((p) => ['say', 'announce'].includes(p.key) && p.access?.write && p.kind?.type === 'text')) },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
+    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => Object.values(hub.devices).some((d) => !hidden(d.id) && (isPrinter(d) || isPaperPrinter(d))) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
@@ -113,9 +117,68 @@
   }
 
   const page = $derived(route.split('/')[0] ?? '');
+
+  // Look only: each page has its own colour (rail pill, card icons, the
+  // backdrop's main cloud) and its icon in a badge before its title.
+  const LOOK = {
+    '': ['#ffb547', '#f07a3a', 'home'],
+    moli: ['#b78cff', '#6a5cff', 'sparkles'],
+    salon: ['#c77dff', '#ff6fa5', 'remote'],
+    pieces: ['#ffc95a', '#ff8f3a', 'light-group'],
+    airzone: ['#5fd4ff', '#3b82f6', 'air-conditioner'],
+    plan: ['#6cc7ff', '#4f7bff', 'home-roof'],
+    carte: ['#5ee0a0', '#14a37f', 'map'],
+    cameras: ['#8b9dff', '#5a4fe0', 'cctv'],
+    parler: ['#ff8fb8', '#e2558f', 'talk'],
+    energie: ['#ffd84d', '#2fbf71', 'bolt'],
+    impression: ['#ff9a6b', '#e2483d', 'printer3d'],
+    dehors: ['#9be15d', '#1fa67a', 'flower-outline'],
+    automatismes: ['#a78bfa', '#7c3aed', 'robot'],
+    infra: ['#5eead4', '#0d9488', 'server'],
+    parc: ['#93c5fd', '#475fd6', 'package'],
+    systeme: ['#7dd3fc', '#2563eb', 'branch'],
+  };
+  const look = $derived(LOOK[page] ?? LOOK['']);
+  const pageIcon = $derived(
+    `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='white' d='${icon(look[2])}'/></svg>`)}")`,
+  );
+
+  // Look only: the card under the mouse leans a little towards it (3D).
+  // Never while a button is held (a slider being dragged must stay still),
+  // never on touch, never when the system asks for less motion.
+  let leaning = null;
+  const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function lean(e) {
+    if (calm || e.pointerType !== 'mouse' || e.buttons) return unlean();
+    const card = e.target instanceof Element ? e.target.closest('.content .card') : null;
+    if (card !== leaning) unlean();
+    if (!card) return;
+    // A map, a plan or a drawing canvas stays flat: you aim at a spot there.
+    if (card.querySelector('.leaflet-container, canvas, .house3d, .drawing, .graph')) return;
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width;
+    const y = (e.clientY - r.top) / r.height;
+    // A big card leans less: the same angle would throw its far edge out.
+    const amp = Math.min(4, 2400 / Math.max(r.width, r.height));
+    card.style.setProperty('--ry', `${((x - 0.5) * amp).toFixed(2)}deg`);
+    card.style.setProperty('--rx', `${((0.5 - y) * amp).toFixed(2)}deg`);
+    card.style.setProperty('--mx', `${(x * 100).toFixed(1)}%`);
+    card.style.setProperty('--my', `${(y * 100).toFixed(1)}%`);
+    card.classList.add('tilting');
+    leaning = card;
+  }
+  function unlean() {
+    if (!leaning) return;
+    leaning.classList.remove('tilting');
+    leaning.style.removeProperty('--rx');
+    leaning.style.removeProperty('--ry');
+    leaning.style.removeProperty('--mx');
+    leaning.style.removeProperty('--my');
+    leaning = null;
+  }
 </script>
 
-<div class="maison" data-theme={theme}>
+<div class="maison" data-theme={theme} style:--accent={look[0]} style:--accent-2={look[1]} style:--page-icon={pageIcon}>
   <nav class="rail" aria-label={t('commun.nav.aria')}>
     <a class="brand" href="#/" aria-label={t('commun.nav.logo')}>
       <svg viewBox="0 0 32 32" aria-hidden="true">
@@ -151,7 +214,7 @@
     </div>
   </nav>
 
-  <main class="content">
+  <main class="content" onpointermove={lean} onpointerleave={unlean} onpointerdown={unlean}>
     {#if page === 'salon'}
       <Salon />
     {:else if page === 'pieces'}
@@ -258,6 +321,7 @@
     grid-template-columns: 104px minmax(0, 1fr);
   }
 
+  /* The rail: a floating pane of frosted glass, its icons grouped close. */
   .rail {
     position: sticky;
     top: 0;
@@ -265,32 +329,58 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 22px 0 18px;
-    gap: 18px;
+    padding: 14px 0;
+    gap: 10px;
+  }
+
+  .rail::before {
+    content: '';
+    position: absolute;
+    inset: 12px 10px 12px 12px;
+    z-index: -1;
+    border-radius: 30px;
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+  }
+
+  .brand {
+    margin-top: 10px;
+    border-radius: 999px;
+    transition: transform 0.6s var(--ease);
+  }
+
+  .brand:hover {
+    transform: rotate(-200deg) scale(1.08);
   }
 
   .brand svg {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     display: block;
+    filter: drop-shadow(0 6px 10px rgb(232 185 49 / 45%));
   }
 
   .rail ul {
     list-style: none;
-    margin: 12px 0 0;
-    padding: 0;
+    margin: 4px 0 0;
+    padding: 0 0 4px;
     display: grid;
-    gap: 6px;
+    gap: 2px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    min-height: 0;
   }
 
   .rail a,
   .rail button {
     display: grid;
     justify-items: center;
-    gap: 4px;
-    width: 80px;
-    padding: 10px 0 8px;
-    border-radius: 20px;
+    gap: 3px;
+    width: 78px;
+    padding: 6px 0 5px;
+    border-radius: 18px;
     border: 0;
     background: none;
     color: var(--ink-3);
@@ -299,51 +389,104 @@
   }
 
   .rail .glyph {
-    width: 52px;
-    height: 34px;
+    width: 48px;
+    height: 32px;
     border-radius: 999px;
     display: grid;
     place-items: center;
-    transition: background 0.25s var(--ease);
+    transition:
+      background 0.3s var(--ease),
+      transform 0.35s var(--ease),
+      box-shadow 0.3s var(--ease);
   }
 
   .rail a.active {
     color: var(--ink);
   }
 
+  /* The page you are on: a warm lit pill, slightly raised. */
   .rail a.active .glyph {
-    background: var(--surface);
-    box-shadow: var(--shadow);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 8px 18px -8px var(--accent-2), inset 0 1px 0 rgb(255 255 255 / 45%);
+    transform: translateY(-1px);
   }
 
   .rail a:hover {
-    color: var(--ink-2);
+    color: var(--ink);
+  }
+
+  .rail a:hover .glyph {
+    transform: translateY(-2px) scale(1.06);
+  }
+
+  .rail a:not(.active):hover .glyph {
+    background: var(--surface-2);
   }
 
   .label {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 600;
   }
 
+  /* The foot: theme, Système, Atelier side by side, icons only (their
+     names are in the tooltip), so the rail keeps room for the pages. */
   .rail-foot {
     margin-top: auto;
-    display: grid;
-    gap: 4px;
+    display: flex;
+    gap: 0;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
   }
 
   .rail-foot a,
   .rail-foot button {
-    padding: 8px 0;
+    width: 26px;
+    padding: 6px 0;
+    border-radius: 10px;
+  }
+
+  .rail-foot .label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .rail-foot a:hover,
+  .rail-foot button:hover {
+    background: var(--surface-2);
+  }
+
+  /* A short screen: the page names make way, the icons stay (named in
+     their tooltip and for screen readers). */
+  @media (min-width: 761px) and (max-height: 940px) {
+    .rail ul .label {
+      font-size: 10.5px;
+    }
+
+    .rail ul a {
+      padding: 3px 0 2px;
+      gap: 1px;
+    }
+
+    .rail .glyph {
+      height: 28px;
+    }
   }
 
   .content {
-    padding: 28px 36px 120px 8px;
-    max-width: 1440px;
+    padding: 28px 36px 120px 14px;
+    max-width: 1560px;
     width: 100%;
     min-width: 0;
+    margin-inline: auto;
   }
 
-  /* Moli, always one tap away. */
+  /* Moli, always one tap away: a glowing orb; its words open on hover so
+     it hides less of the page. */
   .orb {
     position: fixed;
     right: 28px;
@@ -351,18 +494,54 @@
     z-index: 30;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 22px 10px 10px;
+    gap: 0;
+    padding: 9px;
     border: 0;
     border-radius: 999px;
-    background: var(--surface);
-    box-shadow: var(--shadow-lift);
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 0 rgb(176 95 216 / 35%);
     font-weight: 650;
-    transition: transform 0.2s var(--ease);
+    animation: orb-call 3.6s ease-in-out infinite;
+    transition:
+      transform 0.3s var(--ease),
+      gap 0.3s var(--ease),
+      padding 0.3s var(--ease);
   }
 
-  .orb:hover {
-    transform: translateY(-2px);
+  .orb-text {
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 0;
+    transition:
+      max-width 0.4s var(--ease),
+      opacity 0.3s var(--ease);
+  }
+
+  .orb:hover,
+  .orb:focus-visible {
+    transform: translateY(-3px);
+    gap: 12px;
+    padding-right: 22px;
+  }
+
+  .orb:hover .orb-text,
+  .orb:focus-visible .orb-text {
+    max-width: 220px;
+    opacity: 1;
+  }
+
+  @keyframes orb-call {
+    0%,
+    70%,
+    100% {
+      box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 0 rgb(176 95 216 / 30%);
+    }
+    85% {
+      box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 12px rgb(176 95 216 / 0%);
+    }
   }
 
   .notes {
@@ -491,9 +670,15 @@
       flex-direction: row;
       justify-content: center;
       padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-      background: var(--surface);
-      box-shadow: var(--shadow-lift);
+      background: var(--glass);
+      -webkit-backdrop-filter: var(--glass-blur);
+      backdrop-filter: var(--glass-blur);
+      box-shadow: var(--shadow-lift), inset 0 1px 0 var(--glass-line);
       z-index: 25;
+    }
+
+    .rail::before {
+      display: none;
     }
 
     .rail .brand,

@@ -1,6 +1,6 @@
 <script>
   import { hub, device, value, reachable, nameOf, act, num, clock, home } from '../lib/home.svelte.js';
-  import { phase, PHASES, jobName, duration, cancelWord } from '../lib/printers.js';
+  import { phase, PHASES, jobName, duration, cancelWord, readPrinter, hasPoint, keyOf } from '../lib/printers.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LiveVideo from './LiveVideo.svelte';
@@ -11,7 +11,7 @@
   let { id } = $props();
 
   const d = $derived(device(id));
-  const v = (k) => value(id, k);
+  const v = (k) => readPrinter(d, k, (key) => value(id, key));
   const ok = $derived(reachable(id));
   const state = $derived(ok ? phase(v('state')) : 'off');
   const look = $derived(state === 'off' ? { label: t('salon.eteinte'), tone: '' } : PHASES[state]);
@@ -20,7 +20,7 @@
   const left = $derived(v('remaining'));
   const finish = $derived(active && typeof left === 'number' ? home.now + left * 60_000 : null);
   const job = $derived(jobName(v('job')));
-  const can = (key) => d?.points.some((p) => p.key === key && p.access?.write);
+  const can = (key) => d?.points.some((p) => p.key === keyOf(d, key) && p.access?.write);
 
   // Tool heads (Snapmaker U1: four), or the Bambu's filament units.
   const tools = $derived.by(() => {
@@ -104,7 +104,7 @@
   {/if}
 
   <div class="job">
-    <div class="thumb">
+    <div class="thumb" class:ring={active || state === 'done'} style:--p={Math.min(100, progress)}>
       {#if !noImage && v('job')}
         <img src={image} alt="" onerror={() => (noImage = true)} />
       {:else}
@@ -114,7 +114,7 @@
     <div class="facts">
       <b class="name">{job || (state === 'off' ? t('salon.impression.imprimante_eteinte') : t('salon.impression.aucune_impression'))}</b>
       {#if active || state === 'done'}
-        <div class="bar" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
+        <div class="bar" class:moving={state === 'printing'} role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
           <i style:width="{Math.min(100, progress)}%"></i>
         </div>
         <div class="line">
@@ -133,10 +133,10 @@
 
   <div class="temps">
     <span><small>{t('salon.impression.buse')}</small><b class="num">{temp(v('nozzle_temperature'))}</b>{#if v('nozzle_target')}<small class="num"> → {temp(v('nozzle_target'))}</small>{/if}</span>
-    {#if d?.points.some((p) => p.key === 'bed_temperature')}
+    {#if hasPoint(d, 'bed_temperature')}
       <span><small>{t('salon.impression.plateau')}</small><b class="num">{temp(v('bed_temperature'))}</b>{#if v('bed_target')}<small class="num"> → {temp(v('bed_target'))}</small>{/if}</span>
     {/if}
-    {#if d?.points.some((p) => p.key === 'chamber_temperature')}
+    {#if hasPoint(d, 'chamber_temperature')}
       <span><small>{t('salon.impression.enceinte')}</small><b class="num">{temp(v('chamber_temperature'))}</b></span>
     {/if}
   </div>
@@ -266,6 +266,60 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+    border-radius: calc(var(--r-md) - 4px);
+  }
+
+  /* While printing or done: a ring round the picture, filled to the progress. */
+  .thumb.ring {
+    background:
+      linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+      conic-gradient(var(--ring, var(--warm)) calc(var(--p, 0) * 1%), var(--surface-3) 0) border-box;
+    border: 4px solid transparent;
+  }
+
+  [data-state='done'] .thumb.ring {
+    --ring: var(--good);
+  }
+
+  [data-state='paused'] .thumb.ring {
+    --ring: var(--cool);
+  }
+
+  /* A print under way: stripes run along the bar and a gleam sweeps it. */
+  .bar.moving i {
+    position: relative;
+    overflow: hidden;
+    background-image: repeating-linear-gradient(45deg, rgb(255 255 255 / 28%) 0 8px, transparent 8px 16px);
+    background-size: 22px 22px;
+    animation: bar-stripes 1s linear infinite;
+  }
+
+  .bar.moving i::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 55%), transparent);
+    transform: translateX(-100%);
+    animation: bar-sweep 2.4s var(--ease) infinite;
+  }
+
+  @keyframes bar-stripes {
+    to {
+      background-position: 22px 0;
+    }
+  }
+
+  @keyframes bar-sweep {
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bar.moving i,
+    .bar.moving i::after {
+      animation: none;
+    }
   }
 
   .facts {
@@ -291,16 +345,16 @@
     display: block;
     height: 100%;
     border-radius: 999px;
-    background: var(--warm);
+    background-color: var(--warm);
     transition: width 0.8s var(--ease);
   }
 
   [data-state='done'] .bar i {
-    background: var(--good);
+    background-color: var(--good);
   }
 
   [data-state='paused'] .bar i {
-    background: var(--cool);
+    background-color: var(--cool);
   }
 
   .line {
