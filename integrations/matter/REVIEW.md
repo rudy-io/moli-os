@@ -53,8 +53,8 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 
 ## Taille et arbitrages
 
-Image compacte mesurée : **24 954 289 octets**, sous 25 Mo (marge 45 711 octets).
-Image standard : **30 268 337 octets**. Le choix par défaut conserve les symboles ;
+Image compacte mesurée : **24 970 672 octets**, sous 25 Mo (marge 29 328 octets).
+Image standard : **30 289 328 octets**. Le choix par défaut conserve les symboles ;
 la variante compacte retire les noms des backtraces locales, sans retirer de pilote.
 L'artefact diagnostics est identique au binaire standard. [Mesures et limites](../../docs/PERFORMANCE.md).
 Le minimum Rust 1.89 est nécessaire aux verrous de fichiers et validé ; les deux
