@@ -511,16 +511,37 @@ async fn stopped_actor_cancels_pending_transport_and_never_continues_rotating() 
     ));
 }
 
-#[test]
-fn durable_retry_gate_keeps_provider_long_zero_and_overflow_delays() {
+#[tokio::test(start_paused = true)]
+async fn durable_retry_gate_caps_legacy_overflow_and_expires_within_one_hour() {
     for seconds in [0, 86_400, u64::MAX] {
         let state = ConnectionState {
             retry_after_secs: Some(seconds),
             last_attempt_ms: Some(now_ms()),
             ..ConnectionState::default()
         };
-        assert_eq!(Gate::restore(&state).open(), seconds == 0);
+        let gate = Gate::restore(&state);
+        assert_eq!(gate.open(), seconds == 0);
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        assert!(gate.open());
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn persisted_retry_gate_expires_old_deadlines_and_bounds_future_timestamps() {
+    let state = ConnectionState {
+        retry_after_secs: Some(u64::MAX),
+        last_attempt_ms: Some(now_ms().saturating_sub(7_200_000)),
+        ..ConnectionState::default()
+    };
+    assert!(Gate::restore(&state).open());
+    let future = ConnectionState {
+        last_attempt_ms: Some(i64::MAX),
+        ..state
+    };
+    let gate = Gate::restore(&future);
+    assert!(!gate.open());
+    tokio::time::advance(Duration::from_secs(3600)).await;
+    assert!(gate.open());
 }
 
 #[tokio::test]
@@ -705,12 +726,12 @@ impl CheckProbe {
 
         // Make the ordinary poll due without bypassing either provider quota gate.
         cloud.next_poll = Instant::now();
-        if matches!(failure, Error::RateLimited { .. }) {
+        if let Some(delay) = cloud.state.retry_after_secs {
             tokio::time::pause();
             cloud.tick(ctx);
             assert!(!cloud.busy && cloud.job.is_none());
             assert_eq!(self.script.calls.lock().unwrap().len(), previous_calls);
-            tokio::time::advance(Duration::from_secs(6)).await;
+            tokio::time::advance(Duration::from_secs(delay + 1)).await;
             tokio::time::resume();
             assert!(cloud.gate.open());
         }
@@ -996,7 +1017,8 @@ impl CheckProbe {
             .as_ref()
             .unwrap()
             .parse::<u64>()
-            .unwrap();
+            .unwrap()
+            .min(3600);
         let original_session = ctx.secret(SESSION_KEY).unwrap();
         let original_catalog =
             inventory::decode_catalog(ctx.secret(inventory::INVENTORY_KEY).unwrap().as_bytes())
@@ -1138,6 +1160,12 @@ impl CheckProbe {
 }
 
 async fn check(rig: &Rig, check: Check) {
+    // Discovery tests advance the virtual clock through the one-minute backoff.
+    let limit = if matches!(check, Check::DiscoveryRecovery { .. }) {
+        75
+    } else {
+        15
+    };
     let (done, finished) = oneshot::channel();
     spawn_driver(
         &rig.hub,
@@ -1149,7 +1177,7 @@ async fn check(rig: &Rig, check: Check) {
         }),
         rig.cancel.clone(),
     );
-    tokio::time::timeout(Duration::from_secs(15), finished)
+    tokio::time::timeout(Duration::from_secs(limit), finished)
         .await
         .unwrap()
         .unwrap();

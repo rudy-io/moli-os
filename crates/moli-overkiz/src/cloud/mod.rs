@@ -7,6 +7,8 @@ pub(crate) mod worker;
 pub use session::{SessionBinding, SessionPhase, read_session_binding};
 pub use types::*;
 
+pub(crate) const MAX_RETRY_SECS: u64 = 3600;
+
 pub const SESSION_KEY: &str = "cloud_session_v1";
 pub const PENDING_KEY: &str = "cloud_pending_v1";
 pub const STATE_KEY: &str = "cloud_state_v1";

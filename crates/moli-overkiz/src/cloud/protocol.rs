@@ -1,3 +1,4 @@
+// Constant attribution: see NOTICE and licenses/pyoverkiz-MIT.txt.
 use super::Error;
 use crate::inventory::{CollectionKind, MAX_COLLECTION_BYTES, Region};
 use moli_runtime::BoxFuture;
@@ -188,7 +189,13 @@ impl Transport for Https {
                 request.endpoint.body_limit(),
             )
             .await
-            .map_err(|_| Error::Network)?;
+            .map_err(|error| {
+                if error.is::<moli_net::RequestNotDispatched>() {
+                    Error::NotDispatched
+                } else {
+                    Error::Network
+                }
+            })?;
             Ok(Response {
                 status: status.as_u16(),
                 retry_after: headers

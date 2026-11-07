@@ -226,6 +226,16 @@ impl Default for ConnectionState {
     }
 }
 impl ConnectionState {
+    fn clamp_retry(&mut self) {
+        self.retry_after_secs = self
+            .retry_after_secs
+            .map(|seconds| seconds.min(super::MAX_RETRY_SECS));
+        self.failure = self.failure.map(Error::public_failure);
+        if let Some(Error::RateLimited { retry_after_secs }) = &mut self.failure {
+            *retry_after_secs = (*retry_after_secs).min(super::MAX_RETRY_SECS);
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         if self.version != 1
             || self
@@ -279,13 +289,17 @@ pub fn decode_state(body: &[u8]) -> Result<ConnectionState, Error> {
     if body.len() > MAX_STATE_BYTES {
         return Err(Error::InvalidInput);
     }
-    let value: ConnectionState = serde_json::from_slice(body).map_err(|_| Error::InvalidInput)?;
+    let mut value: ConnectionState =
+        serde_json::from_slice(body).map_err(|_| Error::InvalidInput)?;
     value.validate()?;
+    value.clamp_retry();
     Ok(value)
 }
 pub fn encode_state(value: &ConnectionState) -> Result<Vec<u8>, Error> {
+    let mut value = value.clone();
+    value.clamp_retry();
     value.validate()?;
-    let bytes = serde_json::to_vec(value).map_err(|_| Error::InvalidInput)?;
+    let bytes = serde_json::to_vec(&value).map_err(|_| Error::InvalidInput)?;
     if bytes.len() > MAX_STATE_BYTES {
         return Err(Error::InvalidInput);
     }
@@ -298,6 +312,7 @@ pub enum Error {
     InvalidResponse,
     LoginRequired,
     Network,
+    NotDispatched,
     Deadline,
     Persistence,
     DiscoveryLimit,
@@ -305,13 +320,21 @@ pub enum Error {
     Forbidden,
     RateLimited { retry_after_secs: u64 },
 }
+impl Error {
+    pub(super) const fn public_failure(self) -> Self {
+        match self {
+            Self::NotDispatched => Self::Network,
+            other => other,
+        }
+    }
+}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidInput => moli_i18n::tr!("overkiz.cloud_input"),
             Self::InvalidResponse => moli_i18n::tr!("overkiz.cloud_response"),
             Self::LoginRequired => moli_i18n::tr!("overkiz.cloud_login"),
-            Self::Network => moli_i18n::tr!("overkiz.cloud_network"),
+            Self::Network | Self::NotDispatched => moli_i18n::tr!("overkiz.cloud_network"),
             Self::Deadline => moli_i18n::tr!("overkiz.cloud_deadline"),
             Self::Persistence => moli_i18n::tr!("overkiz.cloud_persistence"),
             Self::DiscoveryLimit => moli_i18n::tr!("overkiz.cloud_discovery"),

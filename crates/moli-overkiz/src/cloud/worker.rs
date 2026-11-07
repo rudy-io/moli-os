@@ -152,7 +152,7 @@ fn spawn<T: Transport + 'static>(
             state.request_id = request_id;
             state.last_attempt_ms = Some(attempted);
             if let Err(error) = result {
-                state.failure = Some(error);
+                state.failure = Some(error.public_failure());
             }
             if sink
                 .events
@@ -191,7 +191,7 @@ impl Gate {
             .last_attempt_ms
             .filter(|at| now_ms() >= *at)
             .map_or(0, |at| u64::try_from(now_ms() - at).unwrap_or(0) / 1000);
-        let remaining = seconds.saturating_sub(elapsed);
+        let remaining = seconds.min(super::MAX_RETRY_SECS).saturating_sub(elapsed);
         Instant::now()
             .checked_add(Duration::from_secs(remaining))
             .map_or(Self::Indefinite, Self::Until)
@@ -625,7 +625,7 @@ impl Controller {
         self.live = stored.is_ok() && observed && catalog.is_some();
         if let Err(error) = stored {
             state.phase = ConnectionPhase::PersistencePending;
-            state.failure = Some(error);
+            state.failure = Some(error.public_failure());
             state.last_observation_ms = self.state.last_observation_ms;
         }
         self.warning = state
