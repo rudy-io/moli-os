@@ -109,6 +109,19 @@ telles que les appareils les nomment).
   `lib/icons.js` : seules celles-ci sont dans le paquet).
 - Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style).
 - Règle de style : **pas de bordure gauche colorée** sur les cartes.
+- **Profondeur et mouvement** (apparence seulement, `maison.css` et `Maison.svelte`) : fond de
+  trois nuages de couleur, fixe (il se pose une fois puis ne bouge plus : un fond animé sous du
+  verre dépoli occuperait une tablette murale toute la journée) ; cartes en verre dépoli qui
+  arrivent l'une après l'autre ; à la souris, la carte survolée s'incline vers le pointeur (3D,
+  4° au plus, moins pour une grande carte), jamais au toucher, ni pendant un glissement, ni si
+  le système demande moins d'animations. Une carte au repos ne garde aucune transformation : une
+  fenêtre plein écran ouverte depuis elle couvre toujours l'écran. Rail en verre, page active en
+  pastille ambre ; pied du rail (thème, Système, Atelier) en trois icônes ; écran bas : noms
+  plus petits. La bulle Moli est un rond, son texte s'ouvre au survol.
+- `ui/Donut.svelte` : anneau de parts vu en 3D (pièce de monnaie légèrement inclinée), qui se
+  dessine à l'affichage ; survoler ou toucher une part donne son nom, sa valeur et son
+  pourcentage au centre. Énergie : « Qui consomme maintenant » et « Où ça part » l'ont au-dessus
+  de leurs barres, une couleur par ligne partagée par la barre et la part.
 - Une lampe injoignable n'est jamais affichée allumée (sa dernière valeur est une supposition).
 - Les ordres retenus par la garde ouvrent la feuille « C'est moi » (code PIN), qui sert aussi
   à valider, lancer ou supprimer un automatisme.
