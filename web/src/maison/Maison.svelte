@@ -476,9 +476,10 @@
 
   .content {
     padding: 28px 36px 120px 14px;
-    max-width: 1440px;
+    max-width: 1560px;
     width: 100%;
     min-width: 0;
+    margin-inline: auto;
   }
 
   /* Moli, always one tap away: a glowing orb; its words open on hover so
