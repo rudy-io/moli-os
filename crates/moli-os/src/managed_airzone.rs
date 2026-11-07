@@ -4,10 +4,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context as _, ensure};
@@ -24,11 +24,11 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{Config, DriverConfig};
 
 mod discovery;
+mod persistence;
 
 pub const FILE: &str = "airzone-gateways.json";
 const MAX_GATEWAYS: usize = 32;
 const MAX_BYTES: u64 = 65_536;
-static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -674,12 +674,26 @@ struct EffectiveGateway {
     source: &'static str,
     withdrawn: bool,
 }
+#[derive(Clone, Copy)]
+enum Revocation {
+    ReadOnly,
+    Withdrawn,
+}
 struct State {
+    temporary: HashMap<String, Revocation>,
     store: Store,
     raw: Option<Vec<u8>>,
+    unconfirmed: bool,
     editable: bool,
 }
 impl State {
+    fn no_pending_revocation(&self, instance: &str) -> Result<(), SetupError> {
+        if self.temporary.contains_key(instance) {
+            Err(SetupError::new("revocation_not_persisted"))
+        } else {
+            Ok(())
+        }
+    }
     fn editable(&self) -> Result<(), SetupError> {
         if self.editable {
             Ok(())
@@ -691,6 +705,7 @@ impl State {
 struct Inner {
     hub: Hub,
     path: PathBuf,
+    sync_directory: fn(&Path) -> std::io::Result<()>,
     reserved: HashSet<String>,
     configured: Vec<StaticGateway>,
     state: Arc<tokio::sync::Mutex<State>>,
@@ -767,9 +782,12 @@ impl Manager {
         Ok(Self(Arc::new(Inner {
             hub,
             path,
+            sync_directory: persistence::sync_directory,
             reserved,
             configured,
             state: Arc::new(tokio::sync::Mutex::new(State {
+                temporary: HashMap::new(),
+                unconfirmed: false,
                 store,
                 raw,
                 editable,
@@ -874,6 +892,15 @@ impl Manager {
             source: "moli",
             withdrawn: !saved.enabled,
         }));
+        for gateway in &mut gateways {
+            if let Some(revocation) = state.temporary.get(&gateway.instance) {
+                gateway.config.read_only = true;
+                if matches!(revocation, Revocation::Withdrawn) {
+                    gateway.enabled = false;
+                    gateway.withdrawn = true;
+                }
+            }
+        }
         gateways
     }
 
@@ -1052,6 +1079,9 @@ impl Manager {
 
     async fn persisted(&self, state: &State) -> Result<(), SetupError> {
         state.editable()?;
+        if state.unconfirmed {
+            return Err(SetupError::new("persistence_failed"));
+        }
         let path = self.0.path.clone();
         let expected = state.raw.clone();
         let unchanged =
@@ -1074,13 +1104,28 @@ impl Manager {
         let path = self.0.path.clone();
         let expected = state.raw.clone();
         let saved = next.clone();
-        let raw = tokio::task::spawn_blocking(move || save(&path, &saved, expected.as_deref()))
-            .await
-            .map_err(|_| SetupError::new("persistence_failed"))?
-            .map_err(|_| SetupError::new("persistence_failed"))?;
-        state.store = next;
-        state.raw = Some(raw);
-        Ok(())
+        let sync_directory = self.0.sync_directory;
+        let outcome = tokio::task::spawn_blocking(move || {
+            persistence::save(&path, &saved, expected.as_deref(), sync_directory)
+        })
+        .await
+        .map_err(|_| SetupError::new("persistence_failed"))?
+        .map_err(|_| SetupError::new("persistence_failed"))?;
+        match outcome {
+            persistence::SaveOutcome::Durable(raw) => {
+                state.store = next;
+                state.raw = Some(raw);
+                state.unconfirmed = false;
+                Ok(())
+            }
+            persistence::SaveOutcome::Unconfirmed(raw) => {
+                // The rename changed the conflict snapshot, but never confirms
+                // authority or clears a volatile revocation before durable sync.
+                state.raw = Some(raw);
+                state.unconfirmed = true;
+                Err(SetupError::new("persistence_failed"))
+            }
+        }
     }
 
     async fn commit(
@@ -1095,6 +1140,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.no_pending_revocation(&request.instance)?;
         state.editable()?;
         // A lost response may be retried after saving or after a process restart.
         if let Some(saved) = state
@@ -1192,6 +1238,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.no_pending_revocation(&request.instance)?;
         state.editable()?;
         let current = self.existing(&state, &request.instance)?;
         let replay = current.config.read_only
@@ -1277,17 +1324,17 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
-        state.editable()?;
         let current = self.existing(&state, &instance)?;
-        let result = GatewayWithdrawn {
-            instance: instance.clone(),
-            stored: true,
-            enabled: false,
-            read_only: current.config.read_only,
-        };
-        if current.withdrawn {
-            self.persisted(&state).await?;
-            return Ok(result);
+        if current.withdrawn
+            && !state.temporary.contains_key(&instance)
+            && self.persisted(&state).await.is_ok()
+        {
+            return Ok(GatewayWithdrawn {
+                instance,
+                stored: true,
+                enabled: false,
+                read_only: current.config.read_only,
+            });
         }
         let mut next = state.store.clone();
         if let Some(saved) = next
@@ -1296,39 +1343,55 @@ impl Manager {
             .find(|saved| saved.instance == instance)
         {
             saved.enabled = false;
+            saved.read_only |= current.config.read_only;
         } else if let Some(saved) = next
             .overrides
             .iter_mut()
             .find(|saved| saved.instance == instance)
         {
             saved.enabled = false;
+            if current.config.read_only {
+                saved.read_only = Some(true);
+            }
         } else {
             next.overrides.push(GatewayOverride {
                 instance: instance.clone(),
                 enabled: false,
                 mac: self.known_mac(&current),
                 connection: None,
-                read_only: None,
+                read_only: current.config.read_only.then_some(true),
             });
         }
-        let saved = self.persist(&mut state, next).await;
-        if saved.is_ok() {
-            self.stop(&instance).await;
+        // Revocation cannot depend on the filesystem. Stop/drain before trying
+        // persistence, and never turn an unsaved withdrawal into a restart.
+        self.stop(&instance).await;
+        let stored = self.persist(&mut state, next).await.is_ok();
+        if stored {
+            state.temporary.remove(&instance);
+        } else {
+            state
+                .temporary
+                .insert(instance.clone(), Revocation::Withdrawn);
         }
+        let read_only = current.config.read_only || !stored;
         self.0.hub.record_driver_configured(
             InstanceId::from(instance.as_str()),
             "airzone",
             false,
-            current.config.read_only,
+            read_only,
             Some(actor),
-            if saved.is_ok() {
+            if stored {
                 Outcome::Ok
             } else {
-                Outcome::Err("persistence_failed".into())
+                Outcome::Err(moli_i18n::tr!("airzone_gateways.temporary_warning"))
             },
         );
-        saved?;
-        Ok(result)
+        Ok(GatewayWithdrawn {
+            instance,
+            stored,
+            enabled: false,
+            read_only,
+        })
     }
 
     fn mode_store(
@@ -1344,12 +1407,18 @@ impl Manager {
             .find(|saved| saved.instance == current.instance)
         {
             saved.read_only = read_only;
+            if current.withdrawn {
+                saved.enabled = false;
+            }
         } else if let Some(saved) = next
             .overrides
             .iter_mut()
             .find(|saved| saved.instance == current.instance)
         {
             saved.read_only = Some(read_only);
+            if current.withdrawn {
+                saved.enabled = false;
+            }
             if mac.is_some() {
                 saved.mac = mac;
             }
@@ -1378,20 +1447,27 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
-        state.editable()?;
         let current = self.existing(&state, &instance)?;
         if request.expected_read_only != current.config.read_only {
             return Err(SetupError::new("mode_conflict"));
         }
-        if !request.read_only && current.policy.reason().is_some() {
-            return Err(SetupError::new("configuration_locked"));
+        if !request.read_only {
+            state.no_pending_revocation(&instance)?;
+            state.editable()?;
+            if current.policy.reason().is_some() {
+                return Err(SetupError::new("configuration_locked"));
+            }
+            if !current.enabled {
+                return Err(SetupError::new("gateway_disabled"));
+            }
         }
-        if !request.read_only && !current.enabled {
-            return Err(SetupError::new("gateway_disabled"));
-        }
-        if request.read_only == current.config.read_only {
-            self.persisted(&state).await?;
-            return Ok(self.mode_result(&current, request.read_only));
+        if request.read_only == current.config.read_only && !state.temporary.contains_key(&instance)
+        {
+            match self.persisted(&state).await {
+                Ok(()) => return Ok(self.mode_result(&current, request.read_only, true)),
+                Err(error) if !request.read_only => return Err(error),
+                Err(_) => {} // Still enforce a revocation whose persistence cannot be confirmed.
+            }
         }
         let mac = self.known_mac(&current);
         if !request.read_only {
@@ -1413,12 +1489,32 @@ impl Manager {
         config.mac = mac.clone();
         let driver =
             moli_airzone::Airzone::new(config).map_err(|_| SetupError::new("probe_failed"))?;
+        if request.read_only {
+            self.stop(&instance).await;
+        }
         let next = Self::mode_store(&state, &current, request.read_only, mac);
         let saved = self.persist(&mut state, next).await;
-        if saved.is_ok() {
-            // Acknowledgement waits for the former supervisor and queued
-            // commands to finish; unregistering also revokes offline metadata.
-            self.stop(&instance).await;
+        let stored = saved.is_ok();
+        if !stored && !request.read_only && state.unconfirmed {
+            // A failed grant may already be on disk. Its previous read-only
+            // supervisor stays in place; require a durable revocation before
+            // accepting another grant and expose the restart uncertainty.
+            state
+                .temporary
+                .insert(instance.clone(), Revocation::ReadOnly);
+        }
+        if stored || request.read_only {
+            if stored {
+                state.temporary.remove(&instance);
+            } else {
+                state
+                    .temporary
+                    .entry(instance.clone())
+                    .or_insert(Revocation::ReadOnly);
+            }
+            if !request.read_only {
+                self.stop(&instance).await;
+            }
             if current.enabled {
                 self.start(&instance, driver);
             }
@@ -1427,22 +1523,31 @@ impl Manager {
             InstanceId::from(instance.as_str()),
             "airzone",
             current.enabled,
-            request.read_only,
+            request.read_only || !stored,
             Some(actor),
-            if saved.is_ok() {
+            if stored {
                 Outcome::Ok
+            } else if request.read_only {
+                Outcome::Err(moli_i18n::tr!("airzone_gateways.temporary_warning"))
             } else {
                 Outcome::Err("persistence_failed".into())
             },
         );
-        saved?;
-        Ok(self.mode_result(&current, request.read_only))
+        if !request.read_only {
+            saved?;
+        }
+        Ok(self.mode_result(&current, request.read_only, stored))
     }
 
-    fn mode_result(&self, gateway: &EffectiveGateway, read_only: bool) -> GatewayModeChanged {
+    fn mode_result(
+        &self,
+        gateway: &EffectiveGateway,
+        read_only: bool,
+        stored: bool,
+    ) -> GatewayModeChanged {
         GatewayModeChanged {
             instance: gateway.instance.clone(),
-            stored: true,
+            stored,
             read_only,
             running: self
                 .0
@@ -1538,6 +1643,7 @@ impl AirzoneSetup for Manager {
                 .map(|gateway| {
                     let mac = self.known_mac(&gateway);
                     GatewayStatus {
+                        temporary_revocation: state.temporary.contains_key(&gateway.instance),
                         configuration_lock: gateway.policy.reason(),
                         running: drivers
                             .get(&gateway.instance)
@@ -1678,49 +1784,6 @@ impl AirzoneSetup for Manager {
                 .await
         })
     }
-}
-
-fn save(path: &Path, store: &Store, expected: Option<&[u8]>) -> std::io::Result<Vec<u8>> {
-    if bytes(path)?.as_deref() != expected {
-        return Err(std::io::Error::other(
-            "Airzone registry changed outside this operation",
-        ));
-    }
-    let raw = serde_json::to_vec_pretty(store).map_err(std::io::Error::other)?;
-    if raw.len() as u64 > MAX_BYTES {
-        return Err(std::io::Error::other("Airzone registry exceeds its bound"));
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("missing registry directory"))?;
-    let aside = parent.join(format!(
-        ".airzone-gateways-{}-{}.new",
-        std::process::id(),
-        NEXT_FILE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&aside)?;
-        file.write_all(&raw)?;
-        file.sync_all()?;
-        std::fs::rename(&aside, path)?;
-        // File contents are synced before the atomic replacement. A best-effort
-        // directory sync also retains the rename across a power failure.
-        if let Ok(directory) = std::fs::File::open(parent) {
-            let _ = directory.sync_all();
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&aside);
-    }
-    result.map(|()| raw)
 }
 
 #[cfg(test)]

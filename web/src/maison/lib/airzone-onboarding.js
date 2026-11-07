@@ -1,7 +1,7 @@
 const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
-const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled','configuration_locked']);
+const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled','configuration_locked','revocation_not_persisted']);
 
 export function nextGatewayInstance(drivers = []) {
   const used = new Set(drivers.map((driver) => driver.instance));
@@ -119,7 +119,7 @@ export function discoverGateways({signal} = {}, fetcher = globalThis.fetch) {
 export async function withdrawGateway(instance, fetcher = globalThis.fetch) {
   if (!existingInstance(instance)) return {ok:false,error:'invalid_instance'};
   if (instance === '.' || instance === '..') return {ok:false,error:'unaddressable_instance'};
-  return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/withdraw`,{},(data) => data?.instance === instance && data.stored === true && data.enabled === false && typeof data.read_only === 'boolean',fetcher);
+  return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/withdraw`,{},(data) => data?.instance === instance && typeof data.stored === 'boolean' && data.enabled === false && typeof data.read_only === 'boolean' && (data.stored || data.read_only),fetcher);
 }
 
 /** A separate, PIN-approved permission change; connection editing stays read-only. */
@@ -129,7 +129,7 @@ export async function changeGatewayMode(instance, readOnly, expectedReadOnly, fe
   if (typeof readOnly !== 'boolean' || typeof expectedReadOnly !== 'boolean') return {ok:false,error:'invalid_mode'};
   return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/mode`,
     {read_only:readOnly,expected_read_only:expectedReadOnly,...(!readOnly && typeof pin === 'string' ? {pin} : {})},
-    (data) => data?.instance === instance && data.stored === true && data.read_only === readOnly && typeof data.running === 'boolean',fetcher);
+    (data) => data?.instance === instance && typeof data.stored === 'boolean' && (data.stored || readOnly) && data.read_only === readOnly && typeof data.running === 'boolean',fetcher);
 }
 
 function gatewayIsValid(item) {
@@ -139,6 +139,8 @@ function gatewayIsValid(item) {
     && (item.tls_fingerprint === null || (typeof item.tls_fingerprint === 'string' && /^[0-9a-f]{64}$/.test(item.tls_fingerprint)))
     && (item.mac === null || (typeof item.mac === 'string' && MAC.test(item.mac)))
     && typeof item.enabled === 'boolean' && typeof item.read_only === 'boolean' && typeof item.running === 'boolean'
+    && (item.temporary_revocation == null || typeof item.temporary_revocation === 'boolean')
+    && (item.temporary_revocation !== true || item.read_only)
     && (item.configuration_lock == null || ['disabled','read_only'].includes(item.configuration_lock))
     && (item.enabled || !item.running) && ['configuration','moli'].includes(item.source);
 }

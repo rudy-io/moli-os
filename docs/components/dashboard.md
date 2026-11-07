@@ -201,3 +201,9 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
   n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
+
+Si le registre Airzone ne peut pas être écrit, revenir en lecture seule ou retirer
+une passerelle bloque tout de même ses commandes. La carte indique que ce changement
+n’est pas enregistré et peut être perdu au redémarrage ; elle propose de réessayer
+l’enregistrement. Elle ne propose ni pilotage ni réactivation tant que cette
+révocation reste temporaire.

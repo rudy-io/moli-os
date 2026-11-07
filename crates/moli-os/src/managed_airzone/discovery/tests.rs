@@ -7,6 +7,7 @@ fn host(value: &str) -> Ipv4Addr {
 
 fn gateway(ip: &str, port: u16, pin: Option<&str>) -> GatewayStatus {
     GatewayStatus {
+        temporary_revocation: false,
         configuration_lock: None,
         instance: "airzone-demo".into(),
         host: ip.into(),

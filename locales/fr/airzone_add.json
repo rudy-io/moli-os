@@ -84,5 +84,6 @@
   "airzone_add.error.invalid_pin": "Le code Moli est incorrect.",
   "airzone_add.error.pin_rate_limited": "Trop de tentatives. Patientez avant de réessayer.",
   "airzone_add.error.pin_disabled": "Configurez un code Moli avant d’autoriser le pilotage.",
-  "airzone_add.error.configuration_locked": "Le fichier de configuration interdit cette autorisation."
+  "airzone_add.error.configuration_locked": "Le fichier de configuration interdit cette autorisation.",
+  "airzone_add.error.revocation_not_persisted": "La révocation n’a pas été enregistrée. Réessayez son enregistrement avant de modifier cette passerelle."
 }

@@ -83,7 +83,7 @@ test('lifecycle lists stored gateways independently of runtime and rejects malfo
   assert.deepEqual(result,{ok:true,data:{gateways:[gateway]}});
   assert.equal(sent.options.method,'GET');assert.equal(sent.options.body,undefined);
   assert.equal(sent.options.headers['x-moli-origin'],'ui');
-  for(const changed of [{mac:123456789012},{enabled:'false'},{source:'unknown'},{read_only:null},{running:true},{tls_fingerprint:'bad'}]) {
+  for(const changed of [{mac:123456789012},{enabled:'false'},{source:'unknown'},{read_only:null},{running:true},{tls_fingerprint:'bad'},{configuration_lock:'unknown'},{temporary_revocation:'true'},{temporary_revocation:true}]) {
     assert.equal((await onboarding.listGateways(async()=>response({gateways:[{...gateway,...changed}]}))).error,'response');
   }
   assert.equal((await onboarding.listGateways(async()=>response({gateways:[gateway,gateway]}))).error,'response');

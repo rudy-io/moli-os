@@ -144,7 +144,7 @@ test('both modes require confirmation while only granting control asks for a fre
   assert.equal(component.inspect().gateways[0].read_only,false);
   assert.equal(component.inspect().gateways[1].read_only,true);
   assert.equal(component.inspect().confirmation,null);
-  assert.deepEqual(component.inspect().modeResult,{instance:gateway.instance,read_only:false});
+  assert.deepEqual(component.inspect().modeResult,{instance:gateway.instance,read_only:false,stored:true});
   component.select(gateway.instance,'mode');await component.confirmModeChange();
   assert.equal(calls.length,3);assert.equal(client.home.held,null);
   assert.equal(component.inspect().gateways[0].read_only,true);
@@ -249,4 +249,33 @@ test('static restrictions cannot open a control grant or resume a disabled conne
     if(configuration_lock==='disabled') {component.select(gateway.instance,'edit');assert.equal(component.inspect().editing,null);}
     dispose();
   }
+});
+
+test('volatile revocation remains visible after refresh and retries saving without a control grant',async(t)=>{
+  let temporary=false;
+  const {component,calls}=fixture(t,(url,options)=>{
+    if(options.method==='GET') return response({gateways:[{...gateway,read_only:temporary,temporary_revocation:temporary}]});
+    const body=JSON.parse(options.body);assert.equal(body.read_only,true);assert.equal(body.pin,undefined);
+    temporary=true;return response({instance:gateway.instance,stored:false,read_only:true,running:true});
+  });
+  await turn();component.select(gateway.instance,'mode');await component.confirmModeChange();
+  assert.equal(component.inspect().modeResult.stored,false);
+  assert.equal(component.inspect().gateways[0].temporary_revocation,true);
+  await component.refresh();assert.equal(component.inspect().gateways[0].temporary_revocation,true);
+  component.select(gateway.instance,'mode');assert.equal(component.inspect().confirmation,null);
+  component.select(gateway.instance,'retry_read_only');await component.confirmModeChange();
+  assert.equal(calls.filter(call=>call.url.endsWith('/mode')).length,2);
+  assert.equal(client.home.held,null);
+});
+
+test('a volatile withdrawal never offers replacement or resume and permits an explicit retry',async(t)=>{
+  const {component,calls}=fixture(t,(url,options)=>options.method==='GET'
+    ? response({gateways:[gateway]})
+    : response({instance:gateway.instance,stored:false,read_only:true,enabled:false}));
+  await turn();component.select(gateway.instance,'replace');await component.confirm();
+  assert.equal(component.inspect().gateways[0].temporary_revocation,true);
+  assert.equal(component.inspect().replacement,null);
+  component.select(gateway.instance,'edit');assert.equal(component.inspect().editing,null);
+  component.select(gateway.instance,'withdraw');await component.confirm();
+  assert.equal(calls.filter(call=>call.url.endsWith('/withdraw')).length,2);
 });

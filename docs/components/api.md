@@ -350,11 +350,11 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | POST | `/api/integrations/airzone/discover` | **humain**, origine `ui`, invités refusés | `{}`, champs inconnus refusés, 1 Kio maximum | `{gateways:[{host,port,tls_fingerprint,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true,existing_instance,existing_enabled}],scanned,target_count,incomplete}` | `403` session ; `422` saisie ; `429` recherche en cours ou trop récente ; `503` indisponible |
 | POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
 | POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only,already_installed}` ; nouvel ajout en lecture seule, reprise idempotente avec le mode courant ; sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
-| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running,configuration_lock}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
+| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running,configuration_lock,temporary_revocation}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
 | POST | `/api/integrations/airzone/{instance}/probe` | **humain**, origine `ui`, invités refusés | saisie de connexion avec la même `instance` | même aperçu ; exige l’identité matérielle existante | `404` inconnue ; `409` identité modifiée ; `503` identité antérieure inconnue |
 | PUT | `/api/integrations/airzone/{instance}` | **humain**, origine `ui`, invités refusés | saisie de connexion + `expected_mac` issu de la vérification | même résultat que l’ajout ; met à jour ou réactive en lecture seule | mêmes refus, sauvegarde avant activation |
-| POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:true,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `500` sauvegarde |
-| POST | `/api/integrations/airzone/{instance}/mode` | **humain**, origine `ui`, invités refusés | `{read_only:bool,expected_read_only:bool,pin?:string}`, champs inconnus refusés, 1 Kio maximum | `{instance,stored:true,read_only,running}` ; ancien pilote arrêté avant réponse | `403` session ; `409` mode modifié ailleurs, passerelle en pause ou identité modifiée ; `422` saisie ; `429` occupé ; `500` sauvegarde ; `502` vérification ; `503` indisponible ou identité inconnue |
+| POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:bool,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `429` occupé ; `503` indisponible ; `stored:false` si le retrait ne peut pas être enregistré |
+| POST | `/api/integrations/airzone/{instance}/mode` | **humain**, origine `ui`, invités refusés ; propriétaire + code frais pour activer | `{read_only:bool,expected_read_only:bool,pin?:string}`, champs inconnus refusés, 1 Kio maximum | `{instance,stored:bool,read_only,running}` ; ancien pilote arrêté avant réponse | `401` code incorrect ; `403` session, propriétaire ou code absent ; `409` mode modifié ailleurs, passerelle en pause ou identité modifiée ; `422` saisie ; `429` occupé ; `500` sauvegarde ; `502` vérification ; `503` indisponible ou identité inconnue |
 
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
@@ -385,11 +385,17 @@ partagent le verrouillage de connexion ; le code n’est ni conservé ni journal
 La révocation exige seulement la session humaine et l’origine `ui`.
 L’autorisation vérifie aussi l'identité connue par une lecture avant de persister le choix ; elle est refusée
 pour une passerelle en pause. La révocation reste possible hors ligne ou en pause,
-sans vérification réseau, et conserve l'état activé/désactivé. Chaque transition
-persiste le choix, attend l'arrêt de l'ancien pilote et la révocation de ses
-capacités, puis relance le pilote si nécessaire. Elle est journalisée comme
-`driver_configured` et n'envoie aucune commande physique. Une sauvegarde impossible
-renvoie une erreur sans annoncer un mode qui n'a pas été appliqué.
+sans vérification réseau, et conserve l'état activé/désactivé. L’autorisation de pilotage
+persiste le choix avant de remplacer le pilote. La révocation et le retrait arrêtent
+l’ancien superviseur et refusent ses commandes en attente avant la réponse, même
+si l’écriture échoue. Le pilote est alors relancé uniquement en lecture seule si
+la connexion reste active. La réponse `stored:false` et le champ de liste
+`temporary_revocation:true` signalent une révocation effective en mémoire, dont le
+maintien après redémarrage n’est pas garanti. Les nouvelles autorisations et les
+éditions de cette passerelle sont bloquées jusqu’à l’enregistrement explicite de
+la révocation. Un retrait temporaire reste prioritaire sur une révocation simple.
+Ces opérations sont journalisées comme `driver_configured` et n’envoient aucune
+commande physique ; le registre illisible ou modifié n’est jamais écrasé.
 
 Le mode autorisé est conservé après redémarrage. Les anciennes entrées v1/v2
 marquées `read_only=false` restent invalides : la migration ne les transforme

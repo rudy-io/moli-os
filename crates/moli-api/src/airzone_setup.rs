@@ -54,7 +54,10 @@ pub struct GatewayInstalled {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[allow(clippy::struct_excessive_bools)] // Independent connection, command and persistence facts.
 pub struct GatewayStatus {
+    /// Revocation is effective in memory, but not guaranteed after a restart.
+    pub temporary_revocation: bool,
     /// A restriction from the original static configuration, never a registry grant.
     pub configuration_lock: Option<&'static str>,
     pub instance: String,
@@ -166,7 +169,8 @@ impl IntoResponse for SetupError {
             | "identity_changed"
             | "gateway_disabled"
             | "mode_conflict"
-            | "configuration_locked" => StatusCode::CONFLICT,
+            | "configuration_locked"
+            | "revocation_not_persisted" => StatusCode::CONFLICT,
             "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
             "probe_failed" => StatusCode::BAD_GATEWAY,

@@ -69,5 +69,7 @@
   "airzone_gateways.mode_pin_label": "{action} · {instance}",
   "airzone_gateways.existing_control_kept": "This gateway was already saved. Its control permission is preserved.",
   "airzone_gateways.configuration_disabled": "This connection is disabled in the Moli configuration file. Re-enabling it must be authorized in that file.",
-  "airzone_gateways.configuration_read_only": "Read-only mode is enforced by the Moli configuration file. Control cannot be authorized here."
+  "airzone_gateways.configuration_read_only": "Read-only mode is enforced by the Moli configuration file. Control cannot be authorized here.",
+  "airzone_gateways.temporary_warning": "Commands are blocked, but this change has not been saved. It may be lost when Moli restarts.",
+  "airzone_gateways.retry_revocation": "Retry saving"
 }

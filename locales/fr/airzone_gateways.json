@@ -69,5 +69,7 @@
   "airzone_gateways.mode_pin_label": "{action} · {instance}",
   "airzone_gateways.existing_control_kept": "Cette passerelle était déjà enregistrée. Son autorisation de pilotage est conservée.",
   "airzone_gateways.configuration_disabled": "Cette connexion est désactivée dans le fichier de configuration Moli. Sa réactivation doit être autorisée dans ce fichier.",
-  "airzone_gateways.configuration_read_only": "La lecture seule est imposée par le fichier de configuration Moli. Le pilotage ne peut pas être autorisé ici."
+  "airzone_gateways.configuration_read_only": "La lecture seule est imposée par le fichier de configuration Moli. Le pilotage ne peut pas être autorisé ici.",
+  "airzone_gateways.temporary_warning": "Les commandes sont bloquées, mais ce changement n’a pas été enregistré. Il peut être perdu au redémarrage de Moli.",
+  "airzone_gateways.retry_revocation": "Réessayer l’enregistrement"
 }

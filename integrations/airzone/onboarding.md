@@ -32,11 +32,12 @@
    EN: HTTPS uses an explicit certificate fingerprint; a changed certificate
    requires deliberate verification and configuration, never an automatic bypass.
 7. FR : Conserver la lecture seule pendant les essais. Pour autoriser ensuite le
-   pilotage, utiliser Installation → Autoriser le pilotage et confirmer avec le
-   code Moli. Le bouton Revenir en lecture seule bloque les commandes suivantes,
+   pilotage, un propriétaire utilise Installation → Autoriser le pilotage et
+   confirme avec son code Moli, vérifié à nouveau par le serveur. Le bouton Revenir en lecture seule bloque les commandes suivantes,
    même hors ligne, sans arrêter le chauffage en cours.
-   EN: Keep setup trials read-only. A person can explicitly authorize gateway
-   control in Installation with their Moli PIN, then revoke it from the same card.
+   EN: Keep setup trials read-only. An owner can explicitly authorize gateway
+   control in Installation with a fresh server-verified Moli PIN. Returning to
+   read-only from the same card uses the existing human session.
    For separately authorized physical qualification, review every shared scope,
    use a neutral zone with a human present, then restore its original state.
    Never test protected rooms.
