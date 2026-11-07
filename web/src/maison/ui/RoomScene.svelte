@@ -267,7 +267,7 @@
             onpointercancel={up}
             onkeydown={key}
           >
-            <div class="fill" style:height="{shown}%"></div>
+            <div class="fill" style:transform="scaleY({shown / 100})"></div>
           </div>
           <span class="pct num">{Math.round(shown)} %</span>
         </div>
@@ -430,7 +430,7 @@
     align-items: center;
     gap: 6px;
     transform: translate(-50%, -32px);
-    animation: pop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+    animation: pop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   @keyframes pop {
@@ -544,9 +544,11 @@
     position: absolute;
     left: 0;
     right: 0;
+    top: 0;
     bottom: 0;
     background: linear-gradient(to top, #f08a3a, #ffcf7a);
-    transition: height 0.12s ease;
+    transform-origin: bottom;
+    transition: transform 0.12s ease;
   }
 
   .pct {
