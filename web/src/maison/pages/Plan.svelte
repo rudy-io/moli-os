@@ -51,6 +51,8 @@
   const inFixture = $derived(new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? [])));
   const pinnable = (d) => !isGroup(d) && !inFixture.has(d.id);
   const keep = (d) => pinnable(d) && (editing || keeps(filter, d));
+  /** A quiet sensor hides on the drawing (see .all-sensors): it takes no room. */
+  const solid = (d) => editing || filter.includes('capteurs') || deviceKind(d) !== 'sensor' || alarming(d) || opening(d);
   /** 2D or 3D, this viewer's choice. */
   let view = $state((() => {
     try {
@@ -539,7 +541,7 @@
             <div class="storey" style="width:{f.size[0] * scale}px">
               <button class="storey-name" onclick={() => pickFloor(f.id)}>{f.name}<Icon name="arrow-top-right" size={14} /></button>
               <div style="margin-top:{(f.offset?.[1] ?? 0) * scale}px; height:{f.size[1] * scale}px">
-                <Drawing floor={f} {skin} {keep} fill ontap={() => (opened = null)} token={spotBody} />
+                <Drawing floor={f} {skin} {keep} {solid} fill ontap={() => (opened = null)} token={spotBody} />
               </div>
             </div>
           {/each}
@@ -548,7 +550,7 @@
         <House3D plan={shown} floorId={floor.id} {skin} {keep} ontap={tap3d} />
       {:else if floor.size}
         <div class="drawn" class:all-sensors={editing || filter.includes('capteurs')} onpointermove={drag} onpointerup={drop} onpointercancel={drop} role="presentation">
-          <Drawing bind:this={drawing} {floor} {skin} {editing} {picking} {keep} bind:selected onplace={placeAt} ontap={() => (opened = null)} token={spotBody} />
+          <Drawing bind:this={drawing} {floor} {skin} {editing} {picking} {keep} {solid} bind:selected onplace={placeAt} ontap={() => (opened = null)} token={spotBody} />
         </div>
       {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
