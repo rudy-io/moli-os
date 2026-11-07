@@ -11,6 +11,8 @@
   "commun.volet.voir_connexion": "View connection",
   "commun.volet.actions_observees": "Reported commands: {actions}",
   "commun.volet.impulsion": "Impulse",
+  "commun.impulsion.relais": "Relay {n}",
+  "commun.impulsion.bouton": "Impulse · {relais}",
   "commun.clim.mode.auxiliaire": "Auxiliary heat",
   "commun.clim.ventilation": "Fan speed",
   "commun.volet.position": "Position",
