@@ -3,6 +3,8 @@ mod diagnostic;
 pub use diagnostic::{DiagnosticRequest, inspect};
 mod fields;
 mod model;
+mod onboarding;
+pub use onboarding::{GatewayProbe, probe_read_only};
 mod resources;
 mod write_policy;
 #[cfg(test)]

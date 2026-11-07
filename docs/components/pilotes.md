@@ -136,6 +136,9 @@ historiques. `write = "extended"` active explicitement les nouvelles commandes :
 modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
 qualité de l’air et libellé d’intégration. Un essai d’observation configure
 explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Les passerelles ajoutées depuis Moli démarrent en lecture seule avec le périmètre
+`legacy` ; l'autorisation par code Moli ne modifie pas ce périmètre. Les modifications
+de connexion et réactivations rétablissent la lecture seule.
 Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
 transport. Les commandes restent soumises aux gardes, aux membres affectés et à
 une nouvelle lecture des capacités. Aucun PUT n'est envoyé au

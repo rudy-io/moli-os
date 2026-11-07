@@ -37,6 +37,25 @@ La fiche `#/airzone/<identifiant encodé>` distingue température mesurée, cons
 
 Le modèle pur `maison/lib/airzone.js` conserve les périmètres et les champs inconnus. Les composants `AirzoneZoneCard` et `AirzoneReadings` sont partagés entre aperçu, fiche et diagnostic. Les tests métier et SSR utilisent exclusivement des appareils fictifs ; les captures publiées sont celles d’une maison de démonstration.
 
+### Gestion et alertes Airzone
+
+`#/airzone/devices` présente aussi les appareils masqués. Le nom et la pièce modifient seulement les étiquettes Moli. Masquer/restaurer réutilise le layout existant via une API générique authentifiée ; aucun appareil physique, historique ou automatisme n’est supprimé. Un lien `#/airzone/devices/<identifiant encodé>` ouvre son éditeur. Le flux `layout_changed`, puis les snapshots de reconnexion, invalident le layout des autres tableaux de bord.
+
+`#/airzone/alerts` conserve la liste des défauts actuellement signalés, y compris les appareils masqués. Les défauts système répétés et les copies dans les commandes communes sont regroupés ; une panne de pilote ou du flux ne devient pas une cascade de défauts matériels. `errors` absent/invalide reste inconnu, et `problem=false` ne suffit pas à affirmer que tout fonctionne. Aucun seuil constructeur n’est inventé : batterie et couverture radio sont des pourcentages lorsqu’ils sont transmis ; « batterie faible » provient de l’avertissement explicite Airzone. Les timestamps SSE reflètent les changements de valeur, pas chaque relève : ils ne servent pas de détecteur de péremption. Cette vue n’émet aucune notification externe.
+
+`#/airzone/add`, accessible aussi depuis Système avant la première intégration, propose un assistant **Rechercher → Choisir → Ajouter**. Le premier écran ne demande aucune adresse IP. Une recherche ponctuelle, déclenchée explicitement, interroge les réseaux privés que Moli peut identifier ; elle n’ajoute jamais de passerelle. Les résultats indiquent les connexions déjà enregistrées ou en pause, et conservent l’adresse et la MAC dans un volet d’identification. Une recherche vide ou incomplète propose toujours la saisie manuelle : elle ne prouve pas l’absence de matériel, notamment lorsque Moli n’a pas de visibilité sur le réseau domestique.
+
+Le choix d’un résultat vérifie à nouveau son identité avant d’afficher une confirmation distincte. L’enregistrement recontrôle encore cette identité côté serveur et force la lecture seule. Le formulaire manuel partage ces mêmes actions ; le port, l’identifiant et l’empreinte HTTPS restent dans les réglages avancés. Les réponses tardives après arrêt, retour, passage au manuel ou sortie de page sont ignorées. La recherche est annulable ; aucune reconnexion SSE ni validation PIN annulée ne la relance automatiquement. Une réponse d’enregistrement perdue conserve l’identité vérifiée pour une reprise explicite et idempotente.
+
+Le code Moli existant protège l’accès à la recherche et aux modifications de connexion. La demande de code décrit une recherche réseau lorsque c’est l’action demandée. Le succès confirme l’enregistrement, sans annoncer que toutes les zones ont déjà répondu. L’édition et la réactivation gardent l’identité existante. Les autres fenêtres reconnaissent le nouveau pilote grâce à `driver_registered`.
+
+La page Installation affiche le mode réel de chaque passerelle et propose **Autoriser le pilotage** ou **Revenir en lecture seule**. Chaque changement demande une confirmation explicite. L’autorisation de pilotage exige un propriétaire et un code Moli vérifié à nouveau par le serveur ; la révocation utilise la session humaine existante. Les restrictions explicites du fichier TOML sont indiquées sur la carte et ne peuvent pas être levées depuis cette interface. L'autorisation couvre les zones et commandes compatibles de cette passerelle ; les autres intégrations restent inchangées. Le retour en lecture seule bloque les futures commandes Moli sans changer le chauffage en cours. Une passerelle en pause doit être réactivée avant d'autoriser le pilotage ; sa révocation reste possible hors ligne. Le serveur arbitre les changements concurrents : une liste devenue obsolète est rechargée avant une nouvelle confirmation.
+
+La vue Airzone reste une vue de consultation. Le pilotage autorisé est accessible dans les cartes de commande existantes de Pièces et dans Atelier ; aucun réglage physique n'est envoyé par le bouton d'autorisation. Les ajouts, modifications de connexion et réactivations démarrent toujours en lecture seule. Une passerelle ajoutée depuis Moli conserve le périmètre historique (`on`, consigne, mode et ventilation) après autorisation. Les commandes étendues exigent une instance explicitement configurée avec `write = "extended"` ; le bouton ne change pas cette option.
+
+La page Installation présente d’abord les passerelles et leurs actions courantes. Les adresses, les identifiants, le retrait réversible et le remplacement sont repliés dans les réglages ; les diagnostics détaillés sont dans « Informations techniques ». L’assistant conserve l’aide sur l’appairage physique et la restauration des cartes sous « Besoin d’aide ? ». La découverte des zones déjà appairées reste automatique ; l’API locale n’offre ni appairage ni désappairage physique.
+
+
 Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
 Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
 
@@ -182,3 +201,9 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
   n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
+
+Si le registre Airzone ne peut pas être écrit, revenir en lecture seule ou retirer
+une passerelle bloque tout de même ses commandes. La carte indique que ce changement
+n’est pas enregistré et peut être perdu au redémarrage ; elle propose de réessayer
+l’enregistrement. Elle ne propose ni pilotage ni réactivation tant que cette
+révocation reste temporaire.
