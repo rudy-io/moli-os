@@ -516,5 +516,12 @@
   "systeme.somfy.refresh_provider": "Actualiser depuis TaHoma",
   "systeme.somfy.read_only_explanation": "La consultation est active. Aucun scénario ne sera lancé depuis cette vue en lecture seule.",
   "systeme.somfy.catalog_title": "Scénarios et programmations",
-  "systeme.somfy.equipment_missing": "Aucun volet relié à cette instance. Le catalogue cloud ne connecte pas les équipements."
+  "systeme.somfy.equipment_missing": "Aucun volet relié à cette instance. Le catalogue cloud ne connecte pas les équipements.",
+  "systeme.somfy.disconnect": "Déconnecter ce compte de Moli",
+  "systeme.somfy.disconnect_hint": "La déconnexion efface la session et les données cloud enregistrées dans Moli. Les équipements reliés localement à TaHoma restent disponibles.",
+  "systeme.somfy.confirm_disconnect": "Confirmer la déconnexion",
+  "systeme.somfy.disconnected": "Compte déconnecté de Moli.",
+  "systeme.somfy.not_configured": "Le complément cloud a été retiré de la configuration. Vous pouvez encore déconnecter ce compte pour effacer ses données.",
+  "systeme.somfy.retry_disconnect": "Réessayer la suppression",
+  "systeme.somfy.error.cache_unavailable": "Connexion retirée. Les données cloud restantes n’ont pas pu être effacées. Réessayez après avoir résolu l’erreur de stockage."
 }

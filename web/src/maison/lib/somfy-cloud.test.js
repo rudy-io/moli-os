@@ -29,6 +29,7 @@ test('owner denial never dispatches credentials and exposes only policy hint', a
   assert.equal(view.auth, 'owner_account');
   const input = { kind: 'login', username: 'fixture@example.com', password: 'SYNTHETIC_PASSWORD' };
   await observer.send(input);
+  await observer.disconnect();
   assert.equal(requests.length, 1);
   assert.equal(input.password, '');
   observer.stop();
@@ -211,5 +212,150 @@ test('opening after a failed status refresh does not use the previous selection 
   await observer.open();
   assert.equal(calls.length, 2);
   assert.ok(calls.every(url => !url.endsWith('/catalog')));
+  observer.stop();
+});
+
+test('disconnect purges only the selected orphan account and forgets private browser data after success', async () => {
+  let view, removed = false;
+  const calls = [];
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    calls.push({ url, method: options.method ?? 'GET', body: options.body });
+    if (options.method === 'DELETE') { removed = true; return Response.json({ disconnected: true }); }
+    if (url.endsWith('/catalog')) return Response.json({ revision: 'r', catalog: {} });
+    if (url.includes('/definitions/')) return new Response('{"private":true}');
+    return Response.json({ instances: removed ? [] : [{ instance: 'former gateway', configured: false, state: {} }] });
+  });
+  await observer.load(); await observer.catalog(); await observer.definition('scenarios', 0);
+  assert.ok(view.catalogText);
+  await observer.disconnect();
+  assert.deepEqual(calls.filter(c => c.method !== 'GET'), [{ url: '/api/integrations/overkiz-cloud/former%20gateway', method: 'DELETE', body: undefined }]);
+  assert.equal(view.catalog, null);
+  assert.equal(view.catalogText, '');
+  assert.deepEqual(view.details, {});
+  assert.deepEqual(view.instances, []);
+  assert.equal(view.notice, 'disconnected');
+  assert.equal(view.pending, null);
+  observer.stop();
+});
+
+test('a failed durable disconnect preserves the account and never claims success or retries', async () => {
+  let view, deletes = 0;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'DELETE') { deletes++; return Response.json({}, { status: 503 }); }
+    return url.endsWith('/catalog') ? Response.json({ revision: 'retained', catalog: {} })
+      : Response.json({ instances: [{ instance: 'fixture', configured: false, state: {} }] });
+  });
+  await observer.load(); await observer.catalog();
+  const retained = view.catalogText;
+  await observer.disconnect();
+  assert.equal(deletes, 1);
+  assert.equal(view.catalogText, retained);
+  assert.equal(view.selected, 'fixture');
+  assert.equal(view.error, 'unavailable');
+  assert.notEqual(view.notice, 'disconnected');
+  assert.equal(view.pending, null);
+  observer.stop();
+});
+
+test('disconnect blocks duplicate requests and prevents late catalogue or list reads from restoring data', async () => {
+  let view, removed = false, deferList = false, finishList, finishCatalog, finishDelete, deletes = 0;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'DELETE') { deletes++; return new Promise(resolve => { finishDelete = resolve; }); }
+    if (url.endsWith('/catalog')) return new Promise(resolve => { finishCatalog = resolve; });
+    if (deferList) { deferList = false; return new Promise(resolve => { finishList = resolve; }); }
+    return Response.json({ instances: removed ? [] : [{ instance: 'fixture', configured: false, state: {} }] });
+  });
+  await observer.load();
+  const catalog = observer.catalog();
+  deferList = true;
+  const oldList = observer.load();
+  const deletion = observer.disconnect();
+  await observer.disconnect();
+  assert.equal(deletes, 1);
+  assert.notEqual(view.notice, 'disconnected');
+  removed = true;
+  finishDelete(Response.json({ disconnected: true }));
+  await deletion;
+  finishCatalog(Response.json({ revision: 'late', catalog: {} }));
+  finishList(Response.json({ instances: [{ instance: 'fixture', state: { phase: 'ready' } }] }));
+  await Promise.all([catalog, oldList]);
+  assert.deepEqual(view.instances, []);
+  assert.equal(view.catalog, null);
+  assert.equal(view.catalogText, '');
+  assert.equal(view.reading, false);
+  observer.stop();
+});
+
+test('an orphan account cannot restart cloud login or refresh but remains removable', async () => {
+  const methods = [];
+  const observer = createCloudObserver(() => {}, async (_, options) => {
+    methods.push(options.method ?? 'GET');
+    return Response.json({ instances: [{ instance: 'fixture', configured: false, state: {} }] });
+  });
+  await observer.load();
+  const credentials = { kind: 'login', username: 'fixture@example.com', password: 'SYNTHETIC' };
+  await observer.send(credentials);
+  await observer.send({ kind: 'refresh', generation: 'old' });
+  assert.equal(credentials.password, '');
+  assert.deepEqual(methods, ['GET']);
+  observer.stop();
+});
+
+test('opening an orphan account does not request a catalogue from its retired source', async () => {
+  const calls = [];
+  const observer = createCloudObserver(() => {}, async url => {
+    calls.push(url);
+    return Response.json({ instances: [{ instance: 'fixture', configured: false, state: { scope: { site_oid: 'former' } } }] });
+  });
+  await observer.open();
+  assert.deepEqual(calls, ['/api/integrations/overkiz-cloud']);
+  observer.stop();
+});
+
+test('disconnect waits at most thirty seconds and keeps cached data when its outcome is unknown', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let view, deletionSignal;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'DELETE') {
+      deletionSignal = options.signal;
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+    }
+    return url.endsWith('/catalog') ? Response.json({ revision: 'retained', catalog: {} })
+      : Response.json({ instances: [{ instance: 'fixture', state: {} }] });
+  });
+  await observer.load(); await observer.catalog();
+  const retained = view.catalogText;
+  const pending = observer.disconnect();
+  t.mock.timers.tick(30000);
+  const timedOut = deletionSignal.aborted;
+  if (!timedOut) observer.stop();
+  await pending;
+  assert.equal(timedOut, true);
+  assert.equal(view.catalogText, retained);
+  assert.equal(view.error, 'pending_timeout');
+  assert.equal(view.pending, null);
+  observer.stop();
+});
+
+test('a confirmed credential removal clears private browser data but reports unfinished storage cleanup', async () => {
+  let view, writes = 0;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'DELETE') { writes++; return Response.json({ error: 'cache_unavailable', credentials_removed: true }, { status: 503 }); }
+    if (options.method) { writes++; return Response.json({}, { status: 409 }); }
+    return url.endsWith('/catalog') ? Response.json({ revision: 'r', catalog: {} })
+      : Response.json({ instances: [{ instance: 'fixture', configured: true, online: true, state: { phase: 'ready', scope: {} } }] });
+  });
+  await observer.open();
+  assert.ok(view.catalogText);
+  await observer.disconnect();
+  assert.equal(view.error, 'cache_unavailable');
+  assert.equal(view.notice, '');
+  assert.equal(view.catalog, null);
+  assert.equal(view.catalogText, '');
+  assert.equal(view.instances[0].cleanup_pending, true);
+  assert.equal(view.instances[0].online, false);
+  assert.equal(view.instances[0].state.phase, 'disconnected');
+  await observer.send({ kind: 'refresh', generation: 'old' });
+  assert.equal(writes, 1, 'an unfinished cleanup cannot restart the source');
   observer.stop();
 });

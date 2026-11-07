@@ -31,9 +31,20 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
   let selection = 0;
   let listEpoch = 0;
   let sending = false;
-  let view = { auth: null, instances: [], selected: '', loading: true, pending: null, error: '', catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false };
+  let disconnecting = false;
+  let view = { auth: null, instances: [], selected: '', loading: true, pending: null, error: '', notice: '', catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false };
   const emit = (patch) => { if (active) { view = { ...view, ...patch }; change(view); } };
   const path = () => `${ROOT}/${encodeURIComponent(view.selected)}`;
+  function requestDeadline(ms) {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    lifetime.signal.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(cancel, ms);
+    return { signal: controller.signal, dispose() {
+      clearTimeout(timer);
+      lifetime.signal.removeEventListener('abort', cancel);
+    } };
+  }
   async function call(url, options = {}) {
     const response = await transport(url, { cache: 'no-store', signal: lifetime.signal, ...options });
     if (!active) throw new DOMException('Aborted', 'AbortError');
@@ -42,10 +53,16 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
       emit({ auth: body.auth_policy === 'pin_fallback' ? 'pin_fallback' : 'owner_account', instances: [], selected: '', catalog: null, catalogText: '', details: {} });
       throw new Error('owner');
     }
-    if (!response.ok) throw new Error(response.status === 409 ? 'changed_or_busy' : 'unavailable');
+    if (!response.ok) {
+      if (response.status === 503) {
+        const body = await response.json().catch(() => ({}));
+        if (body.error === 'cache_unavailable' && body.credentials_removed === true) throw new Error('cache_unavailable');
+      }
+      throw new Error(response.status === 409 ? 'changed_or_busy' : 'unavailable');
+    }
     return response;
   }
-  function failed(error) { if (active && error.name !== 'AbortError') emit({ error: error.message === 'owner' ? '' : error.message === 'changed_or_busy' ? 'changed_or_busy' : 'unavailable' }); }
+  function failed(error) { if (active && error.name !== 'AbortError') emit({ error: error.message === 'owner' ? '' : ['changed_or_busy', 'cache_unavailable'].includes(error.message) ? error.message : 'unavailable' }); }
   async function list(signal = lifetime.signal) {
     const epoch = ++listEpoch;
     const body = await (await call(ROOT, { signal })).json();
@@ -62,16 +79,18 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     emit({ instances, selected, auth: 'owner' });
   }
   async function load() {
-    emit({ loading: true, error: '' });
+    if (disconnecting) return false;
+    emit({ loading: true, error: '', notice: '' });
     try { await list(); return active && view.auth === 'owner'; } catch (e) { failed(e); return false; }
     finally { emit({ loading: false }); }
   }
   async function open() {
     const loaded = await load();
-    if (loaded && active && view.instances.find(i => i.instance === view.selected)?.state?.scope) await catalog();
+    const row = loaded && active ? view.instances.find(i => i.instance === view.selected) : null;
+    if (row?.configured !== false && !row?.cleanup_pending && row?.state?.scope) await catalog();
   }
   async function catalog(signal = lifetime.signal) {
-    if (view.auth !== 'owner' || !view.selected || view.reading) return;
+    if (disconnecting || view.auth !== 'owner' || !view.selected || view.reading) return;
     const epoch = selection;
     emit({ reading: true, error: '', details: {} });
     try {
@@ -82,7 +101,7 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     finally { if (epoch === selection) emit({ reading: false }); }
   }
   async function definition(collection, index) {
-    if (!view.catalog || view.detailBusy) return;
+    if (disconnecting || !view.catalog || view.detailBusy) return;
     const epoch = selection;
     const revision = view.catalog.revision;
     const key = `${collection}:${index}`;
@@ -94,13 +113,11 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
     finally { if (epoch === selection) emit({ detailBusy: '' }); }
   }
   async function send(input) {
-    if (sending || view.auth !== 'owner' || !view.selected) { if ('password' in input) input.password = ''; return; }
+    const row = view.instances.find(i => i.instance === view.selected);
+    if (sending || view.auth !== 'owner' || !view.selected || row?.configured === false || row?.cleanup_pending) { if ('password' in input) input.password = ''; return; }
     sending = true;
-    const deadline = new AbortController();
-    const cancel = () => deadline.abort();
-    lifetime.signal.addEventListener('abort', cancel, { once: true });
-    const timer = setTimeout(cancel, 120000);
-    emit({ pending: 'dispatch', error: '' });
+    const deadline = requestDeadline(120000);
+    emit({ pending: 'dispatch', error: '', notice: '' });
     try {
       // Nothing secret enters a PIN continuation, a timer, or the observable view.
       const request = call(`${path()}/requests`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' }, body: JSON.stringify(input), signal: deadline.signal });
@@ -118,10 +135,43 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
       if (active) emit({ error: 'pending_timeout' });
     } catch (e) { failed(e); }
     finally {
-      clearTimeout(timer);
-      lifetime.signal.removeEventListener('abort', cancel);
+      deadline.dispose();
       if (active && deadline.signal.aborted) emit({ error: 'pending_timeout' });
       if ('password' in input) input.password = '';
+      sending = false;
+      emit({ pending: null });
+    }
+  }
+  function clearConnection(instance, complete) {
+    const instances = view.instances.flatMap(row => row.instance !== instance ? [row]
+      : complete && row.configured === false ? [] : [{ ...row, online: false, session_phase: null, cleanup_pending: !complete, state: { phase: 'disconnected' } }]);
+    emit({ instances, selected: instances.some(row => row.instance === instance) ? instance : '', catalog: null, catalogText: '', details: {}, notice: complete ? 'disconnected' : '' });
+  }
+  async function disconnect() {
+    if (sending || view.auth !== 'owner' || !view.selected) return;
+    sending = true;
+    disconnecting = true;
+    const deadline = requestDeadline(30000);
+    const instance = view.selected;
+    // In-flight reads belong to the old account view, including on a failed purge.
+    selection++;
+    listEpoch++;
+    emit({ pending: 'disconnect', error: '', notice: '', reading: false, detailBusy: '' });
+    try {
+      const response = await call(path(), { method: 'DELETE', headers: { 'x-moli-origin': 'ui' }, signal: deadline.signal });
+      if ((await response.json()).disconnected !== true) throw new Error('unavailable');
+      if (!active) return;
+      // Only an acknowledged durable purge clears the private browser copy.
+      clearConnection(instance, true);
+      await list(deadline.signal);
+    } catch (e) {
+      if (active && e.message === 'cache_unavailable') clearConnection(instance, false);
+      failed(e);
+    }
+    finally {
+      deadline.dispose();
+      if (active && deadline.signal.aborted) emit({ error: 'pending_timeout' });
+      disconnecting = false;
       sending = false;
       emit({ pending: null });
     }
@@ -129,7 +179,7 @@ export function createCloudObserver(change, transport = fetch, wait = pause) {
   function select(instance) {
     if (sending || !view.instances.some(i => i.instance === instance)) return;
     selection++;
-    emit({ selected: instance, catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false, error: '' });
+    emit({ selected: instance, catalog: null, catalogText: '', details: {}, detailBusy: '', reading: false, error: '', notice: '' });
   }
-  return { load, open, catalog, definition, send, select, stop() { active = false; lifetime.abort(); view = null; } };
+  return { load, open, catalog, definition, send, disconnect, select, stop() { active = false; lifetime.abort(); view = null; } };
 }

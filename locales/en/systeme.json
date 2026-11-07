@@ -516,5 +516,12 @@
   "systeme.somfy.refresh_provider": "Refresh from TaHoma",
   "systeme.somfy.read_only_explanation": "Viewing is enabled. No scenario will run from this read-only view.",
   "systeme.somfy.catalog_title": "Scenarios and schedules",
-  "systeme.somfy.equipment_missing": "No shutters are connected to this instance. The cloud catalogue does not connect devices."
+  "systeme.somfy.equipment_missing": "No shutters are connected to this instance. The cloud catalogue does not connect devices.",
+  "systeme.somfy.disconnect": "Disconnect this account from Moli",
+  "systeme.somfy.disconnect_hint": "Disconnecting removes the session and cloud data stored in Moli. Devices connected locally to TaHoma remain available.",
+  "systeme.somfy.confirm_disconnect": "Confirm disconnect",
+  "systeme.somfy.disconnected": "Account disconnected from Moli.",
+  "systeme.somfy.not_configured": "The cloud source was removed from the configuration. You can still disconnect this account to remove its data.",
+  "systeme.somfy.retry_disconnect": "Retry cleanup",
+  "systeme.somfy.error.cache_unavailable": "Connection removed. The remaining cloud data could not be deleted. Resolve the storage error, then try again."
 }
