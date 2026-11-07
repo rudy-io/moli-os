@@ -91,6 +91,9 @@ port = 1883
 base_topic = "zigbee2mqtt"
 # username = "moli-os"
 # password_env = "MOLI_Z2M_PASSWORD"
+# Relays wired as triggers (a gate, a garage door): shown as an « Impulsion »
+# button instead of an on/off state that falls back to off.
+# impulse_points = ["z2m:0x00124b0000aa0030/state_l1"]
 
 # Z-Wave, through an existing Z-Wave JS UI bridge (its MQTT gateway).
 # [[driver]]
