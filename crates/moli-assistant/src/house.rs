@@ -25,6 +25,9 @@ pub(crate) struct Layout {
 pub(crate) struct RoomDef {
     pub name: String,
     pub aliases: Vec<String>,
+    /// Where the room is, in the family's words (« en bas », « à l'étage »):
+    /// « allume en bas » lights every room of that floor.
+    pub floor: Option<String>,
 }
 
 /// What the inventory calls a device with no room, in the house's language.
@@ -73,6 +76,22 @@ impl Layout {
 
     pub(crate) fn same_room(&self, a: &str, b: &str) -> bool {
         norm(&self.room(a)) == norm(&self.room(b))
+    }
+
+    /// A room as the inventory heads it: its name, and its floor when the
+    /// layout gives one (7 Nov. 2026: « allume en bas » lit the living room only).
+    fn heading(&self, room: &str) -> String {
+        let floor = self
+            .rooms
+            .iter()
+            .find(|r| r.name == room)
+            .and_then(|r| r.floor.as_deref())
+            .map(str::trim)
+            .filter(|f| !f.is_empty());
+        match floor {
+            Some(floor) => moli_i18n::tr!("assistant.house.room_floor", room = room, floor = floor),
+            None => room.to_owned(),
+        }
     }
 }
 
@@ -164,14 +183,15 @@ pub(crate) fn inventory(
     let mut out = String::new();
     for ((_, room), mut views) in rooms {
         views.sort_by(|a, b| name_of(a).cmp(name_of(b)));
+        let heading = layout.heading(&room);
         if protected.iter().any(|p| layout.same_room(p, &room)) {
             let _ = writeln!(
                 out,
                 "## {}",
-                moli_i18n::tr!("assistant.house.room_protected", room = room)
+                moli_i18n::tr!("assistant.house.room_protected", room = heading)
             );
         } else {
-            let _ = writeln!(out, "## {room}");
+            let _ = writeln!(out, "## {heading}");
         }
         for view in views {
             let _ = write!(out, "- {} · {}", view.device.id, name_of(view));
@@ -240,15 +260,16 @@ pub(crate) fn inventory_static(
     let mut aliases: Vec<(String, DeviceId)> = Vec::new();
     for ((_, room), mut views) in rooms {
         views.sort_by(|a, b| name_of(a).cmp(name_of(b)));
+        let heading = one_line(&layout.heading(&room));
         let room = one_line(&room);
         if protected.iter().any(|p| layout.same_room(p, &room)) {
             let _ = writeln!(
                 out,
                 "## {}",
-                moli_i18n::tr!("assistant.house.room_protected", room = room)
+                moli_i18n::tr!("assistant.house.room_protected", room = heading)
             );
         } else {
-            let _ = writeln!(out, "## {room}");
+            let _ = writeln!(out, "## {heading}");
         }
         for view in views {
             let alias = format!("d{}", aliases.len() + 1);
@@ -698,6 +719,24 @@ mod tests {
                 )],
             ),
         ]
+    }
+
+    /// « Allume en bas » : the model reads which rooms are down there.
+    #[test]
+    fn a_rooms_floor_is_in_its_heading() {
+        let layout: Layout = serde_json::from_str(
+            r#"{"rooms":[{"name":"Chambre des enfants","floor":"  "},{"name":"Salon","floor":"en bas"}]}"#,
+        )
+        .unwrap();
+        let protected = ["Chambre des enfants".to_owned()];
+        let (text, _) = inventory_static(&static_house(), &layout, &protected);
+        assert!(text.contains("## Salon (étage : en bas)\n"), "{text}");
+        assert!(
+            text.contains("## Chambre des enfants (protégée : un adulte valide)\n"),
+            "a blank floor is no floor: {text}"
+        );
+        let chat = inventory(&static_house(), &layout, &protected, Reader::Chat);
+        assert!(chat.contains("## Salon (étage : en bas)\n"), "{chat}");
     }
 
     #[test]
