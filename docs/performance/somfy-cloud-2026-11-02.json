@@ -1,0 +1,204 @@
+{
+  "qualification": "Synthetic local ARM64 comparison, not a real-account or Home Assistant benchmark.",
+  "source_revision": "9183b39530e81fda75c2e0b818441698854f4838",
+  "sampler_sha256": "c0c1f4b0f3a6ead57f29483a4ccbf36d79444ff737a2e0add859ee6852e8e37a",
+  "runner_sha256": "c0e93abe68a35965858574368c6087fa32973a0ab0ac1f7ac7ff960e11d6f14a",
+  "runs": [
+    {
+      "synthetic": true,
+      "source_revision": "9183b39530e81fda75c2e0b818441698854f4838",
+      "images": {
+        "moli-os-cloud-baseline:d81b2be": {
+          "id": "sha256:dc015488f3bb5587fc0bf353bb92bfc15458714288baa70476e5cf847d2ef69a",
+          "bytes": 25711448,
+          "architecture": "arm64",
+          "os": "linux",
+          "revision": "d81b2be13ec6a5a3496c29617f2706f6f37a0f1c"
+        },
+        "moli-os-somfy-cloud:9183b39": {
+          "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+          "bytes": 26409536,
+          "architecture": "arm64",
+          "os": "linux",
+          "revision": "9183b39530e81fda75c2e0b818441698854f4838"
+        }
+      },
+      "started_at": "2026-11-02T07:45:22.164130+00:00",
+      "method": "Dedicated Docker bridge, loopback ports, provider hosts mapped to loopback, local-only DNS, proxies cleared, fake PIN/key and no provider credentials; 150 s warmup minimum, sequential 30 s idle samples and HTTP requests.",
+      "results": [
+        {
+          "synthetic": true,
+          "container": "moli-cloud-baseline-bench",
+          "image": {
+            "id": "sha256:dc015488f3bb5587fc0bf353bb92bfc15458714288baa70476e5cf847d2ef69a",
+            "bytes": 25711448,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 2265088,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 12148736,
+          "cpu_percent_one_core": 0.03496491561299803,
+          "sample_seconds": 31.016805874882266,
+          "health_http_p95_ms": 2.6077080983668566,
+          "health_http_median_ms": 0.848646042868495,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle, no configured physical or cloud integration, no UI client",
+          "first_sampler_health_age_seconds": 6.491616,
+          "startup_seconds_until_first_health": 0.14402633300051093
+        },
+        {
+          "synthetic": true,
+          "container": "moli-cloud-empty-bench",
+          "image": {
+            "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+            "bytes": 26409536,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 2306048,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 12595200,
+          "cpu_percent_one_core": 0.02413059840959994,
+          "sample_seconds": 31.01870858296752,
+          "health_http_p95_ms": 2.8868750669062138,
+          "health_http_median_ms": 1.2540415627881885,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle, no configured physical or cloud integration, no UI client",
+          "first_sampler_health_age_seconds": 182.402972,
+          "startup_seconds_until_first_health": 0.13188233389519155
+        },
+        {
+          "synthetic": true,
+          "container": "moli-cloud-catalog-bench",
+          "image": {
+            "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+            "bytes": 26409536,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 4677632,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 15601664,
+          "cpu_percent_one_core": 0.033708594039047565,
+          "sample_seconds": 31.027695749886334,
+          "health_http_p95_ms": 5.716250045225024,
+          "health_http_median_ms": 1.4811459695920348,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle with synthetic retained cloud catalogue, followed by50 owner cached GETs; no real provider/account",
+          "catalog_http_p95_ms": 26.138083077967167,
+          "catalog_http_median_ms": 13.467166456393898,
+          "catalog_samples": 50,
+          "catalog_response_bytes_max": 1000307,
+          "anonymous_memory_after_catalog_bytes": 4751360,
+          "process_rss_after_catalog_bytes": 15867904,
+          "first_sampler_health_age_seconds": 215.274689,
+          "startup_seconds_until_first_health": 0.12042529205791652
+        }
+      ],
+      "finished_at": "2026-11-02T07:49:32.752699+00:00",
+      "cleanup_errors": []
+    },
+    {
+      "synthetic": true,
+      "source_revision": "9183b39530e81fda75c2e0b818441698854f4838",
+      "images": {
+        "moli-os-cloud-baseline:d81b2be": {
+          "id": "sha256:dc015488f3bb5587fc0bf353bb92bfc15458714288baa70476e5cf847d2ef69a",
+          "bytes": 25711448,
+          "architecture": "arm64",
+          "os": "linux",
+          "revision": "d81b2be13ec6a5a3496c29617f2706f6f37a0f1c"
+        },
+        "moli-os-somfy-cloud:9183b39": {
+          "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+          "bytes": 26409536,
+          "architecture": "arm64",
+          "os": "linux",
+          "revision": "9183b39530e81fda75c2e0b818441698854f4838"
+        }
+      },
+      "started_at": "2026-11-02T07:51:45.557757+00:00",
+      "method": "Dedicated Docker bridge, loopback ports, provider hosts mapped to loopback, local-only DNS, proxies cleared, fake PIN/key and no provider credentials; 150 s warmup minimum, sequential 30 s idle samples and HTTP requests.",
+      "results": [
+        {
+          "synthetic": true,
+          "container": "moli-cloud-baseline-bench",
+          "image": {
+            "id": "sha256:dc015488f3bb5587fc0bf353bb92bfc15458714288baa70476e5cf847d2ef69a",
+            "bytes": 25711448,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 2342912,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 12144640,
+          "cpu_percent_one_core": 0.030299471246045862,
+          "sample_seconds": 31.017042916966602,
+          "health_http_p95_ms": 2.5013750419020653,
+          "health_http_median_ms": 0.8598335552960634,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle, no configured physical or cloud integration, no UI client",
+          "first_sampler_health_age_seconds": 5.755742,
+          "startup_seconds_until_first_health": 0.14836804196238518
+        },
+        {
+          "synthetic": true,
+          "container": "moli-cloud-empty-bench",
+          "image": {
+            "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+            "bytes": 26409536,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 3719168,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 13926400,
+          "cpu_percent_one_core": 0.022595723545051197,
+          "sample_seconds": 31.027995124924928,
+          "health_http_p95_ms": 1.4142089057713747,
+          "health_http_median_ms": 0.720271491445601,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle, no configured physical or cloud integration, no UI client",
+          "first_sampler_health_age_seconds": 182.239758,
+          "startup_seconds_until_first_health": 0.10250712488777936
+        },
+        {
+          "synthetic": true,
+          "container": "moli-cloud-catalog-bench",
+          "image": {
+            "id": "sha256:e746cb39820381d5159e74761e1fcfc6c7505c3a06cc50e3fc81183b98742511",
+            "bytes": 26409536,
+            "architecture": "arm64",
+            "os": "linux"
+          },
+          "anonymous_memory_bytes": 5619712,
+          "anonymous_memory_field": "anon",
+          "process_rss_bytes": 16662528,
+          "cpu_percent_one_core": 0.037924610039886425,
+          "sample_seconds": 31.852667666971684,
+          "health_http_p95_ms": 2.2549170535057783,
+          "health_http_median_ms": 1.176041434518993,
+          "health_samples": 50,
+          "warmup_seconds_minimum": 150,
+          "workload": "idle with synthetic retained cloud catalogue, followed by50 owner cached GETs; no real provider/account",
+          "catalog_http_p95_ms": 14.930624980479479,
+          "catalog_http_median_ms": 9.517833008430898,
+          "catalog_samples": 50,
+          "catalog_response_bytes_max": 1000307,
+          "anonymous_memory_after_catalog_bytes": 5742592,
+          "process_rss_after_catalog_bytes": 16859136,
+          "first_sampler_health_age_seconds": 215.005449,
+          "startup_seconds_until_first_health": 0.10038912505842745
+        }
+      ],
+      "finished_at": "2026-11-02T07:55:56.695092+00:00",
+      "cleanup_errors": []
+    }
+  ]
+}

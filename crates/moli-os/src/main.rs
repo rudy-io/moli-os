@@ -418,6 +418,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         machines: gates.machines,
         weather: weather(&config),
         timezone: Some(config.zone.name.clone()),
+        overkiz_cloud: overkiz_cloud(&config.drivers)?,
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(
@@ -1209,6 +1210,28 @@ fn build_driver(
     })
 }
 
+/// Explicit cloud configuration for the owner-only API (never inferred from cached devices).
+fn overkiz_cloud(
+    drivers: &[DriverConfig],
+) -> anyhow::Result<std::collections::BTreeMap<InstanceId, moli_overkiz::cloud::Config>> {
+    let mut enabled = std::collections::BTreeMap::new();
+    for driver in drivers
+        .iter()
+        .filter(|d| d.enabled != Some(false) && d.kind == "overkiz")
+    {
+        let options: moli_overkiz::Config = driver
+            .options
+            .clone()
+            .try_into()
+            .with_context(|| format!("driver {:?} options", driver.id))?;
+        moli_overkiz::Overkiz::new(options.clone())?;
+        if let Some(cloud) = options.cloud {
+            enabled.insert(InstanceId::from(driver.id.as_str()), cloud);
+        }
+    }
+    Ok(enabled)
+}
+
 /// Drivers with validated constructors share option decoding and error context.
 fn configured_driver<C, D>(
     config: &DriverConfig,
@@ -1266,6 +1289,25 @@ mod tests {
             enabled: None,
             options: toml::Value::Table(toml::Table::new()),
         }
+    }
+
+    #[test]
+    fn cloud_api_registry_contains_only_enabled_valid_overkiz_observers() {
+        let mut cloud = driver("overkiz");
+        cloud.options = toml::from_str("[cloud]\npoll_secs = 600").unwrap();
+        let registry = overkiz_cloud(&[cloud]).unwrap();
+        assert_eq!(registry.get(&InstanceId::from("t")).unwrap().poll_secs, 600);
+        for kind in ["other", "overkiz"] {
+            let mut disabled = driver(kind);
+            disabled.enabled = Some(false);
+            assert!(overkiz_cloud(&[disabled]).unwrap().is_empty());
+        }
+        let mut local = driver("overkiz");
+        local.options = toml::from_str("host = '192.168.1.2'").unwrap();
+        assert!(overkiz_cloud(&[local]).unwrap().is_empty());
+        let mut invalid = driver("overkiz");
+        invalid.options = toml::from_str("[cloud]\npoll_secs = 1").unwrap();
+        assert!(overkiz_cloud(&[invalid]).is_err());
     }
 
     #[test]

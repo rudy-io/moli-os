@@ -1,8 +1,8 @@
 [integration]
 id = "overkiz"
-name = "Somfy TaHoma / Overkiz (local)"
+name = "Somfy TaHoma / Overkiz"
 brands = ["Somfy"]
-models = ["TaHoma developer mode"]
+models = ["TaHoma developer mode", "Somfy cloud programme observation"]
 transport = "https"
 driver = "overkiz"
 crate = "moli-overkiz"
@@ -11,13 +11,46 @@ mdns = ["_kizboxdev._tcp"]
 ssdp = []
 ports = [8443]
 [needs]
+# These flat discovery prerequisites describe the local source. A cloud-only
+# instance omits host/token and enables options.cloud with owner UI login;
+# see CLOUD.md. The catalogue format cannot express alternative source needs.
 secrets = ["token"]
 vars = []
 options = ["host"]
+# cert_sha256 and cloud_session_v1/cloud_state_v1/cloud_inventory_v1 are managed
+# by the driver; cloud_pending_v1 is a transient encrypted owner-API request.
 [origin]
-reused = "Cover families and favourite design follow moli-os PR25 by ddcq; shared native transport and safeguards from PR99. Somfy OpenAPI and PyOverkiz protocol fixtures consulted. Synthetic fixtures only."
+reused = "Cover families and favourite design follow moli-os PR25 by ddcq; shared native transport and safeguards from PR99. Somfy OpenAPI, official public TaHoma Classic client, and pinned PyOverkiz protocol/authentication consulted. Public application constants and region mappings are attributed in source. Synthetic fixtures only."
 author = "agent"
 [[fixture]]
 file = "fixtures/devices.json"
+
+[[fixture]]
+file = "fixtures/cloud-action-groups.json"
+
+[[fixture]]
+file = "fixtures/cloud-calendar-days.json"
+
+[[fixture]]
+file = "fixtures/cloud-calendar-rules.json"
+
+[[fixture]]
+file = "fixtures/cloud-delayed-executions.json"
+
+[[fixture]]
+file = "fixtures/cloud-empty.json"
+
+[[fixture]]
+file = "fixtures/cloud-error-object.json"
+
+[[fixture]]
+file = "fixtures/cloud-scheduled-executions.json"
+
+[[fixture]]
+file = "fixtures/cloud-triggers.json"
+
+[[fixture]]
+file = "fixtures/cloud-unknown-trigger.json"
+
 [[fixture]]
 file = "fixtures/slow-cover.json"

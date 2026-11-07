@@ -25,6 +25,7 @@ mod integrations;
 mod limit;
 mod machines;
 mod mcp;
+mod overkiz;
 mod people;
 mod people_api;
 mod whereabouts;
@@ -137,6 +138,9 @@ pub struct Options {
     /// The house's time zone (IANA), as resolved at start: shown in
     /// `/api/system`.
     pub timezone: Option<String>,
+    /// Explicit enabled cloud observers; no credentials.
+    pub overkiz_cloud:
+        std::collections::BTreeMap<moli_core::InstanceId, moli_overkiz::cloud::Config>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -347,6 +351,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/bench", get(rest::bench))
         .route("/api/home", get(rest::home))
         .merge(house_routes(&humans, options))
+        .merge(overkiz::routes())
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
         .route("/api/energy/price", put(rest::set_energy_price))
@@ -405,6 +410,9 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
+        .layer(Extension(overkiz::Configured(Arc::new(
+            options.overkiz_cloud.clone(),
+        ))))
         .layer(Extension(humans))
         .layer(Extension(persons))
         .layer(DefaultBodyLimit::max(BODY))

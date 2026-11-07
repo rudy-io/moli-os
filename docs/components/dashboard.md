@@ -150,6 +150,18 @@ appareils changent. En tête : Moli contre HA (mémoire, processeur, taille, ré
 tendance des livraisons) lu dans `data/perf.jsonl`. Un nouveau pilote ou une nouvelle brique y
 apparaît sans toucher à la page.
 
+## Programmations TaHoma en lecture seule
+
+La page TaHoma (`#/somfy`), accessible depuis Système, présente les jours, horaires et actions du catalogue
+privé déjà collecté. `lib/somfy-programmes.js` projette les définitions ;
+`ui/SomfyCloudProgramme.svelte` et `SomfyCloudActions.svelte` affichent les mêmes
+actions pour les scénarios, journées et règles intégrées. Les noms viennent des
+étiquettes du catalogue, sans rapprochement heuristique avec d'autres pilotes.
+Les états déclarés restent distincts d'une activation effective. Les formats
+inconnus, données historiques et limites d'affichage sont explicitement qualifiés.
+Les détails longs s'ouvrent à la demande ; la définition JSON d'origine reste
+accessible. Aucun contrôle d'exécution, nouvelle requête ou minuterie n'est ajouté.
+
 ## Vérifier visuellement
 
 Pour un agent, plutôt que son navigateur intégré (chaque clic y demande une autorisation) :
@@ -182,3 +194,13 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
   n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
+
+## Accès TaHoma
+
+`#/somfy` sépare les scénarios et les programmations des réglages de connexion.
+La navigation apparaît pour une intégration Overkiz configurée ; Système conserve
+un lien vers cette page. L’ouverture lit uniquement le catalogue local du
+propriétaire déjà collecté : elle ne déclenche pas de requête au fournisseur.
+Les informations techniques et le JSON d’origine restent disponibles à la demande.
+Le lien « Volets et stores » mène à `#/pieces/volets` : les commandes y dépendent
+des capacités réelles du pilote, indépendamment du catalogue cloud.

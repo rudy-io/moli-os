@@ -1,8 +1,11 @@
 # TaHoma / Overkiz local developer mode
 
-Native local HTTPS integration, token from the encrypted vault, certificate pinned
-before credentials leave. No cloud login or Home Assistant dependency. Network-free
-construction validates configuration. Disabled instances are not started by Moli.
+The native source uses local HTTPS, a token from the encrypted vault and a certificate
+pinned before credentials leave. It has no cloud login or Home Assistant dependency.
+Network-free construction validates configuration. Disabled instances are not started
+by Moli. An optional [Somfy cloud observer](CLOUD.md) adds owner-only, read-only access
+to saved scenarios and programming, using an independent account session. It can
+run alone or alongside the native source without publishing duplicate physical devices.
 
 Certificate pinning uses **trust on first use (TOFU)** when neither the
 configuration nor the encrypted vault contains `cert_sha256`. That first TLS
@@ -133,9 +136,11 @@ Protocol sources consulted at pinned revisions (cover-family/favourite design al
 - [Home Assistant public low-speed fixture](https://github.com/home-assistant/core/blob/20a7eb5e6ce79a2018543081a74d45aa28c9cd3d/tests/components/overkiz/fixtures/setup/cloud_nexity_rail_din_europe.json): ordinary RollerShutter definitions with `nparams = 2`; the separate optional-argument shape is covered by this repository's synthetic fixture.
 
 
-This change does not implement the cloud complement or saved TaHoma scenarios. The official
-local API excludes those scenarios; even an execution ID from an undocumented local scene
-endpoint does not establish support. See [coverage and remaining work](COVERAGE.md).
+The official local API excludes saved TaHoma scenarios; even an execution ID from an
+undocumented local scene endpoint does not establish support. The optional cloud observer
+reads the provider's programme definitions and reports each collection's availability;
+it never runs or imports them as automations. See [cloud protocol and limits](CLOUD.md)
+and [coverage and remaining work](COVERAGE.md).
 The driver uses `Semantic::Position` introduced by
 [PR30](https://github.com/rudy-io/moli-os/pull/30); dedicated UI/card changes remain
 separate. No core guard is changed here.

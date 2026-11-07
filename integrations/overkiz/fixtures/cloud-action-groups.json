@@ -1,0 +1,18 @@
+[
+  {
+    "oid": "00000000-0000-4000-8000-000000000001",
+    "label": "Synthetic scene",
+    "actions": [
+      {
+        "deviceURL": "io://example.invalid/synthetic-shutter",
+        "commands": [
+          {
+            "name": "close",
+            "parameters": []
+          }
+        ]
+      }
+    ],
+    "metadata": "{}"
+  }
+]
