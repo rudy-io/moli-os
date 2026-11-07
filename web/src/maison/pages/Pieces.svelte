@@ -5,7 +5,11 @@
 
 <script>
   import { onMount } from 'svelte';
-  import { roomList, roomNamed, savePref, protectedRoom } from '../lib/home.svelte.js';
+  import { roomList, roomNamed, savePref, protectedRoom, nameOf, value } from '../lib/home.svelte.js';
+  import { isValve, climateKeys, canWrite } from '../lib/capabilities.js';
+  import Thermometer from '../ui/Thermometer.svelte';
+  import ClimateCard from '../ui/ClimateCard.svelte';
+  import ValveCard from '../ui/ValveCard.svelte';
   import Icon from '../ui/Icon.svelte';
   import RoomCard from '../ui/RoomCard.svelte';
   import CoverTile from '../ui/CoverTile.svelte';
@@ -77,6 +81,35 @@
       .filter((s) => s.rooms.length),
   );
   const litIn = (list) => list.reduce((n, r) => n + r.lit, 0);
+
+  // One room at a time (a button per room), or the overview of them all.
+  // The choice is this device's, kept for the next visit.
+  const ALL = '__all';
+  let pick = $state((() => {
+    try {
+      return localStorage.getItem('pieces-room');
+    } catch {
+      return null;
+    }
+  })());
+  function choose_room(name) {
+    pick = name;
+    savePref('pieces-room', name);
+  }
+  const current = $derived(pick === ALL ? null : (rooms.find((r) => r.name === pick) ?? floors[0]?.rooms[0] ?? null));
+  const overview = $derived(pick === ALL || !current);
+  /** The room's climate devices that take a setpoint: one thermometer each. */
+  const comfort = $derived(
+    (current?.climates ?? []).filter((c) => value(c.id, climateKeys(c).target) != null || canWrite(c, climateKeys(c).target)),
+  );
+  /** What a room button says under its name: its lights on, else its temperature. */
+  function roomTemp(r) {
+    for (const c of [...r.climates, ...r.sensors]) {
+      const v = value(c.id, climateKeys(c).temperature);
+      if (typeof v === 'number') return v;
+    }
+    return null;
+  }
 </script>
 
 <div class="pieces">
@@ -90,7 +123,7 @@
     {/if}
   </header>
 
-  {#if !coversOnly}
+  {#if !coversOnly && overview}
   <div class="bar">
     <FilterChips {devices} bind:filter key="pieces-filter" />
     <div class="look" role="radiogroup" aria-label={t('maison.pieces.affichage')}>
@@ -102,7 +135,50 @@
 
   {#if coversOnly && !coverCount}<p class="page-sub">{t('maison.pieces.volets_vides')}</p>{/if}
 
-  {#each floors as floor (floor.id)}
+  {#if !coversOnly}
+    <nav class="picker" aria-label={t('maison.pieces.choisir')}>
+      <button class="pick all" class:on={overview} aria-pressed={overview} onclick={() => choose_room(ALL)}>
+        <span class="pick-icon"><Icon name="light-group" size={20} /></span>
+        <span class="pick-name">{t('maison.pieces.toutes_pieces')}</span>
+      </button>
+      {#each floors as floor (floor.id)}
+        {#if floors.length > 1 && floor.name}<span class="pick-floor">{floor.name}</span>{/if}
+        {#each floor.rooms as r (r.name)}
+          {@const temp = roomTemp(r)}
+          <button class="pick" class:on={!overview && current?.name === r.name} class:lit={r.lit} aria-pressed={!overview && current?.name === r.name} onclick={() => choose_room(r.name)}>
+            <span class="pick-icon"><Icon name={r.icon} size={20} /></span>
+            <span class="pick-name">{r.name}</span>
+            {#if r.lit}<span class="pick-badge">{r.lit}</span>{:else if temp != null}<span class="pick-temp num">{Math.round(temp)}°</span>{/if}
+          </button>
+        {/each}
+      {/each}
+    </nav>
+  {/if}
+
+  {#if !coversOnly && !overview && current}
+    {#key current.name}
+      <div class="stage" class:has-comfort={comfort.length}>
+        <div class="stage-room"><RoomCard room={current} every={filter.includes('capteurs')} icons={look === 'icons'} /></div>
+        {#if comfort.length}
+          <div class="stage-comfort">
+            {#each comfort as c (c.id)}
+              <section class="card comfort">
+                <div class="card-head"><h2><Icon name="thermometer" size={18} />{nameOf(c.id)}</h2></div>
+                <div class="comfort-body">
+                  <Thermometer id={c.id} name={nameOf(c.id)} />
+                  <div class="comfort-card">
+                    {#if isValve(c)}<ValveCard id={c.id} name={nameOf(c.id)} />{:else}<ClimateCard id={c.id} name={nameOf(c.id)} />{/if}
+                  </div>
+                </div>
+              </section>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/key}
+  {/if}
+
+  {#each overview || coversOnly ? floors : [] as floor (floor.id)}
     <section class="floor" aria-label={floor.name ?? t('maison.pieces.titre')}>
       {#if floors.length > 1 && floor.name}
         {@const lit = litIn(floor.rooms)}
@@ -229,6 +305,157 @@
   .rooms {
     columns: 3 340px;
     column-gap: 20px;
+  }
+
+  /* The room buttons: one tap, one room. */
+  .picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: -6px -36px -6px -14px;
+    padding: 6px 36px 12px 14px;
+    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 40px), transparent);
+  }
+
+  .pick {
+    flex: none;
+  }
+
+  .pick-floor {
+    flex: none;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    padding: 0 2px;
+    font-size: 10.5px;
+    font-weight: 750;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 6px 14px 6px 6px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--glass);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+    color: var(--ink-2);
+    font-weight: 650;
+    font-size: 14.5px;
+  }
+
+  .pick:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line);
+    color: var(--ink);
+  }
+
+  .pick-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--ink-3);
+    transition: background 0.25s, color 0.25s;
+  }
+
+  .pick.lit .pick-icon {
+    background: var(--warm-soft);
+    color: var(--warm-ink);
+  }
+
+  .pick.on {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 12px 24px -12px var(--accent-2);
+  }
+
+  .pick.on .pick-icon {
+    background: rgb(255 255 255 / 25%);
+    color: #fff;
+  }
+
+  .pick-badge {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 750;
+    background: var(--warm);
+    color: #fff;
+  }
+
+  .pick-temp {
+    font-size: 12.5px;
+    color: var(--ink-3);
+  }
+
+  .pick.on .pick-temp {
+    color: rgb(255 255 255 / 85%);
+  }
+
+  /* One room, big: its controls, and beside them its thermometers. */
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  .stage.has-comfort {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+
+  .stage-room :global(.room) {
+    font-size: 17px;
+  }
+
+  .stage-comfort {
+    display: grid;
+    gap: 20px;
+  }
+
+  .comfort-body {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 18px;
+    align-items: center;
+  }
+
+  .comfort-card :global(.card) {
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+    animation: none;
+  }
+
+  @media (max-width: 1100px) {
+    .stage.has-comfort {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 760px) {
+    .picker {
+      margin: -6px -16px;
+      padding: 6px 16px 12px;
+    }
+
+    .comfort-body {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+    }
   }
 
   .cover-rooms { display: grid; gap: 24px; }

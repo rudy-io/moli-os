@@ -15,8 +15,8 @@
   let plan = $state({ floors: [] });
   let loaded = $state(false);
   let floorId = $state(null);
-  /** 2D, on arriving: every floor side by side (until one is chosen). */
-  let whole = $state(true);
+  /** 2D, on arriving: one floor, big (« Toute la maison » shows them side by side). */
+  let whole = $state(false);
   let ow = $state(0);
   let ih = $state(800);
   let editing = $state(false);
@@ -409,6 +409,7 @@
 {#snippet spotBody(spot, d)}
   <button
     class="token"
+    data-kind={deviceKind(d)}
     class:lit={lit(d)}
     class:alarm={alarming(d)}
     class:open={opening(d)}
@@ -533,7 +534,7 @@
   {:else}
     <div class="board" class:editing>
       {#if overview}
-        <div class="whole" bind:clientWidth={ow} style="--gap:{GAP}px">
+        <div class="whole drawn" class:all-sensors={filter.includes('capteurs')} bind:clientWidth={ow} style="--gap:{GAP}px">
           {#each stack as f (f.id)}
             <div class="storey" style="width:{f.size[0] * scale}px">
               <button class="storey-name" onclick={() => pickFloor(f.id)}>{f.name}<Icon name="arrow-top-right" size={14} /></button>
@@ -546,7 +547,7 @@
       {:else if in3d}
         <House3D plan={shown} floorId={floor.id} {skin} {keep} ontap={tap3d} />
       {:else if floor.size}
-        <div class="drawn" onpointermove={drag} onpointerup={drop} onpointercancel={drop} role="presentation">
+        <div class="drawn" class:all-sensors={editing || filter.includes('capteurs')} onpointermove={drag} onpointerup={drop} onpointercancel={drop} role="presentation">
           <Drawing bind:this={drawing} {floor} {skin} {editing} {picking} {keep} bind:selected onplace={placeAt} ontap={() => (opened = null)} token={spotBody} />
         </div>
       {:else}
@@ -906,6 +907,48 @@
 
   .editing .token {
     cursor: grab;
+  }
+
+  /* Each kind of device has its colour and shape, so a light never looks
+     like a sensor: lights round, the rest rounded squares with a coloured
+     rim; a tap target never under 40 px. */
+  .token {
+    --k: var(--ink-3);
+    width: 42px;
+    height: 42px;
+    border: 2.5px solid color-mix(in srgb, var(--k) 70%, transparent);
+    background: color-mix(in srgb, var(--k) 14%, var(--surface));
+    color: var(--k);
+  }
+
+  .token:not([data-kind='light']) {
+    border-radius: 13px;
+  }
+
+  .token[data-kind='light'] { --k: #d98a12; }
+  .token[data-kind='plug'] { --k: #2c9a88; }
+  .token[data-kind='climate'] { --k: #4b74f2; }
+  .token[data-kind='cover'] { --k: #0e9fb5; }
+  .token[data-kind='camera'] { --k: #6a5cff; }
+  .token[data-kind='tv'],
+  .token[data-kind='speaker'] { --k: #d64f8e; }
+  .token[data-kind='sensor'] { --k: #7a8194; }
+
+  .token:hover {
+    transform: scale(1.12);
+  }
+
+  /* On: filled with its own colour (a plug on is green, not a lamp). */
+  .token.lit:not([data-kind='light']) {
+    background: var(--k);
+    color: #fff;
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--k) 25%, transparent), var(--shadow-lift);
+  }
+
+  /* The whole floor in view: only what you can act on. Sensors come back
+     when you zoom in, or with the « Capteurs » filter. */
+  .drawn:not(.all-sensors) :global(.pin:not(.named):has(.token[data-kind='sensor']:not(.alarm):not(.open))) {
+    display: none;
   }
 
   .token.lit {

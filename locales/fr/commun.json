@@ -283,5 +283,10 @@
   "commun.volet.vitesse_normale": "Normal",
   "commun.volet.vitesse_lente": "Lent",
   "commun.volet.reconnexion": "Connexion à Moli…",
-  "commun.volet.commandes_de": "Commandes de {label}"
+  "commun.volet.commandes_de": "Commandes de {label}",
+  "commun.thermo.chauffe": "Ça chauffe",
+  "commun.thermo.refroidit": "Ça refroidit",
+  "commun.thermo.stable": "Juste bien",
+  "commun.thermo.mesure": "Il fait {temp}° dans la pièce",
+  "commun.thermo.glisser": "Consigne de {name} : glisser vers le haut pour chauffer, vers le bas pour refroidir"
 }
