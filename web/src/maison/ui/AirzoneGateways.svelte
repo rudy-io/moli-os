@@ -50,17 +50,18 @@
   const approval = gatewayApproval({home,
     label:(intent) => intent.kind === 'mode' ? t('airzone_gateways.mode_pin_label',{action:t(intent.read_only ? 'airzone_gateways.restore_read_only' : 'airzone_gateways.allow_control'),instance:intent.instance}) : t('airzone_gateways.title'),
     reason:(intent) => intent.kind === 'mode' ? intent.read_only ? 'airzone_read_only' : 'airzone_control' : 'configuration',
+    freshPin:(intent) => intent.kind === 'mode' && !intent.read_only,
     waiting:(value) => {awaitingPin=value;},failed:(error) => {failure={error};},current,perform});
 
   function current(intent) {return alive && intent.revision === revision;}
-  async function perform(intent, authenticated = false) {
+  async function perform(intent, authenticated = false, pin) {
     if (!current(intent)) return;
     if (!connected) {failure={error:'connection'};return;}
     if (intent.kind === 'list') refreshNeeded=false;
     pending = intent.kind;
     failure = null;
     const result = intent.kind === 'list' ? await listGateways()
-      : intent.kind === 'mode' ? await changeGatewayMode(intent.instance,intent.read_only,intent.expected_read_only)
+      : intent.kind === 'mode' ? await changeGatewayMode(intent.instance,intent.read_only,intent.expected_read_only,globalThis.fetch,{pin})
       : await withdrawGateway(intent.instance);
     if (!current(intent)) return;
     pending = null;
@@ -82,22 +83,25 @@
     if (intent.kind === 'list') {
       gateways=result.data.gateways;
       failure=intent.notice ?? null;
-      if (modeResult && !gateways.some((item) => item.instance === modeResult.instance && item.read_only === modeResult.read_only)) modeResult=null;
+      if (modeResult) {
+        const checked=gateways.find((item) => item.instance === modeResult.instance && item.read_only === modeResult.read_only);
+        modeResult=checked ? {...modeResult,stored:!checked.temporary_revocation} : null;
+      }
       if (intent.verifyMode) {
         confirmation=null;
         const checked=gateways.find((item) => item.instance === intent.verifyMode);
-        if (checked) modeResult={instance:checked.instance,read_only:checked.read_only};
+        if (checked) modeResult={instance:checked.instance,read_only:checked.read_only,stored:!checked.temporary_revocation};
         else failure={error:'not_found'};
       }
     } else if (intent.kind === 'mode') {
-      gateways=gateways.map((item) => item.instance === intent.instance ? {...item,read_only:result.data.read_only,running:result.data.running} : item);
+      gateways=gateways.map((item) => item.instance === intent.instance ? {...item,read_only:result.data.read_only,running:result.data.running,temporary_revocation:!result.data.stored} : item);
       confirmation=null;
-      modeResult={instance:intent.instance,read_only:result.data.read_only};
+      modeResult={instance:intent.instance,read_only:result.data.read_only,stored:result.data.stored};
     } else {
-      gateways=gateways.map((item) => item.instance === intent.instance ? {...item,enabled:false,running:false,read_only:result.data.read_only} : item);
+      gateways=gateways.map((item) => item.instance === intent.instance ? {...item,enabled:false,running:false,read_only:result.data.read_only,temporary_revocation:!result.data.stored} : item);
       confirmation=null;
-      withdrawn=intent.instance;
-      if (intent.replacing) replacement=intent.instance;
+      withdrawn=result.data.stored ? intent.instance : null;
+      if (intent.replacing && result.data.stored) replacement=intent.instance;
     }
   }
   async function load(automatic = false) {
@@ -108,8 +112,11 @@
   function choose(instance,kind) {
     if (busy || editing || creating || confirmation || !connected) return;
     const gateway=gateways?.find((item) => item.instance === instance);
-    if (!gateway || !['edit','withdraw','replace','mode'].includes(kind)) return;
-    if (kind === 'mode' && gateway.read_only && !gateway.enabled) return;
+    if (!gateway || !['edit','withdraw','replace','mode','retry_read_only'].includes(kind)) return;
+    if (gateway.temporary_revocation && !['retry_read_only','withdraw'].includes(kind)) return;
+    if (kind === 'retry_read_only' && (!gateway.temporary_revocation || !gateway.enabled)) return;
+    if (kind === 'edit' && gateway.configuration_lock === 'disabled') return;
+    if (kind === 'mode' && gateway.read_only && (!gateway.enabled || gateway.configuration_lock)) return;
     revision++;
     failure=null;
     uncertain=false;
@@ -117,13 +124,13 @@
     replacement=null;
     modeResult=null;
     if (kind === 'edit') {editing={...gateway};return;}
-    if (kind === 'mode') {
-      confirmation={instance,kind,host:gateway.host,read_only:!gateway.read_only,expected_read_only:gateway.read_only};
+    if (kind === 'mode' || kind === 'retry_read_only') {
+      confirmation={instance,kind:'mode',host:gateway.host,read_only:kind === 'retry_read_only' || !gateway.read_only,expected_read_only:gateway.read_only};
       return;
     }
     // A disabled TOML entry has no withdrawal override yet. Persist it even
     // when the last list said paused; another tab may also have reactivated it.
-    if (kind === 'replace' || gateway.enabled) confirmation={instance,kind};
+    if (kind === 'replace' || gateway.enabled || gateway.temporary_revocation) confirmation={instance,kind};
   }
   async function confirmWithdrawal() {
     if (busy || !confirmation || confirmation.kind === 'mode') return;
@@ -135,9 +142,11 @@
       await perform({kind:'list',revision,verifyMode:confirmation.instance});
       return;
     }
-    // A mode transition always asks for the person's code, even if this browser
-    // already has a session. The PIN never enters the gateway request.
-    approval.ask({...confirmation,revision});
+    // Granting control proves the code in this request; revocation only needs
+    // the existing human session and must remain easy. Never retain the code.
+    const intent={...confirmation,revision};
+    if (intent.read_only) await perform(intent);
+    else approval.ask(intent);
   }
   function cancelSelection() {
     if (busy) return;
@@ -189,7 +198,7 @@
         <p>{t(confirmation.read_only ? 'airzone_gateways.read_only_help' : 'airzone_gateways.control_help')}</p>
         {#if !confirmation.read_only}<p>{t('airzone_gateways.control_scope')}</p>{/if}
         {#if uncertain}<p role="status">{t('airzone_gateways.mode_uncertain')}</p>{/if}
-        <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmMode}>{t(pending === 'mode' ? 'airzone_gateways.mode_saving' : uncertain ? 'airzone_gateways.verify_mode' : 'airzone_gateways.confirm_with_code')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
+        <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmMode}>{t(pending === 'mode' ? 'airzone_gateways.mode_saving' : uncertain ? 'airzone_gateways.verify_mode' : confirmation.read_only ? 'airzone_gateways.restore_read_only' : 'airzone_gateways.confirm_with_code')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
       </section>
     {:else if confirmation}
       <div class="confirmation" aria-labelledby="withdraw-title">
@@ -200,7 +209,7 @@
         <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmWithdrawal}>{t(pending === 'withdraw' ? 'airzone_gateways.withdrawing' : uncertain ? 'airzone_gateways.retry_withdraw' : confirmation.kind === 'replace' ? 'airzone_gateways.withdraw_first' : 'airzone_gateways.withdraw_confirm')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
       </div>
     {/if}
-    {#if modeResult}
+    {#if modeResult?.stored}
       <div class="message" role="status"><strong>{t(modeResult.read_only ? 'airzone_gateways.read_only_saved' : 'airzone_gateways.control_saved',{instance:modeResult.instance})}</strong>
         {#if !modeResult.read_only}<p>{t('airzone_gateways.controls_location')}</p><a href="#/airzone">{t('airzone_gateways.open_controls')}<Icon name="chevron-right" size={18} /></a>{/if}
       </div>

@@ -12,7 +12,13 @@ use moli_core::Origin;
 use moli_runtime::{BoxFuture, Hub};
 use serde::{Deserialize, Serialize};
 
-use crate::{caller::Caller, rest::origin, session::Sessions};
+use crate::{
+    caller::Caller,
+    people::People,
+    people_api::is_owner,
+    rest::origin,
+    session::{LoginError, Sessions},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +54,12 @@ pub struct GatewayInstalled {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[allow(clippy::struct_excessive_bools)] // Independent connection, command and persistence facts.
 pub struct GatewayStatus {
+    /// Revocation is effective in memory, but not guaranteed after a restart.
+    pub temporary_revocation: bool,
+    /// A restriction from the original static configuration, never a registry grant.
+    pub configuration_lock: Option<&'static str>,
     pub instance: String,
     pub host: String,
     pub port: u16,
@@ -190,8 +201,13 @@ impl SetupError {
 impl IntoResponse for SetupError {
     fn into_response(self) -> Response {
         let status = match self.code {
-            "duplicate_instance" | "duplicate_gateway" | "identity_changed"
-            | "gateway_disabled" | "mode_conflict" => StatusCode::CONFLICT,
+            "duplicate_instance"
+            | "duplicate_gateway"
+            | "identity_changed"
+            | "gateway_disabled"
+            | "mode_conflict"
+            | "configuration_locked"
+            | "revocation_not_persisted" => StatusCode::CONFLICT,
             "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
             "probe_failed" => StatusCode::BAD_GATEWAY,
@@ -303,18 +319,54 @@ pub(crate) async fn diagnostic(
     }
 }
 
+// The code is request-scoped: never Debug, journal or persist it with gateway options.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModePermission {
+    read_only: bool,
+    expected_read_only: bool,
+    #[serde(default)]
+    pin: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)] // Separate Axum state, identity and bounded-body extractors.
 pub(crate) async fn set_mode(
     State(hub): State<Hub>,
     Extension(humans): Extension<Arc<Sessions>>,
     Extension(Setup(setup)): Extension<Setup>,
+    Extension(persons): Extension<Arc<People>>,
     Path(instance): Path<String>,
     caller: Caller,
     headers: HeaderMap,
-    Json(request): Json<GatewayModeRequest>,
+    Json(request): Json<ModePermission>,
 ) -> Response {
     if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
         return StatusCode::FORBIDDEN.into_response();
     }
+    if !request.read_only {
+        if !is_owner(&caller, &humans, &persons, &headers) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(SetupError::new("owner_required")),
+            )
+                .into_response();
+        }
+        let Some(pin) = request.pin.as_deref() else {
+            return (StatusCode::FORBIDDEN, Json(SetupError::new("pin_required"))).into_response();
+        };
+        if let Err(error) = humans.verify(pin, &caller) {
+            let (status, code) = match error {
+                LoginError::Wrong => (StatusCode::UNAUTHORIZED, "invalid_pin"),
+                LoginError::Locked => (StatusCode::TOO_MANY_REQUESTS, "pin_rate_limited"),
+                LoginError::Disabled => (StatusCode::FORBIDDEN, "pin_disabled"),
+            };
+            return (status, Json(SetupError::new(code))).into_response();
+        }
+    }
+    let request = GatewayModeRequest {
+        read_only: request.read_only,
+        expected_read_only: request.expected_read_only,
+    };
     let Some(setup) = setup else {
         return SetupError::new("unavailable").into_response();
     };

@@ -186,9 +186,9 @@ fn through_cloudflare(headers: &HeaderMap) -> bool {
     headers.contains_key("cf-ray") || headers.contains_key("cf-connecting-ip")
 }
 
-/// A proxy on this very machine (a reverse proxy, `tailscale serve`) would
-/// make everyone look local, hence trusted: a request that says it was
-/// relayed is a stranger's.
+/// A proxy (a reverse proxy, `tailscale serve`), on this very machine or on
+/// another of the home network, would make everyone look local or of the
+/// house, hence trusted: a request that says it was relayed is a stranger's.
 fn relayed(headers: &HeaderMap) -> bool {
     [
         "forwarded",
@@ -250,7 +250,7 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
             },
         };
     }
-    let via = if mapped.is_loopback() && relayed(headers) {
+    let via = if relayed(headers) {
         Via::Outside
     } else if mapped.is_loopback() {
         Via::Loopback
@@ -471,6 +471,27 @@ mod tests {
             let relayed = classify("127.0.0.1".parse().unwrap(), &headers, None);
             assert_eq!(relayed.via, Via::Outside, "{relay}");
             assert!(!relayed.is_household() && !relayed.is_local_machine());
+        }
+    }
+
+    #[test]
+    fn a_proxy_elsewhere_on_the_home_network_does_not_make_the_internet_the_household() {
+        // A reverse proxy on another machine of the house relays the Internet
+        // from a private address: what it relays is a stranger's, like on
+        // this machine (the people still sign in with their password).
+        for peer in ["192.168.0.5", "10.0.0.2", "fd00::5"] {
+            for relay in [
+                "x-forwarded-for",
+                "forwarded",
+                "x-real-ip",
+                "tailscale-user-login",
+            ] {
+                let mut headers = HeaderMap::new();
+                headers.insert(relay, "203.0.113.9".parse().unwrap());
+                let relayed = classify(peer.parse().unwrap(), &headers, None);
+                assert_eq!(relayed.via, Via::Outside, "{peer} {relay}");
+                assert!(!relayed.is_household(), "{peer} {relay}");
+            }
         }
     }
 

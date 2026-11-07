@@ -330,6 +330,7 @@ impl Drop for CachedFixture {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp)]
 async fn offline_cached_power_is_not_integrated_when_recording_starts() {
     let f = CachedFixture::new(false).await;
     let config = toml::from_str(
@@ -373,6 +374,7 @@ async fn offline_cached_power_is_not_integrated_when_recording_starts() {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp)]
 async fn offline_cached_counter_is_not_replayed_when_the_first_tariff_arrives() {
     let f = CachedFixture::new(false).await;
     let config = toml::from_str(&CONFIG.replace("fake:m", "cached:m")).unwrap();

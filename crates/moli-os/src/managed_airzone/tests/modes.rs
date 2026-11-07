@@ -24,6 +24,14 @@ fn static_house(port: u16, read_only: bool, enabled: bool, identity: bool) -> (P
     (dir, config)
 }
 
+// A sidecar revocation is reversible; an explicit static read-only lock is not.
+fn managed_read_only_house(port: u16) -> (PathBuf, Config) {
+    let (dir, _) = static_house(port, false, true, true);
+    std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":true,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+    let config = Config::load(&dir.join("moli.toml")).unwrap();
+    (dir, config)
+}
+
 fn zone() -> DeviceId {
     DeviceId::from("airzone-added:aabbccddeeff_s1_z1")
 }
@@ -85,7 +93,7 @@ async fn explicit_mode_round_trip_persists_and_only_authorized_mock_commands_wri
     for configured in [false, true] {
         let (port, writes, stop) = controller().await;
         let (dir, config) = if configured {
-            static_house(port, true, true, true)
+            managed_read_only_house(port)
         } else {
             house()
         };
@@ -243,7 +251,7 @@ async fn a_paused_or_unknown_identity_gateway_can_be_revoked_without_network_acc
             if enabled {
                 "identity_unavailable"
             } else {
-                "gateway_disabled"
+                "configuration_locked"
             }
         );
         manager.shutdown().await;
@@ -254,7 +262,8 @@ async fn a_paused_or_unknown_identity_gateway_can_be_revoked_without_network_acc
 #[tokio::test]
 async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
     let (port, writes, stop) = controller_with_identity("aa:bb:cc:dd:ee:01", None, None).await;
-    let (dir, config) = static_house(port, true, true, true);
+    let (dir, config) = managed_read_only_house(port);
+    let registry_before = std::fs::read(dir.join(FILE)).unwrap();
     let manager = Manager::new(
         Hub::new(HubOptions::default()).unwrap(),
         &config,
@@ -270,7 +279,7 @@ async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
         "identity_changed"
     );
     assert!(manager.list().await.unwrap().gateways[0].read_only);
-    assert!(!dir.join(FILE).exists());
+    assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), registry_before);
     assert_eq!(writes.load(Ordering::Relaxed), 0);
     manager.shutdown().await;
     stop.cancel();
@@ -278,40 +287,33 @@ async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
 }
 
 #[tokio::test]
-async fn mode_commit_failure_never_claims_a_change_or_replaces_the_running_driver() {
-    for read_only in [true, false] {
-        let (port, writes, stop) = controller().await;
-        let (dir, config) = static_house(port, read_only, true, true);
-        let hub = Hub::new(HubOptions::default()).unwrap();
-        let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
-        manager.start_configured().unwrap();
-        writable(&hub, !read_only).await;
-        std::fs::write(dir.join(FILE), "external edit").unwrap();
-        assert_eq!(
-            manager
-                .set_mode(
-                    INSTANCE.into(),
-                    mode(!read_only, read_only),
-                    "person".into()
-                )
-                .await
-                .unwrap_err()
-                .code,
-            "persistence_failed"
-        );
-        let actual = manager.list().await.unwrap().gateways.remove(0);
-        assert_eq!(actual.read_only, read_only);
-        assert!(actual.running);
-        writable(&hub, !read_only).await;
-        assert_eq!(
-            std::fs::read_to_string(dir.join(FILE)).unwrap(),
-            "external edit"
-        );
-        assert_eq!(writes.load(Ordering::Relaxed), 0);
-        manager.shutdown().await;
-        stop.cancel();
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+async fn failed_authorization_persistence_never_grants_control() {
+    let (port, writes, stop) = controller().await;
+    let (dir, config) = managed_read_only_house(port);
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    manager.start_configured().unwrap();
+    writable(&hub, false).await;
+    std::fs::write(dir.join(FILE), "external edit").unwrap();
+    assert_eq!(
+        manager
+            .set_mode(INSTANCE.into(), mode(false, true), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    let actual = manager.list().await.unwrap().gateways.remove(0);
+    assert!(actual.read_only && actual.running);
+    writable(&hub, false).await;
+    assert_eq!(
+        std::fs::read_to_string(dir.join(FILE)).unwrap(),
+        "external edit"
+    );
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    manager.shutdown().await;
+    stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
@@ -319,7 +321,7 @@ async fn a_mode_change_finishes_when_its_http_caller_disappears_and_serializes_o
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let (port, writes, stop) = controller_with_gate(Some((started.clone(), release.clone()))).await;
-    let (dir, config) = static_house(port, true, true, true);
+    let (dir, config) = managed_read_only_house(port);
     let manager = Manager::new(
         Hub::new(HubOptions::default()).unwrap(),
         &config,
@@ -383,7 +385,7 @@ async fn editing_an_authorized_connection_revokes_even_when_the_address_is_uncha
     for configured in [false, true] {
         let (port, writes, stop) = controller().await;
         let (dir, config) = if configured {
-            static_house(port, true, true, true)
+            managed_read_only_house(port)
         } else {
             house()
         };
@@ -457,7 +459,7 @@ fn legacy_invalid_writable_entries_cannot_gain_authority_after_an_upgrade() {
 
 #[test]
 fn writable_static_overrides_require_version_three_and_a_pinned_identity() {
-    let (dir, _) = static_house(3000, true, true, true);
+    let (dir, _) = static_house(3000, false, true, true);
     for (version, mac, valid) in [
         (2, Some("aabbccddeeff"), false),
         (3, None, false),
@@ -475,5 +477,372 @@ fn writable_static_overrides_require_version_three_and_a_pinned_identity() {
         }
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn disabled_incomplete_static_entries_never_block_startup_or_reactivate_from_registry() {
+    for options in ["", "host = '127.0.0.1'\nunknown_option = true\n"] {
+        let (dir, _) = house();
+        let path = dir.join("moli.toml");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        write!(text, "\n[[driver]]\nid = '{INSTANCE}'\nkind = 'airzone'\nenabled = false\n[driver.options]\n{options}").unwrap();
+        std::fs::write(&path, text).unwrap();
+        std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":false,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+        let config = Config::load(&path).unwrap();
+        let manager = Manager::new(
+            Hub::new(HubOptions::default()).unwrap(),
+            &config,
+            CancellationToken::new(),
+        )
+        .expect("disabled invalid options are ignored");
+        manager.start_configured().unwrap();
+        assert!(
+            manager
+                .list()
+                .await
+                .unwrap()
+                .gateways
+                .iter()
+                .all(|gateway| !gateway.enabled && !gateway.running)
+        );
+        manager.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn explicit_static_restrictions_dominate_persisted_and_live_authorizations() {
+    for (enabled, read_only) in [(false, false), (true, true)] {
+        let (dir, _) = static_house(3000, read_only, enabled, true);
+        std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":false,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+        let config = Config::load(&dir.join("moli.toml")).unwrap();
+        let entry = config
+            .drivers
+            .iter()
+            .find(|driver| driver.id == INSTANCE)
+            .unwrap();
+        assert_eq!(entry.enabled != Some(false), enabled);
+        assert_eq!(entry.options["read_only"].as_bool(), Some(read_only));
+        let manager = Manager::new(
+            Hub::new(HubOptions::default()).unwrap(),
+            &config,
+            CancellationToken::new(),
+        )
+        .unwrap();
+        let listed = manager.list().await.unwrap();
+        let status = serde_json::to_value(&listed.gateways[0]).unwrap();
+        assert_eq!(
+            status["configuration_lock"],
+            if enabled { "read_only" } else { "disabled" }
+        );
+        assert_eq!(
+            manager
+                .set_mode(INSTANCE.into(), mode(false, read_only), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "configuration_locked"
+        );
+        manager.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+#[tokio::test]
+async fn failed_persistence_revokes_in_memory_and_cannot_reactivate_through_other_edits() {
+    let (port, writes, stop) = controller().await;
+    let (dir, config) = static_house(port, false, true, true);
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    manager.start_configured().unwrap();
+    writable(&hub, true).await;
+    std::fs::write(dir.join(FILE), b"external edit").unwrap();
+    for expected in [false, true] {
+        let revoked = manager
+            .set_mode(INSTANCE.into(), mode(true, expected), "person".into())
+            .await
+            .unwrap();
+        assert!(revoked.read_only && !revoked.stored);
+        writable(&hub, false).await;
+        assert_eq!(command(&hub).await, Err(CommandError::ReadOnly));
+        let status = serde_json::to_value(&manager.list().await.unwrap().gateways[0]).unwrap();
+        assert_eq!(status["temporary_revocation"], true);
+        assert_eq!(
+            manager
+                .set_mode(INSTANCE.into(), mode(false, true), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "revocation_not_persisted"
+        );
+        assert_eq!(
+            manager
+                .update(INSTANCE.into(), request(port), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "revocation_not_persisted"
+        );
+    }
+    for _ in 0..2 {
+        let withdrawn = manager
+            .withdraw(INSTANCE.into(), "person".into())
+            .await
+            .unwrap();
+        assert!(!withdrawn.stored && !withdrawn.enabled);
+        let status = manager.list().await.unwrap().gateways.remove(0);
+        assert!(!status.enabled && !status.running);
+    }
+    let revoked = manager
+        .set_mode(INSTANCE.into(), mode(true, true), "person".into())
+        .await
+        .unwrap();
+    assert!(!revoked.stored && !revoked.running);
+    assert!(!manager.list().await.unwrap().gateways[0].enabled);
+    assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), b"external edit");
+    // Repair only this synthetic file, then save the stronger withdrawal.
+    std::fs::remove_file(dir.join(FILE)).unwrap();
+    let durable = manager
+        .set_mode(INSTANCE.into(), mode(true, true), "person".into())
+        .await
+        .unwrap();
+    assert!(durable.stored && !durable.running);
+    let status = serde_json::to_value(&manager.list().await.unwrap().gateways[0]).unwrap();
+    assert_eq!(status["temporary_revocation"], false);
+    assert_eq!(status["enabled"], false);
+    assert_eq!(read(&dir.join(FILE))["overrides"][0]["enabled"], false);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    manager.shutdown().await;
+    stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn degraded_registry_still_allows_read_only_revocation_and_withdrawal() {
+    for withdrawal in [false, true] {
+        let (dir, _) = house();
+        let (port, writes, stop) = controller().await;
+        let mut gateway = stored_gateway(INSTANCE, port);
+        gateway.read_only = false;
+        let raw = json!({"version":3,"gateways":[gateway,{"instance":"broken","host":"invalid"}]})
+            .to_string();
+        std::fs::write(dir.join(FILE), &raw).unwrap();
+        let config = Config::load(&dir.join("moli.toml")).unwrap();
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+        manager.start_configured().unwrap();
+        writable(&hub, true).await;
+        if withdrawal {
+            assert!(
+                !manager
+                    .withdraw(INSTANCE.into(), "person".into())
+                    .await
+                    .unwrap()
+                    .stored
+            );
+        } else {
+            assert!(
+                !manager
+                    .set_mode(INSTANCE.into(), mode(true, false), "person".into())
+                    .await
+                    .unwrap()
+                    .stored
+            );
+        }
+        assert!(
+            hub.device(&zone())
+                .unwrap()
+                .device
+                .points
+                .iter()
+                .all(|point| !point.access.write)
+        );
+        assert_eq!(command(&hub).await, Err(CommandError::ReadOnly));
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
+        assert_eq!(writes.load(Ordering::Relaxed), 0);
+        manager.shutdown().await;
+        stop.cancel();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[derive(Debug)]
+struct WaitingCommands(moli_core::Device);
+impl moli_runtime::Driver for WaitingCommands {
+    fn kind(&self) -> &'static str {
+        "airzone"
+    }
+    fn run<'a>(
+        &'a self,
+        ctx: &'a mut moli_runtime::DriverCtx,
+    ) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            ctx.upsert_device(self.0.clone());
+            ctx.set_availability(&self.0.id, true);
+            ctx.ready();
+            std::future::pending().await
+        })
+    }
+}
+
+#[tokio::test]
+async fn volatile_revocation_rejects_already_queued_commands_before_acknowledging() {
+    let (port, writes, stop) = controller().await;
+    let (dir, config) = static_house(port, false, true, true);
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    manager.start_configured().unwrap();
+    writable(&hub, true).await;
+    let definition = hub.device(&zone()).unwrap().device.as_ref().clone();
+    manager.stop(INSTANCE).await;
+    // Hold a synthetic supervisor before it consumes the queue. This makes
+    // cancellation/draining observable without any controller command.
+    let cancel = CancellationToken::new();
+    let task = spawn_driver(
+        &hub,
+        INSTANCE.into(),
+        Arc::new(WaitingCommands(definition)),
+        cancel.clone(),
+    );
+    manager
+        .0
+        .drivers
+        .lock()
+        .unwrap()
+        .insert(INSTANCE.into(), Running { cancel, task });
+    writable(&hub, true).await;
+    let pending = command(&hub);
+    tokio::pin!(pending);
+    tokio::select! {
+        biased;
+        result = &mut pending => panic!("the command should be queued: {result:?}"),
+        () = tokio::task::yield_now() => {}
+    }
+    std::fs::write(dir.join(FILE), b"external edit").unwrap();
+    let revoked = manager
+        .set_mode(INSTANCE.into(), mode(true, false), "person".into())
+        .await
+        .unwrap();
+    assert!(!revoked.stored && revoked.read_only);
+    assert!(matches!(
+        pending.await,
+        Err(CommandError::Driver(_) | CommandError::DriverUnavailable)
+    ));
+    assert_eq!(command(&hub).await, Err(CommandError::ReadOnly));
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    manager.shutdown().await;
+    stop.cancel();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn fail_directory_sync(_: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::other("synthetic directory sync failure"))
+}
+
+#[tokio::test]
+async fn unsynced_revocation_is_honest_and_retry_tracks_the_already_renamed_registry() {
+    for withdrawal in [false, true] {
+        let (port, writes, stop) = controller().await;
+        let (dir, config) = static_house(port, false, true, true);
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let mut manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+        Arc::get_mut(&mut manager.0).unwrap().sync_directory = fail_directory_sync;
+        manager.start_configured().unwrap();
+        writable(&hub, true).await;
+        for expected in [false, true] {
+            if withdrawal {
+                let result = manager
+                    .commit_withdraw(INSTANCE.into(), "person".into())
+                    .await
+                    .unwrap();
+                assert!(!result.stored && !result.enabled && result.read_only);
+            } else {
+                let result = manager
+                    .commit_mode(INSTANCE.into(), mode(true, expected), "person".into())
+                    .await
+                    .unwrap();
+                assert!(!result.stored && result.read_only);
+            }
+            assert_eq!(command(&hub).await, Err(CommandError::ReadOnly));
+            let status = manager.list().await.unwrap().gateways.remove(0);
+            assert!(status.temporary_revocation && status.read_only);
+            assert!(
+                manager
+                    .persisted(&*manager.0.state.lock().await)
+                    .await
+                    .is_err()
+            );
+        }
+        // The rename already occurred; a retry must compare against these bytes,
+        // not the original absent registry, and require successful directory sync.
+        assert!(dir.join(FILE).is_file());
+        Arc::get_mut(&mut manager.0).unwrap().sync_directory = persistence::sync_directory;
+        let result = manager
+            .commit_mode(INSTANCE.into(), mode(true, true), "person".into())
+            .await
+            .unwrap();
+        assert!(result.stored && result.read_only);
+        let status = manager.list().await.unwrap().gateways.remove(0);
+        assert!(!status.temporary_revocation);
+        assert_eq!(status.enabled, !withdrawal);
+        assert_eq!(
+            read(&dir.join(FILE))["overrides"][0]["enabled"],
+            !withdrawal
+        );
+        assert!(
+            manager
+                .persisted(&*manager.0.state.lock().await)
+                .await
+                .is_ok()
+        );
+        assert_eq!(writes.load(Ordering::Relaxed), 0);
+        manager.shutdown().await;
+        stop.cancel();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn unsynced_authorization_keeps_read_only_and_warns_until_durable_revocation() {
+    let (port, writes, stop) = controller().await;
+    let (dir, config) = managed_read_only_house(port);
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let mut manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
+    Arc::get_mut(&mut manager.0).unwrap().sync_directory = fail_directory_sync;
+    manager.start_configured().unwrap();
+    writable(&hub, false).await;
+    assert_eq!(
+        manager
+            .commit_mode(INSTANCE.into(), mode(false, true), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "persistence_failed"
+    );
+    assert_eq!(command(&hub).await, Err(CommandError::ReadOnly));
+    let status = manager.list().await.unwrap().gateways.remove(0);
+    assert!(status.read_only && status.temporary_revocation);
+    // An uncertain grant on disk must not enable an idempotent replay in memory.
+    assert_eq!(read(&dir.join(FILE))["overrides"][0]["read_only"], false);
+    assert_eq!(
+        manager
+            .commit_mode(INSTANCE.into(), mode(false, true), "person".into())
+            .await
+            .unwrap_err()
+            .code,
+        "revocation_not_persisted"
+    );
+    Arc::get_mut(&mut manager.0).unwrap().sync_directory = persistence::sync_directory;
+    let revoked = manager
+        .commit_mode(INSTANCE.into(), mode(true, true), "person".into())
+        .await
+        .unwrap();
+    assert!(revoked.stored && revoked.read_only);
+    let status = manager.list().await.unwrap().gateways.remove(0);
+    assert!(status.read_only && !status.temporary_revocation);
+    assert_eq!(read(&dir.join(FILE))["overrides"][0]["read_only"], true);
+    assert_eq!(writes.load(Ordering::Relaxed), 0);
+    manager.shutdown().await;
+    stop.cancel();
     std::fs::remove_dir_all(dir).unwrap();
 }

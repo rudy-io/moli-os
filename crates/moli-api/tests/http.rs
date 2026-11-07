@@ -1983,7 +1983,7 @@ async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unaut
         (
             "POST",
             "/api/integrations/airzone/existing/mode",
-            Some(json!({"read_only":false,"expected_read_only":true})),
+            Some(json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
         ),
         (
             "POST",
@@ -2422,7 +2422,7 @@ async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismat
         (
             "POST",
             "/api/integrations/airzone/existing/mode",
-            Some(json!({"read_only":false,"expected_read_only":true})),
+            Some(json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
         ),
     ] {
         let hub = lamp_hub().await;
@@ -2701,7 +2701,7 @@ async fn airzone_mode_changes_require_exact_booleans_and_bound_the_request() {
         &addr,
         "POST",
         route,
-        Some(&json!({"read_only":false,"expected_read_only":true})),
+        Some(&json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
         &human,
     )
     .await;
@@ -3051,4 +3051,154 @@ async fn a_live_offer_reaches_the_device_and_its_answer_comes_back() {
     )
     .await;
     assert_eq!(status, 400, "{body}");
+}
+
+#[tokio::test]
+async fn airzone_control_requires_a_fresh_code_in_the_request_not_only_a_session() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let session = pin_session(&addr, "482915").await;
+    let human = format!("{session}x-moli-origin: ui\r\n");
+    let route = "/api/integrations/airzone/existing/mode";
+    for (body, status) in [
+        (json!({"read_only":false,"expected_read_only":true}), 403),
+        (
+            json!({"read_only":false,"expected_read_only":true,"pin":"000000"}),
+            401,
+        ),
+    ] {
+        assert_eq!(
+            request_with(&addr, "POST", route, Some(&body), &human)
+                .await
+                .0,
+            status
+        );
+        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+    let enabling = json!({"read_only":false,"expected_read_only":true,"pin":"482915"});
+    assert_eq!(
+        request_with(&addr, "POST", route, Some(&enabling), &session)
+            .await
+            .0,
+        403
+    );
+    let (status, body) = request_with(&addr, "POST", route, Some(&enabling), &human).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(!body.contains("482915"));
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"read_only":true,"expected_read_only":false})),
+            &human
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+}
+
+#[tokio::test]
+async fn airzone_control_denies_non_owners_even_with_the_code_but_allows_revocation() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            access: Some(serde_json::from_value(json!({"team":"example", "aud":"test-audience", "owners":["owner@example.org"]})).unwrap()),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let route = "/api/integrations/airzone/existing/mode";
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
+            &human
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"read_only":true,"expected_read_only":false})),
+            &human
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn airzone_fresh_code_attempts_share_the_session_lockout() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let route = "/api/integrations/airzone/existing/mode";
+    for _ in 0..5 {
+        assert_eq!(
+            request_with(
+                &addr,
+                "POST",
+                route,
+                Some(&json!({"read_only":false,"expected_read_only":true,"pin":"000000"})),
+                &human
+            )
+            .await
+            .0,
+            401
+        );
+    }
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            "/api/session",
+            Some(&json!({"pin":"482915"})),
+            ""
+        )
+        .await
+        .0,
+        429
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 }

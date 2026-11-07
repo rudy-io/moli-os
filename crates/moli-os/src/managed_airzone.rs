@@ -4,10 +4,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context as _, ensure};
@@ -26,11 +26,11 @@ use crate::config::{Config, DriverConfig};
 mod cloud;
 mod diagnostics;
 mod discovery;
+mod persistence;
 
 pub const FILE: &str = "airzone-gateways.json";
 const MAX_GATEWAYS: usize = 32;
 const MAX_BYTES: u64 = 65_536;
-static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -126,6 +126,34 @@ fn bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     Ok(Some(data))
 }
 
+/// Restrictions from the original TOML, captured before any sidecar overlay.
+#[derive(Clone, Copy, Debug, Default)]
+struct StaticPolicy {
+    disabled: bool,
+    read_only: bool,
+}
+impl StaticPolicy {
+    fn from_driver(driver: &DriverConfig) -> Self {
+        Self {
+            disabled: driver.enabled == Some(false),
+            read_only: driver
+                .options
+                .get("read_only")
+                .and_then(toml::Value::as_bool)
+                == Some(true),
+        }
+    }
+    const fn reason(self) -> Option<&'static str> {
+        if self.disabled {
+            Some("disabled")
+        } else if self.read_only {
+            Some("read_only")
+        } else {
+            None
+        }
+    }
+}
+
 /// Parsing is bounded, but entries are independent: one broken connection must
 /// not take the house down. A degraded registry is never eligible for rewriting.
 #[derive(Clone, Debug)]
@@ -135,6 +163,7 @@ pub(crate) struct Registry {
     editable: bool,
     suppressed: HashSet<String>,
     suppress_all: bool,
+    static_policy: HashMap<String, StaticPolicy>,
 }
 
 #[derive(Deserialize)]
@@ -159,6 +188,16 @@ impl Registry {
     fn reconcile_overrides(&mut self, configured: &mut [StaticGateway]) {
         let overrides = std::mem::take(&mut self.store.overrides);
         for entry in overrides {
+            let policy = self
+                .static_policy
+                .get(&entry.instance)
+                .copied()
+                .unwrap_or_default();
+            if policy.disabled {
+                // Disabled TOML may intentionally omit even required options.
+                self.store.overrides.push(entry);
+                continue;
+            }
             let current = configured
                 .iter_mut()
                 .find(|gateway| gateway.instance == entry.instance);
@@ -173,11 +212,12 @@ impl Registry {
                             && current.config.port == connection.port
                             && current.config.mac.as_deref() == Some(&connection.mac)
                             && current.config.tls_fingerprint == connection.tls_fingerprint
-                            && current.config.read_only == entry.read_only.unwrap_or(true)
+                            && current.config.read_only
+                                == (entry.read_only.unwrap_or(true) || policy.read_only)
                     })
-                    && entry
-                        .read_only
-                        .is_none_or(|read_only| current.config.read_only == read_only)
+                    && entry.read_only.is_none_or(|read_only| {
+                        current.config.read_only == (read_only || policy.read_only)
+                    })
             });
             if matches && !self.suppress_all {
                 self.store.overrides.push(entry);
@@ -271,6 +311,7 @@ fn read_store(path: &Path) -> Registry {
         editable: true,
         suppressed: HashSet::new(),
         suppress_all: false,
+        static_policy: HashMap::new(),
     };
     let Ok(raw) = bytes(path) else {
         registry.unreadable();
@@ -350,7 +391,11 @@ fn read_store(path: &Path) -> Registry {
     registry
 }
 
-fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<DriverConfig> {
+fn overlay(
+    driver: &DriverConfig,
+    entry: &GatewayOverride,
+    policy: StaticPolicy,
+) -> anyhow::Result<DriverConfig> {
     ensure!(
         driver.kind == "airzone",
         "override targets a different driver kind"
@@ -372,6 +417,9 @@ fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<Dri
     }
     if let Some(read_only) = entry.read_only {
         table.insert("read_only".into(), read_only.into());
+    }
+    if policy.read_only {
+        table.insert("read_only".into(), true.into());
     }
     moli_airzone::Airzone::new(options.clone().try_into()?)?;
     Ok(DriverConfig {
@@ -423,6 +471,12 @@ fn duplicates(candidate: &DriverConfig, drivers: &[DriverConfig], except: Option
 #[allow(clippy::unnecessary_wraps)] // Keep the configuration loader's fallible hook.
 pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
     let mut registry = read_store(&config.server.data_dir.join(FILE));
+    registry.static_policy = config
+        .drivers
+        .iter()
+        .filter(|driver| driver.kind == "airzone")
+        .map(|driver| (driver.id.clone(), StaticPolicy::from_driver(driver)))
+        .collect();
     for driver in &mut config.drivers {
         if driver.kind == "airzone"
             && (registry.suppress_all || registry.suppressed.contains(&driver.id))
@@ -442,7 +496,23 @@ pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
             );
             continue;
         };
-        let candidate = overlay(&config.drivers[index], &entry);
+        let policy = registry
+            .static_policy
+            .get(&entry.instance)
+            .copied()
+            .unwrap_or_default();
+        if policy.disabled {
+            // Keep a persisted revocation visible without validating options
+            // of a driver the static configuration explicitly disables.
+            if entry.read_only == Some(true)
+                && let Some(table) = config.drivers[index].options.as_table_mut()
+            {
+                table.insert("read_only".into(), true.into());
+            }
+            registry.store.overrides.push(entry);
+            continue;
+        }
+        let candidate = overlay(&config.drivers[index], &entry, policy);
         match candidate {
             Ok(candidate)
                 if !duplicates(&candidate, &config.drivers, Some(index))
@@ -565,27 +635,67 @@ fn gateway(request: &GatewayRequest, enabled: bool) -> Gateway {
 
 #[derive(Clone, Debug)]
 struct StaticGateway {
+    policy: StaticPolicy,
     instance: String,
     config: moli_airzone::Config,
     enabled: bool,
+}
+impl StaticGateway {
+    fn load(driver: &DriverConfig, registry: &Registry) -> anyhow::Result<Option<Self>> {
+        if driver.kind != "airzone" {
+            return Ok(None);
+        }
+        let native = match driver.options.clone().try_into::<moli_airzone::Config>() {
+            Ok(config) => config,
+            Err(_) if driver.enabled == Some(false) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Some(Self {
+            policy: registry
+                .static_policy
+                .get(&driver.id)
+                .copied()
+                .unwrap_or_else(|| StaticPolicy::from_driver(driver)),
+            instance: driver.id.clone(),
+            config: native,
+            enabled: driver.enabled != Some(false)
+                && !registry.suppress_all
+                && !registry.suppressed.contains(&driver.id),
+        }))
+    }
 }
 struct Running {
     cancel: CancellationToken,
     task: JoinHandle<()>,
 }
 struct EffectiveGateway {
+    policy: StaticPolicy,
     instance: String,
     config: moli_airzone::Config,
     enabled: bool,
     source: &'static str,
     withdrawn: bool,
 }
+#[derive(Clone, Copy)]
+enum Revocation {
+    ReadOnly,
+    Withdrawn,
+}
 struct State {
+    temporary: HashMap<String, Revocation>,
     store: Store,
     raw: Option<Vec<u8>>,
+    unconfirmed: bool,
     editable: bool,
 }
 impl State {
+    fn no_pending_revocation(&self, instance: &str) -> Result<(), SetupError> {
+        if self.temporary.contains_key(instance) {
+            Err(SetupError::new("revocation_not_persisted"))
+        } else {
+            Ok(())
+        }
+    }
     fn editable(&self) -> Result<(), SetupError> {
         if self.editable {
             Ok(())
@@ -600,6 +710,7 @@ struct Inner {
     cloud_cancel: CancellationToken,
     hub: Hub,
     path: PathBuf,
+    sync_directory: fn(&Path) -> std::io::Result<()>,
     reserved: HashSet<String>,
     configured: Vec<StaticGateway>,
     state: Arc<tokio::sync::Mutex<State>>,
@@ -663,14 +774,8 @@ impl Manager {
                 continue;
             }
             reserved.insert(driver.id.clone());
-            if driver.kind == "airzone" {
-                configured.push(StaticGateway {
-                    instance: driver.id.clone(),
-                    config: driver.options.clone().try_into()?,
-                    enabled: driver.enabled != Some(false)
-                        && !registry.suppress_all
-                        && !registry.suppressed.contains(&driver.id),
-                });
+            if let Some(gateway) = StaticGateway::load(driver, &registry)? {
+                configured.push(gateway);
             }
         }
         registry.reconcile_overrides(&mut configured);
@@ -686,9 +791,12 @@ impl Manager {
             cloud_cancel: cancel.child_token(),
             hub,
             path,
+            sync_directory: persistence::sync_directory,
             reserved,
             configured,
             state: Arc::new(tokio::sync::Mutex::new(State {
+                temporary: HashMap::new(),
+                unconfirmed: false,
                 store,
                 raw,
                 editable,
@@ -770,16 +878,20 @@ impl Manager {
                 if let Some(read_only) = overlay.and_then(|entry| entry.read_only) {
                     config.read_only = read_only;
                 }
+                config.read_only |= saved.policy.read_only;
                 EffectiveGateway {
+                    policy: saved.policy,
                     instance: saved.instance.clone(),
                     config,
-                    enabled: overlay.map_or(saved.enabled, |entry| entry.enabled),
+                    enabled: !saved.policy.disabled
+                        && overlay.map_or(saved.enabled, |entry| entry.enabled),
                     source: "configuration",
                     withdrawn: overlay.is_some_and(|entry| !entry.enabled),
                 }
             })
             .collect();
         gateways.extend(state.store.gateways.iter().map(|saved| EffectiveGateway {
+            policy: StaticPolicy::default(),
             instance: saved.instance.clone(),
             config: {
                 let mut config = native(&saved.request(), Some(saved.mac.clone()));
@@ -790,6 +902,15 @@ impl Manager {
             source: "moli",
             withdrawn: !saved.enabled,
         }));
+        for gateway in &mut gateways {
+            if let Some(revocation) = state.temporary.get(&gateway.instance) {
+                gateway.config.read_only = true;
+                if matches!(revocation, Revocation::Withdrawn) {
+                    gateway.enabled = false;
+                    gateway.withdrawn = true;
+                }
+            }
+        }
         gateways
     }
 
@@ -968,6 +1089,9 @@ impl Manager {
 
     async fn persisted(&self, state: &State) -> Result<(), SetupError> {
         state.editable()?;
+        if state.unconfirmed {
+            return Err(SetupError::new("persistence_failed"));
+        }
         let path = self.0.path.clone();
         let expected = state.raw.clone();
         let unchanged =
@@ -990,13 +1114,28 @@ impl Manager {
         let path = self.0.path.clone();
         let expected = state.raw.clone();
         let saved = next.clone();
-        let raw = tokio::task::spawn_blocking(move || save(&path, &saved, expected.as_deref()))
-            .await
-            .map_err(|_| SetupError::new("persistence_failed"))?
-            .map_err(|_| SetupError::new("persistence_failed"))?;
-        state.store = next;
-        state.raw = Some(raw);
-        Ok(())
+        let sync_directory = self.0.sync_directory;
+        let outcome = tokio::task::spawn_blocking(move || {
+            persistence::save(&path, &saved, expected.as_deref(), sync_directory)
+        })
+        .await
+        .map_err(|_| SetupError::new("persistence_failed"))?
+        .map_err(|_| SetupError::new("persistence_failed"))?;
+        match outcome {
+            persistence::SaveOutcome::Durable(raw) => {
+                state.store = next;
+                state.raw = Some(raw);
+                state.unconfirmed = false;
+                Ok(())
+            }
+            persistence::SaveOutcome::Unconfirmed(raw) => {
+                // The rename changed the conflict snapshot, but never confirms
+                // authority or clears a volatile revocation before durable sync.
+                state.raw = Some(raw);
+                state.unconfirmed = true;
+                Err(SetupError::new("persistence_failed"))
+            }
+        }
     }
 
     async fn commit(
@@ -1011,6 +1150,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.no_pending_revocation(&request.instance)?;
         state.editable()?;
         // A lost response may be retried after saving or after a process restart.
         if let Some(saved) = state
@@ -1077,6 +1217,9 @@ impl Manager {
         request: &GatewayRequest,
     ) -> Result<moli_airzone::GatewayProbe, SetupError> {
         let existing = self.existing(state, &request.instance)?;
+        if existing.policy.disabled {
+            return Err(SetupError::new("configuration_locked"));
+        }
         let known = self
             .known_mac(&existing)
             .ok_or_else(|| SetupError::new("identity_unavailable"))?;
@@ -1105,6 +1248,7 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
+        state.no_pending_revocation(&request.instance)?;
         state.editable()?;
         let current = self.existing(&state, &request.instance)?;
         let replay = current.config.read_only
@@ -1190,17 +1334,17 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
-        state.editable()?;
         let current = self.existing(&state, &instance)?;
-        let result = GatewayWithdrawn {
-            instance: instance.clone(),
-            stored: true,
-            enabled: false,
-            read_only: current.config.read_only,
-        };
-        if current.withdrawn {
-            self.persisted(&state).await?;
-            return Ok(result);
+        if current.withdrawn
+            && !state.temporary.contains_key(&instance)
+            && self.persisted(&state).await.is_ok()
+        {
+            return Ok(GatewayWithdrawn {
+                instance,
+                stored: true,
+                enabled: false,
+                read_only: current.config.read_only,
+            });
         }
         let mut next = state.store.clone();
         if let Some(saved) = next
@@ -1209,39 +1353,55 @@ impl Manager {
             .find(|saved| saved.instance == instance)
         {
             saved.enabled = false;
+            saved.read_only |= current.config.read_only;
         } else if let Some(saved) = next
             .overrides
             .iter_mut()
             .find(|saved| saved.instance == instance)
         {
             saved.enabled = false;
+            if current.config.read_only {
+                saved.read_only = Some(true);
+            }
         } else {
             next.overrides.push(GatewayOverride {
                 instance: instance.clone(),
                 enabled: false,
                 mac: self.known_mac(&current),
                 connection: None,
-                read_only: None,
+                read_only: current.config.read_only.then_some(true),
             });
         }
-        let saved = self.persist(&mut state, next).await;
-        if saved.is_ok() {
-            self.stop(&instance).await;
+        // Revocation cannot depend on the filesystem. Stop/drain before trying
+        // persistence, and never turn an unsaved withdrawal into a restart.
+        self.stop(&instance).await;
+        let stored = self.persist(&mut state, next).await.is_ok();
+        if stored {
+            state.temporary.remove(&instance);
+        } else {
+            state
+                .temporary
+                .insert(instance.clone(), Revocation::Withdrawn);
         }
+        let read_only = current.config.read_only || !stored;
         self.0.hub.record_driver_configured(
             InstanceId::from(instance.as_str()),
             "airzone",
             false,
-            current.config.read_only,
+            read_only,
             Some(actor),
-            if saved.is_ok() {
+            if stored {
                 Outcome::Ok
             } else {
-                Outcome::Err("persistence_failed".into())
+                Outcome::Err(moli_i18n::tr!("airzone_gateways.temporary_warning"))
             },
         );
-        saved?;
-        Ok(result)
+        Ok(GatewayWithdrawn {
+            instance,
+            stored,
+            enabled: false,
+            read_only,
+        })
     }
 
     fn mode_store(
@@ -1257,12 +1417,18 @@ impl Manager {
             .find(|saved| saved.instance == current.instance)
         {
             saved.read_only = read_only;
+            if current.withdrawn {
+                saved.enabled = false;
+            }
         } else if let Some(saved) = next
             .overrides
             .iter_mut()
             .find(|saved| saved.instance == current.instance)
         {
             saved.read_only = Some(read_only);
+            if current.withdrawn {
+                saved.enabled = false;
+            }
             if mac.is_some() {
                 saved.mac = mac;
             }
@@ -1291,17 +1457,27 @@ impl Manager {
             .clone()
             .try_lock_owned()
             .map_err(|_| SetupError::new("busy"))?;
-        state.editable()?;
         let current = self.existing(&state, &instance)?;
         if request.expected_read_only != current.config.read_only {
             return Err(SetupError::new("mode_conflict"));
         }
-        if !request.read_only && !current.enabled {
-            return Err(SetupError::new("gateway_disabled"));
+        if !request.read_only {
+            state.no_pending_revocation(&instance)?;
+            state.editable()?;
+            if current.policy.reason().is_some() {
+                return Err(SetupError::new("configuration_locked"));
+            }
+            if !current.enabled {
+                return Err(SetupError::new("gateway_disabled"));
+            }
         }
-        if request.read_only == current.config.read_only {
-            self.persisted(&state).await?;
-            return Ok(self.mode_result(&current, request.read_only));
+        if request.read_only == current.config.read_only && !state.temporary.contains_key(&instance)
+        {
+            match self.persisted(&state).await {
+                Ok(()) => return Ok(self.mode_result(&current, request.read_only, true)),
+                Err(error) if !request.read_only => return Err(error),
+                Err(_) => {} // Still enforce a revocation whose persistence cannot be confirmed.
+            }
         }
         let mac = self.known_mac(&current);
         if !request.read_only {
@@ -1323,12 +1499,32 @@ impl Manager {
         config.mac = mac.clone();
         let driver =
             moli_airzone::Airzone::new(config).map_err(|_| SetupError::new("probe_failed"))?;
+        if request.read_only {
+            self.stop(&instance).await;
+        }
         let next = Self::mode_store(&state, &current, request.read_only, mac);
         let saved = self.persist(&mut state, next).await;
-        if saved.is_ok() {
-            // Acknowledgement waits for the former supervisor and queued
-            // commands to finish; unregistering also revokes offline metadata.
-            self.stop(&instance).await;
+        let stored = saved.is_ok();
+        if !stored && !request.read_only && state.unconfirmed {
+            // A failed grant may already be on disk. Its previous read-only
+            // supervisor stays in place; require a durable revocation before
+            // accepting another grant and expose the restart uncertainty.
+            state
+                .temporary
+                .insert(instance.clone(), Revocation::ReadOnly);
+        }
+        if stored || request.read_only {
+            if stored {
+                state.temporary.remove(&instance);
+            } else {
+                state
+                    .temporary
+                    .entry(instance.clone())
+                    .or_insert(Revocation::ReadOnly);
+            }
+            if !request.read_only {
+                self.stop(&instance).await;
+            }
             if current.enabled {
                 self.start(&instance, driver);
             }
@@ -1337,22 +1533,31 @@ impl Manager {
             InstanceId::from(instance.as_str()),
             "airzone",
             current.enabled,
-            request.read_only,
+            request.read_only || !stored,
             Some(actor),
-            if saved.is_ok() {
+            if stored {
                 Outcome::Ok
+            } else if request.read_only {
+                Outcome::Err(moli_i18n::tr!("airzone_gateways.temporary_warning"))
             } else {
                 Outcome::Err("persistence_failed".into())
             },
         );
-        saved?;
-        Ok(self.mode_result(&current, request.read_only))
+        if !request.read_only {
+            saved?;
+        }
+        Ok(self.mode_result(&current, request.read_only, stored))
     }
 
-    fn mode_result(&self, gateway: &EffectiveGateway, read_only: bool) -> GatewayModeChanged {
+    fn mode_result(
+        &self,
+        gateway: &EffectiveGateway,
+        read_only: bool,
+        stored: bool,
+    ) -> GatewayModeChanged {
         GatewayModeChanged {
             instance: gateway.instance.clone(),
-            stored: true,
+            stored,
             read_only,
             running: self
                 .0
@@ -1478,6 +1683,8 @@ impl AirzoneSetup for Manager {
                 .map(|gateway| {
                     let mac = self.known_mac(&gateway);
                     GatewayStatus {
+                        temporary_revocation: state.temporary.contains_key(&gateway.instance),
+                        configuration_lock: gateway.policy.reason(),
                         running: drivers
                             .get(&gateway.instance)
                             .is_some_and(|running| !running.task.is_finished()),
@@ -1617,49 +1824,6 @@ impl AirzoneSetup for Manager {
                 .await
         })
     }
-}
-
-fn save(path: &Path, store: &Store, expected: Option<&[u8]>) -> std::io::Result<Vec<u8>> {
-    if bytes(path)?.as_deref() != expected {
-        return Err(std::io::Error::other(
-            "Airzone registry changed outside this operation",
-        ));
-    }
-    let raw = serde_json::to_vec_pretty(store).map_err(std::io::Error::other)?;
-    if raw.len() as u64 > MAX_BYTES {
-        return Err(std::io::Error::other("Airzone registry exceeds its bound"));
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("missing registry directory"))?;
-    let aside = parent.join(format!(
-        ".airzone-gateways-{}-{}.new",
-        std::process::id(),
-        NEXT_FILE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&aside)?;
-        file.write_all(&raw)?;
-        file.sync_all()?;
-        std::fs::rename(&aside, path)?;
-        // File contents are synced before the atomic replacement. A best-effort
-        // directory sync also retains the rename across a power failure.
-        if let Ok(directory) = std::fs::File::open(parent) {
-            let _ = directory.sync_all();
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&aside);
-    }
-    result.map(|()| raw)
 }
 
 #[cfg(test)]

@@ -75,6 +75,18 @@ export function powerPoint(device, writable = true) {
   return point?.key ?? null;
 }
 
+/** A Zigbee thermostatic valve (SONOFF TRVZB, TRV-ZBT) states its setpoint the
+ *  ZCL way, never as an air conditioner's `target_temperature`. Recognised by
+ *  what it exposes, nothing is declared. Zigbee2MQTT thermostats only: a valve
+ *  on another protocol may name its points differently (a Z-Wave Danfoss has
+ *  `temperature` and a setpoint but no `system_mode`) and is not matched. */
+export const isValve = (device) => !!pointOf(device, 'occupied_heating_setpoint') && !!pointOf(device, 'system_mode');
+
+/** The points a climate device is read and ordered through. */
+export const climateKeys = (device) => isValve(device)
+  ? { temperature: 'local_temperature', target: 'occupied_heating_setpoint', mode: 'system_mode' }
+  : { temperature: 'temperature', target: 'target_temperature', mode: 'mode' };
+
 const BRIDGE_KINDS = new Map([
   ['Airzone system', 'climate'],
   ['Overkiz RollerShutter', 'cover'],

@@ -172,6 +172,86 @@ async fn play(answer: bool) -> (u32, Vec<i16>) {
     (params.sample_rate.unwrap(), samples)
 }
 
+/// The device's button stops a request; what the device receives then.
+#[derive(Debug)]
+struct Stopped {
+    thinking: bool,
+    events: mpsc::Sender<u64>,
+}
+
+impl Driver for Stopped {
+    fn kind(&self) -> &'static str {
+        "esphome-stop-test"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let client = TcpStream::connect(listener.local_addr()?).await?;
+            let (device, _) = listener.accept().await?;
+            let (initiator, first) = noise::Initiator::start(&[0; 32], noise::PROLOGUE)?;
+            let (second, responder) = noise::respond(&[0; 32], noise::PROLOGUE, &first)?;
+            let session = initiator.finish(&second)?;
+            let (_, write) = client.into_split();
+            let mut tx = frame::Sender::new(write, session.send);
+            let mut rx = frame::Receiver::new(device, responder.receive);
+            let (mut voice, _) = Voice::new(
+                Duration::from_secs(8),
+                Some("http://media.example.test".to_owned()),
+                moli_core::DeviceId::from("esphome:aabbccddeeff"),
+            );
+            let id = ctx.device_id("aabbccddeeff");
+            voice.run = Some(Run {
+                vad: Vad::default(),
+                pcm: Vec::new(),
+                length: Duration::ZERO,
+                speech_by: None,
+                ended: self.thinking,
+            });
+            let stop = VoiceRequest::default();
+            voice.on_request(ctx, &id, &mut tx, &stop).await?;
+            assert!(voice.run.is_none());
+            let (kind, payload) = rx.next().await?;
+            assert_eq!(kind, api::VOICE_EVENT);
+            let event = proto::parse(&payload).unwrap().uint(1).unwrap();
+            self.events.send(event).await?;
+            ctx.cancelled().await;
+            Ok(())
+        })
+    }
+}
+
+async fn event_after_a_stop(thinking: bool) -> u64 {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let (events, mut received) = mpsc::channel(1);
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("voice"),
+        Arc::new(Stopped { thinking, events }),
+        cancel.clone(),
+    );
+    let event = tokio::time::timeout(Duration::from_secs(3), received.recv())
+        .await
+        .expect("an event")
+        .unwrap();
+    cancel.cancel();
+    event
+}
+
+/// The firmware leaves « waiting for a response » only on RUN_END: without
+/// it, the device blinks for good and no longer hears its wake word.
+#[tokio::test]
+async fn a_stop_while_thinking_ends_the_run_for_the_device() {
+    assert_eq!(event_after_a_stop(true).await, VoiceEvent::RunEnd as u64);
+}
+
+/// RUN_END also resets the lights of a stop while listening.
+#[tokio::test]
+async fn a_stop_while_listening_ends_the_run_for_the_device() {
+    assert_eq!(event_after_a_stop(false).await, VoiceEvent::RunEnd as u64);
+}
+
 #[tokio::test]
 async fn a_conversation_answer_reaches_a_flac_only_player() {
     let (rate, samples) = play(true).await;

@@ -551,3 +551,31 @@ test('coloured cards describe the reported mode separately from actual demand an
   source.state.on.value=false;assert.match(renderCard({state:'current',received:1000,age:0}),/data-tone="neutral" data-demand="false"/);
  }
 });
+
+test('gateway cards explain static locks and disable only the prohibited actions',async()=>{
+  const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
+  const gateway={instance:'airzone-example',host:'172.31.1.1',port:3000,enabled:true,source:'configuration',read_only:true,running:true};
+  for (const configuration_lock of ['read_only','disabled']) {
+    const html=render(Card,{props:{gateway:{...gateway,configuration_lock}}}).body;
+    assert.match(text(html),/fichier de configuration Moli/);
+    assert.match(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
+    if(configuration_lock==='disabled') assert.match(tags(html,'button').find(tag=>/class="manage/.test(tag)),/disabled/);
+  }
+});
+
+test('temporary revocation cards warn about restart and expose saving instead of control',async()=>{
+  const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
+  for(const [language,warning,retry,grant] of [
+    ['fr',/peut être perdu au redémarrage/,/Réessayer l’enregistrement/,/Autoriser le pilotage/],
+    ['en',/may be lost when Moli restarts/,/Retry saving/,/Authorize control/],
+  ]) {
+    await words.setLanguage(language);
+    for(const enabled of [false,true]) {
+      const gateway={instance:'airzone-example',host:'172.31.1.1',port:3000,enabled,source:'moli',read_only:true,running:enabled,temporary_revocation:true};
+      const html=render(Card,{props:{gateway}}).body;
+      assert.match(text(html),warning);assert.match(text(html),retry);assert.doesNotMatch(text(html),grant);
+      assert.doesNotMatch(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
+      assert.match(tags(html,'button').find(tag=>/class="manage/.test(tag)),/disabled/);
+    }
+  }
+});

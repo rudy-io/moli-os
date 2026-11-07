@@ -78,5 +78,12 @@
   "airzone_add.error.gateway_disabled": "Cette connexion est en pause. Vérifiez-la avant de la réactiver.",
   "airzone_add.error.unaddressable_instance": "Les identifiants historiques « . » et « .. » restent visibles, mais leur gestion depuis cette page nécessite une migration de configuration.",
   "airzone_add.error.mode_conflict": "Le mode a changé dans une autre fenêtre. La liste a été actualisée ; choisissez à nouveau votre action.",
-  "airzone_add.error.invalid_mode": "Le mode demandé est invalide. Actualisez la liste avant de réessayer."
+  "airzone_add.error.invalid_mode": "Le mode demandé est invalide. Actualisez la liste avant de réessayer.",
+  "airzone_add.error.owner_required": "Seul un propriétaire peut autoriser le pilotage.",
+  "airzone_add.error.pin_required": "Saisissez à nouveau votre code Moli pour autoriser le pilotage.",
+  "airzone_add.error.invalid_pin": "Le code Moli est incorrect.",
+  "airzone_add.error.pin_rate_limited": "Trop de tentatives. Patientez avant de réessayer.",
+  "airzone_add.error.pin_disabled": "Configurez un code Moli avant d’autoriser le pilotage.",
+  "airzone_add.error.configuration_locked": "Le fichier de configuration interdit cette autorisation.",
+  "airzone_add.error.revocation_not_persisted": "La révocation n’a pas été enregistrée. Réessayez son enregistrement avant de modifier cette passerelle."
 }

@@ -3,6 +3,8 @@
   import { t } from '../../lib/i18n.svelte.js';
   import LightTile from '../ui/LightTile.svelte';
   import ClimateCard from '../ui/ClimateCard.svelte';
+  import ValveCard from '../ui/ValveCard.svelte';
+  import { isValve } from '../lib/capabilities.js';
   import CameraTile from '../ui/CameraTile.svelte';
   import CoverTile from '../ui/CoverTile.svelte';
   import SpeakerCard from '../ui/SpeakerCard.svelte';
@@ -23,6 +25,8 @@
   <WeatherCard />
 {:else if kind === 'camera'}
   <CameraTile {id} name={title ?? cam?.name ?? nameOf(id)} refresh={cam?.refresh ?? 10} battery={cam?.battery} onopen={() => (location.hash = '#/cameras')} />
+{:else if kind === 'climate' && isValve(d)}
+  <ValveCard {id} name={title ?? nameOf(id)} />
 {:else if kind === 'climate'}
   <ClimateCard {id} name={title ?? nameOf(id)} />
 {:else if kind === 'speaker'}

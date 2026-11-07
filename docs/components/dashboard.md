@@ -53,7 +53,7 @@ Le choix d’un résultat vérifie à nouveau son identité avant d’afficher u
 
 Le code Moli existant protège l’accès à la recherche et aux modifications de connexion. La demande de code décrit une recherche réseau lorsque c’est l’action demandée. Le succès confirme l’enregistrement, sans annoncer que toutes les zones ont déjà répondu. L’édition et la réactivation gardent l’identité existante. Les autres fenêtres reconnaissent le nouveau pilote grâce à `driver_registered`.
 
-La page Installation affiche le mode réel de chaque passerelle et propose **Autoriser le pilotage** ou **Revenir en lecture seule**. Chaque changement demande une confirmation explicite puis le code Moli, même si le navigateur dispose déjà d'une session. L'autorisation couvre les zones et commandes compatibles de cette passerelle ; les autres intégrations restent inchangées. Le retour en lecture seule bloque les futures commandes Moli sans changer le chauffage en cours. Une passerelle en pause doit être réactivée avant d'autoriser le pilotage ; sa révocation reste possible hors ligne. Le serveur arbitre les changements concurrents : une liste devenue obsolète est rechargée avant une nouvelle confirmation.
+La page Installation affiche le mode réel de chaque passerelle et propose **Autoriser le pilotage** ou **Revenir en lecture seule**. Chaque changement demande une confirmation explicite. L’autorisation de pilotage exige un propriétaire et un code Moli vérifié à nouveau par le serveur ; la révocation utilise la session humaine existante. Les restrictions explicites du fichier TOML sont indiquées sur la carte et ne peuvent pas être levées depuis cette interface. L'autorisation couvre les zones et commandes compatibles de cette passerelle ; les autres intégrations restent inchangées. Le retour en lecture seule bloque les futures commandes Moli sans changer le chauffage en cours. Une passerelle en pause doit être réactivée avant d'autoriser le pilotage ; sa révocation reste possible hors ligne. Le serveur arbitre les changements concurrents : une liste devenue obsolète est rechargée avant une nouvelle confirmation.
 
 Le pilotage autorisé est accessible dans la fiche Airzone ainsi que dans les cartes de commande existantes de Pièces et dans Atelier ; aucun réglage physique n'est envoyé par le bouton d'autorisation. Les ajouts, modifications de connexion et réactivations démarrent toujours en lecture seule. Une passerelle ajoutée depuis Moli conserve le périmètre historique (`on`, consigne, mode et ventilation) après autorisation. Les commandes étendues exigent une instance explicitement configurée avec `write = "extended"` ; le bouton ne change pas cette option.
 
@@ -185,3 +185,29 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
 - Télé : applis et clavier non disponibles (JointSpace ne le permet pas ; protocole
   Android TV Remote v2 à faire).
 - Clims : lecture seule tant que les écritures Daikin n'ont pas été testées physiquement.
+- **Vannes thermostatiques** : une vanne **Zigbee2MQTT** (SONOFF TRVZB, TRV-ZBT) est un climat
+  reconnu à ses points `occupied_heating_setpoint` et `system_mode`, sans rien déclarer. Sa carte
+  (`ui/ValveCard.svelte`) montre la température mesurée (`local_temperature`), la consigne (bornes
+  et pas lus dans le point) et les modes que la vanne accepte ; chaque ordre passe par le chemin
+  normal du hub, donc par la garde. Une vanne d'un autre
+  protocole peut nommer ses points autrement : une Danfoss Z-Wave expose `temperature` et
+  `occupied_heating_setpoint` mais pas `system_mode`, elle n'est pas reconnue.
+  La **table horaire** (`ui/ScheduleEditor.svelte`, calcul pur dans `lib/schedule.js`) s'ouvre sous
+  la carte quand la vanne énonce `weekly_schedule_<jour>` en écriture : un jour à la fois, les
+  créneaux `HH:mm/°C`, un « appliquer aussi à » pour d'autres jours. Chaque jour écrit est un ordre
+  comme un autre (`act`, donc la garde). Les bornes de température sont celles de la consigne de la
+  vanne ; le nombre de créneaux par jour n'est pas un point : 6 (SONOFF TRVZB), 12 si la vanne a
+  des groupes de programmes (TRV-ZBT), d'après les convertisseurs de Zigbee2MQTT. Une TRVZB ne
+  renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
+  garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
+  quand ce n'est pas le groupe suivi par la vanne.
+  La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
+  ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
+  échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
+  n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
+
+Si le registre Airzone ne peut pas être écrit, revenir en lecture seule ou retirer
+une passerelle bloque tout de même ses commandes. La carte indique que ce changement
+n’est pas enregistré et peut être perdu au redémarrage ; elle propose de réessayer
+l’enregistrement. Elle ne propose ni pilotage ni réactivation tant que cette
+révocation reste temporaire.

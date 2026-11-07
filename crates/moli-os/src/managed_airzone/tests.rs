@@ -533,7 +533,7 @@ async fn withdrawal_survives_restart_and_reactivation_requires_the_same_gateway(
 }
 
 #[tokio::test]
-async fn a_failed_withdrawal_save_keeps_the_existing_supervisor_active() {
+async fn a_failed_withdrawal_save_stops_supervision_and_reports_the_unsaved_revocation() {
     let (dir, config) = house();
     let (port, _, stop) = controller().await;
     let cancel = CancellationToken::new();
@@ -554,16 +554,16 @@ async fn a_failed_withdrawal_save_keeps_the_existing_supervisor_active() {
         "persistence_failed"
     );
     assert_eq!(manager.list().await.unwrap().gateways[0].port, port);
-    assert_eq!(
-        manager
+    assert!(
+        !manager
             .withdraw("airzone-added".into(), "person".into())
             .await
-            .unwrap_err()
-            .code,
-        "persistence_failed"
+            .unwrap()
+            .stored
     );
-    assert_eq!(hub.snapshot().drivers.len(), 1);
-    assert!(manager.list().await.unwrap().gateways[0].enabled);
+    assert!(hub.snapshot().drivers.is_empty());
+    let status = manager.list().await.unwrap().gateways.remove(0);
+    assert!(!status.enabled && !status.running && status.temporary_revocation);
     cancel.cancel();
     manager.shutdown().await;
     stop.cancel();
@@ -859,13 +859,12 @@ async fn unreadable_registry_preserves_other_drivers_and_blocks_managed_edits() 
                 .code,
             "persistence_failed"
         );
-        assert_eq!(
-            manager
+        assert!(
+            !manager
                 .withdraw("configured".into(), "person".into())
                 .await
-                .unwrap_err()
-                .code,
-            "persistence_failed"
+                .unwrap()
+                .stored
         );
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
         cancel.cancel();
@@ -986,13 +985,12 @@ async fn partial_registry_skips_bad_entries_without_reviving_a_withdrawn_driver(
             .unwrap()
             .enabled
     );
-    assert_eq!(
-        manager
+    assert!(
+        !manager
             .withdraw("healthy-managed".into(), "person".into())
             .await
-            .unwrap_err()
-            .code,
-        "persistence_failed"
+            .unwrap()
+            .stored
     );
     assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
     manager.shutdown().await;
@@ -1051,13 +1049,12 @@ async fn conflicting_registry_entry_cannot_claim_an_identical_toml_driver() {
         assert_eq!(list.gateways.len(), 1);
         assert_eq!(list.gateways[0].source, "configuration");
         assert_eq!(list.gateways[0].enabled, enabled);
-        assert_eq!(
-            manager
+        assert!(
+            !manager
                 .withdraw("configured".into(), "person".into())
                 .await
-                .unwrap_err()
-                .code,
-            "persistence_failed"
+                .unwrap()
+                .stored
         );
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
         manager.shutdown().await;

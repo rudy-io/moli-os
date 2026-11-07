@@ -78,5 +78,12 @@
   "airzone_add.error.gateway_disabled": "This connection is paused. Check it before resuming.",
   "airzone_add.error.unaddressable_instance": "Legacy identifiers “.” and “..” remain visible, but managing them from this page requires a configuration migration.",
   "airzone_add.error.mode_conflict": "The mode changed in another window. The list was refreshed; choose your action again.",
-  "airzone_add.error.invalid_mode": "The requested mode is invalid. Refresh the list before trying again."
+  "airzone_add.error.invalid_mode": "The requested mode is invalid. Refresh the list before trying again.",
+  "airzone_add.error.owner_required": "Only an owner can authorize control.",
+  "airzone_add.error.pin_required": "Enter your Moli code again to authorize control.",
+  "airzone_add.error.invalid_pin": "The Moli code is incorrect.",
+  "airzone_add.error.pin_rate_limited": "Too many attempts. Wait before trying again.",
+  "airzone_add.error.pin_disabled": "Set up a Moli code before authorizing control.",
+  "airzone_add.error.configuration_locked": "The configuration file prevents this authorization.",
+  "airzone_add.error.revocation_not_persisted": "The revocation has not been saved. Retry saving it before changing this gateway."
 }
