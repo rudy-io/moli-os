@@ -14,6 +14,7 @@
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
+  import LitRing from '../ui/LitRing.svelte';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
@@ -182,7 +183,7 @@
   <div class="grid">
     <section class="card lights">
       <div class="card-head">
-        <h2><Icon name="light" size={18} />{t('maison.accueil.lumieres')} <span class="count">{litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')}</span></h2>
+        <h2>{#if lights.length}<LitRing on={litCount} total={lights.length} label={litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')} />{:else}<Icon name="light" size={18} />{/if}{t('maison.accueil.lumieres')} <span class="count">{litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')}</span></h2>
         <a class="more" href="#/pieces" aria-label={t('maison.accueil.toutes_pieces')}><Icon name="arrow-top-right" size={18} /></a>
       </div>
       <div class="tiles">
