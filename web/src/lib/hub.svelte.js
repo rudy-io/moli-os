@@ -223,9 +223,18 @@ function watchBuild() {
     }
     reloadIfQuiet();
   };
-  setInterval(check, 5 * 60 * 1000);
+  setInterval(check, 2 * 60 * 1000);
   setInterval(reloadIfQuiet, 30 * 1000);
   document.addEventListener('visibilitychange', reloadIfQuiet);
+  // Back on the page (the phone app reopened, the tab shown again): look
+  // at once, and a new build loads now, before anyone starts tapping.
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    await check();
+    if (stale && !document.querySelector('[data-unsaved]') && !drafted()) location.reload();
+  });
+  addEventListener('pageshow', (e) => e.persisted && check());
+  check();
 }
 
 function toast(text) {
