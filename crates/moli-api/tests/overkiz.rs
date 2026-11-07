@@ -26,10 +26,19 @@ impl Server {
         Self::mode(name, cloud, true).await
     }
     async fn mode(name: &str, cloud: bool, read_only: bool) -> Self {
+        Self::options(name, cloud, read_only, None).await
+    }
+    async fn with_private_file(name: &str, cloud: bool, private: Option<&[u8]>) -> Self {
+        Self::options(name, cloud, true, private).await
+    }
+    async fn options(name: &str, cloud: bool, read_only: bool, private: Option<&[u8]>) -> Self {
         let dir =
             std::env::temp_dir().join(format!("moli-cloud-api-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        if let Some(bytes) = private {
+            std::fs::write(dir.join("private-state.enc"), bytes).unwrap();
+        }
         let hub = Hub::new(HubOptions {
             secrets: Some((
                 dir.join("secrets.enc"),
@@ -137,6 +146,7 @@ async fn private_cloud_routes_require_owner_before_body_or_vault() {
             format!("{ROOT}/fixture/definitions/scenarios/0?revision=x"),
         ),
         ("POST", format!("{ROOT}/fixture/requests")),
+        ("DELETE", format!("{ROOT}/fixture")),
     ] {
         let (status, headers, body) = server
             .request(method, &path, "{SENTINEL_PASSWORD", "")
@@ -148,7 +158,9 @@ async fn private_cloud_routes_require_owner_before_body_or_vault() {
     let pin = server.pin().await;
     let (status, _, body) = server.json("GET", ROOT, Value::Null, &pin).await;
     assert_eq!(status, 200);
-    assert_eq!(body, json!({"instances":[]}));
+    assert_eq!(body["instances"][0]["instance"], "fixture");
+    assert_eq!(body["instances"][0]["configured"], false);
+    assert!(!body.to_string().contains("PRIVATE_BROKEN_RECORD"));
 }
 
 async fn store(server: &Server, key: &str, value: &Value) {
@@ -228,10 +240,14 @@ async fn configured_instances_queue_atomic_fixed_key_and_redact_invalid_input() 
         .await;
     assert_eq!(status, 202);
     assert!(body["request_id"].as_str().is_some_and(|v| !v.is_empty()));
-    let saved = server
-        .hub
-        .secret(&"fixture".into(), "cloud_pending_v1")
-        .unwrap();
+    let private = server.hub.private_state(&"fixture".into()).unwrap();
+    let saved = private.get("cloud_pending_v1").unwrap();
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
     let request = moli_overkiz::cloud::decode_request(saved.as_bytes()).unwrap();
     assert_eq!(request.request_id, body["request_id"]);
     assert_eq!(
@@ -246,13 +262,7 @@ async fn configured_instances_queue_atomic_fixed_key_and_redact_invalid_input() 
             .0,
         409
     );
-    assert_eq!(
-        server
-            .hub
-            .secret(&"fixture".into(), "cloud_pending_v1")
-            .unwrap(),
-        saved
-    );
+    assert_eq!(private.get("cloud_pending_v1").unwrap(), saved);
     assert!(
         server
             .hub
@@ -393,11 +403,437 @@ async fn recognized_owner_is_allowed_but_guest_member_and_pin_are_not_owners() {
             assert_eq!(status, 403);
             assert!(!body.contains("SENTINEL") && !body.contains("site-fixture"));
         }
+        let (status, _, body) = server
+            .request("DELETE", &format!("{ROOT}/fixture"), "", &identity)
+            .await;
+        assert_eq!(status, 403);
+        assert!(!body.contains("SENTINEL") && !body.contains("site-fixture"));
     }
     let (status, _, _) = server.json("GET", ROOT, Value::Null, &owner).await;
     assert_eq!(status, 200);
     let (_, _, denied) = server.json("GET", ROOT, Value::Null, &pin).await;
     assert_eq!(denied["auth_policy"], "owner_account");
+}
+
+const CLOUD_KEYS: [&str; 4] = [
+    "cloud_session_v1",
+    "cloud_pending_v1",
+    "cloud_state_v1",
+    "cloud_inventory_v1",
+];
+
+#[tokio::test]
+async fn owner_disconnect_purges_legacy_cloud_after_configuration_removal_only_for_its_instance() {
+    for configured in [false, true] {
+        let server =
+            Server::configured(&format!("disconnect-legacy-{configured}"), configured).await;
+        let pin = server.pin().await;
+        seed(&server).await;
+        let instance = "fixture".into();
+        server
+            .hub
+            .store_secret(&instance, "cloud_pending_v1", "PRIVATE_PENDING")
+            .await
+            .unwrap();
+        for name in ["token", "tls_fingerprint", "cloud_session_v1_extra"] {
+            server
+                .hub
+                .store_secret(&instance, name, "NATIVE_SENTINEL")
+                .await
+                .unwrap();
+        }
+        server
+            .hub
+            .store_secret(
+                &"other".into(),
+                "cloud_session_v1",
+                "OTHER_PRIVATE_SENTINEL",
+            )
+            .await
+            .unwrap();
+        let (status, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+        assert_eq!(status, 200);
+        let row = list["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["instance"] == "fixture")
+            .unwrap();
+        assert_eq!(row["configured"], configured);
+        assert_eq!(row["online"], false);
+        assert!(!list.to_string().contains("SENTINEL"));
+        let (status, headers, body) = server
+            .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+            .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body, json!({"disconnected":true}));
+        assert!(headers.contains("no-store"));
+        for name in CLOUD_KEYS {
+            assert!(
+                server.hub.secret(&instance, name).is_none(),
+                "retained {name}"
+            );
+        }
+        for name in ["token", "tls_fingerprint", "cloud_session_v1_extra"] {
+            assert_eq!(
+                server.hub.secret(&instance, name).as_deref(),
+                Some("NATIVE_SENTINEL")
+            );
+        }
+        assert_eq!(
+            server
+                .hub
+                .secret(&"other".into(), "cloud_session_v1")
+                .as_deref(),
+            Some("OTHER_PRIVATE_SENTINEL")
+        );
+        let (_, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+        let rows = list["instances"].as_array().unwrap();
+        assert!(rows.iter().any(|row| row["instance"] == "other"));
+        let retained = rows.iter().find(|row| row["instance"] == "fixture");
+        if configured {
+            let retained = retained.unwrap();
+            assert_eq!(retained["configured"], true);
+            assert_eq!(retained["state"]["phase"], "disconnected");
+            assert_eq!(retained["online"], false);
+        } else {
+            assert!(
+                retained.is_none(),
+                "an orphan is no longer discoverable after purge"
+            );
+        }
+        assert_eq!(
+            server
+                .request("DELETE", &format!("{ROOT}/unknown"), "", &pin)
+                .await
+                .0,
+            404
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_disconnect_never_claims_success_when_the_vault_cannot_be_locked() {
+    let server = Server::new("disconnect-locked").await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    let path = server.dir.join("secrets.enc");
+    let original = std::fs::read(&path).unwrap();
+    let lock = server.dir.join("secrets.enc.lock");
+    std::fs::remove_file(&lock).unwrap();
+    std::fs::create_dir(&lock).unwrap();
+    let (status, _, raw) = server
+        .request("DELETE", &format!("{ROOT}/fixture"), "", &pin)
+        .await;
+    assert_eq!(status, 503);
+    let body: Value = serde_json::from_str(&raw).unwrap();
+    assert_ne!(body["disconnected"], true);
+    assert!(!body.to_string().contains("SENTINEL"));
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_session_v1")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn owner_can_disconnect_an_orphan_present_only_in_the_encrypted_private_cache() {
+    let server = Server::new("disconnect-private").await;
+    let pin = server.pin().await;
+    let instance = "fixture".into();
+    let state = server.hub.private_state(&instance).unwrap();
+    state
+        .set_if_changed(
+            CLOUD_KEYS[1..]
+                .iter()
+                .map(|name| {
+                    (
+                        name.to_string(),
+                        "PRIVATE_RECORD".into(),
+                        "PRIVATE_RECORD".into(),
+                    )
+                })
+                .collect(),
+        )
+        .await
+        .unwrap();
+    let other = server.hub.private_state(&"other".into()).unwrap();
+    other
+        .set_if_changed(vec![(
+            "cloud_inventory_v1".into(),
+            "OTHER_PRIVATE_RECORD".into(),
+            "OTHER_PRIVATE_RECORD".into(),
+        )])
+        .await
+        .unwrap();
+    let (_, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+    let rows = list["instances"].as_array().unwrap();
+    let row = rows
+        .iter()
+        .find(|row| row["instance"] == "fixture")
+        .unwrap();
+    assert_eq!(row["configured"], false);
+    assert_eq!(row["online"], false);
+    assert!(!list.to_string().contains("PRIVATE_RECORD"));
+    let (status, _, body) = server
+        .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({"disconnected":true}));
+    let fresh = server.hub.private_state(&instance).unwrap();
+    for name in &CLOUD_KEYS[1..] {
+        assert!(
+            state.get(name).is_none(),
+            "old handles cannot expose the purged account"
+        );
+        assert!(fresh.get(name).is_none());
+    }
+    assert!(
+        state
+            .store_secret("cloud_session_v1", "LATE_SENTINEL")
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        other.get("cloud_inventory_v1").as_deref(),
+        Some("OTHER_PRIVATE_RECORD")
+    );
+    let (_, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+    let rows = list["instances"].as_array().unwrap();
+    assert!(!rows.iter().any(|row| row["instance"] == "fixture"));
+    assert!(rows.iter().any(|row| row["instance"] == "other"));
+}
+
+#[tokio::test]
+async fn removed_configuration_exposes_only_stale_cached_reads_and_never_queues_requests() {
+    let server = Server::new("orphan-read-only").await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    let task = moli_runtime::spawn_driver(
+        &server.hub,
+        "fixture".into(),
+        std::sync::Arc::new(Summary),
+        CancellationToken::new(),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while server
+            .hub
+            .device(&"fixture:cloud:summary".into())
+            .is_none_or(|d| d.online != Some(true))
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (status, _, body) = server
+        .json("GET", &format!("{ROOT}/fixture/catalog"), Value::Null, &pin)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["freshness"]["current"], false);
+    assert_eq!(body["freshness"]["collections"]["scenarios"], false);
+    let (_, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+    assert_eq!(list["instances"][0]["configured"], false);
+    assert_eq!(list["instances"][0]["online"], false);
+    for input in [
+        json!({"kind":"login","username":"fixture@example.com","password":"ORPHAN_PASSWORD_SENTINEL"}),
+        json!({"kind":"refresh","generation":"generation-a"}),
+    ] {
+        let (status, _, body) = server
+            .json("POST", &format!("{ROOT}/fixture/requests"), input, &pin)
+            .await;
+        assert_eq!(status, 404);
+        assert!(!body.to_string().contains("SENTINEL"));
+    }
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
+    assert!(
+        server
+            .hub
+            .private_state(&"fixture".into())
+            .unwrap()
+            .get("cloud_pending_v1")
+            .is_none()
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn private_cache_takes_precedence_over_legacy_values_even_when_the_new_value_is_invalid() {
+    let server = Server::configured("private-precedence", true).await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    let private = server.hub.private_state(&"fixture".into()).unwrap();
+    private
+        .set_if_changed(vec![(
+            "cloud_inventory_v1".into(),
+            "PRIVATE_INVALID".into(),
+            "PRIVATE_INVALID".into(),
+        )])
+        .await
+        .unwrap();
+    let (status, _, body) = server
+        .request("GET", &format!("{ROOT}/fixture/catalog"), "", &pin)
+        .await;
+    assert_eq!(
+        status, 503,
+        "a malformed current record must not revive an older catalogue"
+    );
+    assert!(!body.contains("PRIVATE_INVALID") && !body.contains("SENTINEL"));
+}
+
+#[tokio::test]
+async fn unreadable_private_cache_does_not_trap_credentials_or_hide_an_unfinished_disconnect() {
+    for configured in [false, true] {
+        let server = Server::with_private_file(
+            if configured {
+                "disconnect-corrupt-configured"
+            } else {
+                "disconnect-corrupt-orphan"
+            },
+            configured,
+            Some(b"PRIVATE_CORRUPT_CACHE"),
+        )
+        .await;
+        let pin = server.pin().await;
+        seed(&server).await;
+        let instance = "fixture".into();
+        server
+            .hub
+            .store_secret(&instance, "token", "NATIVE_SENTINEL")
+            .await
+            .unwrap();
+        server
+            .hub
+            .store_secret(&"other".into(), "cloud_session_v1", "OTHER_SENTINEL")
+            .await
+            .unwrap();
+        assert!(server.hub.private_state(&instance).is_none());
+        let before = std::fs::read(server.dir.join("private-state.enc")).unwrap();
+        let (status, _, body) = server
+            .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+            .await;
+        assert_eq!(status, 503);
+        assert_eq!(body["error"], "cache_unavailable");
+        assert_eq!(body["credentials_removed"], true);
+        assert_ne!(body["disconnected"], true);
+        for name in CLOUD_KEYS {
+            assert!(server.hub.secret(&instance, name).is_none());
+        }
+        assert_eq!(
+            server.hub.secret(&instance, "token").as_deref(),
+            Some("NATIVE_SENTINEL")
+        );
+        assert_eq!(
+            server
+                .hub
+                .secret(&"other".into(), "cloud_session_v1")
+                .as_deref(),
+            Some("OTHER_SENTINEL")
+        );
+        assert_eq!(
+            std::fs::read(server.dir.join("private-state.enc")).unwrap(),
+            before,
+            "an unreadable shared file must not be destroyed"
+        );
+        let (_, _, list) = server.json("GET", ROOT, Value::Null, &pin).await;
+        let row = list["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["instance"] == "fixture")
+            .expect("partial cleanup remains discoverable");
+        assert_eq!(row["configured"], configured);
+        assert_eq!(row["cleanup_pending"], true);
+        assert_eq!(row["online"], false);
+        assert!(
+            !list.to_string().contains("SENTINEL") && !list.to_string().contains("PRIVATE_CORRUPT")
+        );
+        let (status, _, body) = server
+            .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+            .await;
+        assert_eq!(
+            status, 503,
+            "the owner can retry the same orphan rather than receive404"
+        );
+        assert_eq!(body["credentials_removed"], true);
+        if configured {
+            let (status, _, body) = server
+                .request(
+                    "POST",
+                    &format!("{ROOT}/fixture/requests"),
+                    "invalid body",
+                    &pin,
+                )
+                .await;
+            assert_eq!(
+                status, 503,
+                "cleanup blocks reconnection before parsing input"
+            );
+            let body: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(body["error"], "cache_unavailable");
+            assert_eq!(body["credentials_removed"], true);
+            assert!(server.hub.secret(&instance, "cloud_pending_v1").is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn disconnect_rejects_a_request_whose_body_was_still_arriving() {
+    let server = Server::configured("disconnect-slow-input", true).await;
+    let pin = server.pin().await;
+    let body = r#"{"kind":"refresh","generation":"generation-a"}"#;
+    let mut stream = tokio::net::TcpStream::connect(&server.addr).await.unwrap();
+    let head = format!(
+        "POST {ROOT}/fixture/requests HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: application/json\r\nCookie: {pin}\r\nExpect: 100-continue\r\nContent-Length: {}\r\n\r\n",
+        server.addr,
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    // Hyper emits Continue when the authenticated handler polls the body.
+    // This barrier avoids using sleeps to order the request and the purge.
+    let mut continued = vec![0; b"HTTP/1.1 100 Continue\r\n\r\n".len()];
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read_exact(&mut continued),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(continued, b"HTTP/1.1 100 Continue\r\n\r\n");
+    let (status, _, result) = server
+        .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(result["disconnected"], true);
+    stream.write_all(body.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read_to_end(&mut response),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(
+        response.starts_with("HTTP/1.1 503"),
+        "retired request: {response}"
+    );
+    assert!(
+        server
+            .hub
+            .private_state(&"fixture".into())
+            .unwrap()
+            .get("cloud_pending_v1")
+            .is_none()
+    );
 }
 
 struct Summary;
@@ -657,7 +1093,9 @@ async fn scenario_permission_requires_fresh_pin_and_respects_global_read_only() 
     assert!(
         server
             .hub
-            .secret(&"fixture".into(), "cloud_pending_v1")
+            .private_state(&"fixture".into())
+            .unwrap()
+            .get("cloud_pending_v1")
             .is_none()
     );
     correct["enabled"] = json!(false);
@@ -666,7 +1104,9 @@ async fn scenario_permission_requires_fresh_pin_and_respects_global_read_only() 
     assert!(result["request_id"].is_string());
     let saved = server
         .hub
-        .secret(&"fixture".into(), "cloud_pending_v1")
+        .private_state(&"fixture".into())
+        .unwrap()
+        .get("cloud_pending_v1")
         .unwrap();
     assert!(!saved.contains("482915") && !saved.contains("pin"));
     let envelope = moli_overkiz::cloud::decode_request(saved.as_bytes()).unwrap();
@@ -690,7 +1130,9 @@ async fn generic_observation_requests_cannot_bypass_permission_pin() {
     assert!(
         server
             .hub
-            .secret(&"fixture".into(), "cloud_pending_v1")
+            .private_state(&"fixture".into())
+            .unwrap()
+            .get("cloud_pending_v1")
             .is_none()
     );
 }
@@ -719,7 +1161,9 @@ async fn consent_rejects_stale_catalogues_and_pin_brute_force_without_queueing()
     assert!(
         server
             .hub
-            .secret(&"fixture".into(), "cloud_pending_v1")
+            .private_state(&"fixture".into())
+            .unwrap()
+            .get("cloud_pending_v1")
             .is_none()
     );
     assert_eq!(
@@ -782,7 +1226,9 @@ async fn enabling_requires_the_exact_current_revision_and_known_scenario() {
     assert_eq!(server.json("POST", &path, request, &cookie).await.0, 202);
     let queued = server
         .hub
-        .secret(&"fixture".into(), "cloud_pending_v1")
+        .private_state(&"fixture".into())
+        .unwrap()
+        .get("cloud_pending_v1")
         .unwrap();
     assert!(!queued.contains("482915"));
     let request = moli_overkiz::cloud::decode_request(queued.as_bytes()).unwrap();

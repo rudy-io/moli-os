@@ -72,15 +72,17 @@ pub(super) async fn update(
         scenario_id: request.scenario_id,
         enabled: request.enabled,
     };
-    enqueue(&owner, &id, queued).await
+    let Some(state) = owner.hub.private_state(&id) else {
+        return super::unavailable();
+    };
+    enqueue(&owner, &id, &state, queued).await
 }
 
 impl Owner {
     pub(super) fn execution(&self, cached: &Cached) -> execution::ExecutionView {
         let instance = InstanceId::from(cached.catalog.instance.clone());
         let policy = self
-            .hub
-            .secret(&instance, execution::POLICY_KEY)
+            .record(&instance, execution::POLICY_KEY)
             .and_then(|value| Policy::decode(value.as_bytes()).ok())
             .unwrap_or_default();
         let mut view = execution::view_at_revision(

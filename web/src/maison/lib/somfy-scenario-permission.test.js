@@ -91,3 +91,93 @@ test('timeout after permission acceptance retains a parent error with no retry',
   assert.equal(posts, 1);
   observer.stop();
 });
+
+const executableCatalogue = () => ({ revision: 'revision', freshness: { current: true, collections: { scenarios: true } }, catalog: {}, execution: { read_only: false, scenarios: [{ id: 'demo', permitted: true, executable: true, point: 'fixture/run', value: 'revision-token' }] } });
+
+test('permission errors accept the parent API error field and retire capabilities on a changed catalogue', async () => {
+  for (const [status, code] of [[401, 'invalid_pin'], [409, 'catalog_changed'], [403, 'global_read_only']]) {
+    let view;
+    const observer = createCloudObserver(v => view = v, async (url, options) => {
+      if (options.method === 'POST') return Response.json({ error: code }, { status });
+      return Response.json(url.endsWith('/catalog') ? executableCatalogue() : { instances: [{ instance: 'demo', online: true, state }] });
+    });
+    await observer.open();
+    const before = view.catalogText;
+    assert.equal(await observer.permission(input()), code);
+    assert.equal(view.auth, 'owner');
+    assert.equal(view.catalogText, before, 'the last observation remains available for inspection');
+    if (code !== 'invalid_pin') {
+      assert.equal(view.catalog.execution, null);
+      assert.equal(view.catalog.freshness.current, false);
+    }
+    observer.stop();
+  }
+});
+
+test('starting a disconnect retires execution immediately even when deletion later fails', async () => {
+  let view, finish;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'DELETE') return new Promise(resolve => { finish = resolve; });
+    return Response.json(url.endsWith('/catalog') ? executableCatalogue() : { instances: [{ instance: 'demo', configured: true, online: true, state }] });
+  });
+  await observer.open();
+  const before = view.catalogText;
+  const pending = observer.disconnect();
+  const retiredAtStart = view.catalog.execution === null && view.catalog.freshness.current === false;
+  finish(Response.json({}, { status: 503 }));
+  await pending;
+  assert.equal(retiredAtStart, true);
+  assert.equal(view.catalogText, before);
+  assert.equal(view.catalog.execution, null);
+  assert.equal(view.notice, '');
+  assert.equal(view.error, 'unavailable');
+  observer.stop();
+});
+
+test('a lost source, removed config or cleanup marker cannot retain executable catalogue data', async () => {
+  for (const patch of [{ online: false }, { configured: false }, { cleanup_pending: true }]) {
+    let view, updated = false;
+    const observer = createCloudObserver(v => view = v, async url => Response.json(url.endsWith('/catalog') ? executableCatalogue()
+      : { instances: [{ instance: 'demo', configured: true, online: true, state, ...(updated ? patch : {}) }] }));
+    await observer.open();
+    updated = true;
+    await observer.load();
+    if (patch.cleanup_pending) {
+      assert.equal(view.catalog, null);
+      assert.equal(view.catalogText, '');
+    } else {
+      assert.equal(view.catalog.execution, null);
+      assert.equal(view.catalog.freshness.current, false);
+    }
+    observer.stop();
+  }
+});
+
+test('a permission refusal confirming credential removal clears data and blocks another PIN request', async () => {
+  let view, posts = 0;
+  const observer = createCloudObserver(v => view = v, async (url, options) => {
+    if (options.method === 'POST') { posts++; return Response.json({ error: 'cache_unavailable', credentials_removed: true }, { status: 503 }); }
+    return Response.json(url.endsWith('/catalog') ? executableCatalogue() : { instances: [{ instance: 'demo', configured: true, online: true, state }] });
+  });
+  await observer.open();
+  assert.equal(await observer.permission(input()), 'cache_unavailable');
+  assert.equal(view.catalog, null);
+  assert.equal(view.catalogText, '');
+  assert.equal(view.instances[0].cleanup_pending, true);
+  await observer.permission(input());
+  assert.equal(posts, 1);
+  observer.stop();
+});
+
+test('an unavailable scenario collection does not turn fresh calendar observations into stale data', async () => {
+  let view;
+  const data = executableCatalogue();
+  data.freshness.collections = { scenarios: false, calendar_rules: true };
+  const observer = createCloudObserver(v => view = v, async url => Response.json(url.endsWith('/catalog') ? data
+    : { instances: [{ instance: 'demo', configured: true, online: true, state }] }));
+  await observer.open();
+  assert.equal(view.catalog.execution, null);
+  assert.equal(view.catalog.freshness.current, true);
+  assert.equal(view.catalog.freshness.collections.calendar_rules, true);
+  observer.stop();
+});

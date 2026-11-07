@@ -559,18 +559,18 @@ async fn rate_limit_preserves_previous_success_and_stops_further_network_until_d
     assert_eq!(t.entries().len(), before);
 }
 #[test]
-fn retry_after_validates_http_dates_and_preserves_advertised_seconds() {
+fn retry_after_validates_http_dates_and_caps_advertised_seconds() {
     use super::client::retry_after;
     let now = 784_111_777_000; // Sun, 06 Nov 1994 08:49:37 GMT
     assert_eq!(retry_after(Some("Sun, 06 Nov 1994 08:51:37 GMT"), now), 120);
     assert_eq!(retry_after(Some("Sun, 06 Nov 1994 08:00:00 GMT"), now), 0);
-    assert_eq!(retry_after(Some("999999999"), now), 999_999_999);
+    assert_eq!(retry_after(Some("999999999"), now), 3600);
     for value in ["Sunday, 06-Nov-94 08:51:37 GMT", "Sun Nov  6 08:51:37 1994"] {
         assert_eq!(retry_after(Some(value), now), 120);
     }
     assert_eq!(
         retry_after(Some("Mon, 07 Nov 1994 08:49:37 GMT"), now),
-        86_400
+        3600
     );
     for value in ["-1", "garbage", "Sun, 99 Nov 1994 08:51:37 GMT", "1.5"] {
         assert_eq!(retry_after(Some(value), now), 60);
@@ -1022,9 +1022,9 @@ async fn gateway_entry_and_flattened_directory_limits_reject_whole_discovery() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn advertised_retry_after_is_never_shortened_including_unrepresentable_delay() {
+async fn advertised_retry_after_is_capped_to_one_hour_including_overflow() {
     for seconds in [86_400, u64::MAX] {
-        let reads = vec![
+        let mut reads = vec![
             gate(),
             Ok(Response {
                 status: 429,
@@ -1032,24 +1032,28 @@ async fn advertised_retry_after_is_never_shortened_including_unrepresentable_del
                 body: b"{}".to_vec(),
             }),
         ];
-        let (mut c, mut s, t) = scoped(reads).await;
+        reads.extend(cycle_empty());
+        let (mut c, mut sink, trace) = scoped(reads).await;
         let mut inventory = catalog(&c);
         assert_eq!(
-            c.read_cycle(&mut inventory, &mut s).await,
+            c.read_cycle(&mut inventory, &mut sink).await,
             Err(Error::RateLimited {
-                retry_after_secs: seconds
+                retry_after_secs: 3600
             })
         );
-        assert_eq!(c.state().retry_after_secs, Some(seconds));
-        tokio::time::advance(std::time::Duration::from_secs(3600)).await;
-        let count = t.entries().len();
+        assert_eq!(c.state().retry_after_secs, Some(3600));
+        tokio::time::advance(std::time::Duration::from_secs(3599)).await;
+        let before = trace.entries().len();
         assert!(matches!(
-            c.read_cycle(&mut inventory, &mut s).await,
+            c.read_cycle(&mut inventory, &mut sink).await,
             Err(Error::RateLimited { .. })
         ));
-        assert_eq!(count, t.entries().len());
+        assert_eq!(trace.entries().len(), before);
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        assert_eq!(c.state().retry_after_secs, None);
     }
 }
+
 #[tokio::test]
 async fn zero_retry_after_still_stops_current_cycle_without_fanning_out() {
     let (mut c, mut s, t) = scoped(vec![
@@ -1284,6 +1288,127 @@ async fn review_outer_selection_timeout_is_recorded_in_connection_failure() {
     assert_eq!(select(&mut c, &mut sink, None).await, Err(Error::Deadline));
     assert_eq!(before.elapsed(), std::time::Duration::from_secs(90));
     assert_eq!(c.state().failure, Some(Error::Deadline));
+}
+
+#[tokio::test]
+async fn predispatch_refresh_failure_restores_exact_session_before_retry() {
+    let (mut c, mut sink, trace) =
+        scoped(vec![Err(Error::NotDispatched), token("next", "r3")]).await;
+    let before = sink.saved.last().unwrap().clone();
+    assert_eq!(c.refresh(&mut sink).await, Err(Error::NotDispatched));
+    assert_eq!(sink.saved.last(), Some(&before));
+    assert_eq!(c.state().phase, super::ConnectionPhase::Unavailable);
+    c.refresh(&mut sink).await.unwrap();
+    assert_eq!(
+        trace
+            .entries()
+            .iter()
+            .filter(
+                |entry| entry.starts_with("request:Refresh") && entry.contains("refresh_token=r2")
+            )
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn predispatch_rollback_must_be_acknowledged_before_any_new_request() {
+    let (mut c, mut sink, trace) =
+        scoped(vec![Err(Error::NotDispatched), token("next", "r3")]).await;
+    sink.fail_at = Some(sink.calls + 2);
+    assert_eq!(c.refresh(&mut sink).await, Err(Error::Persistence));
+    assert_eq!(c.state().phase, super::ConnectionPhase::PersistencePending);
+    let requests = trace
+        .entries()
+        .iter()
+        .filter(|entry| entry.starts_with("request:"))
+        .count();
+    sink.fail_at = Some(sink.calls + 1);
+    assert_eq!(c.refresh(&mut sink).await, Err(Error::Persistence));
+    assert_eq!(
+        trace
+            .entries()
+            .iter()
+            .filter(|entry| entry.starts_with("request:"))
+            .count(),
+        requests
+    );
+    sink.fail_at = None;
+    c.retry_persistence(&mut sink).await.unwrap();
+    c.refresh(&mut sink).await.unwrap();
+}
+
+#[tokio::test]
+async fn dispatched_refresh_server_failure_still_retires_old_token() {
+    let (mut c, mut sink, trace) = scoped(vec![response(503, json!({}))]).await;
+    assert_eq!(c.refresh(&mut sink).await, Err(Error::LoginRequired));
+    let count = trace.entries().len();
+    assert_eq!(c.refresh(&mut sink).await, Err(Error::LoginRequired));
+    assert_eq!(trace.entries().len(), count);
+}
+
+#[tokio::test(start_paused = true)]
+async fn discovery_failures_back_off_increasingly_and_unchanged_success_does_not_save_session() {
+    for status in [403, 503, 200] {
+        let mut replies = vec![
+            token("account", "unused"),
+            response(
+                200,
+                json!({"access_token":"long", "refresh_token":"r1", "expires_in":86400}),
+            ),
+            directory("FR"),
+        ];
+        for _ in 0..8 {
+            replies.push(if status == 200 {
+                response(200, json!({"totalCount":201,"results":[]}))
+            } else {
+                response(status, json!({}))
+            });
+        }
+        replies.push(directory("FR"));
+        replies.push(directory("FR"));
+        let (mut c, mut sink, trace) = client(replies);
+        login(&mut c, &mut sink).await;
+        let saved = sink.calls;
+        for delay in [60, 120, 240, 480, 960, 1920, 3600, 3600] {
+            assert!(c.discover(&mut sink).await.is_err());
+            assert_eq!(c.state().retry_after_secs, Some(delay));
+            let count = trace.entries().len();
+            assert!(matches!(
+                c.discover(&mut sink).await,
+                Err(Error::RateLimited { .. })
+            ));
+            assert_eq!(trace.entries().len(), count);
+            assert_eq!(sink.calls, saved);
+            tokio::time::advance(std::time::Duration::from_secs(delay)).await;
+        }
+        c.discover(&mut sink).await.unwrap();
+        c.discover(&mut sink).await.unwrap();
+        assert_eq!(
+            sink.calls, saved,
+            "unchanged directory must not rewrite the vault"
+        );
+        assert_eq!(c.state().retry_after_secs, None);
+    }
+}
+
+#[test]
+fn persisted_retry_after_and_failure_are_capped_on_decode() {
+    let state = ConnectionState {
+        retry_after_secs: Some(u64::MAX),
+        failure: Some(Error::RateLimited {
+            retry_after_secs: u64::MAX,
+        }),
+        ..Default::default()
+    };
+    let decoded = decode_state(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(decoded.retry_after_secs, Some(3600));
+    assert_eq!(
+        decoded.failure,
+        Some(Error::RateLimited {
+            retry_after_secs: 3600
+        })
+    );
 }
 
 #[path = "scenario_transport_tests.rs"]

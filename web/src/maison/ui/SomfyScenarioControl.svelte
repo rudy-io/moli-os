@@ -6,7 +6,10 @@
   import Icon from './Icon.svelte';
   let { observation, definition, generation, pending = false, permission } = $props();
   const control = $derived(scenarioControl(observation, definition.id, hub.devices, hub.connected));
-  const identity = $derived(`${generation}:${observation.revision}:${definition.id}:${control.permitted}`);
+  const identity = $derived(JSON.stringify([generation, observation.revision, definition.id, control.permitted,
+    control.executable, control.reason, control.point, control.value, observation.execution?.read_only, pending]));
+  const canConfigure = $derived(!pending && (control.permitted || control.reason === 'permission_required'));
+  let contextVersion = 0;
   let opened = $state(false);
   let pin = $state('');
   let consent = $state(false);
@@ -15,29 +18,34 @@
   let outcome = $state('');
   let error = $state('');
   let pinInput;
-  $effect(() => { identity; opened = false; pin = ''; consent = false; intent = null; outcome = ''; error = ''; });
-  $effect(() => { if (opened && !control.permitted && control.reason !== 'permission_required') { opened = false; pin = ''; consent = false; } });
+  $effect(() => { identity; contextVersion++; opened = false; pin = ''; consent = false; intent = null; outcome = ''; error = ''; });
+  $effect(() => () => { contextVersion++; pin = ''; consent = false; intent = null; });
   async function configure() {
+    if (busy || !canConfigure) return;
     opened = !opened; pin = ''; consent = false; outcome = ''; error = '';
     if (opened) { intent = !control.permitted; await tick(); pinInput?.focus(); }
   }
   async function save(event) {
     event.preventDefault();
-    if (busy || pending || !consent || !pin) return;
+    if (busy || !canConfigure || !opened || !consent || !pin) return;
     if (intent !== !control.permitted) { opened = false; pin = ''; consent = false; return; }
     busy = true;
+    const before = contextVersion;
     const input = { generation, revision: observation.revision, scenario_id: definition.id, enabled: intent, pin };
     pin = '';
-    try { error = await permission(input); if (!error) opened = false; }
+    try {
+      const result = await permission(input);
+      if (contextVersion === before) { error = result; if (!error) opened = false; }
+    }
     finally { input.pin = ''; busy = false; }
   }
   async function launch() {
     if (busy || pending || !control.executable) return;
     busy = true; outcome = '';
-    const before = identity;
+    const before = contextVersion;
     try {
       const result = await launchScenario(observation, definition.id, hub.devices, hub.connected, act, definition.label ?? t('systeme.somfy.scenario.label'));
-      if (identity === before) outcome = ['ok', 'held', 'error', 'unavailable'].includes(result) ? result : 'error';
+      if (contextVersion === before) outcome = ['ok', 'held', 'error', 'unavailable'].includes(result) ? result : 'error';
     } finally { busy = false; }
   }
 </script>

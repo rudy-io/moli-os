@@ -129,6 +129,19 @@ impl DriverCtx {
         self.hub.has_secret_store()
     }
 
+    /// Durable protocol snapshots, scoped to this instance. Synchronous writes
+    /// must run on a blocking worker; no second vault or master key is needed.
+    #[must_use]
+    pub fn durable_secrets(&self) -> Option<crate::DurableSecrets> {
+        self.hub.durable_secrets(&self.instance)
+    }
+
+    /// Instance-scoped cached data, separate from credential checkpoints.
+    #[must_use]
+    pub fn private_state(&self) -> Option<crate::PrivateState> {
+        self.hub.private_state(&self.instance)
+    }
+
     /// A secret previously stored by this instance.
     #[must_use]
     pub fn secret(&self, name: &str) -> Option<String> {

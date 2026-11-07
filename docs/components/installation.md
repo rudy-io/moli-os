@@ -63,9 +63,10 @@ Ne jamais ouvrir le port 8790 sur Internet. Deux façons sûres :
   `[server.access]` de `moli.toml` (`team`, `aud`, et `owners` pour les e-mails qui peuvent choisir le code
   sans connaître l'actuel). Voir [api.md](api.md).
 
-Jamais de proxy inverse sur la même machine (Nginx, Caddy, `tailscale serve`…) devant Moli : tout le
-monde y paraîtrait local, donc de la maison. Moli refuse d'ailleurs une requête locale qui dit avoir été
-relayée.
+Jamais de proxy inverse devant Moli (Nginx, Caddy, Traefik, `tailscale serve`…), ni sur la même machine
+ni sur une autre du réseau : tout le monde y paraîtrait local ou de la maison. Moli traite d'ailleurs
+toute requête qui dit avoir été relayée (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) comme venue de
+l'extérieur : seules la page de connexion et la connexion par mot de passe y répondent.
 
 ## Changer ou retrouver le code
 

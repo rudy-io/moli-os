@@ -4,10 +4,11 @@
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
+  import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
-  import { canWrite, pointOf } from '../lib/capabilities.js';
+  import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
   import { climateMode } from '../lib/climate.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
@@ -289,20 +290,21 @@
   {/each}
 
   {#each room.climates as d (d.id)}
-    {@const mode = pointOf(d, 'mode') ? value(d.id, 'mode') : null}
+    {@const keys = climateKeys(d)}
+    {@const mode = pointOf(d, keys.mode) ? value(d.id, keys.mode) : null}
     {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
-    {@const temperature = pointOf(d, 'temperature') ? value(d.id, 'temperature') : null}
-    {@const target = pointOf(d, 'target_temperature') ? value(d.id, 'target_temperature') : null}
+    {@const temperature = pointOf(d, keys.temperature) ? value(d.id, keys.temperature) : null}
+    {@const target = pointOf(d, keys.target) ? value(d.id, keys.target) : null}
     <button class="clim" class:on={on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
       <Icon name="air-conditioner" size={18} />
       <b>{nameOf(d.id)}</b>
       {#if Number.isFinite(temperature) || Number.isFinite(target)}
-        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, 'temperature')?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, 'target_temperature')?.unit ?? ''}{/if}</span>
+        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, keys.temperature)?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, keys.target)?.unit ?? ''}{/if}</span>
       {/if}
       <span class="state">{climateState(on, mode)}</span>
     </button>
     {#if openClim === d.id}
-      <ClimateCard id={d.id} name={nameOf(d.id)} />
+      {#if isValve(d)}<ValveCard id={d.id} name={nameOf(d.id)} />{:else}<ClimateCard id={d.id} name={nameOf(d.id)} />{/if}
     {/if}
   {/each}
 

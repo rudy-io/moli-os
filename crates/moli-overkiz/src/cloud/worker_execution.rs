@@ -13,7 +13,7 @@ impl Controller {
                 || self.busy
                 || self.job.is_some()
                 || !self.gate.open()
-                || ctx.secret(super::super::PENDING_KEY).is_some()
+                || super::super::storage::cached(ctx, super::super::PENDING_KEY).is_some()
                 || command.abandoned()
             {
                 return Err(Error::Forbidden);
@@ -22,8 +22,7 @@ impl Controller {
             if !execution::fresh(&catalog, self.poll.as_secs()) {
                 return Err(Error::ScopeMismatch);
             }
-            let policy = ctx
-                .secret(execution::POLICY_KEY)
+            let policy = super::super::storage::cached(ctx, execution::POLICY_KEY)
                 .and_then(|s| Policy::decode(s.as_bytes()).ok())
                 .unwrap_or_default();
             execution::resolve(
@@ -64,8 +63,7 @@ impl Controller {
                 super::super::read_session_binding(s.as_bytes(), ctx.instance().as_str()).ok()
             })
             .ok_or(Error::ScopeMismatch)?;
-        let bytes = ctx
-            .secret(inventory::INVENTORY_KEY)
+        let bytes = super::super::storage::cached(ctx, inventory::INVENTORY_KEY)
             .ok_or(Error::ScopeMismatch)?;
         let catalog =
             inventory::decode_catalog(bytes.as_bytes()).map_err(|_| Error::ScopeMismatch)?;
@@ -92,8 +90,7 @@ impl Controller {
         state.request_id = Some(envelope.request_id);
         let stored = Self::execution_catalog(ctx).ok();
         let catalog = stored.as_ref().map(|(catalog, _)| catalog.clone());
-        let mut policy = ctx
-            .secret(execution::POLICY_KEY)
+        let mut policy = super::super::storage::cached(ctx, execution::POLICY_KEY)
             .and_then(|s| Policy::decode(s.as_bytes()).ok())
             .unwrap_or_default();
         let result = (|| {
@@ -122,17 +119,15 @@ impl Controller {
         let mut values = vec![];
         match result {
             Ok(encoded) => {
-                values.push((execution::POLICY_KEY.into(), encoded));
+                values.push((execution::POLICY_KEY.into(), encoded.clone(), encoded));
                 state.failure = None;
             }
             Err(error) => state.failure = Some(error),
         }
-        let Ok(encoded) = super::super::encode_state(&state)
-            .and_then(|b| String::from_utf8(b).map_err(|_| Error::InvalidResponse))
-        else {
+        let Ok(snapshot) = super::super::storage::snapshot(&state, None) else {
             return;
         };
-        values.push((super::super::STATE_KEY.into(), encoded));
+        values.extend(snapshot);
         let observed = self.live;
         self.live = false;
         execution::publish(
@@ -143,7 +138,7 @@ impl Controller {
             self.poll.as_secs(),
         );
         self.job = Some(Job {
-            task: JobTask::Write(ctx.store_secrets_job(values)),
+            task: JobTask::Write(self.store_cache(values)),
             kind: JobKind::Cycle {
                 epoch: self.epoch,
                 state: Box::new(state),

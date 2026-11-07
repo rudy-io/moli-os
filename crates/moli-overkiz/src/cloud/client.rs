@@ -74,7 +74,7 @@ impl<T: Transport> CloudClient<T> {
                 .session
                 .as_ref()
                 .map_or_else(Vec::new, |s| s.candidates.clone()),
-            failure: self.failure,
+            failure: self.failure.map(Error::public_failure),
             last_attempt_ms: None,
             last_observation_ms: None,
             retry_after_secs: self.retry_remaining(),
@@ -276,7 +276,7 @@ impl<T: Transport> CloudClient<T> {
         let result = tokio::time::timeout(CYCLE_LIMIT, self.discover_inner(sink))
             .await
             .unwrap_or(Err(Error::Deadline));
-        self.failure = result.as_ref().err().copied();
+        self.record_read_result(&result);
         result
     }
     async fn discover_inner(&mut self, sink: &mut impl SessionSink) -> Result<(), Error> {
@@ -347,6 +347,7 @@ impl<T: Transport> CloudClient<T> {
         }
         super::types::validate_candidates(&candidates)?;
         let session = self.session.as_mut().ok_or(Error::LoginRequired)?;
+        let old_scope = session.scope.clone();
         if session.scope.as_ref().is_some_and(|scope| {
             !candidates
                 .iter()
@@ -355,8 +356,8 @@ impl<T: Transport> CloudClient<T> {
             session.scope = None;
             self.verified = false;
         }
+        self.dirty |= session.candidates != candidates || session.scope != old_scope;
         session.candidates = candidates;
-        self.dirty = true;
         self.persist(sink).await
     }
     pub(crate) async fn select_site(
@@ -447,6 +448,8 @@ impl<T: Transport> CloudClient<T> {
             return Err(Error::LoginRequired);
         }
         let refresh = session.refresh.clone().ok_or(Error::LoginRequired)?;
+        let previous = session.clone();
+        let previous_deadline = self.access_deadline;
         session.phase = Phase::Refreshing;
         session.token_site_oid.clone_from(&site);
         session.access = None;
@@ -471,6 +474,15 @@ impl<T: Transport> CloudClient<T> {
             .await;
         let response = match response {
             Ok(r) if r.status == 200 => r,
+            Err(Error::NotDispatched) => {
+                // Only a failed TCP/DNS stage proves that the rotating token was
+                // never sent. Restore the exact previous session durably first.
+                self.session = Some(previous);
+                self.access_deadline = previous_deadline;
+                self.dirty = true;
+                self.persist(sink).await?;
+                return Err(Error::NotDispatched);
+            }
             failed => {
                 let failure = match failed {
                     Ok(response) if response.status == 429 => Error::RateLimited {
@@ -668,15 +680,22 @@ impl<T: Transport> CloudClient<T> {
         if result.is_err() {
             self.verified = false;
         }
+        self.record_read_result(&result);
+        result
+    }
+    fn record_read_result(&mut self, result: &Result<(), Error>) {
         self.failure = result.as_ref().err().copied();
         if result.is_err() {
             if !matches!(result, Err(Error::RateLimited { .. })) && self.retry_remaining().is_none()
             {
                 self.set_retry(self.backoff);
             }
-            self.backoff = (self.backoff * 2).min(3600);
+            self.backoff = (self.backoff * 2).min(super::MAX_RETRY_SECS);
+        } else {
+            self.backoff = 60;
+            self.next_allowed = None;
+            self.unrepresentable_retry = None;
         }
-        result
     }
     async fn cycle_inner(
         &mut self,
@@ -757,9 +776,6 @@ impl<T: Transport> CloudClient<T> {
             self.check_rate()?;
             Err(Error::Network)
         } else {
-            self.backoff = 60;
-            self.next_allowed = None;
-            self.unrepresentable_retry = None;
             Ok(())
         }
     }
@@ -787,6 +803,7 @@ impl<T: Transport> CloudClient<T> {
             .map_err(|_| Error::InvalidResponse)
     }
     fn set_retry(&mut self, seconds: u64) {
+        let seconds = seconds.min(super::MAX_RETRY_SECS);
         self.next_allowed = Instant::now().checked_add(Duration::from_secs(seconds));
         self.unrepresentable_retry = self.next_allowed.is_none().then_some(seconds);
     }
@@ -876,8 +893,13 @@ pub(super) fn retry_after(value: Option<&str>, now: i64) -> u64 {
 fn parse_retry_after(value: Option<&str>, now: i64) -> Option<u64> {
     let value = value.filter(|v| v.len() <= 128)?;
     if value.bytes().all(|b| b.is_ascii_digit()) && !value.is_empty() {
-        // An overflowing decimal promises at least u64::MAX seconds; never shorten it.
-        return Some(value.parse::<u64>().unwrap_or(u64::MAX));
+        // Bound hostile or overflowing provider delays as well as ordinary values.
+        return Some(
+            value
+                .parse::<u64>()
+                .unwrap_or(u64::MAX)
+                .min(super::MAX_RETRY_SECS),
+        );
     }
     let date = value
         .strip_suffix(" GMT")
@@ -897,6 +919,7 @@ fn parse_retry_after(value: Option<&str>, now: i64) -> Option<u64> {
             / 1000,
     )
     .ok()
+    .map(|seconds| seconds.min(super::MAX_RETRY_SECS))
 }
 
 #[derive(Deserialize)]

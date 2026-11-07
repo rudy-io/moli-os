@@ -83,7 +83,7 @@ fn offered(rig: &Rig) -> (PointId, Value) {
     let catalog = rig.catalog();
     let policy = rig
         .hub
-        .secret(&rig.instance, execution::POLICY_KEY)
+        .cloud_secret(&rig.instance, execution::POLICY_KEY)
         .and_then(|s| Policy::decode(s.as_bytes()).ok())
         .unwrap_or_default();
     let status = execution::view(&catalog, &policy, false, true, true)
@@ -187,7 +187,7 @@ async fn controller_rejects_permission_when_global_read_only_even_if_queue_is_in
     );
     assert!(
         rig.hub
-            .secret(&rig.instance, execution::POLICY_KEY)
+            .cloud_secret(&rig.instance, execution::POLICY_KEY)
             .is_none()
     );
     let (point, value) = offered(&rig);
@@ -243,7 +243,7 @@ async fn persisted_consent_cannot_override_global_read_only() {
     assert!(permission(&rig, "revoke", false).await.failure.is_none());
     let policy = Policy::decode(
         rig.hub
-            .secret(&rig.instance, execution::POLICY_KEY)
+            .cloud_secret(&rig.instance, execution::POLICY_KEY)
             .unwrap()
             .as_bytes(),
     )

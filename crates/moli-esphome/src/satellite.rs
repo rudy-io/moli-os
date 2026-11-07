@@ -150,7 +150,10 @@ impl Voice {
         if !request.start {
             self.forget();
             Self::state(ctx, id, "idle");
-            return Ok(());
+            // The firmware waits for the end of the run: without it, a stop while
+            // Moli thinks leaves it thinking for good, its lights blinking and deaf
+            // to its wake word, and a stop while it listens leaves its lights on.
+            return Self::event(tx, VoiceEvent::RunEnd, &[]).await;
         }
         if ctx.voice_brain().is_none() || self.media_base.is_none() {
             tracing::warn!(instance = %ctx.instance(), "voice request: no assistant or no media_base");

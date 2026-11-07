@@ -12,6 +12,44 @@ use std::sync::{
 };
 use tokio_util::sync::CancellationToken;
 
+trait CloudHub {
+    fn cloud_secret(&self, instance: &InstanceId, name: &str) -> Option<String>;
+    async fn insert_cloud_if_absent(
+        &self,
+        instance: &InstanceId,
+        name: &str,
+        value: &str,
+    ) -> std::io::Result<bool>;
+}
+impl CloudHub for Hub {
+    fn cloud_secret(&self, instance: &InstanceId, name: &str) -> Option<String> {
+        self.private_state(instance)
+            .and_then(|store| store.get(name))
+            .or_else(|| self.secret(instance, name))
+    }
+    async fn insert_cloud_if_absent(
+        &self,
+        instance: &InstanceId,
+        name: &str,
+        value: &str,
+    ) -> std::io::Result<bool> {
+        self.private_state(instance)
+            .unwrap()
+            .insert_if_absent(name, value)
+            .await
+    }
+}
+trait CloudContext {
+    fn cloud_secret(&self, name: &str) -> Option<String>;
+}
+impl CloudContext for DriverCtx {
+    fn cloud_secret(&self, name: &str) -> Option<String> {
+        self.private_state()
+            .and_then(|store| store.get(name))
+            .or_else(|| self.secret(name))
+    }
+}
+
 type Entry = (Endpoint, Result<Response, Error>, Duration);
 
 #[derive(Clone)]
@@ -43,7 +81,7 @@ impl Transport for Script {
             let _active = Active(Arc::clone(&self.active));
             if request.endpoint == Endpoint::Accounts {
                 assert!(
-                    self.hub.secret(&self.instance, PENDING_KEY).is_none(),
+                    self.hub.cloud_secret(&self.instance, PENDING_KEY).is_none(),
                     "password input deleted before use"
                 );
                 let reopened = Hub::new(HubOptions {
@@ -51,7 +89,7 @@ impl Transport for Script {
                     ..HubOptions::default()
                 })
                 .unwrap();
-                let marker = reopened.secret(&self.instance, SESSION_KEY).unwrap();
+                let marker = reopened.cloud_secret(&self.instance, SESSION_KEY).unwrap();
                 let binding =
                     super::super::read_session_binding(marker.as_bytes(), self.instance.as_str())
                         .unwrap();
@@ -68,7 +106,7 @@ impl Transport for Script {
                     .lock()
                     .unwrap()
                     .push(request.body.clone());
-                let encoded = self.hub.secret(&self.instance, SESSION_KEY).unwrap();
+                let encoded = self.hub.cloud_secret(&self.instance, SESSION_KEY).unwrap();
                 assert_eq!(
                     super::super::read_session_binding(encoded.as_bytes(), self.instance.as_str())
                         .unwrap()
@@ -197,11 +235,13 @@ impl Driver for DriverProbe {
 impl Rig {
     fn new(label: &str, replies: Vec<Entry>) -> Self {
         let instance = InstanceId::from("cloud-runtime");
-        let path = std::env::temp_dir().join(format!(
-            "cloud-runtime-{label}-{}-{}.enc",
-            std::process::id(),
-            moli_core::now_ms()
-        ));
+        let path = std::env::temp_dir()
+            .join(format!(
+                "cloud-runtime-{label}-{}-{}",
+                std::process::id(),
+                moli_core::now_ms()
+            ))
+            .join("secrets.enc");
         let hub = Hub::new(HubOptions {
             secrets: Some((path.clone(), MasterKey::new("d".repeat(64)))),
             ..HubOptions::default()
@@ -248,7 +288,7 @@ impl Rig {
         let bytes = super::super::encode_request(&envelope).unwrap();
         assert!(
             self.hub
-                .insert_secret_if_absent(
+                .insert_cloud_if_absent(
                     &self.instance,
                     PENDING_KEY,
                     std::str::from_utf8(&bytes).unwrap()
@@ -259,7 +299,7 @@ impl Rig {
     }
     fn state(&self) -> Option<ConnectionState> {
         self.hub
-            .secret(&self.instance, STATE_KEY)
+            .cloud_secret(&self.instance, STATE_KEY)
             .and_then(|v| super::super::decode_state(v.as_bytes()).ok())
     }
     async fn wait_state(&self, predicate: impl Fn(&ConnectionState) -> bool) -> ConnectionState {
@@ -314,7 +354,7 @@ impl Rig {
     fn catalog(&self) -> Catalog {
         inventory::decode_catalog(
             self.hub
-                .secret(&self.instance, inventory::INVENTORY_KEY)
+                .cloud_secret(&self.instance, inventory::INVENTORY_KEY)
                 .unwrap()
                 .as_bytes(),
         )
@@ -324,7 +364,7 @@ impl Rig {
 impl Drop for Rig {
     fn drop(&mut self) {
         self.cancel.cancel();
-        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir_all(self.path.parent().unwrap());
     }
 }
 
@@ -455,7 +495,7 @@ async fn new_login_invalidates_old_binding_before_password_and_old_catalog_is_ne
     );
     let binding = super::super::read_session_binding(
         rig.hub
-            .secret(&rig.instance, SESSION_KEY)
+            .cloud_secret(&rig.instance, SESSION_KEY)
             .unwrap()
             .as_bytes(),
         rig.instance.as_str(),
@@ -511,16 +551,37 @@ async fn stopped_actor_cancels_pending_transport_and_never_continues_rotating() 
     ));
 }
 
-#[test]
-fn durable_retry_gate_keeps_provider_long_zero_and_overflow_delays() {
+#[tokio::test(start_paused = true)]
+async fn durable_retry_gate_caps_legacy_overflow_and_expires_within_one_hour() {
     for seconds in [0, 86_400, u64::MAX] {
         let state = ConnectionState {
             retry_after_secs: Some(seconds),
             last_attempt_ms: Some(now_ms()),
             ..ConnectionState::default()
         };
-        assert_eq!(Gate::restore(&state).open(), seconds == 0);
+        let gate = Gate::restore(&state);
+        assert_eq!(gate.open(), seconds == 0);
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        assert!(gate.open());
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn persisted_retry_gate_expires_old_deadlines_and_bounds_future_timestamps() {
+    let state = ConnectionState {
+        retry_after_secs: Some(u64::MAX),
+        last_attempt_ms: Some(now_ms().saturating_sub(7_200_000)),
+        ..ConnectionState::default()
+    };
+    assert!(Gate::restore(&state).open());
+    let future = ConnectionState {
+        last_attempt_ms: Some(i64::MAX),
+        ..state
+    };
+    let gate = Gate::restore(&future);
+    assert!(!gate.open());
+    tokio::time::advance(Duration::from_secs(3600)).await;
+    assert!(gate.open());
 }
 
 #[tokio::test]
@@ -625,6 +686,10 @@ enum Check {
     ProviderGate,
     QueuedQuota,
     WaitingSelection,
+    NoopPoll,
+    PurgeFlight,
+    LeaseExclusive,
+    HandoffQuota,
     DiscoveryRecovery { phase: SessionPhase, failure: Error },
 }
 #[derive(Debug)]
@@ -639,15 +704,36 @@ impl Driver for CheckProbe {
     }
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            if super::super::storage::has_legacy(ctx) {
+                ctx.private_state()
+                    .unwrap()
+                    .migrate(
+                        super::super::storage::legacy(ctx).unwrap(),
+                        [STATE_KEY, inventory::INVENTORY_KEY, PENDING_KEY]
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect(),
+                    )
+                    .await
+                    .unwrap();
+            }
+
             let mut cloud = Controller::with_transport(
                 ctx,
                 &super::super::Config::default(),
                 self.script.clone(),
             );
+            let ownership = cloud.next_event().await;
+            assert!(matches!(ownership, Some(Event::Ownership(Ok(_)))));
+            cloud.handle(ctx, ownership);
             match self.check {
                 Check::StaleSaves => Self::check_stale_saves(ctx, &mut cloud),
                 Check::Capacity => self.check_capacity(ctx, &mut cloud).await,
                 Check::Closed => self.check_closed(ctx, &mut cloud).await,
+                Check::NoopPoll => self.check_noop_poll(ctx, &mut cloud).await,
+                Check::PurgeFlight => self.check_purge_flight(ctx, &mut cloud).await,
+                Check::LeaseExclusive => self.check_lease_exclusive(ctx, &mut cloud).await,
+                Check::HandoffQuota => self.check_handoff_quota(ctx, &mut cloud).await,
                 Check::CheckpointFailure => self.check_checkpoint_failure(ctx, &mut cloud).await,
                 Check::SlowDisk => self.check_slow_disk(ctx, &mut cloud).await,
                 Check::DelayedReconnect => self.check_delayed_reconnect(ctx, &mut cloud).await,
@@ -682,6 +768,148 @@ impl CheckProbe {
             cloud.handle(ctx, event);
         }
     }
+    async fn check_noop_poll(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        cloud.tick(ctx);
+        Self::drain(ctx, cloud).await;
+        assert!(cloud.live);
+        let credentials = std::fs::read(&self.script.path).unwrap();
+        let private_path = self.script.path.with_file_name("private-state.enc");
+        let snapshot = std::fs::read(&private_path).unwrap();
+        let before = cloud.state.last_observation_ms.unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        cloud.next_poll = Instant::now();
+        cloud.tick(ctx);
+        Self::drain(ctx, cloud).await;
+        assert!(cloud.live);
+        assert!(cloud.state.last_observation_ms.unwrap() > before);
+        assert_eq!(
+            std::fs::read(&self.script.path).unwrap(),
+            credentials,
+            "an unchanged read must not rewrite credential ciphertext"
+        );
+        assert_eq!(
+            std::fs::read(private_path).unwrap(),
+            snapshot,
+            "only liveness changed: keep the durable catalogue bytes"
+        );
+    }
+
+    async fn check_purge_flight(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        let retired = ctx.private_state().unwrap();
+        cloud.tick(ctx);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.script.active.load(Ordering::SeqCst) == 0 {
+                tokio::select! {
+                    event = cloud.next_event() => cloud.handle(ctx, event),
+                    () = tokio::time::sleep(Duration::from_millis(1)) => {},
+                }
+            }
+        })
+        .await
+        .unwrap();
+        self.script
+            .hub
+            .purge_private_state(
+                &self.script.instance,
+                [
+                    SESSION_KEY,
+                    STATE_KEY,
+                    inventory::INVENTORY_KEY,
+                    PENDING_KEY,
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            )
+            .await
+            .unwrap();
+        cloud.tick(ctx);
+        tokio::task::yield_now().await;
+        assert_eq!(self.script.active.load(Ordering::SeqCst), 0);
+        assert!(!cloud.live);
+        assert_eq!(cloud.state.phase, ConnectionPhase::Disconnected);
+        assert!(
+            self.script
+                .hub
+                .secret(&self.script.instance, SESSION_KEY)
+                .is_none()
+        );
+        let current = ctx.private_state().unwrap();
+        for key in [STATE_KEY, inventory::INVENTORY_KEY, PENDING_KEY] {
+            assert!(current.get(key).is_none());
+        }
+        assert!(
+            retired
+                .store_secret(SESSION_KEY, "cannot restore retired credentials")
+                .await
+                .is_err()
+        );
+        cloud.tick(ctx);
+        assert!(!cloud.busy, "disconnect must wait for a new owner login");
+    }
+
+    async fn check_handoff_quota(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        assert!(
+            !cloud.gate.open(),
+            "ownership must restore the latest private quota"
+        );
+        assert!(
+            ctx.cloud_secret(PENDING_KEY).is_some(),
+            "ownership must reload the durable request"
+        );
+        assert_eq!(
+            cloud.state.last_observation_ms, None,
+            "handoff never restores live freshness"
+        );
+        cloud.tick(ctx);
+        Self::drain(ctx, cloud).await;
+        assert!(self.script.calls.lock().unwrap().is_empty());
+        assert!(ctx.cloud_secret(PENDING_KEY).is_none());
+        assert_eq!(
+            cloud.state.request_id.as_deref(),
+            Some("after-second-process-opened")
+        );
+        assert!(matches!(
+            cloud.state.failure,
+            Some(Error::RateLimited { .. })
+        ));
+    }
+    async fn check_lease_exclusive(&self, ctx: &DriverCtx, cloud: &mut Controller) {
+        cloud.tick(ctx);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.script.active.load(Ordering::SeqCst) == 0 {
+                tokio::select! {
+                    event = cloud.next_event() => cloud.handle(ctx, event),
+                    () = tokio::time::sleep(Duration::from_millis(1)) => {},
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let mut competing = self.script.clone();
+        competing.calls = Arc::new(Mutex::new(vec![]));
+        competing.replies = Arc::new(Mutex::new(VecDeque::new()));
+        competing.active = Arc::new(AtomicUsize::new(0));
+        let mut other =
+            Controller::with_transport(ctx, &super::super::Config::default(), competing.clone());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                other.tick(ctx);
+                if !other.receiving() || !competing.calls.lock().unwrap().is_empty() {
+                    break;
+                }
+                let event = other.next_event().await;
+                other.handle(ctx, event);
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            competing.calls.lock().unwrap().is_empty(),
+            "a second OAuth owner must never dispatch using the same vault identity"
+        );
+    }
+
     async fn check_discovery_recovery(
         &self,
         ctx: &DriverCtx,
@@ -693,24 +921,24 @@ impl CheckProbe {
         Self::drain(ctx, cloud).await;
         assert_eq!(cloud.state.phase, ConnectionPhase::Unavailable);
         assert_eq!(cloud.state.failure, Some(failure));
-        let session = ctx.secret(SESSION_KEY).unwrap();
+        let session = ctx.cloud_secret(SESSION_KEY).unwrap();
         let binding =
             super::super::read_session_binding(session.as_bytes(), ctx.instance().as_str())
                 .unwrap();
         assert_eq!(binding.phase, phase);
         assert!(binding.scope.is_none());
-        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(ctx.cloud_secret(PENDING_KEY).is_none());
         assert!(!session.contains("PASSWORD_SENTINEL"));
         let previous_calls = self.script.calls.lock().unwrap().len();
 
         // Make the ordinary poll due without bypassing either provider quota gate.
         cloud.next_poll = Instant::now();
-        if matches!(failure, Error::RateLimited { .. }) {
+        if let Some(delay) = cloud.state.retry_after_secs {
             tokio::time::pause();
             cloud.tick(ctx);
             assert!(!cloud.busy && cloud.job.is_none());
             assert_eq!(self.script.calls.lock().unwrap().len(), previous_calls);
-            tokio::time::advance(Duration::from_secs(6)).await;
+            tokio::time::advance(Duration::from_secs(delay + 1)).await;
             tokio::time::resume();
             assert!(cloud.gate.open());
         }
@@ -727,17 +955,18 @@ impl CheckProbe {
         assert_eq!(cloud.state.candidates.len(), 1);
         assert_eq!(cloud.state.candidates[0].site_oid, "setup");
         assert_eq!(cloud.state.candidates[0].gateway_ids, ["anchor"]);
-        let saved = super::super::decode_state(ctx.secret(STATE_KEY).unwrap().as_bytes()).unwrap();
+        let saved =
+            super::super::decode_state(ctx.cloud_secret(STATE_KEY).unwrap().as_bytes()).unwrap();
         assert_eq!(saved.phase, ConnectionPhase::SelectingSite);
         assert!(saved.failure.is_none());
         assert_eq!(saved.generation, cloud.state.generation);
-        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(ctx.cloud_secret(PENDING_KEY).is_none());
         assert!(
-            !ctx.secret(SESSION_KEY)
+            !ctx.cloud_secret(SESSION_KEY)
                 .unwrap()
                 .contains("PASSWORD_SENTINEL")
         );
-        assert!(ctx.secret(inventory::INVENTORY_KEY).is_none());
+        assert!(ctx.cloud_secret(inventory::INVENTORY_KEY).is_none());
         assert!(!cloud.live, "discovery alone is not a fresh inventory");
         assert!(self.script.replies.lock().unwrap().is_empty());
 
@@ -760,7 +989,7 @@ impl CheckProbe {
         );
     }
     fn check_stale_saves(ctx: &DriverCtx, cloud: &mut Controller) {
-        let before = ctx.secret(SESSION_KEY).unwrap();
+        let before = ctx.cloud_secret(SESSION_KEY).unwrap();
         assert!(matches!(
             cloud.validate_session(ctx, cloud.epoch.wrapping_sub(1), before.as_bytes(), false),
             Err(Error::Persistence)
@@ -780,10 +1009,10 @@ impl CheckProbe {
             ),
             Err(Error::ScopeMismatch)
         ));
-        assert_eq!(ctx.secret(SESSION_KEY).unwrap(), before);
+        assert_eq!(ctx.cloud_secret(SESSION_KEY).unwrap(), before);
     }
     async fn check_capacity(&self, ctx: &DriverCtx, cloud: &mut Controller) {
-        let before = ctx.secret(PENDING_KEY).unwrap();
+        let before = ctx.cloud_secret(PENDING_KEY).unwrap();
         let permit = cloud
             .actor
             .as_ref()
@@ -794,7 +1023,7 @@ impl CheckProbe {
             .unwrap();
         cloud.tick(ctx);
         assert_eq!(
-            ctx.secret(PENDING_KEY).as_deref(),
+            ctx.cloud_secret(PENDING_KEY).as_deref(),
             Some(before.as_str()),
             "full channel cannot consume queued credentials"
         );
@@ -802,7 +1031,7 @@ impl CheckProbe {
         cloud.tick(ctx);
         let event = cloud.next_event().await;
         cloud.handle(ctx, event);
-        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(ctx.cloud_secret(PENDING_KEY).is_none());
     }
     async fn check_closed(&self, ctx: &DriverCtx, cloud: &mut Controller) {
         cloud.actor.as_ref().unwrap().task.abort();
@@ -824,7 +1053,9 @@ impl CheckProbe {
         cloud.handle(ctx, input);
         let event = cloud.next_event().await;
         assert!(matches!(event, Some(Event::Session { .. })));
-        std::fs::remove_file(&self.script.path).unwrap();
+        if self.script.path.exists() {
+            std::fs::remove_file(&self.script.path).unwrap();
+        }
         std::fs::create_dir(&self.script.path).unwrap();
         cloud.handle(ctx, event);
         let stored = cloud.next_event().await;
@@ -845,28 +1076,25 @@ impl CheckProbe {
         cloud.handle(ctx, input);
         let event = cloud.next_event().await;
         assert!(matches!(event, Some(Event::Session { .. })));
-        let temporary = self.script.path.with_extension("tmp");
-        assert!(
-            std::process::Command::new("mkfifo")
-                .arg(&temporary)
-                .status()
-                .unwrap()
-                .success()
-        );
+        let mut lock_path = self.script.path.as_os_str().to_owned();
+        lock_path.push(".lock");
+        let file_lock = std::fs::OpenOptions::new()
+            .write(true)
+            .open(std::path::Path::new(&lock_path))
+            .unwrap();
+        file_lock.try_lock().unwrap();
         let handled = tokio::time::timeout(Duration::from_millis(50), async {
             cloud.handle(ctx, event);
         })
         .await;
-        // A reader releases the actual blocked filesystem open, even on RED.
-        tokio::task::spawn_blocking(move || std::fs::read(temporary))
-            .await
-            .unwrap()
-            .unwrap();
         assert!(
             handled.is_ok(),
-            "a slow cloud disk checkpoint must not occupy the native controller"
+            "a contended cloud checkpoint must not occupy the native controller"
         );
-        let stored = cloud.next_event().await;
+        let stored = tokio::time::timeout(Duration::from_secs(5), cloud.next_event())
+            .await
+            .expect("the interprocess write lock must have a bounded deadline");
+        drop(file_lock);
         assert!(
             matches!(
                 stored,
@@ -875,7 +1103,7 @@ impl CheckProbe {
                     ..
                 })
             ),
-            "FIFO file sync failure must propagate"
+            "checkpoint lock timeout must propagate"
         );
         cloud.handle(ctx, stored);
         let completed = cloud.next_event().await;
@@ -922,7 +1150,7 @@ impl CheckProbe {
         );
         let taken = cloud.next_event().await;
         assert!(
-            ctx.secret(PENDING_KEY).is_none(),
+            ctx.cloud_secret(PENDING_KEY).is_none(),
             "password deleted before terminal result"
         );
         // A newer owner request can arrive after the atomic take and must survive its result.
@@ -939,7 +1167,7 @@ impl CheckProbe {
         assert!(
             self.script
                 .hub
-                .insert_secret_if_absent(&self.script.instance, PENDING_KEY, &encoded)
+                .insert_cloud_if_absent(&self.script.instance, PENDING_KEY, &encoded)
                 .await
                 .unwrap()
         );
@@ -951,7 +1179,7 @@ impl CheckProbe {
         let saved = self
             .script
             .hub
-            .secret(&self.script.instance, STATE_KEY)
+            .cloud_secret(&self.script.instance, STATE_KEY)
             .unwrap();
         let state = super::super::decode_state(saved.as_bytes()).unwrap();
         assert_eq!(state.request_id.as_deref(), Some("login"));
@@ -967,7 +1195,10 @@ impl CheckProbe {
             "rejecting input must not reset the original quota deadline"
         );
         assert!(!cloud.gate.open());
-        assert_eq!(ctx.secret(PENDING_KEY).as_deref(), Some(encoded.as_str()));
+        assert_eq!(
+            ctx.cloud_secret(PENDING_KEY).as_deref(),
+            Some(encoded.as_str())
+        );
         assert!(self.script.calls.lock().unwrap().is_empty());
         let reopened = Hub::new(HubOptions {
             secrets: Some((self.script.path.clone(), MasterKey::new("d".repeat(64)))),
@@ -975,12 +1206,14 @@ impl CheckProbe {
         })
         .unwrap();
         assert_eq!(
-            reopened.secret(&self.script.instance, STATE_KEY).as_deref(),
+            reopened
+                .cloud_secret(&self.script.instance, STATE_KEY)
+                .as_deref(),
             Some(saved.as_str())
         );
         assert_eq!(
             reopened
-                .secret(&self.script.instance, PENDING_KEY)
+                .cloud_secret(&self.script.instance, PENDING_KEY)
                 .as_deref(),
             Some(encoded.as_str()),
             "newer input must also survive on encrypted disk"
@@ -999,11 +1232,15 @@ impl CheckProbe {
             .as_ref()
             .unwrap()
             .parse::<u64>()
-            .unwrap();
-        let original_session = ctx.secret(SESSION_KEY).unwrap();
-        let original_catalog =
-            inventory::decode_catalog(ctx.secret(inventory::INVENTORY_KEY).unwrap().as_bytes())
-                .unwrap();
+            .unwrap()
+            .min(3600);
+        let original_session = ctx.cloud_secret(SESSION_KEY).unwrap();
+        let original_catalog = inventory::decode_catalog(
+            ctx.cloud_secret(inventory::INVENTORY_KEY)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
         cloud.tick(ctx);
         tokio::time::timeout(Duration::from_secs(2), async {
             while self.script.calls.lock().unwrap().len() < 2 {
@@ -1025,7 +1262,7 @@ impl CheckProbe {
         assert!(
             self.script
                 .hub
-                .insert_secret_if_absent(&self.script.instance, PENDING_KEY, &encoded)
+                .insert_cloud_if_absent(&self.script.instance, PENDING_KEY, &encoded)
                 .await
                 .unwrap()
         );
@@ -1055,7 +1292,8 @@ impl CheckProbe {
             let event = cloud.next_event().await;
             cloud.handle(ctx, event);
         }
-        let state = super::super::decode_state(ctx.secret(STATE_KEY).unwrap().as_bytes()).unwrap();
+        let state =
+            super::super::decode_state(ctx.cloud_secret(STATE_KEY).unwrap().as_bytes()).unwrap();
         assert_eq!(state.request_id.as_deref(), Some("queued-before-quota"));
         assert_eq!(
             state.failure,
@@ -1066,12 +1304,15 @@ impl CheckProbe {
         assert_eq!(state.retry_after_secs, Some(advertised));
         assert_eq!(state.last_attempt_ms, quota_anchor);
         assert!(!cloud.gate.open());
-        assert!(ctx.secret(PENDING_KEY).is_none());
+        assert!(ctx.cloud_secret(PENDING_KEY).is_none());
         assert_eq!(
-            ctx.secret(SESSION_KEY).as_deref(),
+            ctx.cloud_secret(SESSION_KEY).as_deref(),
             Some(original_session.as_str())
         );
         self.check_quota_inventory(ctx, &original_catalog);
+        self.check_restored_quota(ctx, &state);
+    }
+    fn check_restored_quota(&self, ctx: &DriverCtx, state: &ConnectionState) {
         let reopened = Hub::new(HubOptions {
             secrets: Some((self.script.path.clone(), MasterKey::new("d".repeat(64)))),
             ..HubOptions::default()
@@ -1079,7 +1320,7 @@ impl CheckProbe {
         .unwrap();
         let saved = super::super::decode_state(
             reopened
-                .secret(&self.script.instance, STATE_KEY)
+                .cloud_secret(&self.script.instance, STATE_KEY)
                 .unwrap()
                 .as_bytes(),
         )
@@ -1091,9 +1332,12 @@ impl CheckProbe {
         assert!(!restored.gate.open());
     }
     fn check_quota_inventory(&self, ctx: &DriverCtx, original_catalog: &Catalog) {
-        let current =
-            inventory::decode_catalog(ctx.secret(inventory::INVENTORY_KEY).unwrap().as_bytes())
-                .unwrap();
+        let current = inventory::decode_catalog(
+            ctx.cloud_secret(inventory::INVENTORY_KEY)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
         assert_eq!(
             current.collections[&CollectionKind::Scenarios].status,
             CollectionStatus::RateLimited
@@ -1141,6 +1385,12 @@ impl CheckProbe {
 }
 
 async fn check(rig: &Rig, check: Check) {
+    // Discovery tests advance the virtual clock through the one-minute backoff.
+    let limit = if matches!(check, Check::DiscoveryRecovery { .. }) {
+        75
+    } else {
+        15
+    };
     let (done, finished) = oneshot::channel();
     spawn_driver(
         &rig.hub,
@@ -1152,7 +1402,7 @@ async fn check(rig: &Rig, check: Check) {
         }),
         rig.cancel.clone(),
     );
-    tokio::time::timeout(Duration::from_secs(15), finished)
+    tokio::time::timeout(Duration::from_secs(limit), finished)
         .await
         .unwrap()
         .unwrap();
@@ -1204,7 +1454,7 @@ async fn stale_epoch_generation_or_cancelled_sink_cannot_write_a_session() {
             SESSION_KEY,
             &original
                 .hub
-                .secret(&original.instance, SESSION_KEY)
+                .cloud_secret(&original.instance, SESSION_KEY)
                 .unwrap(),
         )
         .await
@@ -1249,7 +1499,7 @@ async fn missing_native_credentials_do_not_park_cloud_onboarding() {
             .unwrap()
             .contains(&moli_i18n::tr!("overkiz.auth"))
     );
-    assert!(rig.hub.secret(&rig.instance, "cert_sha256").is_none());
+    assert!(rig.hub.cloud_secret(&rig.instance, "cert_sha256").is_none());
 }
 
 #[tokio::test]
@@ -1382,7 +1632,7 @@ async fn cold_restart_cloud_recovery_cannot_resurrect_an_unrefreshed_native_sour
             .store_secret(
                 &rig.instance,
                 key,
-                &seed.hub.secret(&seed.instance, key).unwrap(),
+                &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
             )
             .await
             .unwrap();
@@ -1450,8 +1700,8 @@ async fn slow_disk_checkpoint_does_not_block_native_controller_progress() {
 }
 
 async fn delayed_reconnect(ctx: &DriverCtx, cloud: &mut Controller, script: &Script) {
-    let old_session = ctx.secret(SESSION_KEY).unwrap();
-    let old_catalog = ctx.secret(inventory::INVENTORY_KEY).unwrap();
+    let old_session = ctx.cloud_secret(SESSION_KEY).unwrap();
+    let old_catalog = ctx.cloud_secret(inventory::INVENTORY_KEY).unwrap();
     let old_disk = std::fs::read(&script.path).unwrap();
     std::fs::remove_file(&script.path).unwrap();
     assert!(
@@ -1491,14 +1741,14 @@ async fn delayed_reconnect(ctx: &DriverCtx, cloud: &mut Controller, script: &Scr
     let hub = script.hub.clone();
     let instance = script.instance.clone();
     let queued = tokio::spawn(async move {
-        hub.insert_secret_if_absent(&instance, PENDING_KEY, &encoded)
+        hub.insert_cloud_if_absent(&instance, PENDING_KEY, &encoded)
             .await
     });
     release.send(()).unwrap();
     writer.await.unwrap();
     assert!(queued.await.unwrap().unwrap());
     assert_ne!(
-        ctx.secret(STATE_KEY).as_deref(),
+        ctx.cloud_secret(STATE_KEY).as_deref(),
         Some("STALE_STATE_WRITE_SENTINEL")
     );
     cloud.tick(ctx);
@@ -1514,7 +1764,9 @@ async fn delayed_reconnect(ctx: &DriverCtx, cloud: &mut Controller, script: &Scr
         ..HubOptions::default()
     })
     .unwrap();
-    let latest = reopened.secret(&script.instance, SESSION_KEY).unwrap();
+    let latest = reopened
+        .cloud_secret(&script.instance, SESSION_KEY)
+        .unwrap();
     assert_ne!(
         super::super::read_session_binding(latest.as_bytes(), script.instance.as_str())
             .unwrap()
@@ -1525,7 +1777,7 @@ async fn delayed_reconnect(ctx: &DriverCtx, cloud: &mut Controller, script: &Scr
     );
     let state = super::super::decode_state(
         reopened
-            .secret(&script.instance, STATE_KEY)
+            .cloud_secret(&script.instance, STATE_KEY)
             .unwrap()
             .as_bytes(),
     )
@@ -1534,7 +1786,7 @@ async fn delayed_reconnect(ctx: &DriverCtx, cloud: &mut Controller, script: &Scr
     assert_eq!(state.generation, cloud.state.generation);
     assert_eq!(
         reopened
-            .secret(&script.instance, inventory::INVENTORY_KEY)
+            .cloud_secret(&script.instance, inventory::INVENTORY_KEY)
             .as_deref(),
         Some(old_catalog.as_str())
     );
@@ -1554,7 +1806,7 @@ async fn cancelled_old_batch_cannot_write_state_after_a_new_login_checkpoint() {
             .store_secret(
                 &rig.instance,
                 key,
-                &seed.hub.secret(&seed.instance, key).unwrap(),
+                &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
             )
             .await
             .unwrap();
@@ -1636,7 +1888,7 @@ async fn manual_refreshes_coalesce_into_one_cycle_with_completion_feedback() {
     rig.wait_state(|state| state.request_id.as_deref() == Some("refresh-two"))
         .await;
     assert_eq!(rig.script.calls.lock().unwrap().len() - previous_calls, 9);
-    assert!(rig.hub.secret(&rig.instance, PENDING_KEY).is_none());
+    assert!(rig.hub.cloud_secret(&rig.instance, PENDING_KEY).is_none());
 }
 
 #[tokio::test]
@@ -1656,7 +1908,7 @@ async fn persisted_ready_cloud_is_stale_until_this_runtime_observes_even_when_na
             .store_secret(
                 &rig.instance,
                 key,
-                &seed.hub.secret(&seed.instance, key).unwrap(),
+                &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
             )
             .await
             .unwrap();
@@ -1709,11 +1961,22 @@ async fn persisted_ready_cloud_is_stale_until_this_runtime_observes_even_when_na
         Some(false),
         "native readiness cannot make an unobserved cloud source fresh"
     );
-    assert_eq!(
-        rig.catalog(),
-        seed.catalog(),
-        "same-identity last-good cache remains owner-readable as stale"
-    );
+    let cached = rig.catalog();
+    let previous = seed.catalog();
+    assert_eq!(cached.identity(), previous.identity());
+    assert_eq!(cached.provider_timezone, previous.provider_timezone);
+    assert_eq!(cached.target_labels, previous.target_labels);
+    for kind in CollectionKind::ALL {
+        assert_eq!(
+            cached.collections[&kind].data,
+            previous.collections[&kind].data
+        );
+        assert_eq!(
+            cached.collections[&kind].last_observation_ms,
+            previous.collections[&kind].last_observation_ms.map(|_| 0),
+            "restored definitions remain readable without restoring liveness"
+        );
+    }
     server.abort();
 }
 
@@ -1727,7 +1990,7 @@ async fn saved_site_choices_wait_for_owner_without_periodic_provider_discovery()
             .store_secret(
                 &rig.instance,
                 key,
-                &seed.hub.secret(&seed.instance, key).unwrap(),
+                &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
             )
             .await
             .unwrap();
@@ -1853,7 +2116,7 @@ async fn review_discovery_never_retries_terminal_unscoped_sessions_even_on_manua
     let seed = Rig::new("discovery-terminal-seed", login_replies());
     let generation = seed.login().await;
     let mut session: serde_json::Value =
-        serde_json::from_str(&seed.hub.secret(&seed.instance, SESSION_KEY).unwrap()).unwrap();
+        serde_json::from_str(&seed.hub.cloud_secret(&seed.instance, SESSION_KEY).unwrap()).unwrap();
     for phase in [SessionPhase::Refreshing, SessionPhase::LoginRequired] {
         session["phase"] = serde_json::to_value(phase).unwrap();
         let rig = Rig::new(&format!("discovery-terminal-{phase:?}"), vec![]);
@@ -1876,7 +2139,7 @@ async fn review_discovery_never_retries_terminal_unscoped_sessions_even_on_manua
         assert_eq!(state.failure, Some(Error::LoginRequired));
         assert_eq!(state.generation.as_ref(), Some(&generation));
         assert!(rig.script.calls.lock().unwrap().is_empty());
-        assert!(rig.hub.secret(&rig.instance, PENDING_KEY).is_none());
+        assert!(rig.hub.cloud_secret(&rig.instance, PENDING_KEY).is_none());
     }
 }
 
@@ -1906,13 +2169,100 @@ async fn review_login_queued_before_long_or_indefinite_429_is_durably_rejected_w
                 .store_secret(
                     &rig.instance,
                     key,
-                    &seed.hub.secret(&seed.instance, key).unwrap(),
+                    &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
                 )
                 .await
                 .unwrap();
         }
         check(&rig, Check::QueuedQuota).await;
     }
+}
+
+async fn ready_cache_rig(label: &str, replies: Vec<Entry>) -> Rig {
+    let mut initial = login_replies();
+    initial.extend(selected_replies());
+    initial.extend(cycle_replies());
+    let seed = Rig::new(&format!("{label}-seed"), initial);
+    let generation = seed.login().await;
+    seed.select(generation).await;
+    let rig = Rig::new(label, replies);
+    for key in [SESSION_KEY, STATE_KEY, inventory::INVENTORY_KEY] {
+        rig.hub
+            .store_secret(
+                &rig.instance,
+                key,
+                &seed.hub.cloud_secret(&seed.instance, key).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    rig
+}
+
+#[tokio::test]
+async fn unchanged_automatic_poll_keeps_both_ciphertexts_but_updates_live_freshness() {
+    let mut replies = cycle_replies();
+    replies.extend(cycle_replies());
+    let rig = ready_cache_rig("unchanged-ciphertexts", replies).await;
+    check(&rig, Check::NoopPoll).await;
+}
+
+#[tokio::test]
+async fn disconnect_during_provider_read_cancels_actor_and_cannot_restore_private_state() {
+    let mut replies = cycle_replies();
+    replies[0].2 = Duration::from_secs(30);
+    let rig = ready_cache_rig("purge-read-flight", replies).await;
+    check(&rig, Check::PurgeFlight).await;
+}
+
+#[tokio::test]
+async fn a_second_cloud_controller_cannot_dispatch_with_the_same_persistent_identity() {
+    let mut replies = cycle_replies();
+    replies[0].2 = Duration::from_secs(30);
+    let rig = ready_cache_rig("exclusive-cloud-lease", replies).await;
+    check(&rig, Check::LeaseExclusive).await;
+}
+
+#[tokio::test]
+async fn ownership_handoff_reloads_private_quota_and_pending_from_a_later_writer() {
+    let mut rig = ready_cache_rig("private-lease-handoff", vec![]).await;
+    let cache = rig.hub.private_state(&rig.instance).unwrap();
+    let mut state = rig.state().unwrap();
+    let catalog = rig.catalog();
+    cache
+        .migrate(
+            super::super::storage::snapshot(&state, Some(&catalog)).unwrap(),
+            [STATE_KEY, inventory::INVENTORY_KEY]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        )
+        .await
+        .unwrap();
+    let second = Hub::new(HubOptions {
+        secrets: Some((rig.path.clone(), MasterKey::new("d".repeat(64)))),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    state.retry_after_secs = Some(600);
+    state.failure = Some(Error::RateLimited {
+        retry_after_secs: 600,
+    });
+    state.last_attempt_ms = Some(now_ms());
+    cache
+        .set_if_changed(super::super::storage::snapshot(&state, Some(&catalog)).unwrap())
+        .await
+        .unwrap();
+    rig.queue(
+        "after-second-process-opened",
+        PendingRequest::Refresh {
+            generation: state.generation.unwrap(),
+        },
+    )
+    .await;
+    rig.hub = second.clone();
+    rig.script.hub = second;
+    check(&rig, Check::HandoffQuota).await;
 }
 
 #[path = "scenario_runtime_tests.rs"]

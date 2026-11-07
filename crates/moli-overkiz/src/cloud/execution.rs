@@ -317,14 +317,12 @@ pub(crate) fn publish(
     online: bool,
     poll_secs: u64,
 ) {
-    let policy = ctx
-        .secret(POLICY_KEY)
+    let policy = super::storage::cached(ctx, POLICY_KEY)
         .and_then(|s| Policy::decode(s.as_bytes()).ok())
         .unwrap_or_default();
     let statuses = catalog
         .map(|c| {
-            let revision = ctx
-                .secret(inventory::INVENTORY_KEY)
+            let revision = super::storage::cached(ctx, inventory::INVENTORY_KEY)
                 .map(|bytes| self::revision(bytes.as_bytes()))
                 .unwrap_or_default();
             view_at_revision(

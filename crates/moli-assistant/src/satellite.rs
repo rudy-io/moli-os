@@ -6,11 +6,13 @@ use std::fmt::Write as _;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
-use moli_runtime::BoxFuture;
+use moli_core::Value;
 use moli_runtime::voice::{Answer, AtDoor, Pcm, Said, Speaker, VoiceBrain};
+use moli_runtime::{BoxFuture, DeviceView};
 use ring::rand::{SecureRandom as _, SystemRandom};
 
-use crate::{Assistant, AssistantError, Message, Role, Speech, Turn, voice, word_list};
+use crate::house::{Layout, norm};
+use crate::{Assistant, AssistantError, Message, Reply, Role, Speech, Turn, voice, word_list};
 
 /// A prepared voice stays fetchable this long (the satellite asks at once).
 const PREPARED_TTL: Duration = Duration::from_secs(60);
@@ -22,8 +24,84 @@ const VOICE_RATE: u32 = 24_000;
 const SATELLITE_GAIN: f32 = 2.8;
 /// Above this, peaks are rounded off instead of clipped.
 const KNEE: f32 = 0.7;
+/// The tools that only read: a turn that called nothing else changed nothing.
+const READ_ONLY_TOOLS: [&str; 8] = [
+    "show",
+    "get_device",
+    "energy",
+    "history",
+    "forecast",
+    "web_search",
+    "delegation_status",
+    "end_conversation",
+];
+
+/// A screen plays in the room of `satellite`: a TV that says what it plays, or
+/// the speaker that carries its sound. A device that is offline says nothing.
+fn screen_plays(devices: &[DeviceView], layout: &Layout, satellite: &str) -> bool {
+    let room_of = |view: &DeviceView| {
+        view.label
+            .room
+            .as_deref()
+            .or(view.device.native_room.as_deref())
+            .map(|room| norm(&layout.room(room)))
+    };
+    let Some(room) = devices
+        .iter()
+        .find(|d| d.device.id.as_str() == satellite)
+        .and_then(room_of)
+    else {
+        return false;
+    };
+    devices
+        .iter()
+        .filter(|d| d.online != Some(false) && room_of(d).as_ref() == Some(&room))
+        .any(|d| {
+            let text = |key: &str| match d.state.get(key).map(|s| &s.value) {
+                Some(Value::Text(text)) => Some(&**text),
+                _ => None,
+            };
+            let carries_tv = text("source") == Some("tv")
+                && matches!(
+                    d.state.get("playing").map(|s| &s.value),
+                    Some(Value::Bool(true))
+                );
+            text("media_state") == Some("playing") || carries_tv
+        })
+}
+
+/// What a turn answers while a screen plays: words only for what it did, and
+/// the conversation ends (the film would be taken for the next question).
+pub(crate) fn hush(reply: &mut Reply) {
+    let acted = !reply.actions.is_empty()
+        || !reply.proposals.is_empty()
+        || reply
+            .tools
+            .iter()
+            .any(|tool| !READ_ONLY_TOOLS.contains(&tool.as_str()));
+    if !acted {
+        reply.reply.clear();
+    }
+    reply.end = true;
+}
 
 impl Assistant {
+    /// This turn comes from a satellite that should keep quiet (`quiet_during_tv`).
+    pub(crate) async fn screen_plays_for(&self, turn: &Turn) -> bool {
+        if !self.0.config.quiet_during_tv || turn.surface.as_deref() != Some("satellite") {
+            return false;
+        }
+        let Some(satellite) = turn
+            .asker
+            .as_deref()
+            .and_then(|asker| asker.strip_prefix("satellite:"))
+        else {
+            return false;
+        };
+        let layout = Layout::load(self.0.layout_path.as_deref()).await;
+        screen_plays(&self.0.hub.snapshot().devices, &layout, satellite)
+    }
+
     /// The voice prepared under `name`, streamed while the cloud voice makes
     /// it, louder for a satellite's small speaker: `<id>.wav` as WAV,
     /// `<id>.flac` as FLAC (a media player's announcement). Whole from the
@@ -349,7 +427,120 @@ fn louder(pcm: &[u8], gain: f32) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use moli_core::Sample;
+
     use super::*;
+
+    fn view(id: &str, room: Option<&str>, state: &[(&str, Value)]) -> DeviceView {
+        DeviceView {
+            device: std::sync::Arc::new(moli_core::Device {
+                id: id.into(),
+                instance: id.split(':').next().unwrap().into(),
+                native_name: id.into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: room.map(Into::into),
+                members: Vec::new(),
+                points: Vec::new(),
+            }),
+            label: moli_core::Label::default(),
+            online: Some(true),
+            state: state
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        (*key).into(),
+                        Sample {
+                            value: value.clone(),
+                            ts: 0,
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>(),
+            camera: false,
+            printer: false,
+            live: false,
+        }
+    }
+
+    fn text(value: &str) -> Value {
+        Value::Text(value.into())
+    }
+
+    #[test]
+    fn a_screen_plays_only_in_the_satellites_room() {
+        let layout = Layout::default();
+        let satellite = || view("voice:1", Some("Living room"), &[]);
+        let plays = |other: DeviceView| screen_plays(&[satellite(), other], &layout, "voice:1");
+        let tv = |state: &str| view("tv:1", Some("living ROOM"), &[("media_state", text(state))]);
+        assert!(plays(tv("playing")));
+        assert!(!plays(tv("paused")), "people can talk over a pause");
+        assert!(!plays(view(
+            "tv:1",
+            Some("Kitchen"),
+            &[("media_state", text("playing"))]
+        )));
+        let mut asleep = tv("playing");
+        asleep.online = Some(false);
+        assert!(!plays(asleep), "the last state of a device that left");
+        // The speaker that carries a TV's sound, not one that plays music.
+        let speaker = |source: &str, playing: bool| {
+            view(
+                "speaker:1",
+                Some("Living room"),
+                &[("source", text(source)), ("playing", Value::Bool(playing))],
+            )
+        };
+        assert!(plays(speaker("tv", true)));
+        assert!(!plays(speaker("tv", false)));
+        assert!(!plays(speaker("music", true)));
+        // A satellite with no room, or unknown: nothing to go by.
+        let nowhere = view("voice:1", None, &[]);
+        assert!(!screen_plays(&[nowhere, tv("playing")], &layout, "voice:1"));
+        assert!(!screen_plays(&[tv("playing")], &layout, "voice:1"));
+    }
+
+    /// What it heard is the film: no words, and no listening again.
+    #[tokio::test]
+    async fn a_turn_that_did_nothing_keeps_quiet_while_a_screen_plays() {
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":"Vous n'etes pas invisible."}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let mut reply = moli
+            .turn(crate::tests::spoken("Je suis invisible ?"))
+            .await
+            .unwrap();
+        assert_eq!(reply.reply, "Vous n'etes pas invisible.");
+        assert!(!reply.end);
+        hush(&mut reply);
+        assert_eq!(reply.reply, "");
+        assert!(reply.end);
+    }
+
+    /// What it did is said, then the conversation ends all the same.
+    #[tokio::test]
+    async fn a_turn_that_acted_says_so_while_a_screen_plays() {
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true,\"say\":\"C'est allume.\"}"}}]}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let mut reply = moli
+            .turn(crate::tests::spoken("Allume la lampe"))
+            .await
+            .unwrap();
+        assert!(!reply.actions.is_empty());
+        hush(&mut reply);
+        assert_eq!(reply.reply, "C'est allume.");
+        assert!(reply.end);
+    }
 
     #[test]
     fn the_satellite_voice_is_louder_without_clipping() {
