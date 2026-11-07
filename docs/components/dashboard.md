@@ -150,6 +150,18 @@ appareils changent. En tête : Moli contre HA (mémoire, processeur, taille, ré
 tendance des livraisons) lu dans `data/perf.jsonl`. Un nouveau pilote ou une nouvelle brique y
 apparaît sans toucher à la page.
 
+## Programmations TaHoma en lecture seule
+
+La page TaHoma (`#/somfy`), accessible depuis Système, présente les jours, horaires et actions du catalogue
+privé déjà collecté. `lib/somfy-programmes.js` projette les définitions ;
+`ui/SomfyCloudProgramme.svelte` et `SomfyCloudActions.svelte` affichent les mêmes
+actions pour les scénarios, journées et règles intégrées. Les noms viennent des
+étiquettes du catalogue, sans rapprochement heuristique avec d'autres pilotes.
+Les états déclarés restent distincts d'une activation effective. Les formats
+inconnus, données historiques et limites d'affichage sont explicitement qualifiés.
+Les détails longs s'ouvrent à la demande ; la définition JSON d'origine reste
+accessible. Les programmations restent consultatives et ne créent aucune minuterie locale.
+
 ## Vérifier visuellement
 
 Pour un agent, plutôt que son navigateur intégré (chaque clic y demande une autorisation) :
@@ -182,3 +194,33 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
   n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).
+
+## Accès TaHoma
+
+`#/somfy` sépare les scénarios et les programmations des réglages de connexion.
+La navigation apparaît pour une intégration Overkiz configurée ; Système conserve
+un lien vers cette page. L’ouverture lit uniquement le catalogue local du
+propriétaire déjà collecté : elle ne déclenche pas de requête au fournisseur.
+Les informations techniques et le JSON d’origine restent disponibles à la demande.
+Le lien « Volets et stores » mène à `#/pieces/volets` : les commandes y dépendent
+des capacités réelles du pilote, indépendamment du catalogue cloud.
+
+
+## Lancer un scénario TaHoma
+
+Dans `#/somfy`, chaque scénario affiche ses actions puis son accès : lecture seule,
+autorisation nécessaire, indisponible ou bouton **Lancer**. L'autorisation demande
+un code Moli frais et un consentement explicite pour ce seul scénario ; elle ne
+l'exécute pas. Le bouton **Revenir en lecture seule** retire cette autorisation.
+Une connexion globalement en lecture seule ne peut pas être ouverte par ce formulaire.
+
+`SomfyScenarioControl` utilise le même client `act()` que les équipements : garde,
+approbations et journal restent centraux. Le helper `somfy-scenario-controls.js`
+vérifie la capacité du catalogue courant et celle du flux Hub vivant. Une ancienne
+carte ne permet pas d'utiliser un point retiré, devenu indisponible ou renouvelé.
+Le code est effacé avant toute attente réseau et n'entre jamais dans l'état partagé.
+Les messages distinguent demande acceptée, validation humaine et résultat incertain ;
+ils ne certifient pas le mouvement des équipements. Aucune relance automatique.
+
+Les tests de lancement utilisent uniquement des scénarios et transports fictifs.
+Les essais sur la maison conservent la lecture seule.

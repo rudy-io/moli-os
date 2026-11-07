@@ -1,5 +1,7 @@
-//! Native Somfy developer-mode local HTTPS. No cloud login, no inferred positions.
+//! Local Somfy developer-mode HTTPS with optional independent cloud observation.
 mod client;
+pub mod cloud;
+pub mod inventory;
 mod model;
 use anyhow::Context as _;
 use client::{Client, Failure};
@@ -23,7 +25,10 @@ pub struct ReviewedOpener {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    pub host: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub cloud: Option<cloud::Config>,
     #[serde(default = "port")]
     pub port: u16,
     #[serde(default = "poll")]
@@ -46,13 +51,22 @@ pub struct Overkiz {
     config: Config,
 }
 impl Overkiz {
-    pub fn new(config: Config) -> anyhow::Result<Self> {
-        if config.host.is_empty()
-            || config.host.len() > 253
-            || !config
-                .host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    pub fn new(mut config: Config) -> anyhow::Result<Self> {
+        if let Some(cloud) = &mut config.cloud {
+            cloud.read_only = config.read_only;
+        }
+        if (config.host.is_none() && config.cloud.is_none())
+            || config.host.as_ref().is_some_and(|host| {
+                host.is_empty()
+                    || host.len() > 253
+                    || !host
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+            })
+            || config
+                .cloud
+                .as_ref()
+                .is_some_and(|cloud| cloud.validate().is_err())
             || config.port == 0
             || !(1..=300).contains(&config.poll_secs)
             || config.cert_sha256.as_ref().is_some_and(|p| !valid_pin(p))
@@ -103,30 +117,47 @@ async fn wait(ctx: &DriverCtx, message: String) {
     ctx.cancelled().await;
 }
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-    let Some(token) = ctx
+    // Explicit source ownership survives supervisor restarts and config changes.
+    for id in ctx.devices() {
+        ctx.set_availability(&id, false);
+        if (cloud::owns_device(&id) && config.cloud.is_none())
+            || (!cloud::owns_device(&id) && config.host.is_none())
+        {
+            ctx.remove_device(&id);
+        }
+    }
+    let Some(cloud_config) = &config.cloud else {
+        return run_native(config, ctx).await;
+    };
+    let cloud = Some(cloud::worker::Controller::new(ctx, cloud_config));
+    run_sources(config, ctx, cloud).await
+}
+
+async fn native_client(config: &Config, ctx: &DriverCtx) -> anyhow::Result<Client> {
+    let token = ctx
         .secret("token")
         .filter(|t| !t.is_empty() && t.len() <= 8192 && http::HeaderValue::from_str(t).is_ok())
-    else {
-        wait(ctx, moli_i18n::tr!("overkiz.auth")).await;
-        return Ok(());
-    };
+        .ok_or(Failure::Auth)?;
     let cached = ctx.secret("cert_sha256");
     if cached.as_ref().is_some_and(|p| !valid_pin(p)) && config.cert_sha256.is_none() {
         return Err(Failure::Certificate.into());
     }
-    let pin = config
+    let host = config
+        .host
+        .as_deref()
+        .context(moli_i18n::tr!("overkiz.invalid"))?;
+    let pin = if let Some(pin) = config
         .cert_sha256
         .clone()
         .or(cached)
-        .filter(|p| valid_pin(p));
-    let pin = if let Some(pin) = pin {
+        .filter(|p| valid_pin(p))
+    {
         pin
     } else {
         if !ctx.can_store_secrets() {
-            wait(ctx, moli_i18n::tr!("overkiz.vault")).await;
-            return Ok(());
+            anyhow::bail!(moli_i18n::tr!("overkiz.vault"));
         }
-        let probe = PinnedHttps::new(&config.host, config.port, None)?;
+        let probe = PinnedHttps::new(host, config.port, None)?;
         probe.handshake().await.map_err(|e| client::network(&e))?;
         let pin = probe
             .pinned_fingerprint()
@@ -136,10 +167,131 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             .map_err(|_| anyhow::anyhow!(moli_i18n::tr!("overkiz.vault")))?;
         pin
     };
-    let client = Client::new(
-        PinnedHttps::new(&config.host, config.port, Some(pin))?,
+    Ok(Client::new(
+        PinnedHttps::new(host, config.port, Some(pin))?,
         token,
-    );
+    ))
+}
+
+async fn run_sources(
+    config: &Config,
+    ctx: &mut DriverCtx,
+    mut cloud: Option<cloud::worker::Controller>,
+) -> anyhow::Result<()> {
+    let mut native = None;
+    let mut native_live = false;
+    let mut native_warning = None;
+    let mut native_parked = false;
+    let mut missing = MissingDevices::new();
+    let mut retry = tokio::time::Instant::now();
+    let mut native_timer = tokio::time::interval(Duration::from_secs(config.poll_secs));
+    native_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut cloud_timer = tokio::time::interval(Duration::from_secs(5));
+    cloud_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        reconcile_status(ctx, native_live, native_warning.as_deref(), cloud.as_ref());
+        let outcome = tokio::select! {
+            command = ctx.next_command() => {
+                let Some(command) = command else { return Ok(()); };
+                if cloud::owns_device(&command.device.id) {
+                    if config.read_only { command.reply(Err(moli_i18n::tr!("overkiz.refused"))); }
+                    else if let Some(cloud) = &mut cloud { cloud.dispatch(ctx,command); }
+                    else { command.reply(Err(moli_i18n::tr!("overkiz.refused"))); }
+                    continue;
+                }
+                let Some(client) = native.as_ref().filter(|_| {
+                    !cloud::owns_device(&command.device.id) && !config.read_only
+                }) else {
+                    command.reply(Err(moli_i18n::tr!("overkiz.refused")));
+                    continue;
+                };
+                let deadline = command.deadline.min(Instant::now() + Duration::from_millis(4500));
+                let operation = tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), apply(client, ctx, &command, deadline, config, &mut missing));
+                let result = cloud::worker::during(operation, &mut cloud, ctx).await.map_err(|_| anyhow::anyhow!(moli_i18n::tr!("overkiz.timeout"))).and_then(|r| r);
+                let needs_human = result.as_ref().err().is_some_and(|error| error.downcast_ref::<Failure>().is_some());
+                command.reply(result.as_ref().copied().map_err(ToString::to_string));
+                if needs_human {
+                    Some(result)
+                } else {
+                    // Match local-only behaviour: a refused order is not a source
+                    // failure. Only a failed subsequent read needs recovery.
+                    Some(cloud::worker::during(refresh(client, ctx, config, &mut missing), &mut cloud, ctx).await.map(|_| ()))
+                }
+            },
+            _ = native_timer.tick(), if config.host.is_some() && !native_parked => {
+                if tokio::time::Instant::now() < retry {
+                    continue;
+                }
+                let operation = async {
+                    let client = if let Some(client) = native.take() { client } else { native_client(config, ctx).await? };
+                    refresh(&client, ctx, config, &mut missing).await?;
+                    native = Some(client);
+                    Ok::<_, anyhow::Error>(())
+                };
+                Some(cloud::worker::during(operation, &mut cloud, ctx).await)
+            },
+            _ = cloud_timer.tick(), if cloud.is_some() => {
+                if let Some(cloud) = &mut cloud { cloud.tick(ctx); }
+                None
+            },
+            event = async { cloud.as_mut().expect("enabled branch").next_event().await }, if cloud.as_ref().is_some_and(cloud::worker::Controller::receiving) => {
+                if let Some(cloud) = &mut cloud { cloud.handle(ctx, event); }
+                None
+            }
+        };
+        match outcome {
+            Some(Ok(())) => {
+                native_live = true;
+                native_warning = None;
+            }
+            Some(Err(error)) => {
+                native_parked = error.downcast_ref::<Failure>().is_some();
+                native_warning = Some(error.to_string());
+                native_live = false;
+                native = None;
+                missing.clear();
+                retry = tokio::time::Instant::now() + Duration::from_secs(60);
+            }
+            None => {}
+        }
+    }
+}
+fn reconcile_status(
+    ctx: &DriverCtx,
+    native_live: bool,
+    native_warning: Option<&str>,
+    cloud: Option<&cloud::worker::Controller>,
+) {
+    // set_availability removes held_offline entries BEFORE instance-wide ready can restore them.
+    for id in ctx.devices() {
+        if (!cloud::owns_device(&id) && !native_live)
+            || (cloud::owns_device(&id) && cloud.is_none_or(|c| !c.live))
+        {
+            ctx.set_availability(&id, false);
+        }
+    }
+    ctx.ready();
+    let warnings: Vec<_> = native_warning
+        .into_iter()
+        .chain(cloud.and_then(|c| c.warning.as_deref()))
+        .collect();
+    if warnings.is_empty() {
+        ctx.clear_warning();
+    } else {
+        ctx.warn(warnings.join(" · "));
+    }
+}
+
+async fn run_native(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
+    let client = match native_client(config, ctx).await {
+        Ok(client) => client,
+        Err(error) if error.downcast_ref::<Failure>().is_some() => return Err(error),
+        Err(error) if !ctx.can_store_secrets() => {
+            wait(ctx, error.to_string()).await;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     // Absence is counted only after a complete successful snapshot. A failed
     // run resets the streak; transport failures cannot hasten removal.
     let mut missing = MissingDevices::new();
@@ -188,6 +340,9 @@ async fn refresh(
         ids.push(id);
     }
     for old in ctx.devices() {
+        if cloud::owns_device(&old) {
+            continue;
+        }
         if ids.contains(&old) {
             missing.remove(&old);
         } else {
@@ -210,7 +365,7 @@ async fn apply(
     config: &Config,
     missing: &mut MissingDevices,
 ) -> anyhow::Result<()> {
-    if config.read_only {
+    if cloud::owns_device(&command.device.id) || config.read_only {
         anyhow::bail!(moli_i18n::tr!("overkiz.refused"));
     }
     if command.abandoned() {
@@ -243,3 +398,6 @@ async fn apply(
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod runtime_tests;
