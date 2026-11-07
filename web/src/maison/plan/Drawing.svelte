@@ -20,6 +20,8 @@
     ontap = () => {},
     /** Fills its box (the overview sets the size) instead of keeping the floor's shape. */
     fill = false,
+    /** Devices that take room on screen (the others may be hidden by the page). */
+    solid = () => true,
   } = $props();
 
   const uid = Math.random().toString(36).slice(2, 8);
@@ -223,6 +225,65 @@
   const pinScale = $derived(Math.min(1.1, Math.max(0.85, (cam.k / fitK) * 0.85)));
   const fs = $derived(12 / cam.k);
   const visible = (x, y) => x > cam.x - 80 / cam.k && y > cam.y - 80 / cam.k && x < cam.x + (W + 80) / cam.k && y < cam.y + (H + 80) / cam.k;
+
+  /** Where each device shows on screen. Devices that would sit on one
+   *  another are pushed apart a little (never in edit mode, where the pin
+   *  is exactly where it is placed); a small dot keeps the true spot. */
+  const placed = $derived.by(() => {
+    const list = [];
+    const named = cam.k > fitK * 1.7;
+    for (const s of floor.devices ?? []) {
+      const d = hub.devices[s.id];
+      if (!d || !keep(d) || !visible(s.x, s.y)) continue;
+      const x = (s.x - cam.x) * cam.k;
+      const y = (s.y - cam.y) * cam.k;
+      list.push({ spot: s, d, x, y, ox: x, oy: y, solid: named || solid(d) });
+    }
+    if (editing) return list;
+    const R = 50 * pinScale;
+    const far = R * 1.7;
+    for (let pass = 0; pass < 14; pass++) {
+      let moved = false;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a.solid) continue;
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          if (!b.solid) continue;
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.hypot(dx, dy);
+          if (dist >= R) continue;
+          if (dist < 0.5) {
+            // Same spot: open them on a fixed angle, so it never jumps around.
+            const t = (i * 7 + j * 3) * 0.9;
+            dx = Math.cos(t);
+            dy = Math.sin(t);
+            dist = 1;
+          }
+          const push = (R - dist) / 2;
+          a.x -= (dx / dist) * push;
+          a.y -= (dy / dist) * push;
+          b.x += (dx / dist) * push;
+          b.y += (dy / dist) * push;
+          moved = true;
+        }
+      }
+      // Never far from where it really is.
+      for (const p of list) {
+        const ex = p.x - p.ox;
+        const ey = p.y - p.oy;
+        const e = Math.hypot(ex, ey);
+        if (e > far) {
+          p.x = p.ox + (ex / e) * far;
+          p.y = p.oy + (ey / e) * far;
+        }
+      }
+      if (!moved) break;
+    }
+    for (const p of list) p.shifted = Math.hypot(p.x - p.ox, p.y - p.oy) > 10;
+    return list;
+  });
 
   // ---- the temperature of each place ------------------------------------------------
 
@@ -501,13 +562,13 @@
     </svg>
 
     <!-- the devices: always the same size on screen -->
-    {#each floor.devices ?? [] as spot (spot.id)}
-      {@const d = hub.devices[spot.id]}
-      {#if d && keep(d) && visible(spot.x, spot.y)}
-        <div class="pin" style="left:{(spot.x - cam.x) * cam.k}px; top:{(spot.y - cam.y) * cam.k}px; --s:{pinScale}" class:named={cam.k > fitK * 1.7}>
-          {@render token(spot, d)}
-        </div>
+    {#each placed as p (p.spot.id)}
+      {#if p.shifted}
+        <i class="anchor" style="left:{p.ox}px; top:{p.oy}px" aria-hidden="true"></i>
       {/if}
+      <div class="pin" style="left:{p.x}px; top:{p.y}px; --s:{pinScale}" class:named={cam.k > fitK * 1.7}>
+        {@render token(p.spot, p.d)}
+      </div>
     {/each}
   {/if}
 
@@ -669,6 +730,17 @@
 
   .handle {
     cursor: nwse-resize;
+  }
+
+  .anchor {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--ink) 45%, transparent);
+    box-shadow: 0 0 0 2px var(--surface);
+    pointer-events: none;
   }
 
   .pin {
