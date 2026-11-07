@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import LitRing from '../ui/LitRing.svelte';
   import Orb from '../moli/Orb.svelte';
   import Editor from '../auto/Editor.svelte';
   import { home, note, relative } from '../lib/home.svelte.js';
@@ -158,7 +159,7 @@
     {#if error}<p class="muted">{error}</p>{/if}
 
     {#if list?.length}
-      <h2 class="section">{t('automatismes.liste.section')} <span class="muted">{t('automatismes.liste.actifs', { count: list.filter((i) => i.live).length, total: mine.length })}</span></h2>
+      <h2 class="section">{#if mine.length}<LitRing on={list.filter((i) => i.live).length} total={mine.length} color="var(--accent-2)" label={t('automatismes.liste.actifs', { count: list.filter((i) => i.live).length, total: mine.length })} />{/if}{t('automatismes.liste.section')} <span class="muted">{t('automatismes.liste.actifs', { count: list.filter((i) => i.live).length, total: mine.length })}</span></h2>
       {#if mine.length}
         <div class="grid">
           {#each mine as item (item.automation.id)}{@render tile(item)}{/each}
@@ -300,7 +301,7 @@
     color: var(--ink-2);
     display: flex;
     gap: 10px;
-    align-items: baseline;
+    align-items: center;
   }
 
   .section span {

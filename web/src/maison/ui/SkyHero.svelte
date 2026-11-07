@@ -155,6 +155,37 @@
     color: var(--sun);
   }
 
+  /* The weather icon turns gently, like the sun in the sky. */
+  .now > :global(svg) {
+    filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--sun) 55%, transparent));
+    animation: sky-sway 7s ease-in-out infinite;
+  }
+
+  @keyframes sky-sway {
+    0%,
+    100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-4px) rotate(10deg); }
+  }
+
+  h1 {
+    animation: hello-in 0.7s var(--ease) backwards;
+  }
+
+  @keyframes hello-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+      filter: blur(6px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .now > :global(svg),
+    h1 {
+      animation: none;
+    }
+  }
+
   .words {
     display: grid;
     color: var(--ink);

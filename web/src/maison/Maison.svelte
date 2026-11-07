@@ -25,6 +25,7 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { icon } from './lib/icons.js';
 
   let { route } = $props();
   $effect(() => {
@@ -114,6 +115,31 @@
 
   const page = $derived(route.split('/')[0] ?? '');
 
+  // Look only: each page has its own colour (rail pill, card icons, the
+  // backdrop's main cloud) and its icon in a badge before its title.
+  const LOOK = {
+    '': ['#ffb547', '#f07a3a', 'home'],
+    moli: ['#b78cff', '#6a5cff', 'sparkles'],
+    salon: ['#c77dff', '#ff6fa5', 'remote'],
+    pieces: ['#ffc95a', '#ff8f3a', 'light-group'],
+    airzone: ['#5fd4ff', '#3b82f6', 'air-conditioner'],
+    plan: ['#6cc7ff', '#4f7bff', 'home-roof'],
+    carte: ['#5ee0a0', '#14a37f', 'map'],
+    cameras: ['#8b9dff', '#5a4fe0', 'cctv'],
+    parler: ['#ff8fb8', '#e2558f', 'talk'],
+    energie: ['#ffd84d', '#2fbf71', 'bolt'],
+    impression: ['#ff9a6b', '#e2483d', 'printer3d'],
+    dehors: ['#9be15d', '#1fa67a', 'flower-outline'],
+    automatismes: ['#a78bfa', '#7c3aed', 'robot'],
+    infra: ['#5eead4', '#0d9488', 'server'],
+    parc: ['#93c5fd', '#475fd6', 'package'],
+    systeme: ['#7dd3fc', '#2563eb', 'branch'],
+  };
+  const look = $derived(LOOK[page] ?? LOOK['']);
+  const pageIcon = $derived(
+    `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='white' d='${icon(look[2])}'/></svg>`)}")`,
+  );
+
   // Look only: the card under the mouse leans a little towards it (3D).
   // Never while a button is held (a slider being dragged must stay still),
   // never on touch, never when the system asks for less motion.
@@ -124,6 +150,8 @@
     const card = e.target instanceof Element ? e.target.closest('.content .card') : null;
     if (card !== leaning) unlean();
     if (!card) return;
+    // A map, a plan or a drawing canvas stays flat: you aim at a spot there.
+    if (card.querySelector('.leaflet-container, canvas, .house3d, .drawing, .graph')) return;
     const r = card.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width;
     const y = (e.clientY - r.top) / r.height;
@@ -147,7 +175,7 @@
   }
 </script>
 
-<div class="maison" data-theme={theme}>
+<div class="maison" data-theme={theme} style:--accent={look[0]} style:--accent-2={look[1]} style:--page-icon={pageIcon}>
   <nav class="rail" aria-label={t('commun.nav.aria')}>
     <a class="brand" href="#/" aria-label={t('commun.nav.logo')}>
       <svg viewBox="0 0 32 32" aria-hidden="true">
@@ -375,9 +403,9 @@
 
   /* The page you are on: a warm lit pill, slightly raised. */
   .rail a.active .glyph {
-    background: var(--grad-warm);
-    color: #2a1703;
-    box-shadow: 0 8px 18px -8px var(--warm-glow), inset 0 1px 0 rgb(255 255 255 / 45%);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 8px 18px -8px var(--accent-2), inset 0 1px 0 rgb(255 255 255 / 45%);
     transform: translateY(-1px);
   }
 

@@ -118,6 +118,18 @@ telles que les appareils les nomment).
   fenêtre plein écran ouverte depuis elle couvre toujours l'écran. Rail en verre, page active en
   pastille ambre ; pied du rail (thème, Système, Atelier) en trois icônes ; écran bas : noms
   plus petits. La bulle Moli est un rond, son texte s'ouvre au survol.
+- **Une couleur par page** (`LOOK` dans `Maison.svelte`) : `--accent` / `--accent-2` teintent la
+  pastille du rail, les icônes des titres de carte, le nuage principal du fond, et un **macaron**
+  (l'icône de la page dans une tuile brillante, qui arrive en tournant puis flotte) se place devant
+  chaque `.page-title`. Pas d'inclinaison sur une carte qui contient une carte géographique, le plan
+  ou un canevas (on y vise un point).
+- Petits graphiques : `ui/LitRing.svelte` (anneau « n sur total » : lumières allumées sur l'Accueil,
+  automatismes actifs, services du Parc en bon état), `ui/Gauge.svelte` (demi-jauge colorée : air et
+  UV dans Dehors) ; anneau de lumières allumées autour de l'icône de chaque pièce ; vignette
+  d'impression entourée de sa progression, barre rayée qui défile pendant l'impression.
+- Petites animations : halo qui ondule autour de l'orbe de Moli, ampoule qui rebondit à l'allumage,
+  icône météo qui se balance, image de caméra qui se rapproche au survol, carte du Parc en alerte
+  qui palpite. Toutes coupées si le système demande moins d'animations.
 - `ui/Donut.svelte` : anneau de parts vu en 3D (pièce de monnaie légèrement inclinée), qui se
   dessine à l'affichage ; survoler ou toucher une part donne son nom, sa valeur et son
   pourcentage au centre. Énergie : « Qui consomme maintenant » et « Où ça part » l'ont au-dessus

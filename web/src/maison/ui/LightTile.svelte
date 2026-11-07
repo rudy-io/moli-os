@@ -380,6 +380,7 @@
     background: var(--surface-2);
     transition: background 0.35s var(--ease), box-shadow 0.35s var(--ease);
     overflow: hidden;
+    isolation: isolate;
   }
 
   .tile.on {
@@ -433,6 +434,40 @@
     background: var(--warm);
     color: #fff;
     box-shadow: 0 0 0 6px var(--glow, var(--warm-glow)), 0 6px 22px var(--glow, var(--warm-glow));
+    animation: bulb-on 0.55s var(--ease);
+  }
+
+  /* Switched on: the bulb springs, the tile catches a little warm light. */
+  @keyframes bulb-on {
+    0% {
+      transform: scale(0.8);
+    }
+    55% {
+      transform: scale(1.14);
+    }
+  }
+
+  .tile.on::before {
+    content: '';
+    position: absolute;
+    inset: -40% auto auto -30%;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--glow, var(--warm-glow)), transparent 70%);
+    pointer-events: none;
+    opacity: 0.9;
+    z-index: -1;
+  }
+
+  .tile:not(.on) .hit:hover .bulb {
+    transform: scale(1.06);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .on .bulb {
+      animation: none;
+    }
   }
 
   .text {

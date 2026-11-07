@@ -207,7 +207,9 @@
   --grad-warm: linear-gradient(135deg, #ffbf5c, #f08a3a);
   --grad-cool: linear-gradient(135deg, #6f95ff, #4b5ff2);
   --grad-good: linear-gradient(135deg, #45c9a6, #2c9a88);
-  --cloud-a: rgb(255 190 110 / 60%);
+  --accent: #ffb547;
+  --accent-2: #f07a3a;
+  --cloud-a: color-mix(in srgb, var(--accent) 55%, transparent);
   --cloud-b: rgb(120 150 255 / 50%);
   --cloud-c: rgb(80 210 180 / 36%);
   --shadow: 0 1px 1px rgb(23 32 56 / 4%), 0 4px 10px -4px rgb(23 32 56 / 8%), 0 18px 40px -18px rgb(23 32 56 / 22%);
@@ -220,7 +222,7 @@
 .maison[data-theme='night'] {
   --glass: color-mix(in srgb, var(--surface) 72%, transparent);
   --glass-line: color-mix(in srgb, #fff 9%, transparent);
-  --cloud-a: rgb(245 150 60 / 16%);
+  --cloud-a: color-mix(in srgb, var(--accent-2) 20%, transparent);
   --cloud-b: rgb(90 110 255 / 22%);
   --cloud-c: rgb(40 190 160 / 12%);
 }
@@ -303,9 +305,61 @@
   }
 }
 
-/* A page arriving: the title slides in. */
+/* A page arriving: the title slides in behind its badge, a glossy tile
+   in the page's colours that turns in like a coin and then floats. */
 .maison .page-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   animation: maison-title 0.6s var(--ease) both;
+}
+
+.maison .page-title::before {
+  content: '';
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background:
+    var(--page-icon) center / 26px no-repeat,
+    radial-gradient(circle at 30% 20%, rgb(255 255 255 / 55%), transparent 55%),
+    linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow:
+    0 10px 22px -10px var(--accent-2),
+    inset 0 -3px 0 rgb(0 0 0 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
+  animation:
+    maison-coin 0.9s var(--ease) backwards,
+    maison-float 6s ease-in-out 1s infinite;
+}
+
+@keyframes maison-coin {
+  from {
+    opacity: 0;
+    transform: perspective(300px) rotateY(-120deg) scale(0.6);
+  }
+}
+
+@keyframes maison-float {
+  0%,
+  100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-4deg); }
+}
+
+/* Each card's title icon sits in a small tile of the page's colour. */
+.maison .card-head h2 > svg:first-child {
+  box-sizing: content-box;
+  width: 18px;
+  height: 18px;
+  padding: 7px;
+  border-radius: 11px;
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.maison[data-theme='night'] .card-head h2 > svg:first-child {
+  color: var(--accent);
 }
 
 @keyframes maison-title {
@@ -356,7 +410,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .maison::before {
+  .maison::before,
+  .maison .page-title::before {
     animation: none;
   }
 
