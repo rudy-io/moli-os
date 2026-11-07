@@ -19,10 +19,10 @@ Les variantes de production construites depuis le dépôt Moli seul mesurent :
 
 | Variante x86_64 musl | Image non compressée | Binaire |
 |---|---:|---:|
-| Standard avec symboles | 30 268 337 octets | 30 264 240 octets |
-| Compacte explicite | **24 954 289 octets** | 24 949 904 octets |
+| Standard avec symboles | 30 289 328 octets | 30 284 856 octets |
+| Compacte explicite | **24 970 672 octets** | 24 966 512 octets |
 
-La compacte respecte 25 Mo avec 45 711 octets de marge. Le standard reste au-dessus
+La compacte respecte 25 Mo avec 29 328 octets de marge. Le standard reste au-dessus
 pour conserver les symboles. Les nouvelles fonctions et la source de la pile sont
 dans Moli ; la copie des sources n'ajoute pas de service ni de dépendance Git.
 Les deux binaires passent les essais protocolaires étendus. Diagnostics correspond

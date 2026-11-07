@@ -14,6 +14,23 @@ Les deux nouvelles régressions unitaires (contention du coffre et redécouverte
 passent dans le contrôle complet : 2 241 tests Rust au total.
 Aucune action matérielle n'a été réalisée pour ces corrections.
 
+# Poids finaux — fixes Hue inclus, 2026-11-07
+
+Artefacts de production reconstruits depuis le commit propre `0445ca8`
+(wildcard, `udp_port`, `SuppressResponse`) : les tailles ci-dessous remplacent
+celles du jalon antérieur au fix, listées plus bas comme historique.
+
+| Variante | Image (octets) | Binaire (octets) | SHA-256 binaire |
+|---|---:|---:|---|
+| Standard | 30 289 328 | 30 284 856 | `72b0adecfdb85454d0d7f12f65ccd79f862873f7590eaddd0781a6a150ec7832` |
+| Diagnostics | 30 289 076 | 30 284 856 | `72b0adecfdb85454d0d7f12f65ccd79f862873f7590eaddd0781a6a150ec7832` |
+| Compacte | 24 970 672 | 24 966 512 | `da2e279c23b2f2764c847b8eec1e9b4b8e59729465b7c80535bc9b7f8afad19a` |
+
+Le binaire diagnostics est identique octet pour octet au standard. La compacte
+reste sous 25 Mo avec 29 328 octets de marge. Reproduction : `podman build`
+sur les cibles `runtime`/`diagnostics` du Dockerfile, la compacte avec
+`--build-arg MOLI_STRIP_SYMBOLS=true`.
+
 Les mesures suivantes concernent les artefacts de production antérieurs à ces
 corrections ; aucun nouveau poids d'image n'est revendiqué.
 
