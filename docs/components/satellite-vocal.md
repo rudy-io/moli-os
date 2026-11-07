@@ -275,6 +275,13 @@ logs = "warn"                                 # none, error, warn, info, debug
 | `wake_words` | vide | ids des mots à activer parmi ceux du firmware |
 | `mac` | absent | adresse attendue : garde-fou du provisionnement et recherche d'un appareil qui a changé d'adresse |
 | `logs` | `warn` | le journal de l'appareil, reversé dans celui de Moli |
+| `speaker` | absent | une enceinte qui dit les réponses à la place de l'appareil : son point `announce` (par exemple `sonos:RINCON_…/announce`) |
+
+**Les réponses sur une enceinte** (`speaker`) : l'appareil écoute et garde ses petits sons (réveil,
+carillon de fin), l'enceinte dit la réponse par-dessus ce qu'elle joue (une Sonos baisse la télé le temps de
+la phrase). L'appareil affiche qu'il répond, attend que l'enceinte ait fini (son point `speaking`), puis
+joue un dixième de seconde de silence et se remet à écouter : il n'entend jamais la réponse. Si l'enceinte
+est en silence (`quiet`), refuse, ou ne commence pas dans les 5 s, l'appareil dit la réponse lui-même.
 
 **La clé chiffrée** vit dans le coffre, jamais dans `moli.toml` :
 

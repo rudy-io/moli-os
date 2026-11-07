@@ -1,12 +1,13 @@
 //! Spoken announcements, the same for every speaker that says them: the
 //! words checked, a short queue said one at a time (dropped when stale), the
 //! speech made by a local Piper server (Wyoming), the level an announcement
-//! is said at (`announce_volume`), and `quiet`, a silence that ends by itself
-//! after [`QUIET_FOR`].
+//! is said at (`announce_volume`), `quiet`, a silence that ends by itself
+//! after [`QUIET_FOR`], and `speaking`, the words being said.
 //!
 //! How the sound reaches the speaker is the driver's own: [`Speaker::play`].
 //! A driver keeps one [`Announcements`], adds its [`points`](Announcements::points)
-//! to its device, and hands it every command and every poll tick.
+//! to its device, hands it every command and every poll tick, and shows
+//! [`speaking_changed`](Announcements::speaking_changed) as it comes.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -16,6 +17,7 @@ use anyhow::{Context as _, ensure};
 use moli_core::{Access, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
 use moli_runtime::media::Image;
 use moli_runtime::{BoxFuture, CommandRequest, DriverCtx, MediaPublisher};
+use tokio::sync::watch;
 
 /// An announcement is a sentence or two, not a speech.
 pub const MAX_TEXT: usize = 500;
@@ -31,8 +33,36 @@ pub const QUIET_FOR: Duration = Duration::from_secs(4 * 3600);
 /// A speaker that can say a sound.
 pub trait Speaker: std::fmt::Debug + Send + Sync + 'static {
     /// Plays `wav` (the speech server's WAV) at `level`, 0–100, the speaker's
-    /// own volume coming back afterwards.
-    fn play(&self, wav: Vec<u8>, level: u8) -> BoxFuture<'_, anyhow::Result<()>>;
+    /// own volume coming back afterwards, and resolves once it has been
+    /// heard. [`Started::now`] when the speaker starts saying it.
+    fn play<'a>(
+        &'a self,
+        wav: Vec<u8>,
+        level: u8,
+        started: &'a Started,
+    ) -> BoxFuture<'a, anyhow::Result<()>>;
+}
+
+/// Tells the house a speaker has started saying an announcement: the
+/// `speaking` point holds its words until it is over. A voice satellite that
+/// answers through this speaker waits for the end before listening again.
+#[derive(Debug)]
+pub struct Started {
+    speaking: watch::Sender<Option<String>>,
+    text: String,
+}
+
+impl Started {
+    /// The speaker is saying it now (said again, nothing changes).
+    pub fn now(&self) {
+        self.speaking.send_if_modified(|said| {
+            let changed = said.as_deref() != Some(self.text.as_str());
+            if changed {
+                *said = Some(self.text.clone());
+            }
+            changed
+        });
+    }
 }
 
 /// Where the speech is made.
@@ -109,6 +139,8 @@ pub struct Announcer {
     waiting: AtomicUsize,
     /// The level an announcement is said at (the `announce_volume` point).
     level: AtomicU8,
+    /// What the speaker is saying now, `None` once said (the `speaking` point).
+    speaking: watch::Sender<Option<String>>,
 }
 
 impl Announcer {
@@ -126,6 +158,7 @@ impl Announcer {
             turn: tokio::sync::Mutex::new(()),
             waiting: AtomicUsize::new(0),
             level: AtomicU8::new(level.min(100)),
+            speaking: watch::Sender::new(None),
         })
     }
 
@@ -185,7 +218,13 @@ impl Announcer {
     /// Says `text` on this speaker (the caller holds the turn).
     async fn announce(&self, text: &str) -> anyhow::Result<()> {
         let wav = self.speech.synthesize(text).await?;
-        self.speaker.play(wav, self.level()).await
+        let started = Started {
+            speaking: self.speaking.clone(),
+            text: text.to_owned(),
+        };
+        let played = self.speaker.play(wav, self.level(), &started).await;
+        self.speaking.send_if_modified(|said| said.take().is_some());
+        played
     }
 }
 
@@ -196,14 +235,18 @@ pub struct Announcements {
     announcer: Option<Arc<Announcer>>,
     /// While set and ahead, nothing is said (ms since the epoch).
     quiet_until: Option<u64>,
+    /// What the speaker is saying, as the announcer tells it.
+    speaking: Option<watch::Receiver<Option<String>>>,
 }
 
 impl Announcements {
     #[must_use]
     pub fn new(announcer: Option<Arc<Announcer>>) -> Self {
+        let speaking = announcer.as_ref().map(|a| a.speaking.subscribe());
         Self {
             announcer,
             quiet_until: None,
+            speaking,
         }
     }
 
@@ -265,6 +308,17 @@ impl Announcements {
                 },
                 None,
             ),
+            // What it is saying now, empty once said.
+            point(
+                "speaking",
+                &moli_i18n::tr!("pilotes.annonces.annonce_en_cours"),
+                Kind::Text,
+                Access {
+                    read: true,
+                    write: false,
+                },
+                None,
+            ),
         ]
     }
 
@@ -280,6 +334,8 @@ impl Announcements {
                 announcer.set_level(level);
             }
             ctx.set_state(id, "announce_volume", Value::Int(announcer.level().into()));
+            // Nothing is being said at start, whatever was before a restart.
+            ctx.set_state(id, "speaking", Value::Null);
         }
         self.quiet_until = match (ctx.current(id, "quiet"), ctx.current(id, "quiet_until")) {
             (Some(Value::Bool(true)), Some(Value::Int(until))) => u64::try_from(until).ok(),
@@ -324,6 +380,30 @@ impl Announcements {
             }
             _ => None,
         }
+    }
+
+    /// Resolves when the speaker starts or stops saying an announcement
+    /// (never without announcements), with its words while it says them:
+    /// hand them to [`show_speaking`](Self::show_speaking). For the driver's
+    /// `select!` next to its commands; cancel-safe.
+    pub async fn speaking_changed(&mut self) -> Option<String> {
+        let Some(speaking) = &mut self.speaking else {
+            return std::future::pending().await;
+        };
+        if speaking.changed().await.is_err() {
+            // The announcer is gone: nothing more will be said.
+            return std::future::pending().await;
+        }
+        speaking.borrow_and_update().clone()
+    }
+
+    /// The `speaking` point: the words being said, empty once said.
+    pub fn show_speaking(ctx: &DriverCtx, id: &DeviceId, said: Option<String>) {
+        ctx.set_state(
+            id,
+            "speaking",
+            said.map_or(Value::Null, |s| Value::Text(s.into())),
+        );
     }
 
     /// On each poll: a silence forgotten on ends, and the house speaks again.
@@ -443,9 +523,106 @@ mod tests {
     struct Mute;
 
     impl Speaker for Mute {
-        fn play(&self, _wav: Vec<u8>, _level: u8) -> BoxFuture<'_, anyhow::Result<()>> {
+        fn play<'a>(
+            &'a self,
+            _wav: Vec<u8>,
+            _level: u8,
+            _started: &'a Started,
+        ) -> BoxFuture<'a, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
+    }
+
+    /// Without announcements, there is never anything being said.
+    #[tokio::test]
+    async fn a_speaker_without_announcements_never_speaks() {
+        let mut none = Announcements::new(None);
+        let never = tokio::time::timeout(Duration::from_millis(50), none.speaking_changed()).await;
+        assert!(never.is_err());
+    }
+
+    /// A driver whose speaker starts saying something, then is done.
+    #[derive(Debug)]
+    struct Teller;
+
+    impl moli_runtime::Driver for Teller {
+        fn kind(&self) -> &'static str {
+            "teller"
+        }
+
+        fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                let id = ctx.device_id("speaker");
+                let speech = Speech {
+                    tts: default_tts(),
+                    voice: None,
+                };
+                let announcer = Announcer::new(Mute, speech, 35, ctx.media_publisher());
+                let mut announcements = Announcements::new(Some(Arc::clone(&announcer)));
+                ctx.upsert_device(moli_core::Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: "Teller".into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: None,
+                    members: Vec::new(),
+                    points: announcements.points(),
+                });
+                announcements.start(ctx, &id);
+                ctx.ready();
+                // What a speaker does while it says an announcement: tells
+                // it has started (twice, as a Sonos may), then the
+                // announcer clears it once played.
+                let speaking = announcer.speaking.clone();
+                tokio::spawn(async move {
+                    let started = Started {
+                        speaking: speaking.clone(),
+                        text: "Il fait onze degrés.".into(),
+                    };
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    started.now();
+                    started.now();
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    speaking.send_if_modified(|said| said.take().is_some());
+                });
+                loop {
+                    tokio::select! {
+                        said = announcements.speaking_changed() => {
+                            Announcements::show_speaking(ctx, &id, said);
+                        }
+                        command = ctx.next_command() => {
+                            let Some(command) = command else { return Ok(()) };
+                            command.reply(Err("not here".into()));
+                        }
+                    }
+                }
+            })
+        }
+    }
+
+    /// The `speaking` point follows the speaker: its words once it starts,
+    /// nothing once it is over.
+    #[tokio::test]
+    async fn the_speaking_point_holds_the_words_being_said() {
+        use moli_core::{InstanceId, PointId};
+        use moli_runtime::{Hub, HubOptions, spawn_driver};
+        use tokio_util::sync::CancellationToken;
+
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let cancel = CancellationToken::new();
+        let task = spawn_driver(
+            &hub,
+            InstanceId::from("teller"),
+            Arc::new(Teller),
+            cancel.clone(),
+        );
+        let speaking = PointId::from("teller:speaker/speaking".to_owned());
+        settled(&hub, &speaking, &Value::Text("Il fait onze degrés.".into())).await;
+        settled(&hub, &speaking, &Value::Null).await;
+        cancel.cancel();
+        task.await.unwrap();
     }
 
     /// The least a driver does with its announcements.

@@ -540,9 +540,12 @@ host = "192.168.1.x"
   musique baisse, l'annonce passe, la musique revient d'elle-même, comme le script HA
   `announce_sonos`. Le certificat du Sonos est épinglé au premier contact (secret
   `sonos/ws_cert`). Une annonce à la fois, dans l'ordre ; la commande répond tout de suite,
-  un échec est journalisé dans les logs.
+  un échec est journalisé dans les logs. `speaking` (texte, lecture) tient les mots de
+  l'annonce pendant que l'enceinte les dit (dès que le clip est `ACTIVE`), vide une fois dits :
+  un [satellite vocal](satellite-vocal.md) qui répond par l'enceinte (`speaker`) attend la fin
+  avant de se remettre à écouter.
   Tout ce qui n'est pas propre au Sonos (le texte vérifié, la file de 3 au plus, l'abandon
-  après 30 s d'attente, `quiet`, `announce_volume`, la synthèse et la publication du son) est
+  après 30 s d'attente, `quiet`, `announce_volume`, `speaking`, la synthèse et la publication du son) est
   dans `crates/moli-announce`, pour toute enceinte qui parle ; le Sonos n'y ajoute que le clip
   (`moli_announce::Speaker`), comme [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay) le RAOP.
 - **Pièges** : description injoignable au démarrage = échec du pilote, relancé par le superviseur. Pas de gestion des groupes Sonos.
@@ -577,7 +580,7 @@ host = "192.168.1.x"
 
 - **Secrets** : aucun.
 - **Points** : ceux de `moli-announce`, comme pour le Sonos (`announce`, `announce_volume`,
-  `quiet`, `quiet_until`), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
+  `quiet`, `quiet_until`, `speaking` dès que le son part), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
   relu dans la session de chaque annonce et remis après elle, même quand le son a échoué. 0 %
   est muet (-144 dB). Un volume relu qui n'est pas un nombre fini (`nan`, `inf`) est ignoré ;
   les autres sont bornés entre -144 et 0 dB. Un récepteur qui refuse le volume de l'annonce la

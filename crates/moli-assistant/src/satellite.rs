@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
-use moli_core::Value;
+use moli_core::{Origin, PointId, Value};
 use moli_runtime::voice::{Answer, AtDoor, Pcm, Said, Speaker, VoiceBrain};
 use moli_runtime::{BoxFuture, DeviceView};
 use ring::rand::{SecureRandom as _, SystemRandom};
@@ -24,6 +24,14 @@ const VOICE_RATE: u32 = 24_000;
 const SATELLITE_GAIN: f32 = 2.8;
 /// Above this, peaks are rounded off instead of clipped.
 const KNEE: f32 = 0.7;
+/// A speaker has this long to start saying an answer; past it, the satellite
+/// says it itself.
+const SPEAKER_STARTS_WITHIN: Duration = Duration::from_secs(5);
+/// The longest answer a speaker says (500 characters at most).
+const SPEAKER_LONGEST: Duration = Duration::from_secs(45);
+/// How often the speaker's `speaking` point is read meanwhile.
+const SPEAKER_POLL: Duration = Duration::from_millis(50);
+
 /// The tools that only read: a turn that called nothing else changed nothing.
 const READ_ONLY_TOOLS: [&str; 8] = [
     "show",
@@ -86,6 +94,44 @@ pub(crate) fn hush(reply: &mut Reply) {
 }
 
 impl Assistant {
+    /// Says `text` on a speaker (`point`, its `announce` point) and waits until
+    /// it has said it: its `speaking` point holds the words while it says them.
+    /// `Err` when it is silenced, refuses, or has not started within `starts`.
+    pub(crate) async fn say_on_speaker(
+        &self,
+        point: &PointId,
+        text: &str,
+        starts: Duration,
+    ) -> Result<(), String> {
+        let (device, _) = point.split().ok_or("not a point")?;
+        let at = |key: &str| PointId::from(format!("{}/{key}", device.as_str()));
+        let hub = &self.0.hub;
+        let read = |key: &str| hub.state(&at(key)).map(|s| s.value);
+        if read("quiet") == Some(Value::Bool(true)) {
+            return Err("the speaker is silenced".into());
+        }
+        let saying = || matches!(read("speaking"), Some(Value::Text(said)) if &*said == text);
+        hub.command(
+            point,
+            Value::Text(text.into()),
+            Origin::Assistant,
+            Some("Moli".into()),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let asked = Instant::now();
+        while !saying() {
+            if asked.elapsed() > starts {
+                return Err("the speaker did not start".into());
+            }
+            tokio::time::sleep(SPEAKER_POLL).await;
+        }
+        while saying() && asked.elapsed() < SPEAKER_LONGEST {
+            tokio::time::sleep(SPEAKER_POLL).await;
+        }
+        Ok(())
+    }
+
     /// This turn comes from a satellite that should keep quiet (`quiet_during_tv`).
     pub(crate) async fn screen_plays_for(&self, turn: &Turn) -> bool {
         if !self.0.config.quiet_during_tv || turn.surface.as_deref() != Some("satellite") {
@@ -266,6 +312,15 @@ impl VoiceBrain for Assistant {
 
     fn heard_nothing(&self, wav: Option<Vec<u8>>) {
         self.heard_nothing_on("satellite", wav.as_deref());
+    }
+
+    fn say_on(&self, point: &str, text: &str) -> BoxFuture<'_, Result<(), String>> {
+        let point = PointId::from(point);
+        let text = text.trim().to_owned();
+        Box::pin(async move {
+            self.say_on_speaker(&point, &text, SPEAKER_STARTS_WITHIN)
+                .await
+        })
     }
 }
 
@@ -468,6 +523,111 @@ mod tests {
 
     fn text(value: &str) -> Value {
         Value::Text(value.into())
+    }
+
+    /// A speaker that says what it is told, or not (`says`), and tells it
+    /// through `speaking` like the Sonos does.
+    #[derive(Debug)]
+    struct Speaker {
+        says: bool,
+    }
+
+    impl moli_runtime::Driver for Speaker {
+        fn kind(&self) -> &'static str {
+            "speaker"
+        }
+
+        fn run<'a>(
+            &'a self,
+            ctx: &'a mut moli_runtime::DriverCtx,
+        ) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                let id = ctx.device_id("one");
+                let point = |key: &str, write: bool| moli_core::PointSpec {
+                    key: key.into(),
+                    label: key.into(),
+                    kind: moli_core::Kind::Text,
+                    access: moli_core::Access {
+                        read: !write,
+                        write,
+                    },
+                    unit: None,
+                    semantic: moli_core::Semantic::Other,
+                };
+                ctx.upsert_device(moli_core::Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: "speaker".into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: None,
+                    members: Vec::new(),
+                    points: vec![point("announce", true), point("speaking", false)],
+                });
+                ctx.set_state(&id, "speaking", Value::Null);
+                ctx.ready();
+                while let Some(command) = ctx.next_command().await {
+                    let said = command.value.clone();
+                    command.reply(Ok(()));
+                    if self.says {
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                        ctx.set_state(&id, "speaking", said);
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        ctx.set_state(&id, "speaking", Value::Null);
+                    }
+                }
+                Ok(())
+            })
+        }
+    }
+
+    async fn moli_with_speaker(says: bool) -> Assistant {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        moli_runtime::spawn_driver(
+            &hub,
+            moli_core::InstanceId::from("speaker"),
+            std::sync::Arc::new(Speaker { says }),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        for _ in 0..200 {
+            if hub.stats().drivers_running == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let config = serde_json::from_value(serde_json::json!({})).unwrap();
+        Assistant::new(hub, None, None, None, config).unwrap()
+    }
+
+    /// The answer is said on the speaker, and only then is it over.
+    #[tokio::test]
+    async fn an_answer_said_on_a_speaker_ends_when_it_has_been_said() {
+        let moli = moli_with_speaker(true).await;
+        let point = PointId::from("speaker:one/announce");
+        let asked = Instant::now();
+        moli.say_on_speaker(&point, "Il fait onze degrés.", Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(
+            asked.elapsed() >= Duration::from_millis(200),
+            "{:?}",
+            asked.elapsed()
+        );
+        let speaking = moli.0.hub.state(&PointId::from("speaker:one/speaking"));
+        assert_eq!(speaking.map(|s| s.value), Some(Value::Null));
+    }
+
+    /// A speaker that never starts: the satellite says it itself.
+    #[tokio::test]
+    async fn a_speaker_that_does_not_start_lets_the_satellite_speak() {
+        let moli = moli_with_speaker(false).await;
+        let point = PointId::from("speaker:one/announce");
+        let err = moli
+            .say_on_speaker(&point, "Il fait onze degrés.", Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(err.contains("did not start"), "{err}");
     }
 
     #[test]
