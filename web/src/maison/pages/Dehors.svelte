@@ -3,6 +3,7 @@
   import { weatherOf } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
+  import Gauge from '../ui/Gauge.svelte';
   import LightTile from '../ui/LightTile.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
 
@@ -87,9 +88,11 @@
   <div class="grid">
     <section class="card">
       <div class="card-head"><h2><Icon name="leaf" size={18} />{t('maison.dehors.air')}</h2><span class="chip {aqiTone}">{aqiWord}</span></div>
+      <div class="gauges">
+        <Gauge value={aqi} max={100} text={num(aqi)} label={t('maison.dehors.indice')} />
+        <Gauge value={uv} max={11} text={num(uv, 0)} label="UV · {uvWord}" colors={['#3fae7c', '#e8b931', '#f08a3a', '#c2410c', '#8e44ad']} />
+      </div>
       <div class="pairs">
-        <div><small>{t('maison.dehors.indice')}</small><b class="num">{num(aqi)}</b></div>
-        <div><small>UV</small><b class="num">{num(uv, 0)}</b><em class="muted">{uvWord}</em></div>
         <div><small>{t('maison.dehors.particules')}</small><b class="num">{num(v(air, 'pm2_5'), 1)} µg/m³</b></div>
         <div><small>{t('maison.dehors.ozone')}</small><b class="num">{num(v(air, 'ozone'))} µg/m³</b></div>
       </div>
@@ -151,6 +154,14 @@
 </div>
 
 <style>
+  .gauges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-items: center;
+    gap: 8px;
+    margin: -4px 0 14px;
+  }
+
   .credit {
     color: var(--ink-3);
     font-size: 12px;

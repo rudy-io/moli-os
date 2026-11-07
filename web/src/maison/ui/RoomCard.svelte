@@ -231,7 +231,7 @@
 
 <section class="card room">
   <div class="head">
-    <span class="room-icon" class:lit={room.lit}><Icon name={room.icon} size={22} /></span>
+    <span class="room-icon" class:lit={room.lit} style:--p={lamps.length ? Math.min(100, (room.lit / lamps.length) * 100) : 0}><Icon name={room.icon} size={22} /></span>
     <div class="title">
       <h2>{room.name}{#if locked}<span class="lock" title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}</h2>
       <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
@@ -340,13 +340,35 @@
     border-radius: 14px;
     display: grid;
     place-items: center;
-    background: var(--surface-2);
+    /* A ring round the icon: the share of the room's lights that are on. */
+    background:
+      linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+      conic-gradient(var(--warm) calc(var(--p, 0) * 1%), var(--surface-3) 0) border-box;
+    border: 3px solid transparent;
     color: var(--ink-3);
   }
 
   .room-icon.lit {
-    background: var(--warm-soft);
+    background:
+      linear-gradient(var(--warm-soft), var(--warm-soft)) padding-box,
+      conic-gradient(var(--warm) calc(var(--p, 0) * 1%), var(--surface-3) 0) border-box;
     color: var(--warm-ink);
+    animation: room-glow 3s ease-in-out infinite alternate;
+  }
+
+  @keyframes room-glow {
+    from {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--warm) 40%, transparent);
+    }
+    to {
+      box-shadow: 0 0 18px 2px color-mix(in srgb, var(--warm) 40%, transparent);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .room-icon.lit {
+      animation: none;
+    }
   }
 
   .title {

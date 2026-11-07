@@ -104,7 +104,7 @@
   {/if}
 
   <div class="job">
-    <div class="thumb">
+    <div class="thumb" class:ring={active || state === 'done'} style:--p={Math.min(100, progress)}>
       {#if !noImage && v('job')}
         <img src={image} alt="" onerror={() => (noImage = true)} />
       {:else}
@@ -114,7 +114,7 @@
     <div class="facts">
       <b class="name">{job || (state === 'off' ? t('salon.impression.imprimante_eteinte') : t('salon.impression.aucune_impression'))}</b>
       {#if active || state === 'done'}
-        <div class="bar" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
+        <div class="bar" class:moving={state === 'printing'} role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
           <i style:width="{Math.min(100, progress)}%"></i>
         </div>
         <div class="line">
@@ -266,6 +266,60 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+    border-radius: calc(var(--r-md) - 4px);
+  }
+
+  /* While printing or done: a ring round the picture, filled to the progress. */
+  .thumb.ring {
+    background:
+      linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+      conic-gradient(var(--ring, var(--warm)) calc(var(--p, 0) * 1%), var(--surface-3) 0) border-box;
+    border: 4px solid transparent;
+  }
+
+  [data-state='done'] .thumb.ring {
+    --ring: var(--good);
+  }
+
+  [data-state='paused'] .thumb.ring {
+    --ring: var(--cool);
+  }
+
+  /* A print under way: stripes run along the bar and a gleam sweeps it. */
+  .bar.moving i {
+    position: relative;
+    overflow: hidden;
+    background-image: repeating-linear-gradient(45deg, rgb(255 255 255 / 28%) 0 8px, transparent 8px 16px);
+    background-size: 22px 22px;
+    animation: bar-stripes 1s linear infinite;
+  }
+
+  .bar.moving i::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 55%), transparent);
+    transform: translateX(-100%);
+    animation: bar-sweep 2.4s var(--ease) infinite;
+  }
+
+  @keyframes bar-stripes {
+    to {
+      background-position: 22px 0;
+    }
+  }
+
+  @keyframes bar-sweep {
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bar.moving i,
+    .bar.moving i::after {
+      animation: none;
+    }
   }
 
   .facts {
@@ -291,16 +345,16 @@
     display: block;
     height: 100%;
     border-radius: 999px;
-    background: var(--warm);
+    background-color: var(--warm);
     transition: width 0.8s var(--ease);
   }
 
   [data-state='done'] .bar i {
-    background: var(--good);
+    background-color: var(--good);
   }
 
   [data-state='paused'] .bar i {
-    background: var(--cool);
+    background-color: var(--cool);
   }
 
   .line {

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
 
   /** A small ring: `on` out of `total`, drawn in when shown (look only). */
-  let { on = 0, total = 1, label = '' } = $props();
+  let { on = 0, total = 1, label = '', color = 'var(--warm)' } = $props();
   let drawn = $state(false);
   const r = 15;
   const c = 2 * Math.PI * r;
@@ -22,7 +22,7 @@
       cy="18"
       {r}
       fill="none"
-      stroke="var(--warm)"
+      stroke={color}
       stroke-width="3"
       stroke-linecap="round"
       transform="rotate(-90 18 18)"
