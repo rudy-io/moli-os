@@ -5,6 +5,8 @@
   import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
+  import { isPrinter } from './lib/printers.js';
+  import { isPaperPrinter } from './lib/paper.js';
   import PinSheet from './ui/PinSheet.svelte';
   import Correct from './moli/Correct.svelte';
   import Setup from './ui/Setup.svelte';
@@ -53,9 +55,10 @@
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
-    { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
+    // Only when the house has something that speaks, or something that prints.
+    { path: 'parler', label: 'commun.nav.parler', icon: 'talk', shown: () => Object.values(hub.devices).some((d) => !hidden(d.id) && d.points?.some((p) => ['say', 'announce'].includes(p.key) && p.access?.write && p.kind?.type === 'text')) },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
+    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => Object.values(hub.devices).some((d) => !hidden(d.id) && (isPrinter(d) || isPaperPrinter(d))) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },

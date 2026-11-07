@@ -300,5 +300,6 @@
   "commun.thermo.refroidit": "Cooling down",
   "commun.thermo.stable": "Just right",
   "commun.thermo.mesure": "It is {temp}° in the room",
-  "commun.thermo.glisser": "{name} target: slide up to warm, down to cool"
+  "commun.thermo.glisser": "{name} target: slide up to warm, down to cool",
+  "commun.atelier.retour": "Back to the house"
 }

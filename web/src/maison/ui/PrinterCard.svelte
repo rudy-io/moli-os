@@ -1,6 +1,6 @@
 <script>
   import { hub, device, value, reachable, nameOf, act, num, clock, home } from '../lib/home.svelte.js';
-  import { phase, PHASES, jobName, duration, cancelWord } from '../lib/printers.js';
+  import { phase, PHASES, jobName, duration, cancelWord, readPrinter, hasPoint, keyOf } from '../lib/printers.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LiveVideo from './LiveVideo.svelte';
@@ -11,7 +11,7 @@
   let { id } = $props();
 
   const d = $derived(device(id));
-  const v = (k) => value(id, k);
+  const v = (k) => readPrinter(d, k, (key) => value(id, key));
   const ok = $derived(reachable(id));
   const state = $derived(ok ? phase(v('state')) : 'off');
   const look = $derived(state === 'off' ? { label: t('salon.eteinte'), tone: '' } : PHASES[state]);
@@ -20,7 +20,7 @@
   const left = $derived(v('remaining'));
   const finish = $derived(active && typeof left === 'number' ? home.now + left * 60_000 : null);
   const job = $derived(jobName(v('job')));
-  const can = (key) => d?.points.some((p) => p.key === key && p.access?.write);
+  const can = (key) => d?.points.some((p) => p.key === keyOf(d, key) && p.access?.write);
 
   // Tool heads (Snapmaker U1: four), or the Bambu's filament units.
   const tools = $derived.by(() => {
@@ -133,10 +133,10 @@
 
   <div class="temps">
     <span><small>{t('salon.impression.buse')}</small><b class="num">{temp(v('nozzle_temperature'))}</b>{#if v('nozzle_target')}<small class="num"> → {temp(v('nozzle_target'))}</small>{/if}</span>
-    {#if d?.points.some((p) => p.key === 'bed_temperature')}
+    {#if hasPoint(d, 'bed_temperature')}
       <span><small>{t('salon.impression.plateau')}</small><b class="num">{temp(v('bed_temperature'))}</b>{#if v('bed_target')}<small class="num"> → {temp(v('bed_target'))}</small>{/if}</span>
     {/if}
-    {#if d?.points.some((p) => p.key === 'chamber_temperature')}
+    {#if hasPoint(d, 'chamber_temperature')}
       <span><small>{t('salon.impression.enceinte')}</small><b class="num">{temp(v('chamber_temperature'))}</b></span>
     {/if}
   </div>

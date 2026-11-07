@@ -288,5 +288,6 @@
   "commun.thermo.refroidit": "Ça refroidit",
   "commun.thermo.stable": "Juste bien",
   "commun.thermo.mesure": "Il fait {temp}° dans la pièce",
-  "commun.thermo.glisser": "Consigne de {name} : glisser vers le haut pour chauffer, vers le bas pour refroidir"
+  "commun.thermo.glisser": "Consigne de {name} : glisser vers le haut pour chauffer, vers le bas pour refroidir",
+  "commun.atelier.retour": "Retour à la maison"
 }

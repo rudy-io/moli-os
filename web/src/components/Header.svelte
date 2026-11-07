@@ -12,6 +12,7 @@
 </script>
 
 <header>
+  <a class="back" href="#/">← {t('commun.atelier.retour')}</a>
   <div class="brand">
     <svg viewBox="0 0 32 32" aria-hidden="true">
       <circle cx="16" cy="16" r="15" fill="var(--sun)" />
@@ -70,6 +71,21 @@
     border-bottom: var(--stroke) solid var(--ink);
     background: var(--card);
   }
+  .back {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--card);
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .back:hover {
+    opacity: 0.85;
+  }
+
   .brand {
     display: flex;
     align-items: center;
@@ -131,6 +147,7 @@
   }
   .drivers {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin: 0 0 0 auto;
     padding: 0;
