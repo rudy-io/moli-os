@@ -84,8 +84,6 @@
 <style>
   aside {
     align-self: start;
-    position: sticky;
-    top: 16px;
   }
   h2 {
     font-size: 13px;
@@ -104,8 +102,6 @@
     padding: 0;
     display: grid;
     gap: 8px;
-    max-height: calc(100vh - 140px);
-    overflow-y: auto;
   }
   li {
     padding: 10px 12px;
