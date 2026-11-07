@@ -18,7 +18,11 @@ const COMMAND_CAPACITY: usize = 1;
 pub(crate) enum Work {
     Request(RequestEnvelope),
     Observe,
-    Execute(moli_runtime::CommandRequest, Box<super::execution::Ticket>),
+    Execute(
+        moli_runtime::CommandRequest,
+        Box<super::execution::Ticket>,
+        moli_runtime::PrivateState,
+    ),
 }
 // Never derive Debug: session bytes and catalogues are private.
 pub(crate) enum Event {
@@ -144,9 +148,11 @@ fn spawn<T: Transport + 'static>(
                     }
                 }
                 Work::Observe => (None, client.retry_persistence(&mut sink).await, true),
-                Work::Execute(command, ticket) => (
+                Work::Execute(command, ticket, lifetime) => (
                     None,
-                    client.execute_command(command, &ticket, &mut sink).await,
+                    client
+                        .execute_command(command, &ticket, &lifetime, &mut sink)
+                        .await,
                     true,
                 ),
             };

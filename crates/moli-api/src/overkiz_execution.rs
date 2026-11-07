@@ -25,6 +25,19 @@ pub(super) async fn update(
     Path(instance): Path<String>,
     request: Request,
 ) -> Response {
+    let (id, config) = match owner.instance(&instance) {
+        Ok(value) => value,
+        Err((status, code)) => return error(status, code),
+    };
+    // A body can wait across DELETE or reconnection. Keep the original lifetime
+    // and never enqueue its consent under a replacement generation.
+    let state = owner.hub.private_state(&id);
+    if owner.cleanup_pending(&id) {
+        return super::cleanup_pending();
+    }
+    let Some(state) = state else {
+        return super::unavailable();
+    };
     let Ok(body) = axum::body::to_bytes(request.into_body(), cloud::MAX_PENDING_BYTES).await else {
         return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_request");
     };
@@ -40,10 +53,6 @@ pub(super) async fn update(
             crate::session::LoginError::Disabled => error(StatusCode::FORBIDDEN, "pin_disabled"),
         };
     }
-    let (id, config) = match owner.instance(&instance) {
-        Ok(value) => value,
-        Err((status, code)) => return error(status, code),
-    };
     if request.enabled && config.read_only {
         return error(StatusCode::FORBIDDEN, "global_read_only");
     }
@@ -71,9 +80,6 @@ pub(super) async fn update(
         revision: request.revision,
         scenario_id: request.scenario_id,
         enabled: request.enabled,
-    };
-    let Some(state) = owner.hub.private_state(&id) else {
-        return super::unavailable();
     };
     enqueue(&owner, &id, &state, queued).await
 }

@@ -405,3 +405,55 @@ async fn owner_purge_lock_failure_leaves_credentials_and_cache_unchanged() {
     assert!(store.get(&format!("bridge/{PURGE_PENDING_NAME}")).is_none());
     assert!(state.is_current());
 }
+
+#[tokio::test]
+async fn read_only_confirmation_preserves_bytes_and_observes_another_process_purge() {
+    let fixture = Fixture::new();
+    let first = fixture.store();
+    let state = handle(&first, "bridge");
+    state
+        .store_secret("session", "synthetic session")
+        .await
+        .unwrap();
+    state
+        .set_if_changed(catalog("synthetic catalogue"))
+        .await
+        .unwrap();
+    let vault = std::fs::read(fixture.0.join("secrets.enc")).unwrap();
+    let cache = std::fs::read(fixture.0.join("private-state.enc")).unwrap();
+    state.confirm_current().await.unwrap();
+    assert_eq!(std::fs::read(fixture.0.join("secrets.enc")).unwrap(), vault);
+    assert_eq!(
+        std::fs::read(fixture.0.join("private-state.enc")).unwrap(),
+        cache
+    );
+    handle(&fixture.store(), "bridge")
+        .purge(vec!["session".into()])
+        .await
+        .unwrap();
+    assert!(
+        state.is_current(),
+        "the original process has not yet read the new epoch"
+    );
+    let error = state.confirm_current().await.unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(!state.is_current());
+}
+
+#[tokio::test]
+async fn confirmation_fails_closed_when_vault_or_lock_is_unavailable() {
+    for missing_vault in [false, true] {
+        let fixture = Fixture::new();
+        let store = fixture.store();
+        let state = handle(&store, "bridge");
+        state.store_secret("session", "synthetic").await.unwrap();
+        if missing_vault {
+            std::fs::remove_file(fixture.0.join("secrets.enc")).unwrap();
+        } else {
+            let lock = fixture.0.join("secrets.enc.lock");
+            std::fs::remove_file(&lock).unwrap();
+            std::fs::create_dir(lock).unwrap();
+        }
+        assert!(state.confirm_current().await.is_err());
+    }
+}

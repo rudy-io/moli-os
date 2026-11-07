@@ -9,10 +9,17 @@ impl<T: Transport> CloudClient<T> {
         &mut self,
         command: moli_runtime::CommandRequest,
         ticket: &Ticket,
+        lifetime: &moli_runtime::PrivateState,
         sink: &mut impl SessionSink,
     ) -> Result<(), Error> {
         let result = self
-            .execute_scenario(ticket, command.deadline, || !command.abandoned(), sink)
+            .execute_scenario(
+                ticket,
+                command.deadline,
+                || !command.abandoned(),
+                lifetime,
+                sink,
+            )
             .await;
         command.reply(result.map_err(|error| error.to_string()));
         result
@@ -25,9 +32,10 @@ impl<T: Transport> CloudClient<T> {
         ticket: &Ticket,
         deadline: std::time::Instant,
         waiting: impl Fn() -> bool,
+        lifetime: &moli_runtime::PrivateState,
         sink: &mut impl SessionSink,
     ) -> Result<(), Error> {
-        if self.execution_read_only {
+        if self.execution_read_only || !lifetime.is_current() {
             return Err(Error::Forbidden);
         }
         let mut sent = false;
@@ -35,7 +43,7 @@ impl<T: Transport> CloudClient<T> {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         let result = tokio::time::timeout(
             remaining,
-            self.scenario_inner(ticket, &waiting, sink, &mut sent),
+            self.scenario_inner(ticket, &waiting, lifetime, sink, &mut sent),
         )
         .await
         .unwrap_or(Err(if sent {
@@ -53,6 +61,7 @@ impl<T: Transport> CloudClient<T> {
         &mut self,
         ticket: &Ticket,
         waiting: &impl Fn() -> bool,
+        lifetime: &moli_runtime::PrivateState,
         sink: &mut impl SessionSink,
         sent: &mut bool,
     ) -> Result<(), Error> {
@@ -91,6 +100,15 @@ impl<T: Transport> CloudClient<T> {
         });
         if !matches || self.identity()? != ticket.identity {
             return Err(Error::ScopeMismatch);
+        }
+        // DELETE can finish while either preparatory GET is awaiting its response.
+        // Validate the disk epoch for other processes, then memory for this process.
+        lifetime
+            .confirm_current()
+            .await
+            .map_err(|_| Error::Forbidden)?;
+        if !lifetime.is_current() {
+            return Err(Error::Forbidden);
         }
         if !waiting() {
             return Err(Error::Deadline);

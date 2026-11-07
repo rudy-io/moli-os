@@ -7,7 +7,14 @@ use moli_runtime::CommandRequest;
 
 impl Controller {
     pub(crate) fn dispatch(&mut self, ctx: &DriverCtx, command: CommandRequest) {
+        if !self.current_storage(ctx) || ctx.secret(super::super::CLEANUP_KEY).is_some() {
+            self.live = false;
+            self.publish(ctx, None);
+            command.reply(Err(Error::Forbidden.to_string()));
+            return;
+        }
         let prepared = (|| {
+            let lifetime = self.storage.clone().ok_or(Error::Forbidden)?;
             if self.scenario_mode.read_only()
                 || !self.live
                 || self.busy
@@ -25,28 +32,29 @@ impl Controller {
             let policy = super::super::storage::cached(ctx, execution::POLICY_KEY)
                 .and_then(|s| Policy::decode(s.as_bytes()).ok())
                 .unwrap_or_default();
-            execution::resolve(
+            let ticket = execution::resolve(
                 &catalog,
                 &policy,
                 &revision,
                 &command.device.id,
                 &command.key,
                 &command.value,
-            )
+            )?;
+            Ok((ticket, lifetime))
         })();
         match prepared {
-            Ok(ticket) => {
+            Ok((ticket, lifetime)) => {
                 let Some(actor) = &self.actor else {
                     command.reply(Err(Error::Network.to_string()));
                     return;
                 };
                 match actor
                     .commands
-                    .try_send(Work::Execute(command, Box::new(ticket)))
+                    .try_send(Work::Execute(command, Box::new(ticket), lifetime))
                 {
                     Ok(()) => self.busy = true,
                     Err(error) => {
-                        if let Work::Execute(command, _) = error.into_inner() {
+                        if let Work::Execute(command, _, _) = error.into_inner() {
                             command.reply(Err(Error::Network.to_string()));
                         }
                     }

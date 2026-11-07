@@ -64,6 +64,19 @@ impl PrivateState {
             == self.epoch
     }
 
+    /// Recheck the lifetime on disk without changing stored values. Callers
+    /// authorizing an external effect must also recheck memory after this await;
+    /// the storage lock is deliberately not held during network operations.
+    pub async fn confirm_current(&self) -> io::Result<()> {
+        self.transaction(|data, _, _, _| {
+            // Generic secret mutations can recreate a removed vault from cache.
+            // An external-effect authorization must require its disk proof.
+            std::fs::metadata(&data.path)?;
+            Ok(((), false))
+        })
+        .await
+    }
+
     /// Persist a credential checkpoint only if this lifetime is still current.
     pub async fn store_secret(&self, name: &str, value: &str) -> io::Result<()> {
         validate_name(name)?;

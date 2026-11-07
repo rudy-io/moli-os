@@ -7,6 +7,7 @@ use moli_runtime::CommandError;
 struct ExecutionProbe {
     script: Script,
     read_only: bool,
+    gate: Arc<PreflightGate>,
 }
 impl Driver for ExecutionProbe {
     fn kind(&self) -> &'static str {
@@ -18,12 +19,19 @@ impl Driver for ExecutionProbe {
                 read_only: self.read_only,
                 ..Default::default()
             };
-            let mut cloud = Controller::with_transport(ctx, &config, self.script.clone());
+            let mut cloud = Controller::with_transport(
+                ctx,
+                &config,
+                GatedScript {
+                    script: self.script.clone(),
+                    gate: self.gate.clone(),
+                },
+            );
             let mut tick = tokio::time::interval(Duration::from_millis(5));
             loop {
                 crate::reconcile_status(ctx, false, None, Some(&cloud));
                 tokio::select! {
-                    _=tick.tick()=>cloud.tick(ctx),
+                    _=tick.tick(), if !self.gate.pause_ticks.load(Ordering::SeqCst)=>cloud.tick(ctx),
                     event=cloud.next_event(),if cloud.receiving()=>cloud.handle(ctx,event),
                     command=ctx.next_command()=>{
                         let Some(command)=command else{return Ok(())};
@@ -34,7 +42,37 @@ impl Driver for ExecutionProbe {
         })
     }
 }
+#[derive(Debug, Default)]
+struct PreflightGate {
+    armed: std::sync::atomic::AtomicBool,
+    pause_ticks: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+#[derive(Clone)]
+struct GatedScript {
+    script: Script,
+    gate: Arc<PreflightGate>,
+}
+impl Transport for GatedScript {
+    fn send(&mut self, request: Request) -> BoxFuture<'_, Result<Response, Error>> {
+        Box::pin(async move {
+            let endpoint = request.endpoint;
+            let response = self.script.send(request).await;
+            if endpoint == Endpoint::Collection(CollectionKind::Scenarios)
+                && self.gate.armed.swap(false, Ordering::SeqCst)
+            {
+                self.gate.entered.notify_one();
+                self.gate.release.notified().await;
+            }
+            response
+        })
+    }
+}
 async fn connected(label: &str, read_only: bool) -> Rig {
+    connected_controlled(label, read_only, Arc::default()).await
+}
+async fn connected_controlled(label: &str, read_only: bool, gate: Arc<PreflightGate>) -> Rig {
     let mut replies = login_replies();
     replies.extend(selected_replies());
     replies.extend(cycle_replies());
@@ -53,6 +91,7 @@ async fn connected(label: &str, read_only: bool) -> Rig {
         Arc::new(ExecutionProbe {
             script: rig.script.clone(),
             read_only,
+            gate,
         }),
         rig.cancel.clone(),
     );
@@ -249,4 +288,142 @@ async fn persisted_consent_cannot_override_global_read_only() {
     )
     .unwrap();
     assert!(!policy.permits(&rig.catalog(), "example"));
+}
+
+fn execution_replies(rig: &Rig) -> Vec<Entry> {
+    let definitions = rig.catalog().collections[&CollectionKind::Scenarios]
+        .data
+        .as_ref()
+        .unwrap()
+        .definitions
+        .iter()
+        .map(|d| d.raw.as_value().clone())
+        .collect::<Vec<_>>();
+    let mut replies = vec![
+        reply(
+            Endpoint::Gateways,
+            200,
+            &serde_json::json!([{"gatewayId":"anchor"}]),
+        ),
+        reply(
+            Endpoint::Collection(CollectionKind::Scenarios),
+            200,
+            &serde_json::json!(definitions),
+        ),
+        reply(
+            Endpoint::Scenario,
+            200,
+            &serde_json::json!({"execId":"synthetic-exec"}),
+        ),
+    ];
+    replies.extend(cycle_replies());
+    replies
+}
+async fn purge_cloud(rig: &Rig, other_process: bool) {
+    let hub = if other_process {
+        Hub::new(HubOptions {
+            secrets: Some((rig.path.clone(), MasterKey::new("d".repeat(64)))),
+            ..HubOptions::default()
+        })
+        .unwrap()
+    } else {
+        rig.hub.clone()
+    };
+    // This is the exact durable operation acknowledged by the DELETE handler.
+    assert!(
+        hub.purge_private_state(
+            &rig.instance,
+            [
+                SESSION_KEY,
+                STATE_KEY,
+                inventory::INVENTORY_KEY,
+                PENDING_KEY,
+                execution::POLICY_KEY,
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+        )
+        .await
+        .unwrap()
+    );
+}
+async fn revoked_during_preflight(other_process: bool) {
+    let gate = Arc::<PreflightGate>::default();
+    let rig = connected_controlled(
+        if other_process {
+            "preflight-other"
+        } else {
+            "preflight-local"
+        },
+        false,
+        gate.clone(),
+    )
+    .await;
+    assert!(permission(&rig, "permit", true).await.failure.is_none());
+    let (point, value) = offered(&rig);
+    rig.script
+        .replies
+        .lock()
+        .unwrap()
+        .extend(execution_replies(&rig));
+    gate.pause_ticks.store(true, Ordering::SeqCst);
+    gate.armed.store(true, Ordering::SeqCst);
+    let hub = rig.hub.clone();
+    let command = tokio::spawn(async move {
+        hub.command(&point, value, Origin::Ui, Some("synthetic-owner".into()))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), gate.entered.notified())
+        .await
+        .unwrap();
+    purge_cloud(&rig, other_process).await;
+    gate.release.notify_one();
+    let result = tokio::time::timeout(Duration::from_secs(2), command)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !rig.script
+            .calls
+            .lock()
+            .unwrap()
+            .contains(&Endpoint::Scenario),
+        "revocation acknowledged during the preparatory GET must prevent the POST"
+    );
+    assert!(result.is_err());
+}
+#[tokio::test]
+async fn disconnect_during_preflight_prevents_post_without_waiting_for_controller_tick() {
+    revoked_during_preflight(false).await;
+}
+#[tokio::test]
+async fn another_process_disconnect_during_preflight_prevents_post() {
+    revoked_during_preflight(true).await;
+}
+#[tokio::test]
+async fn dispatch_after_disconnect_immediately_retires_cached_run_capabilities() {
+    let gate = Arc::<PreflightGate>::default();
+    let rig = connected_controlled("dispatch-revoked", false, gate.clone()).await;
+    assert!(permission(&rig, "permit", true).await.failure.is_none());
+    let (point, value) = offered(&rig);
+    rig.script
+        .replies
+        .lock()
+        .unwrap()
+        .extend(execution_replies(&rig));
+    gate.pause_ticks.store(true, Ordering::SeqCst);
+    purge_cloud(&rig, false).await;
+    let before = rig.script.calls.lock().unwrap().len();
+    assert!(
+        rig.hub
+            .command(&point, value, Origin::Ui, Some("synthetic-owner".into()))
+            .await
+            .is_err()
+    );
+    assert_eq!(rig.script.calls.lock().unwrap().len(), before);
+    let (id, key) = point.split().unwrap();
+    let device = rig.hub.device(&id).unwrap();
+    assert_eq!(device.online, Some(false));
+    assert!(!device.device.point(key).unwrap().access.write);
 }

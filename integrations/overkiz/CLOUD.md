@@ -347,7 +347,13 @@ payloads or scheduling POSTs. This is an observed interoperability interface,
 not a published API guarantee.
 
 Before submission Moli rereads gateway membership and the scenario definition.
-A missing or changed definition prevents submission. These reads and the POST
+A missing or changed definition prevents submission. After those reads, the
+private lifetime is checked again under the vault lock, including changes made
+by another Moli process; the lock is released before network submission. A
+completed disconnect during a preparatory read prevents the scenario POST, and
+queued consent retains the lifetime captured before its HTTP body was read.
+A POST already dispatched before revocation may still execute at Somfy: Moli
+does not promise provider-side cancellation. These reads and the POST
 are **not atomic at Somfy**; no conditional revision is available. A concurrent
 external modification between the read and POST can therefore alter the actions
 executed. The acknowledgement means accepted by the provider, not physically

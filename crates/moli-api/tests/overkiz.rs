@@ -415,11 +415,12 @@ async fn recognized_owner_is_allowed_but_guest_member_and_pin_are_not_owners() {
     assert_eq!(denied["auth_policy"], "owner_account");
 }
 
-const CLOUD_KEYS: [&str; 4] = [
+const CLOUD_KEYS: [&str; 5] = [
     "cloud_session_v1",
     "cloud_pending_v1",
     "cloud_state_v1",
     "cloud_inventory_v1",
+    "cloud_scenario_permissions_v1",
 ];
 
 #[tokio::test]
@@ -430,6 +431,11 @@ async fn owner_disconnect_purges_legacy_cloud_after_configuration_removal_only_f
         let pin = server.pin().await;
         seed(&server).await;
         let instance = "fixture".into();
+        server
+            .hub
+            .store_secret(&instance, "cloud_scenario_permissions_v1", "PRIVATE_POLICY")
+            .await
+            .unwrap();
         server
             .hub
             .store_secret(&instance, "cloud_pending_v1", "PRIVATE_PENDING")
@@ -788,10 +794,71 @@ async fn unreadable_private_cache_does_not_trap_credentials_or_hide_an_unfinishe
 async fn disconnect_rejects_a_request_whose_body_was_still_arriving() {
     let server = Server::configured("disconnect-slow-input", true).await;
     let pin = server.pin().await;
-    let body = r#"{"kind":"refresh","generation":"generation-a"}"#;
+    disconnect_while_body_waits(
+        &server,
+        &pin,
+        "requests",
+        r#"{"kind":"refresh","generation":"generation-a"}"#,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn scenario_permission_cannot_cross_disconnect_and_reconnection_while_body_waits() {
+    let server = Server::configured("disconnect-slow-permission", true).await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    let body = json!({"generation":"generation-a","revision":"a".repeat(64),"scenario_id":"same","enabled":false,"pin":"482915"}).to_string();
+    disconnect_while_body_waits(&server, &pin, "scenario-permission", &body, true).await;
+}
+
+#[tokio::test]
+async fn unfinished_disconnect_blocks_permission_before_reading_its_body() {
+    let server = Server::with_private_file(
+        "partial-scenario-permission",
+        true,
+        Some(b"PRIVATE_CORRUPT_CACHE"),
+    )
+    .await;
+    let pin = server.pin().await;
+    seed(&server).await;
+    assert_eq!(
+        server
+            .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+            .await
+            .0,
+        503
+    );
+    let (status, _, body) = server
+        .request(
+            "POST",
+            &format!("{ROOT}/fixture/scenario-permission"),
+            "invalid body",
+            &pin,
+        )
+        .await;
+    assert_eq!(status, 503);
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["credentials_removed"], true);
+    assert!(
+        server
+            .hub
+            .secret(&"fixture".into(), "cloud_pending_v1")
+            .is_none()
+    );
+}
+
+async fn disconnect_while_body_waits(
+    server: &Server,
+    pin: &str,
+    route: &str,
+    body: &str,
+    reconnect: bool,
+) {
     let mut stream = tokio::net::TcpStream::connect(&server.addr).await.unwrap();
     let head = format!(
-        "POST {ROOT}/fixture/requests HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: application/json\r\nCookie: {pin}\r\nExpect: 100-continue\r\nContent-Length: {}\r\n\r\n",
+        "POST {ROOT}/fixture/{route} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: application/json\r\nCookie: {pin}\r\nExpect: 100-continue\r\nContent-Length: {}\r\n\r\n",
         server.addr,
         body.len()
     );
@@ -808,10 +875,15 @@ async fn disconnect_rejects_a_request_whose_body_was_still_arriving() {
     .unwrap();
     assert_eq!(continued, b"HTTP/1.1 100 Continue\r\n\r\n");
     let (status, _, result) = server
-        .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, &pin)
+        .json("DELETE", &format!("{ROOT}/fixture"), Value::Null, pin)
         .await;
     assert_eq!(status, 200);
     assert_eq!(result["disconnected"], true);
+    if reconnect {
+        // Even the same visible catalogue must not transfer a waiting request
+        // into the new private lifetime created by DELETE.
+        seed(server).await;
+    }
     stream.write_all(body.as_bytes()).await.unwrap();
     let mut response = Vec::new();
     tokio::time::timeout(

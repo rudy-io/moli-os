@@ -4,6 +4,41 @@ use crate::inventory;
 use moli_core::Value;
 use std::time::{Duration, Instant};
 
+struct Lifetime {
+    state: moli_runtime::PrivateState,
+    dir: std::path::PathBuf,
+}
+impl Lifetime {
+    async fn new() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "scenario-lifetime-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions {
+            secrets: Some((
+                dir.join("secrets.enc"),
+                moli_runtime::MasterKey::new("e".repeat(64)),
+            )),
+            ..Default::default()
+        })
+        .unwrap();
+        let state = hub.private_state(&"synthetic".into()).unwrap();
+        state
+            .store_secret("session", "synthetic session")
+            .await
+            .unwrap();
+        Self { state, dir }
+    }
+}
+impl Drop for Lifetime {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 fn scene() -> serde_json::Value {
     json!([{"oid":"saved-scene","label":"Private scenario","actions":[{"deviceURL":"io://1234-5678-9012/1","commands":[{"name":"close","parameters":[]}]}]}])
 }
@@ -55,6 +90,7 @@ async fn saved_scenario_uses_one_exact_id_post_after_scope_and_definition_reads(
                 &ticket,
                 Instant::now() + Duration::from_secs(5),
                 || true,
+                &Lifetime::new().await.state,
                 &mut sink
             )
             .await,
@@ -81,6 +117,7 @@ async fn read_only_and_abandoned_requests_never_reach_the_provider() {
                 &ticket,
                 Instant::now() + Duration::from_secs(5),
                 || false,
+                &Lifetime::new().await.state,
                 &mut sink,
             )
             .await;
@@ -108,6 +145,7 @@ async fn changed_removed_and_wrong_scope_scenarios_send_no_post() {
                     &ticket,
                     Instant::now() + Duration::from_secs(5),
                     || true,
+                    &Lifetime::new().await.state,
                     &mut sink
                 )
                 .await,
@@ -131,6 +169,7 @@ async fn changed_removed_and_wrong_scope_scenarios_send_no_post() {
                 &ticket,
                 Instant::now() + Duration::from_secs(5),
                 || true,
+                &Lifetime::new().await.state,
                 &mut sink
             )
             .await,
@@ -158,6 +197,7 @@ async fn submission_failures_never_retry_or_refresh_after_post() {
                     &ticket,
                     Instant::now() + Duration::from_secs(5),
                     || true,
+                    &Lifetime::new().await.state,
                     &mut sink
                 )
                 .await
@@ -227,6 +267,7 @@ async fn abandonment_after_fresh_reads_and_expired_deadlines_send_no_post() {
                     .iter()
                     .any(|entry| entry.starts_with("request:Collection(Scenarios)"))
             },
+            &Lifetime::new().await.state,
             &mut sink,
         )
         .await;
@@ -243,7 +284,13 @@ async fn abandonment_after_fresh_reads_and_expired_deadlines_send_no_post() {
     let count = trace.entries().len();
     assert_eq!(
         client
-            .execute_scenario(&ticket, Instant::now(), || true, &mut sink)
+            .execute_scenario(
+                &ticket,
+                Instant::now(),
+                || true,
+                &Lifetime::new().await.state,
+                &mut sink
+            )
             .await,
         Err(Error::Deadline)
     );
@@ -306,6 +353,7 @@ async fn timeout_during_post_is_uncertain_and_never_replayed() {
                 &ticket,
                 Instant::now() + Duration::from_secs(1),
                 || true,
+                &Lifetime::new().await.state,
                 &mut sink
             )
             .await,
