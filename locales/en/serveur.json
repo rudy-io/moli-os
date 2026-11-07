@@ -179,5 +179,7 @@
   "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen",
   "serveur.visibilite.identifiant_invalide": "Invalid device identifier.",
   "serveur.visibilite.indisponible": "Dashboard configuration unavailable.",
-  "serveur.visibilite.enregistrement_impossible": "Unable to save visibility."
+  "serveur.visibilite.enregistrement_impossible": "Unable to save visibility.",
+  "serveur.photos.trop": "at most {max} photos",
+  "serveur.photos.piece_invalide": "invalid room name"
 }

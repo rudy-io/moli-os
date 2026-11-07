@@ -93,7 +93,7 @@
       </button>
     {/if}
     {#if can('light') && ok}
-      <button class="round" class:lit={v('light') === true} onclick={() => act(`${id}/light`, v('light') !== true, t('salon.impression.act_lumiere', { nom: nameOf(id) }))} aria-pressed={v('light') === true} title={t('salon.impression.lumiere')}>
+      <button class="round" class:lit={v('light') === true} onclick={() => act(`${id}/${keyOf(d, 'light')}`, v('light') !== true, t('salon.impression.act_lumiere', { nom: nameOf(id) }))} aria-pressed={v('light') === true} title={t('salon.impression.lumiere')}>
         <Icon name="light" size={18} />
       </button>
     {/if}

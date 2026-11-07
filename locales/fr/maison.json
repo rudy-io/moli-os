@@ -248,5 +248,17 @@
   "maison.pieces.toutes_pieces": "Vue d'ensemble",
   "maison.pieces.choisir": "Choisir une pièce",
   "maison.pieces.confort": "Température",
-  "maison.dehors.uv": "UV · {word}"
+  "maison.dehors.uv": "UV · {word}",
+  "maison.scene.ajouter_photo": "Ajouter une photo de la pièce",
+  "maison.scene.changer_photo": "Changer la photo",
+  "maison.scene.luminosite": "Luminosité de la pièce",
+  "maison.scene.tout_eteindre": "Tout éteindre",
+  "maison.scene.tout_allumer": "Tout allumer",
+  "maison.scene.plein_ecran": "Plein écran",
+  "maison.scene.envoi": "Envoi de la photo…",
+  "maison.scene.erreur_photo": "La photo n'a pas pu être enregistrée",
+  "maison.scene.allumer": "Allumer {name}",
+  "maison.scene.eteindre": "Éteindre {name}",
+  "maison.scene.label_photo": "Photo de la pièce {name}",
+  "maison.scene.label_page": "Photo de la page {name}"
 }
