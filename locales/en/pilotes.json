@@ -45,6 +45,8 @@
   "pilotes.esphome.volume": "Volume",
   "pilotes.esphome.sourdine": "Mute",
   "pilotes.esphome.mot_activation": "Wake word heard",
+  "pilotes.esphome.micro_coupe": "Microphone off",
+  "pilotes.esphome.boutons_desactives": "Buttons disabled",
   "pilotes.esphome.cle_manquante": "API key missing: printf %s \"$KEY\" | moli-os secrets set {instance} {key}",
   "pilotes.esphome.cle_invalide": "the API key is not an ESPHome key (32 bytes in base64)",
   "pilotes.esphome.cle_refusee": "the device refuses the API key: take the one from its ESPHome configuration, then printf %s \"$KEY\" | moli-os secrets set {instance} {key}",

@@ -10,6 +10,10 @@ as possible; Moli is maintained on spare time, with no service-level promise.
 
 Moli runs a home: knowing its trust model helps you install it safely and find what matters.
 
+The reference for the rules (what is protected, against whom, and the invariants with their
+proof) is [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md); what follows is a summary for the
+people installing Moli, and the model wins if they ever differ.
+
 - **The home network is trusted by default, the bedrooms are not.** In the default `trusted`
   dashboard mode, a device on the local network commands the house without a code, like a light
   switch on the wall: anywhere but in a protected room, on a machine (a computer, a print at
@@ -71,9 +75,10 @@ Moli runs a home: knowing its trust model helps you install it safely and find w
   address paired it.
 - **The assistant's model** (when a household sets one up, with its own key) is never given
   anyone's precise location or Wi-Fi name, and its key never travels over plain HTTP.
-- **Never expose Moli to the Internet directly**, and never put a reverse proxy on the same
-  machine in front of it (every request would look local; Moli treats a relayed local request
-  as coming from outside). For remote access: a VPN subnet router, or Cloudflare Access, whose
+- **Never expose Moli to the Internet directly**, and never put a reverse proxy in front of it,
+  on the same machine or on another of the home network (every request would look local or of
+  the house; Moli treats any relayed request, `X-Forwarded-For`, `Forwarded` or `X-Real-IP`, as
+  coming from outside). For remote access: a VPN subnet router, or Cloudflare Access, whose
   signed identity Moli verifies itself (`[server.access]`).
 - **DNS rebinding**: only the names configured in `allowed_hosts`, `localhost` and addresses
   typed as such are accepted in `Host`.

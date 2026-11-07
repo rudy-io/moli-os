@@ -1,7 +1,7 @@
 const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
-const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict']);
+const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled']);
 
 export function nextGatewayInstance(drivers = []) {
   const used = new Set(drivers.map((driver) => driver.instance));
@@ -49,9 +49,9 @@ async function exchange(path, request, validate, fetcher, method = 'POST', signa
   try {
     response = await fetcher(path, {method,headers:{'content-type':'application/json','x-moli-origin':'ui'},...(method === 'GET' ? {} : {body:JSON.stringify(request)}),...(signal ? {signal} : {})});
   } catch { return {ok:false,error:signal?.aborted ? 'cancelled' : 'network'}; }
-  if (response.status === 403) return {ok:false,error:'auth',status:403};
   let data;
   try { data = await response.json(); } catch { data = null; }
+  if (response.status === 403 && !['owner_required','pin_required','pin_disabled'].includes(data?.error)) return {ok:false,error:'auth',status:403};
   if (!response.ok) {
     const error = ERRORS.has(data?.error) ? data.error : response.status === 429 ? 'busy' : 'server';
     const result = {ok:false,error,status:response.status};
@@ -123,12 +123,12 @@ export async function withdrawGateway(instance, fetcher = globalThis.fetch) {
 }
 
 /** A separate, PIN-approved permission change; connection editing stays read-only. */
-export async function changeGatewayMode(instance, readOnly, expectedReadOnly, fetcher = globalThis.fetch) {
+export async function changeGatewayMode(instance, readOnly, expectedReadOnly, fetcher = globalThis.fetch, {pin} = {}) {
   if (!existingInstance(instance)) return {ok:false,error:'invalid_instance'};
   if (instance === '.' || instance === '..') return {ok:false,error:'unaddressable_instance'};
   if (typeof readOnly !== 'boolean' || typeof expectedReadOnly !== 'boolean') return {ok:false,error:'invalid_mode'};
   return exchange(`/api/integrations/airzone/${encodeURIComponent(instance)}/mode`,
-    {read_only:readOnly,expected_read_only:expectedReadOnly},
+    {read_only:readOnly,expected_read_only:expectedReadOnly,...(!readOnly && typeof pin === 'string' ? {pin} : {})},
     (data) => data?.instance === instance && data.stored === true && data.read_only === readOnly && typeof data.running === 'boolean',fetcher);
 }
 

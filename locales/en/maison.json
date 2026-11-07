@@ -1,4 +1,12 @@
 {
+  "maison.pieces.volets": "Shutters and blinds",
+  "maison.pieces.volets_compte_one": "{count} device, grouped by room.",
+  "maison.pieces.volets_compte_other": "{count} devices, grouped by room.",
+  "maison.pieces.volets_piece_one": "{count} device",
+  "maison.pieces.volets_piece_other": "{count} devices",
+  "maison.pieces.toutes": "All rooms",
+  "maison.pieces.voir_volets": "View shutters and blinds",
+  "maison.pieces.volets_vides": "No shutters or blinds to display in the rooms.",
   "maison.accueil.mode.normal": "Normal",
   "maison.accueil.mode.nuit": "Night",
   "maison.accueil.mode.absent": "Away",

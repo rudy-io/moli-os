@@ -9,6 +9,8 @@ before(async()=>{
   delete globalThis.localStorage;globalThis.document={querySelector:()=>null,documentElement:{}};
   if (!existsSync(new URL('../ui/AirzoneGateways.svelte',import.meta.url))) return;
   client=await scriptFixture('/src/maison/ui/AirzoneGateways.svelte',`
+    import { confirmHeld } from '../lib/home.svelte.js';
+    export function submitCode(pin) {return confirmHeld(pin);}
     export function refresh() {return load();}
     export function close() {return closeEditor();}
     export function select(instance,kind) {choose(instance,kind);}
@@ -121,12 +123,10 @@ test('reconnect refreshes once and queued events never retry a mutation or reope
 async function approveMode(component) {
   await component.confirmModeChange();
   const held=client.home.held;
-  assert.ok(held,'every mode change asks for a fresh Moli code');
-  client.home.held=null;
-  await held.custom();
+  if (held) {client.home.held=null;await held.custom('482915');}
 }
 
-test('both mode directions require confirmation and a fresh code, preserving the exact gateway scope',async(t)=>{
+test('both modes require confirmation while only granting control asks for a fresh code',async(t)=>{
   let readOnly=true;
   const other={...gateway,instance:'airzone-other',read_only:true};
   const{component,calls}=fixture(t,(url,options)=>{
@@ -140,16 +140,15 @@ test('both mode directions require confirmation and a fresh code, preserving the
   await component.confirmModeChange();assert.equal(calls.length,1);
   assert.equal(client.home.held.reason,'airzone_control');
   assert.match(client.home.held.label,new RegExp(gateway.instance));
-  const first=client.home.held;client.home.held=null;await first.custom();
+  const first=client.home.held;client.home.held=null;await first.custom('482915');
   assert.equal(component.inspect().gateways[0].read_only,false);
   assert.equal(component.inspect().gateways[1].read_only,true);
   assert.equal(component.inspect().confirmation,null);
   assert.deepEqual(component.inspect().modeResult,{instance:gateway.instance,read_only:false});
   component.select(gateway.instance,'mode');await component.confirmModeChange();
-  assert.equal(calls.length,2);assert.equal(client.home.held.reason,'airzone_read_only');
-  const second=client.home.held;client.home.held=null;await second.custom();
+  assert.equal(calls.length,3);assert.equal(client.home.held,null);
   assert.equal(component.inspect().gateways[0].read_only,true);
-  assert.deepEqual(calls.slice(1).map(c=>JSON.parse(c.body)),[{read_only:false,expected_read_only:true},{read_only:true,expected_read_only:false}]);
+  assert.deepEqual(calls.slice(1).map(c=>JSON.parse(c.body)),[{read_only:false,expected_read_only:true,pin:'482915'},{read_only:true,expected_read_only:false}]);
   assert.ok(calls.every(c=>c.method==='GET'||c.url===`/api/integrations/airzone/${gateway.instance}/mode`),'no physical command endpoint');
 });
 
@@ -204,7 +203,7 @@ test('paused gateways cannot grant control but can revoke previous permission',a
 });
 
 test('disconnecting during PIN approval cannot send a mode mutation',async(t)=>{
-  const{component,calls,props}=fixture(t);await turn();component.select(gateway.instance,'mode');await component.confirmModeChange();
+  const{component,calls,props}=fixture(t,()=>response({gateways:[{...gateway,read_only:true}]}));await turn();component.select(gateway.instance,'mode');await component.confirmModeChange();
   const held=client.home.held;props.connected=false;client.flushSync();client.home.held=null;await held.custom();
   assert.equal(calls.length,1);assert.equal(component.inspect().failure.error,'connection');
 });
@@ -219,4 +218,26 @@ test('an external mode change removes an outdated success notice while keeping s
   await turn();component.select(gateway.instance,'mode');await approveMode(component);assert.equal(component.inspect().modeResult.read_only,false);
   readOnly=true;props.registryRevision++;client.flushSync();await turn();
   assert.equal(component.inspect().gateways[0].read_only,true);assert.equal(component.inspect().modeResult,null);
+});
+
+
+test('enabling sends the fresh code only with that exact mode request',async(t)=>{
+  const {component,calls}=fixture(t,(url,options)=>options.method==='GET'
+    ? response({gateways:[{...gateway,read_only:true}]})
+    : response({instance:gateway.instance,stored:true,read_only:false,running:true}));
+  await turn();component.select(gateway.instance,'mode');await component.confirmModeChange();
+  const held=client.home.held;assert.equal(held.freshPin,true);
+  assert.equal(await component.submitCode('482915'),null);
+  assert.deepEqual(JSON.parse(calls.find(call=>call.url.endsWith('/mode')).body),{read_only:false,expected_read_only:true,pin:'482915'});
+  assert.ok(!JSON.stringify(component.inspect()).includes('482915'));
+});
+
+test('revocation does not prompt again when the human session is valid',async(t)=>{
+  const {component,calls}=fixture(t,(url,options)=>options.method==='GET'
+    ? response({gateways:[gateway]})
+    : response({instance:gateway.instance,stored:true,read_only:true,running:true}));
+  await turn();component.select(gateway.instance,'mode');await component.confirmModeChange();
+  assert.equal(client.home.held,null);
+  assert.deepEqual(JSON.parse(calls[1].body),{read_only:true,expected_read_only:false});
+  assert.equal(component.inspect().gateways[0].read_only,true);
 });

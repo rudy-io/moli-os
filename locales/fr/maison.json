@@ -1,4 +1,12 @@
 {
+  "maison.pieces.volets": "Volets et stores",
+  "maison.pieces.volets_compte_one": "{count} ouvrant, regroupé par pièce.",
+  "maison.pieces.volets_compte_other": "{count} ouvrants, regroupés par pièce.",
+  "maison.pieces.volets_piece_one": "{count} ouvrant",
+  "maison.pieces.volets_piece_other": "{count} ouvrants",
+  "maison.pieces.toutes": "Toutes les pièces",
+  "maison.pieces.voir_volets": "Voir les volets et stores",
+  "maison.pieces.volets_vides": "Aucun volet ni store à afficher dans les pièces.",
   "maison.accueil.mode.normal": "Normal",
   "maison.accueil.mode.nuit": "Nuit",
   "maison.accueil.mode.absent": "Absent",

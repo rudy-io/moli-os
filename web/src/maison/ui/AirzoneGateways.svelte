@@ -50,17 +50,18 @@
   const approval = gatewayApproval({home,
     label:(intent) => intent.kind === 'mode' ? t('airzone_gateways.mode_pin_label',{action:t(intent.read_only ? 'airzone_gateways.restore_read_only' : 'airzone_gateways.allow_control'),instance:intent.instance}) : t('airzone_gateways.title'),
     reason:(intent) => intent.kind === 'mode' ? intent.read_only ? 'airzone_read_only' : 'airzone_control' : 'configuration',
+    freshPin:(intent) => intent.kind === 'mode' && !intent.read_only,
     waiting:(value) => {awaitingPin=value;},failed:(error) => {failure={error};},current,perform});
 
   function current(intent) {return alive && intent.revision === revision;}
-  async function perform(intent, authenticated = false) {
+  async function perform(intent, authenticated = false, pin) {
     if (!current(intent)) return;
     if (!connected) {failure={error:'connection'};return;}
     if (intent.kind === 'list') refreshNeeded=false;
     pending = intent.kind;
     failure = null;
     const result = intent.kind === 'list' ? await listGateways()
-      : intent.kind === 'mode' ? await changeGatewayMode(intent.instance,intent.read_only,intent.expected_read_only)
+      : intent.kind === 'mode' ? await changeGatewayMode(intent.instance,intent.read_only,intent.expected_read_only,globalThis.fetch,{pin})
       : await withdrawGateway(intent.instance);
     if (!current(intent)) return;
     pending = null;
@@ -135,9 +136,11 @@
       await perform({kind:'list',revision,verifyMode:confirmation.instance});
       return;
     }
-    // A mode transition always asks for the person's code, even if this browser
-    // already has a session. The PIN never enters the gateway request.
-    approval.ask({...confirmation,revision});
+    // Granting control proves the code in this request; revocation only needs
+    // the existing human session and must remain easy. Never retain the code.
+    const intent={...confirmation,revision};
+    if (intent.read_only) await perform(intent);
+    else approval.ask(intent);
   }
   function cancelSelection() {
     if (busy) return;
@@ -189,7 +192,7 @@
         <p>{t(confirmation.read_only ? 'airzone_gateways.read_only_help' : 'airzone_gateways.control_help')}</p>
         {#if !confirmation.read_only}<p>{t('airzone_gateways.control_scope')}</p>{/if}
         {#if uncertain}<p role="status">{t('airzone_gateways.mode_uncertain')}</p>{/if}
-        <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmMode}>{t(pending === 'mode' ? 'airzone_gateways.mode_saving' : uncertain ? 'airzone_gateways.verify_mode' : 'airzone_gateways.confirm_with_code')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
+        <div class="actions"><button class="primary" type="button" disabled={busy || !connected} onclick={confirmMode}>{t(pending === 'mode' ? 'airzone_gateways.mode_saving' : uncertain ? 'airzone_gateways.verify_mode' : confirmation.read_only ? 'airzone_gateways.restore_read_only' : 'airzone_gateways.confirm_with_code')}</button><button type="button" disabled={busy} onclick={cancelSelection}>{t('airzone_gateways.cancel')}</button></div>
       </section>
     {:else if confirmation}
       <div class="confirmation" aria-labelledby="withdraw-title">

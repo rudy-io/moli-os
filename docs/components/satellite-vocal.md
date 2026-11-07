@@ -294,6 +294,14 @@ clé Noise (`noise::psk_from_base64`).
 | `muted` | oui | vrai / faux |
 | `wake_word` | non | le dernier mot de réveil entendu (son id dans le firmware) |
 | `say` | oui | un texte (500 caractères au plus) dit à voix haute, dans la voix de Moli |
+| `mic_muted` | oui | vrai / faux : coupe les micros (interrupteur `Mute` du firmware) |
+| `buttons_disabled` | oui | vrai / faux : le bouton et la molette ne font plus rien (interrupteur `Disable physical controls` du firmware) |
+
+Les deux derniers points n'existent que si le firmware a ces interrupteurs, ce qui est le cas du Voice PE.
+`muted` coupe le **haut-parleur** et laisse les micros allumés ; `mic_muted` coupe les **micros**. Un
+interrupteur matériel de micro resté en position coupée l'emporte sur `mic_muted`.
+`buttons_disabled` laisse active la remise à zéro par un appui très long sur le bouton (22 s sur le Voice PE),
+qui effacerait le Wi-Fi et la clé.
 
 `say` est une **annonce** : elle passe par-dessus ce que l'appareil joue, qui revient ensuite.
 C'est une commande comme une autre — **la garde s'applique** (pièce protégée, heures calmes).
@@ -326,6 +334,24 @@ C'est une commande comme une autre — **la garde s'applique** (pièce protégé
    (`sound.rs`, aucun fichier sur l'appareil). Ce carillon est un média FLAC complet sous
    `/api/media/<nom aléatoire>.flac`, valable **5 minutes**, distinct des réponses sous
    `/api/voice/`.
+9. Si l'appareil demande l'arrêt (`VoiceAssistantRequest{start=false}`, un appui sur le bouton), Moli oublie
+   la conversation et envoie toujours `RUN_END`. Sans lui, un arrêt pendant que Moli réfléchit laisse le firmware
+   attendre pour de bon (`AWAITING_RESPONSE`) : ses LED clignotent et il n'entend plus son mot de réveil.
+
+## Près d'une télé
+
+Un satellite posé près d'un écran prend parfois un dialogue pour son mot de réveil, puis la suite du film
+pour une conversation. Avec cette option, tant qu'un écran joue dans sa pièce, il ne parle que s'il a
+fait quelque chose, et il raccroche toujours après un tour :
+
+```toml
+[assistant]
+quiet_during_tv = true
+```
+
+Un écran joue quand un appareil de la pièce publie `media_state = "playing"`, ou `source = "tv"` avec
+`playing` vrai (la barre de son qui porte le son de la télé). Pendant une pause, il répond normalement. Une
+simple question (« quelle heure est-il ? ») reste sans réponse tant que l'écran joue, le carillon marquant la fin.
 
 ## ⚠️ Un seul cerveau : Home Assistant **ou** Moli
 

@@ -1,6 +1,6 @@
-//! Every route of the API is listed in `routes.txt` with who may call it. A route added to the
-//! code and not listed (or listed and gone) fails here: whoever adds it decides its level, and
-//! the test then checks that the level holds.
+//! Every route of the API is listed in `routes.txt` with who may call it and whether it is reached
+//! from outside the house. A route added to the code and not listed (or listed and gone) fails
+//! here: whoever adds it decides, and the test then checks that the level holds.
 
 use std::time::Duration;
 
@@ -45,14 +45,21 @@ fn declared(src: &str) -> Vec<(String, String)> {
     found
 }
 
-async fn serve() -> String {
+async fn serve() -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let app = moli_api::router(hub, CancellationToken::new(), &moli_api::Options::default());
+    let shutdown = CancellationToken::new();
+    let app = moli_api::router(hub, shutdown.clone(), &moli_api::Options::default());
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    addr
+    let stopped = shutdown.clone();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(stopped.cancelled_owned())
+            .await
+            .unwrap();
+    });
+    (addr, shutdown, task)
 }
 
 /// The status line only: live streams never end. `extra`: header lines, each ending with CRLF.
@@ -103,7 +110,7 @@ async fn every_route_is_listed_and_holds_its_level() {
         code.len()
     );
 
-    // `METHOD path level`, then free text.
+    // `METHOD path level remote`, then free text.
     let listed: Vec<(String, String, String)> = include_str!("routes.txt")
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
@@ -113,7 +120,16 @@ async fn every_route_is_listed_and_holds_its_level() {
                 w.next()
                     .unwrap_or_else(|| panic!("routes.txt: bad line {l:?}"))
             };
-            (next().to_owned(), next().to_owned(), next().to_owned())
+            let (method, path, level, remote) = (next(), next(), next(), next());
+            match (level, remote) {
+                (_, "oui" | "non") => {}
+                _ => panic!("routes.txt: remote is `oui` or `non`, not {remote:?}: {l:?}"),
+            }
+            // The sign-in is how a person comes in from outside (I3).
+            assert!(level != "public" || remote == "oui", "routes.txt: {l:?}");
+            // Agents stay at home unless the house decides otherwise (I4).
+            assert!(path != "/mcp" || remote == "non", "routes.txt: {l:?}");
+            (method.to_owned(), path.to_owned(), level.to_owned())
         })
         .collect();
 
@@ -133,14 +149,20 @@ async fn every_route_is_listed_and_holds_its_level() {
         [new, gone].concat().join("\n")
     );
 
-    let addr = serve().await;
     // A request relayed through a proxy is a stranger's, even from this machine.
     let stranger = "X-Forwarded-For: 203.0.113.9\r\n";
     let mut wrong = Vec::new();
     for (method, path, level) in &listed {
+        // Authorization must not inherit another route’s exhausted rate budget.
+        let (addr, shutdown, task) = serve().await;
         let url = concrete(path);
         let outside = status(&addr, method, &url, stranger).await;
         let household = status(&addr, method, &url, "").await;
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("route server did not stop")
+            .unwrap();
         let ok = match level.as_str() {
             "public" => outside != 403,
             "foyer" => outside == 403,

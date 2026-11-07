@@ -13,10 +13,13 @@ pub const PING_RESPONSE: u16 = 8;
 pub const DEVICE_INFO_REQUEST: u16 = 9;
 pub const DEVICE_INFO_RESPONSE: u16 = 10;
 pub const LIST_ENTITIES_REQUEST: u16 = 11;
+pub const LIST_SWITCH: u16 = 17;
 pub const LIST_ENTITIES_DONE: u16 = 19;
 pub const SUBSCRIBE_STATES: u16 = 20;
+pub const SWITCH_STATE: u16 = 26;
 pub const SUBSCRIBE_LOGS: u16 = 28;
 pub const LOG: u16 = 29;
+pub const SWITCH_COMMAND: u16 = 33;
 pub const LIST_MEDIA_PLAYER: u16 = 63;
 pub const MEDIA_PLAYER_STATE: u16 = 64;
 pub const MEDIA_PLAYER_COMMAND: u16 = 65;
@@ -110,7 +113,8 @@ pub struct Entity {
     pub name: String,
 }
 
-/// `ListEntitiesMediaPlayerResponse` or `ListEntitiesEventResponse`: key 2, name 3.
+/// `ListEntitiesMediaPlayerResponse`, `ListEntitiesEventResponse` or
+/// `ListEntitiesSwitchResponse`: key 2, name 3.
 #[must_use]
 pub fn entity(payload: &[u8]) -> Option<Entity> {
     let m = parse(payload)?;
@@ -171,6 +175,19 @@ pub fn set_muted(key: u32, muted: bool) -> Vec<u8> {
         .bool(2, true)
         .uint(3, if muted { 3 } else { 4 })
         .finish()
+}
+
+/// `SwitchStateResponse`: which switch, and whether it is on.
+#[must_use]
+pub fn switch_state(payload: &[u8]) -> Option<(u32, bool)> {
+    let m = parse(payload)?;
+    Some((m.fixed32(1)?, m.bool(2)))
+}
+
+/// `SwitchCommandRequest`: turn a switch on or off.
+#[must_use]
+pub fn set_switch(key: u32, on: bool) -> Vec<u8> {
+    Writer::new().fixed32(1, key).bool(2, on).finish()
 }
 
 /// `EventResponse`: which entity, which event (`double_press`…).
@@ -349,6 +366,20 @@ mod tests {
         let set = set_wake_words(&["hey_moli", "dis_moli"]);
         let set = parse(&set).unwrap();
         assert_eq!(set.all_bytes(1).count(), 2);
+    }
+
+    #[test]
+    fn a_switch_is_read_and_set() {
+        let on = Writer::new().fixed32(1, 7).bool(2, true).finish();
+        assert_eq!(switch_state(&on), Some((7, true)));
+        // A device leaves a false value out.
+        let off = Writer::new().fixed32(1, 7).finish();
+        assert_eq!(switch_state(&off), Some((7, false)));
+        assert_eq!(switch_state(&[]), None);
+        let command = set_switch(7, true);
+        let m = parse(&command).unwrap();
+        assert_eq!((m.fixed32(1), m.bool(2)), (Some(7), true));
+        assert!(!parse(&set_switch(7, false)).unwrap().bool(2));
     }
 
     #[test]

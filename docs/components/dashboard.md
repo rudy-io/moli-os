@@ -130,6 +130,25 @@ telles que les appareils les nomment).
   et ne remplace jamais un sens `position` déclaré. Les ordres conservent la
   casse du pilote (`OPEN` ou `open`) ; une cible ou une casse ambiguë ne produit
   pas de commande. Le mouvement reste affiché, même sans position mesurée.
+- `CoverTile.svelte` et `cover-controls.js` : les actions annoncées restent visibles
+  avec icône et libellé, désactivées en lecture seule, hors ligne ou pendant une
+  déconnexion du flux Moli. `#/pieces/volets` les regroupe par pièce en grille ;
+  le détail d'accès renvoie à Système. Une position mesurée à 0 % dit « Fermé »,
+  à 100 % « Ouvert » ; une lecture périmée est explicitement la dernière position.
+  Dans les pièces, le mode « icônes seules » place le nom et l'état dans l'infobulle ;
+  les boutons d'action et de vitesse gardent leur icône, leur nom accessible et une
+  cible tactile de 44 px. Le choix de présentation ne change ni les droits ni la vitesse.
+  Le choix **Normal / Lent**, proposé seulement si annoncé, décrit la prochaine
+  commande : `open_slow` / `close_slow` ou le point d'action facultatif
+  `percent_control_slow` (pourcentage ouvert). Ce point n'est jamais une observation :
+  l'état reste lu sur le point de position habituel. Aucune vitesse persistante n'est
+  déduite. Une capacité lente retirée ne déclenche jamais un ordre normal en repli.
+  **Stop** conserve son ordre propre, même pendant l'envoi d'une autre commande.
+  L'acceptation, la validation demandée et l'erreur ont des retours distincts ;
+  l'interface attend les lectures du pilote pour confirmer le déplacement.
+  Captures d'une installation **fictive** : [jour](../images/tahoma-shutter-quick-actions-light-demo.png),
+  [nuit](../images/tahoma-shutter-quick-actions-demo.png),
+  [mobile](../images/tahoma-shutter-quick-actions-mobile-demo.png).
 - `home.svelte.js` : état de la maison (config, ordres retenus, toasts, thème), lecture des
   valeurs, `powerKey` (le point qui allume/éteint), `deviceKind`, `roomList`, `act` (envoie
   un ordre, gère le 202 de la garde), `confirmHeld` (code PIN), formats français.
@@ -162,3 +181,23 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
 - Télé : applis et clavier non disponibles (JointSpace ne le permet pas ; protocole
   Android TV Remote v2 à faire).
 - Clims : lecture seule tant que les écritures Daikin n'ont pas été testées physiquement.
+- **Vannes thermostatiques** : une vanne **Zigbee2MQTT** (SONOFF TRVZB, TRV-ZBT) est un climat
+  reconnu à ses points `occupied_heating_setpoint` et `system_mode`, sans rien déclarer. Sa carte
+  (`ui/ValveCard.svelte`) montre la température mesurée (`local_temperature`), la consigne (bornes
+  et pas lus dans le point) et les modes que la vanne accepte ; chaque ordre passe par le chemin
+  normal du hub, donc par la garde. Une vanne d'un autre
+  protocole peut nommer ses points autrement : une Danfoss Z-Wave expose `temperature` et
+  `occupied_heating_setpoint` mais pas `system_mode`, elle n'est pas reconnue.
+  La **table horaire** (`ui/ScheduleEditor.svelte`, calcul pur dans `lib/schedule.js`) s'ouvre sous
+  la carte quand la vanne énonce `weekly_schedule_<jour>` en écriture : un jour à la fois, les
+  créneaux `HH:mm/°C`, un « appliquer aussi à » pour d'autres jours. Chaque jour écrit est un ordre
+  comme un autre (`act`, donc la garde). Les bornes de température sont celles de la consigne de la
+  vanne ; le nombre de créneaux par jour n'est pas un point : 6 (SONOFF TRVZB), 12 si la vanne a
+  des groupes de programmes (TRV-ZBT), d'après les convertisseurs de Zigbee2MQTT. Une TRVZB ne
+  renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
+  garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
+  quand ce n'est pas le groupe suivi par la vanne.
+  La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
+  ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
+  échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub
+  n'en garde pas l'historique. Pas encore de rubans d'ouverture ni de chiffres (`running_state`).

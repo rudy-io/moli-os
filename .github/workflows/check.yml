@@ -52,6 +52,11 @@ jobs:
       # runner's own Python is enough, nothing to install.
       - run: python3 --version && python3 -m unittest discover -s tests -t .
         working-directory: tools/model
+      - name: Check the reviewed Airzone coverage inventory
+        if: ${{ hashFiles('integrations/airzone/coverage-matrix.json') != '' }}
+        run: |
+          python3 integrations/airzone/validate_coverage.py --test
+          python3 -m unittest discover -s integrations/airzone -p 'test_*.py'
 
   image:
     runs-on: ubuntu-latest
