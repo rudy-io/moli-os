@@ -239,8 +239,26 @@
   background:
     radial-gradient(38vmax 30vmax at 12% 8%, var(--cloud-a), transparent 70%),
     radial-gradient(42vmax 34vmax at 92% 18%, var(--cloud-b), transparent 70%),
-    radial-gradient(36vmax 30vmax at 60% 100%, var(--cloud-c), transparent 70%);
+    radial-gradient(36vmax 30vmax at 60% 100%, var(--cloud-c), transparent 70%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1.5px) 0 0 / 24px 24px;
   animation: maison-drift 2.4s var(--ease) backwards;
+}
+
+/* A watermark: the page's own icon, very large and faint, in its colour. */
+.maison::after {
+  content: '';
+  position: fixed;
+  right: -6vmax;
+  bottom: -8vmax;
+  width: 48vmax;
+  height: 48vmax;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+  opacity: 0.07;
+  transform: rotate(-12deg);
 }
 
 @keyframes maison-drift {
