@@ -43,7 +43,12 @@ Somfy Accounts password grant, Ginaite token exchange, BOB site discovery, then 
 Ginaite refresh scoped to an explicitly selected setup. The
 [published application constants](https://github.com/iMicknl/python-overkiz-api/blob/5f31858570e14be4f58e6cc58b7a448000556449/pyoverkiz/const.py)
 are distinct from the user's password and rotating tokens. This interoperability
-flow is not a claim of Moli-specific partner registration or provider guarantees.
+flow is not a claim of Moli-specific partner registration or provider guarantees. The
+derived constants are attributed in [`NOTICE`](../../NOTICE), with the complete
+[PyOverkiz MIT licence](../../licenses/pyoverkiz-MIT.txt) from the pinned commit.
+That source licence does not establish permission to use Somfy's service with
+these application credentials, or imply Somfy endorsement. Acceptance of this
+interoperability approach remains a separate maintainer decision.
 
 BOB exposes two different identifiers. The sub-site's `externalOID` identifies the
 selected Overkiz setup in the catalogue. Ginaite's OAuth `siteOID` parameter must

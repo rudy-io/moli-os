@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice } from './capabilities.js';
+import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice, isValve, climateKeys } from './capabilities.js';
 
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const device = (...points) => ({ online: true, points });
@@ -128,4 +128,20 @@ test('bridge display hints cannot depend on friendly names or write access', () 
   assert.equal(knownDeviceKind({ model: 'Home Assistant climate', points: [] }), 'climate');
   assert.equal(knownDeviceKind({ model: 'Home Assistant cover', points: [] }), 'cover');
   assert.equal(knownDeviceKind({ model: 'room', points: [] }), null);
+});
+
+test('a Zigbee thermostatic valve is recognised by its points, never by name or model', () => {
+  const setpoint = point('occupied_heating_setpoint', numeric(4, 35, 0.5));
+  const mode = point('system_mode', { type: 'enum', values: ['off', 'auto', 'heat'] });
+  const valve = device(setpoint, mode, point('local_temperature', numeric(), false));
+  assert.equal(isValve(valve), true);
+  assert.equal(isValve({ ...valve, model: 'anything', native_name: 'Salon' }), true);
+  assert.deepEqual(climateKeys(valve), { temperature: 'local_temperature', target: 'occupied_heating_setpoint', mode: 'system_mode' });
+  // A split's contract, or a valve that states no mode (Z-Wave), is not matched.
+  const split = device(point('target_temperature', numeric(16, 30, 0.5)), point('mode', { type: 'enum', values: ['chaud'] }));
+  assert.equal(isValve(split), false);
+  assert.deepEqual(climateKeys(split), { temperature: 'temperature', target: 'target_temperature', mode: 'mode' });
+  assert.equal(isValve(device(setpoint)), false);
+  assert.equal(isValve(device(mode)), false);
+  assert.equal(isValve(null), false);
 });

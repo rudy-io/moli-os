@@ -121,6 +121,11 @@ pub struct Config {
     /// `alexa:…/say`); none: Telegram only.
     #[serde(default)]
     pub door_speakers: Vec<String>,
+    /// While a screen plays in a satellite's room, what it hears is mostly the
+    /// film: it speaks only when it did something, and never listens again
+    /// without its wake word.
+    #[serde(default)]
+    pub quiet_during_tv: bool,
     /// Where the house is, for the forecast; by default `[automations]`'s.
     #[serde(default)]
     pub latitude: Option<f64>,
@@ -160,6 +165,7 @@ impl Default for Config {
             search_model: default_model(),
             recap_at: default_recap_at(),
             door_speakers: Vec::new(),
+            quiet_during_tv: false,
             latitude: None,
             longitude: None,
             provider: Vec::new(),
@@ -927,8 +933,12 @@ impl Assistant {
         let surface = turn.surface.clone().unwrap_or_default();
         let spoken = turn.spoken;
         let asker = turn.asker.clone();
+        let quiet = self.screen_plays_for(&turn).await;
         let stop = CancellationToken::new();
-        let result = self.converse(turn, &stop).await;
+        let mut result = self.converse(turn, &stop).await;
+        if quiet && let Ok(reply) = &mut result {
+            satellite::hush(reply);
+        }
         if let Some(question) = question {
             let heard = self.take_heard();
             let c = &self.0.config;
@@ -3137,7 +3147,7 @@ mod tests {
     }
 
     /// Moli over a hub with the lamp running, its provider answering `answer` once.
-    async fn moli_with_lamp(answer: &'static [u8]) -> Assistant {
+    pub(crate) async fn moli_with_lamp(answer: &'static [u8]) -> Assistant {
         let (url, _task) = crate::llm::tests::fake_http(200, answer).await;
         let hub = lamp_hub().await;
         let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
@@ -3636,7 +3646,7 @@ mod tests {
         }
     }
 
-    fn spoken(question: &str) -> Turn {
+    pub(crate) fn spoken(question: &str) -> Turn {
         serde_json::from_value(json!({
             "spoken": true,
             "messages": [{ "role": "user", "content": question }],

@@ -8,15 +8,115 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 
 const MAGIC: &[u8; 8] = b"MOLISEC1";
 const AAD: &[u8] = b"moli-os secrets v1";
+
+/// Instance-scoped synchronous access for protocol libraries that require a
+/// durable store callback. Writes must run on a blocking worker, never on an
+/// async executor thread. Values are encrypted with the existing vault key.
+#[derive(Clone)]
+pub struct DurableSecrets {
+    store: Arc<SecretStore>,
+    instance: String,
+}
+
+/// Exclusive lifetime ownership of protocol state. Dropping it releases the
+/// operating-system lock, including when its process exits unexpectedly.
+pub struct DurableLease(std::fs::File);
+
+impl fmt::Debug for DurableLease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DurableLease(<held>)")
+    }
+}
+
+impl Drop for DurableLease {
+    fn drop(&mut self) {
+        // Reading the field also makes the lifetime of the lock explicit.
+        let _ = self.0.unlock();
+    }
+}
+
+impl fmt::Debug for DurableSecrets {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DurableSecrets")
+            .field("instance", &self.instance)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DurableSecrets {
+    pub(crate) fn new(store: Arc<SecretStore>, instance: String) -> Self {
+        Self { store, instance }
+    }
+
+    /// Reads from the running vault without exposing another instance.
+    pub fn get(&self, name: &str) -> Option<String> {
+        self.store.get(&format!("{}/{name}", self.instance))
+    }
+
+    /// Prevents two controllers from using the same persistent identity and
+    /// counter reservations. Hold the returned lease until the controller stops.
+    /// Run on a blocking worker; unlike `set`, acquisition never waits for a peer.
+    pub fn try_lease(&self, name: &str) -> io::Result<DurableLease> {
+        use std::fmt::Write as _;
+        let digest = ring::digest::digest(
+            &ring::digest::SHA256,
+            format!("{}/{name}", self.instance).as_bytes(),
+        );
+        let mut suffix = String::from(".lease.");
+        for byte in digest.as_ref() {
+            let _ = write!(suffix, "{byte:02x}");
+        }
+        std::fs::create_dir_all(parent_dir(&self.store.0.path))?;
+        let mut path = self.store.0.path.as_os_str().to_owned();
+        path.push(suffix);
+        let file = private_file(Path::new(&path), false)?;
+        file.try_lock().map_err(io::Error::other)?;
+        // A second process may have opened this vault before the previous
+        // controller reserved more counters. Ownership alone must not restore
+        // that stale cached snapshot when the lease changes hands.
+        let _guard = self.store.0.write.blocking_lock();
+        let _file_lock = lock_file(&self.store.0.path)?;
+        let next = self.store.0.current()?;
+        *self
+            .store
+            .0
+            .values
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = next;
+        Ok(DurableLease(file))
+    }
+
+    /// Replaces one value, syncing the encrypted file and its parent directory
+    /// before success. A failed write never updates the in-memory value.
+    ///
+    /// # Panics
+    /// Called on a Tokio executor thread rather than a blocking worker.
+    pub fn set(&self, name: &str, value: &str) -> io::Result<()> {
+        let _guard = self.store.0.write.blocking_lock();
+        let _file_lock = lock_file(&self.store.0.path)?;
+        let mut next = self.store.0.current()?;
+        next.insert(format!("{}/{name}", self.instance), value.to_owned());
+        let bytes = encrypt(&self.store.0.key, &next)?;
+        write_durable(&self.store.0.path, &bytes)?;
+        *self
+            .store
+            .0
+            .values
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = next;
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct SecretStore(Arc<SecretData>);
@@ -87,8 +187,7 @@ pub async fn forget_secret(path: &Path, key: &MasterKey, name: &str) -> io::Resu
 }
 
 /// Stores one secret (operator tool: a device key the human provides).
-/// Rereading disk preserves sequential external writes; it does not provide
-/// concurrent cross-process atomicity. Use one active writer per vault.
+/// Every writer holds the same interprocess lock through read/merge/rename.
 /// A running hub sees an external value after its next write or a restart.
 pub async fn set_secret(path: &Path, key: &MasterKey, name: &str, value: &str) -> io::Result<()> {
     let store = SecretStore::open(path.to_path_buf(), &parse_master_key(&key.0)?)?;
@@ -199,6 +298,7 @@ impl SecretStore {
         let data = Arc::clone(&self.0);
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
+            let _file_lock = lock_file(&data.path)?;
             let mut next = data.current()?;
             let (result, changed) = change(&mut next);
             if changed {
@@ -214,8 +314,7 @@ impl SecretStore {
 }
 
 impl SecretData {
-    /// Reread disk for sequential external updates. Caller holds the owned
-    /// same-process write guard; concurrent processes are deliberately unsupported.
+    /// Reread disk while holding both the owned writer guard and interprocess lock.
     fn current(&self) -> io::Result<BTreeMap<String, String>> {
         match std::fs::read(&self.path) {
             Ok(bytes) => decrypt(&self.key, &bytes),
@@ -234,37 +333,11 @@ impl SecretData {
         sync_parent: impl FnOnce(&Path) -> io::Result<()>,
     ) -> io::Result<()> {
         let bytes = encrypt(&self.key, &next)?;
-        let parent = self
-            .path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        std::fs::create_dir_all(parent)?;
-        let temporary = self.path.with_extension("tmp");
-        let result = (|| {
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&temporary)?;
-            set_owner_only(&temporary)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            drop(file);
-            std::fs::rename(&temporary, &self.path)?;
-            // The replacement is known at rename, even if the following durability
-            // barrier fails and the file becomes unreadable. Never restore old tokens.
+        write_durable_with(&self.path, &bytes, |parent| {
+            // A completed rename retired the old token even if directory sync fails.
             *self.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
-            sync_parent(parent)?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(temporary);
-        }
-        result
+            sync_parent(parent)
+        })
     }
 }
 
@@ -275,6 +348,94 @@ fn sync_parent_directory(parent: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn sync_parent_directory(_: &Path) -> io::Result<()> {
     Ok(())
+}
+
+/// Every writer, including the CLI in another process, holds this lock through
+/// read/merge/rename. A lock on the data inode would be lost across rename.
+fn lock_file(path: &Path) -> io::Result<std::fs::File> {
+    lock_file_with_timeout(path, Duration::from_secs(3))
+}
+
+fn lock_file_with_timeout(path: &Path, timeout: Duration) -> io::Result<std::fs::File> {
+    std::fs::create_dir_all(parent_dir(path))?;
+    let mut lock = path.as_os_str().to_owned();
+    lock.push(".lock");
+    let file = private_file(Path::new(&lock), false)?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            // Unsupported filesystems and other I/O failures must fail closed:
+            // never read/merge/write without exclusive ownership.
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "timed out acquiring secret store write lock",
+                    ));
+                }
+                std::thread::sleep(remaining.min(Duration::from_millis(25)));
+            }
+        }
+    }
+}
+
+fn parent_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn private_file(path: &Path, truncate: bool) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(truncate);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_durable_with(path, bytes, sync_parent_directory)
+}
+
+fn write_durable_with(
+    path: &Path,
+    bytes: &[u8],
+    after_rename: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    use std::io::Write as _;
+    std::fs::create_dir_all(parent_dir(path))?;
+    let mut random = [0; 8];
+    SystemRandom::new()
+        .fill(&mut random)
+        .map_err(|_| io::Error::other("no system randomness"))?;
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(format!(".{:016x}.tmp", u64::from_ne_bytes(random)));
+    let temp = Path::new(&temp);
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(temp, path)?;
+        after_rename(parent_dir(path))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temp);
+    }
+    result
 }
 
 fn encrypt(key: &LessSafeKey, values: &BTreeMap<String, String>) -> io::Result<Vec<u8>> {
@@ -312,22 +473,37 @@ fn decrypt(key: &LessSafeKey, bytes: &[u8]) -> io::Result<BTreeMap<String, Strin
     serde_json::from_slice(plain).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn set_owner_only(_: &Path) -> io::Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const KEY: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+
+    #[test]
+    fn contended_write_lock_times_out_without_changing_the_vault() {
+        let dir = std::env::temp_dir().join(format!("moli-lock-timeout-{}", std::process::id()));
+        let path = dir.join("secrets.enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = parse_master_key(KEY).unwrap();
+        let store = SecretStore::open(path.clone(), &key).unwrap();
+        let mut values = BTreeMap::new();
+        values.insert("matter/snapshot".into(), "reserved-counters".into());
+        let bytes = encrypt(&store.0.key, &values).unwrap();
+        write_durable(&path, &bytes).unwrap();
+
+        let held = lock_file(&path).unwrap();
+        let timeout = Duration::from_millis(40);
+        let started = Instant::now();
+        let error = lock_file_with_timeout(&path, timeout).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() >= timeout);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        drop(held);
+        let acquired = lock_file_with_timeout(&path, timeout).unwrap();
+        drop(acquired);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn round_trip_and_wrong_key() {
@@ -580,5 +756,112 @@ mod tests {
         assert!(parse_master_key(KEY).is_ok());
         assert!(parse_master_key("abcd").is_err());
         assert!(parse_master_key(&"zz".repeat(32)).is_err());
+    }
+
+    #[tokio::test]
+    async fn durable_snapshot_shares_the_vault_and_is_instance_scoped() {
+        let dir = std::env::temp_dir().join(format!("moli-durable-{}", std::process::id()));
+        let path = dir.join("secrets.enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = parse_master_key(KEY).unwrap();
+        let vault = Arc::new(SecretStore::open(path.clone(), &key).unwrap());
+        let first = DurableSecrets::new(vault.clone(), "matter_a".into());
+        let second = DurableSecrets::new(vault.clone(), "matter_b".into());
+        let lease_store = first.clone();
+        let other_lease = second.clone();
+        tokio::task::spawn_blocking(move || {
+            let held = lease_store.try_lease("controller").unwrap();
+            assert!(lease_store.try_lease("controller").is_err());
+            assert!(other_lease.try_lease("controller").is_ok());
+            drop(held);
+            assert!(lease_store.try_lease("controller").is_ok());
+        })
+        .await
+        .unwrap();
+        let writer = first.clone();
+        tokio::task::spawn_blocking(move || writer.set("snapshot", "private-snapshot-data"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first.get("snapshot").as_deref(),
+            Some("private-snapshot-data")
+        );
+        assert!(second.get("snapshot").is_none());
+        assert!(!format!("{first:?}").contains("private-snapshot"));
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(
+            !bytes
+                .windows(21)
+                .any(|part| part == b"private-snapshot-data")
+        );
+        let reopened = SecretStore::open(path.clone(), &key).unwrap();
+        assert_eq!(
+            reopened.get("matter_a/snapshot").as_deref(),
+            Some("private-snapshot-data")
+        );
+
+        // Independent handles mirror a running hub and the separate CLI process.
+        // Their read/merge/write transactions must retain both updates.
+        let another = Arc::new(SecretStore::open(path.clone(), &key).unwrap());
+        let other = DurableSecrets::new(another, "matter_b".into());
+        let task = tokio::task::spawn_blocking(move || other.set("snapshot", "other-state"));
+        vault.set("hue/app_key", "existing-key").await.unwrap();
+        task.await.unwrap().unwrap();
+        let reopened = SecretStore::open(path, &key).unwrap();
+        assert_eq!(reopened.get("hue/app_key").as_deref(), Some("existing-key"));
+        assert_eq!(
+            reopened.get("matter_b/snapshot").as_deref(),
+            Some("other-state")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn durable_failure_does_not_publish_an_unsaved_value() {
+        let dir = std::env::temp_dir().join(format!("moli-durable-fail-{}", std::process::id()));
+        let path = dir.join("secrets.enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = parse_master_key(KEY).unwrap();
+        let vault = Arc::new(SecretStore::open(path.clone(), &key).unwrap());
+        // Rename onto a directory fails after encryption and writing the temp.
+        std::fs::create_dir_all(&path).unwrap();
+        let store = DurableSecrets::new(vault, "matter".into());
+        let writer = store.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || writer.set("snapshot", "never-saved"))
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(store.get("snapshot").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn lease_handoff_refreshes_the_snapshot_before_restore() {
+        let dir = std::env::temp_dir().join(format!("moli-lease-refresh-{}", std::process::id()));
+        let path = dir.join("secrets.enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = parse_master_key(KEY).unwrap();
+        let first = DurableSecrets::new(
+            Arc::new(SecretStore::open(path.clone(), &key).unwrap()),
+            "matter".into(),
+        );
+        let second = DurableSecrets::new(
+            Arc::new(SecretStore::open(path, &key).unwrap()),
+            "matter".into(),
+        );
+        let lease = first.try_lease("controller").unwrap();
+        first.set("snapshot", "new-counter-reservation").unwrap();
+        assert!(second.get("snapshot").is_none());
+        assert!(second.try_lease("controller").is_err());
+        drop(lease);
+        let _lease = second.try_lease("controller").unwrap();
+        assert_eq!(
+            second.get("snapshot").as_deref(),
+            Some("new-counter-reservation")
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

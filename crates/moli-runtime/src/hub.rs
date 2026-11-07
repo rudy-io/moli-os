@@ -319,7 +319,7 @@ struct Inner {
     /// Serializes address writes so the file always matches the book.
     address_write: tokio::sync::Mutex<()>,
     journal_log: Option<JournalLog>,
-    secrets: Option<SecretStore>,
+    secrets: Option<Arc<SecretStore>>,
     /// Why there is no secret store, in words a human can act on.
     secrets_problem: Option<String>,
     /// Values changed since the state cache was last written.
@@ -459,7 +459,7 @@ impl Hub {
             Some((path, master)) => match secrets::master_key_bytes(master)
                 .and_then(|key| SecretStore::open(path.clone(), &key))
             {
-                Ok(store) => (Some(store), None),
+                Ok(store) => (Some(Arc::new(store)), None),
                 Err(e) => {
                     tracing::error!(error = %e, "secret store unavailable");
                     (
@@ -1546,6 +1546,13 @@ impl Hub {
     #[must_use]
     pub fn has_secret_store(&self) -> bool {
         self.0.secrets.is_some()
+    }
+
+    pub(crate) fn durable_secrets(&self, instance: &InstanceId) -> Option<secrets::DurableSecrets> {
+        Some(secrets::DurableSecrets::new(
+            self.0.secrets.as_ref()?.clone(),
+            instance.to_string(),
+        ))
     }
 
     pub(crate) fn secrets_problem(&self) -> Option<&str> {

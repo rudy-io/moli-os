@@ -1985,6 +1985,16 @@ async fn only_a_person_changes_the_price_of_a_kwh_and_it_is_journaled() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    // Price periods are keyed by milliseconds; this assertion needs two
+    // distinct periods rather than two replacements of the same instant.
+    let first_since = energy.house_prices()[0].since;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while moli_core::now_ms() <= first_since {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("clock did not advance to a new price period");
     let (status, body) = request_with(
         &addr,
         "PUT",

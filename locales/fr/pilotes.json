@@ -45,6 +45,8 @@
   "pilotes.esphome.volume": "Volume",
   "pilotes.esphome.sourdine": "Sourdine",
   "pilotes.esphome.mot_activation": "Mot d'activation entendu",
+  "pilotes.esphome.micro_coupe": "Micro coupé",
+  "pilotes.esphome.boutons_desactives": "Boutons désactivés",
   "pilotes.esphome.cle_manquante": "clé API manquante : printf %s \"$CLE\" | moli-os secrets set {instance} {key}",
   "pilotes.esphome.cle_invalide": "la clé API n'est pas une clé ESPHome (32 octets en base64)",
   "pilotes.esphome.cle_refusee": "l'appareil refuse la clé API : reprends celle de sa configuration ESPHome, puis printf %s \"$CLE\" | moli-os secrets set {instance} {key}",

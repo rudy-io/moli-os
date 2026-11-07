@@ -22,11 +22,12 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
+  components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
 });
-beforeEach(() => { home.home.config = null; energy.summary = null; });
+beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
   await vite?.close();
   delete globalThis.document;
@@ -36,10 +37,10 @@ after(async () => {
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const number = (min, max, step) => ({ type: 'numeric', min, max, step });
 const enumeration = (...values) => ({ type: 'enum', values });
-function show(component, points, values, extra = {}) {
+function show(component, points, values, extra = {}, props = {}) {
   const d = { id: 'fixture:device', native_name: 'Fixture', model: null, label: {}, online: true, points, members: [], state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }])), ...extra };
   hub.devices = { [d.id]: d };
-  return render(components[component], { props: { id: d.id, name: 'Fixture' } }).body;
+  return render(components[component], { props: { id: d.id, name: 'Fixture', ...props } }).body;
 }
 function showRoom(entries) {
   hub.devices = Object.fromEntries(entries.map(({ id, points, values, ...extra }) => [id, {
@@ -202,11 +203,165 @@ test('partial bridge climate and cover retain their family controls', () => {
   assert.equal(buttons(cover).length, 2);
 });
 
-test('read-only shutter shows position without command buttons', () => {
+test('read-only shutter keeps advertised command buttons visible and disabled', () => {
   const html = show('CoverTile', [point('percent_control', number(0, 100, 1), false), point('control', enumeration('open', 'close'), false)], { percent_control: 42 });
   assert.match(html, /42/);
-  assert.equal(buttons(html).length, 0);
+  assert.equal(buttons(html).length, 2);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
   assert.equal(inputs(html).length, 0);
+});
+
+test('observed bridge covers explain read-only access beside labelled icon actions', () => {
+  const html = show('CoverTile', [
+    point('state', { type: 'text' }, false),
+    { ...point('control', enumeration('open', 'close', 'stop'), false, 'control'), access: { read: false, write: false } },
+    { ...point('percent_control', number(0, 100, 1), false, 'control'), unit: '%' },
+  ], { percent_control: 100 }, { model: 'Home Assistant cover' });
+  assert.match(html, /Lecture seule/);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.match(html, /Ouvert/);
+  assert.doesNotMatch(html, /Ouvert à 100 %/);
+  assert.match(html, /href="#\/systeme"/);
+  assert.doesNotMatch(html, /code Moli|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+  assert.equal((html.match(/data-cover-command=/g) ?? []).length, 3);
+});
+
+test('unavailable covers mark retained positions as historical and never claim movement', () => {
+  const html = show('CoverTile', [point('opening', number(0, 100, 1), true, 'position'), point('state', enumeration('OPEN', 'STOP', 'CLOSE'))],
+    { opening: 42, moving: 'UP' }, { online: false });
+  assert.match(html, /Injoignable/);
+  assert.match(html, /Dernière position.*42/s);
+  assert.match(html, /Ouvrir.*Stop.*Fermer/s);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+});
+
+test('static cover capabilities stay partial and an unknown position stays explicit', () => {
+  const html = show('CoverTile', [point('control', enumeration('close', 'stop'), false)], {}, { model: 'Overkiz RollerShutter' });
+  assert.match(html, /Position non communiquée/);
+  assert.match(html, /Stop.*Fermer/s);
+  assert.doesNotMatch(html, /Ouvrir|<input|0 %/);
+  assert.equal(buttons(html).length, 2);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+});
+
+test('slow mode remains a selectable preview with disabled physical actions in read-only', () => {
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close', 'open_slow'), false),
+    point('opening', number(0, 100, 1), false, 'position')], { opening: 0 });
+  assert.match(html, /Fermé/);
+  assert.doesNotMatch(html, /Ouvert à 0|en mouvement/);
+  assert.match(html, /Vitesse de la prochaine commande/);
+  const physical = buttons(html).filter((button) => /data-cover-command/.test(button));
+  const speed = buttons(html).filter((button) => /aria-pressed/.test(button));
+  assert.equal(physical.length, 3);
+  assert.ok(physical.every((button) => /disabled/.test(button)));
+  assert.equal(speed.length, 2);
+  assert.ok(speed.every((button) => !/disabled/.test(button)));
+});
+
+test('a disconnected hub keeps cached positions historical and disables every physical action', () => {
+  hub.connected = false;
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close')),
+    point('opening', number(0, 100, 1), true, 'position')], { opening: 40, moving: 'UP' });
+  assert.match(html, /Connexion à Moli/);
+  assert.match(html, /Dernière position.*40/s);
+  assert.doesNotMatch(html, /en ouverture|Ouvert à|<input/);
+  assert.equal(buttons(html).length, 3);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+});
+
+test('icons-only covers put names and readings in a tooltip and label every icon button', () => {
+  const html = show('CoverTile', [point('control', enumeration('open', 'stop', 'close', 'open_slow', 'close_slow')),
+    point('opening', number(0, 100, 1), true, 'position')], { opening: 42 }, {}, { icons: true });
+  assert.match(html, /title="Fixture · Ouvert à 42 %"/);
+  assert.equal(buttons(html).length, 5, 'three actions and two speed choices remain available');
+  for (const name of ['Ouvrir', 'Stop', 'Fermer', 'Normal', 'Lent']) assert.match(html, new RegExp(`aria-label="${name}"`));
+  const contents = [...html.matchAll(/<button\b[^>]*>(.*?)<\/button>/gs)].map(([, body]) => body);
+  assert.ok(contents.every((body) => /<svg\b/.test(body)));
+  assert.doesNotMatch(html, />Fixture<|>Ouvert à 42 %<|>Ouvrir<|>Stop<|>Fermer<|>Normal<|>Lent<|>Position<|>Prochaine commande</);
+  assert.equal(inputs(html).length, 1);
+});
+
+test('icons-only read-only and offline covers retain their safeguards and last-known tooltip', () => {
+  const points = [point('control', enumeration('open', 'stop', 'close', 'open_slow'), false),
+    point('opening', number(0, 100, 1), false, 'position')];
+  const readonly = show('CoverTile', points, { opening: 42 }, {}, { icons: true });
+  assert.match(readonly, /aria-label="Lecture seule"/);
+  assert.equal(buttons(readonly).filter((button) => /disabled/.test(button)).length, 3);
+  const offline = show('CoverTile', points, { opening: 42, moving: 'UP' }, { online: false }, { icons: true });
+  assert.match(offline, /title="Fixture · Dernière position : 42 %"/);
+  assert.match(offline, /aria-label="Injoignable"/);
+  assert.doesNotMatch(offline, /en ouverture/);
+  assert.equal(buttons(offline).filter((button) => /disabled/.test(button)).length, 3);
+});
+
+test('the rooms icons preference reaches each cover without changing the dedicated shutters view', () => {
+  show('CoverTile', [point('control', enumeration('open', 'stop', 'close'), false),
+    point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
+  const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
+  assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  assert.match(focused, />Fixture</);
+  assert.match(focused, />Ouvrir</);
+});
+
+test('the shutter route bypasses a stored lights filter without replacing it or deduplicating identities', () => {
+  const saved = '["lumieres"]';
+  const writes = [];
+  globalThis.localStorage = { getItem: () => saved, setItem: (...args) => writes.push(args) };
+  try {
+    const cover = (id) => ({
+      id, model: 'Home Assistant cover', label: { name: 'Twin shade', room: 'Studio' }, online: true,
+      points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+    });
+    const entries = [cover('fixture:one'), cover('fixture:two'), { ...cover('fixture:hidden'), label: { name: 'Hidden shade', room: 'Studio' } },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Fixture lamp', room: 'Studio' }, online: true, points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } }];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = { hidden: ['fixture:hidden'] };
+    const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+    assert.equal((focused.match(/>Twin shade</g) ?? []).length, 2);
+    assert.doesNotMatch(focused, /Fixture lamp|Hidden shade/);
+    assert.match(focused, /href="#\/pieces"/);
+    const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.match(normal, /Fixture lamp/);
+    assert.doesNotMatch(normal, /Twin shade/);
+    assert.match(normal, /href="#\/pieces\/volets"/);
+    assert.deepEqual(writes, []);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('an empty shutter route explains the empty view and offers the ordinary rooms', () => {
+  hub.devices = {};
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  assert.match(html, /Aucun volet ni store à afficher/);
+  assert.match(html, /href="#\/pieces"/);
+});
+
+test('the shutters view groups many individual cards by room without lighting summaries', () => {
+  const rooms = [['Studio', 38], ['Workshop', 2]];
+  const entries = rooms.flatMap(([room, count]) => Array.from({ length: count }, (_, index) => ({
+    id: `fixture:${room}-${index}`, model: 'Home Assistant cover',
+    label: { name: `${room} shade ${index + 1}`, room }, online: index !== 0,
+    points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {},
+  })));
+  hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+  const html = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
+  for (const [room, count] of rooms) {
+    assert.match(html, new RegExp(`<h2[^>]*>.*?${room}.*?</h2>.*?${count} ouvrants`, 's'));
+    const list = html.match(new RegExp(`<ul[^>]*aria-label="${room}"[^>]*>(.*?)</ul>`, 's'))?.[1];
+    assert.ok(list, `${room} has its own accessible list`);
+    assert.equal((list.match(/<li\b/g) ?? []).length, count);
+    assert.match(list, /Injoignable/);
+  }
+  assert.doesNotMatch(html, /Tout est éteint|<input/);
+  assert.equal(buttons(html).length, 120);
+  assert.ok(buttons(html).every((button) => /disabled/.test(button)));
+  const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
+  assert.match(normal, /Tout est éteint/);
+  assert.doesNotMatch(normal, /<ul[^>]*aria-label="Studio"/);
 });
 
 test('partial RTS shutter retains close and stop without inventing position or open', () => {
@@ -216,7 +371,8 @@ test('partial RTS shutter retains close and stop without inventing position or o
   assert.equal(buttons(html).length, 2);
   assert.equal(inputs(html).length, 0);
   const offline = show('CoverTile', points, {}, { model: 'Overkiz RollerShutter', online: false });
-  assert.equal(buttons(offline).length, 0);
+  assert.equal(buttons(offline).length, 2);
+  assert.ok(buttons(offline).every((button) => /disabled/.test(button)));
 });
 
 test('legacy Tuya position stays informative until its normalized position semantic is declared', () => {
@@ -282,11 +438,14 @@ test('case-preserving motor orders identify a cover without inventing a power sw
   const readonly = show('CoverTile', [point('state', enumeration('OPEN', 'STOP', 'CLOSE'), false)], { moving: 'DOWN' });
   assert.equal(home.deviceKind(hub.devices['fixture:device']), 'cover');
   assert.equal(home.powerKey(hub.devices['fixture:device'], false), null);
-  assert.equal(buttons(readonly).length, 0);
+  assert.equal(buttons(readonly).length, 3);
+  assert.ok(buttons(readonly).every((button) => /disabled/.test(button)));
   assert.match(readonly, /en fermeture/);
   const offline = show('CoverTile', points, { moving: 'forward' }, { online: false });
-  assert.equal(buttons(offline).length, 0);
-  assert.match(offline, /mouvement/);
+  assert.equal(buttons(offline).length, 3);
+  assert.ok(buttons(offline).every((button) => /disabled/.test(button)));
+  assert.match(offline, /Injoignable/);
+  assert.doesNotMatch(offline, /mouvement/);
 });
 
 test('multiple position or motor-order candidates do not choose an arbitrary actuator', () => {
@@ -485,4 +644,95 @@ test('a fault is told in words and an unknown state keeps its own', () => {
   const html = show('VacuumCard', robot(), { state: 'remotectl', clean: false, battery: 50, fault: true, detail: 'code 27' });
   assert.match(html, /remotectl/);
   assert.match(html, /code 27/);
+});
+
+const valvePoints = (setpointWrite = true, modeWrite = true) => [
+  point('occupied_heating_setpoint', { ...number(4, 35, 0.5) }, setpointWrite, 'temperature'),
+  point('local_temperature', { type: 'numeric' }, false, 'temperature'),
+  point('system_mode', enumeration('off', 'auto', 'heat'), modeWrite),
+  point('running_state', enumeration('idle', 'heat'), false),
+];
+
+test('a Zigbee valve is a climate shown with its measured temperature, setpoint and mode', () => {
+  const html = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 18.5, local_temperature: 19.2, system_mode: 'auto', running_state: 'idle' });
+  assert.equal(home.deviceKind(hub.devices['fixture:device']), 'climate');
+  assert.match(html, /19[.,]2/);
+  assert.match(html, /18[.,]5/);
+  // − and +, then one button per mode the valve accepts: no preset, no extra mode.
+  assert.equal(buttons(html).filter((tag) => !tag.includes('class="fold')).length, 5);
+  assert.match(html, /aria-pressed="true"[^>]*>Programme/);
+  assert.doesNotMatch(html, /class="dial/);
+});
+
+test('a valve setpoint stops at the bounds its own contract states', () => {
+  const atMin = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 4, local_temperature: 19, system_mode: 'heat' });
+  assert.match(atMin, /aria-label="[^"]*"\s+disabled/);
+  assert.equal(buttons(atMin).filter((tag) => tag.includes('disabled')).length, 1);
+  const atMax = show('ValveCard', valvePoints(), { occupied_heating_setpoint: 35, local_temperature: 19, system_mode: 'heat' });
+  assert.equal(buttons(atMax).filter((tag) => tag.includes('disabled')).length, 1);
+});
+
+test('a read-only valve shows its setpoint and mode without any control', () => {
+  const html = show('ValveCard', valvePoints(false, false), { occupied_heating_setpoint: 18.5, local_temperature: 19, system_mode: 'heat' });
+  // Only the read-only chart is left to open.
+  assert.equal(buttons(html).filter((tag) => !tag.includes('class="fold')).length, 0);
+  assert.match(html, /18[.,]5/);
+});
+
+test('a room lists its valve as a climate and opens the valve card, not the air-conditioner dial', () => {
+  const html = showRoom([{ id: 'fixture:valve', points: valvePoints(), values: { occupied_heating_setpoint: 18.5, local_temperature: 19.2, system_mode: 'heat' } }]);
+  assert.match(html, /19/);
+  assert.doesNotMatch(html, /class="dial/);
+});
+
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const schedulePoints = (write = true, groups = false) => [
+  ...valvePoints(),
+  ...DAYS.map((day) => point(`weekly_schedule_${day}`, { type: 'text' }, write)),
+  ...(groups ? [point('schedule_group_to_edit', enumeration('1', '2', '3')), point('schedule_active_group', enumeration('1', '2', '3'))] : []),
+];
+const valveValues = { occupied_heating_setpoint: 18.5, local_temperature: 19, system_mode: 'auto' };
+
+test('a valve that states its days offers the schedule, one that does not offers nothing', () => {
+  assert.match(show('ValveCard', schedulePoints(), valveValues), /aria-expanded="false"[^>]*>Table horaire/);
+  assert.doesNotMatch(show('ValveCard', valvePoints(), valveValues), /Table horaire/);
+  assert.doesNotMatch(show('ValveCard', schedulePoints(false), valveValues), /Table horaire/);
+});
+
+test('the editor shows the day the valve states: seven days, a time and a setpoint per step', () => {
+  const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_monday: '00:00/17 06:00/20 22:00/16' });
+  assert.equal(buttons(html).filter((tag) => tag.includes('aria-pressed')).length, 7);
+  // The 00:00 step is shown but fixed.
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 3);
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"') && tag.includes('disabled')).length, 1);
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="number"')).length, 3);
+  assert.match(html, /00:00/);
+  assert.doesNotMatch(html, /remplace celle de la vanne/);
+  // Nothing to save until something changes.
+  assert.doesNotMatch(html, /Enregistrer/);
+});
+
+test('a valve that never reports its schedule says saving replaces it', () => {
+  assert.match(show('ScheduleEditor', schedulePoints(), valveValues), /remplace celle de la vanne/);
+});
+
+test('a read-only schedule shows no editor', () => {
+  assert.equal(show('ScheduleEditor', schedulePoints(false), valveValues).includes('<ul'), false);
+});
+
+test('editing a group the valve does not follow is said', () => {
+  const html = show('ScheduleEditor', schedulePoints(true, true), { ...valveValues, weekly_schedule_monday: '00:00/17', schedule_group_to_edit: '2', schedule_active_group: '1' });
+  assert.match(html, /groupe 2/);
+  assert.match(html, /groupe 1/);
+  const same = show('ScheduleEditor', schedulePoints(true, true), { ...valveValues, weekly_schedule_monday: '00:00/17', schedule_group_to_edit: '1', schedule_active_group: '1' });
+  assert.doesNotMatch(same, /La vanne suit|la vanne suit/);
+});
+
+test('a valve offers its chart, which opens on its three periods', () => {
+  assert.match(show('ValveCard', valvePoints(), valveValues), /aria-expanded="false"[^>]*>Courbe/);
+  const html = show('ValveChart', valvePoints(), valveValues);
+  assert.equal(buttons(html).length, 3);
+  assert.match(html, /aria-pressed="true"[^>]*>24 h/);
+  // Nothing is drawn before the hub has answered.
+  assert.doesNotMatch(html, /<svg/);
 });

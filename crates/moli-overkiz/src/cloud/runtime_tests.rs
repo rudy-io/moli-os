@@ -845,28 +845,25 @@ impl CheckProbe {
         cloud.handle(ctx, input);
         let event = cloud.next_event().await;
         assert!(matches!(event, Some(Event::Session { .. })));
-        let temporary = self.script.path.with_extension("tmp");
-        assert!(
-            std::process::Command::new("mkfifo")
-                .arg(&temporary)
-                .status()
-                .unwrap()
-                .success()
-        );
+        let mut lock_path = self.script.path.as_os_str().to_owned();
+        lock_path.push(".lock");
+        let file_lock = std::fs::OpenOptions::new()
+            .write(true)
+            .open(std::path::Path::new(&lock_path))
+            .unwrap();
+        file_lock.try_lock().unwrap();
         let handled = tokio::time::timeout(Duration::from_millis(50), async {
             cloud.handle(ctx, event);
         })
         .await;
-        // A reader releases the actual blocked filesystem open, even on RED.
-        tokio::task::spawn_blocking(move || std::fs::read(temporary))
-            .await
-            .unwrap()
-            .unwrap();
         assert!(
             handled.is_ok(),
-            "a slow cloud disk checkpoint must not occupy the native controller"
+            "a contended cloud checkpoint must not occupy the native controller"
         );
-        let stored = cloud.next_event().await;
+        let stored = tokio::time::timeout(Duration::from_secs(5), cloud.next_event())
+            .await
+            .expect("the interprocess write lock must have a bounded deadline");
+        drop(file_lock);
         assert!(
             matches!(
                 stored,
@@ -875,7 +872,7 @@ impl CheckProbe {
                     ..
                 })
             ),
-            "FIFO file sync failure must propagate"
+            "checkpoint lock timeout must propagate"
         );
         cloud.handle(ctx, stored);
         let completed = cloud.next_event().await;

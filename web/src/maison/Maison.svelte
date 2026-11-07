@@ -156,7 +156,7 @@
     {#if page === 'salon'}
       <Salon />
     {:else if page === 'pieces'}
-      <Pieces />
+      <Pieces {route} />
     {:else if page === 'airzone'}
       {#await import('./pages/Airzone.svelte') then { default: Airzone }}<Airzone {route} />{/await}
     {:else if page === 'plan'}
