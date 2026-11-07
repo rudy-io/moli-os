@@ -288,6 +288,10 @@ async fn legacy_default_never_sends_new_write_scopes() {
         ("hvac", json!({"systemID":1,"zoneID":2,"heatStage":1})),
         ("hvac", json!({"systemID":1,"zoneID":2,"angle":1})),
         ("hvac", json!({"systemID":1,"zoneID":2,"qAdapt":2})),
+        (
+            "hvac",
+            json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1}),
+        ),
         ("hvac", json!({"systemID":1,"user_mode":2})),
         ("hvac", json!({"systemID":1,"mode":3})),
         ("hvac", json!({"systemID":1,"erv_mode":1})),
@@ -338,9 +342,9 @@ async fn read_only_transport_never_sends_any_put() {
 }
 
 #[tokio::test]
-async fn exchange_rejects_unknown_paths_broadcast_writes_and_multiple_parameters() {
+async fn exchange_rejects_unknown_paths_broadcast_writes_and_unreviewed_batches() {
     let (mut config, task, calls) = recording_server().await;
-    // Explicit opt-in never permits compound or broadcast transport shortcuts.
+    // Explicit opt-in never permits unreviewed batches or broadcast writes.
     config.write = crate::WriteMode::Extended;
     for (method, path, body) in [
         ("POST", "../outside", json!({})),
@@ -357,7 +361,7 @@ async fn exchange_rejects_unknown_paths_broadcast_writes_and_multiple_parameters
         (
             "PUT",
             "hvac",
-            json!({"systemID":1,"zoneID":2,"on":1,"setpoint":20}),
+            json!({"systemID":1,"zoneID":2,"on":1,"mode":3}),
         ),
     ] {
         assert!(
@@ -845,6 +849,66 @@ async fn thermostat_html_also_uses_the_explicit_certificate_pin() {
         thermostat(&config, Duration::from_secs(1)).await.unwrap(),
         "<html>Thermostat</html>"
     );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[test]
+fn setpoint_and_turn_on_is_addressed_and_requires_both_acknowledgements() {
+    let command = json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1});
+    validate_write("hvac", &command).unwrap();
+    acknowledge(&json!({"data":command}), &command).unwrap();
+    for body in [
+        json!({"systemID":0,"zoneID":2,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"zoneID":0,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"setpoint":23.5,"on":1}),
+        json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":0}),
+        json!({"systemID":1,"zoneID":2,"setpoint":"23.5","on":1}),
+        json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1,"mode":3}),
+    ] {
+        assert!(validate_write("hvac", &body).is_err());
+    }
+    for response in [
+        json!({"data":{"systemID":1,"zoneID":2}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.5}}),
+        json!({"data":{"systemID":1,"zoneID":2,"on":1}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.5,"on":0}}),
+        json!({"data":{"systemID":1,"zoneID":2,"setpoint":23.0,"on":1}}),
+    ] {
+        assert!(acknowledge(&response, &command).is_err());
+    }
+}
+
+#[tokio::test]
+async fn composed_transport_requires_extended_and_read_only_always_dominates() {
+    let (mut config, task, calls) = recording_server().await;
+    let command = json!({"systemID":1,"zoneID":2,"setpoint":23.5,"on":1});
+    for (write, read_only) in [
+        (crate::WriteMode::Legacy, false),
+        (crate::WriteMode::Extended, false),
+        (crate::WriteMode::Legacy, true),
+        (crate::WriteMode::Extended, true),
+    ] {
+        config.write = write;
+        config.read_only = read_only;
+        let before = calls.load(Ordering::SeqCst);
+        let result = exchange(&config, "PUT", "hvac", &command, Duration::from_secs(1)).await;
+        if read_only || write == crate::WriteMode::Legacy {
+            let expected = if read_only {
+                Failure::ReadOnly
+            } else {
+                Failure::ExtendedWritesDisabled
+            };
+            assert_eq!(
+                result.unwrap_err().downcast_ref::<Failure>(),
+                Some(&expected)
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), before);
+        } else {
+            result.unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+        }
+    }
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     task.abort();
 }

@@ -564,6 +564,37 @@ test('room offline light and explicit television power cannot offer commands', (
   assert.ok(buttons(html).every((tag) => /disabled/.test(tag)));
 });
 
+test('room offline climate stays discoverable without presenting old readings as current', () => {
+  for (const on of [true, false]) {
+    const html = showRoom([{
+      id: 'fixture:climate', model: 'Home Assistant climate', online: false,
+      points: [point('on', { type: 'binary' }, false), point('mode', enumeration('chaud'), false), point('temperature', number(0, 50, 0.1), false), point('target_temperature', number(16, 30, 0.5), false)],
+      values: { on, mode: 'chaud', temperature: 19.4, target_temperature: 21 },
+    }]);
+    const summary = buttons(html).find((tag) => /class="clim(?:\s|")/.test(tag));
+    assert.ok(summary, 'the unavailable climate remains accessible');
+    assert.doesNotMatch(summary, /\bon\b|disabled/, 'its neutral summary can still open the details');
+    assert.match(summary, /aria-expanded="false"/);
+    assert.match(html, /fixture:climate/);
+    assert.match(html, />Injoignable<\/span>/);
+    assert.doesNotMatch(html, /Chaud|Éteinte|→|>21</);
+    assert.equal(inputs(html).length, 0);
+  }
+});
+
+test('room online climate retains its active mode and current readings', () => {
+  const html = showRoom([{
+    id: 'fixture:climate', model: 'Home Assistant climate', online: true,
+    points: [point('on', { type: 'binary' }, false), point('mode', enumeration('chaud'), false), point('temperature', number(0, 50, 0.1), false), point('target_temperature', number(16, 30, 0.5), false)],
+    values: { on: true, mode: 'chaud', temperature: 19.4, target_temperature: 21 },
+  }]);
+  const summary = buttons(html).find((tag) => /class="clim(?:\s|")/.test(tag));
+  assert.match(summary, /\bon\b/);
+  assert.match(html, />Chaud<\/span>/);
+  assert.match(html, /19.*→.*21/s);
+  assert.doesNotMatch(html, /Injoignable/);
+});
+
 test('room shared Airzone control shows its translated mode without fabricated temperatures or off state', () => {
   const html = showRoom([{ id: 'fixture:system', model: 'Airzone system', points: [point('mode', enumeration('off', 'heat')), point('fan_speed', enumeration('0', '1'))], values: { mode: 'heat', fan_speed: '1' } }]);
   assert.match(html, />Chaud<\/span>/);

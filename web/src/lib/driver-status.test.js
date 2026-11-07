@@ -51,3 +51,11 @@ test('registration metadata repairs a status-first arrival without losing its st
   assert.equal(drivers[1].warning,'Fixture warning');
   assert.equal(drivers[0].kind,'fake');
 });
+
+test('withdrawing a runtime driver removes only its live registration and tolerates replay',()=>{
+  assert.equal(typeof driverEvents.applyDriverUnregistration,'function');
+  const drivers=[{instance:'paused',kind:'airzone'},{instance:'other',kind:'fake'}];
+  driverEvents.applyDriverUnregistration(drivers,{instance:'paused'});
+  driverEvents.applyDriverUnregistration(drivers,{instance:'paused'});
+  assert.deepEqual(drivers,[{instance:'other',kind:'fake'}]);
+});

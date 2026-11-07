@@ -9,11 +9,59 @@ use anyhow::{Context as _, ensure};
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Value};
 use serde_json::{Value as Json, json};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
 
+pub(crate) const OPTIONAL_FAMILIES: u64 = 5;
 const MAX_RECORDS: usize = 32;
+
+/// Query selectors only: never copied into published values or write capability
+/// checks. A later IAQ read need not spend its budget re-reading the inventory.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReadPlan {
+    iaq: BTreeMap<u64, u64>,
+    next_iaq: usize,
+    next_system: usize,
+}
+impl ReadPlan {
+    pub(crate) fn iaq_system_count(&self) -> u64 {
+        u64::try_from(self.iaq.len()).unwrap_or(32)
+    }
+
+    fn learn(&mut self, snapshot: &ResourceSnapshot) {
+        if snapshot.systems_available {
+            self.iaq.retain(|id, _| {
+                snapshot
+                    .systems
+                    .iter()
+                    .any(|raw| raw["systemID"].as_u64() == Some(*id))
+            });
+        }
+        for system in &snapshot.systems {
+            let id = system["systemID"].as_u64().expect("validated system");
+            if let Some(count) = system["num_airqsensor"]
+                .as_u64()
+                .filter(|count| *count <= 32)
+            {
+                if count == 0 {
+                    self.iaq.remove(&id);
+                } else {
+                    self.iaq.insert(id, count);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq)]
+enum Section {
+    Version,
+    Integration,
+    Systems,
+    Dhw,
+    Iaq,
+}
 const MAX_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Default)]
@@ -63,6 +111,10 @@ pub(crate) struct ResourceSnapshot {
     unmapped_systems: BTreeSet<u64>,
     incomplete_iaq: BTreeSet<u64>,
     budget: SnapshotBudget,
+    attempted: BTreeSet<Section>,
+    iaq_attempted: BTreeSet<u64>,
+    systems_attempted: BTreeSet<u64>,
+    observed: BTreeSet<Section>,
 }
 
 impl Default for ResourceSnapshot {
@@ -81,6 +133,10 @@ impl Default for ResourceSnapshot {
             unmapped_systems: BTreeSet::new(),
             incomplete_iaq: BTreeSet::new(),
             budget: SnapshotBudget::default(),
+            attempted: BTreeSet::new(),
+            iaq_attempted: BTreeSet::new(),
+            systems_attempted: BTreeSet::new(),
+            observed: BTreeSet::new(),
         }
     }
 }
@@ -236,6 +292,37 @@ fn metadata(value: &Json, key: &str) -> anyhow::Result<Json> {
     Ok(json!({key:text}))
 }
 
+/// Broadcast and targeted metadata reads share the fair scheduler. The
+/// boolean is only this response's documented legacy fallback evidence.
+async fn read_system_selector(
+    config: &Config,
+    system: u64,
+    end: Instant,
+) -> (anyhow::Result<Vec<Json>>, bool) {
+    if system != 127 {
+        return (read_system(config, system, end).await, false);
+    }
+    let response = fetch(
+        config,
+        ReadRequest::Hvac {
+            system: 127,
+            zone: None,
+        },
+        end,
+    )
+    .await;
+    let legacy = response.as_ref().err().is_some_and(|error| {
+        matches!(
+            error.downcast_ref::<api::Failure>(),
+            Some(api::Failure::Http(404 | 405 | 500 | 501) | api::Failure::Api)
+        )
+    });
+    (
+        response.and_then(|value| records(&value, Family::System)),
+        legacy,
+    )
+}
+
 impl ResourceSnapshot {
     pub(crate) async fn read_for(
         config: &Config,
@@ -273,7 +360,7 @@ impl ResourceSnapshot {
         }
         result
     }
-    fn from_webserver(config: &Config, webserver: &Json) -> Self {
+    pub(crate) fn from_webserver(config: &Config, webserver: &Json) -> Self {
         let mut result = Self {
             read_only: config.read_only,
             ..Self::default()
@@ -317,28 +404,93 @@ impl ResourceSnapshot {
                 .iter()
                 .all(|r| r["systemID"].as_u64().is_some_and(|s| mapped.contains(&s)))
     }
+    #[cfg(test)]
     pub(crate) async fn read(
         config: &Config,
         zones: &Snapshot,
         webserver: &Json,
         end: Instant,
     ) -> Self {
-        let mut result = Self::from_webserver(config, webserver);
-        result.version = fetch(config, ReadRequest::Version, end)
-            .await
-            .and_then(|v| metadata(&v, "version"))
-            .ok()
-            .filter(|value| result.budget.reserve(std::slice::from_ref(value)));
-        result.failures += u32::from(result.version.is_none());
-        result.read_integration(config, end).await;
+        Self::read_scheduled(config, zones, webserver, end, 0).await
+    }
 
-        result.read_systems(config, zones, end).await;
-        result.read_dhw(config, end).await;
-        result.read_iaq(config, end).await;
+    /// Rotate the first optional family on every poll. Slow metadata cannot
+    /// consume every cycle before DHW/IAQ get their turn. Each HTTP request is
+    /// still bounded by both the remaining cycle budget and its own deadline.
+    #[cfg(test)]
+    pub(crate) async fn read_scheduled(
+        config: &Config,
+        zones: &Snapshot,
+        webserver: &Json,
+        end: Instant,
+        round: usize,
+    ) -> Self {
+        Self::read_planned(
+            config,
+            zones,
+            webserver,
+            end,
+            round,
+            &mut ReadPlan::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn read_planned(
+        config: &Config,
+        zones: &Snapshot,
+        webserver: &Json,
+        end: Instant,
+        round: usize,
+        plan: &mut ReadPlan,
+    ) -> Self {
+        let mut result = Self::from_webserver(config, webserver);
+        let mut systems_read = false;
+        for offset in 0..5 {
+            if Instant::now() >= end {
+                break;
+            }
+            match (round % 5 + offset) % 5 {
+                0 => {
+                    result.attempted.insert(Section::Version);
+                    result.version = fetch(config, ReadRequest::Version, end)
+                        .await
+                        .and_then(|v| metadata(&v, "version"))
+                        .ok()
+                        .filter(|value| result.budget.reserve(std::slice::from_ref(value)));
+                    result.failures += u32::from(result.version.is_none());
+                }
+                1 => result.read_integration(config, end).await,
+                2 if !systems_read => {
+                    result
+                        .read_systems_rotating(config, zones, end, &mut plan.next_system)
+                        .await;
+                    plan.learn(&result);
+                    systems_read = true;
+                }
+                3 => result.read_dhw(config, end).await,
+                4 => {
+                    // A selector is enough for a read. Actual values and write
+                    // capabilities always come from the new sensor response.
+                    if plan.iaq.is_empty() && !systems_read {
+                        result
+                            .read_systems_rotating(config, zones, end, &mut plan.next_system)
+                            .await;
+                        plan.learn(&result);
+                        systems_read = true;
+                    }
+                    result
+                        .read_iaq_selected(config, end, &mut plan.next_iaq, &plan.iaq)
+                        .await;
+                }
+                _ => {}
+            }
+        }
         result
     }
 
     async fn read_integration(&mut self, config: &Config, end: Instant) {
+        self.attempted.insert(Section::Integration);
         self.integration = fetch(config, ReadRequest::Integration, end)
             .await
             .and_then(|v| metadata(&v, "driver"))
@@ -348,60 +500,74 @@ impl ResourceSnapshot {
     }
 
     async fn read_systems(&mut self, config: &Config, zones: &Snapshot, end: Instant) {
-        let response = fetch(
-            config,
-            ReadRequest::Hvac {
-                system: 127,
-                zone: None,
-            },
-            end,
-        )
-        .await;
-        // An unsupported broadcast can use the documented targeted reads.
-        // Malformed or oversized content is not evidence of a smaller system
-        // inventory: retain useful targeted reads but disable global writes.
-        let legacy_fallback = response.as_ref().err().is_some_and(|e| {
-            matches!(
-                e.downcast_ref::<api::Failure>(),
-                Some(api::Failure::Http(404 | 405 | 500 | 501) | api::Failure::Api)
-            )
-        });
-        let broadcast = response
-            .and_then(|v| records(&v, Family::System))
-            .and_then(|rows| {
-                ensure!(self.budget.reserve(&rows), invalid());
-                Ok(rows)
-            });
-        let broadcast_ok = broadcast.is_ok();
-        self.systems = broadcast.unwrap_or_default();
-        // Some controllers implement only per-system reads. A missing known
-        // system is retried through that documented read form, never a PUT.
-        for system in zones.system_ids() {
-            if self
-                .systems
-                .iter()
-                .any(|r| r["systemID"].as_u64() == Some(system))
+        self.read_systems_rotating(config, zones, end, &mut 0).await;
+    }
+
+    async fn read_systems_rotating(
+        &mut self,
+        config: &Config,
+        zones: &Snapshot,
+        end: Instant,
+        cursor: &mut usize,
+    ) {
+        let mut queries = vec![127];
+        queries.extend(zones.system_ids());
+        let total = queries.len();
+        let first = *cursor % total;
+        queries.rotate_left(first);
+        let mut broadcast_ok = false;
+        let mut legacy_fallback = false;
+        for (position, system) in queries.into_iter().enumerate() {
+            if Instant::now() >= end {
+                break;
+            }
+            *cursor = (first + position) % total;
+            if system != 127
+                && self
+                    .systems
+                    .iter()
+                    .any(|row| row["systemID"].as_u64() == Some(system))
             {
+                *cursor = (first + position + 1) % total;
                 continue;
             }
-            let queried = read_system(config, system, end).await;
-            if let Ok(rows) = queried
+            self.attempted.insert(Section::Systems);
+            if system != 127 {
+                self.systems_attempted.insert(system);
+            }
+            let (rows, legacy) = read_system_selector(config, system, end).await;
+            legacy_fallback |= legacy;
+            // A request truncated by the cycle starts the next turn with its
+            // full budget, including when the preceding broadcast was slow.
+            if rows.is_ok() || Instant::now() < end {
+                *cursor = (first + position + 1) % total;
+            }
+            if let Ok(rows) = rows
                 && self.budget.reserve(&rows)
             {
-                self.systems.extend(rows);
+                if system == 127 {
+                    broadcast_ok = true;
+                    self.observed.insert(Section::Systems);
+                }
+                for row in rows {
+                    self.systems
+                        .retain(|old| old["systemID"] != row["systemID"]);
+                    self.systems.push(row);
+                }
             }
         }
-        self.systems.sort_by_key(|r| r["systemID"].as_u64());
+        self.systems.sort_by_key(|row| row["systemID"].as_u64());
         self.systems_available = (broadcast_ok || (legacy_fallback && !self.systems.is_empty()))
             && zones.system_ids().iter().all(|system| {
                 self.systems
                     .iter()
-                    .any(|r| r["systemID"].as_u64() == Some(*system))
+                    .any(|row| row["systemID"].as_u64() == Some(*system))
             });
         self.failures += u32::from(!self.systems_available);
     }
 
     async fn read_dhw(&mut self, config: &Config, end: Instant) {
+        self.attempted.insert(Section::Dhw);
         self.dhw = fetch(
             config,
             ReadRequest::Hvac {
@@ -431,17 +597,38 @@ impl ResourceSnapshot {
     }
 
     async fn read_iaq(&mut self, config: &Config, end: Instant) {
-        let mut requested = 0;
+        let mut plan = ReadPlan::default();
+        plan.learn(self);
+        self.read_iaq_selected(config, end, &mut plan.next_iaq, &plan.iaq)
+            .await;
+    }
+
+    async fn read_iaq_selected(
+        &mut self,
+        config: &Config,
+        end: Instant,
+        cursor: &mut usize,
+        selection: &BTreeMap<u64, u64>,
+    ) {
+        if selection.is_empty() && self.systems_available {
+            self.attempted.insert(Section::Iaq);
+        }
+        let requested = selection.len();
         let mut succeeded = 0;
-        for system in &self.systems {
-            let Some(count) = system["num_airqsensor"]
-                .as_u64()
-                .filter(|v| (1..=32).contains(v))
-            else {
-                continue;
-            };
-            requested += 1;
-            let system = system["systemID"].as_u64().expect("validated system");
+        let mut systems = selection
+            .iter()
+            .map(|(system, count)| (*system, *count))
+            .collect::<Vec<_>>();
+        let total = systems.len().max(1);
+        let first = *cursor % total;
+        systems.rotate_left(first);
+        for (position, (system, count)) in systems.into_iter().enumerate() {
+            if Instant::now() >= end {
+                break;
+            }
+            *cursor = (first + position) % total;
+            self.attempted.insert(Section::Iaq);
+            self.iaq_attempted.insert(system);
             let read = fetch(
                 config,
                 ReadRequest::Iaq {
@@ -452,6 +639,9 @@ impl ResourceSnapshot {
             )
             .await
             .and_then(|v| records(&v, Family::Iaq(system)));
+            if read.is_ok() || Instant::now() < end {
+                *cursor = (first + position + 1) % total;
+            }
             let read = read.and_then(|rows| {
                 ensure!(self.budget.reserve(&rows), invalid());
                 Ok(rows)
@@ -472,6 +662,34 @@ impl ResourceSnapshot {
             }
         }
         self.iaq_available = requested > 0 && requested == succeeded;
+    }
+
+    /// A skipped family has no new availability evidence. Leave its prior
+    /// sample and receipt untouched; failed queries still mark it unavailable.
+    pub(crate) fn attempted_device(&self, id: &DeviceId, mac: &str) -> bool {
+        let Some((_, native)) = id.as_str().split_once(':') else {
+            return false;
+        };
+        match Target::from_native(native, mac) {
+            Some(Target::System(system)) => {
+                self.observed.contains(&Section::Systems)
+                    || self.systems_attempted.contains(&system)
+            }
+            Some(Target::Dhw) => self.attempted.contains(&Section::Dhw),
+            Some(Target::Iaq(system, _)) => {
+                self.iaq_attempted.contains(&system)
+                    || self.systems.iter().any(|row| {
+                        row["systemID"].as_u64() == Some(system)
+                            && row["num_airqsensor"].as_u64() == Some(0)
+                    })
+                    || (self.systems_available
+                        && !self
+                            .systems
+                            .iter()
+                            .any(|row| row["systemID"].as_u64() == Some(system)))
+            }
+            None => native == format!("{mac}_gateway"),
+        }
     }
 
     pub(crate) fn entities(
@@ -519,7 +737,7 @@ impl ResourceSnapshot {
         entities
     }
 
-    fn gateway(
+    pub(crate) fn gateway(
         &self,
         instance: &InstanceId,
         mac: &str,
@@ -535,16 +753,38 @@ impl ResourceSnapshot {
         if let Some(raw) = &self.integration {
             values.extend(fields::points(Scope::Integration, raw, locked));
         }
-        for (key, value) in [
-            ("version_available", self.version.is_some()),
-            ("integration_available", self.integration.is_some()),
-            ("systems_available", self.systems_available),
-            ("dhw_available", self.dhw.is_some()),
-            ("iaq_available", self.iaq_available),
-            ("read_only_status", read_only),
+        for (key, section, value) in [
+            (
+                "version_available",
+                Section::Version,
+                self.version.is_some(),
+            ),
+            (
+                "integration_available",
+                Section::Integration,
+                self.integration.is_some(),
+            ),
+            (
+                "systems_available",
+                Section::Systems,
+                self.systems_available,
+            ),
+            ("dhw_available", Section::Dhw, self.dhw.is_some()),
+            ("iaq_available", Section::Iaq, self.iaq_available),
         ] {
-            values.push((diagnostic(key, Kind::Binary), Value::Bool(value)));
+            values.push((
+                diagnostic(key, Kind::Binary),
+                if self.attempted.contains(&section) {
+                    Value::Bool(value)
+                } else {
+                    Value::Null
+                },
+            ));
         }
+        values.push((
+            diagnostic("read_only_status", Kind::Binary),
+            Value::Bool(read_only),
+        ));
         values.push((
             diagnostic(
                 "failures_count",

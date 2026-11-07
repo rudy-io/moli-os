@@ -787,3 +787,305 @@ async fn many_optional_sections_share_one_retention_budget_without_partial_senso
     assert!(serialized.len() < MAX_SNAPSHOT_BYTES);
     task.abort();
 }
+
+#[tokio::test]
+async fn rotating_optional_budget_reaches_dhw_and_iaq_despite_slow_metadata() {
+    use axum::{Json as Reply, Router, routing::post};
+    let app = Router::new()
+        .route(
+            "/api/v1/version",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                Reply(json!({"version":"1.78"}))
+            }),
+        )
+        .route(
+            "/api/v1/integration",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                Reply(json!({"driver":"fixture"}))
+            }),
+        )
+        .route(
+            "/api/v1/hvac",
+            post(|Reply(body): Reply<Json>| async move {
+                Reply(match body["systemID"].as_u64().unwrap() {
+                    127 => json!({"systems":[{"systemID":1,"num_airqsensor":1}]}),
+                    0 => json!({"data":{"systemID":0,"acs_temp":45.3}}),
+                    _ => panic!("unexpected optional query: {body}"),
+                })
+            }),
+        )
+        .route(
+            "/api/v1/iaq",
+            post(|Reply(body): Reply<Json>| async move {
+                assert_eq!(body, json!({"systemID":1,"iaqsensorID":0}));
+                Reply(json!({"data":[{"systemID":1,"iaqsensorID":3,"co2_value":411}]}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: Config = serde_json::from_value(
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"read_only":true}),
+    )
+    .unwrap();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones =
+        Snapshot::parse(&json!({"data":[{"systemID":1,"zoneID":1,"roomTemp":20.}]})).unwrap();
+    let info = json!({"mac":"aa:bb:cc:dd:ee:ff"});
+    let started = Instant::now();
+    let first = ResourceSnapshot::read_scheduled(
+        &config,
+        &zones,
+        &info,
+        Instant::now() + Duration::from_secs(1),
+        0,
+    )
+    .await;
+    assert!(first.dhw.is_none());
+    assert!(first.iaq.is_empty());
+    let second = ResourceSnapshot::read_scheduled(
+        &config,
+        &zones,
+        &info,
+        Instant::now() + Duration::from_secs(1),
+        1,
+    )
+    .await;
+    assert_eq!(second.dhw.unwrap()["acs_temp"], json!(45.3));
+    assert_eq!(second.iaq[0]["co2_value"], json!(411));
+    assert!(started.elapsed() < Duration::from_millis(2500));
+    server.abort();
+}
+
+#[tokio::test]
+async fn iaq_selection_survives_cycles_when_inventory_and_sensor_reads_each_take_three_seconds() {
+    use axum::{Json as Reply, Router, routing::post};
+    let app = Router::new()
+        .route(
+            "/api/v1/hvac",
+            post(|| async {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                Reply(json!({"systems":[{"systemID":1,"num_airqsensor":1}]}))
+            }),
+        )
+        .route(
+            "/api/v1/iaq",
+            post(|| async {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                Reply(json!({"data":[{"systemID":1,"iaqsensorID":1,"co2_value":411}]}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config:Config=serde_json::from_value(json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"poll_secs":5,"read_only":true})).unwrap();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones =
+        Snapshot::parse(&json!({"data":[{"systemID":1,"zoneID":1,"roomTemp":20.}]})).unwrap();
+    let mut plan = ReadPlan::default();
+    for round in 0..2 {
+        let started = Instant::now();
+        let state = ResourceSnapshot::read_planned(
+            &config,
+            &zones,
+            &json!({"mac":"aa:bb:cc:dd:ee:ff"}),
+            Instant::now() + Duration::from_secs(5),
+            4,
+            &mut plan,
+        )
+        .await;
+        assert!(started.elapsed() < Duration::from_millis(5500));
+        if round == 0 {
+            assert!(state.systems_available);
+        } else {
+            assert_eq!(state.iaq[0]["co2_value"], json!(411));
+            assert!(
+                !state.systems_available,
+                "selection cache is not a fresh inventory"
+            );
+        }
+    }
+    server.abort();
+}
+
+#[test]
+fn read_plan_is_only_a_selector_and_explicit_sensor_removal_invalidates_it() {
+    let mut plan = ReadPlan::default();
+    let snapshot = ResourceSnapshot {
+        systems: vec![json!({"systemID":1,"num_airqsensor":1,"mode":3,"modes":[1,3]})],
+        systems_available: true,
+        ..ResourceSnapshot::default()
+    };
+    plan.learn(&snapshot);
+    assert_eq!(plan.iaq, BTreeMap::from([(1, 1)]));
+    let unavailable = ResourceSnapshot::default();
+    plan.learn(&unavailable);
+    assert_eq!(plan.iaq, BTreeMap::from([(1, 1)]));
+    let removed = ResourceSnapshot {
+        systems: vec![json!({"systemID":1,"num_airqsensor":0})],
+        systems_available: true,
+        ..ResourceSnapshot::default()
+    };
+    plan.learn(&removed);
+    assert!(plan.iaq.is_empty());
+    assert!(removed.attempted_device(&DeviceId::from("az:aabbccddeeff_s1_iaq1"), "aabbccddeeff"));
+    assert!(
+        !unavailable.attempted_device(&DeviceId::from("az:aabbccddeeff_s1_iaq1"), "aabbccddeeff")
+    );
+}
+
+#[tokio::test]
+async fn iaq_priority_rotation_does_not_alias_the_number_of_systems() {
+    use axum::{Json as Reply, Router, routing::post};
+    let app = Router::new().route(
+        "/api/v1/iaq",
+        post(|Reply(body): Reply<Json>| async move {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            Reply(json!({"data":[{"systemID":body["systemID"],"iaqsensorID":1,"co2_value":411}]}))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: Config = serde_json::from_value(
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"read_only":true}),
+    )
+    .unwrap();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones = Snapshot::parse(&json!({"data":[{"systemID":1,"zoneID":1}]})).unwrap();
+    for expected in [vec![1, 2], vec![1, 2, 3, 4, 5]] {
+        let mut plan = ReadPlan {
+            iaq: expected.iter().map(|id| (*id, 1)).collect(),
+            ..ReadPlan::default()
+        };
+        let mut received = BTreeSet::new();
+        for cycle in 0..expected.len() {
+            let state = ResourceSnapshot::read_planned(
+                &config,
+                &zones,
+                &json!({}),
+                Instant::now() + Duration::from_secs(1),
+                4 + 5 * cycle,
+                &mut plan,
+            )
+            .await;
+            received.extend(
+                state
+                    .iaq
+                    .iter()
+                    .map(|row| row["systemID"].as_u64().unwrap()),
+            );
+        }
+        assert_eq!(received.into_iter().collect::<Vec<_>>(), expected);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn targeted_system_rotation_does_not_repeat_the_same_prefix_after_budget_expiry() {
+    use axum::{Json as Reply, Router, http::StatusCode, routing::post};
+    let app = Router::new().route(
+        "/api/v1/hvac",
+        post(|Reply(body): Reply<Json>| async move {
+            if body["systemID"] == 127 {
+                return (StatusCode::NOT_FOUND, Reply(json!({})));
+            }
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            (
+                StatusCode::OK,
+                Reply(json!({"data":[{"systemID":body["systemID"]}]})),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: Config = serde_json::from_value(
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"read_only":true}),
+    )
+    .unwrap();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones = Snapshot::parse(&json!({"data":[{"systemID":1,"zoneID":1},{"systemID":2,"zoneID":1},{"systemID":3,"zoneID":1},{"systemID":4,"zoneID":1},{"systemID":5,"zoneID":1}]})).unwrap();
+    let mut plan = ReadPlan::default();
+    let mut received = BTreeSet::new();
+    for cycle in 0..5 {
+        let state = ResourceSnapshot::read_planned(
+            &config,
+            &zones,
+            &json!({}),
+            Instant::now() + Duration::from_secs(1),
+            2 + 5 * cycle,
+            &mut plan,
+        )
+        .await;
+        if cycle == 0 {
+            assert!(
+                !state
+                    .attempted_device(&DeviceId::from("az:aabbccddeeff_s5_system"), "aabbccddeeff"),
+                "an unqueried system is not an unavailable system"
+            );
+        }
+        received.extend(
+            state
+                .systems
+                .iter()
+                .map(|row| row["systemID"].as_u64().unwrap()),
+        );
+    }
+    assert_eq!(
+        received.into_iter().collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5]
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn slow_unsupported_broadcast_does_not_starve_the_targeted_system_read() {
+    use axum::{Json as Reply, Router, http::StatusCode, routing::post};
+    let app = Router::new().route(
+        "/api/v1/hvac",
+        post(|Reply(body): Reply<Json>| async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            if body["systemID"] == 127 {
+                return (StatusCode::NOT_FOUND, Reply(json!({})));
+            }
+            (
+                StatusCode::OK,
+                Reply(json!({"data":[{"systemID":body["systemID"],"system_firmware":"fixture"}]})),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: Config = serde_json::from_value(
+        json!({"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"read_only":true}),
+    )
+    .unwrap();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let zones = Snapshot::parse(&json!({"data":[{"systemID":1,"zoneID":1}]})).unwrap();
+    let mut plan = ReadPlan::default();
+    let first = ResourceSnapshot::read_planned(
+        &config,
+        &zones,
+        &json!({}),
+        Instant::now() + Duration::from_secs(5),
+        2,
+        &mut plan,
+    )
+    .await;
+    assert!(first.systems.is_empty());
+    let second = ResourceSnapshot::read_planned(
+        &config,
+        &zones,
+        &json!({}),
+        Instant::now() + Duration::from_secs(5),
+        7,
+        &mut plan,
+    )
+    .await;
+    assert_eq!(second.systems[0]["system_firmware"], json!("fixture"));
+    server.abort();
+}

@@ -15,5 +15,7 @@ export default defineConfig({
   plugins: [svelte()],
   build: { target: 'es2022', cssCodeSplit: false, reportCompressedSize: true },
   // The catalogues (locales/, at the repository's root) are shared with the server.
-  server: { proxy: { '/api': { target, changeOrigin: true }, '/mcp': target }, fs: { allow: ['..'] } },
+  // Preserve the browser-facing Host: the hub compares it to Origin on writes.
+  // Rewriting Host alone makes a same-origin preview request look cross-site.
+  server: { proxy: { '/api': { target, changeOrigin: false }, '/mcp': { target, changeOrigin: false } }, fs: { allow: ['..'] } },
 });

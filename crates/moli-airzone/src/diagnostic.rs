@@ -20,11 +20,30 @@ pub enum DiagnosticRequest {
         #[serde(default)]
         get: bool,
     },
-    Version,
-    Webserver,
-    Integration,
-    Demo,
-    Thermostat,
+    Version {},
+    Webserver {},
+    Integration {},
+    Demo {},
+    Thermostat {},
+}
+
+impl DiagnosticRequest {
+    /// Validate selectors before even issuing the gateway identity read.
+    ///
+    /// # Errors
+    /// Rejects selectors outside the documented system, zone and sensor ranges.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let valid = match self {
+            Self::Hvac { system, zone, .. } => match zone {
+                Some(zone) => *system <= 32 && *zone <= 32,
+                None => *system <= 32 || *system == 127,
+            },
+            Self::Iaq { system, sensor, .. } => *system <= 32 && *sensor <= 32,
+            _ => true,
+        };
+        anyhow::ensure!(valid, api::Failure::InvalidRequest);
+        Ok(())
+    }
 }
 
 /// Inspect one operation without starting a driver or permitting a write.
@@ -33,6 +52,7 @@ pub enum DiagnosticRequest {
 /// Returns a bounded error on invalid configuration, identity, addressing,
 /// transport, or response. The response removes names and native MAC addresses.
 pub async fn inspect(mut config: Config, request: DiagnosticRequest) -> anyhow::Result<Json> {
+    request.validate()?;
     config.read_only = true;
     let client = Airzone::new(config)?;
     let config = &client.config;
@@ -52,7 +72,7 @@ pub async fn inspect(mut config: Config, request: DiagnosticRequest) -> anyhow::
         config.mac.as_ref().is_none_or(|expected| expected == &mac),
         moli_i18n::tr!("airzone.identity")
     );
-    let synthetic = matches!(request, DiagnosticRequest::Demo);
+    let synthetic = matches!(request, DiagnosticRequest::Demo {});
     let (request, get) = match request {
         DiagnosticRequest::Hvac { system, zone, get } => {
             (api::ReadRequest::Hvac { system, zone }, get)
@@ -62,13 +82,13 @@ pub async fn inspect(mut config: Config, request: DiagnosticRequest) -> anyhow::
             sensor,
             get,
         } => (api::ReadRequest::Iaq { system, sensor }, get),
-        DiagnosticRequest::Version => (api::ReadRequest::Version, false),
-        DiagnosticRequest::Webserver => {
+        DiagnosticRequest::Version {} => (api::ReadRequest::Version, false),
+        DiagnosticRequest::Webserver {} => {
             return Ok(json!({"read_only":true,"synthetic":false,"response":redact(&identity,0)}));
         }
-        DiagnosticRequest::Integration => (api::ReadRequest::Integration, false),
-        DiagnosticRequest::Demo => (api::ReadRequest::Demo, false),
-        DiagnosticRequest::Thermostat => {
+        DiagnosticRequest::Integration {} => (api::ReadRequest::Integration, false),
+        DiagnosticRequest::Demo {} => (api::ReadRequest::Demo, false),
+        DiagnosticRequest::Thermostat {} => {
             let html = api::thermostat(config, budget).await?;
             return Ok(
                 json!({"read_only":true,"synthetic":false,"interface_available":true,"response_bytes":html.len()}),
@@ -207,7 +227,7 @@ mod tests {
         let config: Config =
             serde_json::from_value(json!({"host":"127.0.0.1","port":port,"read_only":false}))
                 .unwrap();
-        let report = inspect(config, DiagnosticRequest::Demo).await.unwrap();
+        let report = inspect(config, DiagnosticRequest::Demo {}).await.unwrap();
         assert_eq!(report["synthetic"], true);
         assert_eq!(report["read_only"], true);
         assert_eq!(report["response"]["data"][0]["roomTemp"], 22.5);

@@ -1,0 +1,51 @@
+/* A shared, theme-aware palette for the overview and the thermostat detail.
+   Colour describes the enabled mode; only a reported demand deepens it. */
+.airzone-climate-surface {
+  --climate-accent: var(--ink-2);
+  --climate-soft: var(--surface-2);
+  --climate-color: var(--ink-3);
+  --climate-tint: var(--climate-soft);
+  --climate-demand-soft: 80%;
+  --climate-art-opacity: .1;
+  --climate-background: var(--surface);
+  --climate-border: var(--line);
+}
+.airzone-climate-surface[data-tone='warm'] {
+  --climate-accent: var(--warm-ink);
+  --climate-soft: var(--warm-soft);
+  --climate-color: var(--warm);
+}
+.airzone-climate-surface[data-tone='cool'] {
+  --climate-accent: color-mix(in srgb, var(--cool) 65%, var(--ink));
+  --climate-soft: var(--cool-soft);
+  --climate-color: var(--cool);
+}
+.airzone-climate-surface[data-tone='good'] {
+  --climate-accent: color-mix(in srgb, var(--good) 65%, var(--ink));
+  --climate-soft: var(--good-soft);
+  --climate-color: var(--good);
+}
+.airzone-climate-surface:not([data-tone='neutral']) {
+  --climate-background: linear-gradient(135deg, var(--climate-tint), color-mix(in srgb, var(--climate-tint) 38%, var(--surface)));
+  --climate-border: color-mix(in srgb, var(--climate-color) 28%, var(--line));
+}
+.airzone-climate-surface[data-demand='true']:not([data-tone='neutral']) {
+  --climate-tint: color-mix(in srgb, var(--climate-soft) var(--climate-demand-soft), var(--climate-color));
+}
+.maison[data-theme='night'] .airzone-climate-surface {
+  --climate-demand-soft: 84%;
+  --climate-art-opacity: .06;
+}
+@keyframes airzone-climate-enter {
+  from {opacity:0;transform:translateY(6px)}
+  to {opacity:1;transform:translateY(0)}
+}
+@media (prefers-reduced-motion:no-preference) {
+  .airzone-climate-surface {animation:airzone-climate-enter 220ms ease-out}
+}
+@media (prefers-reduced-motion:reduce) {
+  .airzone-climate-surface {animation:none}
+}
+@media (prefers-contrast:more) {
+  .airzone-climate-surface {--climate-border:var(--ink-2)}
+}

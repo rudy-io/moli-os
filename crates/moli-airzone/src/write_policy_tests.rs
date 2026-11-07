@@ -20,7 +20,12 @@ impl Driver for StaleCapabilities {
             let snapshot = Snapshot::parse(&serde_json::from_str(include_str!(
                 "../../../integrations/airzone/fixtures/zones.json"
             ))?)?;
-            publish_entities(ctx, snapshot.entities(ctx.instance(), "aabbccddeeff"), &[]);
+            publish_entities(
+                ctx,
+                snapshot.entities(ctx.instance(), "aabbccddeeff"),
+                &[],
+                &self.0.progress(),
+            );
             ctx.ready();
             while let Some(command) = ctx.next_command().await {
                 let result = self.0.execute(ctx, "aabbccddeeff", &command).await;
@@ -46,8 +51,15 @@ async fn executor_rejects_stale_writable_metadata_before_networking() {
     });
     for (read_only, write, key, value) in [
         (false, "legacy", "name", Value::from("Zone D")),
+        (false, "legacy", "target_temperature_on", Value::Float(23.5)),
         (true, "legacy", "on", Value::Bool(true)),
         (true, "extended", "name", Value::from("Zone D")),
+        (
+            true,
+            "extended",
+            "target_temperature_on",
+            Value::Float(23.5),
+        ),
     ] {
         let config = serde_json::from_value(
             json!({"host":"127.0.0.1", "port":port,"read_only":read_only,"write":write}),
