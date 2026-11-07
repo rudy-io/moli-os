@@ -78,19 +78,39 @@ fn screen_plays(devices: &[DeviceView], layout: &Layout, satellite: &str) -> boo
         })
 }
 
-/// What a turn answers while a screen plays: words only for what it did, and
-/// the conversation ends (the film would be taken for the next question).
-pub(crate) fn hush(reply: &mut Reply) {
-    let acted = !reply.actions.is_empty()
+/// The turn changed something in the house, or asked to.
+fn acted(reply: &Reply) -> bool {
+    !reply.actions.is_empty()
         || !reply.proposals.is_empty()
         || reply
             .tools
             .iter()
-            .any(|tool| !READ_ONLY_TOOLS.contains(&tool.as_str()));
-    if !acted {
+            .any(|tool| !READ_ONLY_TOOLS.contains(&tool.as_str()))
+}
+
+/// What a turn answers while a screen plays: words only for what it did, and
+/// the conversation ends (the film would be taken for the next question).
+pub(crate) fn hush(reply: &mut Reply) {
+    if !acted(reply) {
         reply.reply.clear();
     }
     reply.end = true;
+}
+
+/// Most of what was heard is in another alphabet: the transcription took the
+/// room for Russian or Chinese (7 Nov. 2026: « Семакия пишет », « 你都好食 »).
+/// The house speaks French or English: nobody spoke to Moli.
+fn foreign_script(text: &str) -> bool {
+    let latin = |c: char| {
+        c.is_ascii_alphabetic() || matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
+    };
+    let (letters, latins) = text
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .fold((0usize, 0usize), |(all, l), c| {
+            (all + 1, l + usize::from(latin(c)))
+        });
+    letters > 0 && latins * 2 < letters
 }
 
 impl Assistant {
@@ -218,7 +238,15 @@ impl VoiceBrain for Assistant {
             let heard = self.listen(&wav, "audio/wav").await;
             // Its recording goes with the turn that follows.
             self.note_heard(voice::seconds_of(&wav, "audio/wav"), audio);
-            heard.map(|heard| heard.text).map_err(|e| e.to_string())
+            heard
+                .map(|heard| {
+                    if foreign_script(&heard.text) {
+                        tracing::info!(heard = %heard.text, "satellite: another alphabet, heard as nothing");
+                        return String::new();
+                    }
+                    heard.text
+                })
+                .map_err(|e| e.to_string())
         })
     }
 
@@ -249,8 +277,12 @@ impl VoiceBrain for Assistant {
             self.turn(turn)
                 .await
                 .map(|reply| Answer {
+                    // It listens again only after it did something (« et la
+                    // cuisine aussi »). After a plain answer, a lively room was
+                    // heard as the next question, and the next, for minutes
+                    // (7 Nov. 2026).
+                    closes: reply.end || !acted(&reply),
                     text: reply.reply,
-                    closes: reply.end,
                 })
                 .map_err(|e| e.to_string())
         })
@@ -308,6 +340,7 @@ impl VoiceBrain for Assistant {
 
     fn is_goodbye(&self, text: &str) -> bool {
         goodbye(text, &word_list("assistant.voice.goodbye"))
+            || asks_to_stop(text, &word_list("assistant.voice.stop"))
     }
 
     fn heard_nothing(&self, wav: Option<Vec<u8>>) {
@@ -347,6 +380,19 @@ fn normalize(text: &str) -> String {
 fn goodbye(text: &str, phrases: &[String]) -> bool {
     let said = normalize(text);
     !said.is_empty() && phrases.iter().any(|p| normalize(p) == said)
+}
+
+/// One of the phrases that stop the conversation, anywhere in what was said,
+/// before the model is asked: it took « Laisse tomber, éteins-toi » for the
+/// living room's lights, and refused « Arrête de nous écouter ! » (7 Nov. 2026).
+fn asks_to_stop(text: &str, phrases: &[String]) -> bool {
+    // Words between spaces, accents and hyphens left out: « éteins-toi » is « eteins toi ».
+    let plain = |s: &str| format!(" {} ", norm(&normalize(s).replace('-', " ")));
+    let said = plain(text);
+    phrases
+        .iter()
+        .map(|p| plain(p))
+        .any(|p| !p.trim().is_empty() && said.contains(&p))
 }
 
 /// The raw voice as a WAV stream, louder: the header first (its sizes left
@@ -719,6 +765,90 @@ mod tests {
             u32::from_le_bytes(header[24..28].try_into().unwrap()),
             24_000
         );
+    }
+
+    #[test]
+    fn stop_phrases_stop_even_inside_a_sentence() {
+        let stop = word_list("assistant.voice.stop");
+        for said in [
+            "Laisse tomber, éteins-toi.",
+            "Arrête de nous écouter !",
+            "Moli, tais-toi.",
+            "Oh, ça suffit maintenant",
+            "Eteins toi",
+            "Chut !",
+        ] {
+            assert!(asks_to_stop(said, &stop), "{said}");
+        }
+        for said in [
+            "Arrête la musique",
+            "Éteins la cuisine",
+            "Stop la musique",
+            "Allume le couloir",
+            "Le parachute est rangé",
+            "",
+        ] {
+            assert!(!asks_to_stop(said, &stop), "{said}");
+        }
+    }
+
+    #[test]
+    fn another_alphabet_is_not_the_house_speaking() {
+        for heard in ["Семакия пишет.", "你都好食", "Ащё! Ащё! Ламезика!"]
+        {
+            assert!(foreign_script(heard), "{heard}");
+        }
+        for heard in [
+            "Allume en bas.",
+            "Ja, dit is Tommie, ik antwoord.",
+            "Ça a été éteint à 20 h ?",
+            "",
+            "1 2 3",
+        ] {
+            assert!(!foreign_script(heard), "{heard}");
+        }
+    }
+
+    /// After a plain answer, the conversation is over; after an action, a
+    /// person may go on.
+    #[tokio::test]
+    async fn only_a_turn_that_acted_listens_again() {
+        let asked = |text: &str| {
+            vec![Said {
+                who: moli_runtime::voice::Speaker::Person,
+                text: text.into(),
+            }]
+        };
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":"Il est huit heures."}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let answer = VoiceBrain::answer(
+            &moli,
+            &moli_core::DeviceId::from("esphome:aabbccddeeff"),
+            asked("Quelle heure est-il ?"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.text, "Il est huit heures.");
+        assert!(answer.closes);
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true,\"say\":\"C'est allume.\"}"}}]}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let answer = VoiceBrain::answer(
+            &moli,
+            &moli_core::DeviceId::from("esphome:aabbccddeeff"),
+            asked("Allume la lampe"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.text, "C'est allume.");
+        assert!(!answer.closes);
     }
 
     #[test]

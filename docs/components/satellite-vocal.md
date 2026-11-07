@@ -332,9 +332,19 @@ C'est une commande comme une autre — **la garde s'applique** (pièce protégé
    produit d'abord un WAV complet, converti en FLAC pour l'annonce. À la fin de la lecture,
    l'appareil envoie `VoiceAssistantAnnounceFinished`.
 7. Moli attend alors une nouvelle demande pendant `CONTINUE_WAIT` (5 s) : la conversation reste
-   ouverte **sans redire le mot de réveil**. Sinon, retour à `idle`.
-8. Pour raccrocher : une phrase de fin (« merci », « c'est tout », « stop », « au revoir »…), un
-   double appui, ou **une transcription vide** — une seule suffit sur un satellite (le silence
+   ouverte **sans redire le mot de réveil**, mais **seulement si le tour a agi** (un ordre, une
+   proposition, un outil qui change quelque chose) : « et la cuisine aussi » marche après
+   « allume le salon ». Après une simple réponse (l'heure, la météo, « je ne comprends pas »),
+   la réponse est dite puis le carillon clôt la conversation. Sans cette règle, un salon
+   vivant était pris pour la question suivante, et la suivante, pendant des minutes
+   (7 nov. 2026). Sinon, retour à `idle`.
+8. Pour raccrocher : une phrase de fin dite seule (« merci », « c'est tout », « stop »,
+   « au revoir »…), une **phrase d'arrêt n'importe où dans ce qui est dit** (« arrête de nous
+   écouter », « tais-toi », « éteins-toi », « laisse tomber », « chut », « ça suffit » :
+   `assistant.voice.stop`, vérifiée avant le modèle, qui avait pris « éteins-toi » pour la
+   lumière du salon), un double appui, ou **une transcription vide**. Une transcription
+   surtout dans un autre alphabet (cyrillique, chinois…) compte comme vide : c'est le bruit de
+   la pièce mal transcrit. Une seule suffit sur un satellite (le silence
    est enregistré dans l'historique comme une fausse activation, mais il n'y a pas de second
    essai : la conversation s'arrête). Moli envoie alors
    `INTENT_END{continue_conversation=0}` et **un carillon** qu'il fabrique lui-même
