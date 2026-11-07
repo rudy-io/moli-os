@@ -108,6 +108,17 @@ telles que les appareils les nomment).
 - Petites animations : halo qui ondule autour de l'orbe de Moli, ampoule qui rebondit à l'allumage,
   icône météo qui se balance, image de caméra qui se rapproche au survol, carte du Parc en alerte
   qui palpite. Toutes coupées si le système demande moins d'animations.
+- **Pièces, une à la fois** (`pages/Pieces.svelte`) : une rangée de boutons (une pièce chacun, son nombre de
+  lumières allumées ou sa température ; « Vue d'ensemble » rend l'ancienne grille, avec les filtres). La pièce
+  choisie s'affiche en grand avec toutes ses commandes et, pour chaque clim ou vanne, un **thermomètre**
+  (`ui/Thermometer.svelte`) : le mercure est la température de la pièce, la perle est la consigne qu'on glisse
+  au doigt (vers le haut ça chauffe, vers le bas ça refroidit ; flèches du clavier aussi). Un seul ordre au lever
+  du doigt, par `act` (la garde s'applique) ; une clim éteinte démarre sur la nouvelle consigne. Choix retenu
+  par appareil (`pieces-room`).
+- **Plan** : un étage en grand à l'arrivée (« Toute la maison » reste un onglet) ; jetons de 42 px, une couleur
+  et une forme par type (lumière ronde ambre, prise verte, clim bleue, volet turquoise, caméra violette, télé et
+  enceinte roses, capteur gris) ; allumé = rempli de sa couleur ; à la vue entière les capteurs calmes sont
+  masqués (zoom ou filtre « Capteurs » pour les voir ; une alerte ou une porte ouverte reste visible).
 - `ui/Donut.svelte` : anneau de parts vu en 3D (pièce de monnaie légèrement inclinée), qui se
   dessine à l'affichage ; survoler ou toucher une part donne son nom, sa valeur et son
   pourcentage au centre. Énergie : « Qui consomme maintenant » et « Où ça part » l'ont au-dessus
