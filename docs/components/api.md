@@ -350,7 +350,7 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 | POST | `/api/integrations/airzone/discover` | **humain**, origine `ui`, invités refusés | `{}`, champs inconnus refusés, 1 Kio maximum | `{gateways:[{host,port,tls_fingerprint,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true,existing_instance,existing_enabled}],scanned,target_count,incomplete}` | `403` session ; `422` saisie ; `429` recherche en cours ou trop récente ; `503` indisponible |
 | POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
 | POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only,already_installed}` ; nouvel ajout en lecture seule, reprise idempotente avec le mode courant ; sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
-| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
+| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running,configuration_lock}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
 | POST | `/api/integrations/airzone/{instance}/probe` | **humain**, origine `ui`, invités refusés | saisie de connexion avec la même `instance` | même aperçu ; exige l’identité matérielle existante | `404` inconnue ; `409` identité modifiée ; `503` identité antérieure inconnue |
 | PUT | `/api/integrations/airzone/{instance}` | **humain**, origine `ui`, invités refusés | saisie de connexion + `expected_mac` issu de la vérification | même résultat que l’ajout ; met à jour ou réactive en lecture seule | mêmes refus, sauvegarde avant activation |
 | POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:true,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `500` sauvegarde |
@@ -369,7 +369,12 @@ La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateway
 lit les versions 1 et 2 et écrit la version 3 : connexions gérées, surcharges ciblées des
 entrées TOML et retraits réversibles. Une modification conserve les options natives
 non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`. Une entrée
-TOML jamais modifiée conserve son mode d’origine. `running` désigne la présence du
+TOML jamais modifiée conserve son mode d’origine. Les restrictions explicites
+`enabled = false` et `read_only = true` du TOML restent prioritaires sur le registre
+et sur les changements demandés dans Moli. Le champ `configuration_lock` de la
+liste vaut `disabled`, `read_only` ou `null` ; il explique ce verrou dans
+l’interface. Un bloc désactivé aux options incomplètes ou inconnues est ignoré.
+`running` désigne la présence du
 superviseur, pas la disponibilité réseau de la passerelle.
 
 Le changement de mode ne prend aucune adresse réseau en entrée : il utilise la

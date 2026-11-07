@@ -535,3 +535,14 @@ test('the code sheet explains permission scope in both directions and both langu
   }
   home.held=null;
 });
+
+test('gateway cards explain static locks and disable only the prohibited actions',async()=>{
+  const Card=(await vite.ssrLoadModule('/src/maison/ui/AirzoneGatewayCard.svelte')).default;
+  const gateway={instance:'airzone-example',host:'172.31.1.1',port:3000,enabled:true,source:'configuration',read_only:true,running:true};
+  for (const configuration_lock of ['read_only','disabled']) {
+    const html=render(Card,{props:{gateway:{...gateway,configuration_lock}}}).body;
+    assert.match(text(html),/fichier de configuration Moli/);
+    assert.match(tags(html,'button').find(tag=>/class="mode-action/.test(tag)),/disabled/);
+    if(configuration_lock==='disabled') assert.match(tags(html,'button').find(tag=>/class="manage/.test(tag)),/disabled/);
+  }
+});

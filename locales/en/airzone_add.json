@@ -83,5 +83,6 @@
   "airzone_add.error.pin_required": "Enter your Moli code again to authorize control.",
   "airzone_add.error.invalid_pin": "The Moli code is incorrect.",
   "airzone_add.error.pin_rate_limited": "Too many attempts. Wait before trying again.",
-  "airzone_add.error.pin_disabled": "Set up a Moli code before authorizing control."
+  "airzone_add.error.pin_disabled": "Set up a Moli code before authorizing control.",
+  "airzone_add.error.configuration_locked": "The configuration file prevents this authorization."
 }

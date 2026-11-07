@@ -67,5 +67,7 @@
   "airzone_gateways.control_pin": "Your Moli code allows commands to all equipment on this gateway. Other gateways do not change.",
   "airzone_gateways.read_only_pin": "Your Moli code confirms the return to read-only for this gateway. Its equipment will not be turned off.",
   "airzone_gateways.mode_pin_label": "{action} · {instance}",
-  "airzone_gateways.existing_control_kept": "This gateway was already saved. Its control permission is preserved."
+  "airzone_gateways.existing_control_kept": "This gateway was already saved. Its control permission is preserved.",
+  "airzone_gateways.configuration_disabled": "This connection is disabled in the Moli configuration file. Re-enabling it must be authorized in that file.",
+  "airzone_gateways.configuration_read_only": "Read-only mode is enforced by the Moli configuration file. Control cannot be authorized here."
 }

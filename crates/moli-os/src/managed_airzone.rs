@@ -124,6 +124,34 @@ fn bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     Ok(Some(data))
 }
 
+/// Restrictions from the original TOML, captured before any sidecar overlay.
+#[derive(Clone, Copy, Debug, Default)]
+struct StaticPolicy {
+    disabled: bool,
+    read_only: bool,
+}
+impl StaticPolicy {
+    fn from_driver(driver: &DriverConfig) -> Self {
+        Self {
+            disabled: driver.enabled == Some(false),
+            read_only: driver
+                .options
+                .get("read_only")
+                .and_then(toml::Value::as_bool)
+                == Some(true),
+        }
+    }
+    const fn reason(self) -> Option<&'static str> {
+        if self.disabled {
+            Some("disabled")
+        } else if self.read_only {
+            Some("read_only")
+        } else {
+            None
+        }
+    }
+}
+
 /// Parsing is bounded, but entries are independent: one broken connection must
 /// not take the house down. A degraded registry is never eligible for rewriting.
 #[derive(Clone, Debug)]
@@ -133,6 +161,7 @@ pub(crate) struct Registry {
     editable: bool,
     suppressed: HashSet<String>,
     suppress_all: bool,
+    static_policy: HashMap<String, StaticPolicy>,
 }
 
 #[derive(Deserialize)]
@@ -157,6 +186,16 @@ impl Registry {
     fn reconcile_overrides(&mut self, configured: &mut [StaticGateway]) {
         let overrides = std::mem::take(&mut self.store.overrides);
         for entry in overrides {
+            let policy = self
+                .static_policy
+                .get(&entry.instance)
+                .copied()
+                .unwrap_or_default();
+            if policy.disabled {
+                // Disabled TOML may intentionally omit even required options.
+                self.store.overrides.push(entry);
+                continue;
+            }
             let current = configured
                 .iter_mut()
                 .find(|gateway| gateway.instance == entry.instance);
@@ -171,11 +210,12 @@ impl Registry {
                             && current.config.port == connection.port
                             && current.config.mac.as_deref() == Some(&connection.mac)
                             && current.config.tls_fingerprint == connection.tls_fingerprint
-                            && current.config.read_only == entry.read_only.unwrap_or(true)
+                            && current.config.read_only
+                                == (entry.read_only.unwrap_or(true) || policy.read_only)
                     })
-                    && entry
-                        .read_only
-                        .is_none_or(|read_only| current.config.read_only == read_only)
+                    && entry.read_only.is_none_or(|read_only| {
+                        current.config.read_only == (read_only || policy.read_only)
+                    })
             });
             if matches && !self.suppress_all {
                 self.store.overrides.push(entry);
@@ -269,6 +309,7 @@ fn read_store(path: &Path) -> Registry {
         editable: true,
         suppressed: HashSet::new(),
         suppress_all: false,
+        static_policy: HashMap::new(),
     };
     let Ok(raw) = bytes(path) else {
         registry.unreadable();
@@ -348,7 +389,11 @@ fn read_store(path: &Path) -> Registry {
     registry
 }
 
-fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<DriverConfig> {
+fn overlay(
+    driver: &DriverConfig,
+    entry: &GatewayOverride,
+    policy: StaticPolicy,
+) -> anyhow::Result<DriverConfig> {
     ensure!(
         driver.kind == "airzone",
         "override targets a different driver kind"
@@ -370,6 +415,9 @@ fn overlay(driver: &DriverConfig, entry: &GatewayOverride) -> anyhow::Result<Dri
     }
     if let Some(read_only) = entry.read_only {
         table.insert("read_only".into(), read_only.into());
+    }
+    if policy.read_only {
+        table.insert("read_only".into(), true.into());
     }
     moli_airzone::Airzone::new(options.clone().try_into()?)?;
     Ok(DriverConfig {
@@ -421,6 +469,12 @@ fn duplicates(candidate: &DriverConfig, drivers: &[DriverConfig], except: Option
 #[allow(clippy::unnecessary_wraps)] // Keep the configuration loader's fallible hook.
 pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
     let mut registry = read_store(&config.server.data_dir.join(FILE));
+    registry.static_policy = config
+        .drivers
+        .iter()
+        .filter(|driver| driver.kind == "airzone")
+        .map(|driver| (driver.id.clone(), StaticPolicy::from_driver(driver)))
+        .collect();
     for driver in &mut config.drivers {
         if driver.kind == "airzone"
             && (registry.suppress_all || registry.suppressed.contains(&driver.id))
@@ -440,7 +494,23 @@ pub fn load_into(config: &mut Config) -> anyhow::Result<()> {
             );
             continue;
         };
-        let candidate = overlay(&config.drivers[index], &entry);
+        let policy = registry
+            .static_policy
+            .get(&entry.instance)
+            .copied()
+            .unwrap_or_default();
+        if policy.disabled {
+            // Keep a persisted revocation visible without validating options
+            // of a driver the static configuration explicitly disables.
+            if entry.read_only == Some(true)
+                && let Some(table) = config.drivers[index].options.as_table_mut()
+            {
+                table.insert("read_only".into(), true.into());
+            }
+            registry.store.overrides.push(entry);
+            continue;
+        }
+        let candidate = overlay(&config.drivers[index], &entry, policy);
         match candidate {
             Ok(candidate)
                 if !duplicates(&candidate, &config.drivers, Some(index))
@@ -563,15 +633,41 @@ fn gateway(request: &GatewayRequest, enabled: bool) -> Gateway {
 
 #[derive(Clone, Debug)]
 struct StaticGateway {
+    policy: StaticPolicy,
     instance: String,
     config: moli_airzone::Config,
     enabled: bool,
+}
+impl StaticGateway {
+    fn load(driver: &DriverConfig, registry: &Registry) -> anyhow::Result<Option<Self>> {
+        if driver.kind != "airzone" {
+            return Ok(None);
+        }
+        let native = match driver.options.clone().try_into::<moli_airzone::Config>() {
+            Ok(config) => config,
+            Err(_) if driver.enabled == Some(false) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Some(Self {
+            policy: registry
+                .static_policy
+                .get(&driver.id)
+                .copied()
+                .unwrap_or_else(|| StaticPolicy::from_driver(driver)),
+            instance: driver.id.clone(),
+            config: native,
+            enabled: driver.enabled != Some(false)
+                && !registry.suppress_all
+                && !registry.suppressed.contains(&driver.id),
+        }))
+    }
 }
 struct Running {
     cancel: CancellationToken,
     task: JoinHandle<()>,
 }
 struct EffectiveGateway {
+    policy: StaticPolicy,
     instance: String,
     config: moli_airzone::Config,
     enabled: bool,
@@ -657,14 +753,8 @@ impl Manager {
                 continue;
             }
             reserved.insert(driver.id.clone());
-            if driver.kind == "airzone" {
-                configured.push(StaticGateway {
-                    instance: driver.id.clone(),
-                    config: driver.options.clone().try_into()?,
-                    enabled: driver.enabled != Some(false)
-                        && !registry.suppress_all
-                        && !registry.suppressed.contains(&driver.id),
-                });
+            if let Some(gateway) = StaticGateway::load(driver, &registry)? {
+                configured.push(gateway);
             }
         }
         registry.reconcile_overrides(&mut configured);
@@ -760,16 +850,20 @@ impl Manager {
                 if let Some(read_only) = overlay.and_then(|entry| entry.read_only) {
                     config.read_only = read_only;
                 }
+                config.read_only |= saved.policy.read_only;
                 EffectiveGateway {
+                    policy: saved.policy,
                     instance: saved.instance.clone(),
                     config,
-                    enabled: overlay.map_or(saved.enabled, |entry| entry.enabled),
+                    enabled: !saved.policy.disabled
+                        && overlay.map_or(saved.enabled, |entry| entry.enabled),
                     source: "configuration",
                     withdrawn: overlay.is_some_and(|entry| !entry.enabled),
                 }
             })
             .collect();
         gateways.extend(state.store.gateways.iter().map(|saved| EffectiveGateway {
+            policy: StaticPolicy::default(),
             instance: saved.instance.clone(),
             config: {
                 let mut config = native(&saved.request(), Some(saved.mac.clone()));
@@ -1067,6 +1161,9 @@ impl Manager {
         request: &GatewayRequest,
     ) -> Result<moli_airzone::GatewayProbe, SetupError> {
         let existing = self.existing(state, &request.instance)?;
+        if existing.policy.disabled {
+            return Err(SetupError::new("configuration_locked"));
+        }
         let known = self
             .known_mac(&existing)
             .ok_or_else(|| SetupError::new("identity_unavailable"))?;
@@ -1286,6 +1383,9 @@ impl Manager {
         if request.expected_read_only != current.config.read_only {
             return Err(SetupError::new("mode_conflict"));
         }
+        if !request.read_only && current.policy.reason().is_some() {
+            return Err(SetupError::new("configuration_locked"));
+        }
         if !request.read_only && !current.enabled {
             return Err(SetupError::new("gateway_disabled"));
         }
@@ -1438,6 +1538,7 @@ impl AirzoneSetup for Manager {
                 .map(|gateway| {
                     let mac = self.known_mac(&gateway);
                     GatewayStatus {
+                        configuration_lock: gateway.policy.reason(),
                         running: drivers
                             .get(&gateway.instance)
                             .is_some_and(|running| !running.task.is_finished()),

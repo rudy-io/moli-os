@@ -67,5 +67,7 @@
   "airzone_gateways.control_pin": "Votre code Moli autorise les commandes vers tous les équipements de cette passerelle. Les autres passerelles ne changent pas.",
   "airzone_gateways.read_only_pin": "Votre code Moli confirme le retour en lecture seule de cette passerelle. Ses équipements ne seront pas arrêtés.",
   "airzone_gateways.mode_pin_label": "{action} · {instance}",
-  "airzone_gateways.existing_control_kept": "Cette passerelle était déjà enregistrée. Son autorisation de pilotage est conservée."
+  "airzone_gateways.existing_control_kept": "Cette passerelle était déjà enregistrée. Son autorisation de pilotage est conservée.",
+  "airzone_gateways.configuration_disabled": "Cette connexion est désactivée dans le fichier de configuration Moli. Sa réactivation doit être autorisée dans ce fichier.",
+  "airzone_gateways.configuration_read_only": "La lecture seule est imposée par le fichier de configuration Moli. Le pilotage ne peut pas être autorisé ici."
 }

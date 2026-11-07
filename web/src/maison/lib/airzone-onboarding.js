@@ -1,7 +1,7 @@
 const RESERVED = new Set(['core','assistant','automations','energie','charges','lumieres','personnes']);
 const INSTANCE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAC = /^[0-9a-f]{12}$/;
-const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled']);
+const ERRORS = new Set(['invalid_instance','invalid_host','invalid_port','invalid_fingerprint','expected_identity_required','invalid_identity','duplicate_instance','duplicate_gateway','identity_unavailable','identity_changed','probe_failed','busy','limit_reached','persistence_failed','unavailable','shutting_down','not_found','instance_mismatch','gateway_disabled','mode_conflict','owner_required','pin_required','invalid_pin','pin_rate_limited','pin_disabled','configuration_locked']);
 
 export function nextGatewayInstance(drivers = []) {
   const used = new Set(drivers.map((driver) => driver.instance));
@@ -139,6 +139,7 @@ function gatewayIsValid(item) {
     && (item.tls_fingerprint === null || (typeof item.tls_fingerprint === 'string' && /^[0-9a-f]{64}$/.test(item.tls_fingerprint)))
     && (item.mac === null || (typeof item.mac === 'string' && MAC.test(item.mac)))
     && typeof item.enabled === 'boolean' && typeof item.read_only === 'boolean' && typeof item.running === 'boolean'
+    && (item.configuration_lock == null || ['disabled','read_only'].includes(item.configuration_lock))
     && (item.enabled || !item.running) && ['configuration','moli'].includes(item.source);
 }
 

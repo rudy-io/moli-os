@@ -83,5 +83,6 @@
   "airzone_add.error.pin_required": "Saisissez à nouveau votre code Moli pour autoriser le pilotage.",
   "airzone_add.error.invalid_pin": "Le code Moli est incorrect.",
   "airzone_add.error.pin_rate_limited": "Trop de tentatives. Patientez avant de réessayer.",
-  "airzone_add.error.pin_disabled": "Configurez un code Moli avant d’autoriser le pilotage."
+  "airzone_add.error.pin_disabled": "Configurez un code Moli avant d’autoriser le pilotage.",
+  "airzone_add.error.configuration_locked": "Le fichier de configuration interdit cette autorisation."
 }

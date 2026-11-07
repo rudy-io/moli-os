@@ -24,6 +24,14 @@ fn static_house(port: u16, read_only: bool, enabled: bool, identity: bool) -> (P
     (dir, config)
 }
 
+// A sidecar revocation is reversible; an explicit static read-only lock is not.
+fn managed_read_only_house(port: u16) -> (PathBuf, Config) {
+    let (dir, _) = static_house(port, false, true, true);
+    std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":true,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+    let config = Config::load(&dir.join("moli.toml")).unwrap();
+    (dir, config)
+}
+
 fn zone() -> DeviceId {
     DeviceId::from("airzone-added:aabbccddeeff_s1_z1")
 }
@@ -85,7 +93,7 @@ async fn explicit_mode_round_trip_persists_and_only_authorized_mock_commands_wri
     for configured in [false, true] {
         let (port, writes, stop) = controller().await;
         let (dir, config) = if configured {
-            static_house(port, true, true, true)
+            managed_read_only_house(port)
         } else {
             house()
         };
@@ -243,7 +251,7 @@ async fn a_paused_or_unknown_identity_gateway_can_be_revoked_without_network_acc
             if enabled {
                 "identity_unavailable"
             } else {
-                "gateway_disabled"
+                "configuration_locked"
             }
         );
         manager.shutdown().await;
@@ -254,7 +262,8 @@ async fn a_paused_or_unknown_identity_gateway_can_be_revoked_without_network_acc
 #[tokio::test]
 async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
     let (port, writes, stop) = controller_with_identity("aa:bb:cc:dd:ee:01", None, None).await;
-    let (dir, config) = static_house(port, true, true, true);
+    let (dir, config) = managed_read_only_house(port);
+    let registry_before = std::fs::read(dir.join(FILE)).unwrap();
     let manager = Manager::new(
         Hub::new(HubOptions::default()).unwrap(),
         &config,
@@ -270,7 +279,7 @@ async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
         "identity_changed"
     );
     assert!(manager.list().await.unwrap().gateways[0].read_only);
-    assert!(!dir.join(FILE).exists());
+    assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), registry_before);
     assert_eq!(writes.load(Ordering::Relaxed), 0);
     manager.shutdown().await;
     stop.cancel();
@@ -281,7 +290,11 @@ async fn enabling_refuses_identity_changes_and_never_writes_or_saves_them() {
 async fn mode_commit_failure_never_claims_a_change_or_replaces_the_running_driver() {
     for read_only in [true, false] {
         let (port, writes, stop) = controller().await;
-        let (dir, config) = static_house(port, read_only, true, true);
+        let (dir, config) = if read_only {
+            managed_read_only_house(port)
+        } else {
+            static_house(port, false, true, true)
+        };
         let hub = Hub::new(HubOptions::default()).unwrap();
         let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
         manager.start_configured().unwrap();
@@ -319,7 +332,7 @@ async fn a_mode_change_finishes_when_its_http_caller_disappears_and_serializes_o
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let (port, writes, stop) = controller_with_gate(Some((started.clone(), release.clone()))).await;
-    let (dir, config) = static_house(port, true, true, true);
+    let (dir, config) = managed_read_only_house(port);
     let manager = Manager::new(
         Hub::new(HubOptions::default()).unwrap(),
         &config,
@@ -383,7 +396,7 @@ async fn editing_an_authorized_connection_revokes_even_when_the_address_is_uncha
     for configured in [false, true] {
         let (port, writes, stop) = controller().await;
         let (dir, config) = if configured {
-            static_house(port, true, true, true)
+            managed_read_only_house(port)
         } else {
             house()
         };
@@ -457,7 +470,7 @@ fn legacy_invalid_writable_entries_cannot_gain_authority_after_an_upgrade() {
 
 #[test]
 fn writable_static_overrides_require_version_three_and_a_pinned_identity() {
-    let (dir, _) = static_house(3000, true, true, true);
+    let (dir, _) = static_house(3000, false, true, true);
     for (version, mac, valid) in [
         (2, Some("aabbccddeeff"), false),
         (3, None, false),
@@ -476,4 +489,73 @@ fn writable_static_overrides_require_version_three_and_a_pinned_identity() {
         assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), raw);
     }
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn disabled_incomplete_static_entries_never_block_startup_or_reactivate_from_registry() {
+    for options in ["", "host = '127.0.0.1'\nunknown_option = true\n"] {
+        let (dir, _) = house();
+        let path = dir.join("moli.toml");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        write!(text, "\n[[driver]]\nid = '{INSTANCE}'\nkind = 'airzone'\nenabled = false\n[driver.options]\n{options}").unwrap();
+        std::fs::write(&path, text).unwrap();
+        std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":false,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+        let config = Config::load(&path).unwrap();
+        let manager = Manager::new(
+            Hub::new(HubOptions::default()).unwrap(),
+            &config,
+            CancellationToken::new(),
+        )
+        .expect("disabled invalid options are ignored");
+        manager.start_configured().unwrap();
+        assert!(
+            manager
+                .list()
+                .await
+                .unwrap()
+                .gateways
+                .iter()
+                .all(|gateway| !gateway.enabled && !gateway.running)
+        );
+        manager.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn explicit_static_restrictions_dominate_persisted_and_live_authorizations() {
+    for (enabled, read_only) in [(false, false), (true, true)] {
+        let (dir, _) = static_house(3000, read_only, enabled, true);
+        std::fs::write(dir.join(FILE), serde_json::to_vec(&json!({"version":3,"gateways":[],"overrides":[{"instance":INSTANCE,"enabled":true,"read_only":false,"mac":"aabbccddeeff"}]})).unwrap()).unwrap();
+        let config = Config::load(&dir.join("moli.toml")).unwrap();
+        let entry = config
+            .drivers
+            .iter()
+            .find(|driver| driver.id == INSTANCE)
+            .unwrap();
+        assert_eq!(entry.enabled != Some(false), enabled);
+        assert_eq!(entry.options["read_only"].as_bool(), Some(read_only));
+        let manager = Manager::new(
+            Hub::new(HubOptions::default()).unwrap(),
+            &config,
+            CancellationToken::new(),
+        )
+        .unwrap();
+        let listed = manager.list().await.unwrap();
+        let status = serde_json::to_value(&listed.gateways[0]).unwrap();
+        assert_eq!(
+            status["configuration_lock"],
+            if enabled { "read_only" } else { "disabled" }
+        );
+        assert_eq!(
+            manager
+                .set_mode(INSTANCE.into(), mode(false, read_only), "person".into())
+                .await
+                .unwrap_err()
+                .code,
+            "configuration_locked"
+        );
+        manager.shutdown().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

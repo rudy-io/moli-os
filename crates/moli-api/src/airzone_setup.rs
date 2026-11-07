@@ -55,6 +55,8 @@ pub struct GatewayInstalled {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct GatewayStatus {
+    /// A restriction from the original static configuration, never a registry grant.
+    pub configuration_lock: Option<&'static str>,
     pub instance: String,
     pub host: String,
     pub port: u16,
@@ -159,8 +161,12 @@ impl SetupError {
 impl IntoResponse for SetupError {
     fn into_response(self) -> Response {
         let status = match self.code {
-            "duplicate_instance" | "duplicate_gateway" | "identity_changed"
-            | "gateway_disabled" | "mode_conflict" => StatusCode::CONFLICT,
+            "duplicate_instance"
+            | "duplicate_gateway"
+            | "identity_changed"
+            | "gateway_disabled"
+            | "mode_conflict"
+            | "configuration_locked" => StatusCode::CONFLICT,
             "not_found" => StatusCode::NOT_FOUND,
             "busy" | "limit_reached" => StatusCode::TOO_MANY_REQUESTS,
             "probe_failed" => StatusCode::BAD_GATEWAY,

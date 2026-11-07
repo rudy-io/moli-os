@@ -60,3 +60,12 @@ are not proof that no device exists: an empty installation without network hints
 an isolated network or a disabled Local API may require the manual fallback.
 Scanning cannot make cloud-only hardware locally compatible. Discovery never
 commands, installs or reactivates a device.
+
+FR : Les restrictions `enabled = false` et `read_only = true` écrites dans le
+   TOML restent prioritaires. La carte de la passerelle explique ce verrou ; un
+   code Moli ne le contourne pas. Les passerelles ajoutées dans Moli se gèrent
+   depuis l’interface sans modifier le TOML.
+   EN: Explicit TOML restrictions `enabled = false` and `read_only = true` take
+   precedence. The gateway card explains the lock; the Moli code cannot bypass
+   it. Gateways added in Moli remain manageable from the interface without
+   changing TOML.

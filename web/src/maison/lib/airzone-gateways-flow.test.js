@@ -241,3 +241,12 @@ test('revocation does not prompt again when the human session is valid',async(t)
   assert.deepEqual(JSON.parse(calls[1].body),{read_only:true,expected_read_only:false});
   assert.equal(component.inspect().gateways[0].read_only,true);
 });
+
+test('static restrictions cannot open a control grant or resume a disabled connection',async(t)=>{
+  for (const configuration_lock of ['read_only','disabled']) {
+    const {component,dispose}=fixture(t,()=>response({gateways:[{...gateway,read_only:true,configuration_lock}]}));
+    await turn();component.select(gateway.instance,'mode');assert.equal(component.inspect().confirmation,null);
+    if(configuration_lock==='disabled') {component.select(gateway.instance,'edit');assert.equal(component.inspect().editing,null);}
+    dispose();
+  }
+});

@@ -110,7 +110,8 @@
     if (busy || editing || creating || confirmation || !connected) return;
     const gateway=gateways?.find((item) => item.instance === instance);
     if (!gateway || !['edit','withdraw','replace','mode'].includes(kind)) return;
-    if (kind === 'mode' && gateway.read_only && !gateway.enabled) return;
+    if (kind === 'edit' && gateway.configuration_lock === 'disabled') return;
+    if (kind === 'mode' && gateway.read_only && (!gateway.enabled || gateway.configuration_lock)) return;
     revision++;
     failure=null;
     uncertain=false;
