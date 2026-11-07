@@ -12,6 +12,8 @@
   import ValveCard from '../ui/ValveCard.svelte';
   import Icon from '../ui/Icon.svelte';
   import RoomCard from '../ui/RoomCard.svelte';
+  import RoomScene from '../ui/RoomScene.svelte';
+  import { photoOf, setPhoto, loadPhotos } from '../lib/photos.svelte.js';
   import CoverTile from '../ui/CoverTile.svelte';
   import FilterChips from '../ui/FilterChips.svelte';
   import { categoryOf, loadFilter } from '../lib/filters.js';
@@ -21,6 +23,10 @@
   let { route = 'pieces' } = $props();
   const coversOnly = $derived(route === 'pieces/volets');
   let plan = $state(cachedPlan);
+  onMount(loadPhotos);
+  /** A clim or a shutter tapped on the photo: its full control, below. */
+  const openControl = () => document.querySelector('.stage-comfort, .stage-room')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   onMount(async () => {
     try {
       const res = await fetch('/api/plan');
@@ -157,6 +163,7 @@
 
   {#if !coversOnly && !overview && current}
     {#key current.name}
+      <RoomScene room={current} photo={photoOf(current.name)} onphoto={(file) => setPhoto(current.name, file)} onopen={openControl} />
       <div class="stage" class:has-comfort={comfort.length}>
         <div class="stage-room"><RoomCard room={current} every={filter.includes('capteurs')} icons={look === 'icons'} /></div>
         {#if comfort.length}

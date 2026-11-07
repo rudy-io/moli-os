@@ -179,5 +179,6 @@
   "serveur.personnes.deja_configuree": "cette personne est déjà configurée : à retirer depuis l’écran Personnes",
   "serveur.visibilite.identifiant_invalide": "Identifiant d’appareil invalide.",
   "serveur.visibilite.indisponible": "Configuration du tableau de bord indisponible.",
-  "serveur.visibilite.enregistrement_impossible": "Impossible d’enregistrer la visibilité."
+  "serveur.visibilite.enregistrement_impossible": "Impossible d’enregistrer la visibilité.",
+  "serveur.plan.trop_de_photos": "{max} photos de pièces au plus"
 }

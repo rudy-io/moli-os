@@ -84,6 +84,10 @@ pub(crate) struct Plan {
     skin: Option<String>,
     #[serde(default)]
     floors: Vec<Floor>,
+    /// A photo for a room (the Moli room's name → an image of the plan's
+    /// folder): the Rooms page shows the room in it, its controls on top.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    photos: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -177,7 +181,9 @@ fn error(status: StatusCode, message: &str) -> Response {
 }
 
 /// Plan images kept at most (a house has a few floors, not a gallery).
-const MAX_IMAGES: usize = 32;
+const MAX_IMAGES: usize = 64;
+/// Room photos kept at most.
+const MAX_PHOTOS: usize = 48;
 
 /// `<16 hex>.<png|jpg|webp|svg>`: the only names ever written or served
 /// (or backed up, or restored).
@@ -327,6 +333,17 @@ impl Plan {
                 "serveur.plan.habillage_inconnu",
                 skin = format!("{skin:?}")
             ));
+        }
+        if self.photos.len() > MAX_PHOTOS {
+            return Err(moli_i18n::tr!("serveur.plan.trop_de_photos", max = MAX_PHOTOS));
+        }
+        for (room, image) in &self.photos {
+            if !text_ok(room, 60) || !image_name_ok(image) || !dir.join("plan").join(image).exists() {
+                return Err(moli_i18n::tr!(
+                    "serveur.plan.image_inconnue",
+                    image = format!("{image:?}")
+                ));
+            }
         }
         let mut ids = std::collections::HashSet::new();
         for f in &self.floors {
@@ -580,6 +597,12 @@ mod tests {
         assert!(!image_name_ok("0123456789ABCDEF.png"));
         assert!(!image_name_ok("0123456789abcdef.exe"));
         assert!(serde_json::from_value::<Plan>(json!({ "floors": [], "extra": 1 })).is_err());
+        let photo = plan(json!({ "floors": [], "photos": { "Salon": "0123456789abcdef.png" } }));
+        assert!(photo.check(&dir).is_ok());
+        let missing = plan(json!({ "floors": [], "photos": { "Salon": "fedcba9876543210.png" } }));
+        assert!(missing.check(&dir).is_err());
+        let sneaky = plan(json!({ "floors": [], "photos": { "Salon": "../moli.toml" } }));
+        assert!(sneaky.check(&dir).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 
