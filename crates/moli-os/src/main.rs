@@ -4,6 +4,7 @@ mod airzone;
 mod backup;
 mod catalogue;
 mod config;
+mod managed_airzone;
 mod timezone;
 
 use std::path::PathBuf;
@@ -169,6 +170,22 @@ fn model_command(command: &ModelCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn load_config(cli: &Cli) -> anyhow::Result<Config> {
+    // A new house starts without a configuration: `serve` writes a minimal
+    // one; recovery commands must remain usable with a damaged registry.
+    let serving = matches!(cli.command, None | Some(Command::Serve));
+    if serving && !cli.config.exists() && fresh(&cli.config) {
+        Config::starter(&cli.config)
+    } else if matches!(
+        cli.command,
+        Some(Command::Backup { .. } | Command::Restore { .. })
+    ) {
+        Config::load_for_recovery(&cli.config)
+    } else {
+        Config::load(&cli.config)
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let boot = Instant::now();
     tracing_subscriber::fmt()
@@ -194,14 +211,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(Command::Model(command)) = &cli.command {
         return model_command(command);
     }
-    // A new house starts without a configuration: `serve` writes a minimal
-    // one; every other command needs the real thing.
-    let serving = matches!(cli.command, None | Some(Command::Serve));
-    let config = if serving && !cli.config.exists() && fresh(&cli.config) {
-        Config::starter(&cli.config)?
-    } else {
-        Config::load(&cli.config)?
-    };
+    let config = load_config(&cli)?;
     match cli.command.unwrap_or(Command::Serve) {
         Command::Profile(_) | Command::Catalogue(_) | Command::Health | Command::Model(_) => {
             unreachable!("handled above")
@@ -360,6 +370,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     })
     .context("cannot open the data directory (labels, journal, secrets)")?;
     let cancel = CancellationToken::new();
+    let airzone_setup = managed_airzone::Manager::new(hub.clone(), &config, cancel.clone())?;
 
     // History first: it must be listening before drivers publish anything.
     let (history, recorder) = start_history(&config, &hub, &cancel)?.unzip();
@@ -378,7 +389,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         None => (None, None),
     };
 
-    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel)?;
+    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
@@ -388,7 +399,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .with_context(|| format!("cannot listen on {}", config.server.listen))?;
     tracing::info!(
         listen = %config.server.listen,
-        drivers = tasks.len(),
+        drivers = hub.snapshot().drivers.len(),
         boot_ms = boot.elapsed().as_millis(),
         "moli-os ready"
     );
@@ -403,6 +414,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
     let surfaces = moli_api::Options {
+        airzone_setup: Some(Arc::new(airzone_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
         ui_pin,
         history,
@@ -431,6 +443,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         shutdown.cancel();
     })
     .await?;
+    airzone_setup.shutdown().await;
     for task in tasks {
         let _ = task.await;
     }
@@ -1070,10 +1083,14 @@ fn spawn_drivers(
     config: &Config,
     hub: &Hub,
     cancel: &CancellationToken,
+    airzone: &managed_airzone::Manager,
 ) -> anyhow::Result<(Vec<tokio::task::JoinHandle<()>>, Gateways)> {
     let mut tasks = Vec::new();
     let mut gates = Gateways::default();
     for driver in config.drivers.iter().filter(|d| d.enabled != Some(false)) {
+        if driver.kind == "airzone" {
+            continue;
+        }
         let context = || format!("driver {:?} options", driver.id);
         let built: Arc<dyn Driver> = match driver.kind.as_str() {
             "phones" => {
@@ -1097,6 +1114,7 @@ fn spawn_drivers(
             cancel.clone(),
         ));
     }
+    airzone.start_configured()?;
     Ok((tasks, gates))
 }
 

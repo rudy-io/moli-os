@@ -397,7 +397,7 @@ export async function confirmHeld(pin) {
   }
   if (held.custom) {
     home.held = null;
-    await held.custom();
+    await held.custom(held.freshPin ? pin : undefined);
     return null;
   }
   await decide({ id: held.id, point: held.point }, true);

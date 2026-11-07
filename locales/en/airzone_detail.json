@@ -1,0 +1,14 @@
+{
+  "airzone_detail.view_history": "View history",
+  "airzone_detail.changed_at": "Value recorded: {time}",
+  "airzone_detail.thermostat": "Thermostat status",
+  "airzone_detail.no_battery": "Not applicable (wired)",
+  "airzone_detail.personalise": "Personalise this zone",
+  "airzone_detail.personalise_help": "Name, room and visibility in Moli",
+  "airzone_detail.parameters_help": "All values reported by Airzone",
+  "airzone_detail.shared_hint": "Settings shared with other zones",
+  "airzone_detail.demand.heat_demand": "Heating",
+  "airzone_detail.demand.cold_demand": "Cooling",
+  "airzone_detail.demand.air_demand": "Air",
+  "airzone_detail.demand.floor_demand": "Floor"
+}

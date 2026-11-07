@@ -5,6 +5,7 @@ import { pointOf } from './capabilities.js';
 const DEMANDS = ['heat_demand', 'cold_demand', 'air_demand', 'floor_demand'];
 const validId = (id) => Number.isInteger(id) && id >= 1 && id <= 32;
 const timestamp = (ts) => Number.isFinite(ts) && ts >= 0 ? ts : null;
+const availabilityOf = (device) => device?.online === true ? 'online' : device?.online === false ? 'offline' : 'unknown';
 const compare = (a, b) => String(deviceName(a) ?? a.id).localeCompare(String(deviceName(b) ?? b.id), locale())
   || a.id.localeCompare(b.id);
 
@@ -98,7 +99,7 @@ export function airzoneInventory(devices, drivers, hidden = []) {
 
 /** Zone enabled and actual demand are independent reported states, not an estimate. */
 export function zoneSummary(device) {
-  const availability = device?.online === true ? 'online' : device?.online === false ? 'offline' : 'unknown';
+  const availability = availabilityOf(device);
   const on = binary(device, 'on');
   const rawMode = readingOf(device, 'mode')?.value;
   const demands = DEMANDS.map((key) => ({ key, value: binary(device, key) })).filter((d) => d.value !== null);
@@ -117,6 +118,143 @@ export function zoneSummary(device) {
     humidity: numeric(device, 'humidity'), problem: binary(device, 'problem'),
     lastSampleAt: timestamps.length ? Math.max(...timestamps) : null,
   };
+}
+
+/** Local API 1.78 defines a battery percentage, not a binary low-battery flag.
+ * Absence is expected for wired thermostats. No manufacturer threshold is
+ * documented: only an explicit alarm below can assert a low battery. */
+export function batterySummary(device) {
+  const candidate = numeric(device, 'battery');
+  const reading = candidate?.unit === '%' && Number.isInteger(candidate.value)
+    && candidate.value >= 0 && candidate.value <= 100 ? candidate : null;
+  const radio = binary(device, 'thermos_radio');
+  return {
+    reading, percent: reading?.value ?? null, radio, availability: availabilityOf(device),
+    status: reading ? 'level' : radio === false ? 'wired' : radio === true ? 'not_reported' : 'unknown',
+  };
+}
+
+const ZONE_ERRORS = new Set(['3', '4', '5', '6', '7', '8', 'IAQ2', 'IAQ3']);
+const SYSTEM_ERRORS = new Set(['9', '11', '13', '14', '15', '16', 'C02', 'C09', 'C11', 'IU', 'IAQ1', 'IAQ4']);
+// The specification's descriptions and examples use both short names and
+// their "alarm" spelling. These are exact aliases, never substring guesses.
+const WARNINGS = new Map([
+  ['occupancy', 'occupancy'], ['presence alarm', 'occupancy'],
+  ['window', 'window'], ['window alarm', 'window'],
+  ['anti-freezing', 'anti_freezing'], ['anti-freezing alarm', 'anti_freezing'],
+  ['active dew protection', 'active_dew_protection'], ['active dew', 'active_dew'],
+  ['zone without thermostat', 'zone_without_thermostat'], ['low battery', 'low_battery'],
+]);
+const unknownAlarm = (scope = 'device') => ({ kind: 'unknown_alarm', severity: 'warning', scope, code: 'unknown' });
+
+function alarmToken(scope, value) {
+  if (typeof value !== 'string' && !Number.isInteger(value)) return unknownAlarm(scope);
+  const token = String(value).trim();
+  if (!token || token.length > 240) return unknownAlarm(scope);
+  const code = token.replace(/^error\s+/i, '').toUpperCase();
+  const knownCode = scope === 'system' ? SYSTEM_ERRORS.has(code)
+    : scope === 'zone' ? ZONE_ERRORS.has(code) : ZONE_ERRORS.has(code) || SYSTEM_ERRORS.has(code);
+  if (knownCode) return {
+    kind: 'device_error', severity: 'error',
+    scope: scope === 'device' ? ZONE_ERRORS.has(code) ? 'zone' : 'system' : scope, code,
+  };
+  const warning = scope !== 'system' ? WARNINGS.get(token.toLowerCase()) : null;
+  if (!warning) return unknownAlarm(scope);
+  return {
+    kind: warning === 'low_battery' ? 'low_battery' : 'device_warning',
+    scope: scope === 'device' ? 'zone' : scope, code: warning,
+    severity: ['low_battery', 'active_dew', 'zone_without_thermostat'].includes(warning) ? 'warning' : 'info',
+  };
+}
+
+function alarmEntry(entry) {
+  if (typeof entry !== 'object' || entry === null) return [alarmToken('device', entry)];
+  if (Array.isArray(entry)) return [unknownAlarm()];
+  const pairs = Object.entries(entry);
+  if (pairs.length === 0 || pairs.length > 8) return [unknownAlarm()];
+  const scopes = pairs.filter(([key]) => ['zone', 'system'].includes(key.toLowerCase()));
+  if (scopes.length) return scopes.map(([scope, value]) => alarmToken(scope.toLowerCase(), value));
+  // An envelope's code and message describe one event, not two warnings.
+  const key = ['code', 'error', 'warning', 'message'].find((name) => Object.hasOwn(entry, name));
+  return [key ? alarmToken('device', entry[key]) : unknownAlarm()];
+}
+
+function reportedAlarms(device) {
+  const reading = readingOf(device, 'errors');
+  if (!reading) return { reported: false, items: [] };
+  const text = reading.value;
+  if (typeof text !== 'string' || text.length > 8192) return { reported: false, items: [unknownAlarm()] };
+  try {
+    const entries = JSON.parse(text);
+    if (!Array.isArray(entries) || entries.length > 32) return { reported: false, items: [unknownAlarm()] };
+    const items = entries.flatMap(alarmEntry);
+    return { reported: items.every((item) => item.kind !== 'unknown_alarm'), items };
+  } catch {
+    // The native diagnostic text is bounded and may have been truncated.
+    // Never parse a partial prefix into a reassuringly incomplete alarm list.
+    return { reported: false, items: [unknownAlarm()] };
+  }
+}
+
+/** Deterministic current alert projection. No clocks, thresholds, commands or
+ * notifications. SSE does not refresh timestamps for unchanged readings. */
+export function airzoneAlerts(devices, drivers, { connected = true } = {}) {
+  const inventory = airzoneInventory(devices, drivers);
+  const included = [...inventory.byId.values()];
+  const diagnosticDevices = included.filter((d) => resourceRole(d) !== 'control'
+    && (['zone', 'metadata', 'dhw', 'iaq'].includes(resourceRole(d)) || pointOf(d, 'errors') || pointOf(d, 'problem')));
+  const diagnostics = { total: diagnosticDevices.length, reported: 0, unknown: diagnosticDevices.length };
+  const result = new Map();
+  const add = (item, affectedIds = []) => {
+    const id = JSON.stringify([item.instance, item.scope, item.target, item.kind, item.code]);
+    const existing = result.get(id);
+    if (existing) existing.affectedIds = [...new Set([...existing.affectedIds, ...affectedIds])].sort();
+    else {
+      const { target, ...publicItem } = item;
+      result.set(id, { id, ...publicItem, affectedIds: [...new Set(affectedIds)].sort() });
+    }
+  };
+  if (connected !== true) {
+    if (inventory.instances.length) add({ kind: 'connection', severity: 'warning', instance: null, deviceId: null, scope: 'connection', target: null, code: 'disconnected' }, included.map((d) => d.id));
+    return { items: [...result.values()], diagnostics, current: false };
+  }
+  const unavailable = new Set();
+  for (const instance of inventory.instances) {
+    const state = instance.driver.status?.state;
+    if (['waiting', 'backoff', 'stopped'].includes(state)) {
+      unavailable.add(instance.id);
+      add({ kind: 'driver', severity: state === 'waiting' ? 'info' : 'warning', instance: instance.id, deviceId: null, scope: 'instance', target: instance.id, code: state }, included.filter((d) => d.instance === instance.id).map((d) => d.id));
+    }
+  }
+  for (const device of included) {
+    // A shared-control entity repeats its master zone's alarms and can go
+    // offline with a missing member. The physical zones already report both.
+    if (unavailable.has(device.instance) || resourceRole(device) === 'control') continue;
+    if (device.online === false) {
+      add({ kind: 'offline', severity: 'warning', instance: device.instance, deviceId: device.id, scope: 'device', target: device.id, code: 'offline' }, [device.id]);
+      continue;
+    }
+    if (device.online !== true || !diagnosticDevices.includes(device)) continue;
+    const alarms = reportedAlarms(device);
+    const problem = binary(device, 'problem') === true;
+    if (problem && alarms.items.length === 0) {
+      alarms.reported = false;
+      alarms.items.push({ kind: 'problem', severity: 'warning', scope: 'device', code: 'reported' });
+    }
+    if (alarms.reported) diagnostics.reported++;
+    for (const alarm of alarms.items) {
+      const systemId = systemOf(device);
+      const scope = alarm.kind === 'unknown_alarm' ? 'device' : alarm.scope;
+      // Only a known numeric system identity permits consolidation across
+      // devices. An unknown system never absorbs another device's warning.
+      const target = scope === 'system' && systemId !== null ? systemId : device.id;
+      add({ ...alarm, scope, instance: device.instance, deviceId: device.id, target }, [device.id]);
+    }
+  }
+  diagnostics.unknown -= diagnostics.reported;
+  const severity = { error: 0, warning: 1, info: 2 };
+  const items = [...result.values()].sort((a, b) => severity[a.severity] - severity[b.severity] || a.id.localeCompare(b.id));
+  return { items, diagnostics, current: true };
 }
 
 const SECTION_ORDER = ['comfort', 'activity', 'limits', 'equipment', 'diagnostics', 'other'];

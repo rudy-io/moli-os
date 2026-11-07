@@ -277,6 +277,15 @@ impl Snapshot {
             .into_iter()
             .collect()
     }
+    /// Counts validated zones, keeping an isolated malformed row visible as
+    /// incomplete rather than presenting a reduced inventory as complete.
+    pub(crate) fn inventory_summary(&self) -> (usize, usize, bool) {
+        (
+            self.system_ids().len(),
+            self.zones.len(),
+            !self.incomplete_systems.is_empty(),
+        )
+    }
     pub(crate) fn scope_members(
         &self,
         instance: &InstanceId,
