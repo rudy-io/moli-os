@@ -220,7 +220,7 @@
 
   const label = (n) => n.replace(/\s+/g, ' ');
   /** Devices small when the whole floor shows, full size once zoomed in. */
-  const pinScale = $derived(Math.min(1, Math.max(0.6, (cam.k / fitK) * 0.6)));
+  const pinScale = $derived(Math.min(1.1, Math.max(0.85, (cam.k / fitK) * 0.85)));
   const fs = $derived(12 / cam.k);
   const visible = (x, y) => x > cam.x - 80 / cam.k && y > cam.y - 80 / cam.k && x < cam.x + (W + 80) / cam.k && y < cam.y + (H + 80) / cam.k;
 
@@ -622,7 +622,7 @@
   .drawing {
     position: relative;
     width: 100%;
-    max-height: max(320px, calc(100dvh - 360px));
+    max-height: max(440px, calc(100dvh - 280px));
     overflow: hidden;
     border-radius: var(--r-lg);
     box-shadow: var(--shadow);
