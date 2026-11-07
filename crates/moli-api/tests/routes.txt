@@ -34,6 +34,7 @@ DELETE /api/phones/{id}                    foyer   oui
 GET    /api/integrations/tuya-cloud        foyer   non
 PUT    /api/integrations/tuya-cloud        foyer   non
 GET    /api/integrations/overkiz-cloud     humain  non  # owner: independent cloud session status
+DELETE /api/integrations/overkiz-cloud/{instance} humain non # owner: purge one cloud account even after configuration removal
 GET    /api/integrations/overkiz-cloud/{instance}/catalog humain  non  # owner: cached private catalogue
 GET    /api/integrations/overkiz-cloud/{instance}/definitions/{collection}/{index} humain  non  # owner: cached definitions
 POST   /api/integrations/overkiz-cloud/{instance}/requests humain  non  # owner: bounded observation/session requests

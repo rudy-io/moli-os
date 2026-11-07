@@ -67,6 +67,18 @@ impl DurableSecrets {
     /// counter reservations. Hold the returned lease until the controller stops.
     /// Run on a blocking worker; unlike `set`, acquisition never waits for a peer.
     pub fn try_lease(&self, name: &str) -> io::Result<DurableLease> {
+        self.try_lease_inner(name, false)
+    }
+
+    /// Acquire protocol ownership and reload this instance's encrypted private
+    /// cache under the same vault lock. Unlike `try_lease`, unavailable private
+    /// storage refuses this lease; other protocols remain independent.
+    /// Run on a blocking worker. Restored observations are deliberately stale.
+    pub fn try_private_lease(&self, name: &str) -> io::Result<DurableLease> {
+        self.try_lease_inner(name, true)
+    }
+
+    fn try_lease_inner(&self, name: &str, private: bool) -> io::Result<DurableLease> {
         use std::fmt::Write as _;
         let digest = ring::digest::digest(
             &ring::digest::SHA256,
@@ -93,6 +105,14 @@ impl DurableSecrets {
             .values
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = next;
+        if private {
+            self.store
+                .0
+                .private
+                .as_ref()
+                .ok_or_else(|| io::Error::other("private state unavailable"))?
+                .reload_instance(&self.store.0.key, &self.instance)?;
+        }
         Ok(DurableLease(file))
     }
 
@@ -119,12 +139,14 @@ impl DurableSecrets {
 }
 
 #[derive(Clone)]
-pub(crate) struct SecretStore(Arc<SecretData>);
+pub(crate) struct SecretStore(pub(crate) Arc<SecretData>);
 
-struct SecretData {
-    path: PathBuf,
-    key: LessSafeKey,
-    values: Mutex<BTreeMap<String, String>>,
+pub(crate) struct SecretData {
+    pub(crate) path: PathBuf,
+    pub(crate) key: LessSafeKey,
+    pub(crate) values: Mutex<BTreeMap<String, String>>,
+    pub(crate) private: Option<crate::private_state::PrivateStateStore>,
+    needs_directory_sync: std::sync::atomic::AtomicBool,
     /// Serializes writes so the file always matches memory.
     write: Arc<tokio::sync::Mutex<()>>,
 }
@@ -226,7 +248,11 @@ impl SecretStore {
             Err(e) if e.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e),
         };
+        // A broken private catalogue must not disable unrelated vault users.
+        let private = crate::private_state::PrivateStateStore::open(&path, &key).ok();
         Ok(Self(Arc::new(SecretData {
+            private,
+            needs_directory_sync: std::sync::atomic::AtomicBool::new(false),
             path,
             key,
             values: Mutex::new(values),
@@ -294,16 +320,47 @@ impl SecretStore {
         change: impl FnOnce(&mut BTreeMap<String, String>) -> (T, bool) + Send + 'static,
         sync_parent: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
     ) -> io::Result<T> {
+        self.transaction_data_with_sync(move |_, next| Ok(change(next)), sync_parent)
+            .await
+    }
+
+    pub(crate) async fn transaction_data<T: Send + 'static>(
+        &self,
+        change: impl FnOnce(&SecretData, &mut BTreeMap<String, String>) -> io::Result<(T, bool)>
+        + Send
+        + 'static,
+    ) -> io::Result<T> {
+        self.transaction_data_with_sync(change, sync_parent_directory)
+            .await
+    }
+
+    async fn transaction_data_with_sync<T: Send + 'static>(
+        &self,
+        change: impl FnOnce(&SecretData, &mut BTreeMap<String, String>) -> io::Result<(T, bool)>
+        + Send
+        + 'static,
+        sync_parent: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
+    ) -> io::Result<T> {
         let guard = Arc::clone(&self.0.write).lock_owned().await;
         let data = Arc::clone(&self.0);
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
             let _file_lock = lock_file(&data.path)?;
             let mut next = data.current()?;
-            let (result, changed) = change(&mut next);
-            if changed {
+            // A failed CAS must still notice another process's durable revocation.
+            *data.values.lock().unwrap_or_else(PoisonError::into_inner) = next.clone();
+            let (result, changed) = change(&data, &mut next)?;
+            if changed || (!data.path.is_file() && !next.is_empty()) {
                 data.commit(next, sync_parent)?;
             } else {
+                if data
+                    .needs_directory_sync
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    sync_parent(parent_dir(&data.path))?;
+                    data.needs_directory_sync
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
                 *data.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
             }
             Ok(result)
@@ -327,7 +384,7 @@ impl SecretData {
         }
     }
 
-    fn commit(
+    pub(crate) fn commit(
         &self,
         next: BTreeMap<String, String>,
         sync_parent: impl FnOnce(&Path) -> io::Result<()>,
@@ -336,17 +393,22 @@ impl SecretData {
         write_durable_with(&self.path, &bytes, |parent| {
             // A completed rename retired the old token even if directory sync fails.
             *self.values.lock().unwrap_or_else(PoisonError::into_inner) = next;
-            sync_parent(parent)
+            self.needs_directory_sync
+                .store(true, std::sync::atomic::Ordering::Release);
+            sync_parent(parent)?;
+            self.needs_directory_sync
+                .store(false, std::sync::atomic::Ordering::Release);
+            Ok(())
         })
     }
 }
 
 #[cfg(unix)]
-fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+pub(crate) fn sync_parent_directory(parent: &Path) -> io::Result<()> {
     std::fs::File::open(parent)?.sync_all()
 }
 #[cfg(not(unix))]
-fn sync_parent_directory(_: &Path) -> io::Result<()> {
+pub(crate) fn sync_parent_directory(_: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -403,7 +465,7 @@ fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_durable_with(path, bytes, sync_parent_directory)
 }
 
-fn write_durable_with(
+pub(crate) fn write_durable_with(
     path: &Path,
     bytes: &[u8],
     after_rename: impl FnOnce(&Path) -> io::Result<()>,
@@ -438,7 +500,7 @@ fn write_durable_with(
     result
 }
 
-fn encrypt(key: &LessSafeKey, values: &BTreeMap<String, String>) -> io::Result<Vec<u8>> {
+pub(crate) fn encrypt(key: &LessSafeKey, values: &BTreeMap<String, String>) -> io::Result<Vec<u8>> {
     let mut nonce = [0u8; NONCE_LEN];
     SystemRandom::new()
         .fill(&mut nonce)
@@ -457,7 +519,7 @@ fn encrypt(key: &LessSafeKey, values: &BTreeMap<String, String>) -> io::Result<V
     Ok(out)
 }
 
-fn decrypt(key: &LessSafeKey, bytes: &[u8]) -> io::Result<BTreeMap<String, String>> {
+pub(crate) fn decrypt(key: &LessSafeKey, bytes: &[u8]) -> io::Result<BTreeMap<String, String>> {
     let rest = bytes
         .strip_prefix(MAGIC.as_slice())
         .ok_or_else(|| invalid("not a moli-os secret store"))?;

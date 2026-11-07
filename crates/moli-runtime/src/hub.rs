@@ -1548,6 +1548,65 @@ impl Hub {
         self.0.secrets.is_some()
     }
 
+    /// Private cached data and durable request slots, scoped to one instance.
+    /// An invalid private file disables only these handles, never the vault.
+    #[must_use]
+    pub fn private_state(&self, instance: &InstanceId) -> Option<crate::PrivateState> {
+        crate::PrivateState::new(self.0.secrets.as_deref()?.clone(), instance.to_string())
+    }
+
+    /// Owner cleanup of retained private data, even if its cache is unreadable.
+    /// `false` means credentials are retired durably but cached data still needs
+    /// repair; the retained cleanup marker makes the instance discoverable.
+    pub async fn purge_private_state(
+        &self,
+        instance: &InstanceId,
+        names: Vec<String>,
+    ) -> std::io::Result<bool> {
+        let store = self
+            .0
+            .secrets
+            .as_deref()
+            .ok_or_else(|| std::io::Error::other("no secret store"))?;
+        crate::private_state_handle::purge_retained(store.clone(), instance.to_string(), names)
+            .await
+    }
+
+    /// Instances retaining one of the caller's exact private names. Values never
+    /// leave the scoped accessors; this also finds removed driver configurations.
+    #[must_use]
+    pub fn private_instances(&self, names: &[&str]) -> Vec<InstanceId> {
+        let Some(store) = &self.0.secrets else {
+            return vec![];
+        };
+        let mut instances = std::collections::BTreeSet::new();
+        for key in store
+            .0
+            .values
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+        {
+            if let Some((instance, name)) = key.split_once('/')
+                && names.contains(&name)
+            {
+                instances.insert(InstanceId::from(instance));
+            }
+        }
+        if let Some(private) = &store.0.private {
+            for instance in private.instances() {
+                let instance = InstanceId::from(instance.as_str());
+                if self
+                    .private_state(&instance)
+                    .is_some_and(|state| names.iter().any(|name| state.get(name).is_some()))
+                {
+                    instances.insert(instance);
+                }
+            }
+        }
+        instances.into_iter().collect()
+    }
+
     pub(crate) fn durable_secrets(&self, instance: &InstanceId) -> Option<secrets::DurableSecrets> {
         Some(secrets::DurableSecrets::new(
             self.0.secrets.as_ref()?.clone(),
@@ -1593,7 +1652,7 @@ impl Hub {
     }
 
     /// Atomically queues one encrypted value; false means an existing slot is busy.
-    /// Same-process serialization only: one active writer per vault.
+    /// Serialized with other writers, including separate processes.
     pub async fn insert_secret_if_absent(
         &self,
         instance: &InstanceId,

@@ -136,6 +136,12 @@ impl DriverCtx {
         self.hub.durable_secrets(&self.instance)
     }
 
+    /// Instance-scoped cached data, separate from credential checkpoints.
+    #[must_use]
+    pub fn private_state(&self) -> Option<crate::PrivateState> {
+        self.hub.private_state(&self.instance)
+    }
+
     /// A secret previously stored by this instance.
     #[must_use]
     pub fn secret(&self, name: &str) -> Option<String> {

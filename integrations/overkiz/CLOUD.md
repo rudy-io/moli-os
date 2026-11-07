@@ -105,12 +105,19 @@ owner chooses their own Moli code; a new installation's one-use setup code is
 read by the person themselves, following the project's
 [installation procedure](../../.claude/skills/installer-moli/SKILL.md).
 
-The username/password request is briefly queued in the encrypted vault and
-consumed before authentication. They are not retained in the running session or
-catalogue. The driver is the only writer of its cloud session. Before rotating a
-refresh token it checkpoints the operation; after rotation it saves the replacement
-before further authenticated reads. An ambiguous refresh response or interrupted
-refresh checkpoint requires reconnection instead of replaying an old token.
+The username/password request is briefly queued in the encrypted private-state
+file and durably consumed before authentication. They are not retained in the
+running session or catalogue. The controller owns its cloud session. Before
+rotating a refresh token it durably checkpoints the operation in `secrets.enc`;
+after rotation it saves the replacement before further authenticated reads.
+
+A typed failure before request dispatch, such as DNS resolution or connection
+refusal, can restore the previous session. That rollback must itself be durable
+before the token can be tried again. A failed rollback blocks further provider
+requests until persistence succeeds. TLS/exchange failures, a global timeout,
+an ambiguous HTTP response including a 5xx, or an interrupted refresh checkpoint
+do not prove that the token was unused: the possibly consumed token is retired
+rather than replayed.
 
 Older version-1 sessions that incorrectly recorded the setup `externalOID` as the
 OAuth scope are validated before recovery. Their old access bearer is retired;
@@ -123,20 +130,84 @@ expect the incorrect setup-scoped binding cannot resume it. Keep the current
 vault and master key when rolling back code; never restore an old refresh-token
 snapshot, which may contain an already consumed token.
 
-Use one active writer per vault/data directory. Do not share the observer's vault
-between Moli processes or run concurrent CLI secret mutations against it. The
-owner API and driver coordinate through the same process and bounded queue.
-Keep the new instance's own master key; never replace an existing key to repair
-authentication.
+A per-instance operating-system lease permits only one cloud controller to use
+an OAuth identity in a vault/data directory. It is acquired on a blocking worker
+before restoring a session or consuming an owner request, and remains held until
+the actor has actually stopped. At ownership handoff, the session and that
+instance's private state are reloaded under the vault lock: pending input and
+quota deadlines are current, while observations restart stale. Other instances'
+live observations are preserved. This does not coordinate external OAuth clients
+or copied data directories. Do not edit cloud-session entries with the CLI while
+the controller owns them. The owner API and driver coordinate through a
+bounded queue and generation checks. Keep the instance's own master key; never
+replace an existing key to repair authentication.
 
-Automatic retries respect the provider's advertised `Retry-After`, including
-delays longer than an hour. Only the fallback backoff is limited to 60–3,600
-seconds. A quota response stops the current cycle without marking the remaining
+Automatic retries use the provider's advertised `Retry-After`, capped at 3,600
+seconds. The cap also applies when restoring a saved delay after restart. Failed
+discovery and observation attempts use a growing backoff from 60 to 3,600 seconds
+instead of repeating a full discovery every minute. A quota response stops the
+current cycle without marking the remaining
 unattempted collections as failed observations. Manual refresh does not create a
 new login generation or bypass an active quota delay.
 A queued connection request encountered during that delay is consumed and
 reported as rate-limited, with its request identifier; its password is not left
 waiting for an arbitrarily long provider delay.
+
+The owner can disconnect the cloud account even after the `cloud` table has been
+removed. Disconnect retires the current lifetime, removes its cloud session,
+pending input and cached private data, and prevents an older worker from writing
+them back. It neither contacts Somfy nor removes the local developer token,
+certificate pin or other instances' data. It is not delayed by a provider quota.
+
+If the private cache is unreadable at startup, disconnect still durably revokes
+the credentials and retires the old lifetime. The owner endpoint returns HTTP
+503 with `error: "cache_unavailable"` and `credentials_removed: true`, rather
+than claiming a complete purge. A cleanup marker (`cloud::CLEANUP_KEY`) keeps the
+instance discoverable even after its configuration has been removed. The panel
+clears its private browser copy, reports the remaining cleanup and offers an
+explicit retry; login and refresh stay blocked while that marker exists.
+The shared `private-state.enc` file is preserved: deleting the entire file could
+destroy other instances' data. Resolve the storage error, restart Moli if the
+cache was unavailable at startup, then retry the scoped cleanup. Its marker is
+removed only after the namespace purge is durable. An ordinary error or the
+panel's 30-second deadline does not prove credential removal; the panel keeps
+the cached view, reports the unknown outcome and does not retry automatically.
+
+## Encrypted private cache and migration
+
+`secrets.enc` contains authentication checkpoints and the opaque lifetime fence.
+The catalogue, connection-state cache and bounded pending requests live in the
+separate `private-state.enc` file, encrypted with the same master key. Neither
+file exposes definitions or credentials through ordinary device state or logs.
+The filename is fixed; an instance, setup or provider response cannot choose a
+filesystem path.
+
+The controller publishes live observation times in memory. Durable snapshots
+neutralize liveness: collection observation timestamps use `Some(0)` where the
+catalogue validator requires a timestamp with retained data; the connection's
+last-observation timestamp is `None`. Retry metadata needed to resume a bounded
+backoff remains durable. A restart therefore restores historical definitions,
+not a fresh observation. Unchanged durable content only refreshes memory: it
+does not rewrite or synchronize the encrypted snapshot on every poll. Pending
+requests still require durable insertion and removal before acknowledgement or
+dispatch.
+
+Every session or private-state mutation checks its expected opaque epoch while
+holding the vault's transaction lock. Disconnect commits a new epoch and removes
+the selected cloud credentials before removing the private namespace. A worker
+from the retired lifetime cannot republish data, even if its asynchronous caller
+was cancelled while a disk transaction was already running. A rename followed
+by a failed directory sync updates the cache to match disk, but is not treated as
+durable success; an identical retry must finish the synchronization before it is
+acknowledged.
+
+Migration from older versions first writes and synchronizes the encrypted
+private copy, then removes the legacy catalogue/state/queue entries from the
+vault. It is restartable, preserves newer private records, and does not change
+native credentials. These two files are not one atomic transaction: their
+generation binding makes an interrupted migration or disconnect safe to resume.
+See [backup and restore](../../docs/components/exploitation.md#sauvegarder-et-restaurer)
+for the fixed-file backup and old-backup cleanup rules.
 
 ## Cached owner interface
 
@@ -147,9 +218,11 @@ remain visible as stale during a connection failure. A previous account/setup's
 catalogue is withheld when that binding no longer matches.
 
 The persisted `Ready` state alone does not establish current freshness: the
-cloud source must have completed a cycle in the running process and persisted
-its result. Each collection also retains its own status and observation time.
-The local source being online does not make cloud data current.
+cloud source must have completed a cycle in the running process and published
+its validated result. A changed durable snapshot must be saved before success;
+unchanged definitions can refresh their live timestamps without another disk
+write. Each collection retains its own status and observation time. The local
+source being online does not make cloud data current.
 
 Detailed definitions are fetched as server-serialized JSON text against the
 catalogue's revision. A changed revision requires a new catalogue read instead

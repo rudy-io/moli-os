@@ -5,7 +5,7 @@ use axum::{
     extract::{FromRequestParts, Path, Query, Request},
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use moli_core::InstanceId;
 use moli_overkiz::{cloud, inventory};
@@ -16,7 +16,17 @@ use ring::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+
+const CLOUD_RECORDS: [&str; 4] = [
+    cloud::SESSION_KEY,
+    cloud::PENDING_KEY,
+    cloud::STATE_KEY,
+    inventory::INVENTORY_KEY,
+];
 
 #[derive(Clone)]
 pub(crate) struct Configured(pub Arc<BTreeMap<InstanceId, cloud::Config>>);
@@ -61,6 +71,10 @@ pub(crate) fn routes() -> Router<Hub> {
     Router::new()
         .route("/api/integrations/overkiz-cloud", get(list))
         .route(
+            "/api/integrations/overkiz-cloud/{instance}",
+            delete(disconnect),
+        )
+        .route(
             "/api/integrations/overkiz-cloud/{instance}/catalog",
             get(catalog),
         )
@@ -79,10 +93,44 @@ fn error(status: StatusCode, code: &'static str) -> Response {
 fn unavailable() -> Response {
     error(StatusCode::SERVICE_UNAVAILABLE, "unavailable")
 }
+fn cleanup_pending() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error":"cache_unavailable", "credentials_removed":true})),
+    )
+        .into_response()
+}
 fn changed() -> Response {
     error(StatusCode::CONFLICT, "catalog_changed")
 }
 impl Owner {
+    fn known_instances(&self) -> BTreeSet<InstanceId> {
+        self.configured
+            .0
+            .iter()
+            .filter(|(_, config)| config.validate().is_ok())
+            .map(|(instance, _)| instance.clone())
+            .chain(self.hub.private_instances(&CLOUD_RECORDS))
+            .chain(self.hub.private_instances(&[cloud::CLEANUP_KEY]))
+            .collect()
+    }
+    fn cleanup_pending(&self, instance: &InstanceId) -> bool {
+        self.hub.secret(instance, cloud::CLEANUP_KEY).is_some()
+    }
+    fn known_instance(&self, name: &str) -> Result<InstanceId, (StatusCode, &'static str)> {
+        let instance = InstanceId::from(name);
+        if self.known_instances().contains(&instance) {
+            Ok(instance)
+        } else {
+            Err((StatusCode::NOT_FOUND, "instance_not_found"))
+        }
+    }
+    fn record(&self, instance: &InstanceId, name: &str) -> Option<String> {
+        self.hub
+            .private_state(instance)
+            .and_then(|state| state.get(name))
+            .or_else(|| self.hub.secret(instance, name))
+    }
     fn instance(
         &self,
         name: &str,
@@ -105,7 +153,7 @@ impl Owner {
         instance: &InstanceId,
         binding: Option<&cloud::SessionBinding>,
     ) -> cloud::ConnectionState {
-        let saved = self.hub.secret(instance, cloud::STATE_KEY);
+        let saved = self.record(instance, cloud::STATE_KEY);
         let decoded = saved
             .as_ref()
             .and_then(|body| cloud::decode_state(body.as_bytes()).ok());
@@ -136,13 +184,13 @@ impl Owner {
             .is_some_and(|d| d.online == Some(true))
     }
     fn cached(&self, name: &str) -> Result<Cached, (StatusCode, &'static str)> {
-        let (instance, config) = self.instance(name)?;
+        let instance = self.known_instance(name)?;
+        let configured = self.instance(name).ok().map(|(_, config)| config);
         let binding = self
             .binding(&instance)
             .ok_or((StatusCode::CONFLICT, "catalog_changed"))?;
         let bytes = self
-            .hub
-            .secret(&instance, inventory::INVENTORY_KEY)
+            .record(&instance, inventory::INVENTORY_KEY)
             .ok_or((StatusCode::NOT_FOUND, "not_observed"))?;
         let catalog = inventory::decode_catalog(bytes.as_bytes())
             .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?;
@@ -153,11 +201,17 @@ impl Owner {
             return Err((StatusCode::CONFLICT, "catalog_changed"));
         }
         let state = self.state(&instance, Some(&binding));
-        let current = self.online(&instance)
+        let poll_secs = configured.map_or_else(
+            || cloud::Config::default().poll_secs,
+            |config| config.poll_secs,
+        );
+        let current = configured.is_some()
+            && !self.cleanup_pending(&instance)
+            && self.online(&instance)
             && binding.phase == cloud::SessionPhase::Ready
             && state.phase == cloud::ConnectionPhase::Ready
             && state.failure.is_none()
-            && recent(state.last_observation_ms, config.poll_secs);
+            && recent(state.last_observation_ms, poll_secs);
         let fresh_collections: BTreeMap<_, _> = catalog
             .collections
             .iter()
@@ -166,7 +220,7 @@ impl Owner {
                     *kind,
                     current
                         && collection.status == inventory::CollectionStatus::Available
-                        && recent(collection.last_observation_ms, config.poll_secs),
+                        && recent(collection.last_observation_ms, poll_secs),
                 )
             })
             .collect();
@@ -201,24 +255,45 @@ fn hex(bytes: &[u8]) -> String {
 }
 async fn list(owner: Owner) -> Response {
     let instances: Vec<_> = owner
-        .configured
-        .0
+        .known_instances()
         .iter()
-        .filter(|(_, c)| c.validate().is_ok())
-        .map(|(instance, _)| {
+        .map(|instance| {
+            let configured = owner.instance(instance.as_str()).is_ok();
+            let cleanup_pending = owner.cleanup_pending(instance);
             let binding = owner.binding(instance);
             let state = owner.state(instance, binding.as_ref());
-            let online = owner.online(instance)
+            let online = configured && !cleanup_pending && owner.online(instance)
                 && binding.as_ref().is_some_and(|b| {
                     state.generation.as_ref() == Some(&b.generation)
                         && state.scope == b.scope
                         && b.phase == cloud::SessionPhase::Ready
                 });
             let session_phase = binding.as_ref().map(|binding| binding.phase);
-            json!({"instance":instance,"state":state,"online":online,"session_phase":session_phase})
+            json!({"instance":instance,"configured":configured,"cleanup_pending":cleanup_pending,"state":state,"online":online,"session_phase":session_phase})
         })
         .collect();
     Json(json!({"instances":instances})).into_response()
+}
+async fn disconnect(owner: Owner, Path(name): Path<String>) -> Response {
+    let instance = match owner.known_instance(&name) {
+        Ok(instance) => instance,
+        Err((status, code)) => return error(status, code),
+    };
+    match owner
+        .hub
+        .purge_private_state(
+            &instance,
+            CLOUD_RECORDS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        )
+        .await
+    {
+        Ok(true) => Json(json!({"disconnected": true})).into_response(),
+        Ok(false) => cleanup_pending(),
+        Err(_) => unavailable(),
+    }
 }
 async fn catalog(owner: Owner, Path(instance): Path<String>) -> Response {
     match owner.cached(&instance) {
@@ -272,6 +347,15 @@ async fn request(owner: Owner, Path(instance): Path<String>, request: Request) -
         Ok((instance, _)) => instance,
         Err((status, code)) => return error(status, code),
     };
+    // Bind the request to the current lifetime before its body can wait across
+    // a disconnect. A later insertion must not acquire the replacement epoch.
+    let state = owner.hub.private_state(&instance);
+    if owner.cleanup_pending(&instance) {
+        return cleanup_pending();
+    }
+    let Some(state) = state else {
+        return unavailable();
+    };
     let Ok(body) = axum::body::to_bytes(request.into_body(), cloud::MAX_PENDING_BYTES).await else {
         return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_request");
     };
@@ -295,11 +379,11 @@ async fn request(owner: Owner, Path(instance): Path<String>, request: Request) -
     else {
         return error(StatusCode::BAD_REQUEST, "invalid_request");
     };
-    match owner
-        .hub
-        .insert_secret_if_absent(&instance, cloud::PENDING_KEY, &bytes)
-        .await
-    {
+    // An unconsumed pre-migration request still owns the slot.
+    if owner.hub.secret(&instance, cloud::PENDING_KEY).is_some() {
+        return error(StatusCode::CONFLICT, "busy");
+    }
+    match state.insert_if_absent(cloud::PENDING_KEY, &bytes).await {
         Ok(true) => (
             StatusCode::ACCEPTED,
             Json(json!({"request_id":envelope.request_id})),
