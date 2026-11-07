@@ -11,6 +11,8 @@
   "commun.volet.voir_connexion": "Voir la connexion",
   "commun.volet.actions_observees": "Commandes annoncées : {actions}",
   "commun.volet.impulsion": "Impulsion",
+  "commun.impulsion.relais": "Relais {n}",
+  "commun.impulsion.bouton": "Impulsion · {relais}",
   "commun.clim.mode.auxiliaire": "Chauffage auxiliaire",
   "commun.clim.ventilation": "Ventilation",
   "commun.volet.position": "Position",

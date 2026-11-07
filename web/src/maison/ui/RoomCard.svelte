@@ -6,6 +6,7 @@
   import ClimateCard from './ClimateCard.svelte';
   import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
+  import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
@@ -287,6 +288,10 @@
 
   {#each room.covers as d (d.id)}
     <CoverTile id={d.id} {icons} />
+  {/each}
+
+  {#each room.impulses as d (d.id)}
+    <ImpulseTile id={d.id} {icons} />
   {/each}
 
   {#each room.climates as d (d.id)}

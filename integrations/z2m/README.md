@@ -2,7 +2,7 @@
 
 - Réutilisé : le protocole MQTT de Zigbee2MQTT ; les points viennent des `exposes`, sans code
   par marque.
-- `fixtures/bridge_devices.json` (8 appareils, dont un volet anonymisé à partir d'un vrai Lonsonho QS-Zigbee-C03) et `state.json` : captures réelles, rejouées
+- `fixtures/bridge_devices.json` (9 appareils, dont un volet anonymisé à partir d'un vrai Lonsonho QS-Zigbee-C03 et un Tuya ZG-2002-RF à deux relais en mode impulsion) et `state.json` : captures réelles, rejouées
   par les tests de `crates/moli-z2m/src/catalog.rs`.
 - Identité : adresse IEEE (le `friendly_name` ne sert qu'aux sujets).
 - Reste : Z2M ne rejoue pas les états, les appareils endormis ne sont connus qu'à leur
