@@ -1543,3 +1543,252 @@ async fn a_restarted_driver_does_not_keep_the_previous_runs_warning() {
     cancel.cancel();
     supervisor.await.unwrap();
 }
+
+/// A switch behind a bridge that loses its first `lost` orders: it answers
+/// « sent » and nothing happens, like Zigbee2MQTT restarting. It also has a
+/// momentary point (a gate's pulse), which no state ever confirms.
+struct DeafSwitch {
+    /// What its owner called it (« Portail » makes it a gate to the guard).
+    name: &'static str,
+    lost: u32,
+    /// An undeclared pulse relay: it reports on, then off at once.
+    falls_back: bool,
+    orders: Arc<AtomicU32>,
+    pulses: Arc<AtomicU32>,
+}
+
+impl Driver for DeafSwitch {
+    fn kind(&self) -> &'static str {
+        "deaf"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("sw1");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: self.name.into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    spec("state", Kind::Binary, true, Semantic::OnOff),
+                    spec("pulse", Kind::Binary, true, Semantic::Other),
+                ],
+            });
+            ctx.set_state(&id, "state", Value::Bool(false));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                if &*cmd.key == "state" {
+                    let n = self.orders.fetch_add(1, Ordering::SeqCst) + 1;
+                    if n > self.lost {
+                        ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                        if self.falls_back {
+                            ctx.set_state(&cmd.device.id, &cmd.key, Value::Bool(false));
+                        }
+                    }
+                } else {
+                    self.pulses.fetch_add(1, Ordering::SeqCst);
+                    ctx.set_state(&cmd.device.id, &cmd.key, Value::Bool(true));
+                }
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// The hub, a switch losing its first `lost` orders, and its two counters.
+async fn deaf(lost: u32) -> (Hub, CancellationToken, Arc<AtomicU32>, Arc<AtomicU32>) {
+    deaf_switch(lost, false).await
+}
+
+async fn deaf_switch(
+    lost: u32,
+    falls_back: bool,
+) -> (Hub, CancellationToken, Arc<AtomicU32>, Arc<AtomicU32>) {
+    deaf_named("sw1", lost, falls_back).await
+}
+
+async fn deaf_named(
+    name: &'static str,
+    lost: u32,
+    falls_back: bool,
+) -> (Hub, CancellationToken, Arc<AtomicU32>, Arc<AtomicU32>) {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let cancel = CancellationToken::new();
+    let orders = Arc::new(AtomicU32::new(0));
+    let pulses = Arc::new(AtomicU32::new(0));
+    spawn_driver(
+        &hub,
+        InstanceId::from("deaf"),
+        Arc::new(DeafSwitch {
+            name,
+            lost,
+            falls_back,
+            orders: Arc::clone(&orders),
+            pulses: Arc::clone(&pulses),
+        }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    (hub, cancel, orders, pulses)
+}
+
+fn deaf_point(key: &str) -> PointId {
+    PointId::from(format!("deaf:sw1/{key}"))
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_order_to_a_switch_is_sent_again() {
+    let (hub, _cancel, orders, _) = deaf(1).await;
+    hub.command(
+        &deaf_point("state"),
+        Value::Bool(true),
+        Origin::Automation,
+        Some("Lumière".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(orders.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        hub.state(&deaf_point("state")).unwrap().value,
+        Value::Bool(false)
+    );
+
+    tokio::time::sleep(moli_runtime::CONFIRM_WINDOW + Duration::from_secs(1)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), 2, "sent again once");
+    assert_eq!(
+        hub.state(&deaf_point("state")).unwrap().value,
+        Value::Bool(true)
+    );
+    let journal = hub.journal(10);
+    assert_eq!(journal.len(), 2);
+    let by = journal[0].actor.as_deref().unwrap();
+    assert!(by.contains("2/5") && by.contains("Lumière"), "{by}");
+    assert_eq!(journal[0].origin, Origin::Automation);
+    assert_eq!(journal[0].outcome, Outcome::Ok);
+
+    // Obeyed: nothing more.
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), 2);
+    assert_eq!(hub.journal(10).len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_obeyed_order_is_never_sent_again() {
+    let (hub, _cancel, orders, _) = deaf(0).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), 1);
+    assert_eq!(hub.journal(10).len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_switch_that_never_obeys_gets_five_sends_then_a_failure() {
+    let (hub, _cancel, orders, _) = deaf(u32::MAX).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), moli_runtime::MAX_SENDS);
+    let journal = hub.journal(20);
+    // The order, its four resends, the failure.
+    assert_eq!(journal.len(), 6);
+    assert!(
+        matches!(&journal[0].outcome, Outcome::Err(e) if e.contains('5')),
+        "{:?}",
+        journal[0].outcome
+    );
+    assert_eq!(journal[0].actor, None);
+
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), moli_runtime::MAX_SENDS);
+    assert_eq!(hub.journal(20).len(), 6);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_newer_order_ends_the_follow_up() {
+    let (hub, _cancel, orders, _) = deaf(u32::MAX).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    // A person changes their mind before the first resend.
+    hub.command(&deaf_point("state"), Value::Bool(false), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        orders.load(Ordering::SeqCst),
+        2,
+        "no resend of the old order"
+    );
+    assert_eq!(hub.journal(10).len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_momentary_point_is_never_sent_again() {
+    let (hub, _cancel, _, pulses) = deaf(0).await;
+    hub.command(&deaf_point("pulse"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(pulses.load(Ordering::SeqCst), 1);
+    assert_eq!(hub.journal(10).len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relay_that_falls_back_at_once_is_not_sent_again() {
+    // On for less than a look at its state: its report was heard.
+    let (hub, _cancel, orders, _) = deaf_switch(0, true).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        hub.state(&deaf_point("state")).unwrap().value,
+        Value::Bool(false)
+    );
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        orders.load(Ordering::SeqCst),
+        1,
+        "a gate must not open twice"
+    );
+    assert_eq!(hub.journal(10).len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn another_points_report_does_not_confirm_an_order() {
+    let (hub, _cancel, orders, _) = deaf(1).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    // Its neighbour says « on »: that is not the switch obeying.
+    hub.command(&deaf_point("pulse"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(moli_runtime::CONFIRM_WINDOW + Duration::from_secs(1)).await;
+    assert_eq!(
+        orders.load(Ordering::SeqCst),
+        2,
+        "the lost order went again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_gate_is_never_sent_again() {
+    // Its relay moved, its report was lost: sent again, it would close.
+    let (hub, _cancel, orders, _) = deaf_named("Portail", u32::MAX, false).await;
+    hub.command(&deaf_point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert_eq!(orders.load(Ordering::SeqCst), 1, "a gate's order goes once");
+    assert_eq!(hub.journal(10).len(), 1);
+}

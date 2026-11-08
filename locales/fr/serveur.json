@@ -96,6 +96,8 @@
   "serveur.garde.machine": "ordre à une machine (imprimante, ordinateur) : un humain décide",
   "serveur.garde.code_partout": "code demandé pour chaque commande (mode pin)",
   "serveur.garde.en_attente": "en attente d'autorisation humaine #{id} : {reason}",
+  "serveur.ordre.renvoi": "renvoi {envoi}/{envois}",
+  "serveur.ordre.non_confirme": "l'appareil n'a pas confirmé après {envois} envois",
   "serveur.garde.remplacee": "remplacée par une demande plus récente",
   "serveur.garde.cedee": "cédée à une demande plus récente : trop de demandes en attente",
   "serveur.garde.expiree": "expirée",
