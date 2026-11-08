@@ -172,6 +172,11 @@
 
   <DashboardCode />
 
+  <section class="gateway-entry" aria-label={t('systeme.airzone.title')}>
+    <div><h2>{t('systeme.airzone.title')}</h2><p>{t('systeme.airzone.help')}</p></div>
+    <div class="gateway-links"><a href="#/airzone/installation">{t('airzone_gateways.manage')}<Icon name="chevron-right" size={18} /></a><a href="#/airzone/add">{t('systeme.airzone.add')}<Icon name="chevron-right" size={18} /></a></div>
+  </section>
+
   <AssistantSettings />
 
   <AssistantExchanges />
@@ -329,6 +334,8 @@
   .somfy-entry span { flex: 1; }
   .somfy-entry:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 
+
+  .gateway-links {display:flex;gap:12px;flex-wrap:wrap;}
   .systeme {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -338,6 +345,13 @@
   .systeme > :global(*) {
     min-width: 0;
   }
+
+  .gateway-entry {display:flex; flex-wrap:wrap; align-items:center; gap:16px 28px; padding:20px; border-radius:var(--r-lg); background:var(--surface); box-shadow:var(--shadow);}
+  .gateway-entry div {flex:1 1 280px;}
+  .gateway-entry h2 {font-size:18px; margin:0 0 7px;}
+  .gateway-entry p {font-size:14px; line-height:1.6; color:var(--ink-2); margin:0; max-width:65ch;}
+  .gateway-entry a {display:inline-flex; align-items:center; gap:6px; min-height:44px; color:var(--cool); font-weight:600; font-size:14px;}
+  .gateway-entry a:focus-visible {outline:3px solid var(--cool); outline-offset:3px;}
 
   .roomless {
     display: grid;

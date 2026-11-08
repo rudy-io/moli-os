@@ -55,16 +55,18 @@ test('unknown restored devices remain offline until availability and only fresh 
   event({type:'availability',device:device.id,online:true});assert.equal(hub.devices[device.id].online,true);
 });
 
-test('registry revision changes on registration and reconnect snapshots but not status or samples',()=>{
+test('registry revision changes on registration, withdrawal and reconnect snapshots but not status or samples',()=>{
   const revision=hub.driverRevision;
   assert.ok(Number.isSafeInteger(revision));
   event({type:'driver_registered',instance:'airzone-test',kind:'airzone',integration:'airzone'});
   assert.equal(hub.driverRevision,revision+1);
   event({type:'driver_status',instance:'airzone-test',status:{state:'backoff'}});
   assert.equal(hub.driverRevision,revision+1);
+  event({type:'driver_unregistered',instance:'airzone-test'});
+  assert.equal(hub.driverRevision,revision+2);assert.equal(hub.drivers.length,0);
   source.onerror();assert.equal(hub.connected,false);
   source.emit('snapshot',{devices:[],drivers:[]});
-  assert.equal(hub.connected,true);assert.equal(hub.driverRevision,revision+2);
+  assert.equal(hub.connected,true);assert.equal(hub.driverRevision,revision+3);
 });
 
 test('restoration uses the persisted label even without a previous browser device, and supersedes an older label',()=>{

@@ -523,5 +523,13 @@
   "systeme.somfy.disconnected": "Compte déconnecté de Moli.",
   "systeme.somfy.not_configured": "Le complément cloud a été retiré de la configuration. Vous pouvez encore déconnecter ce compte pour effacer ses données.",
   "systeme.somfy.retry_disconnect": "Réessayer la suppression",
-  "systeme.somfy.error.cache_unavailable": "Connexion retirée. Les données cloud restantes n’ont pas pu être effacées. Réessayez après avoir résolu l’erreur de stockage."
+  "systeme.somfy.error.cache_unavailable": "Connexion retirée. Les données cloud restantes n’ont pas pu être effacées. Réessayez après avoir résolu l’erreur de stockage.",
+  "systeme.journal.pilote_lecture_seule": "Pilote {kind} ajouté en lecture seule",
+  "systeme.journal.pilote_ajoute": "Pilote {kind} ajouté",
+  "systeme.airzone.title": "Passerelle Airzone",
+  "systeme.airzone.help": "Connectez une passerelle compatible avec l’API locale et retrouvez ses zones dans Moli, en lecture seule.",
+  "systeme.airzone.add": "Ajouter une passerelle",
+  "systeme.journal.pilote_pause": "Pilote {kind} mis en pause",
+  "systeme.journal.pilote_reconfigure_lecture_seule": "Pilote {kind} reconfiguré en lecture seule",
+  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré"
 }

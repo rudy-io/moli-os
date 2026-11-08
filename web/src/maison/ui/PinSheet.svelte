@@ -33,6 +33,12 @@
         : t('commun.code.seconde_fois')
       : /automatisme|automation/i.test(home.held?.reason ?? '')
         ? t('commun.code.raison_automatisme')
+        : home.held?.reason === 'airzone_control'
+          ? t('airzone_gateways.control_pin')
+        : home.held?.reason === 'airzone_read_only'
+          ? t('airzone_gateways.read_only_pin')
+        : home.held?.reason === 'discovery'
+          ? t('airzone_wizard.discovery_pin')
         : /configuration/i.test(home.held?.reason ?? '')
           ? t('commun.code.raison_configuration')
         : /calme|quiet/i.test(home.held?.reason ?? '')

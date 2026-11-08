@@ -31,6 +31,7 @@ mod people_api;
 mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
+pub mod airzone_setup;
 mod phones;
 mod plan;
 mod rest;
@@ -101,6 +102,8 @@ impl Household {
 /// Surface settings.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    /// Bounded human-only Airzone onboarding, owned by the executable.
+    pub airzone_setup: Option<Arc<dyn airzone_setup::AirzoneSetup>>,
     /// Host names (or IPs) this instance is reached by, besides localhost.
     pub allowed_hosts: Vec<String>,
     /// PIN that opens a human session in the dashboard. `None`: nobody is
@@ -325,6 +328,45 @@ fn assistant_routes() -> Router<Hub> {
         .route("/api/assistant/key", put(assistant::set_key))
 }
 
+fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hub> {
+    Router::new()
+        .route(
+            "/api/integrations/airzone/discover",
+            upload(post(airzone_setup::discover), 1024, humans),
+        )
+        .route(
+            "/api/integrations/airzone/probe",
+            upload(post(airzone_setup::probe), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone",
+            upload(post(airzone_setup::install), 2048, humans).get(airzone_setup::list),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/probe",
+            upload(post(airzone_setup::probe_update), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}",
+            upload(put(airzone_setup::update), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/withdraw",
+            upload(post(airzone_setup::withdraw), 1024, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/mode",
+            upload(post(airzone_setup::set_mode), 1024, humans),
+        )
+        .merge(overkiz::routes())
+        .layer(Extension(airzone_setup::Setup(
+            options.airzone_setup.clone(),
+        )))
+        .layer(Extension(overkiz::Configured(Arc::new(
+            options.overkiz_cloud.clone(),
+        ))))
+}
+
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
@@ -334,6 +376,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
     }
     Router::new()
         .route("/api/health", get(rest::health))
+        .merge(integration_routes(&humans, options))
         .merge(device_routes())
         .route("/api/media/{name}", get(rest::media))
         .route("/api/command", post(rest::command))
@@ -351,7 +394,6 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/bench", get(rest::bench))
         .route("/api/home", get(rest::home))
         .merge(house_routes(&humans, options))
-        .merge(overkiz::routes())
         .route("/api/system", get(system::system))
         .route("/api/energy", get(rest::energy))
         .route("/api/energy/price", put(rest::set_energy_price))
@@ -410,9 +452,6 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
-        .layer(Extension(overkiz::Configured(Arc::new(
-            options.overkiz_cloud.clone(),
-        ))))
         .layer(Extension(humans))
         .layer(Extension(persons))
         .layer(DefaultBodyLimit::max(BODY))

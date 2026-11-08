@@ -1,11 +1,22 @@
 # Installation / Onboarding
 
-1. FR : Vérifier une passerelle compatible API locale, son adresse et son port.
-   EN: Verify a Local API controller, its host and port. Cloud-only equipment
+1. FR : Allumer une passerelle compatible API locale, sur le réseau de Moli.
+   EN: Power on a Local API controller on Moli's network. Cloud-only equipment
    is not made locally compatible by adding this driver.
-2. FR : Créer une instance par passerelle, `read_only = true` explicite pour cet essai,
-   puis `moli-os check-config`. EN: Configure one instance per controller with
-   read-only explicitly enabled for this trial, validate configuration, then restart Moli.
+2. FR : Dans **Système → Ajouter une passerelle**, lancer la recherche, choisir
+   une passerelle, puis confirmer son ajout dans Moli. Le code Moli protège
+   l’accès à la recherche et à l’installation. Une passerelle déjà ajoutée est
+   signalée ; la sélection seule n’ajoute rien. L’enregistrement démarre la
+   lecture des zones sans fichier à modifier.
+   **Saisir une adresse** reste disponible si la recherche ne trouve pas le
+   matériel. L’adresse, le port et l’empreinte HTTPS se règlent alors manuellement.
+   EN: In **System → Add a gateway**, search, choose a controller and explicitly
+   confirm its read-only addition. The Moli code protects discovery and setup.
+   Existing controllers are identified; selecting a result does not install it.
+   Use the manual-address fallback if discovery cannot reach the controller.
+   Manual configuration remains available for advanced deployment:
+   one instance per controller, `read_only = true`, then `moli-os check-config`
+   and restart. Do not configure the same gateway through both paths.
 3. FR : Comparer les systèmes/zones et les capacités publiées avec l'installation.
    EN: Compare discovered systems/zones, units, ranges and capabilities with the
    installation. Assign Moli rooms; protect the relevant rooms. A new zone already
@@ -20,10 +31,42 @@
 6. FR : Pour HTTPS, choisir le port et une empreinte SHA-256 vérifiée.
    EN: HTTPS uses an explicit certificate fingerprint; a changed certificate
    requires deliberate verification and configuration, never an automatic bypass.
-7. FR : Conserver la lecture seule pendant les essais. EN: For a separately
-   authorized actuation qualification only, explicitly opt in with
-   `read_only = false`, review every shared scope, use a neutral zone with a human
-   present, then restore its original state. Never test protected rooms.
+7. FR : Conserver la lecture seule pendant les essais. Pour autoriser ensuite le
+   pilotage, un propriétaire utilise Installation → Autoriser le pilotage et
+   confirme avec son code Moli, vérifié à nouveau par le serveur. Le bouton Revenir en lecture seule bloque les commandes suivantes,
+   même hors ligne, sans arrêter le chauffage en cours.
+   EN: Keep setup trials read-only. An owner can explicitly authorize gateway
+   control in Installation with a fresh server-verified Moli PIN. Returning to
+   read-only from the same card uses the existing human session.
+   For separately authorized physical qualification, review every shared scope,
+   use a neutral zone with a human present, then restore its original state.
+   Never test protected rooms.
 8. FR : Qualifier séparément les coupures, reprises, horaires constructeurs et
    compatibilité du firmware. EN: Synthetic protocol tests do not establish
    physical execution, long-running reliability or all firmware compatibility.
+
+## Limites de la recherche / Discovery limits
+
+FR : La recherche est ponctuelle et bornée. Elle utilise les adresses privées
+déjà connues de Moli pour explorer les réseaux locaux correspondants et vérifie
+les réponses avec l’API Airzone. Un résultat vide ne prouve pas l’absence de
+matériel : une installation sans indice réseau, un réseau isolé ou une API locale
+désactivée nécessitent la saisie manuelle. Un appareil exclusivement cloud ne
+devient pas compatible avec l’API locale grâce au scan. La recherche ne commande,
+n’ajoute et ne réactive aucun appareil.
+
+EN: Discovery is an on-demand, bounded search based on private addresses already
+known to Moli, with responses verified through the Airzone API. Empty results
+are not proof that no device exists: an empty installation without network hints,
+an isolated network or a disabled Local API may require the manual fallback.
+Scanning cannot make cloud-only hardware locally compatible. Discovery never
+commands, installs or reactivates a device.
+
+FR : Les restrictions `enabled = false` et `read_only = true` écrites dans le
+   TOML restent prioritaires. La carte de la passerelle explique ce verrou ; un
+   code Moli ne le contourne pas. Les passerelles ajoutées dans Moli se gèrent
+   depuis l’interface sans modifier le TOML.
+   EN: Explicit TOML restrictions `enabled = false` and `read_only = true` take
+   precedence. The gateway card explains the lock; the Moli code cannot bypass
+   it. Gateways added in Moli remain manageable from the interface without
+   changing TOML.
