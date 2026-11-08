@@ -1732,6 +1732,7 @@ dependencies = [
  "moli-sonos",
  "moli-tapo",
  "moli-telegram",
+ "moli-tesla",
  "moli-tuya",
  "moli-voltalis",
  "moli-weather",
@@ -1955,6 +1956,24 @@ dependencies = [
  "moli-i18n",
  "moli-net",
  "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-tesla"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "ring",
  "serde",
  "serde_json",
  "tokio",

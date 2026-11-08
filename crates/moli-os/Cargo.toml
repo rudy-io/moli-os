@@ -32,6 +32,7 @@ moli-airzone.workspace = true
 moli-bambu.workspace = true
 moli-esphome.workspace = true
 moli-alexa.workspace = true
+moli-tesla.workspace = true
 moli-moonraker.workspace = true
 moli-frigate.workspace = true
 moli-philips.workspace = true
