@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 http.workspace = true
+jiff.workspace = true
 ring.workspace = true
 moli-core.workspace = true
 moli-runtime.workspace = true
@@ -22,5 +23,5 @@ workspace = true
 rcgen = "0.14"
 rustls.workspace = true
 tokio-rustls.workspace = true
-tokio = { workspace = true, features = ["io-util"] }
+tokio = { workspace = true, features = ["io-util", "test-util"] }
 tokio-util.workspace = true

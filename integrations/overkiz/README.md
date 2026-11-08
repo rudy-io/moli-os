@@ -1,8 +1,13 @@
 # TaHoma / Overkiz local developer mode
 
-Native local HTTPS integration, token from the encrypted vault, certificate pinned
-before credentials leave. No cloud login or Home Assistant dependency. Network-free
-construction validates configuration. Disabled instances are not started by Moli.
+The native source uses local HTTPS, a token from the encrypted vault and a certificate
+pinned before credentials leave. It has no cloud login or Home Assistant dependency.
+Network-free construction validates configuration. Disabled instances are not started
+by Moli. An optional [Somfy cloud source](CLOUD.md) adds owner-only observation of
+saved scenarios and programming, using an independent account session. Known saved
+scenarios can also be launched after separate owner consent with a fresh Moli PIN,
+provided global `read_only` is false. The source can run alone or alongside the
+native source without publishing duplicate physical devices.
 
 Certificate pinning uses **trust on first use (TOFU)** when neither the
 configuration nor the encrypted vault contains `cert_sha256`. That first TLS
@@ -70,6 +75,8 @@ Set **`read_only = true`** for observation. All published write permissions are 
 and both the model and runtime refuse every write path, including stale writable metadata,
 before actuation. Readings and physical capability inference are retained. The default
 remains false for existing configurations; onboarding explicitly enables observation.
+The option covers both sources. Setting it to false does not itself authorize any
+cloud scenario; per-scenario consent is still required.
 Known covers, gates and windows remain visible with a read-only unknown `opening_state`
 when no state is reported, including stateless RTS gates. Unknown classes never gain writes.
 
@@ -133,9 +140,13 @@ Protocol sources consulted at pinned revisions (cover-family/favourite design al
 - [Home Assistant public low-speed fixture](https://github.com/home-assistant/core/blob/20a7eb5e6ce79a2018543081a74d45aa28c9cd3d/tests/components/overkiz/fixtures/setup/cloud_nexity_rail_din_europe.json): ordinary RollerShutter definitions with `nparams = 2`; the separate optional-argument shape is covered by this repository's synthetic fixture.
 
 
-This change does not implement the cloud complement or saved TaHoma scenarios. The official
-local API excludes those scenarios; even an execution ID from an undocumented local scene
-endpoint does not establish support. See [coverage and remaining work](COVERAGE.md).
+The official local API excludes saved TaHoma scenarios; even an execution ID from an
+undocumented local scene endpoint does not establish support. The optional cloud source
+reads programme definitions and reports each collection's availability. Its separate
+saved-ID execution path uses scope-bound consent, current catalogue capabilities
+and the Hub guard/journal; it never imports programmes as Moli automations or
+accepts arbitrary action payloads. See [cloud protocol and limits](CLOUD.md)
+and [coverage and remaining work](COVERAGE.md).
 The driver uses `Semantic::Position` introduced by
 [PR30](https://github.com/rudy-io/moli-os/pull/30); dedicated UI/card changes remain
 separate. No core guard is changed here.

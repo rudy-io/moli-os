@@ -1,0 +1,44 @@
+[
+  {
+    "weeklyCalendarRule": {
+      "oid": "00000000-0000-4000-8000-000000000003",
+      "priority": 10,
+      "calendarDayOID": "00000000-0000-4000-8000-000000000002",
+      "finalRule": true,
+      "startYear": 2026,
+      "startMonth": 11,
+      "startDay": 1,
+      "endYear": 2026,
+      "endMonth": 12,
+      "endDay": 31,
+      "period": 1,
+      "dayMask": 31,
+      "formattedDayMask": "SYNTHETIC_DISPLAY"
+    }
+  },
+  {
+    "specificDayCalendarRule": {
+      "oid": "00000000-0000-4000-8000-000000000005",
+      "priority": 20,
+      "calendarDayOID": "00000000-0000-4000-8000-000000000002",
+      "finalRule": true,
+      "year": 2026,
+      "month": 11,
+      "day": 11
+    }
+  },
+  {
+    "dailyCalendarRule": {
+      "oid": "00000000-0000-4000-8000-000000000006",
+      "priority": 0,
+      "finalRule": false,
+      "startYear": -1,
+      "startMonth": -1,
+      "startDay": -1,
+      "endYear": -1,
+      "endMonth": -1,
+      "endDay": -1,
+      "period": 1
+    }
+  }
+]

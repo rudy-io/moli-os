@@ -221,7 +221,11 @@ impl PersonRef {
     }
 
     fn in_rooms(&self, hub: &Hub, hidden: &HashSet<InstanceId>, device: &DeviceId) -> bool {
-        if hidden.contains(&device.instance()) {
+        // A cloud scenario can affect devices outside its displayed room. Room
+        // labels never grant a guest permission to execute or observe it.
+        if moli_overkiz::cloud::execution::owns_scenario(device)
+            || hidden.contains(&device.instance())
+        {
             return false;
         }
         let rooms = hub.rooms_of(device);

@@ -1,5 +1,12 @@
 # Connect a local TaHoma
 
+For the independent, read-only cloud programme catalogue, see the
+[cloud connection procedure](CLOUD.md#configuration-and-connection). Its owner-only
+System panel accepts the person's Somfy login directly into the encrypted request
+queue. No developer-mode token or local host is needed for a cloud-only instance;
+the local procedure below remains separate. Keep Home Assistant running during
+the trial and do not copy its authentication session.
+
 Check the gateway supports Somfy developer mode. First-generation boxes and the
 Connectivity Kit are excluded by Somfy. Follow the official app procedure: gateway
 settings, seven taps on the PIN, enable developer mode, generate a dedicated token.

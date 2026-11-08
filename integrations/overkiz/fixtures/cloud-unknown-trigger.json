@@ -1,0 +1,11 @@
+[
+  {
+    "syntheticFutureTrigger": {
+      "oid": "00000000-0000-4000-8000-000000000008",
+      "label": "Synthetic future type",
+      "unknownRule": {
+        "arbitrary": "preserve, do not execute"
+      }
+    }
+  }
+]
