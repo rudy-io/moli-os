@@ -483,6 +483,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         assistant,
         automations: Some(automations),
         access: config.server.access.clone(),
+        remote: config.server.remote.clone(),
         demo: config.server.demo,
         household: Some(household),
         phones: gates.phones,

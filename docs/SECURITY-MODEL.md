@@ -45,15 +45,15 @@ qu'un intermédiaire lui passe en clair.
 
 | # | Invariant | Preuve |
 |---|---|---|
-| I1 | **Refus par défaut** : un chemin d'accès ou une route non déclarés sont refusés. | Prouvé pour les routes : `crates/moli-api/tests/routes.txt` et `routes.rs`. Entrées : étape 2. |
-| I2 | **La position réseau ne prouve l'identité** que sur le réseau de la maison et les VPN déclarés. | Tests de `caller.rs` ; entrées déclarées : étape 2. |
+| I1 | **Refus par défaut** : un chemin d'accès ou une route non déclarés sont refusés. | Prouvé pour les routes : `crates/moli-api/tests/routes.txt` et `routes.rs`. Entrées : `[server.remote]` ne retient que ce qui y est déclaré, tout autre relais est un inconnu (`a_declared_proxy_relays_strangers_known_by_the_hop_it_added`). |
+| I2 | **La position réseau ne prouve l'identité** que sur le réseau de la maison et les VPN déclarés. | Tests de `caller.rs` : `a_proxy_elsewhere_on_the_home_network_does_not_make_the_internet_the_household`, `a_declared_vpn_is_the_household_from_outside`. |
 | I3 | **L'identité est une preuve cryptographique** vérifiée par Moli (mot de passe, assertion signée, plus tard passkey), jamais un en-tête en clair. | Assertion Cloudflare Access : tests de `access.rs`. Générique : étape 4. |
-| I4 | **Moindre privilège** : les droits à distance sont un sous-ensemble des droits à la maison ; MCP reste à la maison sauf choix contraire. | Colonne `distant` de `routes.txt` (MCP `non` vérifié) ; appliquée aux entrées distantes : étape 2. |
+| I4 | **Moindre privilège** : les droits à distance sont un sous-ensemble des droits à la maison ; MCP reste à la maison sauf choix contraire. | Colonne `distant` de `routes.txt`, appliquée route par route derrière un proxy déclaré par `routes.rs` ; `agents_machines_and_secrets_stay_at_home` (`remote.rs`). Pour `[server.access]` : à choisir, étape 4. |
 | I5 | **Échec fermé** : config invalide, fournisseur d'identité injoignable, fichier illisible = refus, jamais ouverture ; un fichier illisible n'est jamais écrasé. | `a_file_that_is_not_valid_is_never_overwritten` (règles de l'assistant), tests de `people.rs`, `a_trim_keeps_the_lines_it_could_not_read_aside` (historique des automatismes) ; entrées : étape 2. |
-| I6 | **Sûr par défaut** : l'accès distant est coupé tant qu'aucune entrée n'est déclarée ; les combinaisons dangereuses sont refusées au démarrage. | `check-config` : étape 2. |
+| I6 | **Sûr par défaut** : l'accès distant est coupé tant qu'aucune entrée n'est déclarée ; les combinaisons dangereuses sont refusées au démarrage. | Rien de déclaré : comportement d'avant. `[server.remote]` refusé au démarrage et par `moli-os check-config` s'il ouvrirait Internet (sous-réseau public, proxy public, proxy dans un VPN) : `what_would_open_the_house_to_the_internet_is_refused`, `a_remote_that_would_open_the_internet_is_refused`. |
 | I7 | **Indépendance locale** : rien de la maison ne dépend de l'accès distant ni d'un compteur ; un bouton coupe tout le distant. | Étape 3. |
 | I8 | **Traçabilité** : chaque événement distant est journalisé avec la vraie IP, sans secret ; les propriétaires sont avertis d'un nouvel appareil. | Avis d'appairage d'un téléphone (existant) ; journal d'authentification : étape 5. |
-| I9 | **Surface minimale** : Moli n'écoute jamais Internet directement ; garde `Host` sur toutes les routes. | Garde `Host` : `foreign_host_is_rejected_everywhere` ; écoute publique refusée : étape 2. |
+| I9 | **Surface minimale** : Moli n'écoute jamais Internet directement ; garde `Host` sur toutes les routes. | Garde `Host` : `foreign_host_is_rejected_everywhere` ; écoute sur une adresse publique refusée au démarrage : `a_remote_that_would_open_the_internet_is_refused`. |
 | I10 | **Révocable et limité dans le temps** : chaque session et chaque appareil, seul ou tous ensemble. | Sessions PIN de 30 jours (existant) ; par appareil : étape 3. |
 
 ### TaHoma cloud : observation privée et déconnexion
@@ -119,9 +119,10 @@ Ce que les PR suivantes respectent, décidé dans #136 :
 
 ## 6. Étapes
 
-1. Ce document et la colonne `distant` de `routes.txt`.
-2. Entrées déclarées (`lan`, `vpn`, `proxy`, `tunnel`) et règles de `check-config` (I1, I2, I4,
-   I5, I6, I9).
+1. Fait (#137) : ce document et la colonne `distant` de `routes.txt`.
+2. Fait : entrées déclarées dans `[server.remote]` (`vpn`, `proxies` ; le réseau de la maison et
+   `[server.access]` restent comme avant), colonne `distant` appliquée, règles au démarrage et
+   dans `check-config` (I1, I2, I4, I6, I9). Une entrée `tunnel` générique vient avec l'étape 4.
 3. Sessions par appareil, révocation, bouton « couper l'accès distant » (I7, I10).
 4. Identité signée générique (JWKS : Cloudflare Access, Authentik, Authelia, Pomerium, Keycloak)
    et authentification récente (I3, I4).

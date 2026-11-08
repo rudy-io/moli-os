@@ -34,6 +34,7 @@ pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
 mod phones;
 mod plan;
+mod remote;
 mod rest;
 mod session;
 pub mod settings;
@@ -55,6 +56,7 @@ use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Pr
 
 pub use access::AccessConfig;
 pub use plan::image_name_ok as plan_image_name_ok;
+pub use remote::{Net, RemoteConfig, home_only};
 
 /// A JSON request is small: orders, labels, a graph, a conversation turn.
 const BODY: usize = 256 * 1024;
@@ -126,6 +128,9 @@ pub struct Options {
     /// The Cloudflare Access application in front of the tunnel, whose
     /// signed assertions name the person (`[server.access]`).
     pub access: Option<AccessConfig>,
+    /// The ways in from outside the house the installation declares
+    /// (`[server.remote]`: VPN subnets, reverse proxies).
+    pub remote: RemoteConfig,
     /// A demo house (no real devices): anyone is let in, as a visitor
     /// (`[server] demo = true`).
     pub demo: bool,
@@ -277,6 +282,7 @@ fn people(
         demo: options.demo,
         people: persons.clone(),
         known_only: options.access.as_ref().is_some_and(|a| a.known_only),
+        remote: Arc::new(options.remote.clone()),
     };
     (Arc::new(humans), gate, persons)
 }

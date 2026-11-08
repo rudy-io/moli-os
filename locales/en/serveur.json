@@ -1,5 +1,6 @@
 {
   "serveur.acces.refuse": "access denied: home network or Cloudflare Access only",
+  "serveur.acces.a_la_maison": "refused from outside: do it from home",
   "serveur.limite.trop_de_demandes": "too many requests in a row: try again in a few seconds",
   "serveur.limite.trop_de_flux": "too many live streams open: close a tab or try again later",
 

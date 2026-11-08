@@ -26,6 +26,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::access::Verifier;
 use crate::people::{People, PersonRef, Vouched};
+use crate::remote::RemoteConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -56,6 +57,8 @@ pub(crate) struct Gate {
     /// `[server.access] known_only`: an e-mail none of the people has is a
     /// stranger's.
     pub(crate) known_only: bool,
+    /// `[server.remote]`: the declared VPNs and proxies.
+    pub(crate) remote: Arc<RemoteConfig>,
 }
 
 /// What a guest may reach: the dashboard, what it reads of its rooms (the
@@ -130,6 +133,9 @@ pub(crate) struct Caller {
     pub(crate) key: String,
     /// The person, when Moli knows who it is (Access e-mail, password).
     pub(crate) person: Option<PersonRef>,
+    /// Came in through `[server.remote]` (a declared VPN or proxy): what
+    /// stays at home is refused ([`crate::remote::home_only`]).
+    pub(crate) remote: bool,
 }
 
 impl Caller {
@@ -220,7 +226,12 @@ fn is_home(ip: IpAddr) -> bool {
 }
 
 /// `access`: the e-mail of a verified Access assertion, if any.
-pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>) -> Caller {
+pub(crate) fn classify(
+    peer: IpAddr,
+    headers: &HeaderMap,
+    access: Option<String>,
+    remote: &RemoteConfig,
+) -> Caller {
     // `::ffff:192.168.0.20` is the home network too.
     let mapped = peer.to_canonical();
     if through_cloudflare(headers) {
@@ -229,11 +240,13 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
         // a client could choose, except through the tunnel.
         return match (mapped.is_loopback(), access) {
             (true, Some(email)) => Caller {
+                remote: false,
                 key: format!("access:{email}"),
                 via: Via::Access { email },
                 person: None,
             },
             (true, None) => Caller {
+                remote: false,
                 key: format!(
                     "cf:{}",
                     header(headers, "cf-connecting-ip")
@@ -244,14 +257,28 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
                 person: None,
             },
             (false, _) => Caller {
+                remote: false,
                 key: mapped.to_string(),
                 via: Via::Outside,
                 person: None,
             },
         };
     }
+    // A declared proxy relaying: a stranger until a person signs in, known
+    // by the client address the proxy added (never one the client wrote).
+    if let Some(key) = remote.proxied(mapped, headers) {
+        return Caller {
+            via: Via::Outside,
+            key,
+            person: None,
+            remote: true,
+        };
+    }
+    let in_vpn = !mapped.is_loopback() && remote.in_vpn(mapped);
     let via = if relayed(headers) {
         Via::Outside
+    } else if in_vpn {
+        Via::Lan
     } else if mapped.is_loopback() {
         Via::Loopback
     } else if is_home(mapped) {
@@ -260,6 +287,7 @@ pub(crate) fn classify(peer: IpAddr, headers: &HeaderMap, access: Option<String>
         Via::Outside
     };
     Caller {
+        remote: in_vpn && via == Via::Lan,
         via,
         key: mapped.to_string(),
         person: None,
@@ -306,7 +334,7 @@ pub(crate) async fn identify(
         },
         _ => None,
     };
-    let mut caller = classify(peer, request.headers(), email);
+    let mut caller = classify(peer, request.headers(), email, &gate.remote);
     // The person Access vouched for, or a stranger if no longer of the house.
     vouch(&gate, &mut caller);
     // A phone's report carries its own token (checked by the route): the
@@ -318,6 +346,7 @@ pub(crate) async fn identify(
             .contains_key(axum::http::header::AUTHORIZATION)
     {
         caller = Caller {
+            remote: caller.remote,
             key: format!("phone:{id}"),
             via: Via::Phone,
             person: None,
@@ -360,6 +389,15 @@ pub(crate) async fn identify(
         if caller.via == Via::Outside {
             caller.via = Via::Visitor;
         }
+    }
+    // What stays at home is refused to whoever came in from outside (I4).
+    if caller.remote && crate::remote::home_only(request.uri().path()) {
+        tracing::warn!(client = caller.key, path = %request.uri().path(), "remote refused");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "error": moli_i18n::tr!("serveur.acces.a_la_maison") })),
+        )
+            .into_response();
     }
     // Strangers get nothing: not a reading, not a PIN attempt. Moli is the
     // home network's, and Cloudflare Access's for the people it lets in.
@@ -446,29 +484,55 @@ mod tests {
 
     #[test]
     fn the_home_network_is_the_household() {
-        let lan = classify("192.168.0.20".parse().unwrap(), &HeaderMap::new(), None);
+        let lan = classify(
+            "192.168.0.20".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &RemoteConfig::default(),
+        );
         assert_eq!(lan.via, Via::Lan);
         assert_eq!(lan.key, "192.168.0.20");
         assert!(lan.is_household() && !lan.is_local_machine());
-        let local = classify("127.0.0.1".parse().unwrap(), &HeaderMap::new(), None);
+        let local = classify(
+            "127.0.0.1".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &RemoteConfig::default(),
+        );
         assert!(local.is_local_machine());
         let mapped = classify(
             "::ffff:192.168.0.20".parse().unwrap(),
             &HeaderMap::new(),
             None,
+            &RemoteConfig::default(),
         );
         assert_eq!(mapped.via, Via::Lan);
         assert_eq!(mapped.key, "192.168.0.20");
-        let ula = classify("fd00::1".parse().unwrap(), &HeaderMap::new(), None);
+        let ula = classify(
+            "fd00::1".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &RemoteConfig::default(),
+        );
         assert_eq!(ula.via, Via::Lan);
-        let public = classify("8.8.8.8".parse().unwrap(), &HeaderMap::new(), None);
+        let public = classify(
+            "8.8.8.8".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &RemoteConfig::default(),
+        );
         assert_eq!(public.via, Via::Outside);
         assert!(!public.is_household());
         // A proxy on this machine would make everyone local: relayed is a stranger.
         for relay in ["x-forwarded-for", "forwarded", "tailscale-user-login"] {
             let mut headers = HeaderMap::new();
             headers.insert(relay, "100.64.0.7".parse().unwrap());
-            let relayed = classify("127.0.0.1".parse().unwrap(), &headers, None);
+            let relayed = classify(
+                "127.0.0.1".parse().unwrap(),
+                &headers,
+                None,
+                &RemoteConfig::default(),
+            );
             assert_eq!(relayed.via, Via::Outside, "{relay}");
             assert!(!relayed.is_household() && !relayed.is_local_machine());
         }
@@ -488,7 +552,12 @@ mod tests {
             ] {
                 let mut headers = HeaderMap::new();
                 headers.insert(relay, "203.0.113.9".parse().unwrap());
-                let relayed = classify(peer.parse().unwrap(), &headers, None);
+                let relayed = classify(
+                    peer.parse().unwrap(),
+                    &headers,
+                    None,
+                    &RemoteConfig::default(),
+                );
                 assert_eq!(relayed.via, Via::Outside, "{peer} {relay}");
                 assert!(!relayed.is_household(), "{peer} {relay}");
             }
@@ -554,6 +623,7 @@ mod tests {
             "192.168.0.30".parse().unwrap(),
             &cf,
             Some("moi@example.org".into()),
+            &RemoteConfig::default(),
         );
         assert_eq!(
             posing.via,
@@ -571,7 +641,12 @@ mod tests {
         // The tunnel ends on this machine: without proof, a stranger, and
         // never the CLI.
         let cf = headers(&[("cf-ray", "8c…-CDG"), ("cf-connecting-ip", "203.0.113.7")]);
-        let stranger = classify("127.0.0.1".parse().unwrap(), &cf, None);
+        let stranger = classify(
+            "127.0.0.1".parse().unwrap(),
+            &cf,
+            None,
+            &RemoteConfig::default(),
+        );
         assert_eq!(stranger.via, Via::Outside);
         assert_eq!(stranger.key, "cf:203.0.113.7");
         assert!(!stranger.is_household() && !stranger.is_local_machine());
@@ -579,6 +654,7 @@ mod tests {
             "127.0.0.1".parse().unwrap(),
             &cf,
             Some("moi@example.org".into()),
+            &RemoteConfig::default(),
         );
         assert_eq!(
             owner.via,
@@ -589,5 +665,83 @@ mod tests {
         assert_eq!(owner.key, "access:moi@example.org");
         assert!(owner.is_household() && !owner.is_local_machine());
         assert_eq!(owner.describe(), "tableau de bord (moi@example.org)");
+    }
+
+    fn remote() -> RemoteConfig {
+        toml_like(&["10.6.0.0/24"], &["192.168.1.5"])
+    }
+
+    fn toml_like(vpn: &[&str], proxies: &[&str]) -> RemoteConfig {
+        RemoteConfig {
+            vpn: vpn
+                .iter()
+                .map(|n| crate::remote::Net::try_from((*n).to_owned()).unwrap())
+                .collect(),
+            proxies: proxies.iter().map(|p| p.parse().unwrap()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_declared_vpn_is_the_household_from_outside() {
+        let remote = remote();
+        let phone = classify(
+            "10.6.0.7".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &remote,
+        );
+        assert_eq!(phone.via, Via::Lan);
+        assert!(phone.is_household() && phone.remote);
+        // Nothing declared: as before, the home network, not from outside.
+        let home = classify(
+            "192.168.0.20".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &remote,
+        );
+        assert!(home.is_household() && !home.remote);
+        let undeclared = classify(
+            "10.6.0.7".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &RemoteConfig::default(),
+        );
+        assert!(undeclared.is_household() && !undeclared.remote);
+        // A VPN caller that says it was relayed is a stranger, like anyone.
+        let mut relayed = HeaderMap::new();
+        relayed.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        let posing = classify("10.6.0.7".parse().unwrap(), &relayed, None, &remote);
+        assert_eq!(posing.via, Via::Outside);
+    }
+
+    #[test]
+    fn a_declared_proxy_relays_strangers_known_by_the_hop_it_added() {
+        let remote = remote();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "192.168.0.20, 203.0.113.9".parse().unwrap(),
+        );
+        let client = classify("192.168.1.5".parse().unwrap(), &headers, None, &remote);
+        assert_eq!(client.via, Via::Outside);
+        assert_eq!(client.key, "203.0.113.9", "the hop the proxy added");
+        assert!(client.remote && !client.is_household());
+        // Two clients behind the proxy are counted apart.
+        let mut other = HeaderMap::new();
+        other.insert("x-forwarded-for", "198.51.100.4".parse().unwrap());
+        let other = classify("192.168.1.5".parse().unwrap(), &other, None, &remote);
+        assert_ne!(other.key, client.key);
+        // The proxy's machine itself, relaying nothing: the home network.
+        let itself = classify(
+            "192.168.1.5".parse().unwrap(),
+            &HeaderMap::new(),
+            None,
+            &remote,
+        );
+        assert!(itself.is_household() && !itself.remote);
+        // Another address of the network relaying: a stranger, not remote.
+        let undeclared = classify("192.168.1.6".parse().unwrap(), &headers, None, &remote);
+        assert_eq!(undeclared.via, Via::Outside);
+        assert_eq!(undeclared.key, "192.168.1.6");
     }
 }

@@ -155,6 +155,10 @@ pub struct Server {
     /// nobody coming through Cloudflare is recognized).
     #[serde(default)]
     pub access: Option<moli_api::AccessConfig>,
+    /// The ways in from outside the house: VPN subnets, reverse proxies
+    /// (docs/SECURITY-MODEL.md). Nothing declared: as before.
+    #[serde(default)]
+    pub remote: moli_api::RemoteConfig,
     /// The house's time zone (IANA): when automations fire, where energy
     /// days are cut, the assistant's clock, the quiet hours. Absent: the
     /// system's, named at start (in a container, usually UTC).
@@ -200,6 +204,7 @@ impl Default for Server {
             allowed_hosts: Vec::new(),
             history_days: default_history_days(),
             access: None,
+            remote: moli_api::RemoteConfig::default(),
             timezone: None,
             language: default_language(),
             demo: false,
@@ -398,6 +403,19 @@ impl Config {
                 bail!("duplicate driver id {:?}", driver.id);
             }
         }
+        self.server.remote.check().map_err(|e| anyhow::anyhow!(e))?;
+        // Moli never listens on the Internet itself (I9): a public address
+        // is refused; 0.0.0.0 is the machine's, behind its firewall.
+        let listen = self.server.listen.ip().to_canonical();
+        if !listen.is_unspecified()
+            && !listen.is_loopback()
+            && !moli_api::Net::is_home_address(listen)
+        {
+            bail!(
+                "[server] listen = {}: Moli listens on this machine or the home network, never on a public address (see [server.remote])",
+                self.server.listen
+            );
+        }
         if self.server.worker_threads == 0 {
             bail!("worker_threads must be ≥ 1");
         }
@@ -423,6 +441,21 @@ mod tests {
         let config: Config = toml::from_str(include_str!("../../../moli.example.toml")).unwrap();
         config.check().unwrap();
         assert_eq!(config.drivers[0].kind, "z2m");
+    }
+
+    #[test]
+    fn a_remote_that_would_open_the_internet_is_refused() {
+        let with = |server: &str| {
+            let config: Config = toml::from_str(&format!("[server]\n{server}")).unwrap();
+            config.check()
+        };
+        assert!(
+            with("[server.remote]\nvpn = [\"10.6.0.0/24\"]\nproxies = [\"127.0.0.1\"]").is_ok()
+        );
+        assert!(with("[server.remote]\nvpn = [\"0.0.0.0/0\"]").is_err());
+        assert!(with("[server.remote]\nproxies = [\"203.0.113.9\"]").is_err());
+        assert!(with("listen = \"203.0.113.9:8790\"").is_err());
+        assert!(with("listen = \"192.168.0.10:8790\"").is_ok());
     }
 
     #[test]

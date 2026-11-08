@@ -265,6 +265,7 @@ mod tests {
 
     fn caller(via: Via, person: bool) -> Caller {
         Caller {
+            remote: false,
             via,
             key: "10.0.0.30".into(),
             person: person.then(|| PersonRef {
