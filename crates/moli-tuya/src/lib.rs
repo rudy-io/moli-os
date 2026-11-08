@@ -14,6 +14,7 @@
 pub mod cloud;
 mod connections;
 mod device;
+pub mod import;
 pub mod light;
 pub mod model;
 pub mod protocol;

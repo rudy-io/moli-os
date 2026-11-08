@@ -476,6 +476,7 @@ devices_file = "/data/tuya.json"   # défaut : data/tuya.json
 ```
 
 - **Secrets** : une clé locale par appareil, `key-<device_id>` (16 caractères), rangée par l'import.
+- **Import sans Home Assistant** : `moli-os tuya import --cloud [--summary]` lit le cloud Tuya avec les clés du projet cloud que Moli garde pour le repli (`src/import.rs`, `cloud::import`) : la liste des appareils liés au projet, puis le modèle de chaque appareil (ses DP). Même fichier et même fusion que l'export par HA ci-dessous.
 - **Import** (une fois, puis à chaque nouvel appareil) : `tools/home-assistant/tuya-export.py` tourne **dans le conteneur Home Assistant** et lit, via le compte Tuya déjà lié à HA, la liste des appareils, leurs DP et leurs clés locales.
 
 ```sh
