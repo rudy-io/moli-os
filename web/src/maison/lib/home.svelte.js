@@ -3,7 +3,7 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve } from './capabilities.js';
+import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
 
 export { hub, positionPoint, coverOrder };
 
@@ -231,6 +231,7 @@ export function deviceKind(d) {
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
     return 'cover';
+  if (impulsePoints(d).length) return 'impulse';
   if (powerKey(d, false)) {
     if (isGroup(d)) return 'group';
     if (isFixture(d)) return 'light';
@@ -267,6 +268,7 @@ export function roomList() {
         lights: by('light'),
         plugs: by('plug').filter((d) => !quiet(d.id)),
         covers: by('cover'),
+        impulses: by('impulse'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
@@ -395,7 +397,7 @@ export async function confirmHeld(pin) {
   }
   if (held.custom) {
     home.held = null;
-    await held.custom();
+    await held.custom(held.freshPin ? pin : undefined);
     return null;
   }
   await decide({ id: held.id, point: held.point }, true);

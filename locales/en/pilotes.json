@@ -109,6 +109,7 @@
   "pilotes.annonces.volume_annonce": "Announcement volume",
   "pilotes.annonces.volume_nombre": "an announcement's volume is a number from 0 to 100",
   "pilotes.annonces.annonce": "Announcement",
+  "pilotes.annonces.annonce_en_cours": "Saying now",
   "pilotes.sonos.ne_se_regle_pas": "{point} cannot be set",
   "pilotes.annonces.annonces_non_configurees": "announcements are not configured",
   "pilotes.annonces.annonce_texte": "an announcement must be text",

@@ -40,6 +40,8 @@ const CONTINUE_WAIT: Duration = Duration::from_secs(5);
 pub(crate) enum Thought {
     Heard(String),
     Answered(Answer),
+    /// The speaker said the answer (`true`), or did not.
+    Spoken(bool),
     Failed(String),
 }
 
@@ -80,6 +82,10 @@ pub(crate) struct Voice {
     device: DeviceId,
     window: Duration,
     media_base: Option<String>,
+    /// The speaker that says the answers (`speaker` of the configuration).
+    speaker: Option<String>,
+    /// An answer the speaker is saying, and whether it closes the conversation.
+    spoken_by_speaker: Option<(String, bool)>,
     run: Option<Run>,
     conversation: Vec<Said>,
     conversation_id: String,
@@ -104,12 +110,15 @@ impl Voice {
         window: Duration,
         media_base: Option<String>,
         device: DeviceId,
+        speaker: Option<String>,
     ) -> (Self, Thoughts) {
         let (thoughts_tx, thoughts) = mpsc::channel(8);
         let voice = Self {
             device,
             window,
             media_base: media_base.map(|b| b.trim_end_matches('/').to_owned()),
+            speaker: speaker.filter(|s| !s.trim().is_empty()),
+            spoken_by_speaker: None,
             run: None,
             conversation: Vec::new(),
             conversation_id: String::new(),
@@ -313,15 +322,6 @@ impl Voice {
                 if closes && reply.trim().is_empty() {
                     return self.end(ctx, id, tx, false).await;
                 }
-                let url = match (ctx.voice_brain(), &self.media_base) {
-                    // TTS_END uses the firmware's announcement player too;
-                    // a conversation does not give it a separate WAV decoder.
-                    (Some(brain), Some(base)) => brain.announcement_url(base, &reply),
-                    _ => None,
-                };
-                let Some(url) = url else {
-                    return self.fail(ctx, id, tx, "no voice for the answer").await;
-                };
                 self.conversation.push(Said {
                     who: Speaker::Moli,
                     text: reply.clone(),
@@ -336,19 +336,97 @@ impl Voice {
                     ],
                 )
                 .await?;
+                // The device shows it is answering, whoever says it.
                 Self::event(tx, VoiceEvent::TtsStart, &[("text", &reply)]).await?;
-                Self::event(tx, VoiceEvent::TtsEnd, &[("url", &url)]).await?;
-                Self::event(tx, VoiceEvent::RunEnd, &[]).await?;
-                self.run = None;
-                // Listening again is the device's move once the answer has played
-                // (closing too: its new request is answered with the chime).
-                self.continuing = Some(Instant::now() + Duration::from_secs(60));
-                self.closing = closes;
                 Self::state(ctx, id, "speaking");
-                Ok(())
+                if let (Some(speaker), Some(brain)) = (self.speaker.clone(), ctx.voice_brain()) {
+                    // The speaker says it; the device waits, and listens again
+                    // only once it has (it would hear the answer otherwise).
+                    self.spoken_by_speaker = Some((reply.clone(), closes));
+                    let (generation, thoughts) = (self.generation, self.thoughts_tx.clone());
+                    let instance = ctx.instance().clone();
+                    tokio::spawn(async move {
+                        let said = brain.say_on(&speaker, &reply).await;
+                        if let Err(why) = &said {
+                            tracing::warn!(%instance, error = %why, "the speaker did not say the answer: the device says it");
+                        }
+                        let _ = thoughts
+                            .send((generation, Thought::Spoken(said.is_ok())))
+                            .await;
+                    });
+                    return Ok(());
+                }
+                self.play_answer(ctx, id, tx, &reply, closes).await
+            }
+            Thought::Spoken(said) => {
+                let Some((reply, closes)) = self.spoken_by_speaker.take() else {
+                    return Ok(());
+                };
+                if said {
+                    let Some(silence) = self.publish(ctx, sound::silence()) else {
+                        return self.fail(ctx, id, tx, "no silence to play").await;
+                    };
+                    return self.answered(ctx, id, tx, &silence, closes).await;
+                }
+                self.play_answer(ctx, id, tx, &reply, closes).await
             }
             Thought::Failed(why) => self.fail(ctx, id, tx, &why).await,
         }
+    }
+
+    /// The device says the answer itself.
+    async fn play_answer(
+        &mut self,
+        ctx: &DriverCtx,
+        id: &DeviceId,
+        tx: &mut Outbox,
+        reply: &str,
+        closes: bool,
+    ) -> Sent {
+        let url = match (ctx.voice_brain(), &self.media_base) {
+            // TTS_END uses the firmware's announcement player too;
+            // a conversation does not give it a separate WAV decoder.
+            (Some(brain), Some(base)) => brain.announcement_url(base, reply),
+            _ => None,
+        };
+        let Some(url) = url else {
+            return self.fail(ctx, id, tx, "no voice for the answer").await;
+        };
+        self.answered(ctx, id, tx, &url, closes).await
+    }
+
+    /// The device plays `url` (the answer, or a silence once a speaker said
+    /// it), then listens again.
+    async fn answered(
+        &mut self,
+        ctx: &DriverCtx,
+        id: &DeviceId,
+        tx: &mut Outbox,
+        url: &str,
+        closes: bool,
+    ) -> Sent {
+        Self::event(tx, VoiceEvent::TtsEnd, &[("url", url)]).await?;
+        Self::event(tx, VoiceEvent::RunEnd, &[]).await?;
+        self.run = None;
+        // Listening again is the device's move once the answer has played
+        // (closing too: its new request is answered with the chime).
+        self.continuing = Some(Instant::now() + Duration::from_secs(60));
+        self.closing = closes;
+        Self::state(ctx, id, "speaking");
+        Ok(())
+    }
+
+    /// A sound the device fetches: its address.
+    fn publish(&self, ctx: &DriverCtx, flac: Vec<u8>) -> Option<String> {
+        let base = self.media_base.as_ref()?;
+        let name = ctx.media_publisher().publish(
+            "flac",
+            Image {
+                content_type: "audio/flac".into(),
+                bytes: flac,
+            },
+        )?;
+        Some(format!("{base}/api/media/{name}"))
     }
 
     /// The answer (or the chime) has played.
@@ -432,16 +510,7 @@ impl Voice {
             ],
         )
         .await?;
-        let chime = self.media_base.as_ref().and_then(|base| {
-            let name = ctx.media_publisher().publish(
-                "flac",
-                Image {
-                    content_type: "audio/flac".into(),
-                    bytes: sound::chime(),
-                },
-            )?;
-            Some(format!("{base}/api/media/{name}"))
-        });
+        let chime = self.publish(ctx, sound::chime());
         if let Some(url) = &chime {
             Self::event(tx, VoiceEvent::TtsEnd, &[("url", url)]).await?;
         }
@@ -470,6 +539,7 @@ impl Voice {
 
     fn forget(&mut self) {
         self.run = None;
+        self.spoken_by_speaker = None;
         self.continuing = None;
         self.closing = false;
         self.conversation.clear();

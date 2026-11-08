@@ -148,3 +148,47 @@ Les [mesures et empreintes des sources](performance/somfy-programme-ui-2026-11-0
 identifient exactement ce qui a été construit. Ce relevé de taille ne mesure ni
 le CPU/RAM du navigateur ni les latences serveur. Les réserves et le dépassement
 du budget image documentés ci-dessus restent ouverts.
+
+## Essai Airzone — 2026-11-03
+
+La dernière image ARM64 mesurée avant l’ajout de passerelle depuis le dashboard
+(`4aec51d`) pèse 26 246 840 octets : le budget de 25 Mo est déjà dépassé.
+Cette branche étend le pilote, les diagnostics et les vues Airzone ; elle ne
+revendique donc pas le respect intégral du budget. L’ajout interactif utilise un
+registre borné (32 passerelles, 64 Kio), des lectures à la demande et le superviseur
+existant ; il n’ajoute aucune interrogation périodique lorsqu’il est inactif.
+La taille de l’image finale et les mesures de l’essai sont rapportées dans la PR.
+Les mesures localhost avec un dashboard ouvert ne constituent ni un test CPU au
+repos, ni un comparatif avec Home Assistant.
+
+Le raffinement UX conserve le chargement différé de la vue. Le bundle Airzone
+mesuré passe de 54,57 Ko / 16,03 Ko gzip à 60,75 Ko / 17,51 Ko gzip ; aucune
+bibliothèque ni requête périodique supplémentaire n’est ajoutée. Les mesures et
+captures actualisées figurent dans la PR, sans assimiler ce coût à un gain de
+latence ou à une qualification complète du budget.
+
+La gestion des passerelles porte ce même chunk différé à 72,72 Ko / 20,75 Ko
+gzip. La liste se rafraîchit sur les événements de cycle de vie et les
+reconnexions, sans nouveau poller. La conservation des appareils indisponibles
+ajoute un inventaire borné à 8 Mio sur disque, réécrit seulement lorsque les
+définitions changent. La tâche de persistance existante enregistre les valeurs
+dans un fichier séparé, lié à la génération de cet inventaire. Une observation
+invalide est écartée individuellement ; elle ne bloque pas les autres appareils. Les observations restaurées ne sont pas
+rejouées comme des mesures fraîches dans l’historique ou les intégrales d’énergie.
+Le coût de l’image et les mesures après redémarrage sont consignés dans la PR.
+
+L’assistant de découverte porte le chunk Airzone à 82,99 Ko / 23,18 Ko gzip,
+sans nouvelle dépendance. La recherche est déclenchée explicitement : au plus
+deux sous-réseaux privés /24, 512 cibles, 16 connexions simultanées et quatre
+vérifications Airzone simultanées. Elle s’arrête après 18 secondes et une
+nouvelle recherche attend au moins 30 secondes depuis le début de la précédente.
+Il n’y a aucune tâche de scan quand l’assistant est inactif. Ces bornes ne
+constituent pas une mesure de CPU au repos ni une garantie de découverte derrière
+un réseau Docker isolé ; le formulaire manuel reste disponible.
+
+Le basculement de pilotage protégé par code porte le chunk Airzone à
+88,71 Ko / 24,43 Ko gzip (mesure du build local du 4 novembre 2026), contre
+82,99 Ko / 23,18 Ko gzip avant ce changement. Aucune dépendance supplémentaire
+n'est ajoutée. Le changement de mode est ponctuel et sérialisé ; l'autorisation
+vérifie l'identité par une lecture, la révocation ne dépend d'aucune réponse
+réseau. Le superviseur précédent est arrêté avant le remplacement.

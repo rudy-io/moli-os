@@ -19,8 +19,9 @@ use anyhow::{Context as _, bail};
 /// SQLite databases: copied through SQLite itself.
 const DATABASES: [&str; 2] = ["history.db", "energy.db"];
 /// Everything else worth keeping (missing ones are skipped).
-const FILES: [&str; 19] = [
+const FILES: [&str; 20] = [
     "moli.toml",
+    crate::managed_airzone::FILE,
     "plan.json",
     "phones.json",
     "former-emails.json",
@@ -134,11 +135,13 @@ pub fn restore(data_dir: &Path, dir: &Path, force: bool) -> anyhow::Result<()> {
     }
     // An older backup has no authoritative cache. Keeping a newer sidecar
     // would resurrect devices/readings or a private catalogue from another
-    // connection instead of restoring the old backup's actual state.
+    // connection instead of restoring the old backup's actual state. A newer
+    // Airzone registry would also resurrect gateways or permissions.
     let obsolete: Vec<_> = [
         "state.devices.json",
         "state.observations.json",
         "private-state.enc",
+        crate::managed_airzone::FILE,
     ]
     .into_iter()
     .filter(|name| !listed.contains_key(*name) && data_dir.join(name).exists())
@@ -318,6 +321,35 @@ mod tests {
         );
         cancel.cancel();
         task.await.unwrap();
+    }
+
+    #[test]
+    fn legacy_restore_clears_newer_airzone_registry_but_preserves_unrelated_omissions() {
+        let base = std::env::temp_dir().join(format!("moli-airzone-legacy-{}", std::process::id()));
+        let (data, saved, target) = (base.join("data"), base.join("saved"), base.join("target"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(data.join("labels.toml"), b"x = 1\n").unwrap();
+        backup(&data, &saved).unwrap();
+        let registry = target.join(crate::managed_airzone::FILE);
+        std::fs::write(&registry, b"newer registry").unwrap();
+        std::fs::write(target.join("secrets.enc"), b"keep unrelated omission").unwrap();
+        assert!(restore(&target, &saved, false).is_err());
+        assert!(registry.exists());
+        std::fs::write(saved.join("labels.toml"), b"damaged").unwrap();
+        assert!(restore(&target, &saved, true).is_err());
+        assert!(registry.exists());
+        std::fs::write(saved.join("labels.toml"), b"x = 1\n").unwrap();
+        restore(&target, &saved, true).unwrap();
+        assert!(
+            !registry.exists(),
+            "older backups must not revive newer gateway permissions"
+        );
+        assert_eq!(
+            std::fs::read(target.join("secrets.enc")).unwrap(),
+            b"keep unrelated omission"
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[tokio::test]

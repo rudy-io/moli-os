@@ -74,6 +74,28 @@ les tests du stockage privé dans `crates/moli-runtime/src/` (génération, conc
 durable et chiffrement), `crates/moli-overkiz/src/cloud/runtime_tests.rs` (session, reprise et
 indépendance locale) et `crates/moli-os/src/backup.rs` (restauration sans cache plus récent).
 
+### Airzone : autoriser et révoquer le pilotage
+
+Les routes d'installation Airzone exigent une personne authentifiée avant de lire le corps
+de la demande ; elles sont classées `humain non` dans l'inventaire. Une session encore valide
+ne suffit pas pour activer le pilotage : le serveur vérifie aussi le rôle propriétaire et le
+code fourni dans cette demande, avec le même compteur d'essais que la connexion. Ce code ne
+parvient ni au gestionnaire des passerelles ni au journal. Le retour en lecture seule reste
+accessible à une personne authentifiée sans nouveau code.
+
+Un `enabled = false` ou `read_only = true` explicite dans le TOML reste prioritaire sur le
+registre. Si ce registre ne peut pas être enregistré, retirer une passerelle ou révoquer son
+pilotage prend tout de même effet en mémoire ; l'interface indique que ce résultat n'est pas
+garanti après redémarrage. Une restauration ancienne sans registre ne conserve pas les
+autorisations d'un registre plus récent.
+
+Preuves : les tests `airzone_control_requires_a_fresh_code_in_the_request_not_only_a_session`,
+`airzone_control_denies_non_owners_even_with_the_code_but_allows_revocation` et
+`airzone_fresh_code_attempts_share_the_session_lockout` dans `crates/moli-api/tests/http.rs` ; les
+tests de modes dans `crates/moli-os/src/managed_airzone/tests/modes.rs` ;
+`legacy_restore_clears_newer_airzone_registry_but_preserves_unrelated_omissions` dans
+`crates/moli-os/src/backup.rs`.
+
 ## 5. Règles de conception
 
 Ce que les PR suivantes respectent, décidé dans #136 :

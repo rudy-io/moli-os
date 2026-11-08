@@ -136,6 +136,9 @@ historiques. `write = "extended"` active explicitement les nouvelles commandes :
 modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
 qualité de l’air et libellé d’intégration. Un essai d’observation configure
 explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
+Les passerelles ajoutées depuis Moli démarrent en lecture seule avec le périmètre
+`legacy` ; l'autorisation par code Moli ne modifie pas ce périmètre. Les modifications
+de connexion et réactivations rétablissent la lecture seule.
 Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
 transport. Les commandes restent soumises aux gardes, aux membres affectés et à
 une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
@@ -175,14 +178,15 @@ base_topic = "zigbee2mqtt"  # défaut
 # username = "moli-os"
 # password_env = "MOLI_Z2M_PASSWORD"   # NOM de la variable, jamais le mot de passe
 # client_id = "…"                      # défaut : moli-os-<instance>
+# impulse_points = ["z2m:0x…/state_l1"]  # relais câblés en déclencheur (portail, garage)
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`. **Relais à impulsion** (`impulse_points`) : un relais qui pilote un contact sec (portail, porte de garage, ZG-2002-RF en mode `inching`) ressemble à un interrupteur dont l'état retombe à éteint ; Z2M ne dit pas à quoi il est câblé, et le retour à `OFF` est aussi celui d'une minuterie, donc rien n'est déduit : le propriétaire liste les identifiants de points (`z2m:<IEEE>/state_l1`). Un point listé (interrupteur réglable seulement) devient une énumération à une seule valeur, `cycle`, de sens `control` (un agent demande toujours l'accord d'une personne), en écriture seule : l'ordre part en `state_lN: "ON"`, l'état renvoyé n'est jamais publié ni relu. Un identifiant inconnu ou non éligible est signalé dans les journaux. Le tableau de bord montre un bouton « Impulsion » par relais (« Relais 1 », « Relais 2 ») ; la fonction de chaque relais se dit par le nom de l'appareil. **Migration** : un relais déclaré cesse d'être un interrupteur (`on_off` → `control`) ; une règle, un favori ou un historique qui lisait son état est à reprendre.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
-- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (8 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
+- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (9 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
 
 ## `zwave` : Z-Wave via zwave-js-ui (`crates/moli-zwave`)
 
@@ -419,7 +423,13 @@ host = "192.168.1.x"
   reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
-  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
+  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub peut
+  ne donner cette pièce qu'à un appareil d'un produit (un MYGGSPRAY ou un VALLHORN : la présence,
+  pas la lumière) : un appareil en lecture seule sans pièce reprend celle de son `relationId`,
+  sauf si le produit est réparti sur deux pièces. Un appareil qu'on peut commander ne reprend
+  rien : une pièce dit aussi qui peut le commander. Comme toute pièce native, celle-ci s'efface à
+  l'affichage devant une pièce choisie dans Moli, mais la garde et l'accès des invités comptent
+  les deux. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
   lampes elles-mêmes) ne publient que leur pile, ou rien.
 - **Pièges** : un renommage, un changement de pièce, un ajout ou un retrait recharge tout. Le
   WebSocket coupé (redémarrage du hub) ou muet 95 s : rechargement complet puis reconnexion ;
@@ -437,7 +447,7 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), pièce partagée par un produit (ordre, deux pièces, lecture seule, déplacement), store (points et sens, position inversée dans les deux sens,
   ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `enedis` : compteur Linky par la Conso API (`crates/moli-enedis`)
@@ -533,9 +543,12 @@ host = "192.168.1.x"
   musique baisse, l'annonce passe, la musique revient d'elle-même, comme le script HA
   `announce_sonos`. Le certificat du Sonos est épinglé au premier contact (secret
   `sonos/ws_cert`). Une annonce à la fois, dans l'ordre ; la commande répond tout de suite,
-  un échec est journalisé dans les logs.
+  un échec est journalisé dans les logs. `speaking` (texte, lecture) tient les mots de
+  l'annonce pendant que l'enceinte les dit (dès que le clip est `ACTIVE`), vide une fois dits :
+  un [satellite vocal](satellite-vocal.md) qui répond par l'enceinte (`speaker`) attend la fin
+  avant de se remettre à écouter.
   Tout ce qui n'est pas propre au Sonos (le texte vérifié, la file de 3 au plus, l'abandon
-  après 30 s d'attente, `quiet`, `announce_volume`, la synthèse et la publication du son) est
+  après 30 s d'attente, `quiet`, `announce_volume`, `speaking`, la synthèse et la publication du son) est
   dans `crates/moli-announce`, pour toute enceinte qui parle ; le Sonos n'y ajoute que le clip
   (`moli_announce::Speaker`), comme [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay) le RAOP.
 - **Pièges** : description injoignable au démarrage = échec du pilote, relancé par le superviseur. Pas de gestion des groupes Sonos.
@@ -570,7 +583,7 @@ host = "192.168.1.x"
 
 - **Secrets** : aucun.
 - **Points** : ceux de `moli-announce`, comme pour le Sonos (`announce`, `announce_volume`,
-  `quiet`, `quiet_until`), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
+  `quiet`, `quiet_until`, `speaking` dès que le son part), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
   relu dans la session de chaque annonce et remis après elle, même quand le son a échoué. 0 %
   est muet (-144 dB). Un volume relu qui n'est pas un nombre fini (`nan`, `inf`) est ignoré ;
   les autres sont bornés entre -144 et 0 dB. Un récepteur qui refuse le volume de l'annonce la

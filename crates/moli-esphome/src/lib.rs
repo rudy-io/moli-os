@@ -79,6 +79,11 @@ pub struct Config {
     /// `error`, `warn`, `info`, `debug`.
     #[serde(default = "default_logs")]
     pub logs: String,
+    /// A speaker that says the answers instead of the device (its
+    /// `announce` point, e.g. a Sonos's); the device keeps its own sounds,
+    /// and says an answer itself when the speaker does not.
+    #[serde(default)]
+    pub speaker: Option<String>,
 }
 
 fn default_logs() -> String {
@@ -633,6 +638,7 @@ async fn session(
         Duration::from_secs(config.window_s),
         config.media_base.clone(),
         id.clone(),
+        config.speaker.clone(),
     );
 
     let mut ping = tokio::time::interval(PING_EVERY);
@@ -979,6 +985,7 @@ mod tests {
             wake_words: Vec::new(),
             mac: Some("AA:BB:CC:DD:EE:FF".into()),
             logs: "none".into(),
+            speaker: None,
         };
         let cancel = CancellationToken::new();
         spawn_driver(

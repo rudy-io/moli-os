@@ -35,6 +35,11 @@ pub struct Config {
     pub password_env: Option<String>,
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Relays wired as triggers (a gate's contacts, a garage door): point ids
+    /// such as `z2m:0xa4c138aa581f6da3/state_l1`. Each shows as an « Impulsion »
+    /// order instead of an on/off state that falls back to off.
+    #[serde(default)]
+    pub impulse_points: Vec<String>,
 }
 
 fn default_host() -> String {
@@ -111,7 +116,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     ctx.ready();
                 }
                 Event::Incoming(Packet::Publish(publish)) => {
-                    let reloaded = on_publish(ctx, base, &mut catalog, &publish);
+                    let reloaded = on_publish(ctx, config, base, &mut catalog, &publish);
                     if reloaded {
                         queue_reads(base, &catalog, &mut read_done, &mut reads);
                     }
@@ -135,7 +140,13 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 }
 
 /// Handles one message. Returns `true` when the catalog was reloaded.
-fn on_publish(ctx: &DriverCtx, base: &str, catalog: &mut Catalog, publish: &Publish) -> bool {
+fn on_publish(
+    ctx: &DriverCtx,
+    config: &Config,
+    base: &str,
+    catalog: &mut Catalog,
+    publish: &Publish,
+) -> bool {
     let Some(rest) = publish
         .topic
         .strip_prefix(base)
@@ -144,7 +155,11 @@ fn on_publish(ctx: &DriverCtx, base: &str, catalog: &mut Catalog, publish: &Publ
         return false;
     };
     if rest == "bridge/devices" {
-        return match Catalog::from_bridge_devices(ctx.instance(), &publish.payload) {
+        return match Catalog::with_impulses(
+            ctx.instance(),
+            &publish.payload,
+            &config.impulse_points,
+        ) {
             Ok(fresh) => {
                 apply_catalog(ctx, catalog, fresh);
                 true

@@ -109,6 +109,7 @@
   "pilotes.annonces.volume_annonce": "Volume des annonces",
   "pilotes.annonces.volume_nombre": "le volume d'une annonce est un nombre de 0 à 100",
   "pilotes.annonces.annonce": "Annonce",
+  "pilotes.annonces.annonce_en_cours": "Annonce en cours",
   "pilotes.sonos.ne_se_regle_pas": "{point} ne peut pas être réglé",
   "pilotes.annonces.annonces_non_configurees": "les annonces ne sont pas configurées",
   "pilotes.annonces.annonce_texte": "une annonce est du texte",
