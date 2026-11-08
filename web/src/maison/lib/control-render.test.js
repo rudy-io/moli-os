@@ -777,3 +777,17 @@ test('a room shows its trigger device and a lone control point stays a cover', (
   assert.match(room, /Impulsion · Relais 1/);
   assert.match(room, /data-cover-command="open"/);
 });
+
+test('a presence radar shows someone there, whatever the key of its presence point', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const lux = { ...point('illuminance', number(0, 10000), false, 'illuminance'), unit: 'lx' };
+  const room = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: true } },
+  ]);
+  assert.match(room, /title="Présence"/);
+  const empty = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: false } },
+    { id: 'z2m:pir', points: [presence('occupancy')], values: { occupancy: false } },
+  ]);
+  assert.doesNotMatch(empty, /title="Présence"/);
+});

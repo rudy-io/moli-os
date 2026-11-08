@@ -98,7 +98,11 @@ export function doorOpen(id) {
 
 export const leak = (id) => value(id, 'water_leak') === true || value(id, 'watersensor_state') === 'alarm';
 
-export const motion = (id) => value(id, 'occupancy') === true || value(id, 'pir') === 'pir';
+/** Someone is there: any point the server reads as presence (`occupancy`,
+ *  `presence` of a mmWave radar, `motion`), whatever its key, or Tuya's `pir`. */
+export const motion = (id) =>
+  (device(id)?.points ?? []).some((p) => p.semantic === 'occupancy' && value(id, p.key) === true) ||
+  value(id, 'pir') === 'pir';
 
 /** A sensor's battery (not a phone's: it charges). */
 export function lowBattery(id) {
