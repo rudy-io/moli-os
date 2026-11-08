@@ -799,8 +799,13 @@ test('the security panel lists a presence radar beside the motion sensors', () =
   hub.devices = {
     'z2m:radar': { id: 'z2m:radar', native_name: 'Radar salon', model: null, label: { room: 'Salon' }, online: true, members: [], points: [presence('presence')], state: at({ presence: true }) },
     'z2m:pir': { id: 'z2m:pir', native_name: 'PIR cellier', model: null, label: { room: 'Cellier' }, online: true, members: [], points: [presence('occupancy')], state: at({ occupancy: false }) },
+    // Who is home is no sensor, whatever the people driver's instance is called.
+    'personnes:maison': { id: 'personnes:maison', instance: 'personnes', native_name: 'Le foyer', model: null, label: {}, online: true, members: [], points: [presence('anyone_home')], state: at({}) },
   };
+  hub.drivers = [{ instance: 'personnes', kind: 'people' }];
   const html = render(components.SecurityPanel, { props: {} }).body;
+  hub.drivers = [];
   assert.match(html, /Radar salon/);
   assert.match(html, /PIR cellier/);
+  assert.doesNotMatch(html, /Le foyer/);
 });
