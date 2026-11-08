@@ -247,5 +247,6 @@
   "maison.robot.sonner": "Faire sonner",
   "maison.pieces.toutes_pieces": "Vue d'ensemble",
   "maison.pieces.choisir": "Choisir une pièce",
-  "maison.pieces.confort": "Température"
+  "maison.pieces.confort": "Température",
+  "maison.dehors.uv": "UV · {word}"
 }

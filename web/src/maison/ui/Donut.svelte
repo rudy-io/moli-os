@@ -54,11 +54,14 @@
         />
       {/each}
     </svg>
-    <svg class="face" viewBox="0 0 100 100" aria-hidden="true">
+    <svg class="face" viewBox="0 0 100 100">
       <circle class="track" cx="50" cy="50" r={R} stroke-width={sw} />
       {#each arcs as a, n (a.id)}
         <circle
-          role="presentation"
+          role="button"
+          tabindex="0"
+          aria-label="{a.label} · {a.pct} %"
+          aria-pressed={focus === a.id}
           class:dim={focus && focus !== a.id}
           class:lift={focus === a.id}
           cx="50"
@@ -72,6 +75,7 @@
           onpointerenter={(e) => e.pointerType === 'mouse' && (focus = a.id)}
           onpointerleave={(e) => e.pointerType === 'mouse' && (focus = null)}
           onclick={() => (focus = focus === a.id ? null : a.id)}
+          onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), (focus = focus === a.id ? null : a.id))}
         />
       {/each}
     </svg>

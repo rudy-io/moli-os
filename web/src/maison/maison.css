@@ -203,7 +203,7 @@
 .maison {
   --glass: color-mix(in srgb, var(--surface) 78%, transparent);
   --glass-line: color-mix(in srgb, #fff 70%, transparent);
-  --glass-blur: saturate(160%) blur(18px);
+  --glass-blur: saturate(150%) blur(10px);
   --grad-warm: linear-gradient(135deg, #ffbf5c, #f08a3a);
   --grad-cool: linear-gradient(135deg, #6f95ff, #4b5ff2);
   --grad-good: linear-gradient(135deg, #45c9a6, #2c9a88);

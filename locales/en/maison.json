@@ -247,5 +247,6 @@
   "maison.robot.sonner": "Ring",
   "maison.pieces.toutes_pieces": "Overview",
   "maison.pieces.choisir": "Pick a room",
-  "maison.pieces.confort": "Temperature"
+  "maison.pieces.confort": "Temperature",
+  "maison.dehors.uv": "UV · {word}"
 }

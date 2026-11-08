@@ -90,7 +90,7 @@
       <div class="card-head"><h2><Icon name="leaf" size={18} />{t('maison.dehors.air')}</h2><span class="chip {aqiTone}">{aqiWord}</span></div>
       <div class="gauges">
         <Gauge value={aqi} max={100} text={num(aqi)} label={t('maison.dehors.indice')} />
-        <Gauge value={uv} max={11} text={num(uv, 0)} label="UV · {uvWord}" colors={['#3fae7c', '#e8b931', '#f08a3a', '#c2410c', '#8e44ad']} />
+        <Gauge value={uv} max={11} text={num(uv, 0)} label={t('maison.dehors.uv', { word: uvWord })} colors={['#3fae7c', '#e8b931', '#f08a3a', '#c2410c', '#8e44ad']} />
       </div>
       <div class="pairs">
         <div><small>{t('maison.dehors.particules')}</small><b class="num">{num(v(air, 'pm2_5'), 1)} µg/m³</b></div>

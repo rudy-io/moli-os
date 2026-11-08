@@ -358,17 +358,10 @@
       linear-gradient(var(--warm-soft), var(--warm-soft)) padding-box,
       conic-gradient(var(--warm) calc(var(--p, 0) * 1%), var(--surface-3) 0) border-box;
     color: var(--warm-ink);
-    animation: room-glow 3s ease-in-out infinite alternate;
+    /* A still glow: an endless shadow animation repaints all day. */
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--warm) 18%, transparent);
   }
 
-  @keyframes room-glow {
-    from {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--warm) 40%, transparent);
-    }
-    to {
-      box-shadow: 0 0 18px 2px color-mix(in srgb, var(--warm) 40%, transparent);
-    }
-  }
 
   @media (prefers-reduced-motion: reduce) {
     .room-icon.lit {

@@ -500,7 +500,6 @@
     backdrop-filter: var(--glass-blur);
     box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 0 rgb(176 95 216 / 35%);
     font-weight: 650;
-    animation: orb-call 3.6s ease-in-out infinite;
     transition:
       transform 0.3s var(--ease),
       gap 0.3s var(--ease),
@@ -530,16 +529,6 @@
     opacity: 1;
   }
 
-  @keyframes orb-call {
-    0%,
-    70%,
-    100% {
-      box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 0 rgb(176 95 216 / 30%);
-    }
-    85% {
-      box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line), 0 0 0 12px rgb(176 95 216 / 0%);
-    }
-  }
 
   .notes {
     position: fixed;
