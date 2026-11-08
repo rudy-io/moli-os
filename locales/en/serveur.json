@@ -96,6 +96,8 @@
   "serveur.garde.machine": "command to a machine (printer, computer): a human decides",
   "serveur.garde.code_partout": "code required for every command (pin mode)",
   "serveur.garde.en_attente": "awaiting human approval #{id}: {reason}",
+  "serveur.ordre.renvoi": "resent {envoi}/{envois}",
+  "serveur.ordre.non_confirme": "the device did not confirm after {envois} sends",
   "serveur.garde.remplacee": "replaced by a more recent request",
   "serveur.garde.cedee": "gave way to a more recent request: too many waiting",
   "serveur.garde.expiree": "expired",
