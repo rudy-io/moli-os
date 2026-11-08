@@ -97,7 +97,8 @@
   d'appareil, retire `test_bit` (contrôle d'usine), et un appareil déjà dans `tuya.json` garde
   ses DP tels quels, aucun compris (une caméra ou une télécommande infrarouge importée sans DP
   par HA n'en reçoit pas du cloud : `sd_format`, sirène, codes bruts) ; seule sa clé locale est
-  mise à jour. Lancé en root, l'import rend `tuya.json` et le coffre au propriétaire du dossier
+  mise à jour. Une caméra (`sp`), un hub infrarouge (`wnykq`) ou une télécommande (`infrared_*`)
+  nouvelle n'en reçoit pas non plus, comme par l'export HA. Lancé en root, l'import rend `tuya.json` et le coffre au propriétaire du dossier
   de données (moli-os tourne sous cet utilisateur). Essayé le 8 novembre 2026 sur un vrai
   compte (43 appareils : prises, ampoules, passerelle Zigbee et ses sous-appareils, hub
   infrarouge et ses télécommandes, caméras, Fingerbot) : chaque sous-appareil rattaché à la

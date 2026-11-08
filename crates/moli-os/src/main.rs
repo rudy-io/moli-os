@@ -675,6 +675,7 @@ fn tuya_import(
 /// Files written by a tool run as root (the import) go back to whoever
 /// owns the data directory: moli-os runs as that user and must still read
 /// its vault and its devices file.
+#[cfg(unix)]
 fn keep_owner(data_dir: &std::path::Path, files: &[&std::path::Path]) {
     use std::os::unix::fs::MetadataExt as _;
     let Ok(dir) = std::fs::metadata(data_dir) else {
@@ -694,6 +695,10 @@ fn keep_owner(data_dir: &std::path::Path, files: &[&std::path::Path]) {
         }
     }
 }
+
+/// Elsewhere, files keep the owner the system gives them.
+#[cfg(not(unix))]
+fn keep_owner(_data_dir: &std::path::Path, _files: &[&std::path::Path]) {}
 
 /// The options of the tuya driver `instance`.
 fn tuya_driver(config: &Config, instance: &str) -> anyhow::Result<moli_tuya::Config> {

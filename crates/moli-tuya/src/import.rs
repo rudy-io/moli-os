@@ -51,7 +51,12 @@ fn device(raw: &Json, model: &Json) -> Option<Map<String, Json>> {
     if let Some(product) = text(raw, "product_name") {
         out.insert("product".into(), json!(product));
     }
-    out.insert("dps".into(), Json::Array(dps(model, category)));
+    let dps = if no_points(category) {
+        Vec::new()
+    } else {
+        dps(model, category)
+    };
+    out.insert("dps".into(), Json::Array(dps));
     out.insert("local_key".into(), json!(text(raw, "local_key")));
     // A gateway has a node_id too: only what is not a hub is a sub-device.
     let node_id = text(raw, "node_id");
@@ -103,6 +108,14 @@ fn device_code(category: &str, id: u64, code: &str) -> Option<String> {
             .map(|n| format!("switch_mode{n}")),
         _ => None,
     }
+}
+
+/// A camera and an infrared hub or remote get no data point from the cloud,
+/// new or not: theirs are `sd_format`, a siren, raw infrared codes, which an
+/// automation or an agent must not be able to press. The export through
+/// Home Assistant brings them without any too.
+fn no_points(category: &str) -> bool {
+    matches!(category, "sp" | "wnykq") || category.starts_with("infrared")
 }
 
 /// Data points only the factory uses: never shown.
@@ -309,6 +322,32 @@ mod tests {
             codes(&file.devices[0]).len(),
             3,
             "a new device keeps the cloud's"
+        );
+    }
+
+    /// A new camera, infrared hub or remote comes without data points: no
+    /// `sd_format`, siren or raw code to press.
+    #[test]
+    fn a_new_camera_or_infrared_remote_gets_no_data_points() {
+        let raws = [
+            json!({ "id": "ca0000000000000000ffff", "name": "Caméra", "category": "sp", "local_key": "0123456789abcdef" }),
+            json!({ "id": "ir0000000000000000gggg", "name": "Hub IR", "category": "wnykq", "local_key": "0123456789abcdef" }),
+            json!({ "id": "tv0000000000000000hhhh", "name": "TV", "category": "infrared_tv", "sub": true,
+                    "node_id": "hh00000000000000", "local_key": "0123456789abcdef" }),
+        ];
+        let model = json!({ "services": [{ "properties": [
+            { "abilityId": 111, "code": "sd_format", "accessMode": "rw", "typeSpec": { "type": "bool" } },
+            { "abilityId": 159, "code": "siren_switch", "accessMode": "rw", "typeSpec": { "type": "bool" } },
+            { "abilityId": 201, "code": "ir_send", "accessMode": "wr", "typeSpec": { "type": "string" } },
+        ]}]});
+        let file = from_cloud(&raws, &[model.clone(), model.clone(), model]);
+        assert_eq!(file.devices.len(), 3);
+        assert!(file.devices.iter().all(|d| d.device.dps.is_empty()));
+        // Still filed: its key, and the remote behind its hub.
+        assert!(file.devices.iter().all(|d| d.local_key.is_some()));
+        assert_eq!(
+            file.devices[2].device.parent.as_deref(),
+            Some("ir0000000000000000gggg")
         );
     }
 

@@ -335,7 +335,6 @@ fn base64(text: &str) -> Option<Vec<u8>> {
 /// The devices the cloud speaks for, by Tuya id: (index in the driver, device).
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
-/// Reads the states, then follows the changes, for ever (reconnecting).
 /// Devices per page of the cloud's list.
 const PAGE: usize = 50;
 
@@ -391,6 +390,7 @@ pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportF
     Ok(crate::import::from_cloud(&raws, &models))
 }
 
+/// Reads the states, then follows the changes, for ever (reconnecting).
 pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
     let mut api = Api {
         keys,
