@@ -15,6 +15,14 @@
    *  has said nothing for this long is not trusted any more. */
   const STALE = 26 * 3_600_000;
   const has = (d, keys) => keys.find((k) => d?.points.some((p) => p.key === k)) ?? null;
+  /** What says someone moves or is there: the usual keys first, else any point
+   *  the server reads as presence (a mmWave radar's `presence`). */
+  const moveKey = (d) => has(d, MOVES) ?? d?.points.find((p) => p.semantic === 'occupancy')?.key ?? null;
+  /** Who is home (people, phones, presence drivers) is no sensor of the house,
+   *  whatever its instance is called. */
+  const PEOPLE = ['people', 'phones', 'presence'];
+  const aboutPeople = (d) =>
+    d.id.startsWith('presence:') || d.id.startsWith('telephones:') || PEOPLE.includes(hub.drivers?.find((x) => x.instance === d.instance)?.kind);
   const battery = (id) => {
     const pct = value(id, 'battery_percentage') ?? value(id, 'battery');
     return typeof pct === 'number' ? Math.round(pct) : null;
@@ -82,9 +90,9 @@
 
   const sensors = $derived(
     Object.values(hub.devices)
-      .filter((d) => !hidden(d.id) && !d.id.startsWith('presence:') && !d.id.startsWith('telephones:') && has(d, MOVES))
+      .filter((d) => !hidden(d.id) && !aboutPeople(d) && moveKey(d))
       .map((d) => {
-        const key = has(d, MOVES);
+        const key = moveKey(d);
         const v = value(d.id, key);
         const moving = v === true || v === 'pir' || Number(value(d.id, 'person')) > 0 || value(d.id, 'person') === true;
         const why = silence(d, key);

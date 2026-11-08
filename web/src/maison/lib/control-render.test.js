@@ -26,6 +26,7 @@ before(async () => {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -776,4 +777,35 @@ test('a room shows its trigger device and a lone control point stays a cover', (
   ]);
   assert.match(room, /Impulsion · Relais 1/);
   assert.match(room, /data-cover-command="open"/);
+});
+
+test('a presence radar shows someone there, whatever the key of its presence point', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const lux = { ...point('illuminance', number(0, 10000), false, 'illuminance'), unit: 'lx' };
+  const room = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: true } },
+  ]);
+  assert.match(room, /title="Présence"/);
+  const empty = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: false } },
+    { id: 'z2m:pir', points: [presence('occupancy')], values: { occupancy: false } },
+  ]);
+  assert.doesNotMatch(empty, /title="Présence"/);
+});
+
+test('the security panel lists a presence radar beside the motion sensors', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const at = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, ts: Date.now() }]));
+  hub.devices = {
+    'z2m:radar': { id: 'z2m:radar', native_name: 'Radar salon', model: null, label: { room: 'Salon' }, online: true, members: [], points: [presence('presence')], state: at({ presence: true }) },
+    'z2m:pir': { id: 'z2m:pir', native_name: 'PIR cellier', model: null, label: { room: 'Cellier' }, online: true, members: [], points: [presence('occupancy')], state: at({ occupancy: false }) },
+    // Who is home is no sensor, whatever the people driver's instance is called.
+    'personnes:maison': { id: 'personnes:maison', instance: 'personnes', native_name: 'Le foyer', model: null, label: {}, online: true, members: [], points: [presence('anyone_home')], state: at({}) },
+  };
+  hub.drivers = [{ instance: 'personnes', kind: 'people' }];
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  hub.drivers = [];
+  assert.match(html, /Radar salon/);
+  assert.match(html, /PIR cellier/);
+  assert.doesNotMatch(html, /Le foyer/);
 });
