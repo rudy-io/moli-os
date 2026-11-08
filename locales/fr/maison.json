@@ -244,5 +244,14 @@
   "maison.robot.demarrer": "Démarrer",
   "maison.robot.arreter": "Arrêter",
   "maison.robot.base": "Retour à la base",
-  "maison.robot.sonner": "Faire sonner"
+  "maison.robot.sonner": "Faire sonner",
+  "maison.accueil.voiture_batterie": "Batterie",
+  "maison.accueil.voiture_autonomie": "Autonomie",
+  "maison.accueil.voiture_recharge": "Recharge",
+  "maison.accueil.voiture_recharge_vale": "En recharge · {power}",
+  "maison.accueil.voiture_portes": "Portes",
+  "maison.accueil.voiture_verrouillees": "verrouillées",
+  "maison.accueil.voiture_ouvertes": "ouvertes",
+  "maison.accueil.voiture_vigie": "Mode vigie",
+  "maison.accueil.voiture_endormie": "Endormie"
 }

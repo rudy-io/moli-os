@@ -103,6 +103,18 @@
     if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: t('commun.piece.eclairement') });
     if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: t('commun.piece.presence') });
     if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
+    // The car: its battery, what it does.
+    if (deviceKind(d) === 'car') {
+      const parts = [];
+      if (typeof v('soc') === 'number') parts.push(t('commun.piece.voiture_batterie', { n: Math.round(v('soc')) }));
+      if (typeof v('range') === 'number') parts.push(t('commun.piece.voiture_autonomie', { km: Math.round(v('range')) }));
+      if (parts.length) out.push({ tone: '', icon: 'car', text: parts.join(' · ') });
+      if (v('charging') === true) out.push({ tone: 'cool', icon: 'power', text: t('commun.piece.voiture_recharge') });
+      if (v('sentry') === true) out.push({ tone: 'warm', icon: 'shield', text: t('commun.piece.voiture_vigie') });
+      if (v('doors_locked') === false) out.push({ tone: 'warm', icon: 'lock', text: t('commun.piece.voiture_portes_ouvertes') });
+      if (v('awake') === false) out.push({ tone: '', icon: 'moon', text: t('commun.piece.voiture_endormie') });
+      return out;
+    }
     if (deviceKind(d) === 'camera') out.push({ tone: 'cool', icon: 'cctv', text: nameOf(d.id), href: '#/cameras' });
     if (deviceKind(d) === 'printer') {
       const st = phase(v('state'));
