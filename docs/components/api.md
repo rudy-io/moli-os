@@ -368,8 +368,12 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateways.json`
 lit les versions 1 et 2 et écrit la version 3 : connexions gérées, surcharges ciblées des
 entrées TOML et retraits réversibles. Une modification conserve les options natives
-non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`. Une entrée
-TOML jamais modifiée conserve son mode d’origine. Les restrictions explicites
+non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`.
+Réactiver une passerelle retirée utilise la session humaine existante, sans nouveau
+code Moli : cela reprend uniquement la lecture et ne restaure jamais son ancienne
+autorisation de pilotage. Pour commander à nouveau, un propriétaire doit ensuite
+fournir un code frais via le changement de mode. Une entrée TOML jamais modifiée
+conserve son mode d’origine. Les restrictions explicites
 `enabled = false` et `read_only = true` du TOML restent prioritaires sur le registre
 et sur les changements demandés dans Moli. Le champ `configuration_lock` de la
 liste vaut `disabled`, `read_only` ou `null` ; il explique ce verrou dans

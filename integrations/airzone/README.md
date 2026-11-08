@@ -52,7 +52,10 @@ both write modes at publication, execution and transport boundaries.
 Set `read_only = true` for an observation-only trial. Gateways added, edited or reactivated from the dashboard explicitly
 use `read_only = true`. In Installation, an owner can then authorize control
 with a fresh server-verified Moli PIN; returning to read-only uses the existing
-human session. Explicit TOML `enabled = false` and `read_only = true` always take
+human session. Reactivating a withdrawn gateway also uses that session without
+a new PIN, but only resumes reading: previous control permission is never restored.
+An owner must authorize control again with a fresh PIN.
+Explicit TOML `enabled = false` and `read_only = true` always take
 precedence, and the card explains these locks. The per-gateway choice is stored
 in registry v3 and leaves hand-written TOML untouched. If persistence fails,
 revocation still blocks commands in memory; the card explains that it may be

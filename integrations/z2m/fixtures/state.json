@@ -84,5 +84,23 @@
   "position": 32,
   "state": "OPEN",
   "switch_type": "momentary"
+ },
+ "0x00124b000000000a": {
+  "backlight_mode": "ON",
+  "countdown_l1": 0,
+  "countdown_l2": 0,
+  "inching_control_set": {
+   "inching_control_1": "ENABLE",
+   "inching_control_2": "ENABLE",
+   "inching_time_1": 1,
+   "inching_time_2": 1
+  },
+  "indicator_mode": "off/on",
+  "linkquality": 120,
+  "power_on_behavior_l1": "off",
+  "power_on_behavior_l2": "off",
+  "state_l1": "ON",
+  "state_l2": "OFF",
+  "switch_type": "momentary"
  }
 }

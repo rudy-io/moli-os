@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
-use moli_core::Value;
+use moli_core::{Origin, PointId, Value};
 use moli_runtime::voice::{Answer, AtDoor, Pcm, Said, Speaker, VoiceBrain};
 use moli_runtime::{BoxFuture, DeviceView};
 use ring::rand::{SecureRandom as _, SystemRandom};
@@ -24,6 +24,14 @@ const VOICE_RATE: u32 = 24_000;
 const SATELLITE_GAIN: f32 = 2.8;
 /// Above this, peaks are rounded off instead of clipped.
 const KNEE: f32 = 0.7;
+/// A speaker has this long to start saying an answer; past it, the satellite
+/// says it itself.
+const SPEAKER_STARTS_WITHIN: Duration = Duration::from_secs(5);
+/// The longest answer a speaker says (500 characters at most).
+const SPEAKER_LONGEST: Duration = Duration::from_secs(45);
+/// How often the speaker's `speaking` point is read meanwhile.
+const SPEAKER_POLL: Duration = Duration::from_millis(50);
+
 /// The tools that only read: a turn that called nothing else changed nothing.
 const READ_ONLY_TOOLS: [&str; 8] = [
     "show",
@@ -70,22 +78,80 @@ fn screen_plays(devices: &[DeviceView], layout: &Layout, satellite: &str) -> boo
         })
 }
 
-/// What a turn answers while a screen plays: words only for what it did, and
-/// the conversation ends (the film would be taken for the next question).
-pub(crate) fn hush(reply: &mut Reply) {
-    let acted = !reply.actions.is_empty()
+/// The turn changed something in the house, or asked to.
+fn acted(reply: &Reply) -> bool {
+    !reply.actions.is_empty()
         || !reply.proposals.is_empty()
         || reply
             .tools
             .iter()
-            .any(|tool| !READ_ONLY_TOOLS.contains(&tool.as_str()));
-    if !acted {
+            .any(|tool| !READ_ONLY_TOOLS.contains(&tool.as_str()))
+}
+
+/// What a turn answers while a screen plays: words only for what it did, and
+/// the conversation ends (the film would be taken for the next question).
+pub(crate) fn hush(reply: &mut Reply) {
+    if !acted(reply) {
         reply.reply.clear();
     }
     reply.end = true;
 }
 
+/// Most of what was heard is in another alphabet: the transcription took the
+/// room for Russian or Chinese (7 Nov. 2026: « Семакия пишет », « 你都好食 »).
+/// The house speaks French or English: nobody spoke to Moli.
+fn foreign_script(text: &str) -> bool {
+    let latin = |c: char| {
+        c.is_ascii_alphabetic() || matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
+    };
+    let (letters, latins) = text
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .fold((0usize, 0usize), |(all, l), c| {
+            (all + 1, l + usize::from(latin(c)))
+        });
+    letters > 0 && latins * 2 < letters
+}
+
 impl Assistant {
+    /// Says `text` on a speaker (`point`, its `announce` point) and waits until
+    /// it has said it: its `speaking` point holds the words while it says them.
+    /// `Err` when it is silenced, refuses, or has not started within `starts`.
+    pub(crate) async fn say_on_speaker(
+        &self,
+        point: &PointId,
+        text: &str,
+        starts: Duration,
+    ) -> Result<(), String> {
+        let (device, _) = point.split().ok_or("not a point")?;
+        let at = |key: &str| PointId::from(format!("{}/{key}", device.as_str()));
+        let hub = &self.0.hub;
+        let read = |key: &str| hub.state(&at(key)).map(|s| s.value);
+        if read("quiet") == Some(Value::Bool(true)) {
+            return Err("the speaker is silenced".into());
+        }
+        let saying = || matches!(read("speaking"), Some(Value::Text(said)) if &*said == text);
+        hub.command(
+            point,
+            Value::Text(text.into()),
+            Origin::Assistant,
+            Some("Moli".into()),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let asked = Instant::now();
+        while !saying() {
+            if asked.elapsed() > starts {
+                return Err("the speaker did not start".into());
+            }
+            tokio::time::sleep(SPEAKER_POLL).await;
+        }
+        while saying() && asked.elapsed() < SPEAKER_LONGEST {
+            tokio::time::sleep(SPEAKER_POLL).await;
+        }
+        Ok(())
+    }
+
     /// This turn comes from a satellite that should keep quiet (`quiet_during_tv`).
     pub(crate) async fn screen_plays_for(&self, turn: &Turn) -> bool {
         if !self.0.config.quiet_during_tv || turn.surface.as_deref() != Some("satellite") {
@@ -172,7 +238,15 @@ impl VoiceBrain for Assistant {
             let heard = self.listen(&wav, "audio/wav").await;
             // Its recording goes with the turn that follows.
             self.note_heard(voice::seconds_of(&wav, "audio/wav"), audio);
-            heard.map(|heard| heard.text).map_err(|e| e.to_string())
+            heard
+                .map(|heard| {
+                    if foreign_script(&heard.text) {
+                        tracing::info!(heard = %heard.text, "satellite: another alphabet, heard as nothing");
+                        return String::new();
+                    }
+                    heard.text
+                })
+                .map_err(|e| e.to_string())
         })
     }
 
@@ -203,8 +277,12 @@ impl VoiceBrain for Assistant {
             self.turn(turn)
                 .await
                 .map(|reply| Answer {
+                    // It listens again only after it did something (« et la
+                    // cuisine aussi »). After a plain answer, a lively room was
+                    // heard as the next question, and the next, for minutes
+                    // (7 Nov. 2026).
+                    closes: reply.end || !acted(&reply),
                     text: reply.reply,
-                    closes: reply.end,
                 })
                 .map_err(|e| e.to_string())
         })
@@ -262,10 +340,20 @@ impl VoiceBrain for Assistant {
 
     fn is_goodbye(&self, text: &str) -> bool {
         goodbye(text, &word_list("assistant.voice.goodbye"))
+            || asks_to_stop(text, &word_list("assistant.voice.stop"))
     }
 
     fn heard_nothing(&self, wav: Option<Vec<u8>>) {
         self.heard_nothing_on("satellite", wav.as_deref());
+    }
+
+    fn say_on(&self, point: &str, text: &str) -> BoxFuture<'_, Result<(), String>> {
+        let point = PointId::from(point);
+        let text = text.trim().to_owned();
+        Box::pin(async move {
+            self.say_on_speaker(&point, &text, SPEAKER_STARTS_WITHIN)
+                .await
+        })
     }
 }
 
@@ -292,6 +380,19 @@ fn normalize(text: &str) -> String {
 fn goodbye(text: &str, phrases: &[String]) -> bool {
     let said = normalize(text);
     !said.is_empty() && phrases.iter().any(|p| normalize(p) == said)
+}
+
+/// One of the phrases that stop the conversation, anywhere in what was said,
+/// before the model is asked: it took « Laisse tomber, éteins-toi » for the
+/// living room's lights, and refused « Arrête de nous écouter ! » (7 Nov. 2026).
+fn asks_to_stop(text: &str, phrases: &[String]) -> bool {
+    // Words between spaces, accents and hyphens left out: « éteins-toi » is « eteins toi ».
+    let plain = |s: &str| format!(" {} ", norm(&normalize(s).replace('-', " ")));
+    let said = plain(text);
+    phrases
+        .iter()
+        .map(|p| plain(p))
+        .any(|p| !p.trim().is_empty() && said.contains(&p))
 }
 
 /// The raw voice as a WAV stream, louder: the header first (its sizes left
@@ -470,6 +571,111 @@ mod tests {
         Value::Text(value.into())
     }
 
+    /// A speaker that says what it is told, or not (`says`), and tells it
+    /// through `speaking` like the Sonos does.
+    #[derive(Debug)]
+    struct Speaker {
+        says: bool,
+    }
+
+    impl moli_runtime::Driver for Speaker {
+        fn kind(&self) -> &'static str {
+            "speaker"
+        }
+
+        fn run<'a>(
+            &'a self,
+            ctx: &'a mut moli_runtime::DriverCtx,
+        ) -> BoxFuture<'a, anyhow::Result<()>> {
+            Box::pin(async move {
+                let id = ctx.device_id("one");
+                let point = |key: &str, write: bool| moli_core::PointSpec {
+                    key: key.into(),
+                    label: key.into(),
+                    kind: moli_core::Kind::Text,
+                    access: moli_core::Access {
+                        read: !write,
+                        write,
+                    },
+                    unit: None,
+                    semantic: moli_core::Semantic::Other,
+                };
+                ctx.upsert_device(moli_core::Device {
+                    id: id.clone(),
+                    instance: ctx.instance().clone(),
+                    native_name: "speaker".into(),
+                    manufacturer: None,
+                    model: None,
+                    description: None,
+                    native_room: None,
+                    members: Vec::new(),
+                    points: vec![point("announce", true), point("speaking", false)],
+                });
+                ctx.set_state(&id, "speaking", Value::Null);
+                ctx.ready();
+                while let Some(command) = ctx.next_command().await {
+                    let said = command.value.clone();
+                    command.reply(Ok(()));
+                    if self.says {
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                        ctx.set_state(&id, "speaking", said);
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        ctx.set_state(&id, "speaking", Value::Null);
+                    }
+                }
+                Ok(())
+            })
+        }
+    }
+
+    async fn moli_with_speaker(says: bool) -> Assistant {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        moli_runtime::spawn_driver(
+            &hub,
+            moli_core::InstanceId::from("speaker"),
+            std::sync::Arc::new(Speaker { says }),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        for _ in 0..200 {
+            if hub.stats().drivers_running == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let config = serde_json::from_value(serde_json::json!({})).unwrap();
+        Assistant::new(hub, None, None, None, config).unwrap()
+    }
+
+    /// The answer is said on the speaker, and only then is it over.
+    #[tokio::test]
+    async fn an_answer_said_on_a_speaker_ends_when_it_has_been_said() {
+        let moli = moli_with_speaker(true).await;
+        let point = PointId::from("speaker:one/announce");
+        let asked = Instant::now();
+        moli.say_on_speaker(&point, "Il fait onze degrés.", Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(
+            asked.elapsed() >= Duration::from_millis(200),
+            "{:?}",
+            asked.elapsed()
+        );
+        let speaking = moli.0.hub.state(&PointId::from("speaker:one/speaking"));
+        assert_eq!(speaking.map(|s| s.value), Some(Value::Null));
+    }
+
+    /// A speaker that never starts: the satellite says it itself.
+    #[tokio::test]
+    async fn a_speaker_that_does_not_start_lets_the_satellite_speak() {
+        let moli = moli_with_speaker(false).await;
+        let point = PointId::from("speaker:one/announce");
+        let err = moli
+            .say_on_speaker(&point, "Il fait onze degrés.", Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(err.contains("did not start"), "{err}");
+    }
+
     #[test]
     fn a_screen_plays_only_in_the_satellites_room() {
         let layout = Layout::default();
@@ -559,6 +765,90 @@ mod tests {
             u32::from_le_bytes(header[24..28].try_into().unwrap()),
             24_000
         );
+    }
+
+    #[test]
+    fn stop_phrases_stop_even_inside_a_sentence() {
+        let stop = word_list("assistant.voice.stop");
+        for said in [
+            "Laisse tomber, éteins-toi.",
+            "Arrête de nous écouter !",
+            "Moli, tais-toi.",
+            "Oh, ça suffit maintenant",
+            "Eteins toi",
+            "Chut !",
+        ] {
+            assert!(asks_to_stop(said, &stop), "{said}");
+        }
+        for said in [
+            "Arrête la musique",
+            "Éteins la cuisine",
+            "Stop la musique",
+            "Allume le couloir",
+            "Le parachute est rangé",
+            "",
+        ] {
+            assert!(!asks_to_stop(said, &stop), "{said}");
+        }
+    }
+
+    #[test]
+    fn another_alphabet_is_not_the_house_speaking() {
+        for heard in ["Семакия пишет.", "你都好食", "Ащё! Ащё! Ламезика!"]
+        {
+            assert!(foreign_script(heard), "{heard}");
+        }
+        for heard in [
+            "Allume en bas.",
+            "Ja, dit is Tommie, ik antwoord.",
+            "Ça a été éteint à 20 h ?",
+            "",
+            "1 2 3",
+        ] {
+            assert!(!foreign_script(heard), "{heard}");
+        }
+    }
+
+    /// After a plain answer, the conversation is over; after an action, a
+    /// person may go on.
+    #[tokio::test]
+    async fn only_a_turn_that_acted_listens_again() {
+        let asked = |text: &str| {
+            vec![Said {
+                who: moli_runtime::voice::Speaker::Person,
+                text: text.into(),
+            }]
+        };
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":"Il est huit heures."}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let answer = VoiceBrain::answer(
+            &moli,
+            &moli_core::DeviceId::from("esphome:aabbccddeeff"),
+            asked("Quelle heure est-il ?"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.text, "Il est huit heures.");
+        assert!(answer.closes);
+        let moli = crate::tests::moli_with_lamp(
+            br#"{"choices":[{"message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{"name":"set",
+            "arguments":"{\"point\":\"fake:lamp/on\",\"value\":true,\"say\":\"C'est allume.\"}"}}]}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        )
+        .await;
+        let answer = VoiceBrain::answer(
+            &moli,
+            &moli_core::DeviceId::from("esphome:aabbccddeeff"),
+            asked("Allume la lampe"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.text, "C'est allume.");
+        assert!(!answer.closes);
     }
 
     #[test]

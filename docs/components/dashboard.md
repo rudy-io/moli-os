@@ -90,6 +90,9 @@ telles que les appareils les nomment).
 
 - `rooms[].aliases` : les noms que HA, Hue ou Tuya donnent à la même pièce (le dashboard et
   Moli les ramènent au nom canonique).
+- `rooms[].floor` (facultatif) : l'étage de la pièce, dans les mots de la famille
+  (`"en bas"`, `"à l'étage"`). L'inventaire de Moli l'écrit à côté de la pièce
+  (« Salon (étage : en bas) ») : « allume en bas » allume chaque pièce de cet étage.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
