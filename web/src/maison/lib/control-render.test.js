@@ -26,6 +26,7 @@ before(async () => {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -790,4 +791,16 @@ test('a presence radar shows someone there, whatever the key of its presence poi
     { id: 'z2m:pir', points: [presence('occupancy')], values: { occupancy: false } },
   ]);
   assert.doesNotMatch(empty, /title="Présence"/);
+});
+
+test('the security panel lists a presence radar beside the motion sensors', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const at = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, ts: Date.now() }]));
+  hub.devices = {
+    'z2m:radar': { id: 'z2m:radar', native_name: 'Radar salon', model: null, label: { room: 'Salon' }, online: true, members: [], points: [presence('presence')], state: at({ presence: true }) },
+    'z2m:pir': { id: 'z2m:pir', native_name: 'PIR cellier', model: null, label: { room: 'Cellier' }, online: true, members: [], points: [presence('occupancy')], state: at({ occupancy: false }) },
+  };
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  assert.match(html, /Radar salon/);
+  assert.match(html, /PIR cellier/);
 });
