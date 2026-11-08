@@ -52,6 +52,19 @@ timezone = "Europe/Paris"
 # [energy.tariff]
 # period = "z2m:linky/active_register_tier_delivered"
 # prices = { "HP" = 0.17, "HC" = 0.14 }
+# Or, instead of `period` (the two are mutually exclusive), a fixed weekly
+# planning: the windows of each weekday must tile [00:00, 24:00) exactly,
+# `to` may be "24:00", and `period` must name a key of `prices`.
+# # [[energy.tariff.planning]]
+# # days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+# # from = "00:00"
+# # to = "01:00"
+# # period = "HP"
+# # [[energy.tariff.planning]]
+# # days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+# # from = "01:00"
+# # to = "24:00"
+# # period = "HC"
 # [[energy.meter]]
 # id = "linky-hc"        # storage key: never rename
 # name = "Heures creuses"
@@ -80,6 +93,33 @@ timezone = "Europe/Paris"
 # bulbs = ["hue:…", "hue:…"]
 # power = "tuya:…/switch_1"
 
+# House-held virtual values (HA input_* equivalents). `aggregate` computes a
+# read-only statistic over existing Moli points; it is useful for a Jeedom
+# “virtual sensor”, e.g. the average house temperature.
+# [[driver]]
+# id = "maison"
+# kind = "helpers"
+#
+# [[driver.options.helper]]
+# id = "mode_maison"
+# name = "Mode Maison"
+# kind = "select"
+# options = ["Normal", "Absent", "Nuit", "Vacances"]
+# initial = "Normal"
+#
+# [[driver.options.helper]]
+# id = "temp_maison"
+# name = "Température moyenne"
+# kind = "aggregate"
+# op = "avg"             # or "min" / "max"
+# unit = "°C"
+# semantic = "temperature"
+# stale_s = 7200         # optional: drop source readings older than 2 h
+# points = [
+#   "z2m:0x00124b0000000001/temperature",
+#   "zwave:0x00000001/temperature",
+# ]
+
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]
 id = "z2m"
@@ -91,9 +131,6 @@ port = 1883
 base_topic = "zigbee2mqtt"
 # username = "moli-os"
 # password_env = "MOLI_Z2M_PASSWORD"
-# Relays wired as triggers (a gate, a garage door): shown as an « Impulsion »
-# button instead of an on/off state that falls back to off.
-# impulse_points = ["z2m:0x00124b0000aa0030/state_l1"]
 
 # Z-Wave, through an existing Z-Wave JS UI bridge (its MQTT gateway).
 # [[driver]]
@@ -155,6 +192,52 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 
+# La voiture (son API officielle) : batterie, autonomie, recharge, puissance,
+# portes, mode vigie et les six commandes de la tuile. Le compte se connecte
+# une fois depuis le tableau de bord (Système, pilote tesla : l'adresse à
+# ouvrir s'y affiche, la dernière adresse s'y colle) ; le jeton de
+# rafraîchissement vit au coffre chiffré, jamais dans un fichier.
+#
+# Le client public partagé de Tesla n'existe plus (2026) : une application
+# personnelle est requise. Crée-la sur developer.tesla.com (permissions
+# openid, offline_access, user_data, vehicle_device_data, vehicle_cmds),
+# enregistre-y une URI de redirection (par ex. https://example.com/moli-tesla —
+# la page n'a pas besoin d'exister : c'est l'adresse qui porte le code), puis
+# dépose ses identifiants au coffre : moli-os secrets set tesla client_id et
+# moli-os secrets set tesla client_secret (valeurs par un tube).
+# [[driver]]
+# id = "tesla"
+# kind = "tesla"
+#
+# [driver.options]
+# api_host = "fleet-api.prd.eu.vn.cloud.tesla.com" # l'API (Europe) ; Amérique du Nord / Asie : fleet-api.prd.na.vn.cloud.tesla.com, Chine : api.tesla.cn
+# auth_host = "auth.tesla.com"                     # la connexion et le point de jeton
+# redirect_uri = "https://example.com/moli-tesla"  # l'URI enregistrée sur l'application (obligatoire, identique)
+# partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
+# poll_charging_s = 60                             # pendant la recharge ou branchée
+# poll_idle_s = 180                                # éveillée et au repos
+# poll_asleep_s = 600                              # endormie
+#
+# Énergie : la recharge de la voiture compte dans la conso de la maison
+# (compteur « appliance » sur la puissance de charge, intégrée dans le temps).
+# Remplacer <vehicle id> par l'id du véhicule (visible dans /api/devices,
+# instance « tesla »). Sans compteur grid/total/circuit déclaré, ce sont les
+# compteurs appliance (ces prises, la voiture) qui forment le total maison.
+# [[energy.meter]]
+# id = "tesla"                     # clé de stockage : ne jamais renommer
+# name = "Voiture"
+# point = "tesla:<vehicle id>/charge_power"
+# role = "appliance"
+# integrate = true
+# Ring doorbells and cameras (Amazon Vision Partner API). The partner keys and
+# the HMAC key live in the vault: `moli-os secrets set ring client_id`,
+# `client_secret` and `hmac_key` (from developer.amazon.com/ring/console/apps).
+# The refresh token is filed by Moli itself when you confirm the link in the
+# Ring app. A doorbell needs the Ring base plan.
+# [[driver]]
+# id = "ring"
+# kind = "ring"
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
@@ -185,3 +268,31 @@ base_topic = "zigbee2mqtt"
 # chat = "local"        # la conversation (obligatoire avec des fournisseurs)
 # # voice, builder : le même fournisseur que chat pour l'instant
 # # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
+
+# Compteur Linky, par l'interface USB-TIC (lecture seule). Le pilote publie
+# les points du compteur (puissance, intensités, compteurs Wh, période) sur
+# l'appareil « teleinfo:linky ». Le module énergie les consomme ensuite.
+# [[driver]]
+# id = "teleinfo"
+# kind = "teleinfo"
+#
+# [driver.options]
+# port = "/dev/ttyUSB0"          # le port série de l'interface USB-TIC
+# baud = 9600                    # 9600 = mode standard du Linky ; 1200 = mode historique
+# id = "linky"                   # l'appareil sera « teleinfo:linky »
+# name = "Linky"
+# offline_after = 90             # secondes sans trame avant « hors ligne »
+#
+# Énergie : la puissance instantanée (VA) pour le jauge, les compteurs (Wh)
+# pour les index. Remplacer les points selon le tarif (BASE : hchc/hchp,
+# HEURES PLEINES/CREUSES : hchc1..3/hchp1..3, TEMPO : east + easf01..10).
+# [energy.live]
+# power = "teleinfo:linky/papp"  # TEMPO : "teleinfo:linky/sinsts"
+# max = 9000                     # puissance souscrite, dans l'unité du point (VA)
+#
+# [[energy.meter]]
+# id = "linky"                   # clé de stockage : ne jamais renommer
+# name = "Linky"
+# point = "teleinfo:linky/hchc"  # l'index cumulé (Wh) du tarif
+# role = "grid"
+# reset = "never"                # un index Linky ne redescend jamais

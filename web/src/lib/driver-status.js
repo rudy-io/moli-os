@@ -14,9 +14,3 @@ export function applyDriverRegistration(drivers, event) {
   if (driver) Object.assign(driver, identity);
   else drivers.push({instance:event.instance, ...identity, status:{state:'starting'}, warning:null});
 }
-
-// Withdrawal removes the live task; persisted configuration/history is separate.
-export function applyDriverUnregistration(drivers, event) {
-  const index = drivers.findIndex((item) => item.instance === event.instance);
-  if (index !== -1) drivers.splice(index, 1);
-}

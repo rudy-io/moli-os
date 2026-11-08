@@ -255,7 +255,7 @@ pub(crate) async fn run(
         && crate::rest::origin(&hub, &headers, &humans, &caller) == Origin::Household
         && autos
             .get(&id)
-            .is_some_and(|a| household_may_run(&hub, &a.graph))
+            .is_some_and(|a| household_may_run(&hub, &autos, &a.graph))
     {
         by = Actor {
             human: true,
@@ -270,8 +270,10 @@ pub(crate) async fn run(
 
 /// Whether each order of the routine would go through from the dashboard
 /// without a code (nothing in a protected room, no machine at work, nothing
-/// that opens a lock, a garage door or a gate).
-fn household_may_run(hub: &Hub, graph: &Graph) -> bool {
+/// that opens a lock, a garage door or a gate). A notify counts like a
+/// write: every point its active channels reach (speakers, Telegram,
+/// phones) must go through too.
+fn household_may_run(hub: &Hub, autos: &Automations, graph: &Graph) -> bool {
     graph.nodes.iter().all(|node| match &node.step {
         Step::Set { point, value } => hub
             .would_hold(
@@ -283,6 +285,10 @@ fn household_may_run(hub: &Hub, graph: &Graph) -> bool {
         Step::Toggle { point } => hub
             .would_hold(&PointId::from(point.as_str()), None, Origin::Household)
             .is_none(),
+        Step::Notify { channels, .. } => autos
+            .channel_points(channels)
+            .iter()
+            .all(|p| hub.would_hold(p, None, Origin::Household).is_none()),
         _ => true,
     })
 }
@@ -347,7 +353,9 @@ pub(crate) async fn live(
         return crate::sse::full(&caller.key);
     };
     let rx = autos.subscribe();
-    // The seat goes with the stream, and comes back when it ends.
+    // The seat goes with the stream, and comes back when it ends; when the
+    // pool evicts the seat, its token ends the stream too.
+    let seat_token = seat.token.clone();
     let stream = stream::unfold((rx, seat), |(mut rx, seat)| async move {
         loop {
             match rx.recv().await {
@@ -360,7 +368,7 @@ pub(crate) async fn live(
             }
         }
     })
-    .take_until(shutdown.cancelled_owned());
+    .take_until(crate::sse::until_end(&shutdown, &seat_token));
     sse(stream).into_response()
 }
 

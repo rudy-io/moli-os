@@ -39,16 +39,6 @@ scope and guards still apply. Set `read_only = true` for an observation-only tri
 it overrides either write mode and blocks every command. Both restrictions apply
 to published capabilities, the executor and transport, including integration
 configuration. They are not merely disabled UI buttons.
-Gateways added, edited or reactivated from the dashboard explicitly use
-`read_only = true`. New managed gateways retain `write = "legacy"`; authorizing
-control with the Moli PIN does not opt in to extended commands. Static instances
-keep their explicitly configured write scope when connection overrides are applied.
-The per-gateway read-only choice is stored in registry v3, survives restart and
-leaves hand-written TOML untouched. Enabling verifies the pinned identity;
-revocation also works offline or while paused. Changing mode sends no physical
-command. Authorized commands still use Moli's guards; revoking does not stop
-heating already running. Older v1/v2 entries declaring writable mode remain invalid.
-
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains
 available, and Moli does not register itself automatically to fill that label.
@@ -216,5 +206,5 @@ Older driver binaries reject unknown TOML options. Before rolling back, restore
 a configuration compatible with that version: `read_only`, `write`,
 `tls_fingerprint` and `dhw_units` are not accepted by the original driver. Removing
 `read_only` does not make an older driver read-only; keep the instance disabled if observation-only
-operation is required. Restore a matching managed-gateway registry/backup too.
-Keep the current configuration, registry and encrypted store backed up first.
+operation is required. Keep the current configuration and encrypted store
+backed up first.

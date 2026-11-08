@@ -29,11 +29,19 @@ pub(crate) async fn status(Extension(Moli(moli)): Extension<Moli>) -> Response {
     }
 }
 
+/// One conversation turn: a person's choice (PIN session), never an
+/// unauthenticated house device (a script could drive the conversation
+/// with a fully fabricated history and drain the LLM quota).
 pub(crate) async fn turn(
     Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
     caller: Caller,
+    headers: HeaderMap,
     axum::Json(mut turn): axum::Json<Turn>,
 ) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return person_only();
+    }
     let Some(moli) = moli else {
         return not_configured();
     };
@@ -259,11 +267,17 @@ pub(crate) async fn delete_rule(
     }
 }
 
+/// Speech to text: a person's audio (PIN session), not any house device's.
 pub(crate) async fn listen(
     Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
     headers: HeaderMap,
     audio: Bytes,
 ) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return person_only();
+    }
     let Some(moli) = moli else {
         return not_configured();
     };
@@ -354,7 +368,7 @@ fn speech_response(speech: Result<Speech, AssistantError>) -> Response {
     }
 }
 
-/// The settings card: key filed or not (never the key), voice, tone.
+/// The exchange history's window: hours back (24 by default, 720 at most).
 #[derive(serde::Deserialize)]
 pub(crate) struct Since {
     #[serde(default = "a_day")]
@@ -367,11 +381,17 @@ fn a_day() -> u32 {
 
 /// What was said to Moli: the shared exchanges (satellites, doors), and the caller's own from the
 /// dashboard, not the questions of the rest of the household; newest first, at most 30 days.
+/// Conversation history is the household's: it asks for a person (code).
 pub(crate) async fn exchanges(
     Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
     caller: Caller,
+    headers: HeaderMap,
     axum::extract::Query(since): axum::extract::Query<Since>,
 ) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return person_only();
+    }
     match moli {
         Some(moli) => axum::Json(json!({
             "exchanges": moli.exchanges_for(since.hours.min(720), &caller.asker()),
@@ -436,14 +456,24 @@ pub(crate) async fn recording(
     }
 }
 
-/// The evening recap, sent now (to try it).
-pub(crate) async fn recap(Extension(Moli(moli)): Extension<Moli>) -> Response {
+/// The evening recap, sent now (to try it). It sends messages to people:
+/// a person's choice only (code), never a house device's.
+pub(crate) async fn recap(
+    Extension(Moli(moli)): Extension<Moli>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    if !humans.is_human(&headers, &caller.key) {
+        return person_only();
+    }
     match moli {
         Some(moli) => axum::Json(json!({ "sent": moli.send_recap().await })).into_response(),
         None => not_configured(),
     }
 }
 
+/// The settings card: key filed or not (never the key), voice, tone.
 pub(crate) async fn settings(Extension(Moli(moli)): Extension<Moli>) -> Response {
     match moli {
         Some(moli) => axum::Json(moli.settings()).into_response(),
@@ -516,6 +546,16 @@ fn people_only() -> Response {
     (
         StatusCode::FORBIDDEN,
         axum::Json(json!({ "error": moli_i18n::tr!("serveur.enregistrement.humain") })),
+    )
+        .into_response()
+}
+
+/// Conversing with Moli, its history, the recap and its voice: a person's
+/// choice (code), never a house device or a script's.
+fn person_only() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(json!({ "error": moli_i18n::tr!("serveur.session.humain_seulement") })),
     )
         .into_response()
 }

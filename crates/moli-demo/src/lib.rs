@@ -77,6 +77,7 @@ const IMITABLE: &[&str] = &[
     "presence",
     "phones",
     "telegram",
+    "tesla",
 ];
 
 #[derive(Debug, Deserialize)]

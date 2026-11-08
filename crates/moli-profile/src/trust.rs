@@ -37,6 +37,24 @@ struct Approval {
     /// Where the file was when approved (for humans: the hash is what counts).
     path: String,
     sha256: String,
+    /// When the approval was recorded (RFC 3339 UTC, whole seconds): an
+    /// audit trail in the file itself. Absent in entries recorded before
+    /// timestamps existed (they stay valid).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<String>,
+}
+
+/// UTC now, whole seconds (`2026-10-17T12:34:56Z`): when an approval is
+/// recorded, so the file is its own audit trail.
+fn utc_now() -> String {
+    // jiff's default display is UTC and drops a zero sub-second part; make
+    // the UTC designator explicit.
+    let text = jiff::Timestamp::now().to_string();
+    let seconds = match text.find('.') {
+        Some(i) => &text[..i],
+        None => text.as_str(),
+    };
+    format!("{seconds}Z")
 }
 
 /// Lowercase hex SHA-256 of a profile's text.
@@ -86,6 +104,7 @@ pub fn record(trust_file: &Path, file: &ProfileFile) -> io::Result<Recorded> {
     let approval = Approval {
         path: file.path.clone(),
         sha256: file.sha256.clone(),
+        at: Some(utc_now()),
     };
     if approvals.trusted.contains(&approval) {
         return Ok(Recorded::AlreadyTrusted);
@@ -142,6 +161,18 @@ mod tests {
         assert!(!is_trusted(&trust_file, &v1.sha256).await.unwrap());
         let text = std::fs::read_to_string(&trust_file).unwrap();
         assert!(text.starts_with("# Profile files") && text.contains("[[trusted]]"));
+
+        // Every recorded approval carries its date (RFC 3339 UTC): the file
+        // is its own audit trail.
+        let at = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("at = "))
+            .expect("timestamp line");
+        assert!(at.trim().ends_with("Z\""), "{at}");
+        // Old entries without a timestamp stay parseable and valid.
+        let old = "trusted = [{ path = \"/x.toml\", sha256 = \"ab\" }]\n";
+        let parsed = parse(old).unwrap();
+        assert_eq!(parsed.trusted[0].at, None);
 
         std::fs::write(&trust_file, "nonsense = [").unwrap();
         assert!(is_trusted(&trust_file, &v2.sha256).await.is_err());

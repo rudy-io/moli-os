@@ -31,8 +31,15 @@ const PRIMARY = new Set([
   'smoke', 'current', 'alert',
 ]);
 
+/** Writable enums are interactive controls (mode selectors, e.g. house
+ *  helpers): they earn the card face even though their semantic is the
+ *  generic « other ». */
+function isWritableEnum(point) {
+  return point.kind?.type === 'enum' && point.access?.write === true;
+}
+
 export function isPrimary(point) {
-  return PRIMARY.has(point.semantic);
+  return PRIMARY.has(point.semantic) || isWritableEnum(point);
 }
 
 export function isAlarm(point, value) {

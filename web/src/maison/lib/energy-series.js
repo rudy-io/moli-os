@@ -5,6 +5,7 @@
 // total (its main clamp, else the Linky): nothing counted twice.
 
 import { t } from '../../lib/i18n.svelte.js';
+import { planningPeriodAt } from './energy-advice.js';
 
 const PALETTE = ['#e9a23b', '#5b8def', '#3fae7c', '#c46ad8', '#e0705a', '#2fb3b8', '#8c7ae6', '#d4a373'];
 const LIGHTS = '#f2c94c';
@@ -48,9 +49,18 @@ export function deviceSeries(meters) {
   return parts;
 }
 
-/** The share of an hour starting at `start` (ms) spent off-peak, from the
- *  windows learnt off the meter (minutes of the day, `{from, to}`). */
-export function offPeakShare(start, windows) {
+/** The share of an hour starting at `start` (ms) spent off-peak. When
+ *  `planning` (the fixed weekly schedule) is given, each minute is looked up
+ *  by its own weekday; otherwise falls back to the windows learnt off the
+ *  meter (minutes of the day, `{from, to}`). */
+export function offPeakShare(start, windows, planning) {
+  if (planning?.length) {
+    let inside = 0;
+    for (let i = 0; i < 60; i++) {
+      if (planningPeriodAt(planning, start + i * 60_000) === 'hc') inside++;
+    }
+    return inside / 60;
+  }
   if (!windows?.length) return 0;
   const d = new Date(start);
   const m0 = d.getHours() * 60 + d.getMinutes();

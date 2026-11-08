@@ -97,6 +97,13 @@ enum Behaviour {
         base: f64,
         switched: bool,
     },
+    /// Charging power: full while the device's `charging` flag is on.
+    Charger {
+        base: f64,
+    },
+    /// A battery (a car's): fills while the device's `charging` flag is on,
+    /// and stops itself at the full mark (the flag turns off by itself).
+    Battery,
     /// A cumulative meter, in Wh (factor 1) or kWh (factor 0.001).
     Meter {
         factor: f64,
@@ -194,7 +201,12 @@ fn readable_number(spec: &PointSpec) -> bool {
 }
 
 /// The behaviour of one point, guessed from what it means.
-fn behaviour(spec: &PointSpec, start: Option<&Value>, has_switch: bool) -> Behaviour {
+fn behaviour(
+    spec: &PointSpec,
+    start: Option<&Value>,
+    has_switch: bool,
+    has_charger: bool,
+) -> Behaviour {
     let key = spec.key.to_ascii_lowercase();
     let start_num = start.and_then(Value::as_f64);
     if spec.access.write {
@@ -230,10 +242,14 @@ fn behaviour(spec: &PointSpec, start: Option<&Value>, has_switch: bool) -> Behav
         _ => {}
     }
     match (spec.semantic, spec.unit.as_ref()) {
+        (Semantic::Power, _) if key == "charge_power" && has_charger => {
+            Behaviour::Charger { base: v.max(1.0) }
+        }
         (Semantic::Power, _) => Behaviour::Power {
             base: if v > 1.0 { v } else { 8.0 },
             switched: has_switch,
         },
+        (Semantic::Battery, _) => Behaviour::Battery,
         (Semantic::ApparentPower, _) => Behaviour::Power {
             base: if v > 1.0 { v } else { 300.0 },
             switched: false,
@@ -322,13 +338,16 @@ impl World {
         let mut index = HashMap::new();
         for (p, id) in played.iter().zip(ids) {
             let has_switch = p.device.points.iter().any(is_switch);
+            let has_charger = p.device.points.iter().any(|s| {
+                matches!(s.kind, Kind::Binary) && !s.access.write && &*s.key == "charging"
+            });
             let points = p
                 .device
                 .points
                 .iter()
                 .map(|spec| Point {
                     key: spec.key.to_string(),
-                    behaviour: behaviour(spec, p.state.get(&*spec.key), has_switch),
+                    behaviour: behaviour(spec, p.state.get(&*spec.key), has_switch, has_charger),
                     pulse_left: 0.0,
                     carry: 0.0,
                 })
@@ -418,6 +437,18 @@ impl World {
                 let state = if *b { "playing" } else { "paused" };
                 Self::set(ctx, live, "state", Value::Text(state.into()));
             }
+            ("command", Value::Text(t)) => {
+                // The car's orders, as its driver writes them.
+                match t.to_ascii_lowercase().as_str() {
+                    "start_charging" => Self::set(ctx, live, "charging", Value::Bool(true)),
+                    "stop_charging" => Self::set(ctx, live, "charging", Value::Bool(false)),
+                    "lock" => Self::set(ctx, live, "doors_locked", Value::Bool(true)),
+                    "unlock" => Self::set(ctx, live, "doors_locked", Value::Bool(false)),
+                    "sentry_on" => Self::set(ctx, live, "sentry", Value::Bool(true)),
+                    "sentry_off" => Self::set(ctx, live, "sentry", Value::Bool(false)),
+                    _ => {}
+                }
+            }
             ("control", Value::Text(t)) => {
                 let t = t.to_ascii_lowercase();
                 if t.contains("pause") {
@@ -461,6 +492,11 @@ impl World {
                         0.3
                     };
                     Some((p.key.clone(), rounded(w, spec)))
+                }
+                Behaviour::Charger { base } => {
+                    let spec = live.specs.iter().find(|s| *s.key == p.key)?;
+                    let on = matches!(live.values.get("charging"), Some(Value::Bool(true)));
+                    Some((p.key.clone(), rounded(if on { base } else { 0.0 }, spec)))
                 }
                 Behaviour::Daylight => Some((p.key.clone(), Value::Bool(clock.daylight()))),
                 _ => None,
@@ -559,6 +595,28 @@ impl World {
                         base * clock.household() * (1.0 + rng.signed() * 0.12)
                     };
                     Some(rounded(w.max(0.0), spec))
+                }
+                Behaviour::Charger { base } => {
+                    let on = matches!(live.values.get("charging"), Some(Value::Bool(true)));
+                    let w = if on {
+                        base * (1.0 + rng.signed() * 0.03)
+                    } else {
+                        0.0
+                    };
+                    Some(rounded(w, spec))
+                }
+                Behaviour::Battery => {
+                    if dt > 0.0 && matches!(live.values.get("charging"), Some(Value::Bool(true))) {
+                        // About ten percent an hour.
+                        let v = now.unwrap_or(0.0) + dt * 10.0 / 3600.0;
+                        if v >= 100.0 {
+                            // The battery is full: the charge ends.
+                            updates.push(("charging".to_owned(), Value::Bool(false)));
+                        }
+                        Some(rounded(v, spec))
+                    } else {
+                        None
+                    }
                 }
                 Behaviour::Counting => {
                     if p.key == "media_position" && !running.unwrap_or(false) {

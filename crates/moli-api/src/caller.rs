@@ -97,6 +97,11 @@ fn public(method: &Method, path: &str) -> bool {
     (!api && (method == Method::GET || method == Method::HEAD))
         || path == "/api/session"
         || (path == "/api/invitation" && method == Method::POST)
+        // Ring's one-way linking is machine-to-machine plus a human confirm:
+        // Ring POSTs the one-time code (safe: single-use, 60 s, useless
+        // without the client secret), and the browser confirms after sign-in.
+        || (path == "/api/ring/link" && method == Method::POST)
+        || (path == "/api/ring/linked" && method == Method::GET)
 }
 
 /// What a visitor may not change in a demo house: everything but playing
@@ -589,5 +594,15 @@ mod tests {
         assert_eq!(owner.key, "access:moi@example.org");
         assert!(owner.is_household() && !owner.is_local_machine());
         assert_eq!(owner.describe(), "tableau de bord (moi@example.org)");
+    }
+
+    #[test]
+    fn ring_linking_is_open_to_ring_and_the_browser() {
+        assert!(public(&Method::POST, "/api/ring/link"));
+        assert!(public(&Method::GET, "/api/ring/linked"));
+        // The inverse and deeper paths stay closed to strangers.
+        assert!(!public(&Method::GET, "/api/ring/link"));
+        assert!(!public(&Method::POST, "/api/ring/linked"));
+        assert!(!public(&Method::POST, "/api/ring/link/extra"));
     }
 }

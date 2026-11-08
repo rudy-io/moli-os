@@ -66,7 +66,7 @@ async fn fixture_server(
     posts: Arc<AtomicUsize>,
     status: Arc<AtomicUsize>,
 ) -> (u16, tokio::task::JoinHandle<()>) {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
     let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -157,7 +157,7 @@ async fn real_driver_pins_before_token_and_refreshes_before_every_write() {
         instance.clone(),
         Arc::new(
             Overkiz::new(Config {
-                host: "localhost".into(),
+                host: "127.0.0.1".into(),
                 port,
                 poll_secs: 300,
                 cert_sha256: None,
@@ -294,7 +294,7 @@ async fn test_vault(command_timeout: Duration) -> (std::path::PathBuf, Hub, Inst
 #[path = "runtime_slow_tests.rs"]
 mod slow;
 fn tls_acceptor() -> TlsAcceptor {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
     let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -364,7 +364,7 @@ impl Rig {
         .spawn(listener);
         let cancel = CancellationToken::new();
         let config: Config = serde_json::from_value(serde_json::json!({
-            "host":"localhost","port":port,"poll_secs":poll_secs,"read_only":read_only,
+            "host":"127.0.0.1","port":port,"poll_secs":poll_secs,"read_only":read_only,
             "writable_openers":writable_openers.iter().map(|p| serde_json::json!({
                 "device_url":p.device_url,"ui_class":p.ui_class
             })).collect::<Vec<_>>()

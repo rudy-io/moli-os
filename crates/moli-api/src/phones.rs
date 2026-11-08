@@ -95,13 +95,16 @@ pub(crate) async fn register(
     }
     // Paired from a person's session: the phone is theirs.
     let person = caller.person.as_ref().map(|p| p.id.as_str());
-    match gate.register(
-        &p.name,
-        &p.platform,
-        &p.model,
-        p.push_token.as_deref(),
-        person,
-    ) {
+    match gate
+        .register(
+            &p.name,
+            &p.platform,
+            &p.model,
+            p.push_token.as_deref(),
+            person,
+        )
+        .await
+    {
         Ok(paired) => {
             // It will hear every notice of the house: the house hears of it.
             // Its name as kept, last: the pairer chose it, it says nothing
@@ -150,7 +153,7 @@ pub(crate) async fn remove(
             &moli_i18n::tr!("serveur.telephone.retrait_humain"),
         );
     }
-    match gate.remove(&id) {
+    match gate.remove(&id).await {
         Ok(true) => axum::Json(json!({ "removed": id })).into_response(),
         Ok(false) => error(
             StatusCode::NOT_FOUND,
@@ -190,7 +193,7 @@ pub(crate) async fn report(
             &moli_i18n::tr!("pilotes.phones.hors_maison"),
         );
     }
-    match gate.report(&id, r) {
+    match gate.report(&id, r).await {
         Ok(home) => axum::Json(json!({ "home": home })).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, &format!("{e:#}")),
     }

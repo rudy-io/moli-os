@@ -267,7 +267,7 @@ async fn first_pin(host: &str, ctx: &DriverCtx) -> anyhow::Result<String> {
     probe.handshake().await.context("first contact")?;
     let seen = probe.seen_fingerprint().context("no certificate seen")?;
     ctx.store_secret(CERT, &seen).await?;
-    tracing::info!(instance = %ctx.instance(), "printer certificate pinned");
+    tracing::info!(instance = %ctx.instance(), fingerprint = %seen, "printer certificate pinned (first contact: verify it matches the printer)");
     Ok(seen)
 }
 

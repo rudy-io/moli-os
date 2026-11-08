@@ -3,6 +3,7 @@
 web/node_modules
 web/dist
 *.bak-*
+.local-notes.md
 __pycache__/
 # What the house-model scripts produce: data (a set drawn from a real house's corrections among
 # them), runs, merged weights, GGUF files, results and logs never go in the repository.

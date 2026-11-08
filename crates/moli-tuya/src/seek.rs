@@ -26,7 +26,7 @@ use crate::connections::Connections;
 use crate::device::{Address, Reachability};
 use crate::protocol::{Codec, Frame, Version, cmd};
 
-const PORT: u16 = 6668;
+pub(crate) const PORT: u16 = 6668;
 /// Long enough for a device on the home Wi-Fi to accept a connection.
 const KNOCK: Duration = Duration::from_millis(800);
 /// One identification attempt, all included.
@@ -200,6 +200,17 @@ async fn question(
         }
     }
     (ip, None)
+}
+
+/// Whether the device at `at` is `id`, on any version it speaks: the key is
+/// the proof. Returns the version that answered.
+pub(crate) async fn prove(at: SocketAddr, id: &str, key: [u8; 16]) -> Option<Version> {
+    for version in [Version::V33, Version::V34, Version::V35] {
+        if identify(at, id, key, version).await {
+            return Some(version);
+        }
+    }
+    None
 }
 
 /// Whether the device at `ip` is `id`: it answers sensibly only to its own
@@ -491,5 +502,24 @@ mod tests {
         );
         // A 3.4 handshake to a device that does not speak it: no answer.
         assert!(!identify(at, "bf01", key, Version::V34).await);
+    }
+
+    #[tokio::test]
+    async fn prove_accepts_only_the_device_own_key() {
+        // A forged broadcast points at this address: only the device's own
+        // key can make `prove` accept it.
+        let key = *b"0123456789abcdef";
+        let port = fake_device(key).await;
+        let at: SocketAddr = ([127, 0, 0, 1], port).into();
+        assert_eq!(
+            prove(at, "bf01", key).await,
+            Some(Version::V33),
+            "its own key proves the address"
+        );
+        assert_eq!(
+            prove(at, "bf01", *b"fedcba9876543210").await,
+            None,
+            "a forger's key proves nothing"
+        );
     }
 }

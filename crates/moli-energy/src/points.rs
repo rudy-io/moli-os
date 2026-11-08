@@ -334,6 +334,8 @@ mod tests {
             month_projection: projection,
             monthly_fee: Some(19.56),
             budget_point: None,
+            planning: None,
+            tariff_prices: std::collections::BTreeMap::new(),
             house_price: None,
             house_prices: Vec::new(),
         }

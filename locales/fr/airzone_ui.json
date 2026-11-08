@@ -3,8 +3,8 @@
   "airzone_ui.subtitle": "La température et le confort de chaque zone, en un regard.",
   "airzone_ui.open": "Ouvrir la vue Airzone",
   "airzone_ui.workshop_link": "Retrouvez vos températures et consignes dans la vue Airzone.",
-  "airzone_ui.read_only": "Équipements en lecture seule",
-  "airzone_ui.read_only_help": "Aucune commande n’est envoyée aux équipements. Les noms, pièces et cartes peuvent être gérés dans Moli.",
+  "airzone_ui.read_only": "Vue en lecture seule",
+  "airzone_ui.read_only_help": "Consultez les états et les réglages. Aucune commande n’est envoyée depuis cette vue.",
   "airzone_ui.zones": "Zones",
   "airzone_ui.installation": "Installation et diagnostic",
   "airzone_ui.zone_count_one": "{count} zone",
@@ -78,15 +78,5 @@
   "airzone_ui.sections.limits": "Limites et consignes",
   "airzone_ui.sections.equipment": "Équipement et thermostat",
   "airzone_ui.sections.diagnostics": "Diagnostic",
-  "airzone_ui.sections.other": "Autres informations",
-  "airzone_ui.manage": "Gérer les appareils",
-  "airzone_ui.manage_help": "Noms et visibilité dans Moli, sans modifier vos équipements Airzone.",
-  "airzone_ui.alerts": "Alertes",
-  "airzone_ui.alerts_help": "Les problèmes signalés et les connexions à vérifier.",
-  "airzone_ui.add": "Ajouter un appareil",
-  "airzone_ui.add_help": "Retrouver un appareil masqué, une nouvelle zone ou une autre passerelle.",
-  "airzone_ui.alert_count_one": "{count} alerte à consulter",
-  "airzone_ui.alert_count_other": "{count} alertes à consulter",
-  "airzone_ui.observation_view": "Vue de consultation",
-  "airzone_ui.observation_help": "Cette vue présente l’état des équipements. Le mode de pilotage se règle séparément pour chaque passerelle dans Installation."
+  "airzone_ui.sections.other": "Autres informations"
 }

@@ -250,6 +250,20 @@ pub enum ValueError {
 /// Longest text a point accepts: a value is a setting, never a document.
 pub const MAX_TEXT: usize = 4_000;
 
+/// Point keys the agents never read, on any device: a phone's exact
+/// position, how precise it is, and the Wi-Fi it is on. They stay on the
+/// household's own surfaces (the map, presence): where someone was is as
+/// private as where they are.
+pub const PRIVATE_POINT_KEYS: [&str; 4] = ["latitude", "longitude", "accuracy", "wifi"];
+
+/// Whether a point key is one of the private ones ([`PRIVATE_POINT_KEYS`]).
+#[must_use]
+pub fn is_private_point(key: &str) -> bool {
+    PRIVATE_POINT_KEYS
+        .iter()
+        .any(|p| key.eq_ignore_ascii_case(p))
+}
+
 pub fn validate(kind: &Kind, value: &Value) -> Result<Value, ValueError> {
     if let Value::Text(t) = value
         && t.chars().count() > MAX_TEXT
@@ -336,6 +350,19 @@ mod tests {
             "a position is never deduced to be a shutter's opening"
         );
         assert_eq!(Semantic::infer("whatever", None), Semantic::Other);
+    }
+
+    #[test]
+    fn private_point_keys() {
+        for key in PRIVATE_POINT_KEYS {
+            assert!(is_private_point(key), "{key}");
+            assert!(is_private_point(&key.to_uppercase()), "{key}");
+        }
+        // Same word elsewhere is not private: matching is exact and
+        // case-insensitive, nothing more.
+        for key in ["zone", "wifi_ssid", "latitude2", "home", "accuracy_m"] {
+            assert!(!is_private_point(key), "{key}");
+        }
     }
 
     #[test]

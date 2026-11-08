@@ -366,7 +366,7 @@ pub async fn set_volume(host: &str, port: u16, db: f64) -> anyhow::Result<()> {
 /// say it. A receiver that will not take `during` still says it, at its own
 /// volume, with a warning: nothing is put back then. Returns the receiver's
 /// volume once done, when it is known. A `TEARDOWN` that fails after the
-/// sound was heard is only a warning. `started` as the sound starts going.
+/// sound was heard is only a warning.
 ///
 /// # Errors
 /// The receiver is unreachable, refused a step, or the sound did not go.
@@ -376,7 +376,6 @@ pub async fn say(
     pcm: &[u8],
     during: f64,
     after: Option<f64>,
-    started: impl FnOnce() + Send,
 ) -> anyhow::Result<Option<f64>> {
     let mut session = Session::open(host, port).await?;
     let after = session.volume().await?.or(after);
@@ -390,7 +389,6 @@ pub async fn say(
             tracing::warn!(host, error = %e, "airplay announcement said at the receiver's own volume");
             raised = false;
         }
-        started();
         session.play(pcm).await
     }
     .await;
@@ -1284,16 +1282,9 @@ mod tests {
     #[tokio::test]
     async fn the_volume_put_back_is_the_one_the_receiver_says_in_the_session() {
         let (port, log, fake) = receiver(None).await;
-        let after = say(
-            "127.0.0.1",
-            port,
-            &[0; 4 * PACKET],
-            -18.0,
-            Some(-3.0),
-            || (),
-        )
-        .await
-        .unwrap();
+        let after = say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, Some(-3.0))
+            .await
+            .unwrap();
         fake.await.unwrap();
         assert_eq!(after, Some(-6.0), "what the fake says it is");
         assert_eq!(
@@ -1316,16 +1307,9 @@ mod tests {
     #[tokio::test]
     async fn a_receiver_that_keeps_its_volume_to_itself_gets_the_one_moli_followed() {
         let (port, log, fake) = receiver(Some("GET_PARAMETER")).await;
-        let after = say(
-            "127.0.0.1",
-            port,
-            &[0; 4 * PACKET],
-            -18.0,
-            Some(-3.0),
-            || (),
-        )
-        .await
-        .unwrap();
+        let after = say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, Some(-3.0))
+            .await
+            .unwrap();
         fake.await.unwrap();
         assert_eq!(after, Some(-3.0));
         assert_eq!(log.lock().unwrap()[6], "SET_PARAMETER volume: -3.000000");
@@ -1349,16 +1333,9 @@ mod tests {
         );
         // Said all the same, at the receiver's own volume: nothing put back.
         let (port, log, fake) = receiver(Some("SET_PARAMETER")).await;
-        let after = say(
-            "127.0.0.1",
-            port,
-            &[0; 4 * PACKET],
-            -18.0,
-            Some(-3.0),
-            || (),
-        )
-        .await
-        .expect("a receiver with a fixed volume is still heard");
+        let after = say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, Some(-3.0))
+            .await
+            .expect("a receiver with a fixed volume is still heard");
         fake.await.unwrap();
         assert_eq!(after, Some(-6.0));
         assert_eq!(
@@ -1375,19 +1352,12 @@ mod tests {
         );
         // Hanging up on the volume is no fixed volume: the announcement stops.
         let (port, _, fake) = receiver(Some("hang up SET_PARAMETER")).await;
-        say(
-            "127.0.0.1",
-            port,
-            &[0; 4 * PACKET],
-            -18.0,
-            Some(-3.0),
-            || (),
-        )
-        .await
-        .expect_err("a receiver gone is not one with a fixed volume");
+        say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, Some(-3.0))
+            .await
+            .expect_err("a receiver gone is not one with a fixed volume");
         fake.await.unwrap();
         let (port, _, fake) = receiver(Some("TEARDOWN")).await;
-        say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, None, || ())
+        say("127.0.0.1", port, &[0; 4 * PACKET], -18.0, None)
             .await
             .expect("heard: a failed TEARDOWN is only a warning");
         fake.await.unwrap();

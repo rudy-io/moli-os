@@ -29,7 +29,6 @@ use moli_core::{Device, DeviceId, Value};
 use moli_runtime::media::{Image, SnapshotSource};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
-use tokio::net::TcpStream;
 use tokio::time::Instant;
 
 pub use profile::{
@@ -465,6 +464,26 @@ impl Driver for ProfileDriver {
     }
 }
 
+/// The connection for one exchange. In production the destination is
+/// checked (no loopback / link-local: `moli_net::checked_connect`); in
+/// unit tests the simulated devices sit on loopback, so the check is
+/// skipped there.
+async fn connect(host: &str, port: u16) -> anyhow::Result<tokio::net::TcpStream> {
+    #[cfg(test)]
+    {
+        // Same semantics as `checked_connect` (the io error stays in the
+        // chain), without the forbidden-range check: the simulated devices
+        // of the unit tests sit on loopback.
+        tokio::net::TcpStream::connect((host, port))
+            .await
+            .with_context(|| format!("cannot reach {host}:{port}"))
+    }
+    #[cfg(not(test))]
+    {
+        moli_net::checked_connect(host, port).await
+    }
+}
+
 /// An image on demand: the profile's `snapshot` path, asked only when a
 /// surface wants one. Nothing is polled, nothing is kept.
 #[derive(Debug)]
@@ -523,7 +542,7 @@ async fn exchange(
 ) -> anyhow::Result<Bytes> {
     let (host, port) = (target.host.as_str(), target.port);
     let fetch = async {
-        let tcp = TcpStream::connect((host, port))
+        let tcp = connect(host, port)
             .await
             .with_context(|| format!("cannot reach {host}:{port}"))?;
         let builder = http::Request::builder()

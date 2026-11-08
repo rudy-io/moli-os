@@ -90,6 +90,130 @@ struct Pin {
     provider: Arc<CryptoProvider>,
 }
 
+/// Ranges Moli never dials, even for a literal address written in a config
+/// file: the unspecified/broadcast addresses (no destination) and link-local
+/// (the cloud metadata address 169.254.169.254, and friends).
+fn always_forbidden(addr: &std::net::IpAddr) -> bool {
+    match addr {
+        std::net::IpAddr::V4(v4) => v4_always_forbidden(*v4),
+        // The IPv4-mapped form (`::ffff:a.b.c.d`) carries a v4 address:
+        // check that one.
+        std::net::IpAddr::V6(v6)
+            if v6.segments().iter().take(5).all(|&s| s == 0) && v6.segments()[5] == 0xffff =>
+        {
+            v4_always_forbidden(std::net::Ipv4Addr::new(
+                (v6.segments()[6] >> 8) as u8,
+                (v6.segments()[6] & 0xff) as u8,
+                (v6.segments()[7] >> 8) as u8,
+                (v6.segments()[7] & 0xff) as u8,
+            ))
+        }
+        std::net::IpAddr::V6(v6) => v6.is_unspecified() || v6.is_unicast_link_local(),
+    }
+}
+
+/// A loopback address: the host's own API, local services. Refused when Moli
+/// dials on someone else's behalf (a name resolved through DNS, a profile's
+/// request); allowed only when a person wrote it in a config file, pointing
+/// at their own machine.
+fn is_loopback(addr: &std::net::IpAddr) -> bool {
+    match addr {
+        std::net::IpAddr::V4(v4) => v4.is_loopback(),
+        std::net::IpAddr::V6(v6)
+            if v6.segments().iter().take(5).all(|&s| s == 0) && v6.segments()[5] == 0xffff =>
+        {
+            std::net::Ipv4Addr::new(
+                (v6.segments()[6] >> 8) as u8,
+                (v6.segments()[6] & 0xff) as u8,
+                (v6.segments()[7] >> 8) as u8,
+                (v6.segments()[7] & 0xff) as u8,
+            )
+            .is_loopback()
+        }
+        std::net::IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+/// The forbidden ranges for one IPv4 address: the unspecified/broadcast
+/// addresses and link-local (the cloud metadata service at
+/// 169.254.169.254).
+fn v4_always_forbidden(v4: std::net::Ipv4Addr) -> bool {
+    v4.is_unspecified() || v4.is_broadcast() || (v4.octets()[0], v4.octets()[1]) == (169, 254)
+}
+
+/// An IP Moli must never dial: [`always_forbidden`], plus loopback. Private
+/// (RFC 1918) addresses stay allowed: that is where the appliances live.
+fn forbidden(addr: &std::net::IpAddr) -> bool {
+    always_forbidden(addr) || is_loopback(addr)
+}
+
+/// The addresses of `host:port` Moli may dial. A literal IP is checked as
+/// written: loopback only when `allow_literal_loopback`. A name is always
+/// resolved up front and its addresses checked strictly (loopback included),
+/// so a DNS rebinding pointing the name at `127.0.0.1` or
+/// `169.254.169.254` is refused before any byte goes on the wire.
+async fn allowed_addresses(
+    host: &str,
+    port: u16,
+    allow_literal_loopback: bool,
+) -> anyhow::Result<Vec<std::net::SocketAddr>> {
+    match host.parse() {
+        Ok(ip) if always_forbidden(&ip) || (!allow_literal_loopback && is_loopback(&ip)) => {
+            anyhow::bail!("forbidden address: {ip}")
+        }
+        Ok(ip) => Ok(vec![std::net::SocketAddr::new(ip, port)]),
+        Err(_) => {
+            let resolved = tokio::net::lookup_host((host, port))
+                .await
+                .with_context(|| format!("cannot resolve {host}"))?;
+            let addrs: Vec<std::net::SocketAddr> =
+                resolved.filter(|addr| !forbidden(&addr.ip())).collect();
+            if addrs.is_empty() {
+                anyhow::bail!("{host} resolves only to forbidden addresses (loopback, link-local)");
+            }
+            Ok(addrs)
+        }
+    }
+}
+
+/// Connects to `host:port` with its destination checked (see
+/// [`allowed_addresses`]): loopback and link-local are refused, whether the
+/// address is written in a config file or reached through a name. The io
+/// error of the last attempt stays in the error chain (not only in the
+/// message): the profile driver tells « the device is absent » (refused,
+/// timed out) from a protocol failure by its type.
+pub async fn checked_connect(host: &str, port: u16) -> anyhow::Result<TcpStream> {
+    connect_checked(host, port, false).await
+}
+
+/// Like [`checked_connect`], except a literal loopback address is allowed:
+/// the person wrote it in a config file, pointing at their own machine
+/// (Moli's own API, a local LLM, a local camera server). A name still
+/// resolves to strictly checked addresses: the anti-rebinding guarantee does
+/// not weaken.
+pub async fn trusted_connect(host: &str, port: u16) -> anyhow::Result<TcpStream> {
+    connect_checked(host, port, true).await
+}
+
+async fn connect_checked(
+    host: &str,
+    port: u16,
+    allow_literal_loopback: bool,
+) -> anyhow::Result<TcpStream> {
+    let addrs = allowed_addresses(host, port, allow_literal_loopback).await?;
+    let mut last_error: Option<std::io::Error> = None;
+    for addr in &addrs {
+        match TcpStream::connect(addr).await {
+            Ok(tcp) => return Ok(tcp),
+            Err(e) => last_error = Some(e),
+        }
+    }
+    Err(
+        anyhow::Error::new(last_error.expect("at least one address"))
+            .context(format!("cannot reach {host}")),
+    )
+}
+
 /// Lowercase hex without separators: `AB:CD:…` as typed in a config file
 /// must match what [`fingerprint`] computes.
 fn normalize(pin: &str) -> String {
@@ -129,6 +253,12 @@ impl ServerCertVerifier for Pin {
             Some(_) => Ok(ServerCertVerified::assertion()),
             None => {
                 // First contact: from now on, only this certificate.
+                // TOFU: surface the adopted fingerprint so a person can
+                // check it against the device before it is stored.
+                tracing::warn!(
+                    fingerprint = %seen,
+                    "certificate pin adopted at first contact (trust on first use): check it matches the device"
+                );
                 *expected = Some(seen);
                 Ok(ServerCertVerified::assertion())
             }
@@ -284,7 +414,7 @@ impl PinnedTls {
         host: &str,
         port: u16,
     ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
-        let tcp = tokio::time::timeout(TIMEOUT, TcpStream::connect((host, port)))
+        let tcp = tokio::time::timeout(TIMEOUT, checked_connect(host, port))
             .await
             .context("connect timeout")??;
         let _ = tcp.set_nodelay(true);
@@ -386,11 +516,13 @@ impl PinnedHttps {
     }
 
     async fn connect(&self) -> anyhow::Result<SendRequest<Full<Bytes>>> {
-        let tcp =
-            tokio::time::timeout(TIMEOUT, TcpStream::connect((self.host.as_str(), self.port)))
-                .await
-                .context("connect timeout")?
-                .with_context(|| format!("cannot reach {}", self.host))?;
+        // The host comes from the person's config file (a local camera
+        // server, a gateway on the LAN): a literal loopback stays reachable,
+        // while a name resolving to loopback is still refused.
+        let tcp = tokio::time::timeout(TIMEOUT, trusted_connect(self.host.as_str(), self.port))
+            .await
+            .context("connect timeout")?
+            .with_context(|| format!("cannot reach {}", self.host))?;
         // An appliance unplugged mid-stream sends nothing, not even a reset:
         // keepalive probes turn that silence into an error within minutes.
         SockRef::from(&tcp).set_tcp_keepalive(
@@ -612,8 +744,11 @@ pub fn empty(builder: http::request::Builder) -> anyhow::Result<Request<Full<Byt
     Ok(builder.body(Full::new(Bytes::new()))?)
 }
 
-/// One plain-HTTP request to a LAN device (UPnP, local JSON APIs), on its
-/// own connection: devices like these often close idle ones.
+/// One plain-HTTP request to a device (UPnP, local JSON APIs), on its own
+/// connection: devices like these often close idle ones. The destination is
+/// a [`trusted_connect`]: the address comes from the person's config file,
+/// so a literal loopback (a service on the host itself) is allowed, while a
+/// name is still resolved and checked strictly.
 pub async fn plain(
     host: &str,
     port: u16,
@@ -631,7 +766,7 @@ pub async fn plain_with_headers(
     request: Request<Full<Bytes>>,
 ) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
     let exchange = async {
-        let tcp = TcpStream::connect((host, port))
+        let tcp = trusted_connect(host, port)
             .await
             .with_context(|| format!("cannot reach {host}:{port}"))?;
         let (mut sender, connection) = http1::handshake(TokioIo::new(tcp)).await?;
@@ -652,7 +787,9 @@ pub async fn plain_with_headers(
 /// One request to a web API (an LLM, a cloud service), on its own
 /// connection: TLS checked against the public CAs when `tls`, the whole
 /// exchange within `limit`, the answer capped at `max_body` bytes. The
-/// `host` header is added when missing.
+/// `host` header is added when missing. The destination is a
+/// [`trusted_connect`] (a local model behind `http://` stays reachable),
+/// never a profile-declared URL.
 pub async fn web(
     host: &str,
     port: u16,
@@ -733,7 +870,7 @@ async fn web_response(
             .insert(http::header::HOST, value.parse().context("host header")?);
     }
     let exchange = async {
-        let tcp = TcpStream::connect((host, port))
+        let tcp = trusted_connect(host, port)
             .await
             .with_context(|| format!("cannot reach {host}:{port}"))?;
         let response = if tls {
@@ -866,6 +1003,137 @@ mod body_tests {
         assert_eq!(
             BodyTooLarge(MAX_BODY).to_string(),
             "body too large (over 4 MiB)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::*;
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    fn ip(addr: &str) -> IpAddr {
+        addr.parse().expect("valid address")
+    }
+
+    #[test]
+    fn forbidden_addresses_are_loopback_and_link_local() {
+        for addr in [
+            "127.0.0.1",
+            "127.5.5.5",
+            "0.0.0.0",
+            "169.254.169.254",
+            "169.254.0.1",
+            "255.255.255.255",
+            "::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+        ] {
+            assert!(forbidden(&ip(addr)), "{addr} must be forbidden");
+        }
+        for addr in [
+            "192.168.1.10",
+            "10.0.0.1",
+            "172.16.0.5",
+            "8.8.8.8",
+            "192.0.2.1",
+        ] {
+            assert!(!forbidden(&ip(addr)), "{addr} must be allowed");
+        }
+    }
+
+    #[test]
+    fn always_forbidden_keeps_the_dangerous_ranges_without_loopback() {
+        for addr in [
+            "0.0.0.0",
+            "169.254.169.254",
+            "169.254.0.1",
+            "255.255.255.255",
+            "::",
+            "fe80::1",
+        ] {
+            assert!(
+                always_forbidden(&ip(addr)),
+                "{addr} must always be forbidden"
+            );
+        }
+        for addr in ["127.0.0.1", "::1", "::ffff:127.0.0.1", "192.168.1.10"] {
+            assert!(
+                !always_forbidden(&ip(addr)),
+                "{addr} must not be in the hard set"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_forbidden_literal_address_is_refused_before_any_connect() {
+        for host in ["127.0.0.1", "169.254.169.254", "0.0.0.0", "::1"] {
+            let err = checked_connect(host, 9).await.unwrap_err();
+            assert!(err.to_string().contains("forbidden"), "{host}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_forbidden_name_resolution_is_refused() {
+        // `localhost` resolves to loopback: the connection must be refused,
+        // never dialed.
+        let err = checked_connect("localhost", 9).await.unwrap_err();
+        assert!(!err.to_string().contains("cannot reach"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_literal_address_passes_the_range_check() {
+        let addrs = allowed_addresses("192.0.2.1", 8080, false).await.unwrap();
+        assert_eq!(
+            addrs,
+            vec![std::net::SocketAddr::from_str("192.0.2.1:8080").unwrap()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_trusted_literal_loopback_passes_the_range_check() {
+        // Written by a person in a config file: Moli's own API, a local LLM.
+        for host in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
+            let addrs = allowed_addresses(host, 8790, true).await.unwrap();
+            assert_eq!(addrs.len(), 1, "{host}");
+            assert!(is_loopback(&addrs[0].ip()), "{host}");
+        }
+        // The same literals stay refused on the strict path.
+        for host in ["127.0.0.1", "::1"] {
+            assert!(
+                allowed_addresses(host, 8790, false).await.is_err(),
+                "{host}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_trusted_connect_refuses_the_dangerous_ranges() {
+        for host in ["169.254.169.254", "0.0.0.0", "::"] {
+            let err = trusted_connect(host, 9).await.unwrap_err();
+            assert!(err.to_string().contains("forbidden"), "{host}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_trusted_name_rebound_to_loopback_is_refused() {
+        // Even with the relaxed literal check, a name must never resolve to
+        // loopback: the anti-rebinding guarantee is total.
+        let err = trusted_connect("localhost", 9).await.unwrap_err();
+        assert!(!err.to_string().contains("cannot reach"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_trusted_literal_loopback_reaches_the_io_layer() {
+        // Port 9: the range check passes, the dial is attempted and fails
+        // with an io error (connection refused) kept in the error chain.
+        let err = trusted_connect("127.0.0.1", 9).await.unwrap_err();
+        assert!(err.to_string().contains("cannot reach"), "{err}");
+        assert!(
+            err.chain()
+                .any(<dyn std::error::Error>::is::<std::io::Error>),
+            "{err}"
         );
     }
 }

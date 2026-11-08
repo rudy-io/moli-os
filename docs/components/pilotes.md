@@ -107,12 +107,12 @@ l'exige).
 
 | Brique | Usage |
 |---|---|
-| `PinnedHttps` | HTTPS vers un appareil du LAN au certificat auto-signé : empreinte SHA-256 **épinglée au premier contact** (TOFU), puis exigée. Construit sans empreinte, l'objet adopte celle de la première poignée de main (sous un seul verrou) et refuse ensuite toute autre (`PIN_MISMATCH`) ; une empreinte fournie est normalisée (minuscules, sans `:`) ; `pinned_fingerprint()` la donne. Délai 4 s par étape, keepalive TCP (60 s / 15 s), une connexion réutilisée avec un seul nouvel essai pour les requêtes rejouables. `send_once` (connexion, appui de touche : jamais rejoué), `send_slow` (caméra sur batterie), `stream` (SSE), `handshake` (épingle avant tout envoi de secret : le pilote stocke l'empreinte, puis construit l'objet qui porte le secret). En-tête `Host` **avec le port** sauf 443. **Corps bornés** : 4 Mio (`MAX_BODY`), 16 Mio pour `send_slow` (`MAX_SLOW_BODY`, images) ; au-delà, erreur `body too large`, jamais rejouée. `stream` n'a pas de fin par nature : l'appelant borne ce qu'il accumule. |
+| `PinnedHttps` | HTTPS vers un appareil du LAN au certificat auto-signé : empreinte SHA-256 **épinglée au premier contact** (TOFU), puis exigée. Construit sans empreinte, l'objet adopte celle de la première poignée de main (sous un seul verrou) et refuse ensuite toute autre (`PIN_MISMATCH`) ; l'empreinte adoptée est **loguée** (niveau `warn`, champ `fingerprint`) pour que l'humain puisse la vérifier sur l'appareil — les pilotes la répètent dans leur log d'appairage (`info`). Une empreinte fournie est normalisée (minuscules, sans `:`) ; `pinned_fingerprint()` la donne. Délai 4 s par étape, keepalive TCP (60 s / 15 s), une connexion réutilisée avec un seul nouvel essai pour les requêtes rejouables. `send_once` (connexion, appui de touche : jamais rejoué), `send_slow` (caméra sur batterie), `stream` (SSE), `handshake` (épingle avant tout envoi de secret : le pilote stocke l'empreinte, puis construit l'objet qui porte le secret). En-tête `Host` **avec le port** sauf 443. **Corps bornés** : 4 Mio (`MAX_BODY`), 16 Mio pour `send_slow` (`MAX_SLOW_BODY`, images) ; au-delà, erreur `body too large`, jamais rejouée. `stream` n'a pas de fin par nature : l'appelant borne ce qu'il accumule. **Contrôle des destinations** : deux chemins. `checked_connect` (strict) pour les profils, `PinnedHttps`, `PinnedTls` et WebSocket : une IP littérale est vérifiée, un nom d'hôte est résolu **avant** connexion et seules les adresses autorisées sont dialez — boucle `127.0.0.0/8`, liaison locale `169.254.0.0/16`, `0.0.0.0` et équivalents IPv6 sont refusés (anti-rebinding DNS) ; les plages RFC 1918 restent autorisées (hôtes du LAN). `trusted_connect` (relaxé) pour `plain`/`web` : l'adresse est choisie par l'humain dans la config, donc une IP littérale de boucle est autorisée (API Frigate locale, LLM local, `moli-os health`) ; un nom d'hôte reste résolu **avant** connexion et les adresses interdites y compris la boucle sont refusées — le rebinding DNS n'atteint jamais Moli. |
 | `PinnedTls` | même épinglage pour un autre transport TLS (MQTT de Bambu) |
 | `legacy.rs` | webpki ne sait pas lire un certificat **X.509 v1** (station Reolink). Le certificat est accepté sur son empreinte ; la signature de la poignée de main est vérifiée à la main avec la clé RSA, P-256 ou P-384 extraite du DER. |
 | `public_tls()` | TLS vérifié contre les autorités publiques (liste Mozilla embarquée : l'image n'a pas de magasin système) |
-| `plain()` / `plain_with_headers()` | HTTP en clair, une connexion par requête (UPnP, API JSON locales), corps borné à 4 Mio |
-| `web(host, port, tls, req, limit, max_body)` + `WebUrl::parse` | une requête vers une API web, délai global et taille de réponse bornés ; `WebUrl` n'accepte que `http(s)://` et refuse `user@host`. Utilisé par l'assistant et les webhooks des automatismes. |
+| `plain()` / `plain_with_headers()` | HTTP en clair, une connexion par requête (UPnP, API JSON locales), corps borné à 4 Mio ; destination vérifiée par `trusted_connect` (littérale de boucle admise) |
+| `web(host, port, tls, req, limit, max_body)` + `WebUrl::parse` | une requête vers une API web, délai global et taille de réponse bornés ; `WebUrl` n'accepte que `http(s)://` et refuse `user@host`. Utilisé par l'assistant et les webhooks des automatismes ; destination vérifiée par `trusted_connect` (littérale de boucle admise). |
 | `raop` | AirPlay 1 vers un récepteur qui prend le PCM en clair : `plain` (le critère, lu dans le TXT `_raop._tcp`), `announced` (ce TXT, demandé au seul récepteur, celui de l'instance dont le SRV donne le port configuré), `Session` (RTSP, réponses appariées par `CSeq`, puis le son en RTP avec SYNC, avance bornée, renvois et horloge, en ne répondant qu'au récepteur), et trois gestes d'une session chacun, `read_volume`, `set_volume`, `say` (le volume relu, le niveau de l'annonce, le son, le volume remis). Un refus d'une étape de la session est une erreur typée (`Refused`), distincte d'un récepteur absent ; un `TEARDOWN` raté n'est qu'un avertissement. Voir [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay). |
 | `upnp` | `discover` (SSDP `M-SEARCH` vers 239.255.255.250:1900), `fetch` (description), `soap` (action), `control_url`, lecture XML minimale par nom de balise |
 
@@ -136,9 +136,6 @@ historiques. `write = "extended"` active explicitement les nouvelles commandes :
 modes système, eau chaude, renommage, réglages installateur, grilles, ventilation,
 qualité de l’air et libellé d’intégration. Un essai d’observation configure
 explicitement `read_only = true`, prioritaire sur les deux modes d’écriture.
-Les passerelles ajoutées depuis Moli démarrent en lecture seule avec le périmètre
-`legacy` ; l'autorisation par code Moli ne modifie pas ce périmètre. Les modifications
-de connexion et réactivations rétablissent la lecture seule.
 Ces restrictions sont appliquées aux capacités publiées, à l’exécuteur et au
 transport. Les commandes restent soumises aux gardes, aux membres affectés et à
 une nouvelle lecture des capacités. Aucun PUT n'est envoyé au
@@ -164,7 +161,7 @@ Configuration, garde des groupes, limites des réponses, commandes et restrictio
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.
-- **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées sur `{base}/{friendly_name}/set`.
+- **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées sur `{base}/{friendly_name}/set`. L'envoi MQTT n'étant qu'une remise au pont, la commande n'est **acquitée que si l'appareil confirme** (écho d'état correspondant), que zigbee2mqtt logue l'échec sur `bridge/logging` (refus, rapporté au journal avec l'erreur ZCL), ou que le délai d'acquittement (15 s) expire (échec « sans accusé »). Une écriture déjà en cours sur le même point est refusée (« occupé »), et une commande vers un appareil sur secteur que zigbee2mqtt signale hors du réseau est refusée sans attendre.
 - **Configuration** :
 
 ```toml
@@ -178,15 +175,15 @@ base_topic = "zigbee2mqtt"  # défaut
 # username = "moli-os"
 # password_env = "MOLI_Z2M_PASSWORD"   # NOM de la variable, jamais le mot de passe
 # client_id = "…"                      # défaut : moli-os-<instance>
-# impulse_points = ["z2m:0x…/state_l1"]  # relais câblés en déclencheur (portail, garage)
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`. **Relais à impulsion** (`impulse_points`) : un relais qui pilote un contact sec (portail, porte de garage, ZG-2002-RF en mode `inching`) ressemble à un interrupteur dont l'état retombe à éteint ; Z2M ne dit pas à quoi il est câblé, et le retour à `OFF` est aussi celui d'une minuterie, donc rien n'est déduit : le propriétaire liste les identifiants de points (`z2m:<IEEE>/state_l1`). Un point listé (interrupteur réglable seulement) devient une énumération à une seule valeur, `cycle`, de sens `control` (un agent demande toujours l'accord d'une personne), en écriture seule : l'ordre part en `state_lN: "ON"`, l'état renvoyé n'est jamais publié ni relu. Un identifiant inconnu ou non éligible est signalé dans les journaux. Le tableau de bord montre un bouton « Impulsion » par relais (« Relais 1 », « Relais 2 ») ; la fonction de chaque relais se dit par le nom de l'appareil. **Migration** : un relais déclaré cesse d'être un interrupteur (`on_off` → `control`) ; une règle, un favori ou un historique qui lisait son état est à reprendre.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
+- **Passerelle** : le pont est publié comme pseudo-appareil `bridge` (`<instance>:bridge`) avec un point binaire `pairing` (fenêtre d'appairage). Écrire `true` publie `254` (le plafond Z2M, en secondes) sur `{base}/bridge/request/permit_join` ; la commande n'est acquittée que par la réponse `bridge/response/permit_join` (sinon échec après le délai d'acquittement). Le point suit la fenêtre : valeur initiale et échéance reprises du `bridge/info` retenu (`permit_join`, `permit_join_end`), remise à `false` quand la fenêtre se referme. L'atelier en fait un bouton ; un agent qui y commande est traité comme n'importe quelle commande (garde, journal, approbation). Le même mécanisme est prévu pour Z-Wave (`<instance>:bridge`).
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
-- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (9 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
+- **Tests** : `src/catalog.rs` sur des fixtures réelles `integrations/z2m/fixtures/bridge_devices.json` (8 appareils) et `state.json` : typage, décodage, encodage des commandes, composites, lectures à la demande.
 
 ## `zwave` : Z-Wave via zwave-js-ui (`crates/moli-zwave`)
 
@@ -235,6 +232,80 @@ base_topic = "zwave"        # défaut
   `currentValue` CC 38 suffit à créer `on` et `level`) ; `battery` (CC 53 `batteryLevel`
   ou CC 128 `level`, %), `temperature` / `humidity` (CC 31/49 : « Air temperature »,
   « Relative humidity »),
+  `power` (CC 50, clé 66049, W) en lecture ; un (cc, property) inconnu est ignoré proprement.
+  Sémantique du point de niveau : `Brightness` uniquement si la classe de device du
+  nœud est Multilevel Switch (generic 0x11) avec specific 0x01/0x02 — sinon `Other`,
+  sinon la garde ne traite pas le nœud comme une lumière (un module de volet CC 38
+  nommé « Portail » doit rester vérifiable par le nom). `native_name` conserve le nom
+  brut du gateway (accents et espaces intacts) ; seul le sujet MQTT est assaini.
+- **Identité** : `nodeId` zwave (`<instance>:<nodeId>`), jamais le nom ; le nom et la
+  localisation zwave-js servent de suggestions (`native_name`, `native_room`).
+- **Pièges** : le gateway ne rejoue pas les états sans le flag retain → bootstrap `getNodes`
+  à chaque connexion (fenêtre initiale de 15 s), puis réessai toutes les 30 s jusqu'à
+  la première réponse acceptée, puis rafraîchissement périodique toutes les 300 s (les
+  nœuds appairés ou renommés ensuite apparaissent sans redémarrage ; si la première
+  fenêtre de 15 s passe sans réponse, un avertissement journalise le sujet interrogé —
+  vérifier `base_topic` et `mqtt_name`) ; le fallback tolérant par
+  accumulation des topics vus n'est armé qu'après cette première fenêtre (pas de fantômes
+  `zwave:<nom>` si la réponse arrive après quelques secondes) ; un nœud
+  n'est marqué hors ligne que sur `status` `false` après avoir été vu en ligne (un capteur
+  sur pile jamais vu reste disponible) ; le shape de `getNodes` et la sérialisation des
+  propertyKeys (CC 49) sont confirmés sur la cible (capture réelle + test
+  on/off sur nœud neutre) ; les sujets supposent la passerelle en mode `VALUEID` avec
+  `nodeNames` (`"gateway": {"type": 0, "nodeNames": true}` dans `settings.json`) — sans
+  cela la passerelle reste en mode `NAMED` et **ne publie aucun sujet de valeur** ; ne pas
+  cocher « Ignore location » dans la passerelle : le pilote préfixe chaque sujet par la
+  localisation du nœud quand elle existe (cf. `getNodes`), et un sujet sans préfixe ne
+  serait plus associé à son appareil ; les mises à jour d'état arrivent enveloppées
+  `{"time", "value"}` (défaut de la passerelle, déballées par le pilote) ; ne jamais
+  journaliser les `MqttOptions` (le `Debug` affiche le mot de passe) ; une commande avant
+  `ConnAck` est refusée (`broker injoignable`), jamais acquittée puis perdue ; le succès
+  d'une écriture n'est pas vérifié (la passerelle n'acquitte pas les commandes).
+- **Tests** : `src/catalog.rs` sur les fixtures `integrations/zwave/fixtures/get_nodes.json`
+  (6 nœuds synthétiques, dont un moteur de volet CC 38), `value_messages.json` et
+  `get_nodes_real.json` (capture réelle anonymisée) : découverte, typage, décodage,
+  encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
+  et de config.
+
+## `zwave` : Z-Wave via zwave-js-ui (`crates/moli-zwave`)
+
+- **Couvre** : tous les nœuds Z-Wave décrits par le gateway zwave-js-ui (lumières, prises,
+  capteurs sur pile) ; on/off et niveau écrivables, tout le reste en lecture seule ; aucun
+  code par marque.
+- **Protocole** : MQTT local (1883 par défaut), abonnement à `{base}/#`. Commandes publiées
+  sur `{base}/{nom}/{cc}/{endpoint}/{prop}/set` (payload JSON brut : `true`/`false` pour
+  CC 32 sur `currentValue` et CC 37 sur `targetValue`, nombre `0`–`255` pour CC 38 sur
+  `targetValue`) ; les mises à jour d'état arrivent enveloppées `{time, value}` (défaut de la
+  passerelle, déballées par le pilote) ; disponibilité sur `{base}/{nom}/status`
+  (`true`/`false`) ; bootstrap par l'API `getNodes` du gateway (topic
+  `{base}/_CLIENTS/ZWAVE_GATEWAY-{mqtt_name}/api/getNodes/set`, payload `{"args":[]}`,
+  réponse sur le même topic sans le `/set`).
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "zwave"
+kind = "zwave"
+[driver.options]
+host = "127.0.0.1"          # défaut
+port = 1883                 # défaut
+base_topic = "zwave"        # défaut
+# mqtt_name = "zwave-js-ui" # défaut — nom du client MQTT de la passerelle (champ « Name » du panneau MQTT ;
+                           # la variable d'environnement MQTT_NAME de la passerelle le remplace si définie)
+# username
+# password_env = "MOLI_ZWAVE_PASSWORD"   # NOM de la variable, jamais le mot de passe
+# client_id
+```
+
+- **Secrets** : mot de passe broker éventuel dans la variable d'environnement nommée par
+  `password_env` ; jamais dans `moli.toml`.
+- **Points** : `on` (CC 32 Basic, 37 Switch Binary, 38 Switch Multilevel : le number de
+  CC 38 est décodé en booléen) et, écrivables, le niveau CC 38 `targetValue` (0-100 %) —
+  exposé sous la clé `brightness` (la clé standard des lumières, celle que l'interface
+  « maison » et les ambiances cherchent, comme Hue et Dirigera) quand la classe de
+  device est un vrai variateur, sinon `level` (volets, et le mode accumulation sans
+  `getNodes`) ; `battery` (CC 53 `batteryLevel` ou CC 128 `level`, %),
+  `temperature` / `humidity` (CC 31/49 : « Air temperature », « Relative humidity »),
   `power` (CC 50, clé 66049, W) en lecture ; un (cc, property) inconnu est ignoré proprement.
   Sémantique du point de niveau : `Brightness` uniquement si la classe de device du
   nœud est Multilevel Switch (generic 0x11) avec specific 0x01/0x02 — sinon `Other`,
@@ -423,13 +494,7 @@ host = "192.168.1.x"
   reprendre.
 - **Identité** : `id` du Dirigera (un UUID suivi de `_1`, `_2`… : un produit Matter comme le
   MYGGSPRAY se présente en deux appareils). Nom natif = `customName` (sinon le modèle), pièce
-  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub peut
-  ne donner cette pièce qu'à un appareil d'un produit (un MYGGSPRAY ou un VALLHORN : la présence,
-  pas la lumière) : un appareil en lecture seule sans pièce reprend celle de son `relationId`,
-  sauf si le produit est réparti sur deux pièces. Un appareil qu'on peut commander ne reprend
-  rien : une pièce dit aussi qui peut le commander. Comme toute pièce native, celle-ci s'efface à
-  l'affichage devant une pièce choisie dans Moli, mais la garde et l'accès des invités comptent
-  les deux. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
+  native = la pièce IKEA, sans l'espace insécable que le hub laisse parfois au bout. Le hub, les répéteurs et les télécommandes de lampes (qui pilotent leurs
   lampes elles-mêmes) ne publient que leur pile, ou rien.
 - **Pièges** : un renommage, un changement de pièce, un ajout ou un retrait recharge tout. Le
   WebSocket coupé (redémarrage du hub) ou muet 95 s : rechargement complet puis reconnexion ;
@@ -447,7 +512,7 @@ host = "192.168.1.x"
   `src/model.rs` sur `integrations/dirigera/fixtures/home.json` (un hub réel anonymisé : lampes
   TRADFRI et ORMANAS, détecteur MYGGSPRAY, le hub lui-même) et `events.json` (événements
   réels : marche/arrêt, fondu, couleur, blanc), plus chaque famille, bornes en mireds, contact
-  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), pièce partagée par un produit (ordre, deux pièces, lecture seule, déplacement), store (points et sens, position inversée dans les deux sens,
+  inversé, couleur partielle, éclairement en lux (0, bornes 1 et 40001, un relevé réel, 0xFFFF), store (points et sens, position inversée dans les deux sens,
   ordres, mouvement, valeur inconnue), types inconnus ignorés, encodage des commandes.
 
 ## `enedis` : compteur Linky par la Conso API (`crates/moli-enedis`)
@@ -485,6 +550,19 @@ docker exec -i homeassistant python3 - < tuya-export.py \
 ```
 
   Le script ne rafraîchit jamais le jeton de HA (cela révoquerait celui de HA) et refuse de tourner s'il expire dans moins de 15 min. `moli-os tuya import [--instance tuya] [--devices-file …]` refuse un terminal, range les clés dans le coffre et écrit `tuya.json` **sans clé**. Les champs `ip`, `version` et `room` modifiés à la main sont conservés. Redémarrer ensuite.
+
+- **Sans Home Assistant** : `tools/tuya-export.py` fait le même export, mais se connecte au compte Tuya directement par le QR code de l'app Smart Life / Tuya Smart (même flux que l'intégration Tuya de HA), donc aucune dépendance à HA ni à Jeedom. Le *user code* se lit dans l'app (Réglages > Compte et sécurité > User code). Dans un conteneur éphémère, tout reste propre :
+
+```sh
+docker run --rm -i --entrypoint sh \
+  -v "$PWD/tools/tuya-export.py:/tuya-export.py:ro" \
+  python:3.12-slim \
+  -c "pip install -q tuya-device-sharing-sdk pyqrcode cryptography && python3 /tuya-export.py --user-code <code>" \
+  | docker exec -i moli-os /moli-os tuya import
+```
+
+  ⚠️ **`-i` seulement, jamais `-it`** : avec un TTY, docker fusionne le stderr du conteneur (QR code, messages) dans le stdout pipé vers `moli-os`, qui ne reçoit plus que du texte → « invalid import ». Sans TTY, le QR et les messages restent visibles dans le terminal et seul le JSON (clés locales comprises) traverse le tube ; rien n'est écrit sur disque.
+  `--summary` liste les appareils sans clé (contrôle avant l'import, à lancer **sans** le pipe) ; `--user-code` évite la question.
 - **`tuya.json`** : `id`, `name`, `category`, `product`, `ip`, `version` (`"3.3"`, `"3.4"`, `"3.5"`), `room`, `gateway`, `dps[]` (`id`, `code`, `type`, `writable`, `unit`, `scale`, `min`, `max`, `step`, `range`).
 - **Points** : clé = code du DP (`switch_1`, `cur_power`). Booléen → binaire ; entier → numérique divisé par `10^scale` ; enum → enum ; texte → texte ; `Json`, `Raw`, `Bitmap` ignorés. Unités : `mA` affiché en A, `℃` en °C, `度` en kWh. Écrivable si `writable` **et** type booléen, entier ou enum (jamais le texte libre). À l'envoi, un entier est arrondi au pas de l'appareil (si `step` > 1).
 - **Découverte** : écoute UDP **6666, 6667** (jusqu'à 3.3) et **7000** (3.4+), sockets partagées (`SO_REUSEPORT`) avec localtuya de HA. L'adresse retenue est celle d'où vient la diffusion. `ip` et `version` servent au premier essai ; une connexion validée et saine reste intacte, un appareil hors ligne peut suivre une nouvelle annonce. La connexion doit prouver sa clé avant de devenir disponible ou de recevoir un ordre : état `dps` déchiffré en 3.3, négociation authentifiée en 3.4/3.5, avec un délai global de 5 s après la connexion TCP. Un simple heartbeat ou un retour d'erreur ne suffit jamais. Ni une diffusion ni une recherche par clé ne peuvent descendre sous la version 3.4/3.5 du fichier ou celle prouvée depuis le démarrage.
@@ -512,6 +590,25 @@ host = "192.168.1.x"
 - **Identité** : UID de la caméra (stable même si elle change de canal) ; à défaut `ch<N>` (numéro de canal, moins stable).
 - **Pièges** : le certificat est épinglé par une poignée de main nue **avant** tout envoi d'identifiants ; c'est un **X.509 v1**, vérifié à la main par `moli-net`. Une seule session (jeton) est gardée même à travers les redémarrages du pilote : les stations limitent les sessions simultanées. Codes `-6`/`-7` : nouvelle connexion. Le jeton voyage dans l'URL : aucune erreur ne cite l'URL. Une caméra sur batterie peut mettre ~10 s à se réveiller (14 s accordées à l'image). Station injoignable : toutes les détections passent à `null` (jamais de « personne vue » périmée).
 - **Tests** : `src/lib.rs` (événements lus aux deux niveaux `md`/`visitor` et `ai`, erreurs par commande, jeton masqué au débogage) ; `crates/moli-net/src/legacy.rs` sur le certificat public réel du Home Hub (`integrations/reolink/fixtures/home-hub-cert.b64`).
+
+## `ring` : sonnettes et caméras Ring (`crates/moli-ring`)
+
+- **Couvre** : les sonnettes et caméras d'un compte Ring, par l'API partenaire Amazon Vision (le cloud du compte). **Lecture seule** + images à la demande. Seuls les appareils portant un module vidéo (sonnettes, caméras) sont suivis : gong et capteurs restent exclus. Un appareil cessé d'être partagé au compte sort de la maison.
+- **Protocole** : HTTPS public vers `api.amazonvision.com` (JSON:API) et `oauth.ring.com` (jetons). Deux en-têtes obligatoires sur chaque appel, jeton compris (`User-Agent` et `Hardware_Id`) — sans eux, Ring répond 406. Événements sondés toutes les 15 s (`/v1/history/devices/<id>/events`, un appel par type : `ding`, `motion.human`, `motion.vehicle`, `motion.animal`) ; liste des appareils (`/v1/devices?include=status,capabilities`) toutes les 5 min. L'instantané (`/v1/devices/<id>/media/image/download`, type `latest_in_range`, fenêtre d'une heure) renvoie d'abord un 303 vers une URL présignée, puis un GET de la JPEG (5 Mio au plus).
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "ring"
+kind = "ring"
+```
+
+- **Secrets** : `client_id`, `client_secret` et `hmac_key` posés par l'humain (`moli-os secrets set ring …`, portail développeur Ring) ; `refresh_token` écrit par l'API de Moli au moment du lien du compte ; `hardware_id` (UUID v4 généré et rangé une fois par Moli).
+- **Lien du compte** (unidirectionnel, conduit par Ring ; `crates/moli-api/src/ring_link.rs`) : `POST /api/ring/link` (le backend Ring, corps form-encoded, code à usage unique de 60 s ; le `client_id` éventuellement envoyé est croisé avec celui du coffre) puis `GET /api/ring/linked?nonce=…&time=…` (la redirection du navigateur) : la confirmation exige une **session humaine (PIN)** et un nonce signé — HMAC-SHA256 de `"<time ms>:<id de compte>"` avec la clé HMAC du partenaire, base64 URL-safe sans padding, fenêtre de 600 s, futur refusé, comparaison en temps constant sur tous les comptes non réclamés. La route est publique, derrière la liste des hôtes et le limitateur de débit (le code est inusable sans le `client_secret` du coffre). L'API confirme le lien auprès de Ring (`POST` puis `PATCH` obligatoires sur `/v1/accounts/me/app-integrations`, avec `account_identifier` masqué au plus juste : initiale du nom ou de l'e-mail Access) et range le `refresh_token`. Un re-lien du même compte réédite un code : la réclamation la plus récente gagne.
+- **Points** (binaires, par caméra) : `doorbell` (un appui est un événement, diffusé tel quel), `person`, `vehicle`, `animal` (des niveaux : retombent à faux 90 s après le dernier événement). Doublons exclus par l'identifiant opaque de l'événement, plus récent d'abord ; la première lecture ne compte que l'inventaire (aucun afflux d'histoire).
+- **Jeton** : l'accès vit ~4 h ; le tick du pilote est le **seul** rafraîchisseur (marge de 60 s avant l'échéance). Le refresh **tourne** à chaque rafraîchissement : le nouveau est rangé dans le coffre avant d'employer l'ancien. Refresh du coffre rejeté (400–499 au jeton, 401/403 à l'API) : le pilote s'arrête (« compte non lié »), et si le jeton rejeté est encore celui du coffre, il est oublié (la personne relance le lien). Clés partenaire refusées (401 au jeton) : les clés sont relues du coffre, puis nouvel essai avec recroissance d'attente (2 s → 60 s).
+- **Pièges** : Ring peut répondre **406** depuis les adresses de centre de données / cloud, en-têtes corrects compris (une URL publique est nécessaire ; voir `integrations/ring/onboarding.md`). L'URL présignée porte le jeton dans sa query : aucune erreur ne la cite. Cloud coupé : les appareils passent hors ligne, les niveaux retombent d'eux-mêmes. Juste après un redémarrage, l'instantané peut échouer (« aucun jeton en mémoire ») le temps du premier tick.
+- **Tests** : `src/lib.rs` (découpage de l'URL présignée sans fuite de la query, aller-retour de l'échappement formulaire, première lecture sans émission, forme de l'identifiant matériel) ; `crates/moli-api/src/ring_link.rs` (vecteurs de nonce vérifiés indépendamment, lecture form-encoded, échappement, égalité en temps constant, UUID v4, base64 URL sans padding, réclamation unique d'un nonce signé).
 
 ## `sonos` : enceintes Sonos (`crates/moli-sonos`)
 
@@ -543,12 +640,9 @@ host = "192.168.1.x"
   musique baisse, l'annonce passe, la musique revient d'elle-même, comme le script HA
   `announce_sonos`. Le certificat du Sonos est épinglé au premier contact (secret
   `sonos/ws_cert`). Une annonce à la fois, dans l'ordre ; la commande répond tout de suite,
-  un échec est journalisé dans les logs. `speaking` (texte, lecture) tient les mots de
-  l'annonce pendant que l'enceinte les dit (dès que le clip est `ACTIVE`), vide une fois dits :
-  un [satellite vocal](satellite-vocal.md) qui répond par l'enceinte (`speaker`) attend la fin
-  avant de se remettre à écouter.
+  un échec est journalisé dans les logs.
   Tout ce qui n'est pas propre au Sonos (le texte vérifié, la file de 3 au plus, l'abandon
-  après 30 s d'attente, `quiet`, `announce_volume`, `speaking`, la synthèse et la publication du son) est
+  après 30 s d'attente, `quiet`, `announce_volume`, la synthèse et la publication du son) est
   dans `crates/moli-announce`, pour toute enceinte qui parle ; le Sonos n'y ajoute que le clip
   (`moli_announce::Speaker`), comme [`airplay`](#airplay--annonces-sur-un-récepteur-airplay-1-cratesmoli-airplay) le RAOP.
 - **Pièges** : description injoignable au démarrage = échec du pilote, relancé par le superviseur. Pas de gestion des groupes Sonos.
@@ -583,7 +677,7 @@ host = "192.168.1.x"
 
 - **Secrets** : aucun.
 - **Points** : ceux de `moli-announce`, comme pour le Sonos (`announce`, `announce_volume`,
-  `quiet`, `quiet_until`, `speaking` dès que le son part), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
+  `quiet`, `quiet_until`), et `volume` (0-100 %, **écrivable**) : le niveau du récepteur,
   relu dans la session de chaque annonce et remis après elle, même quand le son a échoué. 0 %
   est muet (-144 dB). Un volume relu qui n'est pas un nombre fini (`nan`, `inf`) est ignoré ;
   les autres sont bornés entre -144 et 0 dB. Un récepteur qui refuse le volume de l'annonce la
@@ -796,15 +890,28 @@ agent_sha256 = "<sha256 du jeton de l'agent : le jeton reste sur le PC>"
 
 - **Couvre** : les valeurs que la maison garde pour elle, comme les `input_select` /
   `input_boolean` / `input_number` / `input_text` de HA : mode de la maison, alarme active,
-  budget… Chaque aide est un appareil `<instance>:<id>` avec un point inscriptible :
-  `state` (choix, `select`), `on` (interrupteur, `switch`), `value` (`number`, `text`).
+  budget… Chaque aide est un appareil `<instance>:<id>` avec un point : `state` (choix,
+  `select`), `on` (interrupteur, `switch`), `value` (`number`, `text`) — ou un point
+  **calculé** `value` pour `aggregate`.
 - **Configuration** : `[[driver.options.helper]]` avec `id` (jamais renommé), `name`,
-  `kind`, `options` (choix), `min`/`max`/`step` (nombre), `initial`, `room` (facultatif).
-- Une commande devient la nouvelle valeur (garde et journal comme pour tout appareil) ; la
-  valeur survit aux redémarrages (cache d'état) ; une aide jamais vue démarre à `initial`.
+  `kind` (`select`, `switch`, `number`, `text`, `aggregate`), `options` (choix),
+  `min`/`max`/`step` (nombre), `initial`, `room` (facultatif).
+  Pour `aggregate` : `points` (liste de points `"instance:appareil/cle"`, obligatoire),
+  `op` (`avg` par défaut, `min`, `max`), `unit` (symbole affiché, ex. `°C`),
+  `semantic` (ex. `temperature`), et `stale_s` (facultatif : un relevé plus ancien que
+  ce délai est exclu du calcul).
+- Une commande sur une aide stockée devient sa nouvelle valeur (garde et journal comme
+  pour tout appareil) ; la valeur survit aux redémarrages (cache d'état) ; une aide jamais
+  vue démarre à `initial`.
+- **Aggregate** : lecture seule, recalculé à chaque changement d'un point source, après un
+  retard du bus, et toutes les 30 s (les seuils de fraîcheur sont liés au temps). Un point
+  sans valeur ou périmé (`stale_s`) est exclu ; plus aucun point valide → aucune valeur
+  publiée. Résultat arrondi à deux décimales ; la valeur n'est publiée que si elle change
+  (pas de bruit sur le bus).
 - Exemple : une instance `maison` avec `mode_maison` (Normal, Absent, Nuit, Vacances),
-  `alarme_active`, `budget_elec_mensuel`, aux mêmes noms et valeurs que les `input_*` de HA
-  qu'elles remplacent.
+  `alarme_active`, `budget_elec_mensuel`, et `temp_maison` (moyenne des thermomètres de
+  la maison, équivalent du capteur « virtuel » de Jeedom) — aux mêmes noms et valeurs que
+  les `input_*` de HA qu'elles remplacent.
 
 ## `lumieres` : luminaires (`crates/moli-lights`, D12)
 
@@ -863,15 +970,92 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
   tient ; provisionnement borné par la MAC).
 
+## `tesla` : la voiture (`crates/moli-tesla`)
+
+- **Couvre** : la voiture Tesla de la maison, un appareil par véhicule du compte, par
+  l'API officielle (celle que l'appli officielle utilise) : batterie, autonomie, recharge,
+  puissance, prises, portes, mode vigie, températures.
+- **Protocole** : HTTPS Fleet API régionale — `fleet-api.prd.eu.vn.cloud.tesla.com`
+  (Europe, défaut), `fleet-api.prd.na.vn.cloud.tesla.com` (Amérique du Nord, Asie),
+  `api.tesla.cn` (Chine) —
+  `GET /api/1/vehicles`, `GET /api/1/vehicles/{id}/vehicle_data`,
+  `POST /api/1/vehicles/{id}/command/{cmd}` — devant le point de jeton `auth.tesla.com`
+  (`/oauth2/v3/token`, OAuth PKCE avec l'application personnelle de la maison ; l'échange
+  de code porte l'`audience` de la Fleet API régionale). Avant tout appel, l'application
+  doit être enregistrée dans la région (`POST /api/1/partner_accounts` avec un jeton
+  `client_credentials` : idempotent, le pilote le fait à chaque connexion). L'état est relu
+  toutes les `poll_charging_s` s (60) en recharge ou branchée, `poll_idle_s` (180) au
+  repos, `poll_asleep_s` (600) endormie ; une commande a 4,5 s pour arriver (l'horloge
+  du cœur donne 5 s). Si Tesla rate-limit (429), Moli respecte le `Retry-After` demandé.
+- **Connexion** : une fois, depuis le tableau de bord (pilote « Compte Tesla ») : le
+  pilote affiche l'adresse de la page de connexion de Tesla ; on s'y connecte, puis on
+  colle l'adresse de la dernière page (elle porte le `code=`). Le jeton de
+  rafraîchissement reçu est à usage unique et tourne à chaque échange : le dernier vit au
+  coffre chiffré (`refresh_token`), jamais dans un fichier ; il expire après trois mois
+  (reconnecter le compte, pareille opération). Le client public partagé de Tesla
+  ayant été retiré (2026), une application personnelle (developer.tesla.com) est
+  obligatoire : permissions `openid`, `offline_access`, `user_data`,
+  `vehicle_device_data`, `vehicle_cmds` ; secrets `client_id` et `client_secret`
+  (tous deux obligatoires : l'enregistrement de l'application dans la région utilise un
+  jeton `client_credentials`) au coffre chiffré, jamais dans un fichier.
+  Sans `client_id`, le pilote se gare avec l'invitation à les déposer ;
+  `redirect_uri` (option du pilote, obligatoire) doit être l'URI de redirection
+  enregistrée sur l'application ; `partner_domain` (option du pilote, défaut : l'hôte
+  de `redirect_uri`) doit être le domaine racine des origines autorisées de
+  l'application, où la clé publique EC P-256 (PEM) doit être hébergée de façon
+  permanente (`https://domaine/.well-known/appspecific/com.tesla.3p.public-key.pem`) ;
+  sans cette clé accessible, l'activation régionale échoue (424).
+- **Plafond de facturation** : l'API est facturée à l'usage (plafond par
+  défaut : 0 $). Quand le compte dépasse son contingent, Tesla le désactive :
+  chaque appel répond `403 account disabled: EXCEEDED_LIMIT`, jusqu'à ce que le
+  plafond soit relevé (developer.tesla.com) ou que le cycle de facturation
+  recommence. Moli le marque « plafond atteint » sur l'état du compte et
+  espace ses tentatives à 6 h ; le pilote reprend tout seul à la réactivation.
+- **Points** (normalisés en SI) : `soc` (%), `range` (km), `charging`,
+  `charge_power` (W), `plugged_in`, `doors_locked`, `sentry`, `awake`,
+  `inside_temp` / `outside_temp` (°C) ; `command` (texte, écriture seule,
+  sémantique contrôle) : `start_charging`, `stop_charging`, `lock`, `unlock`,
+  `sentry_on`, `sentry_off`. Unités à l'entrée : tous les `*_range` de l'API
+  (dont `battery_range`) sont **toujours en miles, quel que soit le réglage
+  GUI de la voiture** — le pilote les convertit systématiquement en km (pas de
+  lecture de `gui_range_units`) ; les températures suivent `gui_settings`
+  (°F→°C quand la voiture est réglée en impérial).
+- **Vie privée** : rien ne quitte la maison pour un tiers ; seul le compte Tesla de la
+  personne est interrogé, avec ses permissions.
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
+
+## `teleinfo` : le compteur Linky (`crates/moli-teleinfo`)
+
+- **Couvre** : le compteur d'électricité Linky, par la canalée série TIC, via une
+  interface USB-TIC (ex. Cartelectronic USBTICLC) — lecture seule ; le compteur pousse
+  une trame ~toutes les 10 s.
+- **Protocole** : port série 7E1 (7 bits, parité paire, 1 stop), mode standard (9600 baud,
+  trames à tabulations) ou historique (1200 baud, trames à espaces) ; le format est détecté
+  ligne par ligne, seul le débit se règle (`baud`) selon l'écran du Linky. Trames STX/ETX,
+  checksum par ligne `(somme & 0x3F) + 0x20` ; les lignes corrompues sont écartées et
+  comptées sans abattre la trame.
+- **Configuration** : `port` (`/dev/ttyUSB0`), `baud` (9600/1200), `id` (`linky`), `name`,
+  `offline_after` (90 s).
+- **Points** : puissances en VA (`papp`, `sinsts`, `pmax`), intensités en A (`iinst`,
+  `irms1..3`, `isousc`, `imax`), tensions en V (`uinst01..03`, `urms1..3`), compteurs
+  cumulés en Wh (`hchc`/`hchp` — BASE, `hchc1..3`/`hchp1..3` — HC, `base`, `hphc`,
+  `east`/`easf01..10`/`easd01..04` — TEMPO), textes (`adco`, `adsc`, `ptec`, `ltarf`,
+  `ngtf`, `demain`, `motdetat`…). Les sous-unités téléinfo (0,1 VA / 0,1 A / 0,1 V) sont
+  converties à la publication.
+- **Surveillance** : l'appareil passe hors ligne après `offline_after` s sans trame ; le
+  pilote passe en `waiting` tant que le port n'est pas accessible (branchement, groupe
+  `dialout`, rule udev — voir [onboarding](../../integrations/teleinfo/onboarding.md)).
+- **Énergie** : les compteurs (Wh) et la puissance (VA) se branchent sur
+  `[energy.live]` / `[[energy.meter]]` (exemple dans `moli.example.toml`).
 
 ## Tests : où et comment
 
 - Tout passe par `.\scripts\dev.ps1 sh scripts/check.sh` (fmt, clippy `-D warnings`, `cargo test --workspace`, dans Docker ; voir [exploitation.md](exploitation.md)). Une crate seule : `.\scripts\dev.ps1 cargo test -p moli-tuya`.
 - Les tests de pilotes sont des tests unitaires purs (sans réseau), souvent sur des captures réelles : fixtures Z2M et Hue, réponses Reolink, Meross, Daikin, Moonraker.
-- `crates/moli-net` : épinglage (premier certificat adopté puis exigé, empreinte `AB:CD…` normalisée ; le vérificateur ne fait que hacher les octets, aucun vrai certificat nécessaire) et corps bornés.
+- `crates/moli-net` : épinglage (premier certificat adopté puis exigé, empreinte `AB:CD…` normalisée, loguée à l'adoption ; le vérificateur ne fait que hacher les octets, aucun vrai certificat nécessaire), corps bornés, et le contrôle des destinations : `checked_connect` (strict, profils/pilotes pinnés/WebSocket) refuse l'IP littérale de boucle, la liaison locale `169.254.0.0/16` dont les métadonnées cloud, `0.0.0.0` et `::1` ; `trusted_connect` (chemins configurés par l'humain : `plain`, `web`) admet la boucle en IP littérale mais refuse toujours un nom d'hôte résolu vers l'une de ces adresses — un rebinding DNS n'atteint jamais Moli.
 - `crates/moli-runtime/tests/hub.rs` couvre le contrat côté cœur : aller-retour de commande, refus, clés inconnues ignorées, pilote qui panique relancé, appareils étrangers refusés.
 - `crates/moli-os/src/config.rs` vérifie que `moli.example.toml` est valide.
 - Sur du vrai matériel : propriétés inoffensives, jamais dans une pièce protégée, état initial remis (voir `AGENTS.md`).
@@ -901,6 +1085,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `enedis` | `moli-enedis` | HTTPS vers la Conso API, jeton du client | non | un compteur Linky (lecture, pas de 15 minutes) |
 | `tuya` | `moli-tuya` | TCP 6668 chiffré 3.3/3.4/3.5, UDP 6666/6667/7000 ; cloud en lecture | oui : DP booléens, entiers, enum (local seulement) | prises Tuya (local, écriture comprise) ; capteurs sur pile et passerelles (cloud) |
 | `reolink` | `moli-reolink` | HTTPS API locale, épinglé (X.509 v1) | non (+ images) | Reolink Home Hub (caméras, sonnette) |
+| `ring` | `moli-ring` | HTTPS cloud (API partenaire Amazon Vision) | non (+ images) | pas encore |
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `airplay` | `moli-airplay` | RAOP : RTSP 5000, RTP/UDP | oui : annonces, volume | Freebox Delta Player |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
@@ -916,6 +1101,8 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say` | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
+| `teleinfo` | `moli-teleinfo` | port série 7E1 (TIC Linky, 9600/1200) | non | pas encore (interface USB-TIC branchée) |
+| `tesla` | `moli-tesla` | HTTPS, API officielle (OAuth PKCE) | oui : `command` (charge, portes, vigie) | pas encore (API officielle) |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |

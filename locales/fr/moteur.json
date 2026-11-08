@@ -28,6 +28,7 @@
   "moteur.verif.pas_bascule": "« {nom} » ne s'allume ni ne s'éteint.",
   "moteur.verif.attente": "Une attente dure entre 1 seconde et 24 heures.",
   "moteur.verif.delai": "Le délai maximum va de 1 seconde à 24 heures.",
+  "moteur.verif.maintien": "Le maintien ne peut pas dépasser 24 heures.",
   "moteur.verif.message_vide": "Le message est vide.",
   "moteur.verif.canal_manquant": "Choisis où prévenir.",
   "moteur.verif.telegram": "Telegram n'est pas branché (pilote telegram et son bot) : seule la maison sera prévenue.",
@@ -169,6 +170,7 @@
 
   "moteur.pourquoi.essai": "Essai à blanc",
   "moteur.pourquoi.main": "Lancée à la main",
+  "moteur.pourquoi.deja_lancee": "Déjà en cours : ce lancement a été ignoré",
   "moteur.pourquoi.demarrage": "Moli vient de démarrer",
   "moteur.pourquoi.heure": "Il est {heure}",
   "moteur.pourquoi.interrompu": "{pourquoi} · interrompu par un redémarrage de Moli",

@@ -63,17 +63,6 @@ export function coverOrder(device, allowPartial = false) {
   return points.length === 1 ? points[0] : null;
 }
 
-/** Triggers (a gate's contacts, a garage door): writable `control` points whose
- *  only value is `cycle`. They are orders, never a state, and never a cover:
- *  `coverOrder` handles one `control` point with open/close, this is one button
- *  per point. */
-export function impulsePoints(device) {
-  return device?.points?.filter((point) => point.semantic === 'control'
-    && point.kind?.type === 'enum'
-    && point.kind.values?.length === 1
-    && point.kind.values[0] === 'cycle') ?? [];
-}
-
 /** Reading power and commanding it are separate capabilities. */
 export function powerPoint(device, writable = true) {
   // A shutter's state is a motor order, never an on/off switch.

@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 struct FakePlug {
     runs: AtomicU32,
     panic_once: bool,
+    native_room: Option<Arc<str>>,
 }
 
 impl FakePlug {
@@ -26,6 +27,7 @@ impl FakePlug {
         Arc::new(Self {
             runs: AtomicU32::new(0),
             panic_once,
+            native_room: None,
         })
     }
 }
@@ -58,7 +60,7 @@ impl Driver for FakePlug {
                 manufacturer: None,
                 model: None,
                 description: None,
-                native_room: None,
+                native_room: self.native_room.clone(),
                 members: Vec::new(),
                 points: vec![
                     spec("state", Kind::Binary, true, Semantic::OnOff),
@@ -182,6 +184,127 @@ async fn unknown_keys_from_drivers_are_ignored() {
     assert!(view.state.contains_key("state"));
 }
 
+/// A driver with a bounded power point (0..=100): out-of-range and wrong-type
+/// reports must be refused by the hub, never become states.
+struct BadReporter {
+    report_power: bool,
+}
+
+impl Driver for BadReporter {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("bad1");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "bad1".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    spec("state", Kind::Binary, true, Semantic::OnOff),
+                    spec(
+                        "power",
+                        Kind::Numeric {
+                            min: Some(0.0),
+                            max: Some(100.0),
+                            step: None,
+                        },
+                        false,
+                        Semantic::Power,
+                    ),
+                ],
+            });
+            if self.report_power {
+                ctx.set_state(&id, "power", Value::Int(999)); // out of range: refused
+                ctx.set_state(&id, "power", Value::Float(50.0)); // in range: kept
+            }
+            ctx.set_state(&id, "state", Value::from("ON")); // wrong type: refused
+            ctx.set_state(&id, "state", Value::Bool(true)); // valid
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn out_of_range_and_wrong_type_reports_are_refused() {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(BadReporter { report_power: true }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    let power = hub.state(&PointId::from("fake:bad1/power")).unwrap();
+    assert_eq!(
+        power.value,
+        Value::Float(50.0),
+        "out-of-range reports are refused, the valid one is kept and canonicalized"
+    );
+    let state = hub.state(&PointId::from("fake:bad1/state")).unwrap();
+    assert_eq!(
+        state.value,
+        Value::Bool(true),
+        "wrong-type reports are refused, the valid one is kept"
+    );
+
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn restored_samples_must_match_the_current_spec() {
+    let dir = std::env::temp_dir().join(format!("moli-state-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.json");
+    std::fs::write(
+        &path,
+        r#"{"fake:bad1":{"power":{"value":999,"ts":5},"state":{"value":true,"ts":6}}}"#,
+    )
+    .unwrap();
+    let opts = HubOptions {
+        state_path: Some(path),
+        ..HubOptions::default()
+    };
+
+    let hub = Hub::new(opts).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(BadReporter {
+            report_power: false,
+        }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    assert!(
+        hub.state(&PointId::from("fake:bad1/power")).is_none(),
+        "a cached sample out of the point's range must not be restored"
+    );
+    assert_eq!(
+        hub.state(&PointId::from("fake:bad1/state")).unwrap().value,
+        Value::Bool(true),
+        "a conforming cached sample is restored"
+    );
+
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test(start_paused = true)]
 async fn panicking_driver_is_restarted() {
     let (hub, _cancel) = start(true).await;
@@ -293,7 +416,8 @@ async fn cached_values_are_restored_with_their_age() {
     wait_running(&hub).await;
 
     let power = hub.state(&point("power")).unwrap();
-    assert_eq!(power.value, Value::Int(42));
+    // Restored like any live value: canonicalized by the point's spec.
+    assert_eq!(power.value, Value::Float(42.0));
     assert_eq!(power.ts, 1000, "restored values keep their original age");
     assert!(
         hub.state(&point("gone")).is_none(),
@@ -509,6 +633,51 @@ async fn unguarded_rooms_are_free() {
         .await
         .unwrap();
     assert_eq!(hub.state(&point("state")).unwrap().value, Value::Bool(true));
+}
+
+/// A driver publishing an empty native room must not dodge
+/// `protect_unassigned`: the device is treated as having no room at all.
+#[tokio::test]
+async fn a_blank_native_room_stays_unassigned() {
+    let opts = HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_rooms: vec!["Chambre".into()],
+            protected_devices: vec![],
+            quiet_hours: None,
+            protect_unassigned: true,
+            dashboard: moli_runtime::guard::Dashboard::Trusted,
+        },
+        ..HubOptions::default()
+    };
+    let hub = Hub::new(opts).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(FakePlug {
+            runs: AtomicU32::new(0),
+            panic_once: false,
+            native_room: Some(String::new().into()),
+        }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    assert!(
+        hub.rooms_of(&"fake:plug1".into()).is_empty(),
+        "a blank native room counts as no room"
+    );
+    assert_eq!(
+        hub.protected_room(&"fake:plug1".into()).as_deref(),
+        Some("appareil sans pièce")
+    );
+    let held = hub
+        .command(&point("state"), Value::Bool(true), Origin::Mcp, None)
+        .await;
+    assert!(
+        matches!(held, Err(CommandError::NeedsApproval { .. })),
+        "unassigned device must be held, got {held:?}"
+    );
 }
 
 #[tokio::test]

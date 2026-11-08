@@ -195,7 +195,9 @@ pub(crate) async fn remove(
         return refused(r);
     }
     // Not forgotten (the disk): still refused, as nobody's of the house.
-    if let Some(Err(e)) = phones.map(|gate| gate.forget(&id)) {
+    if let Some(gate) = phones
+        && let Err(e) = gate.forget(&id).await
+    {
         tracing::warn!(person = id, error = %e, "phones of a removed person not forgotten");
     }
     Json(json!({ "removed": id })).into_response()

@@ -71,7 +71,7 @@ async fn save_fixture(f: &Fixture) {
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(hub.persist_state().await.unwrap());
 }
 
@@ -175,7 +175,7 @@ async fn removing_an_absent_device_does_not_write_another_cache_generation() {
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(hub.persist_state().await.unwrap());
     hub.remove_device(&"synthetic:missing".into());
     assert!(!hub.persist_state().await.unwrap());
@@ -270,7 +270,7 @@ async fn concurrent_flushes_are_serialized_and_definitions_stay_legacy_compatibl
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     let (a, b) = tokio::join!(hub.persist_state(), hub.persist_state());
     assert_ne!(
         a.unwrap(),
@@ -282,29 +282,6 @@ async fn concurrent_flushes_are_serialized_and_definitions_stay_legacy_compatibl
     assert!(values.get("version").is_none());
     assert_eq!(values["synthetic:device"]["on"]["value"], true);
     assert!(f.0.join("state.devices.json").is_file());
-}
-
-#[tokio::test]
-async fn unregister_disables_commands_and_reregistration_keeps_newer_live_samples() {
-    let f = Fixture::new();
-    let hub = f.hub();
-    let _commands = register(&hub);
-    hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
-    hub.persist_state().await.unwrap();
-    hub.set_state(&id(), "on", Value::Bool(false));
-    let latest = hub.state(&PointId::new(&id(), "on")).unwrap();
-    hub.unregister_driver(&instance());
-    assert!(hub.snapshot().drivers.is_empty());
-    let retired = hub.device(&id()).unwrap();
-    assert_eq!(retired.online, Some(false));
-    assert!(!retired.device.points[0].access.write);
-    let _next_commands = register(&hub);
-    assert_eq!(hub.state(&PointId::new(&id(), "on")).unwrap(), latest);
-    hub.set_availability(&id(), true);
-    assert!(!hub.device(&id()).unwrap().device.points[0].access.write);
-    hub.upsert_device(definition());
-    assert!(hub.device(&id()).unwrap().device.points[0].access.write);
 }
 
 #[tokio::test]
@@ -324,25 +301,6 @@ async fn malformed_identity_and_oversized_sidecars_are_discarded() {
     let oversized = f.hub();
     let _oversized_commands = register(&oversized);
     assert!(oversized.device(&id()).is_none());
-}
-
-#[tokio::test]
-async fn reregistered_instance_does_not_expose_another_integration_inventory() {
-    let f = Fixture::new();
-    let hub = f.hub();
-    let _commands = register(&hub);
-    hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
-    hub.unregister_driver(&instance());
-    let _other = hub.register_driver(&instance(), "other", "other-package".into());
-    assert!(hub.device(&id()).is_none());
-    assert!(hub.known_device_ids_of(&instance()).is_empty());
-    hub.unregister_driver(&instance());
-    let _original = register(&hub);
-    assert_eq!(
-        hub.device(&id()).unwrap().state["on"].value,
-        Value::Bool(true)
-    );
 }
 
 #[derive(Debug)]
@@ -425,7 +383,7 @@ async fn restoration_does_not_replay_cached_values_as_new_measurement_events() {
     }
     assert!(saw_snapshot);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     assert!(
         std::iter::from_fn(|| events.try_recv().ok())
             .any(|event| matches!(event, moli_core::Event::State { .. }))
@@ -441,7 +399,7 @@ async fn an_invalid_replacement_drops_only_its_definition_and_keeps_valid_legacy
     let mut oversized = definition();
     oversized.native_name = "a".repeat(8193).into();
     hub.upsert_device(oversized);
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     assert!(hub.persist_state().await.unwrap());
     assert!(!hub.persist_state().await.unwrap());
     let reboot = f.hub();
@@ -477,9 +435,9 @@ async fn failed_observation_write_keeps_the_previous_snapshot_and_retries() {
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     hub.persist_state().await.unwrap();
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     let blocked = f.0.join("state.observations.json.tmp");
     std::fs::create_dir(&blocked).unwrap();
     assert!(hub.persist_state().await.is_err());
@@ -537,7 +495,7 @@ async fn the_first_identical_live_reading_after_restore_is_a_fresh_measurement()
     hub.upsert_device(definition());
     assert_eq!(hub.state(&PointId::new(&id(), "on")).unwrap().ts, 1);
     let mut events = hub.subscribe();
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     let first: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert_eq!(
         first
@@ -547,7 +505,7 @@ async fn the_first_identical_live_reading_after_restore_is_a_fresh_measurement()
         1
     );
     assert!(hub.state(&PointId::new(&id(), "on")).unwrap().ts > 1);
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(
         events.try_recv().is_err(),
         "subsequent identical values keep normal deduplication"
@@ -574,14 +532,14 @@ async fn current_state_requires_fresh_samples_but_supports_drivers_without_avail
         hub.current_state(&point).is_none(),
         "a fresh definition is not a fresh measurement"
     );
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert_eq!(hub.current_state(&point).unwrap().value, Value::Bool(true));
     hub.set_availability(&id(), false);
     assert!(hub.current_state(&point).is_none());
     let plain = Hub::new(HubOptions::default()).unwrap();
     let _plain_commands = register(&plain);
     plain.upsert_device(definition());
-    plain.set_state(&id(), "on", Value::Bool(true));
+    plain.set_state(&id(), "on", &Value::Bool(true));
     assert_eq!(plain.device(&id()).unwrap().online, None);
     assert!(plain.current_state(&point).is_some());
 }
@@ -627,14 +585,14 @@ async fn state_only_flush_keeps_definition_file_and_restores_latest_observations
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     hub.persist_state().await.unwrap();
     let definitions = std::fs::read(f.0.join("state.devices.json")).unwrap();
     // Any attempt to rewrite the inventory now fails, even with identical bytes.
     std::fs::create_dir(f.0.join("state.devices.json.tmp")).unwrap();
     hub.upsert_device(definition());
     assert!(!hub.persist_state().await.unwrap());
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     let latest = hub.state(&PointId::new(&id(), "on")).unwrap();
     assert!(hub.persist_state().await.unwrap());
     assert_eq!(
@@ -653,7 +611,7 @@ async fn invalid_definitions_are_omitted_without_losing_healthy_devices_or_retry
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     for case in ["enum", "text", "nan"] {
         let mut invalid = definition();
         invalid.id = format!("synthetic:{case}").into();
@@ -698,10 +656,10 @@ async fn invalid_readings_do_not_poison_other_devices_or_reappear_as_old_samples
     text.id = "synthetic:text".into();
     text.points[0].kind = Kind::Text;
     hub.upsert_device(text.clone());
-    hub.set_state(&text.id, "on", Value::Text("old".into()));
+    hub.set_state(&text.id, "on", &Value::Text("old".into()));
     hub.persist_state().await.unwrap();
-    hub.set_state(&text.id, "on", Value::Text("a".repeat(65537).into()));
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&text.id, "on", &Value::Text("a".repeat(65537).into()));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(hub.persist_state().await.unwrap());
     assert!(!hub.persist_state().await.unwrap());
     let reboot = f.hub();
@@ -719,9 +677,9 @@ async fn deletion_and_readdition_ignore_observations_from_the_previous_definitio
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     hub.persist_state().await.unwrap();
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     hub.persist_state().await.unwrap();
     let old_values = std::fs::read(f.0.join("state.json")).unwrap();
     hub.remove_device(&id());
@@ -766,7 +724,7 @@ async fn one_oversized_serialized_definition_does_not_exhaust_the_inventory_budg
     };
     hub.upsert_device(oversized);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(hub.persist_state().await.unwrap());
     assert!(!hub.persist_state().await.unwrap());
     assert!(
@@ -786,9 +744,9 @@ async fn version_one_inventory_migrates_without_using_an_unrelated_observation_f
     let hub = f.hub();
     let _commands = register(&hub);
     hub.upsert_device(definition());
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     hub.persist_state().await.unwrap();
-    hub.set_state(&id(), "on", Value::Bool(false));
+    hub.set_state(&id(), "on", &Value::Bool(false));
     hub.persist_state().await.unwrap();
     let path = f.0.join("state.devices.json");
     let mut old: serde_json::Value =
@@ -806,7 +764,7 @@ async fn version_one_inventory_migrates_without_using_an_unrelated_observation_f
     let upgraded: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(upgraded["version"], 2);
-    migrated.set_state(&id(), "on", Value::Bool(false));
+    migrated.set_state(&id(), "on", &Value::Bool(false));
     migrated.persist_state().await.unwrap();
     let reboot = f.hub();
     let _reboot_commands = register(&reboot);
@@ -869,12 +827,16 @@ async fn oversized_observation_maps_are_bounded_without_losing_other_devices() {
         .collect();
     hub.upsert_device(large.clone());
     hub.upsert_device(definition());
-    hub.set_state(&large.id, "point-0", Value::Text("previous".into()));
+    hub.set_state(&large.id, "point-0", &Value::Text("previous".into()));
     hub.persist_state().await.unwrap();
     for point in &large.points {
-        hub.set_state(&large.id, &point.key, Value::Text("a".repeat(65536).into()));
+        hub.set_state(
+            &large.id,
+            &point.key,
+            &Value::Text("a".repeat(65536).into()),
+        );
     }
-    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.set_state(&id(), "on", &Value::Bool(true));
     assert!(hub.persist_state().await.unwrap());
     assert!(!hub.persist_state().await.unwrap());
     for name in [
@@ -905,7 +867,7 @@ fn cancelled_flush_cannot_lose_a_deletion_or_race_the_next_writer() {
             let hub = f.hub();
             let _commands = register(&hub);
             hub.upsert_device(definition());
-            hub.set_state(&id(), "on", Value::Bool(true));
+            hub.set_state(&id(), "on", &Value::Bool(true));
             hub.persist_state().await.unwrap();
             hub.remove_device(&id());
             // Hold the only filesystem worker: the next flush consumes its flags

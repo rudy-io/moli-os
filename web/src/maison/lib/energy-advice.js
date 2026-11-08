@@ -76,6 +76,76 @@ export const windowText = (w) => {
   return `${at(w.from)} → ${at(w.to)}`;
 };
 
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const weekdayKey = (date) => WEEKDAYS[date.getDay()];
+
+/** Local « HH:MM » into minutes after midnight (a window may end at « 24:00 » = 1440). */
+const hhmmToMin = (text) => {
+  const [h, m] = String(text).split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+
+/** The tariff key behind a configured period name (« HC.. » → « hc », « HP » → « hp »). */
+const periodKey = (name) => {
+  const s = String(name ?? '').toLowerCase();
+  return /hc|creuse/.test(s) ? 'hc' : /hp|pleine/.test(s) ? 'hp' : null;
+};
+
+/** The period in force at `ts` by a fixed per-weekday planning
+ *  (`summary.planning`); null when no window covers the minute. */
+export function planningPeriodAt(planning, ts) {
+  if (!planning?.length) return null;
+  const d = new Date(ts);
+  const key = weekdayKey(d);
+  const m = d.getHours() * 60 + d.getMinutes();
+  const seg = planning.find(
+    (p) => p.days?.includes(key) && m >= hhmmToMin(p.from) && m < hhmmToMin(p.to),
+  );
+  return seg ? periodKey(seg.period) : null;
+}
+
+/** Off-peak windows `[{ from, to }]` (minutes of the day, `to` may be 1440)
+ *  for the weekday of `now`, from a fixed per-weekday planning. */
+export function planningOffPeak(planning, now = Date.now()) {
+  if (!planning?.length) return [];
+  const key = weekdayKey(new Date(now));
+  return planning
+    .filter((p) => p.days?.includes(key) && periodKey(p.period) === 'hc')
+    .map((p) => ({ from: hhmmToMin(p.from), to: hhmmToMin(p.to) }))
+    .sort((a, b) => a.from - b.from);
+}
+
+/** The nearest period change for a fixed planning; `off` is the current
+ *  off-peak state (same contract as `nextChange`). A boundary counts only
+ *  when the period on each side of it actually differs. */
+export function planningChange(planning, now = Date.now()) {
+  if (!planning?.length) return null;
+  const off = planningPeriodAt(planning, now) === 'hc';
+  const base = new Date(now);
+  // The planning is weekly: a full week ahead always holds the next change
+  // (null only if the period never flips, e.g. all-HC weeks).
+  const candidates = [];
+  for (let d = 0; d < 7; d++) {
+    const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+    const key = weekdayKey(day);
+    for (const p of planning) {
+      if (!p.days?.includes(key)) continue;
+      const at = new Date(day);
+      at.setMinutes(hhmmToMin(p.from));
+      if (at.getTime() > now) candidates.push(at.getTime());
+    }
+  }
+  candidates.sort((a, b) => a - b);
+  for (const c of candidates) {
+    const before = planningPeriodAt(planning, c - 1);
+    const after = planningPeriodAt(planning, c);
+    if (before && after && before !== after) {
+      return { off, at: new Date(c), minutes: Math.max(1, Math.round((c - now) / 60_000)) };
+    }
+  }
+  return null;
+}
+
 /** The floor (W): what never stops (fridge, box, servers, standbys).
  *  Median over the days of each day's quietest hour (days with at least
  *  12 hours measured); null below three days. `report`:
@@ -131,15 +201,21 @@ export function todayByHour(report, now = Date.now()) {
   return out.some((v) => v != null) ? out : null;
 }
 
-/** Price per kWh of each tariff period, from what the month cost so far. */
+/** Price per kWh of each tariff period: the configured `tariff_prices` win
+ *  per period; missing periods fall back to what the grid meters cost so
+ *  far this month. */
 export function prices(summary) {
   const out = {};
+  for (const [name, v] of Object.entries(summary?.tariff_prices ?? {})) {
+    const key = periodKey(name);
+    if (key && typeof v === 'number') out[key] = v;
+  }
   for (const m of summary?.meters ?? []) {
     if (m.role !== 'grid') continue;
     const a = summary.month.meters[m.id];
     if (!a?.kwh || a.cost == null) continue;
-    const key = /hc|creuse/i.test(m.id + m.name) ? 'hc' : /hp|pleine/i.test(m.id + m.name) ? 'hp' : null;
-    if (key) out[key] = a.cost / a.kwh;
+    const key = periodKey(m.id + m.name);
+    if (key && out[key] == null) out[key] = a.cost / a.kwh;
   }
   return out;
 }

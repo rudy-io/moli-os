@@ -470,7 +470,7 @@ async fn first_pin(config: &Config, ctx: &DriverCtx) -> anyhow::Result<String> {
     probe.handshake().await.context("first contact")?;
     let seen = probe.seen_fingerprint().context("no certificate seen")?;
     ctx.store_secret(CERT, &seen).await?;
-    tracing::info!(instance = %ctx.instance(), "reolink certificate pinned");
+    tracing::info!(instance = %ctx.instance(), fingerprint = %seen, "reolink certificate pinned (first contact: verify it matches the station)");
     Ok(seen)
 }
 

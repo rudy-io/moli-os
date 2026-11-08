@@ -258,9 +258,12 @@
     const out = [];
     const rooms = (floor.rooms ?? []).filter((r) => r.kind !== 'void' && r.kind !== 'roof');
     // A probe counts for the smallest room around it (the pool, not the
-    // deck around the pool).
+    // deck around the pool). Outdoor services (the weather) are not room
+    // probes: they never join a room's mean.
+    const outdoorIds = new Set(Object.values(home.config?.outdoor ?? {}));
     const owner = new Map();
     for (const s of floor.devices ?? []) {
+      if (outdoorIds.has(s.id)) continue;
       const around = rooms.filter((r) => inside(r.poly, s.x, s.y));
       if (around.length) owner.set(s.id, around.reduce((a, b) => (area(b.poly) < area(a.poly) ? b : a)).id);
     }

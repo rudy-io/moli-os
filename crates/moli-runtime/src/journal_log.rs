@@ -7,6 +7,10 @@
 //! whole previous file is kept beside it as `journal.jsonl.1`: what a burst
 //! of commands pushes out of the live file is still on disk. Write failures
 //! are counted and shown on `/api/health`, never silent.
+//!
+//! A trim is two renames; a power cut between them would leave the live file
+//! missing. [`JournalLog::open`] rebuilds it from the leftovers (`.tmp` first,
+//! then `.1`) so the journal and the entry ids stay continuous.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
@@ -28,7 +32,10 @@ pub(crate) struct JournalLog {
 
 impl JournalLog {
     /// Opens (or creates) the log and returns its last `keep` entries.
+    /// If a trim was interrupted by a power cut (live file missing, `.1`
+    /// and/or `.tmp` still there), the live file is rebuilt first.
     pub(crate) fn open(path: &Path, keep: usize) -> io::Result<(Self, Vec<Arc<JournalEntry>>)> {
+        recover_interrupted_trim(path)?;
         let mut entries: Vec<Arc<JournalEntry>> = match std::fs::read_to_string(path) {
             Ok(text) => text
                 .lines()
@@ -103,6 +110,25 @@ fn append_to(path: &Path) -> io::Result<File> {
     OpenOptions::new().create(true).append(true).open(path)
 }
 
+/// Rebuilds the live file after a power cut during a trim. A trim renames
+/// the live file to `.1` before renaming the freshly written `.tmp` into
+/// place; a cut between the two renames leaves the live file missing. The
+/// `.tmp` (written and synced before the first rename, so complete) is the
+/// new tail: it becomes the live file. If only `.1` survived, it goes back.
+fn recover_interrupted_trim(path: &Path) -> io::Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    let tmp = path.with_extension("jsonl.tmp");
+    let prev = previous(path);
+    if std::fs::metadata(&tmp).is_ok_and(|m| m.len() > 0) {
+        std::fs::rename(&tmp, path)?;
+    } else if prev.exists() {
+        std::fs::rename(&prev, path)?;
+    }
+    Ok(())
+}
+
 /// Keeps the last `KEEP_LINES` lines (written aside, then renamed), the
 /// whole file becoming the previous generation; returns the reopened file
 /// and its size.
@@ -138,6 +164,25 @@ fn previous(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use moli_core::{Action, InstanceId, JournalEntry, Origin, Outcome};
+
+    fn entry_line(id: u64) -> String {
+        let entry = JournalEntry {
+            id,
+            ts: 1_760_000_000,
+            origin: Origin::Cli,
+            actor: None,
+            action: Action::Address {
+                instance: InstanceId::from("frigate"),
+                device: None,
+                from: "192.168.1.10".into(),
+                to: "192.168.1.11".into(),
+            },
+            outcome: Outcome::Ok,
+            duration_ms: 0,
+        };
+        serde_json::to_string(&entry).unwrap()
+    }
 
     #[test]
     fn trimming_keeps_the_last_lines() {
@@ -162,5 +207,49 @@ mod tests {
             "the previous file is kept whole"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_interrupted_trim_is_recovered_on_open() {
+        // Power cut between the two renames of a trim: the live file is
+        // gone, `.1` holds the previous generation, `.tmp` the new tail.
+        // The dir name is unique per test: the tests run in parallel.
+        let dir =
+            std::env::temp_dir().join(format!("moli-journal-recover-trim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        let prev = dir.join("journal.jsonl.1");
+        let tmp = dir.join("journal.jsonl.tmp");
+        let all: Vec<String> = (1..=500).map(entry_line).collect();
+        std::fs::write(&path, all.join("\n") + "\n").unwrap();
+        std::fs::rename(&path, &prev).unwrap();
+        std::fs::write(&tmp, all.join("\n") + "\n").unwrap();
+
+        let (_log, entries) = JournalLog::open(&path, 2_000).unwrap();
+        assert!(!tmp.exists(), "the tail is promoted to the live file");
+        let ids: Vec<u64> = entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids.first(), Some(&1));
+        assert_eq!(ids.last(), Some(&500), "the next id must derive from it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_tail_falls_back_to_the_previous_generation() {
+        // Only the first rename survived: no `.tmp`, just `.1`.
+        // The dir name is unique per test: the tests run in parallel.
+        let dir = std::env::temp_dir().join(format!(
+            "moli-journal-recover-missing-tail-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        let prev = dir.join("journal.jsonl.1");
+        let all: Vec<String> = (1..=500).map(entry_line).collect();
+        std::fs::write(&prev, all.join("\n") + "\n").unwrap();
+
+        let (_log, entries) = JournalLog::open(&path, 2_000).unwrap();
+        assert!(path.exists(), "the previous generation is restored");
+        assert_eq!(entries.iter().map(|e| e.id).next_back(), Some(500));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

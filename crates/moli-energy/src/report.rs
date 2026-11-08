@@ -263,11 +263,19 @@ impl Period {
         };
         // Both measure the same home; the lower one is missing data (the
         // Linky lags by up to a whole kWh, the clamp has no old history).
+        // With no feed meter declared at all (no grid, total or circuit),
+        // the home's total is what its declared appliance meters drew:
+        // plug meters, a car's charging point, …
+        let feedless = !config
+            .meters
+            .iter()
+            .any(|m| matches!(m.role, Role::Grid | Role::Total | Role::Circuit));
         let total = match (grid, whole) {
             (Some(g), Some(w)) => Some(if w.kwh > g.kwh { w } else { g }),
             (g, w) => g.or(w),
         }
         .or(circuits)
+        .or_else(|| feedless.then(|| Amount::sum(meters.values())))
         .unwrap_or_default();
         let solar = production
             .as_ref()
@@ -528,5 +536,107 @@ mod tests {
         )
         .unwrap();
         assert!(bad.check().is_err());
+    }
+
+    #[test]
+    fn feedless_total_falls_back_to_the_appliance_meters() {
+        let config: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "lave_linge"
+            name = "Lave-linge"
+            point = "tuya:plug1/cur_power"
+            role = "appliance"
+            integrate = true
+            [[meter]]
+            id = "tesla"
+            name = "Voiture"
+            point = "tesla:3612923/charge_power"
+            role = "appliance"
+            integrate = true
+            "#,
+        )
+        .unwrap();
+        let row = |meter: &str, kwh: f64, cost: Option<f64>| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost,
+        };
+        let rows = [
+            row("lave_linge", 2.0, Some(0.3)),
+            row("tesla", 12.0, Some(1.8)),
+        ];
+        let p = Period::of(&config, &rows, 0, HOUR_MS);
+        assert_eq!(
+            p.total,
+            Amount {
+                kwh: 14.0,
+                cost: Some(2.1)
+            }
+        );
+        assert_eq!(p.unmeasured, None);
+        assert_eq!(p.meters.len(), 2);
+        // A meter with no reading in the period still counts for zero.
+        let p = Period::of(&config, &[row("tesla", 5.0, Some(0.8))], 0, HOUR_MS);
+        assert_eq!(
+            p.total,
+            Amount {
+                kwh: 5.0,
+                cost: Some(0.8)
+            }
+        );
+        // No reading at all: an empty total, not an error.
+        assert_eq!(
+            Period::of(&config, &[], 0, HOUR_MS).total,
+            Amount::default()
+        );
+    }
+
+    #[test]
+    fn circuits_win_over_the_appliance_fallback() {
+        let config: Config = toml::from_str(
+            r#"
+            [[meter]]
+            id = "c1"
+            name = "Circuit 1"
+            point = "em:x/e1"
+            role = "circuit"
+            [[meter]]
+            id = "c2"
+            name = "Circuit 2"
+            point = "em:x/e2"
+            role = "circuit"
+            [[meter]]
+            id = "plug"
+            name = "Prise"
+            point = "tuya:plug/cur_power"
+            role = "appliance"
+            integrate = true
+            "#,
+        )
+        .unwrap();
+        let row = |meter: &str, kwh: f64, cost: Option<f64>| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost,
+        };
+        let rows = [
+            row("c1", 4.0, Some(0.5)),
+            row("c2", 1.0, Some(0.1)),
+            row("plug", 3.0, Some(0.4)),
+        ];
+        let p = Period::of(&config, &rows, 0, HOUR_MS);
+        // The appliance is still shown on its own, but never added to the total.
+        assert_eq!(
+            p.total,
+            Amount {
+                kwh: 5.0,
+                cost: Some(0.6)
+            }
+        );
+        assert_eq!(p.unmeasured, None);
+        assert_eq!(p.meters.len(), 3);
     }
 }

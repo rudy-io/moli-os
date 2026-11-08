@@ -71,26 +71,16 @@ pub struct Clip {
 }
 
 impl moli_announce::Speaker for Clip {
-    fn play<'a>(
-        &'a self,
-        wav: Vec<u8>,
-        level: u8,
-        started: &'a moli_announce::Started,
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn play(&self, wav: Vec<u8>, level: u8) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move {
             let url = moli_announce::publish_sound(&self.publisher, &self.media_base, wav)?;
-            self.clip(&url, level, started).await
+            self.clip(&url, level).await
         })
     }
 }
 
 impl Clip {
-    async fn clip(
-        &self,
-        url: &str,
-        level: u8,
-        started: &moli_announce::Started,
-    ) -> anyhow::Result<()> {
+    async fn clip(&self, url: &str, level: u8) -> anyhow::Result<()> {
         let tls = PinnedTls::new(self.pin.clone())?;
         let mut ws = WebSocket::connect(
             &self.host,
@@ -142,13 +132,13 @@ impl Clip {
         .await?;
         refused(&header, &body)?;
         tracing::info!(clip = %body, "announcement accepted by the speaker");
-        follow(&mut ws, started).await
+        follow(&mut ws).await
     }
 }
 
 /// Listens to the clip a little: a speaker that cannot fetch or play the
-/// sound says so only there, and tells when it starts saying it (`ACTIVE`).
-async fn follow(ws: &mut WebSocket, started: &moli_announce::Started) -> anyhow::Result<()> {
+/// sound says so only there.
+async fn follow(ws: &mut WebSocket) -> anyhow::Result<()> {
     let until = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
         let left = until.saturating_duration_since(tokio::time::Instant::now());
@@ -176,7 +166,6 @@ async fn follow(ws: &mut WebSocket, started: &moli_announce::Started) -> anyhow:
                         str::to_owned
                     )
                 )),
-                "ACTIVE" => started.now(),
                 "DONE" | "DISMISSED" => return Ok(()),
                 _ => {}
             }

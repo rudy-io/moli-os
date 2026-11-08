@@ -15,7 +15,7 @@ mod price;
 pub mod report;
 mod store;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -27,7 +27,8 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-pub use config::{Config, MeterConfig, Reset, Role, Tariff};
+use config::Planning;
+pub use config::{Config, MeterConfig, Reset, Role, Segment, Tariff, Weekday, Window};
 use meter::{Integral, Outcome, Reading, Tracker};
 pub use price::HousePrice;
 use price::HousePrices;
@@ -47,6 +48,9 @@ struct Inner {
     config: Config,
     tz: TimeZone,
     hub: Hub,
+    /// The fixed HP/HC planning, if configured (mutually exclusive with the
+    /// observed tariff point).
+    planning: Option<Planning>,
     /// The house's price of a kWh, shared with the recorder.
     prices: HousePrices,
 }
@@ -145,9 +149,17 @@ pub struct Summary {
     pub period: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_now: Option<f64>,
-    /// The point holding the period (its history tells the off-peak hours).
+    /// The point holding the period (its history tells the off-peak hours),
+    /// when the period is observed from a meter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub period_point: Option<String>,
+    /// The fixed HP/HC planning, if any: the interface draws the off-peak
+    /// windows from it (no history needed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planning: Option<Vec<Segment>>,
+    /// The configured prices by period name, for the dashboard (savings…).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub tariff_prices: BTreeMap<String, f64>,
     pub meters: Vec<MeterInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<LiveInfo>,
@@ -203,9 +215,22 @@ impl Energy {
         // Subscribe before reading anything: no reading falls in between.
         let events = hub.subscribe();
         let last = store.last_readings()?;
+        // The planning is validated by `check()`: parsing cannot fail here.
+        let planning = config
+            .tariff
+            .as_ref()
+            .and_then(|t| t.planning_windows().ok())
+            .filter(|w| !w.is_empty())
+            .map(|windows| Planning::new(windows, tz.clone()));
         let prices = HousePrices::new(store.house_prices()?);
-        let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store))
-            .with_prices(prices.clone());
+        let recorder = Recorder::new(
+            hub.clone(),
+            config.clone(),
+            planning.clone(),
+            last,
+            Arc::clone(&store),
+        )
+        .with_prices(prices.clone());
         let task = tokio::spawn(recorder.run(events, cancel));
         let energy = Self {
             inner: Arc::new(Inner {
@@ -213,6 +238,7 @@ impl Energy {
                 config,
                 tz,
                 hub: hub.clone(),
+                planning,
                 prices,
             }),
         };
@@ -296,17 +322,17 @@ impl Energy {
         })
     }
 
-    fn period_now(&self) -> Option<String> {
+    /// The current tariff period: the observed point wins when it has a
+    /// value; otherwise the planning answers (it knows every moment).
+    fn period_now(&self, now: u64) -> Option<String> {
         let tariff = self.inner.config.tariff.as_ref()?;
-        match self
-            .inner
-            .hub
-            .current_state(&PointId::from(tariff.period.clone()))?
-            .value
+        if let Some(point) = &tariff.period
+            && let Some(s) = self.inner.hub.current_state(&PointId::from(point.clone()))
+            && let Value::Text(text) = s.value
         {
-            Value::Text(s) => Some(s.to_string()),
-            _ => None,
+            return Some(text.to_string());
         }
+        self.inner.planning.as_ref().and_then(|p| p.period_at(now))
     }
 
     pub async fn summary(&self) -> Result<Summary, EnergyError> {
@@ -323,7 +349,7 @@ impl Energy {
             blocking(move || Ok((store.hours(from, tomorrow)?, store.first_hour()?))).await?;
         let config = &self.inner.config;
         let month_period = Period::of(config, &rows, month, month_end);
-        let period = self.period_now();
+        let period = self.period_now(now);
         let meters = self.meters();
         Ok(Summary {
             currency: config.currency.clone(),
@@ -333,7 +359,13 @@ impl Energy {
                 .as_deref()
                 .and_then(|p| config.period_price(p))
                 .or_else(|| self.inner.prices.at(now)),
-            period_point: config.tariff.as_ref().map(|t| t.period.clone()),
+            period_point: config.tariff.as_ref().and_then(|t| t.period.clone()),
+            planning: config.tariff.as_ref().and_then(|t| t.planning.clone()),
+            tariff_prices: config
+                .tariff
+                .as_ref()
+                .map(|t| t.prices.clone())
+                .unwrap_or_default(),
             period,
             flows: Flows::of(&meters),
             meters,
@@ -634,6 +666,9 @@ struct Recorder {
     /// unit for an integrated meter).
     factors: HashMap<String, f64>,
     periods: Periods,
+    /// The fixed HP/HC planning, if configured (mutually exclusive with the
+    /// observed tariff point).
+    planning: Option<Planning>,
     /// Integrated meters (power × time), by meter id.
     integrals: HashMap<String, Integral>,
     /// When recording started: a power known from before is not counted
@@ -651,7 +686,13 @@ struct Recorder {
 const HOLD_TICK: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl Recorder {
-    fn new(hub: Hub, config: Config, last: HashMap<String, Reading>, store: Arc<Store>) -> Self {
+    fn new(
+        hub: Hub,
+        config: Config,
+        planning: Option<Planning>,
+        last: HashMap<String, Reading>,
+        store: Arc<Store>,
+    ) -> Self {
         let by_point = config
             .meters
             .iter()
@@ -670,6 +711,7 @@ impl Recorder {
                 .collect(),
             factors: HashMap::new(),
             periods: Periods::default(),
+            planning,
             integrals: HashMap::new(),
             started: now_ms(),
             lit_by: HashMap::new(),
@@ -757,7 +799,7 @@ impl Recorder {
     /// The tariff's and the meters' current values (at start, after a lag,
     /// once the tariff is first known).
     async fn read_present(&mut self) {
-        let tariff = self.config.tariff.as_ref().map(|t| t.period.clone());
+        let tariff = self.config.tariff.as_ref().and_then(|t| t.period.clone());
         let points: Vec<String> = tariff
             .into_iter()
             .chain(self.config.meters.iter().map(|m| m.point.clone()))
@@ -786,7 +828,7 @@ impl Recorder {
         let Some(indexes) = self.lit_by.get(moved) else {
             return; // no light moved
         };
-        if self.config.tariff.is_some() && self.periods.0.is_empty() {
+        if self.config.tariff.is_some() && self.planning.is_none() && self.periods.0.is_empty() {
             return; // no price yet: a later state files it
         }
         let meters: Vec<MeterConfig> = indexes
@@ -811,7 +853,7 @@ impl Recorder {
             .config
             .tariff
             .as_ref()
-            .is_some_and(|t| t.period == point)
+            .is_some_and(|t| t.period.as_deref() == Some(point))
         {
             if let Value::Text(period) = value {
                 let first = self.periods.0.is_empty();
@@ -852,6 +894,7 @@ impl Recorder {
         if meter.role.consumes()
             && self.config.tariff.is_some()
             && meter.price.is_none()
+            && self.planning.is_none()
             && self.periods.0.is_empty()
         {
             // No price yet: counters are cumulative, file it later.
@@ -978,7 +1021,7 @@ impl Recorder {
     fn slices(&self, meter: &MeterConfig, kwh: f64, from: u64, to: u64) -> Vec<HourRow> {
         let pieces = match &meter.period {
             Some(period) => {
-                meter::spread_weighted(kwh, from, to, |a, b| self.periods.time_in(period, a, b))
+                meter::spread_weighted(kwh, from, to, |a, b| self.time_in_period(period, a, b))
             }
             None => meter::spread(kwh, from, to),
         };
@@ -989,9 +1032,8 @@ impl Recorder {
                 let middle = hour.max(from) / 2 + (hour + meter::HOUR_MS).min(to) / 2;
                 let price = meter.price.or_else(|| {
                     meter.role.consumes().then_some(())?;
-                    self.periods
-                        .at(middle)
-                        .and_then(|p| self.config.period_price(p))
+                    self.period_at(middle)
+                        .and_then(|p| self.config.period_price(&p))
                         .or_else(|| self.prices.at(middle))
                 });
                 HourRow {
@@ -1002,6 +1044,23 @@ impl Recorder {
                 }
             })
             .collect()
+    }
+
+    /// The tariff period at `t`: the planning (it knows every moment) when
+    /// configured, else the observed point (its earliest record before).
+    fn period_at(&self, t: u64) -> Option<String> {
+        match &self.planning {
+            Some(pl) => pl.period_at(t),
+            None => self.periods.at(t).map(str::to_owned),
+        }
+    }
+
+    /// The ms of `[a, b)` spent in `period`.
+    fn time_in_period(&self, period: &str, a: u64, b: u64) -> u64 {
+        match &self.planning {
+            Some(pl) => pl.time_in(period, a, b),
+            None => self.periods.time_in(period, a, b),
+        }
     }
 
     /// Files a reading; memory follows only once it is on disk, so a failed
@@ -1138,7 +1197,7 @@ mod tests {
         .unwrap();
         let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
         let store = Arc::new(Store::memory());
-        let mut recorder = Recorder::new(hub, config, HashMap::new(), Arc::clone(&store));
+        let mut recorder = Recorder::new(hub, config, None, HashMap::new(), Arc::clone(&store));
         let point = "enedis:linky/hours";
         let text = |json: String| Value::Text(json.into());
         let first = format!(
@@ -1182,6 +1241,7 @@ mod tests {
         let recorder = Recorder::new(
             hub,
             config.clone(),
+            None,
             HashMap::new(),
             Arc::new(Store::memory()),
         )

@@ -5,10 +5,14 @@
 //!
 //! Live streams (this one and the automations') are counted: each holds a
 //! connection and a seat on the bus, so a caller holds a few at most, and
-//! the house a bounded number ([`Streams`]).
+//! the house a bounded number ([`Streams`]). The pool never refuses a whole
+//! house: when it is full, the oldest stream is evicted, so a client whose
+//! address keeps rotating cannot starve the family's live views.
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::State;
@@ -28,53 +32,123 @@ use crate::people::PersonRef;
 
 /// Live streams one caller may hold at once (a few tabs, a wall tablet).
 const PER_CALLER: usize = 8;
-/// Live streams in all.
+/// Live streams in all. When the pool is full, the oldest stream is evicted
+/// instead of refusing: a caller whose address keeps rotating (IPv6 privacy
+/// extensions) must not be able to starve the house's live views.
 const IN_ALL: usize = 64;
+
+/// The live streams open: per caller, the seat ids (oldest first), and each
+/// seat's cancellation token (an eviction ends the stream).
+#[derive(Debug, Default)]
+struct Table {
+    open: HashMap<String, Vec<u64>>,
+    tokens: HashMap<u64, CancellationToken>,
+    next: u64,
+}
 
 /// The live streams open, by caller.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Streams(Arc<Mutex<HashMap<String, usize>>>);
+pub(crate) struct Streams(Arc<Mutex<Table>>);
 
 /// One open stream's seat, given back when the stream ends.
 #[derive(Debug)]
 pub(crate) struct Seat {
     streams: Streams,
     key: String,
+    id: u64,
+    pub(crate) token: CancellationToken,
 }
 
 impl Streams {
-    /// A seat for one more stream from `key`, if one is left.
+    /// A seat for one more stream from `key`. Refused only when the caller
+    /// already holds [`PER_CALLER`]; when the pool is full, the oldest
+    /// stream is evicted to make room.
     pub(crate) fn take(&self, key: &str) -> Option<Seat> {
-        let mut open = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if open.values().sum::<usize>() >= IN_ALL || open.get(key).is_some_and(|n| *n >= PER_CALLER)
+        let mut t = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if t.open
+            .get(key)
+            .is_some_and(|seats| seats.len() >= PER_CALLER)
         {
             return None;
         }
-        *open.entry(key.to_owned()).or_default() += 1;
+        if t.open.values().map(Vec::len).sum::<usize>() >= IN_ALL {
+            // The oldest seat, among all callers: it makes room.
+            let oldest = t
+                .open
+                .iter()
+                .filter_map(|(caller, seats)| {
+                    seats
+                        .first()
+                        .copied()
+                        .map(|seat_id| (caller.clone(), seat_id))
+                })
+                .min_by_key(|(_, seat_id)| *seat_id);
+            if let Some((caller, seat_id)) = oldest {
+                let seats = t
+                    .open
+                    .get_mut(&caller)
+                    .expect("caller just read from the table");
+                seats.remove(0);
+                if seats.is_empty() {
+                    t.open.remove(&caller);
+                }
+                if let Some(token) = t.tokens.remove(&seat_id) {
+                    tracing::info!(client = %caller, "live stream pool full: oldest stream evicted");
+                    token.cancel();
+                }
+            }
+        }
+        let seat_id = t.next;
+        t.next += 1;
+        let token = CancellationToken::new();
+        t.tokens.insert(seat_id, token.clone());
+        t.open.entry(key.to_owned()).or_default().push(seat_id);
         Some(Seat {
             streams: self.clone(),
             key: key.to_owned(),
+            id: seat_id,
+            token,
         })
     }
 }
 
 impl Drop for Seat {
     fn drop(&mut self) {
-        let mut open = self
+        let mut t = self
             .streams
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(n) = open.get_mut(&self.key) {
-            *n -= 1;
-            if *n == 0 {
-                open.remove(&self.key);
+        // Nothing to give back when this seat was already evicted.
+        if let Some(seats) = t.open.get_mut(&self.key) {
+            if let Some(i) = seats.iter().position(|s| *s == self.id) {
+                seats.remove(i);
+            }
+            if seats.is_empty() {
+                t.open.remove(&self.key);
             }
         }
+        t.tokens.remove(&self.id);
+        self.token.cancel();
     }
 }
 
-/// No seat left: 503.
+/// Ends when the house shuts down or when the pool evicts this seat.
+pub(crate) fn until_end(
+    shutdown: &CancellationToken,
+    seat: &CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+    let shutdown = shutdown.clone();
+    let seat = seat.clone();
+    Box::pin(async move {
+        tokio::select! {
+            () = shutdown.cancelled_owned() => {}
+            () = seat.cancelled_owned() => {}
+        }
+    })
+}
+
+/// The caller holds too many streams of its own: 503.
 pub(crate) fn full(key: &str) -> Response {
     tracing::warn!(client = key, "too many live streams");
     (
@@ -101,7 +175,9 @@ pub(crate) async fn events(
     // Subscribe before the snapshot: nothing can fall between the two.
     let rx = hub.subscribe();
     let first = view.snapshot(&hub);
-    // The seat goes with the stream, and comes back when it ends.
+    // The seat goes with the stream, and comes back when it ends; when the
+    // pool evicts the seat, its token ends the stream too.
+    let seat_token = seat.token.clone();
     let state = (hub, rx, view, seat);
     let rest = stream::unfold(state, |(hub, mut rx, mut view, seat)| async move {
         let event = loop {
@@ -124,7 +200,7 @@ pub(crate) async fn events(
     });
     let stream = stream::once(async { Ok(first) })
         .chain(rest)
-        .take_until(shutdown.cancelled_owned());
+        .take_until(until_end(&shutdown, &seat_token));
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
@@ -185,14 +261,15 @@ impl View {
             Event::DeviceRemoved { device } | Event::LabelChanged { device, .. } => {
                 (Some(device.clone()), true)
             }
-            // A driver's state, a decision on a request: no room in them.
+            // A driver's state, a driver's registration, a decision on a
+            // request, a layout change, the house's journal and notices:
+            // none of it is part of a guest's view.
             Event::DriverStatus { .. }
             | Event::DriverRegistered { .. }
-            | Event::DriverUnregistered { .. }
             | Event::ApprovalResolved { .. }
-            | Event::LayoutChanged {} => return Pass::Event,
-            // The house's journal and notices are the household's.
-            Event::Journal { .. } | Event::Notice { .. } => return Pass::Drop,
+            | Event::LayoutChanged {}
+            | Event::Journal { .. }
+            | Event::Notice { .. } => return Pass::Drop,
         };
         // Described anew, moved, gone: what the guest sees may have changed.
         if moved && guest.guest_devices(hub, &hub.snapshot()) != self.sight {
@@ -208,6 +285,44 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A guest never receives decisions on approvals nor driver states:
+    /// they carry the house's activity outside its rooms (journal/notices
+    /// territory, which guests must not see at all).
+    #[test]
+    fn a_guest_never_sees_decisions_nor_driver_states() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let guest = PersonRef {
+            id: "guest".into(),
+            name: "Invité".into(),
+            role: crate::people::Role::Guest,
+            rooms: vec!["Salon".into()],
+        };
+        let view = View {
+            asker: "192.168.0.50".into(),
+            guest: Some(guest),
+            sight: HashSet::new(),
+        };
+        let resolved = Event::ApprovalResolved {
+            id: 1,
+            decision: moli_core::Decision::Approved,
+        };
+        let status = Event::DriverStatus {
+            instance: moli_core::InstanceId::from("fake"),
+            status: moli_core::DriverStatus::Running,
+            warning: None,
+        };
+        assert!(matches!(view.pass(&hub, &resolved), Pass::Drop));
+        assert!(matches!(view.pass(&hub, &status), Pass::Drop));
+        // The household still sees everything.
+        let open = View {
+            asker: "192.168.0.50".into(),
+            guest: None,
+            sight: HashSet::new(),
+        };
+        assert!(matches!(open.pass(&hub, &resolved), Pass::Event));
+        assert!(matches!(open.pass(&hub, &status), Pass::Event));
+    }
 
     #[test]
     fn an_answer_for_one_person_is_shown_to_them_only() {
@@ -249,18 +364,50 @@ mod tests {
             .map(|_| streams.take("192.168.0.20").unwrap())
             .collect();
         assert!(streams.take("192.168.0.20").is_none(), "one too many");
-        let other = streams.take("192.168.0.21");
-        assert!(other.is_some(), "another caller still has seats");
+        assert!(
+            streams.take("192.168.0.21").is_some(),
+            "another caller is unaffected"
+        );
         drop(mine);
         assert!(
             streams.take("192.168.0.20").is_some(),
             "a stream that ends gives its seat back"
         );
-        let many: Vec<Seat> = (0..IN_ALL)
-            .filter_map(|i| streams.take(&format!("fd00::{i:x}")))
+    }
+
+    #[test]
+    fn a_full_pool_evicts_the_oldest_stream() {
+        // A caller whose address keeps rotating (one key per address) must
+        // not be able to fill the house and starve the live views: the pool
+        // evicts its oldest stream instead of refusing.
+        let streams = Streams::default();
+        let oldest = streams.take("fd00::1").unwrap();
+        let rest: Vec<Seat> = (1..IN_ALL)
+            .map(|i| streams.take(&format!("fd00::{i}")).unwrap())
             .collect();
-        assert_eq!(many.len(), IN_ALL - 1, "the house holds {IN_ALL} at most");
-        drop((other, many));
-        assert!(streams.0.lock().unwrap().is_empty());
+        assert_eq!(
+            open_count(&streams),
+            IN_ALL,
+            "the house holds {IN_ALL} at most"
+        );
+        let newest = streams.take("fd00::200").unwrap();
+        assert_eq!(
+            open_count(&streams),
+            IN_ALL,
+            "a new stream displaces an old one"
+        );
+        assert!(oldest.token.is_cancelled(), "the oldest stream is evicted");
+        assert!(
+            !newest.token.is_cancelled(),
+            "the new stream is not evicted"
+        );
+        // Dropping an already-evicted seat must not corrupt the table.
+        drop((oldest, rest, newest));
+        let t = streams.0.lock().unwrap();
+        assert!(t.open.is_empty() && t.tokens.is_empty());
+    }
+
+    fn open_count(streams: &Streams) -> usize {
+        streams.0.lock().unwrap().open.values().map(Vec::len).sum()
     }
 }

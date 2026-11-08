@@ -822,7 +822,14 @@ impl Hub {
             .get(device)
             .map(|d| d.members.clone())
             .unwrap_or_default();
-        let mut rooms: Vec<String> = own(device).chain(members.iter().flat_map(own)).collect();
+        let mut rooms: Vec<String> = own(device)
+            .chain(members.iter().flat_map(own))
+            // A driver may publish an empty (or blank) native room; an empty
+            // string would make the device "have a room" and slip past
+            // `protect_unassigned` without matching any protected room.
+            .map(|room| room.trim().to_owned())
+            .filter(|room| !room.is_empty())
+            .collect();
         rooms.sort();
         rooms.dedup();
         rooms
@@ -838,12 +845,13 @@ impl Hub {
                 .labels
                 .values()
                 .filter_map(|l| l.room.clone())
-                .chain(
-                    model
-                        .devices
-                        .values()
-                        .filter_map(|d| d.native_room.as_deref().map(str::to_owned)),
-                )
+                .chain(model.devices.values().filter_map(|d| {
+                    d.native_room
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|room| !room.is_empty())
+                        .map(str::to_owned)
+                }))
                 .collect()
         };
         let known: Vec<&str> = known.iter().map(String::as_str).collect();
@@ -1136,52 +1144,6 @@ impl Hub {
                 fingerprint,
             },
             Outcome::Ok,
-            Instant::now(),
-        );
-    }
-
-    /// Journals a human's persisted driver installation without its address.
-    pub fn record_driver_added(
-        &self,
-        instance: InstanceId,
-        driver_kind: &str,
-        read_only: bool,
-        actor: Option<String>,
-        outcome: Outcome,
-    ) {
-        self.record(
-            Origin::Ui,
-            actor,
-            Action::DriverAdded {
-                instance,
-                driver_kind: driver_kind.to_owned(),
-                read_only,
-            },
-            outcome,
-            Instant::now(),
-        );
-    }
-
-    /// Journals a human's persisted driver edit without its address or secrets.
-    pub fn record_driver_configured(
-        &self,
-        instance: InstanceId,
-        driver_kind: &str,
-        enabled: bool,
-        read_only: bool,
-        actor: Option<String>,
-        outcome: Outcome,
-    ) {
-        self.record(
-            Origin::Ui,
-            actor,
-            Action::DriverConfigured {
-                instance,
-                driver_kind: driver_kind.to_owned(),
-                enabled,
-                read_only,
-            },
-            outcome,
             Instant::now(),
         );
     }
@@ -1605,11 +1567,9 @@ impl Hub {
         self.0.secrets_problem.as_deref()
     }
 
-    pub(crate) async fn forget_secret(
-        &self,
-        instance: &InstanceId,
-        name: &str,
-    ) -> std::io::Result<bool> {
+    /// Forgets a secret of a driver instance (a revoked key, a forgotten
+    /// phone's push token…); `true` if it existed.
+    pub async fn forget_secret(&self, instance: &InstanceId, name: &str) -> std::io::Result<bool> {
         match &self.0.secrets {
             Some(store) => store.remove(&format!("{instance}/{name}")).await,
             None => Ok(false),
@@ -1728,54 +1688,6 @@ impl Hub {
             self.emit(event);
         }
         rx
-    }
-
-    /// Detaches an already stopped driver. Call only after cancelling and
-    /// awaiting its task: an old task must not publish over a replacement.
-    /// Labels, history and original cached definitions are retained.
-    pub fn unregister_driver(&self, instance: &InstanceId) {
-        let devices = {
-            let mut model = self.write();
-            if model.drivers.remove(instance).is_none() {
-                return;
-            }
-            let mut devices: Vec<_> = model
-                .devices
-                .values()
-                .filter(|device| &device.instance == instance)
-                .map(|device| (**device).clone())
-                .collect();
-            for device in &mut devices {
-                let states = model.states.get(&device.id).cloned().unwrap_or_default();
-                if let Some(cached) = model.cached_devices.get_mut(&device.id) {
-                    cached.states = states;
-                }
-                for point in &mut device.points {
-                    point.access.write = false;
-                }
-                model
-                    .devices
-                    .insert(device.id.clone(), Arc::new(device.clone()));
-                model.availability.insert(device.id.clone(), false);
-                model.unconfirmed.insert(device.id.clone(), false);
-                model.held_offline.remove(&device.id);
-                model.snapshots.remove(&device.id);
-                model.printers.remove(&device.id);
-            }
-            devices
-        };
-        for device in devices {
-            self.emit(Event::Availability {
-                device: device.id.clone(),
-                online: false,
-            });
-            self.emit(Event::DeviceUpserted {
-                device: Arc::new(device),
-            });
-        }
-        self.emit(Event::DriverUnregistered {
-            instance: instance.clone(),
-        });
     }
 
     pub(crate) fn set_driver_status(&self, instance: &InstanceId, status: DriverStatus) {
@@ -1897,23 +1809,7 @@ impl Hub {
                     .point(key)
                     .is_some_and(|point| device_cache::sample_matches(&point.kind, &sample.value))
             });
-            let mut restored = Vec::new();
-            let mut awaiting = Vec::new();
-            for point in &device.points {
-                if let Some(sample) = cached.remove(&point.key)
-                    && !states.contains_key(&point.key)
-                    && device_cache::sample_matches(&point.kind, &sample.value)
-                {
-                    awaiting.push(point.key.clone());
-                    restored.push(Event::State {
-                        point: PointId::new(&device.id, &point.key),
-                        value: sample.value.clone(),
-                        ts: sample.ts,
-                        pulse: false,
-                    });
-                    states.insert(point.key.clone(), sample);
-                }
-            }
+            let (restored, awaiting) = Self::restore_point_states(&device, &mut cached, states);
             if !cached.is_empty() {
                 model.restored.insert(device.id.clone(), cached);
             }
@@ -1946,6 +1842,59 @@ impl Hub {
         for event in restored {
             self.emit(event);
         }
+    }
+
+    /// Claims cached samples for the points the device definition declares,
+    /// re-validating each against the current spec. Returns the restore
+    /// events and the points awaiting their first live sample.
+    fn restore_point_states(
+        device: &Device,
+        cached: &mut BTreeMap<Arc<str>, Sample>,
+        states: &mut BTreeMap<Arc<str>, Sample>,
+    ) -> (Vec<Event>, Vec<Arc<str>>) {
+        let mut restored = Vec::new();
+        let mut awaiting = Vec::new();
+        for point in &device.points {
+            if let Some(sample) = cached.remove(&point.key)
+                && !states.contains_key(&point.key)
+                && device_cache::sample_matches(&point.kind, &sample.value)
+            {
+                // A restored sample must still match the point's current
+                // spec: the cache is only as trustworthy as its last
+                // write (a spec may have tightened since). Like a live
+                // reading, Null always passes (the spec's "no reading"
+                // marker); any other value is canonicalized.
+                let value = if matches!(sample.value, Value::Null) {
+                    sample.value.clone()
+                } else if let Ok(v) = validate(&point.kind, &sample.value) {
+                    v
+                } else {
+                    tracing::warn!(
+                        device = %device.id,
+                        point = %point.key,
+                        "restored state sample rejected: does not match the point's spec"
+                    );
+                    continue;
+                };
+                // A restored value is not a live reading: it awaits its
+                // first on-line sample before it counts as a change.
+                awaiting.push(point.key.clone());
+                restored.push(Event::State {
+                    point: PointId::new(&device.id, &point.key),
+                    value: value.clone(),
+                    ts: sample.ts,
+                    pulse: false,
+                });
+                states.insert(
+                    point.key.clone(),
+                    Sample {
+                        value,
+                        ts: sample.ts,
+                    },
+                );
+            }
+        }
+        (restored, awaiting)
     }
 
     /// Writes the state cache if anything changed since the last write.
@@ -2204,17 +2153,17 @@ impl Hub {
 
     /// Records a value. Unknown devices/points are ignored (the model only
     /// holds what drivers declared). Only actual changes are broadcast.
-    pub(crate) fn set_state(&self, device: &DeviceId, key: &str, value: Value) {
+    pub(crate) fn set_state(&self, device: &DeviceId, key: &str, value: &Value) {
         self.record_state(device, key, value, false);
     }
 
     /// Like `set_state`, but always broadcast: for points that are
     /// occurrences (button presses), where the same value twice is two events.
-    pub(crate) fn pulse_state(&self, device: &DeviceId, key: &str, value: Value) {
+    pub(crate) fn pulse_state(&self, device: &DeviceId, key: &str, value: &Value) {
         self.record_state(device, key, value, true);
     }
 
-    fn record_state(&self, device: &DeviceId, key: &str, value: Value, always: bool) {
+    fn record_state(&self, device: &DeviceId, key: &str, value: &Value, always: bool) {
         let ts = now_ms();
         let event = {
             let mut model = self.write();
@@ -2222,13 +2171,43 @@ impl Hub {
                 return;
             };
             let key = spec.key.clone();
+            // A value the point's spec refuses (out of range, wrong type,
+            // too long) is not the point's state: it would feed automations
+            // the guard always lets through, be persisted, and be broadcast.
+            // Validate as a check only: the stored value keeps the driver's
+            // own type (a dimmer reporting Int(80) is not a Float(80.0)).
+            // Null is the spec's own "no reading" marker (missing or invalid
+            // upstream value): it is never refused, it clears the point.
+            // Any other refused value also clears the point: keeping the
+            // previous sample would let a stale value persist and resurface
+            // after a restart.
+            if !matches!(value, Value::Null) && validate(&spec.kind, value).is_err() {
+                tracing::warn!(
+                    instance = %device.instance(),
+                    device = %device,
+                    point = %key,
+                    "state value rejected: does not match the point's spec"
+                );
+                if let Some(states) = model.states.get_mut(device) {
+                    states.remove(&key);
+                }
+                self.0.state_dirty.store(true, Ordering::Release);
+                return;
+            }
             self.0.state_dirty.store(true, Ordering::Release);
             let first_live = model
                 .awaiting_samples
                 .get_mut(device)
                 .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
+            let changed =
+                always || first_live || states.get(&key).is_none_or(|s| s.value != *value);
+            let event = changed.then(|| Event::State {
+                point: PointId::new(device, &key),
+                value: value.clone(),
+                ts,
+                pulse: always,
+            });
             states.insert(
                 key.clone(),
                 Sample {
@@ -2236,12 +2215,7 @@ impl Hub {
                     ts,
                 },
             );
-            changed.then(|| Event::State {
-                point: PointId::new(device, &key),
-                value,
-                ts,
-                pulse: always,
-            })
+            event
         };
         if let Some(event) = event {
             self.emit(event);

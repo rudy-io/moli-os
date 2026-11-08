@@ -10,7 +10,7 @@ const ANYWHERE = '§partout';
 
 /** The ids of a room's devices (a fixture's bulbs with it). */
 const idsOf = (room) =>
-  [room.group, ...room.lights, ...room.plugs, ...room.covers, ...room.impulses, ...room.climates, ...room.media, ...room.sensors]
+  [room.group, ...room.lights, ...room.plugs, ...room.covers, ...room.climates, ...room.media, ...room.sensors]
     .filter(Boolean)
     .flatMap((d) => [d.id, ...(d.members ?? [])]);
 

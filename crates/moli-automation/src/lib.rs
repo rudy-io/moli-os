@@ -324,6 +324,24 @@ impl Automations {
         self.0.hub.writable_points("notify")
     }
 
+    /// The points a `Notify` step actually reaches through its active
+    /// channels: voice (every speaker), Telegram (every messenger), phone
+    /// (every phone). Used by the household-run gate and by the checker's
+    /// protected-rooms report, so a channel cannot slip past either.
+    pub fn channel_points(&self, channels: &[Channel]) -> Vec<moli_core::PointId> {
+        let mut points = Vec::new();
+        if channels.contains(&Channel::Voix) {
+            points.extend(self.speakers());
+        }
+        if channels.contains(&Channel::Telegram) {
+            points.extend(self.messengers());
+        }
+        if channels.contains(&Channel::Telephone) {
+            points.extend(self.phones());
+        }
+        points
+    }
+
     pub fn hub(&self) -> &Hub {
         &self.0.hub
     }

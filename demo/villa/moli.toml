@@ -140,6 +140,12 @@ kind = "demo"
 fixture = "devices/telephones.json"
 
 [[driver]]
+id = "tesla"
+kind = "demo"
+[driver.options]
+fixture = "devices/tesla.json"
+
+[[driver]]
 id = "tuya"
 kind = "demo"
 [driver.options]

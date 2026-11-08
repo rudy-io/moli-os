@@ -1,0 +1,29 @@
+[integration]
+id = "teleinfo"
+name = "Compteur Linky (TIC téléinfo)"
+brands = ["Enedis"]
+models = ["Linky"]
+# Serial port of a USB-TIC interface (e.g. Cartelectronic USBTICLC) wired to
+# the meter's TIC plug: Moli keeps the values itself, nothing on the network.
+transport = "native"
+driver = "teleinfo"
+crate = "moli-teleinfo"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = []
+
+[origin]
+reused = "protocole téléinfo EdF/Enedis (captures réelles de la TIC d'un Linky, modes standard et historique)"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/standard_raw.txt"
+[[fixture]]
+file = "fixtures/legacy_raw.txt"

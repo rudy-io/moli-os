@@ -22,7 +22,7 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -735,45 +735,4 @@ test('a valve offers its chart, which opens on its three periods', () => {
   assert.match(html, /aria-pressed="true"[^>]*>24 h/);
   // Nothing is drawn before the hub has answered.
   assert.doesNotMatch(html, /<svg/);
-});
-
-// A gate's contacts: trigger relays, one `cycle` order each, no state to show.
-const trigger = (key, label) => ({ key, label, kind: enumeration('cycle'), access: { read: false, write: true }, semantic: 'control' });
-
-test('trigger relays are not shutters and show one Impulsion button each', () => {
-  const points = [trigger('state_l1', 'State'), trigger('state_l2', 'State')];
-  assert.equal(home.deviceKind({ id: 'z2m:0xa', points, state: {} }), 'impulse');
-  const html = show('ImpulseTile', points, {});
-  assert.match(html, /Fixture/);
-  assert.equal(buttons(html).length, 2);
-  assert.match(html, /Impulsion · Relais 1/);
-  assert.match(html, /Impulsion · Relais 2/);
-  assert.match(html, /aria-label="Fixture : Impulsion · Relais 1"/);
-  // A trigger has no on/off state: nothing says it is on, off, open or closed.
-  assert.doesNotMatch(html, /Allumée|Éteinte|Ouvert|Fermé|<input/);
-});
-
-test('trigger buttons stay disabled while the hub is down or the relay is offline', () => {
-  const points = [trigger('state_l1', 'State')];
-  hub.connected = false;
-  assert.match(buttons(show('ImpulseTile', points, {}))[0], /disabled/);
-  hub.connected = true;
-  assert.match(buttons(show('ImpulseTile', points, {}, { online: false }))[0], /disabled/);
-  assert.doesNotMatch(buttons(show('ImpulseTile', points, {}))[0], /disabled/);
-});
-
-test('icons-only trigger relays keep a label on every icon button', () => {
-  const html = show('ImpulseTile', [trigger('state_l1', 'State'), trigger('state_l2', 'State')], {}, {}, { icons: true });
-  assert.equal(buttons(html).length, 2);
-  assert.match(html, /aria-label="Fixture : Impulsion · Relais 1"/);
-  assert.doesNotMatch(html, />Impulsion · Relais 1</);
-});
-
-test('a room shows its trigger device and a lone control point stays a cover', () => {
-  const room = showRoom([
-    { id: 'z2m:gate', points: [trigger('state_l1', 'State')], values: {} },
-    { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
-  ]);
-  assert.match(room, /Impulsion · Relais 1/);
-  assert.match(room, /data-cover-command="open"/);
 });

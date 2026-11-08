@@ -183,6 +183,14 @@ pub struct ProfileError {
 /// Decimals `round` may keep.
 const MAX_ROUND: u32 = 6;
 
+/// At most this many read requests per profile: the total polling load it
+/// puts on its host (a device or a web API) stays explicit and bounded.
+const MAX_REQUESTS: usize = 32;
+
+/// Cumulative polling: at most this many polls per second across all of a
+/// profile's requests (an average interval of half a second, never less).
+const MAX_POLLS_PER_S: f64 = 2.0;
+
 /// Units accepted beyond those the core knows by name.
 const EXTRA_UNITS: &[&str] = &[
     "mired", "lqi", "dBm", "Hz", "L", "m³", "µg/m³", "ppb", "rpm", "km/h", "mm", "°", "UV",
@@ -341,21 +349,16 @@ impl Profile {
         if self.requests.is_empty() {
             return Err(fail("at least one [[request]] is required".into()));
         }
+        if self.requests.len() > MAX_REQUESTS {
+            return Err(fail(format!(
+                "at most {MAX_REQUESTS} [[request]]s per profile ({} declared)",
+                self.requests.len()
+            )));
+        }
         if let Some(path) = &self.profile.snapshot {
             // Asked outside the guard (a dashboard tile in a loop, the MCP
             // `camera_snapshot` tool): a read, so it may change nothing.
-            check_shape(path)
-                .and_then(|()| check_read_query(path))
-                .and_then(|()| {
-                    // Sent as written, never rendered: a `{var}` or `{secret}` would
-                    // leave as is.
-                    if path.contains('{') {
-                        Err("no {…} placeholder: the path is sent as written".into())
-                    } else {
-                        Ok(())
-                    }
-                })
-                .map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
+            check_snapshot_path(path).map_err(|e| fail(format!("[profile] snapshot: {e}")))?;
         }
         let secrets = Secrets {
             declared: self.profile.secret.is_some(),
@@ -373,6 +376,16 @@ impl Profile {
             let request = compile_request(r, secrets, &mut vars)
                 .map_err(|e| fail(format!("request {:?}: {e}", r.id)))?;
             requests.push(request);
+        }
+        // Cumulative polling load on the host: a profile must not poll
+        // faster than twice a second on average. (f64 sum of 32 terms of
+        // at most 0.2: the error is ~1e-15, so a tiny tolerance keeps a
+        // profile exactly at the limit valid.)
+        let polls_per_s: f64 = requests.iter().map(|r| 1.0 / r.every.as_secs_f64()).sum();
+        if polls_per_s > MAX_POLLS_PER_S + 1e-9 {
+            return Err(fail(format!(
+                "polling too fast: {polls_per_s:.2} polls/s across all requests, {MAX_POLLS_PER_S:.1} at most (a request may not be faster than 5s)"
+            )));
         }
         let answers = Answers(&requests);
         for (what, path) in [
@@ -618,6 +631,20 @@ fn check_read_query(path: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Validates a snapshot path: a plain read (shape + query) that is sent as
+/// written, never rendered (no `{…}` placeholder).
+fn check_snapshot_path(path: &str) -> Result<(), String> {
+    check_shape(path)
+        .and_then(|()| check_read_query(path))
+        .and_then(|()| {
+            if path.contains('{') {
+                Err("no {…} placeholder: the path is sent as written".into())
+            } else {
+                Ok(())
+            }
+        })
 }
 
 fn compile_request(
@@ -1141,10 +1168,13 @@ impl CompiledPoint {
                             let f = 10f64.powi(i32::try_from(d).unwrap_or(0));
                             (n * f).round() / f
                         });
-                        // Never publish NaN or infinity, whatever the input.
-                        if n.is_finite() {
+                        // Never publish NaN, infinity, or a value outside the
+                        // point's declared bounds: the hub would refuse it
+                        // anyway, and it would feed the automations.
+                        if n.is_finite() && self.within_bounds(n) {
                             Value::Float(n)
                         } else {
+                            tracing::debug!(point = %self.spec.key, "value outside the point's spec: not published");
                             Value::Null
                         }
                     }
@@ -1169,8 +1199,26 @@ impl CompiledPoint {
                     Value::Null
                 }
             }
-            Kind::Text => Value::Text(as_text.into()),
+            Kind::Text => {
+                // A value is a setting, never a document (hub's MAX_TEXT).
+                if as_text.chars().count() > moli_core::MAX_TEXT {
+                    tracing::warn!(point = %self.spec.key, "text longer than the limit: not published");
+                    Value::Null
+                } else {
+                    Value::Text(as_text.into())
+                }
+            }
         })
+    }
+
+    /// Whether a numeric reading stays inside the point's declared bounds.
+    fn within_bounds(&self, n: f64) -> bool {
+        match &self.spec.kind {
+            Kind::Numeric { min, max, .. } => {
+                !min.is_some_and(|m| n < m) && !max.is_some_and(|m| n > m)
+            }
+            _ => true,
+        }
     }
 }
 
@@ -1487,6 +1535,29 @@ refresh = "control"
             try_compile(meross).is_ok(),
             "built in: the secret goes to the instance's own device"
         );
+    }
+
+    #[test]
+    fn a_profile_cannot_declare_too_many_or_too_fast_polls() {
+        let head = "[profile]\nid = \"cap\"\nname = \"Cap\"\n";
+        // One minimal request + point, ready to duplicate.
+        let one = |n: usize| {
+            format!(
+                "\n[[request]]\nid = \"r{n}\"\npath = \"/x\"\nformat = \"json\"\nevery = \"5s\"\n\n\
+                 [[point]]\nkey = \"p{n}\"\nlabel = \"P\"\nfrom = \"r{n}.x\"\nkind = \"binary\"\n"
+            )
+        };
+        // 33 requests at the slowest allowed pace: too many.
+        let many = (0..33).map(one).collect::<String>();
+        let err = try_compile(&format!("{head}{many}")).unwrap_err();
+        assert!(err.to_string().contains("at most 32"), "{err}");
+        // 12 requests at the fastest pace (5 s): 2.4 polls/s, too fast.
+        let fast = (0..12).map(one).collect::<String>();
+        let err = try_compile(&format!("{head}{fast}")).unwrap_err();
+        assert!(err.to_string().contains("polls/s"), "{err}");
+        // 10 requests at 5 s sit exactly at the limit: still accepted.
+        let just = (0..10).map(one).collect::<String>();
+        assert!(try_compile(&format!("{head}{just}")).is_ok());
     }
 
     #[test]

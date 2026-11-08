@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { hub, connect } from './lib/hub.svelte.js';
+  import { hub, connect, command } from './lib/hub.svelte.js';
   import { deviceName } from './lib/format.js';
   import { t, locale } from './lib/i18n.svelte.js';
   import Header from './components/Header.svelte';
@@ -27,11 +27,20 @@
   // Not a word: it sorts last and is said with t() where it is shown.
   const NO_ROOM = '§no-room';
 
+  // Gateways expose their pairing window as a `pairing` point on a
+  // `<instance>:bridge` device: they get a button, not a room card.
+  const isGateway = (d) =>
+    d.id.endsWith(':bridge') &&
+    d.points?.some((p) => p.key === 'pairing' && p.access?.write) === true;
+  const gateways = $derived(Object.values(hub.devices).filter(isGateway));
+
   const rooms = $derived.by(() => {
     const groups = new Map();
-    const devices = Object.values(hub.devices).sort((a, b) =>
-      deviceName(a).localeCompare(deviceName(b), locale()),
-    );
+    const devices = Object.values(hub.devices)
+      .filter((d) => !isGateway(d))
+      .sort((a, b) =>
+        deviceName(a).localeCompare(deviceName(b), locale()),
+      );
     for (const d of devices) {
       // The user's label wins; the system's own room is a fallback.
       const room = d.label?.room || d.native_room || NO_ROOM;
@@ -64,6 +73,29 @@
 <main>
   <section class="home" aria-label={t('commun.atelier.maison')}>
     <EnergyStrip onopen={() => (energyOpen = true)} />
+    {#if gateways.length}
+      <section class="gateways">
+        <h2>{t('commun.atelier.passerelles')}</h2>
+        <div class="gw-grid">
+          {#each gateways as g (g.id)}
+            {@const open = g.state.pairing?.value === true}
+            {@const busy = `${g.id}/pairing` in hub.pending}
+            <div class="gateway">
+              <span class="gw-name">{deviceName(g)}</span>
+              <button
+                class="pair"
+                class:open={open}
+                disabled={busy}
+                title={t('commun.atelier.appairage_info')}
+                onclick={() => command(`${g.id}/pairing`, !open)}
+              >
+                {open ? t('commun.atelier.fermer_appairage') : t('commun.atelier.appairer')}
+              </button>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
     {#if !hub.connected && rooms.length === 0}
       <p class="empty">{t('commun.atelier.connexion')}</p>
     {:else if rooms.length === 0}
@@ -159,6 +191,51 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 14px;
+  }
+  .gateways {
+    margin-bottom: 28px;
+  }
+  .gw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .gateway {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--card);
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius);
+  }
+  .gw-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pair {
+    flex: none;
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius);
+    background: var(--card);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 650;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .pair.open {
+    background: var(--sun);
+    color: #161512;
+  }
+  .pair:disabled {
+    opacity: 0.5;
+    cursor: wait;
   }
   .empty {
     color: var(--ink-2);

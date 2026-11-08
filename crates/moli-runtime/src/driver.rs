@@ -160,9 +160,12 @@ impl DriverCtx {
 
     /// Records an occurrence (button press…): broadcast even when the value
     /// equals the previous one, because each one is a new event.
+    /// The value is taken by value: drivers hand over what they just read,
+    /// and the hub is the only consumer (it validates and stores it).
+    #[allow(clippy::needless_pass_by_value)]
     pub fn pulse_state(&self, device: &DeviceId, key: &str, value: Value) {
         if self.owns(device) {
-            self.hub.pulse_state(device, key, value);
+            self.hub.pulse_state(device, key, &value);
         }
     }
 
@@ -268,9 +271,12 @@ impl DriverCtx {
     }
 
     /// Records a value for a point of one of this instance's devices.
+    /// The value is taken by value: drivers hand over what they just read,
+    /// and the hub is the only consumer (it validates and stores it).
+    #[allow(clippy::needless_pass_by_value)]
     pub fn set_state(&self, device: &DeviceId, key: &str, value: Value) {
         if self.owns(device) {
-            self.hub.set_state(device, key, value);
+            self.hub.set_state(device, key, &value);
         }
     }
 

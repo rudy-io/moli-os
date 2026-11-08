@@ -27,11 +27,25 @@ CREATE TABLE IF NOT EXISTS samples (
     PRIMARY KEY (point_id, ts)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);
--- What agents query: one row per recorded change.
-CREATE VIEW IF NOT EXISTS history AS
-    SELECT p.point AS point, s.ts AS ts, s.kind AS kind, s.num AS num, s.txt AS txt
-    FROM samples s JOIN points p ON p.id = s.point_id;
 ";
+
+/// The view the agents read: one row per recorded change, without the
+/// household's private points (exact position, Wi-Fi). The base tables are
+/// off-limits to agent connections (see `open`), so this view is their only
+/// path to the data.
+fn agent_view() -> String {
+    let hidden = moli_core::PRIVATE_POINT_KEYS
+        .iter()
+        .map(|key| format!("p.point NOT LIKE '%/{key}'"))
+        .collect::<Vec<_>>()
+        .join("\n              AND ");
+    format!(
+        "CREATE VIEW history AS
+             SELECT p.point AS point, s.ts AS ts, s.kind AS kind, s.num AS num, s.txt AS txt
+             FROM samples s JOIN points p ON p.id = s.point_id
+           WHERE {hidden}"
+    )
+}
 
 /// Agents' SQL: time budget per query.
 const SQL_BUDGET: Duration = Duration::from_secs(2);
@@ -50,6 +64,10 @@ pub enum HistoryError {
     NotReadOnly,
     #[error("query took longer than {}s", SQL_BUDGET.as_secs())]
     TooSlow,
+    #[error("private points (exact position, Wi-Fi) are not queryable by agents")]
+    PrivatePoint,
+    #[error("the base tables are not exposed to agents; query the `history` view instead")]
+    BaseTable,
     #[error("{0}")]
     Internal(String),
 }
@@ -154,6 +172,11 @@ impl Store {
         writer.pragma_update(None, "synchronous", "NORMAL")?;
         writer.busy_timeout(Duration::from_secs(5))?;
         writer.execute_batch(SCHEMA)?;
+        // The view is not covered by `IF NOT EXISTS` migrations of its
+        // definition (it hides the private points now): it is re-created on
+        // every open.
+        writer.execute_batch("DROP VIEW IF EXISTS history;")?;
+        writer.execute_batch(&agent_view())?;
 
         let read_only = || -> Result<Connection, HistoryError> {
             let conn = Connection::open_with_flags(
@@ -168,6 +191,9 @@ impl Store {
         agents.pragma_update(None, "query_only", true)?;
         // Agents read data; they never attach files, change settings, or
         // hold transactions open (a pinned read snapshot would stall the WAL).
+        // (The base tables are not reachable from agent SQL — see `query_sql`:
+        // the authorizer fires for reads through views too, so the guard
+        // lives in the query text instead.)
         agents.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
             AuthAction::Attach { .. }
             | AuthAction::Detach { .. }
@@ -338,7 +364,11 @@ impl Store {
     }
 
     /// Runs an agent's query: one read-only statement, bounded in time and rows.
+    /// Private points (exact position, Wi-Fi) stay out of reach: the `history`
+    /// view hides their rows and this guard refuses queries that name them or
+    /// reach the base tables directly.
     pub fn query_sql(&self, sql: &str, max_rows: usize) -> Result<SqlResult, HistoryError> {
+        check_agent_query(sql)?;
         let conn = lock(&self.agents);
         let started = Instant::now();
         conn.progress_handler(10_000, Some(move || started.elapsed() > SQL_BUDGET))?;
@@ -357,6 +387,49 @@ impl Store {
             other => other,
         })
     }
+}
+
+/// Guards an agent's SQL: private points and the base tables stay out of
+/// reach. The `history` view already hides the private rows, but an agent
+/// can still *name* them in a query, and the base tables remain readable on
+/// this connection (an authorizer on them would also fire for reads through
+/// the view) — so the query text is checked before it runs. Mentioning a
+/// private key or a base-table name anywhere, even in a string literal, is
+/// refused: the safe direction is to deny.
+fn check_agent_query(sql: &str) -> Result<(), HistoryError> {
+    let lower = sql.to_lowercase();
+    for key in moli_core::PRIVATE_POINT_KEYS {
+        if contains_word(&lower, key) {
+            return Err(HistoryError::PrivatePoint);
+        }
+    }
+    for table in ["samples", "points"] {
+        if contains_word(&lower, table) {
+            return Err(HistoryError::BaseTable);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `needle` occurs in `hay` as a whole identifier, not buried in a
+/// longer one (`samples_ts` does not count as `samples`).
+fn contains_word(hay: &str, needle: &str) -> bool {
+    let mut from = 0usize;
+    while let Some(off) = hay[from..].find(needle) {
+        let start = from + off;
+        let end = start + needle.len();
+        let before = start > 0 && is_ident_byte(hay.as_bytes()[start - 1]);
+        let after = end < hay.len() && is_ident_byte(hay.as_bytes()[end]);
+        if !before && !after {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 fn run_sql(conn: &Connection, sql: &str, max_rows: usize) -> Result<SqlResult, HistoryError> {
@@ -532,6 +605,50 @@ mod tests {
         // A value that never changed is still known, however old.
         let stable = store.series("d/stable", 6_000, 10_000, 10).unwrap();
         assert_eq!(stable.before, Some((1_000, Value::Int(7))));
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn agents_read_only_the_filtered_history_view() {
+        let (store, dir) = store("agent-view");
+        store
+            .insert(
+                &[
+                    (p("phone/latitude"), Value::Float(43.21), 1_000),
+                    (p("phone/zone"), Value::from("Travail"), 1_000),
+                ],
+                false,
+            )
+            .unwrap();
+        // The view keeps the household's data but hides the private points.
+        let rows = store
+            .query_sql("SELECT point FROM history ORDER BY point", 10)
+            .unwrap();
+        assert_eq!(rows.rows, vec![vec![Json::from("phone/zone")]]);
+
+        // The base tables are the only other read paths: denied.
+        for sql in ["SELECT * FROM samples", "SELECT point FROM points"] {
+            assert!(store.query_sql(sql, 10).is_err(), "{sql} must be refused");
+        }
+        // Private points cannot even be named in a query, though the
+        // household can still read them.
+        for sql in [
+            "SELECT ts, num FROM history WHERE point LIKE '%/latitude%'",
+            "SELECT point FROM history WHERE point = 'phone/wifi'",
+            "SELECT txt FROM history WHERE txt = 'wifi'",
+        ] {
+            assert!(store.query_sql(sql, 10).is_err(), "{sql} must be refused");
+        }
+        // The household's own reads are untouched.
+        assert_eq!(
+            store
+                .series("phone/latitude", 0, 10_000, 10)
+                .unwrap()
+                .raw
+                .len(),
+            1
+        );
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }

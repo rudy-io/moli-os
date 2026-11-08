@@ -344,6 +344,42 @@ fn names_a_camera(key: &str) -> bool {
     key == "motion" || key == "detection"
 }
 
+/// Hard cap on cameras created from MQTT topics: any client of the broker
+/// (or a compromised Frigate) can publish `frigate/<name>/…`, so the device
+/// model must not be flooded with fake camera names. Cameras already created
+/// keep receiving their state.
+const MAX_CAMERAS: usize = 32;
+
+/// Whether an announced camera name may become a device: the topic must
+/// prove it is a camera, and the discovery cap must not be reached.
+fn camera_allowed(cameras: &BTreeSet<String>, key: &str) -> bool {
+    names_a_camera(key) && cameras.len() < MAX_CAMERAS
+}
+
+/// Register a newly discovered camera: create the device, provide snapshots
+/// when an API is configured, and set its initial availability.
+fn register_camera(
+    ctx: &mut DriverCtx,
+    cameras: &mut BTreeSet<String>,
+    api: Option<&moli_net::upnp::Location>,
+    camera: &str,
+    available: bool,
+) {
+    cameras.insert(camera.to_owned());
+    ctx.upsert_device(camera_device(ctx, camera));
+    if let Some(api) = api {
+        ctx.provide_snapshots(
+            &ctx.device_id(camera),
+            std::sync::Arc::new(CameraImages {
+                host: api.host.clone(),
+                port: api.port,
+                camera: camera.to_owned(),
+            }),
+        );
+    }
+    ctx.set_availability(&ctx.device_id(camera), available);
+}
+
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut options = MqttOptions::new(
         format!("moli-{}", ctx.instance()),
@@ -413,22 +449,20 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     }
                     let Some(Update::Value(camera, key, value)) = parse(rest, &payload) else { continue };
                     if !cameras.contains(camera) {
-                        if !names_a_camera(key) {
-                            continue; // a zone, or not a camera yet
+                        if !camera_allowed(&cameras, key) {
+                            if cameras.len() >= MAX_CAMERAS {
+                                // A genuine camera beyond the cap: say so, so
+                                // a human can raise MAX_CAMERAS.
+                                tracing::warn!(
+                                    instance = %ctx.instance(),
+                                    camera = %camera,
+                                    limit = MAX_CAMERAS,
+                                    "camera discovery cap reached: no new device created"
+                                );
+                            }
+                            continue; // a zone, or the cap is reached
                         }
-                        cameras.insert(camera.to_owned());
-                        ctx.upsert_device(camera_device(ctx, camera));
-                        if let Some(api) = &api {
-                            ctx.provide_snapshots(
-                                &ctx.device_id(camera),
-                                std::sync::Arc::new(CameraImages {
-                                    host: api.host.clone(),
-                                    port: api.port,
-                                    camera: camera.to_owned(),
-                                }),
-                            );
-                        }
-                        ctx.set_availability(&ctx.device_id(camera), available);
+                        register_camera(ctx, &mut cameras, api.as_ref(), camera, available);
                     }
                     ctx.set_state(&ctx.device_id(camera), key, value);
                 }
@@ -523,5 +557,24 @@ mod tests {
         assert_eq!(v["gpu_load"], Value::Float(7.5));
         assert_eq!(v["cpu_load"], Value::Float(14.0));
         assert!(parse_stats("not json").is_empty());
+    }
+
+    #[test]
+    fn camera_discovery_is_capped() {
+        // A zone never becomes a device.
+        let mut cameras: BTreeSet<String> = BTreeSet::new();
+        assert!(!camera_allowed(&cameras, "count"));
+        // Camera topics are accepted while the cap is not reached…
+        assert!(camera_allowed(&cameras, "motion"));
+        for i in 0..MAX_CAMERAS - 1 {
+            cameras.insert(format!("cam{i}"));
+        }
+        assert!(camera_allowed(&cameras, "motion"), "one slot left");
+        // …and refused once it is: the broker cannot flood the model with
+        // fake camera names.
+        cameras.insert(format!("cam{}", MAX_CAMERAS - 1));
+        assert_eq!(cameras.len(), MAX_CAMERAS);
+        assert!(!camera_allowed(&cameras, "motion"));
+        assert!(!camera_allowed(&cameras, "detection"));
     }
 }

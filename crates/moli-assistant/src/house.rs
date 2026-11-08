@@ -25,9 +25,6 @@ pub(crate) struct Layout {
 pub(crate) struct RoomDef {
     pub name: String,
     pub aliases: Vec<String>,
-    /// Where the room is, in the family's words (« en bas », « à l'étage »):
-    /// « allume en bas » lights every room of that floor.
-    pub floor: Option<String>,
 }
 
 /// What the inventory calls a device with no room, in the house's language.
@@ -76,22 +73,6 @@ impl Layout {
 
     pub(crate) fn same_room(&self, a: &str, b: &str) -> bool {
         norm(&self.room(a)) == norm(&self.room(b))
-    }
-
-    /// A room as the inventory heads it: its name, and its floor when the
-    /// layout gives one (7 Nov. 2026: « allume en bas » lit the living room only).
-    fn heading(&self, room: &str) -> String {
-        let floor = self
-            .rooms
-            .iter()
-            .find(|r| r.name == room)
-            .and_then(|r| r.floor.as_deref())
-            .map(str::trim)
-            .filter(|f| !f.is_empty());
-        match floor {
-            Some(floor) => moli_i18n::tr!("assistant.house.room_floor", room = room, floor = floor),
-            None => room.to_owned(),
-        }
     }
 }
 
@@ -183,15 +164,14 @@ pub(crate) fn inventory(
     let mut out = String::new();
     for ((_, room), mut views) in rooms {
         views.sort_by(|a, b| name_of(a).cmp(name_of(b)));
-        let heading = layout.heading(&room);
         if protected.iter().any(|p| layout.same_room(p, &room)) {
             let _ = writeln!(
                 out,
                 "## {}",
-                moli_i18n::tr!("assistant.house.room_protected", room = heading)
+                moli_i18n::tr!("assistant.house.room_protected", room = room)
             );
         } else {
-            let _ = writeln!(out, "## {heading}");
+            let _ = writeln!(out, "## {room}");
         }
         for view in views {
             let _ = write!(out, "- {} · {}", view.device.id, name_of(view));
@@ -260,16 +240,15 @@ pub(crate) fn inventory_static(
     let mut aliases: Vec<(String, DeviceId)> = Vec::new();
     for ((_, room), mut views) in rooms {
         views.sort_by(|a, b| name_of(a).cmp(name_of(b)));
-        let heading = one_line(&layout.heading(&room));
         let room = one_line(&room);
         if protected.iter().any(|p| layout.same_room(p, &room)) {
             let _ = writeln!(
                 out,
                 "## {}",
-                moli_i18n::tr!("assistant.house.room_protected", room = heading)
+                moli_i18n::tr!("assistant.house.room_protected", room = room)
             );
         } else {
-            let _ = writeln!(out, "## {heading}");
+            let _ = writeln!(out, "## {room}");
         }
         for view in views {
             let alias = format!("d{}", aliases.len() + 1);
@@ -366,12 +345,6 @@ pub(crate) fn resolve_point(written: &str, devices: &[DeviceView]) -> PointId {
 const MAX_POINTS: usize = 8;
 const MAX_CHOICES: usize = 30;
 
-/// Values the model never reads, whatever the device: where someone is to
-/// the metre (a phone's position, how precise it is) and the Wi-Fi a phone
-/// is on. They stay on the household's own server (presence, zones): the
-/// model reads `home`, `zone`, the battery.
-const PRIVATE_POINTS: [&str; 4] = ["latitude", "longitude", "accuracy", "wifi"];
-
 /// Controls some profiles mark as configuration: the model keeps them.
 const CONTROLS: [&str; 4] = ["mode", "target_temperature", "system_mode", "fan_mode"];
 /// What names a device's setting (how it behaves, not what it does now): a delay, a
@@ -436,10 +409,10 @@ pub(crate) fn noise(key: &str) -> bool {
     NOISE_MARKS.iter().any(|m| key.contains(m))
 }
 
-/// A point the model never reads (`PRIVATE_POINTS`): not in the inventory,
-/// not in `get_device`, not in `history`, not in a « Moli écrit » prompt.
+/// A point the model never reads: not in the inventory, not in `get_device`,
+/// not in `history`, not in a « Moli écrit » prompt.
 pub(crate) fn private(key: &str) -> bool {
-    PRIVATE_POINTS.iter().any(|p| key.eq_ignore_ascii_case(p))
+    moli_core::is_private_point(key)
 }
 
 fn points_of(view: &DeviceView, reader: Reader) -> Vec<String> {
@@ -719,24 +692,6 @@ mod tests {
                 )],
             ),
         ]
-    }
-
-    /// « Allume en bas » : the model reads which rooms are down there.
-    #[test]
-    fn a_rooms_floor_is_in_its_heading() {
-        let layout: Layout = serde_json::from_str(
-            r#"{"rooms":[{"name":"Chambre des enfants","floor":"  "},{"name":"Salon","floor":"en bas"}]}"#,
-        )
-        .unwrap();
-        let protected = ["Chambre des enfants".to_owned()];
-        let (text, _) = inventory_static(&static_house(), &layout, &protected);
-        assert!(text.contains("## Salon (étage : en bas)\n"), "{text}");
-        assert!(
-            text.contains("## Chambre des enfants (protégée : un adulte valide)\n"),
-            "a blank floor is no floor: {text}"
-        );
-        let chat = inventory(&static_house(), &layout, &protected, Reader::Chat);
-        assert!(chat.contains("## Salon (étage : en bas)\n"), "{chat}");
     }
 
     #[test]

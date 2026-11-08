@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, act, pending } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending, modeValues, modeValueKey, modeValueName, deviceKind, hidden } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
   import { isValve } from '../lib/capabilities.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
@@ -42,20 +42,40 @@
     }
   }
 
-  // The house's mode (a helper, « Mode Maison »): one tap, like Home
-  // Assistant's mode buttons.
-  const modeDevice = $derived(Object.values(hub.devices).find((d) => d.id.endsWith(':mode_maison')));
-  const modes = $derived(modeDevice?.points.find((p) => p.key === 'state')?.kind.values ?? []);
-  const mode = $derived(modeDevice ? value(modeDevice.id, 'state') : null);
-  const MODE_ICON = { Normal: 'home', Nuit: 'moon', Absent: 'lock', Vacances: 'palm' };
-  /** A mode's name in the house's language (an unknown one shows as it is). */
-  function modeName(m) {
-    const key = `maison.accueil.mode.${String(m).toLowerCase()}`;
+  // Mode helpers (e.g. « Mode Maison », « Mode Chauffage »): every mode
+  // device (writable enum `state`) gets its own labeled button group, one
+  // tap per value. Test-only values are filtered in modeValues; they stay
+  // reachable from Atelier, the API, or Moli.
+  const MODE_GROUP_ICON = { mode_maison: 'home', mode_chauffage: 'fire' };
+  /** Per-mode-value icon, keyed by the normalized value (accent-stripped lowercase). */
+  const MODE_ICON = {
+    normal: 'home',
+    nuit: 'moon',
+    absent: 'lock',
+    vacances: 'palm',
+    confort: 'fire',
+    eco: 'leaf',
+    off: 'power',
+  };
+  const modeGroups = $derived(
+    Object.values(hub.devices)
+      .filter((d) => deviceKind(d) === 'mode')
+      .map((d) => ({
+        id: d.id,
+        icon: MODE_GROUP_ICON[d.id.slice('maison:'.length)] ?? 'home',
+        label: modeGroupLabel(d),
+        values: modeValues(d),
+        current: value(d.id, 'state'),
+      })),
+  );
+  /** A mode device's label in the house's language (unknown: its native name). */
+  function modeGroupLabel(d) {
+    const key = `maison.accueil.${d.id.slice('maison:'.length)}`;
     const word = t(key);
-    return word === key ? m : word;
+    return word === key ? d.native_name ?? d.id : word;
   }
-  function setMode(m) {
-    if (m !== mode) act(`${modeDevice.id}/state`, m, t('maison.accueil.mode_action', { mode: modeName(m) }));
+  function setMode(devId, m) {
+    if (m !== value(devId, 'state')) act(`${devId}/state`, m, t('maison.accueil.mode_action', { mode: modeValueName(m) }));
   }
 
   // The speakers that talk (announcements): one tap silences them all, for
@@ -139,6 +159,42 @@
   );
   const bell = $derived((cfg.favorites?.cameras ?? [])[0]);
 
+  // The car, if the house has one (its points: battery, range, charging, doors).
+  const car = $derived(Object.values(hub.devices).find((d) => d.manufacturer === 'Tesla' && d.model) ?? null);
+  const carName = $derived(car ? [car.native_name, car.model].filter(Boolean).join(' · ') : '');
+  const carSoc = $derived(car ? value(car.id, 'soc') : null);
+  const carRange = $derived(car ? value(car.id, 'range') : null);
+  const carCharging = $derived(car ? value(car.id, 'charging') === true : false);
+  const carPower = $derived(car ? value(car.id, 'charge_power') : null);
+  const carDoors = $derived(car ? value(car.id, 'doors_locked') : null);
+  const carSentry = $derived(car ? value(car.id, 'sentry') : null);
+  const carAsleep = $derived(car ? value(car.id, 'awake') === false : false);
+  /** The state worth a word: charging, sentry, asleep, or the doors. */
+  const carState = $derived.by(() => {
+    if (!car) return '';
+    if (carCharging && typeof carPower === 'number' && carPower > 0) {
+      return t('maison.accueil.voiture_recharge_vale', { power: carPower >= 1000 ? `${num(carPower / 1000, 1)} kW` : `${num(carPower)} W` });
+    }
+    if (carSentry === true) return t('maison.accueil.voiture_vigie');
+    if (carAsleep) return t('maison.accueil.voiture_endormie');
+    if (carDoors === true) return t('maison.accueil.voiture_verrouillees');
+    if (carDoors === false) return t('maison.accueil.voiture_ouvertes');
+    return '';
+  });
+  /** Charging: its power (kilowatts above a kilowatt); nothing, otherwise. */
+  const chargeText = $derived(
+    carCharging && typeof carPower === 'number' && carPower > 0
+      ? carPower >= 1000 ? `${num(carPower / 1000, 1)} kW` : `${num(carPower)} W`
+      : '—',
+  );
+  const doorsText = $derived(
+    carDoors === true
+      ? t('maison.accueil.voiture_verrouillees')
+      : carDoors === false
+        ? t('maison.accueil.voiture_ouvertes')
+        : '—',
+  );
+
   // The last real passage at the door (the history knows; the live value
   // is refreshed every few seconds whatever happens).
   let passage = $state(null);
@@ -155,12 +211,17 @@
 <div class="accueil">
   <SkyHero />
 
-  {#if modes.length}
-    <div class="modes" role="radiogroup" aria-label={t('maison.accueil.mode_maison')}>
-      {#each modes as m (m)}
-        <button role="radio" aria-checked={m === mode} class:on={m === mode} disabled={pending(modeDevice.id, 'state')} onclick={() => setMode(m)}>
-          <Icon name={MODE_ICON[m] ?? 'home'} size={16} />{modeName(m)}
-        </button>
+  {#if modeGroups.length}
+    <div class="modes">
+      {#each modeGroups as g (g.id)}
+        <div class="mode-group" role="radiogroup" aria-label={g.label}>
+          <span class="mode-group-label"><Icon name={g.icon} size={14} />{g.label}</span>
+          {#each g.values as m (m)}
+            <button role="radio" aria-checked={m === g.current} class:on={m === g.current} disabled={pending(g.id, 'state')} onclick={() => setMode(g.id, m)}>
+              <Icon name={MODE_ICON[modeValueKey(m)] ?? 'home'} size={16} />{modeValueName(m)}
+            </button>
+          {/each}
+        </div>
       {/each}
       {#if talkers.length}
         <span class="sep" aria-hidden="true"></span>
@@ -248,6 +309,19 @@
       <span class="go"><Icon name="arrow-top-right" size={20} /></span>
     </a>
 
+    {#if car}
+      <a class="card car" href="#/pieces">
+        <div class="card-head"><h2><Icon name="car" size={18} />{carName}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
+        <div class="facts">
+          <div><small>{t('maison.accueil.voiture_batterie')}</small><b class="num">{typeof carSoc === 'number' ? `${num(carSoc, 0)} %` : '—'}</b></div>
+          <div><small>{t('maison.accueil.voiture_autonomie')}</small><b class="num">{typeof carRange === 'number' ? `${num(carRange, 0)} km` : '—'}</b></div>
+          <div><small>{t('maison.accueil.voiture_recharge')}</small><b class="num">{chargeText}</b></div>
+          <div><small>{t('maison.accueil.voiture_portes')}</small><b>{doorsText}</b></div>
+        </div>
+        {#if carState}<p class="muted small">{carState}</p>{/if}
+      </a>
+    {/if}
+
     <a class="card outside" href="#/dehors">
       <div class="card-head"><h2><Icon name="flower-outline" size={18} />{t('maison.accueil.dehors')}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
       <div class="facts">
@@ -304,6 +378,21 @@
     background: var(--line, color-mix(in srgb, var(--ink) 14%, transparent));
   }
 
+  .mode-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mode-group-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-3);
+  }
+
   .modes button.hush.on {
     background: color-mix(in srgb, var(--alert) 16%, var(--surface-2));
     color: var(--alert);
@@ -355,6 +444,13 @@
 
   .remote {
     grid-column: span 3;
+  }
+
+  .car {
+    grid-column: span 3;
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.2s var(--ease);
   }
 
   .outside {
@@ -448,6 +544,7 @@
   }
 
   .remote:hover,
+  .car:hover,
   .outside:hover {
     transform: translateY(-2px);
   }

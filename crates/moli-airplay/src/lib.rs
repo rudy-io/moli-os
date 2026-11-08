@@ -195,25 +195,13 @@ impl Receiver {
 }
 
 impl Speaker for Receiver {
-    fn play<'a>(
-        &'a self,
-        wav: Vec<u8>,
-        level: u8,
-        started: &'a moli_announce::Started,
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn play(&self, wav: Vec<u8>, level: u8) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async move {
             let pcm = sound::from_wav(&wav)?;
             let _line = self.line.lock().await;
-            let put_back = raop::say(
-                &self.host,
-                self.port,
-                &pcm,
-                db(level),
-                self.level().map(db),
-                || started.now(),
-            )
-            .await
-            .map_err(|e| explained(e, &self.host))?;
+            let put_back = raop::say(&self.host, self.port, &pcm, db(level), self.level().map(db))
+                .await
+                .map_err(|e| explained(e, &self.host))?;
             // What the receiver said in the session is its level now,
             // unless one was written meanwhile (it is sent next).
             if let Some(read) = put_back
@@ -291,9 +279,6 @@ async fn run(config: &Config, mdns_port: u16, ctx: &mut DriverCtx) -> anyhow::Re
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
-            said = announcements.speaking_changed() => {
-                Announcements::show_speaking(ctx, &id, said);
-            }
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
                 if let Some(result) = announcements.command(ctx, &id, &command) {

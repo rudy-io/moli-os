@@ -27,10 +27,10 @@ mod machines;
 mod mcp;
 mod people;
 mod people_api;
+mod ring_link;
 mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
-pub mod airzone_setup;
 mod phones;
 mod plan;
 mod rest;
@@ -54,6 +54,7 @@ use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Pr
 
 pub use access::AccessConfig;
 pub use plan::image_name_ok as plan_image_name_ok;
+pub use ring_link::RingGate;
 
 /// A JSON request is small: orders, labels, a graph, a conversation turn.
 const BODY: usize = 256 * 1024;
@@ -101,8 +102,6 @@ impl Household {
 /// Surface settings.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
-    /// Bounded human-only Airzone onboarding, owned by the executable.
-    pub airzone_setup: Option<Arc<dyn airzone_setup::AirzoneSetup>>,
     /// Host names (or IPs) this instance is reached by, besides localhost.
     pub allowed_hosts: Vec<String>,
     /// PIN that opens a human session in the dashboard. `None`: nobody is
@@ -134,6 +133,9 @@ pub struct Options {
     pub phones: Option<moli_phones::Gateway>,
     /// The house's computers' Moli agents, when a host driver runs.
     pub machines: Option<moli_host::agents::Agents>,
+    /// The Ring account's unclaimed token pairs, when a `ring` driver
+    /// runs (the link flow, `ring_link.rs`).
+    pub ring: Option<RingGate>,
     /// The sky over the house (forecast, satellite), when its position is
     /// known.
     pub weather: Option<moli_weather::Weather>,
@@ -324,38 +326,6 @@ fn assistant_routes() -> Router<Hub> {
         .route("/api/assistant/key", put(assistant::set_key))
 }
 
-fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
-    Router::new()
-        .route(
-            "/api/integrations/airzone/discover",
-            upload(post(airzone_setup::discover), 1024, humans),
-        )
-        .route(
-            "/api/integrations/airzone/probe",
-            upload(post(airzone_setup::probe), 2048, humans),
-        )
-        .route(
-            "/api/integrations/airzone",
-            upload(post(airzone_setup::install), 2048, humans).get(airzone_setup::list),
-        )
-        .route(
-            "/api/integrations/airzone/{instance}/probe",
-            upload(post(airzone_setup::probe_update), 2048, humans),
-        )
-        .route(
-            "/api/integrations/airzone/{instance}",
-            upload(put(airzone_setup::update), 2048, humans),
-        )
-        .route(
-            "/api/integrations/airzone/{instance}/withdraw",
-            upload(post(airzone_setup::withdraw), 1024, humans),
-        )
-        .route(
-            "/api/integrations/airzone/{instance}/mode",
-            upload(post(airzone_setup::set_mode), 1024, humans),
-        )
-}
-
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
@@ -365,7 +335,6 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
     }
     Router::new()
         .route("/api/health", get(rest::health))
-        .merge(integration_routes(&humans))
         .merge(device_routes())
         .route("/api/media/{name}", get(rest::media))
         .route("/api/command", post(rest::command))
@@ -375,6 +344,10 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .route("/api/journal", get(rest::journal))
         .route("/api/approvals", get(rest::approvals))
         .route("/api/approvals/{id}", post(rest::decide))
+        // Ring's one-way link: Ring POSTs the one-time code, then the browser
+        // confirms the account (ring_link.rs).
+        .route("/api/ring/link", post(ring_link::link))
+        .route("/api/ring/linked", get(ring_link::linked))
         .route(
             "/api/session",
             get(rest::session).post(rest::login).delete(rest::logout),
@@ -425,9 +398,6 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         )
         .fallback(assets::serve)
         .layer(Extension(shutdown))
-        .layer(Extension(airzone_setup::Setup(
-            options.airzone_setup.clone(),
-        )))
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
@@ -444,6 +414,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
+        .layer(Extension(options.ring.clone()))
         .layer(Extension(humans))
         .layer(Extension(persons))
         .layer(DefaultBodyLimit::max(BODY))

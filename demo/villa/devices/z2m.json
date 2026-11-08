@@ -1326,6 +1326,138 @@
     "voltage": 2800,
     "linkquality": 70
    }
+  },
+  {
+   "id": "z2m:nous-d1z-borne",
+   "instance": "z2m",
+   "native_name": "NOUS D1Z — Borne de recharge",
+   "manufacturer": "NOUS",
+   "model": "D1Z",
+   "points": [
+    {
+     "key": "state",
+     "label": "State",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "on_off"
+    },
+    {
+     "key": "power",
+     "label": "Power",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "current",
+     "label": "Current",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "A",
+     "semantic": "current"
+    },
+    {
+     "key": "voltage",
+     "label": "Voltage",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "V",
+     "semantic": "voltage"
+    },
+    {
+     "key": "energy",
+     "label": "Energy",
+     "kind": {
+      "type": "numeric"
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "kWh",
+     "semantic": "energy"
+    },
+    {
+     "key": "power_outage_memory",
+     "label": "Power outage memory",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "on",
+       "off",
+       "restore"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "indicator_mode",
+     "label": "Indicator mode",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "off",
+       "on_off",
+       "off_on"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "native_room": "Garage",
+   "state": {
+    "state": true,
+    "power": 3650.0,
+    "current": 15.9,
+    "voltage": 229.8,
+    "energy": 186.4,
+    "power_outage_memory": "restore",
+    "linkquality": 210
+   }
   }
  ]
 }

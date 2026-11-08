@@ -167,6 +167,7 @@ pub fn check(graph: &Graph, hub: &Hub, can: Abilities) -> Check {
 /// Where one node's problems go.
 struct Ctx<'a> {
     hub: &'a Hub,
+    can: Abilities,
     node: String,
     problems: &'a mut Vec<Problem>,
     protected: &'a mut Vec<String>,
@@ -223,6 +224,28 @@ impl Ctx<'_> {
         Some(spec)
     }
 
+    /// Rooms reached by a notify's active channels (voice, Telegram, phone):
+    /// they carry real effects like any write, so their protected rooms must
+    /// be surfaced before approval.
+    fn notify_rooms(&mut self, channels: &[Channel]) {
+        for (channel, key, available) in [
+            (Channel::Voix, "announce", self.can.voice),
+            (Channel::Telegram, "notify", self.can.telegram),
+            (Channel::Telephone, "push", self.can.phone),
+        ] {
+            if !channels.contains(&channel) || !available {
+                continue;
+            }
+            for point in self.hub.writable_points(key) {
+                if let Some((device, _)) = point.split()
+                    && let Some(room) = self.hub.protected_room(&device)
+                {
+                    self.protected.push(room);
+                }
+            }
+        }
+    }
+
     fn rule(&mut self, rule: &Rule) {
         match rule {
             Rule::State { point, op, value } => {
@@ -275,19 +298,25 @@ fn check_node(
 ) {
     let mut c = Ctx {
         hub,
+        can,
         node: node.id.clone(),
         problems,
         protected,
     };
     match &node.step {
-        Step::WhenState { point, .. } => {
+        Step::WhenState { point, for_s, .. } => {
             c.need(point, false);
+            // An unbounded hold would put the engine to sleep for ~292
+            // years on the first point change: same cap as the waits.
+            if *for_s > MAX_WAIT_S {
+                c.push(Level::Error, tr!("moteur.verif.maintien"));
+            }
         }
         Step::WhenThreshold {
             point,
             above,
             below,
-            ..
+            for_s,
         } => {
             if let Some(spec) = c.need(point, false)
                 && !matches!(spec.kind, Kind::Numeric { .. })
@@ -296,6 +325,9 @@ fn check_node(
             }
             if above.is_none() && below.is_none() {
                 c.push(Level::Error, tr!("moteur.verif.seuil_manquant"));
+            }
+            if *for_s > MAX_WAIT_S {
+                c.push(Level::Error, tr!("moteur.verif.maintien"));
             }
         }
         Step::AtTime { at, days } => {
@@ -363,6 +395,7 @@ fn check_node(
         Step::Notify {
             message, channels, ..
         } => {
+            c.notify_rooms(channels);
             if message.trim().is_empty() {
                 c.push(Level::Error, tr!("moteur.verif.message_vide"));
             }
@@ -1000,6 +1033,41 @@ pub fn describe(graph: &Graph, hub: &Hub) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A hold (`for_s`) capped at 24 h like the other waits: 25 h must be
+    /// refused, 24 h accepted, on both trigger kinds that carry a hold.
+    #[test]
+    fn a_trigger_hold_longer_than_a_day_is_rejected() {
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let expected = tr!("moteur.verif.maintien");
+        let triggers: Vec<serde_json::Value> = [
+            serde_json::json!({ "type": "when_state", "point": "ghost:device/point", "for_s": 90_000 }),
+            serde_json::json!({ "type": "when_state", "point": "ghost:device/point", "for_s": 24 * 3600 }),
+            serde_json::json!({ "type": "when_threshold", "point": "ghost:device/point", "above": 1.0, "for_s": 90_000 }),
+            serde_json::json!({ "type": "when_threshold", "point": "ghost:device/point", "above": 1.0, "for_s": 24 * 3600 }),
+        ]
+        .into_iter()
+        .map(|t| {
+            let mut t = t;
+            t["id"] = serde_json::json!("t");
+            t
+        })
+        .collect();
+        for (i, trigger) in triggers.iter().enumerate() {
+            let graph: crate::model::Graph = serde_json::from_value(serde_json::json!({
+                "nodes": [
+                    trigger,
+                    { "id": "s", "type": "set", "point": "ghost:device/point", "value": true }
+                ],
+                "edges": [{ "from": "t", "to": "s" }]
+            }))
+            .unwrap();
+            let check = check(&graph, &hub, Abilities::default());
+            let flagged = check.problems.iter().any(|p| p.message == expected);
+            // Even indices carry a 25 h hold: refused. Odd: exactly 24 h, kept.
+            assert_eq!(flagged, i % 2 == 0, "trigger {i}: {:?}", check.problems);
+        }
+    }
 
     #[test]
     fn durations_read_naturally() {

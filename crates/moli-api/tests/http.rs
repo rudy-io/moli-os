@@ -1,6 +1,7 @@
 //! End-to-end: a real HTTP server over a hub with a fake driver.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use moli_core::{Access, Device, InstanceId, Kind, PointSpec, Semantic, Value};
@@ -240,6 +241,168 @@ async fn an_approved_routine_runs_from_the_household_dashboard_without_a_code() 
     panic!("the routine did not switch the lamp on");
 }
 
+/// A speaker (announcer) sits in a protected room: a routine that announces
+/// through it is a direct order to that room, so the household dashboard must
+/// not run it without a code — exactly like a write step in a protected room.
+struct Speaker {
+    announced: Arc<AtomicBool>,
+}
+
+impl Driver for Speaker {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("speaker");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "speaker".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![PointSpec {
+                    key: "announce".into(),
+                    label: "Announce".into(),
+                    kind: Kind::Text,
+                    access: Access {
+                        read: false,
+                        write: true,
+                    },
+                    unit: None,
+                    semantic: Semantic::Other,
+                }],
+            });
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                if cmd.key.as_ref() == "announce" {
+                    self.announced
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_routine_announcing_in_a_protected_room_needs_a_code() {
+    use moli_automation::{Actor, Author, Automation, Automations};
+
+    let announced = Arc::new(AtomicBool::new(false));
+    let hub = Hub::new(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_rooms: vec!["Chambre".into()],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(Speaker {
+            announced: announced.clone(),
+        }),
+        cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    hub.set_label(
+        &moli_core::DeviceId::from("fake:speaker"),
+        moli_runtime::LabelPatch {
+            name: None,
+            room: Some("Chambre".into()),
+        },
+        moli_core::Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (autos, _engine) = Automations::start(
+        &hub,
+        moli_automation::Config::default(),
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let person = Actor {
+        human: true,
+        author: Author::Human,
+    };
+    let routine: Automation = serde_json::from_value(json!({
+        "name": "Annoncer",
+        "graph": {
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "n", "type": "notify", "message": "Bonsoir", "channels": ["voix"] }
+            ],
+            "edges": [{ "from": "t", "to": "n" }]
+        }
+    }))
+    .unwrap();
+    let routine = autos.save(routine, person).await.unwrap();
+    let fingerprint = routine.fingerprint();
+    autos
+        .approve(&routine.id, &fingerprint, person)
+        .await
+        .unwrap();
+
+    let options = moli_api::Options {
+        automations: Some(autos.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let body = json!({ "fingerprint": fingerprint });
+    let ui = "X-Moli-Origin: ui\r\n";
+    let path = format!("/api/automations/{}/run", routine.id);
+
+    // Speaker in the protected room « Chambre »: the codeless dashboard is
+    // refused, nothing is announced.
+    let (status, resp) = request_with(&addr, "POST", &path, Some(&body), ui).await;
+    assert_eq!(status, 403, "{resp}");
+    assert!(!announced.load(std::sync::atomic::Ordering::Relaxed));
+
+    // Same routine, speaker moved to an unguarded room: the dashboard runs it.
+    hub.set_label(
+        &moli_core::DeviceId::from("fake:speaker"),
+        moli_runtime::LabelPatch {
+            name: None,
+            room: Some("Salon".into()),
+        },
+        moli_core::Origin::Ui,
+        None,
+    )
+    .await
+    .unwrap();
+    let (status, resp) = request_with(&addr, "POST", &path, Some(&body), ui).await;
+    assert_eq!(status, 200, "{resp}");
+    for _ in 0..200 {
+        if announced.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        announced.load(std::sync::atomic::Ordering::Relaxed),
+        "the announcement must reach the speaker"
+    );
+
+    cancel.cancel();
+}
+
 #[tokio::test]
 async fn labels_via_rest() {
     let (addr, _hub) = server().await;
@@ -339,8 +502,124 @@ async fn history_over_rest_and_mcp() {
         &json!({"name": "history_sql", "arguments": {"sql": "DELETE FROM samples"}}),
     );
     let (_, body) = request(&addr, "POST", "/mcp", Some(&write)).await;
-    assert!(body.contains("read-only"), "{body}");
+    // Base tables are off-limits to agents entirely (before any preparation).
+    assert!(body.contains("base tables"), "{body}");
+
+    // A write on the `history` view itself is refused too (query-only).
+    let write2 = rpc(
+        3,
+        "tools/call",
+        &json!({"name": "history_sql", "arguments": {"sql": "DELETE FROM history"}}),
+    );
+    let (_, body) = request(&addr, "POST", "/mcp", Some(&write2)).await;
+    assert!(body.contains("isError\":true"), "{body}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Private points (a phone's exact position) stay out of the agent surface
+/// (MCP tools and SQL) while the household keeps them on its own.
+#[tokio::test]
+async fn mcp_never_sees_private_points() {
+    let store_dir =
+        std::env::temp_dir().join(format!("moli-api-mcp-private-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    std::fs::create_dir_all(&store_dir).unwrap();
+    let store = Arc::new(moli_history::Store::open(&store_dir.join("h.db")).unwrap());
+    let now = moli_core::now_ms();
+    store
+        .insert(
+            &[
+                ("tel:p1/latitude".into(), Value::Float(48.85), now - 60_000),
+                ("tel:p1/push".into(), Value::from("bonjour"), now - 60_000),
+            ],
+            false,
+        )
+        .unwrap();
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    spawn_driver(
+        &hub,
+        InstanceId::from("tel"),
+        Arc::new(Phone),
+        CancellationToken::new(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let options = moli_api::Options {
+        history: Some(moli_history::History::from_store(store)),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+
+    // get_device: the private point is hidden from both spec and state.
+    let call = rpc(
+        1,
+        "tools/call",
+        &json!({"name": "get_device", "arguments": {"device": "tel:p1"}}),
+    );
+    let (status, body) = request(&addr, "POST", "/mcp", Some(&call)).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("push"), "{body}");
+    assert!(!body.contains("latitude"), "{body}");
+    assert!(!body.contains("48.85"), "{body}");
+
+    // list_devices (compact): hidden there too.
+    let call = rpc(
+        2,
+        "tools/call",
+        &json!({"name": "list_devices", "arguments": {}}),
+    );
+    let (_, body) = request(&addr, "POST", "/mcp", Some(&call)).await;
+    assert!(body.contains("tel:p1"), "{body}");
+    assert!(!body.contains("latitude"), "{body}");
+
+    // history: refused for the private point, fine for the rest.
+    let call = rpc(
+        3,
+        "tools/call",
+        &json!({"name": "history", "arguments": {"point": "tel:p1/latitude"}}),
+    );
+    let (_, body) = request(&addr, "POST", "/mcp", Some(&call)).await;
+    assert!(body.contains("private point"), "{body}");
+    assert!(!body.contains("48.85"), "{body}");
+    let call = rpc(
+        4,
+        "tools/call",
+        &json!({"name": "history", "arguments": {"point": "tel:p1/push"}}),
+    );
+    let (_, body) = request(&addr, "POST", "/mcp", Some(&call)).await;
+    assert!(body.contains("bonjour"), "{body}");
+
+    // history_sql: private points are not in the view, base tables are gone.
+    for sql in [
+        "SELECT num FROM history WHERE point = 'tel:p1/latitude'",
+        "SELECT num FROM samples WHERE ts > 0",
+    ] {
+        let call = rpc(
+            5,
+            "tools/call",
+            &json!({"name": "history_sql", "arguments": {"sql": sql}}),
+        );
+        let (_, body) = request(&addr, "POST", "/mcp", Some(&call)).await;
+        assert!(body.contains("isError\":true"), "{sql}: {body}");
+        assert!(!body.contains("48.85"), "{sql}: {body}");
+    }
+
+    // The household keeps its data on its own surface.
+    let (status, body) = request(
+        &addr,
+        "GET",
+        "/api/history?point=tel:p1/latitude&hours=1",
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("48.85"), "{body}");
+
+    let _ = std::fs::remove_dir_all(&store_dir);
 }
 
 fn rpc(id: u64, method: &str, params: &Json) -> Json {
@@ -854,6 +1133,50 @@ async fn only_a_person_records_and_hears_the_satellites() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Talking to Moli (a turn, its voice, its history, the recap) is a
+/// person's choice (the code), never a device's or a script's.
+#[tokio::test]
+async fn only_a_person_converses_with_the_assistant() {
+    let hub = lamp_hub().await;
+    let moli = moli_assistant::Assistant::new(
+        hub.clone(),
+        None,
+        None,
+        None,
+        moli_assistant::Config::default(),
+    )
+    .unwrap();
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new("482915")),
+        assistant: Some(moli),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let ui = "x-moli-origin: ui\r\n";
+    let turn = json!({ "messages": [{ "role": "user", "content": "allume le salon" }] });
+
+    // The dashboard without the code: the conversation is closed.
+    let (status, body) = request_with(&addr, "POST", "/api/assistant", Some(&turn), ui).await;
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/assistant/listen", None, ui).await;
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = request_with(&addr, "GET", "/api/assistant/exchanges", None, ui).await;
+    assert_eq!(status, 403, "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/assistant/recap", None, ui).await;
+    assert_eq!(status, 403, "{body}");
+
+    // A person (the code): the conversation opens (without an API key,
+    // Moli simply says it is not configured: 503, not 403).
+    let pin = pin_session(&addr, "482915").await;
+    let (status, body) = request_with(&addr, "POST", "/api/assistant", Some(&turn), &pin).await;
+    assert_eq!(status, 503, "{body}");
+    let (status, body) = request_with(&addr, "GET", "/api/assistant/exchanges", None, &pin).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"exchanges\""), "{body}");
+    let (status, body) = request_with(&addr, "POST", "/api/assistant/recap", None, &pin).await;
+    assert_eq!(status, 200, "{body}");
+}
+
 /// A phone, as the phones driver describes one: where it is, and a point
 /// to notify it.
 struct Phone;
@@ -1324,7 +1647,8 @@ async fn pairing_a_phone_tells_the_house() {
         home: None,
         radius: 150.0,
     };
-    let (gateway, _driver) = moli_phones::open(config, &phones_dir).unwrap();
+    let (gateway, _driver) =
+        moli_phones::open(config, &phones_dir, None, &InstanceId::from("telephones")).unwrap();
     let hub = lamp_hub().await;
     let options = moli_api::Options {
         phones: Some(gateway),
@@ -1375,7 +1699,8 @@ async fn a_phone_follows_its_person() {
         home: None,
         radius: 150.0,
     };
-    let (gateway, driver) = moli_phones::open(config, &phones_dir).unwrap();
+    let (gateway, driver) =
+        moli_phones::open(config, &phones_dir, None, &InstanceId::from("telephones")).unwrap();
     let gate = gateway.clone();
     let house = guest_house("phones", move |options| options.phones = Some(gate)).await;
     spawn_driver(
@@ -1410,9 +1735,11 @@ async fn a_phone_follows_its_person() {
     }
     let sam = gateway
         .register("Téléphone de Sam", "ios", "", None, Some("sam"))
+        .await
         .unwrap();
     let past = gateway
         .register("Téléphone de passage", "ios", "", None, Some("passage"))
+        .await
         .unwrap();
     let report = |phone: &moli_phones::Paired| {
         (
@@ -1938,562 +2265,6 @@ async fn driver_warning_reaches_rest_and_sse_without_changing_running_status() {
     supervisor.await.unwrap();
 }
 
-#[tokio::test]
-async fn airzone_onboarding_requires_a_human_before_any_probe() {
-    let (addr, _) = server().await;
-    for path in [
-        "/api/integrations/airzone/probe",
-        "/api/integrations/airzone",
-    ] {
-        let (status, _) = request_with(
-            &addr,
-            "POST",
-            path,
-            Some(&json!({"instance":"airzone-new","host":"127.0.0.1","port":3000})),
-            "x-moli-origin: ui\r\n",
-        )
-        .await;
-        assert_eq!(status, 403, "unauthenticated caller reached {path}");
-    }
-}
-
-#[tokio::test]
-async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unauthenticated_change()
-{
-    let (addr, _) = server().await;
-    for (method, path, body) in [
-        ("GET", "/api/integrations/airzone", None),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/probe",
-            Some(json!({"instance":"existing","host":"127.0.0.1","port":3000})),
-        ),
-        (
-            "PUT",
-            "/api/integrations/airzone/existing",
-            Some(
-                json!({"instance":"existing","host":"127.0.0.1","port":3000,"expected_mac":"aabbccddeeff"}),
-            ),
-        ),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/withdraw",
-            Some(json!({})),
-        ),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/mode",
-            Some(json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
-        ),
-    ] {
-        let (status, _) =
-            request_with(&addr, method, path, body.as_ref(), "x-moli-origin: ui\r\n").await;
-        assert_eq!(
-            status, 403,
-            "unauthenticated caller reached {method} {path}"
-        );
-    }
-}
-
-#[derive(Debug, Default)]
-struct CountedAirzoneSetup(std::sync::atomic::AtomicUsize);
-
-#[tokio::test]
-async fn airzone_discovery_requires_authentication_before_searching_the_lan() {
-    let (addr, _) = server().await;
-    let (status, _) = request_with(
-        &addr,
-        "POST",
-        "/api/integrations/airzone/discover",
-        Some(&json!({})),
-        "x-moli-origin: ui\r\n",
-    )
-    .await;
-    assert_eq!(status, 403);
-}
-
-#[tokio::test]
-async fn airzone_discovery_explicitly_reports_an_unavailable_backend() {
-    let hub = lamp_hub().await;
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let (status, body) = request_with(
-        &addr,
-        "POST",
-        "/api/integrations/airzone/discover",
-        Some(&json!({})),
-        &human,
-    )
-    .await;
-    assert_eq!(status, 503);
-    assert_eq!(
-        serde_json::from_str::<Json>(&body).unwrap()["error"],
-        "unavailable"
-    );
-}
-
-#[tokio::test]
-async fn airzone_discovery_refuses_browser_selected_targets_and_oversized_input() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let route = "/api/integrations/airzone/discover";
-    for body in [
-        json!({"network":"10.0.0.0/8"}),
-        json!({"host":"127.0.0.1"}),
-        json!({"read_only":false}),
-    ] {
-        assert_eq!(
-            request_with(&addr, "POST", route, Some(&body), &human)
-                .await
-                .0,
-            422
-        );
-    }
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"padding":"x".repeat(2048)})),
-            &human
-        )
-        .await
-        .0,
-        413
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-    let (status, body) = request_with(&addr, "POST", route, Some(&json!({})), &human).await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        serde_json::from_str::<Json>(&body).unwrap(),
-        json!({"gateways":[],"scanned":0,"target_count":0,"incomplete":true})
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
-}
-
-impl moli_api::airzone_setup::AirzoneSetup for CountedAirzoneSetup {
-    fn set_mode(
-        &self,
-        instance: String,
-        request: moli_api::airzone_setup::GatewayModeRequest,
-        _actor: String,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayModeChanged, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            if instance == "conflict" {
-                return Err(moli_api::airzone_setup::SetupError::new("mode_conflict"));
-            }
-            Ok(moli_api::airzone_setup::GatewayModeChanged {
-                instance,
-                stored: true,
-                read_only: request.read_only,
-                running: true,
-            })
-        })
-    }
-    fn discover(
-        &self,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayDiscovery, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async {
-            Ok(moli_api::airzone_setup::GatewayDiscovery {
-                gateways: vec![],
-                scanned: 0,
-                target_count: 0,
-                incomplete: true,
-            })
-        })
-    }
-    fn list(
-        &self,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayList, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async { Ok(moli_api::airzone_setup::GatewayList { gateways: vec![] }) })
-    }
-    fn probe_update(
-        &self,
-        _instance: String,
-        request: moli_api::airzone_setup::GatewayRequest,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayPreview, moli_api::airzone_setup::SetupError>,
-    > {
-        self.probe(request)
-    }
-    fn update(
-        &self,
-        _instance: String,
-        request: moli_api::airzone_setup::GatewayRequest,
-        actor: String,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayInstalled, moli_api::airzone_setup::SetupError>,
-    > {
-        self.install(request, actor)
-    }
-    fn withdraw(
-        &self,
-        instance: String,
-        _actor: String,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayWithdrawn, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            Ok(moli_api::airzone_setup::GatewayWithdrawn {
-                instance,
-                stored: true,
-                enabled: false,
-                read_only: true,
-            })
-        })
-    }
-    fn probe(
-        &self,
-        request: moli_api::airzone_setup::GatewayRequest,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayPreview, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            Ok(moli_api::airzone_setup::GatewayPreview {
-                instance: request.instance,
-                mac: "aabbccddeeff".into(),
-                gateway_type: Some("ws_az".into()),
-                api_version: None,
-                firmware: Some("4.21".into()),
-                systems: 1,
-                zones: 1,
-                incomplete: false,
-                read_only: true,
-            })
-        })
-    }
-    fn install(
-        &self,
-        request: moli_api::airzone_setup::GatewayRequest,
-        _actor: String,
-    ) -> BoxFuture<
-        '_,
-        Result<moli_api::airzone_setup::GatewayInstalled, moli_api::airzone_setup::SetupError>,
-    > {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            Ok(moli_api::airzone_setup::GatewayInstalled {
-                instance: request.instance,
-                stored: true,
-                read_only: true,
-                already_installed: false,
-            })
-        })
-    }
-}
-
-#[tokio::test]
-async fn airzone_routes_bind_authentication_bounded_typed_input_and_rate_budget() {
-    use std::sync::atomic::Ordering;
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let body = json!({"instance":"airzone-new","host":"127.0.0.1","port":3000,"expected_mac":"aabbccddeeff"});
-    let probe = "/api/integrations/airzone/probe";
-    let install = "/api/integrations/airzone";
-    assert_eq!(
-        request_with(&addr, "POST", probe, Some(&body), "x-moli-origin: ui\r\n")
-            .await
-            .0,
-        403
-    );
-    let pin = pin_session(&addr, "482915").await;
-    assert_eq!(
-        request_with(&addr, "POST", probe, Some(&body), &pin)
-            .await
-            .0,
-        403
-    );
-    let human = format!("{pin}x-moli-origin: ui\r\n");
-    let mut invalid = body.clone();
-    invalid["unexpected_option"] = json!(false);
-    assert_eq!(
-        request_with(&addr, "POST", install, Some(&invalid), &human)
-            .await
-            .0,
-        422
-    );
-    invalid = body.clone();
-    invalid["host"] = json!("a".repeat(3000));
-    assert_eq!(
-        request_with(&addr, "POST", probe, Some(&invalid), &human)
-            .await
-            .0,
-        413
-    );
-    assert_eq!(
-        setup.0.load(Ordering::Relaxed),
-        0,
-        "refused requests must never reach the network service"
-    );
-    let (status, reply) = request_with(&addr, "POST", probe, Some(&body), &human).await;
-    assert_eq!(status, 200, "{reply}");
-    assert_eq!(
-        serde_json::from_str::<Json>(&reply).unwrap()["read_only"],
-        true
-    );
-    let (status, reply) = request_with(&addr, "POST", install, Some(&body), &human).await;
-    assert_eq!(status, 200, "{reply}");
-    assert_eq!(
-        serde_json::from_str::<Json>(&reply).unwrap()["stored"],
-        true
-    );
-    assert_eq!(
-        request_with(&addr, "POST", probe, Some(&body), &human)
-            .await
-            .0,
-        429
-    );
-    assert_eq!(setup.0.load(Ordering::Relaxed), 2);
-}
-
-#[tokio::test]
-async fn airzone_existing_gateways_share_the_installation_rate_budget() {
-    use std::sync::atomic::Ordering;
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let body = json!({"instance":"existing","host":"192.168.1.2","port":3000,"expected_mac":"aabbccddeeff"});
-    let routes = [
-        ("POST", "/api/integrations/airzone/probe"),
-        ("POST", "/api/integrations/airzone/existing/probe"),
-        ("PUT", "/api/integrations/airzone/existing"),
-    ];
-    for (method, path) in routes.into_iter().cycle().take(6) {
-        assert_eq!(
-            request_with(&addr, method, path, Some(&body), &human)
-                .await
-                .0,
-            200
-        );
-    }
-    for (method, path) in routes {
-        assert_eq!(
-            request_with(&addr, method, path, Some(&body), &human)
-                .await
-                .0,
-            429
-        );
-    }
-    assert_eq!(
-        setup.0.load(Ordering::Relaxed),
-        6,
-        "limited requests never reach a gateway"
-    );
-    assert_eq!(
-        request_with(&addr, "GET", "/api/integrations/airzone", None, &human)
-            .await
-            .0,
-        200
-    );
-}
-
-#[tokio::test]
-async fn airzone_lifecycle_routes_require_ui_origin_and_reject_untyped_or_mismatched_changes() {
-    for (method, path, body) in [
-        (
-            "POST",
-            "/api/integrations/airzone/discover",
-            Some(json!({})),
-        ),
-        ("GET", "/api/integrations/airzone", None),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/probe",
-            Some(json!({"instance":"existing","host":"127.0.0.1","port":3000})),
-        ),
-        (
-            "PUT",
-            "/api/integrations/airzone/existing",
-            Some(
-                json!({"instance":"existing","host":"127.0.0.1","port":3000,"expected_mac":"aabbccddeeff"}),
-            ),
-        ),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/withdraw",
-            Some(json!({})),
-        ),
-        (
-            "POST",
-            "/api/integrations/airzone/existing/mode",
-            Some(json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
-        ),
-    ] {
-        let hub = lamp_hub().await;
-        let setup = Arc::new(CountedAirzoneSetup::default());
-        let addr = serve(
-            &hub,
-            &moli_api::Options {
-                ui_pin: Some(moli_api::UiPin::new("482915")),
-                airzone_setup: Some(setup.clone()),
-                ..moli_api::Options::default()
-            },
-        )
-        .await;
-        let pin = pin_session(&addr, "482915").await;
-        assert_eq!(
-            request_with(&addr, method, path, body.as_ref(), &pin)
-                .await
-                .0,
-            403
-        );
-        let human = format!("{pin}x-moli-origin: ui\r\n");
-        if let Some(body) = &body {
-            let mut invalid = body.clone();
-            invalid["unexpected_option"] = json!(false);
-            assert_eq!(
-                request_with(&addr, method, path, Some(&invalid), &human)
-                    .await
-                    .0,
-                422
-            );
-        }
-        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-        let (status, response) = request_with(&addr, method, path, body.as_ref(), &human).await;
-        assert_eq!(status, 200, "{method} {path}: {response}");
-        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
-    }
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let (status, response) = request_with(
-        &addr,
-        "PUT",
-        "/api/integrations/airzone/existing",
-        Some(&json!({"instance":"different","host":"127.0.0.1","port":3000})),
-        &human,
-    )
-    .await;
-    assert_eq!(status, 422);
-    assert_eq!(
-        serde_json::from_str::<Json>(&response).unwrap()["error"],
-        "instance_mismatch"
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-}
-
-#[tokio::test]
-async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_code() {
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let service = setup.clone();
-    let house = guest_house("airzone-guest", move |options| {
-        options.airzone_setup = Some(service);
-    })
-    .await;
-    let (status, session, _) = request_cookie(
-        &house.addr,
-        "POST",
-        "/api/session",
-        &json!({"pin":"482915"}),
-        &house.guest,
-        "moli_session",
-    )
-    .await;
-    assert_eq!(status, 200);
-    let guest = house
-        .guest
-        .replace("Cookie: ", &format!("Cookie: {}; ", session.unwrap()));
-    for (method, path) in [
-        ("POST", "/api/integrations/airzone/discover"),
-        ("POST", "/api/integrations/airzone/probe"),
-        ("POST", "/api/integrations/airzone"),
-        ("GET", "/api/integrations/airzone"),
-        ("POST", "/api/integrations/airzone/existing/probe"),
-        ("PUT", "/api/integrations/airzone/existing"),
-        ("POST", "/api/integrations/airzone/existing/withdraw"),
-        ("POST", "/api/integrations/airzone/existing/mode"),
-    ] {
-        assert_eq!(
-            request_with(
-                &house.addr,
-                method,
-                path,
-                Some(&json!({"instance":"airzone-new","host":"127.0.0.1","port":3000})),
-                &guest
-            )
-            .await
-            .0,
-            403
-        );
-    }
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-    std::fs::remove_dir_all(house.dir).unwrap();
-}
-
 /// The house's price of a kWh: changed by a person (the code), never typed
 /// in cents, counted from now on, and journaled with what it was.
 #[tokio::test]
@@ -2608,125 +2379,6 @@ async fn live_dashboards_learn_a_new_drivers_kind_before_its_devices() {
     task.await.unwrap();
 }
 
-#[tokio::test]
-async fn airzone_mode_changes_require_exact_booleans_and_bound_the_request() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let route = "/api/integrations/airzone/existing/mode";
-    for body in [
-        json!({}),
-        json!({"read_only":false}),
-        json!({"read_only":"false","expected_read_only":true}),
-        json!({"read_only":false,"expected_read_only":null}),
-    ] {
-        assert_eq!(
-            request_with(&addr, "POST", route, Some(&body), &human)
-                .await
-                .0,
-            422
-        );
-    }
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"read_only":false,"expected_read_only":true,"padding":"x".repeat(2048)})),
-            &human
-        )
-        .await
-        .0,
-        413
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-    let (status, body) = request_with(
-        &addr,
-        "POST",
-        route,
-        Some(&json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
-        &human,
-    )
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        serde_json::from_str::<Json>(&body).unwrap(),
-        json!({"instance":"existing","stored":true,"read_only":false,"running":true})
-    );
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"read_only":true,"expected_read_only":false})),
-            &human
-        )
-        .await
-        .0,
-        429
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
-}
-
-#[tokio::test]
-async fn airzone_mode_revocation_and_stale_mode_errors_are_explicit() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let body = json!({"read_only":true,"expected_read_only":false});
-    let (status, result) = request_with(
-        &addr,
-        "POST",
-        "/api/integrations/airzone/existing/mode",
-        Some(&body),
-        &human,
-    )
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        serde_json::from_str::<Json>(&result).unwrap()["read_only"],
-        true
-    );
-    let (status, result) = request_with(
-        &addr,
-        "POST",
-        "/api/integrations/airzone/conflict/mode",
-        Some(&body),
-        &human,
-    )
-    .await;
-    assert_eq!(status, 409);
-    assert_eq!(
-        serde_json::from_str::<Json>(&result).unwrap()["error"],
-        "mode_conflict"
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
-}
-
 /// A camera with live video only: it answers an offer with an echo of it.
 struct LiveCam;
 
@@ -2821,154 +2473,4 @@ async fn a_live_offer_reaches_the_device_and_its_answer_comes_back() {
     )
     .await;
     assert_eq!(status, 400, "{body}");
-}
-
-#[tokio::test]
-async fn airzone_control_requires_a_fresh_code_in_the_request_not_only_a_session() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let session = pin_session(&addr, "482915").await;
-    let human = format!("{session}x-moli-origin: ui\r\n");
-    let route = "/api/integrations/airzone/existing/mode";
-    for (body, status) in [
-        (json!({"read_only":false,"expected_read_only":true}), 403),
-        (
-            json!({"read_only":false,"expected_read_only":true,"pin":"000000"}),
-            401,
-        ),
-    ] {
-        assert_eq!(
-            request_with(&addr, "POST", route, Some(&body), &human)
-                .await
-                .0,
-            status
-        );
-        assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-    }
-    let enabling = json!({"read_only":false,"expected_read_only":true,"pin":"482915"});
-    assert_eq!(
-        request_with(&addr, "POST", route, Some(&enabling), &session)
-            .await
-            .0,
-        403
-    );
-    let (status, body) = request_with(&addr, "POST", route, Some(&enabling), &human).await;
-    assert_eq!(status, 200, "{body}");
-    assert!(!body.contains("482915"));
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"read_only":true,"expected_read_only":false})),
-            &human
-        )
-        .await
-        .0,
-        200
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
-}
-
-#[tokio::test]
-async fn airzone_control_denies_non_owners_even_with_the_code_but_allows_revocation() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            access: Some(serde_json::from_value(json!({"team":"example", "aud":"test-audience", "owners":["owner@example.org"]})).unwrap()),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let route = "/api/integrations/airzone/existing/mode";
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
-            &human
-        )
-        .await
-        .0,
-        403
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            route,
-            Some(&json!({"read_only":true,"expected_read_only":false})),
-            &human
-        )
-        .await
-        .0,
-        200
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
-}
-
-#[tokio::test]
-async fn airzone_fresh_code_attempts_share_the_session_lockout() {
-    let hub = lamp_hub().await;
-    let setup = Arc::new(CountedAirzoneSetup::default());
-    let addr = serve(
-        &hub,
-        &moli_api::Options {
-            ui_pin: Some(moli_api::UiPin::new("482915")),
-            airzone_setup: Some(setup.clone()),
-            ..moli_api::Options::default()
-        },
-    )
-    .await;
-    let human = format!(
-        "{}x-moli-origin: ui\r\n",
-        pin_session(&addr, "482915").await
-    );
-    let route = "/api/integrations/airzone/existing/mode";
-    for _ in 0..5 {
-        assert_eq!(
-            request_with(
-                &addr,
-                "POST",
-                route,
-                Some(&json!({"read_only":false,"expected_read_only":true,"pin":"000000"})),
-                &human
-            )
-            .await
-            .0,
-            401
-        );
-    }
-    assert_eq!(
-        request_with(
-            &addr,
-            "POST",
-            "/api/session",
-            Some(&json!({"pin":"482915"})),
-            ""
-        )
-        .await
-        .0,
-        429
-    );
-    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 }

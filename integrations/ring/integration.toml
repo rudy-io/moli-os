@@ -1,0 +1,25 @@
+[integration]
+id = "ring"
+name = "Sonnettes et caméras Ring"
+brands = ["Ring"]
+models = ["Doorbell", "Doorbell Plus", "Doorbell Pro", "Doorbell Video", "Battery Doorbell", "Battery Doorbell Plus", "Battery Doorbell Pro", "Stick Up Cam", "Outdoor Cam Plus", "Indoor Cam Plus"]
+transport = "https"
+driver = "ring"
+crate = "moli-ring"
+
+[discovery]
+# Un compte cloud : rien à trouver sur le réseau maison.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# Rangés par l'humain ; `refresh_token` (au lien du compte) et `hardware_id`
+# (généré une fois) sont écrits par Moli, voir README.md.
+secrets = ["client_id", "client_secret", "hmac_key"]
+vars = []
+options = []
+
+[origin]
+reused = "API partenaire Amazon Vision documentée par Ring (developer.amazon.com/ring/console) : échange de jetons OAuth, lien unidirectionnel avec nonce HMAC-SHA256, événements JSON:API et instantanés présignés"
+author = "agent"

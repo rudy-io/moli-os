@@ -125,7 +125,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             forget_key(ctx).await?;
             let seen = Bridge::first_contact(&config.host).await.context("hue")?;
             ctx.store_secret(CERT, &seen).await?;
-            tracing::info!(instance = %ctx.instance(), "hue bridge certificate pinned");
+            tracing::info!(instance = %ctx.instance(), fingerprint = %seen, "hue bridge certificate pinned (first contact: verify it matches the bridge)");
             seen
         }
     };

@@ -1,0 +1,110 @@
+{
+ "imitates": "tesla",
+ "devices": [
+  {
+   "id": "tesla:100000001",
+   "instance": "tesla",
+   "native_name": "Tesla",
+   "manufacturer": "Tesla",
+   "model": "Model Y",
+   "description": "La voiture, par l'API officielle de Tesla.",
+   "native_room": "Garage",
+   "points": [
+    {
+     "key": "soc",
+     "label": "Niveau de batterie",
+     "kind": { "type": "numeric", "min": 0, "max": 100, "step": 1 },
+     "access": { "read": true, "write": false },
+     "unit": "%",
+     "semantic": "battery"
+    },
+    {
+     "key": "range",
+     "label": "Autonomie",
+     "kind": { "type": "numeric", "min": 0 },
+     "access": { "read": true, "write": false },
+     "unit": "km",
+     "semantic": "other"
+    },
+    {
+     "key": "charging",
+     "label": "En recharge",
+     "kind": { "type": "binary" },
+     "access": { "read": true, "write": false },
+     "semantic": "other"
+    },
+    {
+     "key": "charge_power",
+     "label": "Puissance de charge",
+     "kind": { "type": "numeric", "min": 0 },
+     "access": { "read": true, "write": false },
+     "unit": "W",
+     "semantic": "power"
+    },
+    {
+     "key": "plugged_in",
+     "label": "Prise branchée",
+     "kind": { "type": "binary" },
+     "access": { "read": true, "write": false },
+     "semantic": "other"
+    },
+    {
+     "key": "doors_locked",
+     "label": "Portes verrouillées",
+     "kind": { "type": "binary" },
+     "access": { "read": true, "write": false },
+     "semantic": "other"
+    },
+    {
+     "key": "sentry",
+     "label": "Mode vigie",
+     "kind": { "type": "binary" },
+     "access": { "read": true, "write": false },
+     "semantic": "other"
+    },
+    {
+     "key": "awake",
+     "label": "Réveillée",
+     "kind": { "type": "binary" },
+     "access": { "read": true, "write": false },
+     "semantic": "other"
+    },
+    {
+     "key": "inside_temp",
+     "label": "Température intérieure",
+     "kind": { "type": "numeric", "min": -60, "max": 100, "step": 0.1 },
+     "access": { "read": true, "write": false },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "outside_temp",
+     "label": "Température extérieure",
+     "kind": { "type": "numeric", "min": -60, "max": 100, "step": 0.1 },
+     "access": { "read": true, "write": false },
+     "unit": "°C",
+     "semantic": "temperature"
+    },
+    {
+     "key": "command",
+     "label": "Commande",
+     "kind": { "type": "text" },
+     "access": { "read": false, "write": true },
+     "semantic": "control"
+    }
+   ],
+   "state": {
+    "soc": 64,
+    "range": 262,
+    "charging": true,
+    "charge_power": 7200,
+    "plugged_in": true,
+    "doors_locked": true,
+    "sentry": false,
+    "awake": true,
+    "inside_temp": 21.4,
+    "outside_temp": 14.2
+   }
+  }
+ ]
+}

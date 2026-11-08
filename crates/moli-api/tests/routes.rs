@@ -45,21 +45,14 @@ fn declared(src: &str) -> Vec<(String, String)> {
     found
 }
 
-async fn serve() -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
+async fn serve() -> String {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let shutdown = CancellationToken::new();
-    let app = moli_api::router(hub, shutdown.clone(), &moli_api::Options::default());
+    let app = moli_api::router(hub, CancellationToken::new(), &moli_api::Options::default());
     let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    let stopped = shutdown.clone();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(stopped.cancelled_owned())
-            .await
-            .unwrap();
-    });
-    (addr, shutdown, task)
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    addr
 }
 
 /// The status line only: live streams never end. `extra`: header lines, each ending with CRLF.
@@ -149,20 +142,14 @@ async fn every_route_is_listed_and_holds_its_level() {
         [new, gone].concat().join("\n")
     );
 
+    let addr = serve().await;
     // A request relayed through a proxy is a stranger's, even from this machine.
     let stranger = "X-Forwarded-For: 203.0.113.9\r\n";
     let mut wrong = Vec::new();
     for (method, path, level) in &listed {
-        // Authorization must not inherit another route’s exhausted rate budget.
-        let (addr, shutdown, task) = serve().await;
         let url = concrete(path);
         let outside = status(&addr, method, &url, stranger).await;
         let household = status(&addr, method, &url, "").await;
-        shutdown.cancel();
-        tokio::time::timeout(Duration::from_secs(5), task)
-            .await
-            .expect("route server did not stop")
-            .unwrap();
         let ok = match level.as_str() {
             "public" => outside != 403,
             "foyer" => outside == 403,

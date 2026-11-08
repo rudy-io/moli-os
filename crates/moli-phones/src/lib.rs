@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use anyhow::{Context as _, bail, ensure};
-use moli_core::{Access, Device, DeviceId, Kind, PointSpec, Semantic, Unit, Value};
-use moli_runtime::{BoxFuture, Driver, DriverCtx};
+use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
+use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub};
 use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom as _, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -68,7 +68,10 @@ pub struct Phone {
     /// SHA-256 of the token, hex: the token itself is never kept.
     pub token_sha256: String,
     pub created_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Legacy only: the push token used to live here, in clear. It now lives
+    /// in the encrypted store (`<instance>/<id>/push_token`); the field stays
+    /// readable so old files load, but is never written back.
+    #[serde(default, skip_serializing)]
     pub push_token: Option<String>,
     /// The person it belongs to (`personnes:<id>`): who paired it, signed in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -157,6 +160,34 @@ fn sha256(token: &str) -> String {
     hex(digest(&SHA256, token.as_bytes()).as_ref())
 }
 
+/// `phones.json` says who owns which phone and where the home is: for Moli's
+/// user alone (0600 on unix, like `people.json` and the secret store).
+fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(path)?;
+    // A file left there (a crash) kept its own mode.
+    private(path)?;
+    file.write_all(bytes)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn private(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)]
+fn private(_: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
 /// Metres between two points (haversine).
 fn distance(a: Home, lat: f64, lon: f64) -> f64 {
     let r = 6_371_000.0_f64;
@@ -177,8 +208,13 @@ pub struct Registry {
 impl Registry {
     fn open(path: PathBuf) -> anyhow::Result<Self> {
         let file = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .with_context(|| format!("{} is unreadable", path.display()))?,
+            Ok(bytes) => {
+                // Names of the household's people and the home's position:
+                // the file stays owned by its user (0600), old files included.
+                private(&path).with_context(|| format!("cannot chmod {}", path.display()))?;
+                serde_json::from_slice(&bytes)
+                    .with_context(|| format!("{} is unreadable", path.display()))?
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => File::default(),
             Err(e) => return Err(e.into()),
         };
@@ -194,9 +230,23 @@ impl Registry {
 
     fn save(&self, file: &File) -> anyhow::Result<()> {
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(file)? + "\n")?;
+        write_private(
+            &tmp,
+            (serde_json::to_string_pretty(file)? + "\n").as_bytes(),
+        )?;
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
+    }
+
+    /// Removes a legacy push token from the in-memory file and saves it.
+    fn clear_push_token(&self, id: &str) {
+        let mut file = self.lock();
+        if let Some(phone) = file.phones.iter_mut().find(|p| p.id == id) {
+            phone.push_token = None;
+            if let Err(e) = self.save(&file) {
+                tracing::warn!(phone = id, error = %e, "phones.json not rewritten after the token moved to the vault");
+            }
+        }
     }
 
     #[must_use]
@@ -224,6 +274,30 @@ pub struct Gateway {
     config: Arc<Config>,
     tx: mpsc::Sender<Event>,
     members: Members,
+    /// The push tokens live in the hub's encrypted store, never in phones.json.
+    vault: Option<Vault>,
+}
+
+/// One name in the encrypted store: the push token of phone `<id>` is
+/// `<instance>/<id>/push_token`, read back by the driver through its context.
+#[derive(Clone)]
+struct Vault {
+    hub: Hub,
+    instance: InstanceId,
+}
+
+impl std::fmt::Debug for Vault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Vault")
+            .field("instance", &self.instance)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Vault {
+    fn name(phone: &str) -> String {
+        format!("{phone}/push_token")
+    }
 }
 
 /// Whether a person still belongs to the house.
@@ -269,8 +343,63 @@ impl Gateway {
             })
     }
 
+    /// Files a phone's push token in the encrypted store
+    /// (`<instance>/<phone id>/push_token`), where the driver reads it.
+    async fn store_push_token(&self, phone: &str, token: &str) -> anyhow::Result<()> {
+        let vault = self
+            .vault
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no encrypted store (MOLI_MASTER_KEY)"))?;
+        vault
+            .hub
+            .store_secret(&vault.instance, &Vault::name(phone), token)
+            .await
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Removes a phone's push token from the vault (a forgotten phone).
+    async fn forget_push_token(&self, phone: &str) -> anyhow::Result<()> {
+        if let Some(vault) = self.vault.as_ref() {
+            vault
+                .hub
+                .forget_secret(&vault.instance, &Vault::name(phone))
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::from)?;
+        }
+        Ok(())
+    }
+
+    /// Legacy phones.json kept push tokens in clear (before the encrypted
+    /// store): move each into the vault, then out of the file. Returns how
+    /// many were moved.
+    pub async fn migrate_legacy_tokens(&self) -> usize {
+        let legacy: Vec<(String, String)> = self
+            .registry
+            .lock()
+            .phones
+            .iter()
+            .filter_map(|p| p.push_token.as_ref().map(|t| (p.id.clone(), t.clone())))
+            .collect();
+        let mut moved = 0usize;
+        for (id, token) in &legacy {
+            if let Err(e) = self.store_push_token(id, token).await {
+                tracing::warn!(
+                    phone = %id,
+                    error = %e,
+                    "legacy push token not migrated to the encrypted store"
+                );
+                continue;
+            }
+            self.registry.clear_push_token(id);
+            moved += 1;
+        }
+        moved
+    }
+
     /// A new phone. `name`: the person's word for it (« iPhone de Sam »).
-    pub fn register(
+    /// The push token goes to the encrypted store, never to phones.json.
+    pub async fn register(
         &self,
         name: &str,
         platform: &str,
@@ -309,7 +438,7 @@ impl Gateway {
             model: model.to_owned(),
             token_sha256: sha256(&token),
             created_ms: moli_core::now_ms(),
-            push_token: push_token.map(str::to_owned),
+            push_token: None,
             person: person.map(str::to_owned),
         };
         {
@@ -319,6 +448,16 @@ impl Gateway {
             }
             file.phones.push(phone.clone());
             self.registry.save(&file)?;
+        }
+        // The push token is an app credential: encrypted store only.
+        if let Some(pt) = push_token
+            && let Err(e) = self.store_push_token(&phone.id, pt).await
+        {
+            tracing::warn!(
+                phone = %phone.id,
+                error = %e,
+                "push token not stored: notifications will not work for this phone"
+            );
         }
         let _ = self.tx.try_send(Event::Registered(phone.clone()));
         tracing::info!(phone = phone.id, name = phone.name, "phone paired");
@@ -362,15 +501,27 @@ impl Gateway {
     }
 
     /// A phone forgotten (lost, sold): its token stops working at once.
-    pub fn remove(&self, id: &str) -> anyhow::Result<bool> {
-        let mut file = self.registry.lock();
-        let before = file.phones.len();
-        file.phones.retain(|p| p.id != id);
-        if file.phones.len() == before {
+    pub async fn remove(&self, id: &str) -> anyhow::Result<bool> {
+        // The file change stays inside the block: a std lock guard must
+        // never live across an await (the future has to stay Send).
+        let removed = {
+            let mut file = self.registry.lock();
+            let before = file.phones.len();
+            file.phones.retain(|p| p.id != id);
+            if file.phones.len() == before {
+                false
+            } else {
+                self.registry.save(&file)?;
+                true
+            }
+        };
+        if !removed {
             return Ok(false);
         }
-        self.registry.save(&file)?;
-        drop(file);
+        // Its push token dies with it.
+        if let Err(e) = self.forget_push_token(id).await {
+            tracing::warn!(phone = id, error = %e, "push token not removed from the vault");
+        }
         let _ = self.tx.try_send(Event::Removed(id.to_owned()));
         tracing::info!(phone = id, "phone removed");
         Ok(true)
@@ -378,24 +529,31 @@ impl Gateway {
 
     /// Every phone of a person forgotten (removed from the house): their
     /// tokens stop working at once. Returns the phones forgotten.
-    pub fn forget(&self, person: &str) -> anyhow::Result<Vec<String>> {
-        let mut file = self.registry.lock();
-        let theirs = |p: &Phone| p.person.as_deref() == Some(person);
-        let gone: Vec<String> = file
-            .phones
-            .iter()
-            .filter(|p| theirs(p))
-            .map(|p| p.id.clone())
-            .collect();
-        if gone.is_empty() {
-            return Ok(gone);
-        }
-        file.phones.retain(|p| !theirs(p));
-        self.registry.save(&file)?;
-        drop(file);
+    pub async fn forget(&self, person: &str) -> anyhow::Result<Vec<String>> {
+        // The file change stays inside the block: a std lock guard must
+        // never live across an await (the future has to stay Send).
+        let gone = {
+            let mut file = self.registry.lock();
+            let theirs = |p: &Phone| p.person.as_deref() == Some(person);
+            let gone: Vec<String> = file
+                .phones
+                .iter()
+                .filter(|p| theirs(p))
+                .map(|p| p.id.clone())
+                .collect();
+            if gone.is_empty() {
+                return Ok(gone);
+            }
+            file.phones.retain(|p| !theirs(p));
+            self.registry.save(&file)?;
+            gone
+        };
         for id in &gone {
+            if let Err(e) = self.forget_push_token(id).await {
+                tracing::warn!(phone = %id, error = %e, "push token not removed from the vault");
+            }
             let _ = self.tx.try_send(Event::Removed(id.clone()));
-            tracing::info!(phone = id, "phone removed with its person");
+            tracing::info!(phone = %id, "phone removed with its person");
         }
         Ok(gone)
     }
@@ -422,20 +580,23 @@ impl Gateway {
         person.is_none_or(|p| self.members.0.get().is_none_or(|belongs| belongs(&p)))
     }
 
-    /// Whether `token` is this phone's.
+    /// Whether `token` is this phone's. Constant-time: the comparison cannot
+    /// leak the stored hash one byte at a time.
     #[must_use]
     pub fn verify(&self, id: &str, token: &str) -> bool {
         let hash = sha256(token);
-        // Hashes compared, not tokens: timing could only leak a hash.
         self.registry
             .lock()
             .phones
             .iter()
-            .any(|p| p.id == id && p.token_sha256 == hash)
+            .find(|p| p.id == id)
+            .is_some_and(|p| {
+                moli_core::constant_time_eq(p.token_sha256.as_bytes(), hash.as_bytes())
+            })
     }
 
     /// A report from a verified phone; returns the home (to watch its edge).
-    pub fn report(&self, id: &str, report: Report) -> anyhow::Result<Option<HomeView>> {
+    pub async fn report(&self, id: &str, report: Report) -> anyhow::Result<Option<HomeView>> {
         report.check()?;
         // What each report carries (never its values): what the phone can say.
         tracing::info!(
@@ -446,13 +607,19 @@ impl Gateway {
             wifi = report.wifi.is_some(),
             "phone report"
         );
-        if let Some(token) = &report.push_token {
-            let mut file = self.registry.lock();
-            if let Some(phone) = file.phones.iter_mut().find(|p| p.id == id)
-                && phone.push_token.as_deref() != Some(token.as_str())
-            {
-                phone.push_token = Some(token.clone());
-                self.registry.save(&file)?;
+        // The push token is an app credential: encrypted store only, and
+        // only written when it actually changed.
+        if let Some(token) = &report.push_token
+            && let Some(vault) = self.vault.as_ref()
+            && vault
+                .hub
+                .secret(&vault.instance, &Vault::name(id))
+                .as_deref()
+                != Some(token.as_str())
+        {
+            if let Err(e) = self.store_push_token(id, token).await {
+                tracing::warn!(phone = id, error = %e, "phone push token not updated");
+            } else {
                 tracing::info!(phone = id, "phone push token updated");
             }
         }
@@ -492,7 +659,14 @@ pub struct Phones {
 }
 
 /// The pair the binary wires: the gateway for the API, the driver for the hub.
-pub fn open(config: Config, data_dir: &Path) -> anyhow::Result<(Gateway, Phones)> {
+/// `hub` carries the encrypted store: the push tokens live there (the driver
+/// reads them back through its context), never in phones.json.
+pub fn open(
+    config: Config,
+    data_dir: &Path,
+    hub: Option<&Hub>,
+    instance: &InstanceId,
+) -> anyhow::Result<(Gateway, Phones)> {
     ensure!(
         config.radius.is_finite() && (20.0..=5_000.0).contains(&config.radius),
         "radius: 20–5000 m"
@@ -502,11 +676,26 @@ pub fn open(config: Config, data_dir: &Path) -> anyhow::Result<(Gateway, Phones)
     }
     let registry = Arc::new(Registry::open(data_dir.join("phones.json"))?);
     let (tx, rx) = mpsc::channel(64);
+    let vault = hub.and_then(|hub| {
+        if hub.has_secret_store() {
+            Some(Vault {
+                hub: hub.clone(),
+                instance: instance.clone(),
+            })
+        } else {
+            tracing::warn!(
+                instance = %instance,
+                "no encrypted store: phone push tokens cannot be kept (MOLI_MASTER_KEY)"
+            );
+            None
+        }
+    });
     let gateway = Gateway {
         registry,
         config: Arc::new(config),
         tx,
         members: Members::default(),
+        vault,
     };
     Ok((
         gateway.clone(),
@@ -672,6 +861,9 @@ fn publish(ctx: &DriverCtx, phone: &Phone) {
 }
 
 async fn run(this: &Phones, ctx: &mut DriverCtx) -> anyhow::Result<()> {
+    // Old phones.json kept push tokens in clear: move them to the encrypted
+    // store before the first push.
+    this.gateway.migrate_legacy_tokens().await;
     for phone in this.gateway.registry.phones() {
         publish(ctx, &phone);
     }
@@ -681,7 +873,7 @@ async fn run(this: &Phones, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         tokio::select! {
             command = ctx.next_command() => match command {
                 Some(command) => {
-                    let result = notify(this, &command).await;
+                    let result = notify(this, ctx, &command).await;
                     command.reply(result);
                 }
                 None => return Ok(()),
@@ -702,7 +894,11 @@ async fn run(this: &Phones, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 
 /// `push`: a notification to this phone (a title line, then the message;
 /// or a single line).
-async fn notify(this: &Phones, command: &moli_runtime::CommandRequest) -> Result<(), String> {
+async fn notify(
+    this: &Phones,
+    ctx: &DriverCtx,
+    command: &moli_runtime::CommandRequest,
+) -> Result<(), String> {
     let (key, value) = (&*command.key, &command.value);
     let Value::Text(text) = value else {
         return Err(moli_i18n::tr!("pilotes.phones.du_texte", point = key));
@@ -720,13 +916,9 @@ async fn notify(this: &Phones, command: &moli_runtime::CommandRequest) -> Result
     if !this.gateway.belongs(id) {
         return Err(moli_i18n::tr!("pilotes.phones.hors_maison"));
     }
-    let token = this
-        .gateway
-        .registry
-        .phones()
-        .into_iter()
-        .find(|p| p.id == id)
-        .and_then(|p| p.push_token)
+    // The push token lives in the encrypted store, never in phones.json.
+    let token = ctx
+        .secret(&format!("{id}/push_token"))
         .ok_or_else(|| moli_i18n::tr!("pilotes.phones.sans_jeton"))?;
     let (title, body) =
         push::message(text).ok_or_else(|| moli_i18n::tr!("pilotes.phones.message_vide"))?;
@@ -788,9 +980,18 @@ fn apply(this: &Phones, ctx: &DriverCtx, id: &str, r: &Report) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use moli_runtime::{HubOptions, MasterKey};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
 
-    fn gateway(dir: &Path, config: Config) -> (Gateway, Phones) {
-        open(config, dir).unwrap()
+    fn gateway(dir: &Path, config: Config) -> (Gateway, Phones, Hub) {
+        let hub = Hub::new(HubOptions {
+            secrets: Some((dir.join("secrets.enc"), MasterKey::generate().unwrap())),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        let (g, phones) = open(config, dir, Some(&hub), &InstanceId::from("phones")).unwrap();
+        (g, phones, hub)
     }
 
     fn config() -> Config {
@@ -802,24 +1003,55 @@ mod tests {
     }
 
     #[test]
-    fn a_phone_pairs_and_only_its_token_opens() {
+    fn gateway_stays_send_for_the_api_handlers() {
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+        assert_send::<Gateway>();
+        assert_sync::<Gateway>();
+        assert_send::<Hub>();
+        assert_sync::<Hub>();
+    }
+
+    #[tokio::test]
+    async fn gateway_method_futures_are_send() {
+        let dir = std::env::temp_dir().join(format!("moli-phones-send-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (g, _phones, _hub) = gateway(&dir, config());
+        // tokio::spawn requires the futures to be Send: the API handlers
+        // capture the gateway across awaits.
+        tokio::spawn(async move {
+            let _ = g.remove("pX").await;
+            let _ = g.forget("x").await;
+            let _ = g.register("n", "ios", "", None, None).await;
+            let _ = g.report("pX", Report::default()).await;
+        })
+        .await
+        .unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_phone_pairs_and_only_its_token_opens() {
         let dir = std::env::temp_dir().join(format!("moli-phones-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let (g, _phones) = gateway(&dir, config());
+        let (g, _phones, _hub) = gateway(&dir, config());
         let paired = g
             .register("iPhone  de Sam", "ios", "iPhone 15", None, None)
+            .await
             .unwrap();
         assert_eq!(paired.token.len(), 64);
         assert!(g.verify(&paired.id, &paired.token));
         assert!(!g.verify(&paired.id, &"0".repeat(64)));
         assert!(!g.verify("p00000000", &paired.token));
-        assert!(g.remove(&paired.id).unwrap());
+        assert!(g.remove(&paired.id).await.unwrap());
         assert!(
             !g.verify(&paired.id, &paired.token),
             "a removed phone's token is dead"
         );
         let paired = g
             .register("iPhone  de Sam", "ios", "iPhone 15", None, None)
+            .await
             .unwrap();
         let kept = std::fs::read_to_string(dir.join("phones.json")).unwrap();
         assert!(
@@ -827,37 +1059,149 @@ mod tests {
             "only the token's hash is kept"
         );
         assert!(kept.contains("iPhone de Sam"));
-        assert!(g.register("", "ios", "", None, None).is_err());
-        assert!(g.register("x", "symbian", "", None, None).is_err());
+        assert!(g.register("", "ios", "", None, None).await.is_err());
+        assert!(g.register("x", "symbian", "", None, None).await.is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[test]
-    fn a_phone_follows_its_person_out_of_the_house() {
+    #[tokio::test]
+    async fn a_phone_follows_its_person_out_of_the_house() {
         let dir = std::env::temp_dir().join(format!("moli-phones-whose-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let (g, _phones) = gateway(&dir, config());
-        let pair = |person| g.register("Téléphone", "ios", "", None, person).unwrap();
-        let (sam, guest, house) = (pair(Some("sam")), pair(Some("passage")), pair(None));
+        let (g, _phones, _hub) = gateway(&dir, config());
+        let sam = g
+            .register("Téléphone", "ios", "", None, Some("sam"))
+            .await
+            .unwrap();
+        let guest = g
+            .register("Téléphone", "ios", "", None, Some("passage"))
+            .await
+            .unwrap();
+        let house = g
+            .register("Téléphone", "ios", "", None, None)
+            .await
+            .unwrap();
         assert!(g.belongs(&guest.id), "until the API says who belongs");
         // A guest whose stay ended: its phone no longer belongs.
         g.members(|person| person == "sam");
         assert!(g.belongs(&sam.id) && g.belongs(&house.id));
         assert!(!g.belongs(&guest.id));
         // Sam removed: Sam's phones are forgotten, their tokens dead.
-        assert_eq!(g.forget("sam").unwrap(), std::slice::from_ref(&sam.id));
+        assert_eq!(
+            g.forget("sam").await.unwrap(),
+            std::slice::from_ref(&sam.id)
+        );
         assert!(!g.verify(&sam.id, &sam.token));
         assert!(g.verify(&house.id, &house.token));
-        assert!(g.forget("sam").unwrap().is_empty());
+        assert!(g.forget("sam").await.unwrap().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[test]
-    fn the_home_is_learned_on_its_wifi_only() {
+    #[tokio::test]
+    async fn push_tokens_live_only_in_the_vault() {
+        let dir = std::env::temp_dir().join(format!("moli-phones-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (g, _phones, hub) = gateway(&dir, config());
+        let vault_name = |id: &str| format!("{id}/push_token");
+        let paired = g
+            .register(
+                "iPhone  de Sam",
+                "ios",
+                "iPhone 15",
+                Some("expo-token-123"),
+                None,
+            )
+            .await
+            .unwrap();
+        // Never in the registry file (push tokens are app credentials).
+        let kept = std::fs::read_to_string(dir.join("phones.json")).unwrap();
+        assert!(
+            !kept.contains("expo-token-123"),
+            "the push token must not sit in phones.json"
+        );
+        // …and in the encrypted store, namespaced by the driver instance.
+        assert_eq!(
+            hub.secret(&InstanceId::from("phones"), &vault_name(&paired.id)),
+            Some("expo-token-123".into())
+        );
+        // A report with the same token changes nothing; a new one is filed.
+        g.report(
+            &paired.id,
+            Report {
+                push_token: Some("expo-token-123".into()),
+                ..Report::default()
+            },
+        )
+        .await
+        .unwrap();
+        g.report(
+            &paired.id,
+            Report {
+                push_token: Some("expo-token-456".into()),
+                ..Report::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            hub.secret(&InstanceId::from("phones"), &vault_name(&paired.id)),
+            Some("expo-token-456".into())
+        );
+        // Removal and forgetting purge the vault too.
+        assert!(g.remove(&paired.id).await.unwrap());
+        assert_eq!(
+            hub.secret(&InstanceId::from("phones"), &vault_name(&paired.id)),
+            None
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn legacy_push_tokens_are_migrated_to_the_vault() {
+        let dir = std::env::temp_dir().join(format!("moli-phones-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A pre-vault phones.json, with the token in clear and loose mode.
+        std::fs::write(
+            dir.join("phones.json"),
+            r#"{ "phones": [ { "id": "p00000001", "name": "L'iPhone", "platform": "ios", "model": "", "token_sha256": "ab", "created_ms": 1, "push_token": "legacy-token" } ] }"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            dir.join("phones.json"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        let (g, _phones, hub) = gateway(&dir, config());
+        // The file is tightened on open (0600), whatever its old mode was.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(dir.join("phones.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "existing phones.json must become 0600");
+        }
+        assert_eq!(g.migrate_legacy_tokens().await, 1);
+        let kept = std::fs::read_to_string(dir.join("phones.json")).unwrap();
+        assert!(!kept.contains("legacy-token"), "the clear token is gone");
+        assert_eq!(
+            hub.secret(&InstanceId::from("phones"), "p00000001/push_token"),
+            Some("legacy-token".into())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_home_is_learned_on_its_wifi_only() {
         let dir = std::env::temp_dir().join(format!("moli-phones-home-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let (g, _phones) = gateway(&dir, config());
+        let (g, _phones, _hub) = gateway(&dir, config());
         let at = |lat, wifi: &str, acc| Report {
             latitude: Some(lat),
             longitude: Some(2.35),
@@ -866,22 +1210,28 @@ mod tests {
             ..Report::default()
         };
         assert!(
-            g.report("p1", at(48.85, "Café", 10.0)).unwrap().is_none(),
+            g.report("p1", at(48.85, "Café", 10.0))
+                .await
+                .unwrap()
+                .is_none(),
             "another Wi-Fi: not home"
         );
         assert!(
             g.report("p1", at(48.85, "Maison-Wifi", 500.0))
+                .await
                 .unwrap()
                 .is_none(),
             "too vague"
         );
         let home = g
             .report("p1", at(48.85, "Maison-Wifi", 15.0))
+            .await
             .unwrap()
             .unwrap();
         assert!((home.latitude - 48.85).abs() < 1e-9 && (home.radius - 150.0).abs() < 1e-9);
         assert!(
             g.report("p1", at(48.95, "Maison-Wifi", 15.0))
+                .await
                 .unwrap()
                 .unwrap()
                 .latitude
@@ -896,6 +1246,7 @@ mod tests {
                     ..Report::default()
                 }
             )
+            .await
             .is_err()
         );
         let _ = std::fs::remove_dir_all(dir);

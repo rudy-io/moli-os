@@ -37,9 +37,6 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     if !writes {
         return None;
     }
-    if path == "/api/integrations/airzone" || path.starts_with("/api/integrations/airzone/") {
-        return Some(("airzone_setup", 6));
-    }
     if path == "/api/command" || path.starts_with("/api/labels/") {
         return Some(if from_dashboard {
             ("dashboard", 100)
@@ -49,7 +46,6 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     }
     // A person's decisions: approvals, and what Moli proposed, learned or should undo.
     if path.starts_with("/api/approvals/")
-        || (path.starts_with("/api/devices/") && path.ends_with("/visibility"))
         || path.starts_with("/api/assistant/proposals/")
         || path.starts_with("/api/assistant/turns/")
         || path.starts_with("/api/assistant/rules/")
@@ -67,6 +63,17 @@ fn budget(method: &Method, path: &str, from_dashboard: bool) -> Option<(&'static
     }
     if path.starts_with("/api/assistant") || path.starts_with("/api/plan/images") {
         return Some(("heavy", 20));
+    }
+    // Launching a routine executes a real graph (LLM calls, notifications):
+    // a small budget per caller, on top of the engine's own per-automation
+    // locks. Dry runs pass through here too, but they have no effect.
+    if path.starts_with("/api/automations/") && path.ends_with("/run") {
+        return Some(("run", 6));
+    }
+    // Drafting costs LLM completions (up to two per request): a dedicated
+    // class so a draft spam cannot starve conversations.
+    if path == "/api/automations/draft" {
+        return Some(("draft", 10));
     }
     // A computer's agent reports every 5 s; a launch is a person's.
     if path.starts_with("/api/machines/") {
@@ -156,35 +163,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn airzone_network_actions_share_one_budget_including_existing_instances() {
-        for (method, path) in [
-            (Method::POST, "/api/integrations/airzone"),
-            (Method::POST, "/api/integrations/airzone/probe"),
-            (Method::POST, "/api/integrations/airzone/discover"),
-            (Method::POST, "/api/integrations/airzone/existing/probe"),
-            (Method::PUT, "/api/integrations/airzone/existing"),
-            (Method::POST, "/api/integrations/airzone/existing/withdraw"),
-            (Method::POST, "/api/integrations/airzone/existing/mode"),
-        ] {
-            for dashboard in [false, true] {
-                assert_eq!(
-                    budget(&method, path, dashboard),
-                    Some(("airzone_setup", 6)),
-                    "{path}"
-                );
-            }
-        }
-        assert_eq!(
-            budget(&Method::GET, "/api/integrations/airzone", true),
-            None
-        );
-        assert_eq!(
-            budget(&Method::PUT, "/api/integrations/airzone-unrelated", true),
-            None
-        );
-    }
-
-    #[test]
     fn writes_have_a_budget_per_caller() {
         let limits = Limits::default();
         for _ in 0..30 {
@@ -229,10 +207,6 @@ mod tests {
             budget(&Method::PUT, "/api/labels/x", false),
             Some(("command", 30))
         );
-        assert_eq!(
-            budget(&Method::PUT, "/api/devices/fake:lamp/visibility", true),
-            Some(("decide", 30))
-        );
         assert_eq!(budget(&Method::POST, "/mcp", false), Some(("mcp", 120)));
         assert_eq!(
             budget(&Method::POST, "/api/assistant", false),
@@ -242,7 +216,16 @@ mod tests {
             budget(&Method::POST, "/api/session", true),
             Some(("session", 10))
         );
-        assert_eq!(budget(&Method::POST, "/api/automations/x/run", false), None);
+        assert_eq!(
+            budget(&Method::POST, "/api/automations/x/run", false),
+            Some(("run", 6))
+        );
+        assert_eq!(
+            budget(&Method::POST, "/api/automations/draft", false),
+            Some(("draft", 10))
+        );
+        // List endpoints are reads: never counted.
+        assert_eq!(budget(&Method::GET, "/api/automations", false), None);
         // Deciding on what Moli proposed is a decision, like an approval.
         for path in [
             "/api/assistant/proposals/3",

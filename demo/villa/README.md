@@ -1,8 +1,8 @@
 # La villa de démonstration
 
-Une maison complète, **sans aucun appareil** : 116 appareils simulés (lumières Hue,
+Une maison complète, **sans aucun appareil** : 117 appareils simulés (lumières Hue,
 prises et volets Tuya, capteurs Zigbee, clims, Sonos, télé, caméras, imprimantes 3D,
-piscine, Linky et tableau électrique), un plan 2D/3D, des automatismes et une année de
+la voiture Tesla, piscine, Linky, relais DIN NOUS et tableau électrique), un plan 2D/3D, des automatismes et une année de
 consommation. Chaque appareil reprend la forme exacte d'un vrai appareil, tel que son pilote
 le publie : le tableau de bord ne voit pas la différence.
 

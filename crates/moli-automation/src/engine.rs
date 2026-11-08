@@ -387,9 +387,16 @@ impl Automations {
                 let busy = lock(&self.0.active)
                     .get(&a.id)
                     .is_some_and(|(_, t)| !t.is_cancelled());
-                if busy && !manual {
-                    tracing::debug!(automation = a.id, "already running: trigger ignored");
-                    return skipped(why);
+                if busy {
+                    // A manual launch respects the lock too: otherwise a
+                    // loop on the network would run the real graph in
+                    // parallel (every write node is a real LLM call).
+                    tracing::debug!(automation = a.id, manual, "already running: run ignored");
+                    return skipped(if manual {
+                        tr!("moteur.pourquoi.deja_lancee")
+                    } else {
+                        why
+                    });
                 }
             }
             Mode::Queued => {

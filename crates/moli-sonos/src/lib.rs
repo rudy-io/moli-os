@@ -325,9 +325,6 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let mut online = None;
     loop {
         tokio::select! {
-            said = announcements.speaking_changed() => {
-                Announcements::show_speaking(ctx, &id, said);
-            }
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
                 if let Some(result) = announcements.command(ctx, &id, &command) {
@@ -377,6 +374,7 @@ async fn speaker_pin(host: &str, ctx: &DriverCtx) -> Option<String> {
         return None;
     }
     let seen = probe.seen_fingerprint()?;
+    tracing::info!(host, fingerprint = %seen, "sonos certificate pinned (first contact: verify it matches the speaker)");
     if ctx.can_store_secrets()
         && let Err(e) = ctx.store_secret(WS_CERT, &seen).await
     {

@@ -713,7 +713,7 @@ async fn tls_server(
 ) -> (Config, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     use std::fmt::Write as _;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let digest = ring::digest::digest(&ring::digest::SHA256, certificate.cert.der());
     let mut fingerprint = String::new();
     for byte in digest.as_ref() {
@@ -776,7 +776,7 @@ async fn tls_server(
     });
     (
         Config {
-            host: "localhost".into(),
+            host: "127.0.0.1".into(),
             port,
             poll_secs: 30,
             mac: None,
@@ -814,7 +814,7 @@ async fn pinned_https_reads_and_writes_work_but_changed_certificate_sends_no_htt
         .unwrap_err();
     assert_eq!(error.downcast_ref::<Failure>(), Some(&Failure::Certificate));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert!(!error.to_string().contains("localhost"));
+    assert!(!error.to_string().contains("127.0.0.1"));
     task.abort();
 }
 

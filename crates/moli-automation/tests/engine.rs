@@ -1040,3 +1040,73 @@ async fn said_aloud_through_every_speaker() {
         Some(Value::Text("Quelqu'un est à la porte".into()))
     );
 }
+
+/// A writer that takes its time, so a run stays in progress long enough
+/// for a second launch to be observed mid-flight.
+#[derive(Debug, Default)]
+struct SlowWriter(std::sync::atomic::AtomicUsize);
+
+impl Writer for SlowWriter {
+    fn write(&self, _prompt: String) -> BoxFuture<'_, anyhow::Result<String>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            Ok("done".to_owned())
+        })
+    }
+
+    fn withholds(&self, _key: &str) -> bool {
+        false
+    }
+}
+
+/// A manual launch must respect the mode's lock: in `single`, a second
+/// launch while one is in progress is skipped, not run in parallel.
+#[tokio::test]
+async fn a_manual_run_respects_the_single_mode_lock() {
+    let (_hub, autos, _cancel) = setup().await;
+    let writer = Arc::new(SlowWriter::default());
+    autos.set_writer(writer.clone());
+    let mut a = automation(serde_json::json!({
+        "nodes": [
+            { "id": "t", "type": "manual" },
+            { "id": "w", "type": "write", "prompt": "Do the slow thing" }
+        ],
+        "edges": [{ "from": "t", "to": "w" }]
+    }));
+    a.mode = Mode::Single;
+    let a = autos.save(a, HUMAN).await.unwrap();
+    autos.approve(&a.id, &a.fingerprint(), HUMAN).await.unwrap();
+    let fp = a.fingerprint();
+
+    let first = autos.run_now(&a.id, false, Some(&fp), HUMAN).await.unwrap();
+    assert_eq!(first.status, RunStatus::Running);
+    // While it is still in progress, a second launch is ignored.
+    let second = autos.run_now(&a.id, false, Some(&fp), HUMAN).await.unwrap();
+    assert_eq!(second.id, 0, "skipped runs carry no id");
+    assert_eq!(second.status, RunStatus::Cancelled);
+    assert_eq!(
+        second.why,
+        moli_i18n::tr!("moteur.pourquoi.deja_lancee"),
+        "the skip is explained"
+    );
+
+    for _ in 0..300 {
+        let runs = autos.runs(Some(&a.id), 10);
+        if !runs.is_empty() && runs.iter().all(|r| r.ended.is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let runs = autos.runs(Some(&a.id), 10);
+    assert_eq!(runs.len(), 1, "only the first run should exist: {runs:?}");
+    assert!(
+        runs.iter().all(|r| r.ended.is_some()),
+        "the first run should have finished: {runs:?}"
+    );
+    assert_eq!(
+        writer.0.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the writer ran once, not twice in parallel"
+    );
+}

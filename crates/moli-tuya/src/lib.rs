@@ -31,7 +31,7 @@ use serde::Deserialize;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use device::{Link, Order, Up};
+use device::{Address, Link, Order, Up};
 pub use model::{DeviceFile, Dp, DpKind, TuyaDevice};
 use protocol::Version;
 
@@ -144,12 +144,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             || (dev.ip.is_none() && cloud::SLEEPY.contains(&dev.category.as_str()));
         silent_seen |= silent;
         if silent && keys.is_some() {
-            let device = dev.device(ctx.instance());
-            let id = device.id.clone();
-            ctx.upsert_device(device);
-            let dev = Arc::new(dev);
-            watched.insert(dev.id.clone(), (devices.len(), Arc::clone(&dev)));
-            devices.push((id, dev));
+            register_silent(ctx, dev, &mut devices, &mut watched);
             continue;
         }
         if dev.gateway.is_some() {
@@ -263,6 +258,21 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         anyhow::bail!(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
     }
     Ok(())
+}
+
+/// Declares a device the cloud speaks for (no LAN link of its own).
+fn register_silent(
+    ctx: &DriverCtx,
+    dev: TuyaDevice,
+    devices: &mut Vec<(DeviceId, Arc<TuyaDevice>)>,
+    watched: &mut cloud::Watched,
+) {
+    let device = dev.device(ctx.instance());
+    let id = device.id.clone();
+    ctx.upsert_device(device);
+    let dev = Arc::new(dev);
+    watched.insert(dev.id.clone(), (devices.len(), Arc::clone(&dev)));
+    devices.push((id, dev));
 }
 
 /// Sub-devices whose gateway is reached locally speak through it: they are
@@ -577,19 +587,20 @@ fn dispatch(
     });
 }
 
+/// After a failed proof, no new probe of the same (device, address) pair
+/// until this deadline: a forger broadcasting on purpose must not make the
+/// driver run a TCP probe for every broadcast.
+const REFUSE_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// Listens to the devices' broadcasts (3.1–3.3 on 6666/6667, 3.4+ also on
 /// 7000) and keeps every device's address and version up to date. Devices
-/// with a verified healthy connection are left alone. Anyone can broadcast: a
-/// device is never spoken to in an older version than it proved, or than
-/// its file says (`device::Floor`).
+/// with a verified healthy connection are left alone. Anyone on the LAN can
+/// send a broadcast: a device is never spoken to in an older version than it
+/// proved, or than its file says (`device::Floor`), and a new address is
+/// only trusted once the device itself proves its key there (the encrypted
+/// probe `seek` uses).
 async fn discover(addresses: HashMap<String, seek::Wanted>) {
-    let mut sockets = Vec::new();
-    for port in [6666u16, 6667, 7000] {
-        match broadcast_socket(port) {
-            Ok(socket) => sockets.push(socket),
-            Err(e) => tracing::warn!(port, error = %e, "tuya discovery port unavailable"),
-        }
-    }
+    let sockets = discovery_sockets();
     if sockets.is_empty() {
         // Keep the senders: links go on with the addresses they have.
         std::future::pending::<()>().await;
@@ -623,24 +634,94 @@ async fn discover(addresses: HashMap<String, seek::Wanted>) {
         });
     }
     drop(found_tx);
+    // (device, address) pairs that failed to prove their key, with the
+    // deadline until which they are not probed again.
+    let mut refused: HashMap<String, tokio::time::Instant> = HashMap::new();
     while let Some((id, ip, version)) = found.recv().await {
-        if let Some(device) = addresses.get(&id) {
-            let state = *device.reachability.borrow();
-            if state.online {
-                continue;
-            }
-            let version = version.max(state.version.unwrap_or(Version::V33));
+        let Some(device) = addresses.get(&id) else {
+            continue;
+        };
+        let state = *device.reachability.borrow();
+        if state.online {
+            continue;
+        }
+        let moved = device
+            .address
+            .borrow()
+            .as_ref()
+            .is_none_or(|(current, _)| current != &ip);
+        if !moved {
+            // Same address: a version update only; the floor in `device`
+            // filters any downgrade.
+            note_version(&device.address, &ip, version);
+            continue;
+        }
+        // A broadcast can be sent by anyone on the network: the address is
+        // trusted only if the device itself proves its key at that address.
+        let mark = format!("{id}@{ip}");
+        if refused
+            .get(&mark)
+            .is_some_and(|until| *until > tokio::time::Instant::now())
+        {
+            continue;
+        }
+        // The discovery sockets are IPv4, so the address is an IPv4 one.
+        let Some(ipv4) = ip.parse::<Ipv4Addr>().ok() else {
+            continue;
+        };
+        if let Some(proven) = seek::prove((ipv4, seek::PORT).into(), &id, device.key).await {
+            refused.remove(&mark);
+            let next = proven.max(state.version.unwrap_or(Version::V33));
             device.address.send_if_modified(|current| {
-                let next = Some((ip.clone(), version));
-                if *current == next {
+                let updated = Some((ip.clone(), next));
+                if *current == updated {
                     return false;
                 }
-                tracing::info!(device = id, ip, ?version, "tuya device found");
-                *current = next;
+                tracing::info!(
+                    device = id,
+                    %ip,
+                    ?next,
+                    "tuya device found (its key was proved at that address)"
+                );
+                *current = updated;
                 true
             });
+        } else {
+            refused.insert(mark, tokio::time::Instant::now() + REFUSE_WINDOW);
+            tracing::warn!(
+                device = id,
+                %ip,
+                ?version,
+                "tuya broadcast refused: no key proof at that address"
+            );
         }
     }
+}
+
+/// One broadcast socket per discovery port. A port that cannot bind is
+/// logged and skipped, never fatal: the other ports keep working.
+fn discovery_sockets() -> Vec<UdpSocket> {
+    let mut sockets = Vec::new();
+    for port in [6666u16, 6667, 7000] {
+        match broadcast_socket(port) {
+            Ok(socket) => sockets.push(socket),
+            Err(e) => tracing::warn!(port, error = %e, "tuya discovery port unavailable"),
+        }
+    }
+    sockets
+}
+
+/// Publishes `version` for a device already seen at `ip` (a version update
+/// only; the floor in `device` filters any downgrade).
+fn note_version(sender: &Arc<watch::Sender<Address>>, ip: &str, version: Version) {
+    sender.send_if_modified(|current| {
+        let next = Some((ip.to_owned(), version));
+        if *current == next {
+            return false;
+        }
+        *current = next;
+        true
+    });
 }
 
 /// Shared with anything else listening (Home Assistant's localtuya):

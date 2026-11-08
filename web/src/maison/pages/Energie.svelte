@@ -3,7 +3,7 @@
   import { home, hub, value, isOn, nameOf, deviceKind, doorOpen, act } from '../lib/home.svelte.js';
   import { isValve } from '../lib/capabilities.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
-  import { offPeak, nextChange, clockText, minutesText, windowText, baseload, typicalDay, todayByHour, prices, advise } from '../lib/energy-advice.js';
+  import { offPeak, nextChange, clockText, minutesText, windowText, baseload, typicalDay, todayByHour, prices, advise, planningOffPeak, planningChange } from '../lib/energy-advice.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import EnergyChart from '../ui/EnergyChart.svelte';
@@ -54,12 +54,16 @@
   const inside = (row) =>
     row === '__lights' ? lights : appliances.filter((a) => (a.within ?? '__rest') === row && !(a.estimated && !a.within));
 
-  // Who draws power right now: each circuit, then what none explains.
+  // Who draws power right now: each circuit, then what none explains — or
+  // directly the appliance meters when no circuit meter has a power point
+  // (plug-only homes, a car's charging point).
   const draws = $derived.by(() => {
     if (!s) return [];
-    const list = s.meters
-      .filter((m) => m.role === 'circuit' && m.power)
-      .map((m) => ({ id: m.id, name: m.name, w: Math.max(0, livePower(m.power, m.power_w) ?? 0) }));
+    const circuits = s.meters.filter((m) => m.role === 'circuit' && m.power);
+    const list = (circuits.length
+      ? circuits
+      : appliances.filter((a) => !a.estimated && a.power)
+    ).map((m) => ({ id: m.id, name: m.name, w: Math.max(0, livePower(m.power, m.power_w) ?? 0) }));
     const lit = lights.reduce((t, a) => t + Math.max(0, livePower(a.power, a.power_w) ?? 0), 0);
     if (lights.length) list.push({ id: '__lights', name: t('energie.lumieres'), w: lit, estimated: true });
     if (now != null) {
@@ -106,8 +110,10 @@
   const parts = $derived.by(() => {
     const period = s?.[span];
     if (!period) return [];
-    const list = s.meters
-      .filter((m) => m.role === 'circuit')
+    // With circuit meters they are the parts; without any, the appliance
+    // meters (plugs, a car's charging point) are the top-level parts.
+    const circuits = s.meters.filter((m) => m.role === 'circuit');
+    const list = (circuits.length ? circuits : appliances.filter((a) => !a.estimated))
       .map((m) => ({ id: m.id, name: m.name, ...(period.meters[m.id] ?? { kwh: 0 }) }));
     const of = (a) => period.meters[a.id] ?? { kwh: 0 };
     const lit = lights.reduce((t, a) => t + (of(a).kwh ?? 0), 0);
@@ -174,8 +180,15 @@
     }
   });
 
-  const windows = $derived(offPeak(tariff, home.now));
-  const change = $derived(nextChange(windows, home.now));
+  const planning = $derived(s?.planning ?? null);
+  // Off-peak windows come from the fixed planning when configured,
+  // otherwise they are learned from the last week of tariff changes.
+  const windows = $derived(
+    planning ? planningOffPeak(planning, home.now) : offPeak(tariff, home.now)
+  );
+  const change = $derived(
+    planning ? planningChange(planning, home.now) : nextChange(windows, home.now)
+  );
   const profile = $derived(typicalDay(week));
   const todayHours = $derived(todayByHour(week, home.now));
   const base = $derived(baseload(week));
@@ -384,14 +397,14 @@
       </section>
     </div>
 
-    <TariffPie {windows} />
+    <TariffPie {windows} {planning} />
 
     {#if profile}
       <section class="card">
         <div class="card-head"><h2><Icon name="clock" size={18} />{t('energie.journee.titre')}</h2></div>
         <DayProfile {profile} {windows} {base} today={todayHours} now={home.now} />
         {#if windows.length}
-          <p class="foot muted">{t('energie.journee.creuses', { windows: windows.map(windowText).join(t('energie.et')) })}</p>
+          <p class="foot muted">{t(planning ? 'energie.journee.creuses_planning' : 'energie.journee.creuses', { windows: windows.map(windowText).join(t('energie.et')) })}</p>
         {/if}
       </section>
     {/if}

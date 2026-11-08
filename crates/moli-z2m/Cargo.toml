@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 moli-core.workspace = true
+moli-i18n.workspace = true
 moli-runtime.workspace = true
 anyhow.workspace = true
 rumqttc.workspace = true

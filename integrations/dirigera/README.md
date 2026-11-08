@@ -40,13 +40,6 @@
   Leggin/dirigera, la liaison openHAB (`blind-state` stopped/up/down ; elle garde l'échelle
   du hub, qui est aussi la sienne), et Home Assistant (dirigera_platform) et
   homebridge-dirigera, qui inversent de la même façon (`100 - niveau`).
-- Pièce : le hub ne donne souvent une pièce qu'à une partie d'un produit. Vu sur un vrai
-  MYGGSPRAY (la présence `_2`, pas la lumière `_1`, même `relationId`) et dans les réponses
-  publiées par openHAB (VALLHORN, TIMMERFLOTTE, SOMRIG ; aucun produit avec deux pièces). Un
-  appareil en lecture seule sans pièce reprend celle de son produit. Deux pièces pour un même
-  `relationId`, ou un appareil qu'on peut commander : rien n'est repris. IKEA ne documente pas
-  `relationId` : « un même produit physique » est la lecture de Leggin/dirigera. Pas vu : un
-  TOFSMYGGA américain (deux prises), un pont Matter tiers.
 - Reste : purificateurs, enceintes, pièces et scènes IKEA ; un produit à plusieurs
   fonctions (VALLHORN) reste en plusieurs appareils (`relationId` non regroupé).
 - **Vérifié sur du vrai matériel** (17 octobre 2026, hub DIRIGERA matériel P2.5, firmware

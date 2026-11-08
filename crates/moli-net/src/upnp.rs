@@ -118,6 +118,28 @@ impl Location {
     }
 }
 
+/// The `LOCATION` of a search answer, if it is trustworthy: sent by a device
+/// of the home network and pointing to itself (the same test as
+/// [`announcement`] — a `LOCATION` elsewhere would steer Moli to another
+/// machine, a cloud metadata service or the API itself: refused).
+#[must_use]
+pub fn discovered(answer: &str, from: Ipv4Addr) -> Option<Location> {
+    if !from.is_private() {
+        return None;
+    }
+    let location = answer.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim()
+            .eq_ignore_ascii_case("location")
+            .then(|| value.trim().to_owned())
+    })?;
+    let at = Location::parse(&location)?;
+    if at.host != from.to_string() {
+        return None;
+    }
+    Some(at)
+}
+
 /// SSDP search: the `LOCATION`s of devices answering for `target`.
 pub async fn discover(target: &str, wait: Duration) -> anyhow::Result<Vec<Location>> {
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
@@ -130,15 +152,14 @@ pub async fn discover(target: &str, wait: Duration) -> anyhow::Result<Vec<Locati
     let mut found = Vec::new();
     let mut buf = vec![0u8; 2048];
     let deadline = tokio::time::Instant::now() + wait;
-    while let Ok(Ok((n, _))) = tokio::time::timeout_at(deadline, socket.recv_from(&mut buf)).await {
+    while let Ok(Ok((n, from))) =
+        tokio::time::timeout_at(deadline, socket.recv_from(&mut buf)).await
+    {
+        let std::net::IpAddr::V4(from) = from.ip() else {
+            continue;
+        };
         let answer = String::from_utf8_lossy(&buf[..n]);
-        let location = answer.lines().find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.trim()
-                .eq_ignore_ascii_case("location")
-                .then(|| value.trim().to_owned())
-        });
-        if let Some(location) = location.as_deref().and_then(Location::parse)
+        if let Some(location) = discovered(&answer, from)
             && !found.contains(&location)
         {
             found.push(location);
@@ -323,5 +344,30 @@ mod tests {
             announcement(&alive.replace("NOTIFY *", "M-SEARCH *"), box_ip),
             None
         );
+    }
+
+    #[test]
+    fn a_search_answer_must_come_from_a_home_device_saying_itself() {
+        let box_ip = Ipv4Addr::new(192, 168, 0, 1);
+        let answer = "HTTP/1.1 200 OK\r\nCACHING: 300\r\nLOCATION: http://192.168.0.1:60000/0a1b2c3d/gatedesc.xml\r\nST: upnp:rootdevice\r\n\r\n";
+        assert_eq!(
+            discovered(answer, box_ip),
+            Some(Location {
+                host: "192.168.0.1".into(),
+                port: 60000,
+                path: "/0a1b2c3d/gatedesc.xml".into()
+            })
+        );
+        // The same answer from outside the home network: refused.
+        assert_eq!(discovered(answer, Ipv4Addr::new(8, 8, 8, 8)), None);
+        // A home device answering, but pointing at another machine (the cloud
+        // metadata, Moli's own API): refused.
+        let lie = answer.replace("http://192.168.0.1", "http://169.254.169.254");
+        assert_eq!(discovered(&lie, box_ip), None);
+        let self_ref = answer.replace("http://192.168.0.1", "http://127.0.0.1:8790");
+        assert_eq!(discovered(&self_ref, box_ip), None);
+        // From another home device that does not serve the description
+        // itself: refused.
+        assert_eq!(discovered(answer, Ipv4Addr::new(192, 168, 0, 66)), None);
     }
 }

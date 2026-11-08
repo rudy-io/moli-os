@@ -304,9 +304,6 @@ Toute écriture est journalisée, réussie ou non (`JournalEntry`, `crates/moli-
 
 - `{"kind":"command","point":"…","value":…}`
 - `{"kind":"label","device":"…","label":{"name":"…","room":"…"}}` (label vide si refus)
-- `{"kind":"visibility","device":"…","hidden":true}` (masquage local réversible)
-- `{"kind":"driver_added","instance":"…","driver_kind":"airzone","read_only":true}` (installation locale d’une passerelle)
-- `{"kind":"driver_configured","instance":"…","driver_kind":"airzone","enabled":false,"read_only":true}` (connexion modifiée ou retrait réversible ; aucune adresse enregistrée dans le journal)
 - `{"kind":"approval","request":<id>,"point":"…","value":…,"decision":"approved|denied|expired"}`
 - `{"kind":"setting","name":"energy.price","from":…?,"to":…}` : un réglage de la maison changé
   par une personne (aujourd'hui le prix du kWh), avec sa valeur d'avant
@@ -347,136 +344,13 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 |---|---|---|---|---|---|
 | GET | `/api/integrations/tuya-cloud` | libre | aucune | `{instances:[{instance, configured}]}` (jamais les clés) | aucune |
 | PUT | `/api/integrations/tuya-cloud` | **humain** | `{access_id, access_secret, instance?}` (lettres et chiffres) | `{stored, instance}` ; le pilote redémarre avec elles en moins d'une minute | `403` ; `404` pas de pilote tuya ; `422` pas des clés Tuya ; `500` coffre |
-| POST | `/api/integrations/airzone/discover` | **humain**, origine `ui`, invités refusés | `{}`, champs inconnus refusés, 1 Kio maximum | `{gateways:[{host,port,tls_fingerprint,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true,existing_instance,existing_enabled}],scanned,target_count,incomplete}` | `403` session ; `422` saisie ; `429` recherche en cours ou trop récente ; `503` indisponible |
-| POST | `/api/integrations/airzone/probe` | **humain**, origine `ui`, invités refusés | `{instance,host,port,tls_fingerprint?}` | `{instance,mac,gateway_type,api_version,firmware,systems,zones,incomplete,read_only:true}` | `403` session ; `409` doublon ; `422` saisie ; `429` occupé ; `502` vérification ; `503` indisponible |
-| POST | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | même saisie + `expected_mac` issu de la vérification | `{instance,stored:true,read_only,already_installed}` ; nouvel ajout en lecture seule, reprise idempotente avec le mode courant ; sans garantir la disponibilité réseau | mêmes refus ; `409` identité modifiée ; `500` sauvegarde |
-| GET | `/api/integrations/airzone` | **humain**, origine `ui`, invités refusés | — | `{gateways:[{instance,host,port,tls_fingerprint,mac,enabled,source,read_only,running,configuration_lock,temporary_revocation}]}` ; inclut les entrées TOML et les passerelles retirées | `403` session ; `429` occupé ; `503` indisponible |
-| POST | `/api/integrations/airzone/{instance}/probe` | **humain**, origine `ui`, invités refusés | saisie de connexion avec la même `instance` | même aperçu ; exige l’identité matérielle existante | `404` inconnue ; `409` identité modifiée ; `503` identité antérieure inconnue |
-| PUT | `/api/integrations/airzone/{instance}` | **humain**, origine `ui`, invités refusés | saisie de connexion + `expected_mac` issu de la vérification | même résultat que l’ajout ; met à jour ou réactive en lecture seule | mêmes refus, sauvegarde avant activation |
-| POST | `/api/integrations/airzone/{instance}/withdraw` | **humain**, origine `ui`, invités refusés | `{}` | `{instance,stored:bool,enabled:false,read_only}` ; relève arrêtée avant la réponse | `404` inconnue ; `429` occupé ; `503` indisponible ; `stored:false` si le retrait ne peut pas être enregistré |
-| POST | `/api/integrations/airzone/{instance}/mode` | **humain**, origine `ui`, invités refusés ; propriétaire + code frais pour activer | `{read_only:bool,expected_read_only:bool,pin?:string}`, champs inconnus refusés, 1 Kio maximum | `{instance,stored:bool,read_only,running}` ; ancien pilote arrêté avant réponse | `401` code incorrect ; `403` session, propriétaire ou code absent ; `409` mode modifié ailleurs, passerelle en pause ou identité modifiée ; `422` saisie ; `429` occupé ; `500` sauvegarde ; `502` vérification ; `503` indisponible ou identité inconnue |
-
 | GET | `/api/ambiances` | libre | aucune | `[{id, name, icon, colors:["#rrggbb"], white (K), brightness (%), effect?}]` (`crates/moli-ambiance`) | aucune |
 | POST | `/api/ambiance` | libre ; chaque ordre passe par la garde comme `/api/command` | `{lights:[id…] (1 → 32, un groupe vaut ses membres), ambiance? \| color? ("#rrggbb") \| white? (1500 → 10000 K), actor?}` | `{done:[id], held:[{device, point, approval, reason}], failed:[{device, error}], skipped:[id]}` | `400` ; `404` ambiance inconnue |
 | POST | `/api/command` | libre ; origine via `x-moli-origin` (§ 1.3) | `{point, value, actor?}` | `200 {ok:true}` ; **`202 {ok:false, pending:<id>, reason}`** si retenu | `404` point inconnu ; `403` point en lecture seule ; `422` valeur invalide ; `503` pilote indisponible / file pleine ; `504` pas de réponse en 5 s ; `502` erreur du pilote |
 | PUT | `/api/labels/{id}` | libre ; changer la pièce d'un appareil gardé exige `ui` | `{name?, room?}` : absent = inchangé, `""` = effacé | `Label` `{name?, room?}` | `404` unknown device ; `403` changement de pièce gardé ; `500` écriture de `labels.toml` |
-| PUT | `/api/devices/{id}/visibility` | session humaine + origine `ui`, invités refusés | `{hidden:bool}`, champs inconnus refusés, 1 KiB maximum | `{hidden:bool}` | `403` non-humain ; `404` appareil inconnu ; `422` identifiant invalide ; `503` layout non configuré ; `500` sauvegarde impossible |
 | GET | `/api/journal` | libre | `?limit=` (défaut 100) | `[JournalEntry]`, plus récent d'abord (500 au plus en mémoire) | `400` requête invalide |
 | GET | `/api/approvals` | libre ; un invité : ses pièces seulement | aucune | `[ApprovalRequest]`, plus ancien d'abord | aucune |
 | POST | `/api/approvals/{id}` | **humain** + `x-moli-origin: ui` | `{approve: bool, point}` | `{ok:true}` | `403` ; `409` mauvais point ; `410` inconnue / expirée ; erreurs de commande si l'ordre approuvé échoue ; `400` id non numérique |
-
-La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateways.json`
-lit les versions 1 et 2 et écrit la version 3 : connexions gérées, surcharges ciblées des
-entrées TOML et retraits réversibles. Une modification conserve les options natives
-non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`. Une entrée
-TOML jamais modifiée conserve son mode d’origine. Les restrictions explicites
-`enabled = false` et `read_only = true` du TOML restent prioritaires sur le registre
-et sur les changements demandés dans Moli. Le champ `configuration_lock` de la
-liste vaut `disabled`, `read_only` ou `null` ; il explique ce verrou dans
-l’interface. Un bloc désactivé aux options incomplètes ou inconnues est ignoré.
-`running` désigne la présence du
-superviseur, pas la disponibilité réseau de la passerelle.
-
-Le changement de mode ne prend aucune adresse réseau en entrée : il utilise la
-connexion déjà enregistrée. `expected_read_only` doit correspondre au mode actuel,
-sinon `mode_conflict` impose de relire la liste. L'autorisation de pilotage exige un propriétaire et le code Moli (`pin`) dans
-la même requête : une session de navigateur seule ne suffit pas. Les tentatives
-partagent le verrouillage de connexion ; le code n’est ni conservé ni journalisé.
-La révocation exige seulement la session humaine et l’origine `ui`.
-L’autorisation vérifie aussi l'identité connue par une lecture avant de persister le choix ; elle est refusée
-pour une passerelle en pause. La révocation reste possible hors ligne ou en pause,
-sans vérification réseau, et conserve l'état activé/désactivé. L’autorisation de pilotage
-persiste le choix avant de remplacer le pilote. La révocation et le retrait arrêtent
-l’ancien superviseur et refusent ses commandes en attente avant la réponse, même
-si l’écriture échoue. Le pilote est alors relancé uniquement en lecture seule si
-la connexion reste active. La réponse `stored:false` et le champ de liste
-`temporary_revocation:true` signalent une révocation effective en mémoire, dont le
-maintien après redémarrage n’est pas garanti. Les nouvelles autorisations et les
-éditions de cette passerelle sont bloquées jusqu’à l’enregistrement explicite de
-la révocation. Un retrait temporaire reste prioritaire sur une révocation simple.
-Ces opérations sont journalisées comme `driver_configured` et n’envoient aucune
-commande physique ; le registre illisible ou modifié n’est jamais écrasé.
-
-Le mode autorisé est conservé après redémarrage. Les anciennes entrées v1/v2
-marquées `read_only=false` restent invalides : la migration ne les transforme
-jamais en autorisation. Les commandes deviennent accessibles par les chemins
-habituels de Moli, avec leurs gardes et autorisations existantes. Le retour en
-lecture seule bloque les commandes suivantes ; il n'arrête pas le chauffage et
-n'annule pas une commande déjà exécutée.
-
-
-La saisie de connexion accepte uniquement une IPv4 privée en production : les
-noms DNS, les IP publiques et la boucle locale sont refusés. L’exception de boucle
-locale n’existe que dans les binaires de tests unitaires pour leurs faux contrôleurs.
-Toutes les routes Airzone POST/PUT partagent le budget de six requêtes par client
-sur dix secondes, y compris la vérification et la modification d’une passerelle
-existante ; le dépassement renvoie `429` avant tout appel réseau. La liste GET reste
-hors de ce budget.
-
-La découverte est une lecture à la demande, sans ajout automatique, écriture de
-configuration, tâche périodique ni commande d’équipement. Ses indices viennent des
-passerelles enregistrées, des IPv4 privées des pilotes configurés, de leurs adresses
-apprises encore rattachées à la même configuration et de la table locale des voisins.
-Elle explore au plus deux `/24` privés et 512 couples adresse/port ; les adresses
-publiques, de boucle locale, de réseau et de broadcast sont exclues. Aucun nom DNS
-ni sous-réseau fourni par le navigateur n’est accepté. Elle essaie le port 3000,
-en préservant les ports et empreintes HTTPS des connexions déjà connues, sans repli
-HTTP pour ces dernières. Un autre port ou une empreinte inconnue nécessite la
-saisie manuelle. Les installations déjà présentes, actives ou retirées, sont
-identifiées par MAC sans être réenregistrées ; l’identité est revérifiée au moment
-de l’ajout explicite.
-
-Une seule recherche à la fois et au plus une toutes les 30 secondes, partagées par
-tous les clients de l’instance. La préconnexion TCP dispose de 250 ms, avec au plus
-16 connexions concurrentes ; les validations natives sont limitées à quatre en
-parallèle et 32 au total, sous une échéance globale de 18 secondes. La validation
-réutilise exclusivement les lectures natives bornées d’identité et d’inventaire.
-Abandonner la future ou arrêter Moli annule les connexions et validations restantes.
-`scanned` compte les cibles traitées, pas les passerelles trouvées. `incomplete`
-signale une borne atteinte, l’expiration ou un réseau insuffisamment identifié.
-Une recherche vide ne prouve donc pas l’absence de matériel : Docker, les VLAN et
-un premier démarrage sans indice peuvent masquer le LAN réel. Le parcours manuel
-reste disponible. Le scan ne modifie aucune identité ni aucun état d’appareil.
-
-Le registre accepte au plus 32 connexions gérées et surcharges au total, retraits
-compris, et 64 Kio. Les entrées TOML retirées restent représentées par une surcharge
-`enabled=false` : cette trace empêche leur redémarrage au prochain lancement.
-Au démarrage, une entrée mal formée, en doublon ou dont le pilote TOML a été
-supprimé est signalée dans les journaux puis ignorée. Les entrées valides et les
-autres pilotes de la maison continuent de fonctionner. Une surcharge invalide
-identifiable laisse son pilote Airzone en pause ; une surcharge sans instance
-identifiable met tous les pilotes Airzone en pause. Si le registre entier est
-illisible, dépasse les bornes ou utilise une version inconnue, tous les pilotes
-Airzone restent en pause, car les retraits précédents ne sont plus vérifiables.
-Le fichier original reste intact, y compris les données ignorées. Tant qu'une
-anomalie existe, les ajouts, modifications et retraits gérés échouent avec
-`persistence_failed`, avant toute vérification réseau ou activation. Sauvegarder
-le fichier puis le corriger, ou restaurer une sauvegarde cohérente, et redémarrer
-Moli pour retrouver ces opérations. La commande de restauration reste utilisable.
-
-La première opération persistée migre le registre vers la version 2. Pour revenir
-à un ancien binaire qui ne lit que la version 1, restaurer la sauvegarde cohérente
-du registre et de la configuration prise avant cette migration. Changer seulement
-le numéro de version ou effacer les traces de retrait ne constitue pas un retour
-arrière et pourrait relancer une passerelle retirée.
-
-Les identifiants d’instances TOML existants sont conservés à l’identique, y compris
-les majuscules, points, espaces ou caractères Unicode autorisés par la configuration.
-Les routes utilisent leur encodage URL ; le corps doit porter exactement le même
-identifiant. Seuls les identifiants littéraux `.` et `..` ne peuvent pas être modifiés
-depuis le navigateur, qui normalise ces segments de chemin : ils restent listés et
-l’interface explique le refus sans les renommer ni envoyer de requête vers une
-autre instance. Les nouveaux identifiants suivent la syntaxe `[a-z][a-z0-9_-]{0,31}`.
-
-Un changement d’adresse conserve l’instance et exige la même MAC. Un remplacement
-matériel passe par le retrait explicite de l’ancienne passerelle puis l’ajout sous
-une nouvelle instance ; aucun historique, nom ou automatisme n’est transplanté.
-Retirer n’efface ni les historiques ni les étiquettes : les fiches connues restent
-hors ligne durant la session et leur cache est dormant après redémarrage, jusqu’à
-réactivation. Le superviseur est annulé, ses commandes vidées, puis sa tâche attendue
-avant désinscription ou redémarrage. Les opérations persistées continuent même si
-le client HTTP se déconnecte ; rejouer exactement une opération réussie ne crée
-ni second superviseur ni seconde entrée de journal.
 
 **Session humaine**
 
@@ -502,8 +376,8 @@ ni second superviseur ni seconde entrée de journal.
 
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
 |---|---|---|---|---|---|
-| GET | `/api/assistant` | libre | aucune | `{ready, model, listen}` ; non configuré : `{ready:false, listen:false, configured:false}` | aucune |
-| POST | `/api/assistant` | libre ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page", id?}`, dernier message = utilisateur ; `id` (1 à 64 lettres, chiffres, `-`, `_`, unique parmi les tours en cours) permet d'arrêter le tour | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}, interrupted?}` ; `interrupted:true` : tour arrêté avant de répondre, `reply` vide, les ordres déjà donnés restent dans `actions` | `400` ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
+| GET | `/api/assistant` | libre | aucune | `{ready, model, listen, speak, voices}` ; non configuré : `{ready:false, listen:false, speak:false, configured:false}` | aucune |
+| POST | `/api/assistant` | **humain** ; Moli agit en origine `assistant` | `Turn` : `{messages:[{role:"user"\|"assistant", content}], surface?: "bubble"\|"page", id?}`, dernier message = utilisateur ; `id` (1 à 64 lettres, chiffres, `-`, `_`, unique parmi les tours en cours) permet d'arrêter le tour | `Reply` : `{reply, cards:[…], actions:[{point, device, value, status:"done"\|"held"\|"failed", request?, reason?, error?}], model, usage:{prompt_tokens, completion_tokens, steps}, interrupted?}` ; `interrupted:true` : tour arrêté avant de répondre, `reply` vide, les ordres déjà donnés restent dans `actions` | `400` ; `403` sans session humaine ; `429` occupé (2 tours simultanés, 60 tours / 10 min tous clients confondus) ; `502` fournisseur du modèle ; `503` non configuré / pas de clé |
 | POST | `/api/assistant/stop` | libre | `{id}` : l'`id` donné au tour | `{stopped}` : un tour de cet `id` tournait et s'arrête. Seule l'attente du modèle est coupée : un outil, un ordre ou un brouillon commencé va au bout, et le coût des étapes faites reste compté | `503` |
 | POST | `/api/assistant/proposals/{id}` | **humain** | `{approve: bool}` | `{ok, said}` : la proposition du modèle maison est appliquée (ou annulée) | `403` pas une personne ; `409` refusée par la garde ; `410` inconnue, déjà décidée ou expirée (10 min) ; `500` écriture impossible (la proposition reste) ; `503` sans assistant |
 | POST | `/api/assistant/turns/{id}/undo` | **humain**, celui qui a posé le tour | aucune | `{ok, said}` : les ordres du tour remis à leur valeur d'avant (ce qui a changé depuis est laissé) | `403` ; `410` tour inconnu, expiré ou d'un autre ; `503` |
@@ -511,8 +385,9 @@ ni second superviseur ni seconde entrée de journal.
 | POST | `/api/assistant/turns/{id}/correct` | **humain**, celui qui a posé le tour | `{choice}` ou `{choices:[…]}`, `remember?` | la bonne réponse exécutée sous la garde ; une règle si `remember` | `403` ; `410` ; `422` choix non proposé ; `503` |
 | GET | `/api/assistant/rules` | **humain** | aucune | les règles apprises (avec qui les a apprises) | `403` ; `503` |
 | PUT · DELETE | `/api/assistant/rules/{id}` | **humain** | `{enabled}` (PUT) | `{ok}` | `403` ; `410` ; `503` |
-| GET | `/api/assistant/exchanges?hours=` | libre (pas les invités) | aucune | `{exchanges:[…], recording_until}` : ce qui a été dit à Moli (720 h au plus). Ce qui est commun (satellites, portes, échanges plus anciens) pour tout le foyer, et **seulement ses propres questions** posées depuis le tableau de bord ; qui a demandé n'y figure jamais | `503` |
-| POST | `/api/assistant/listen` | libre | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text}` (transcription) | `400` pas de l'audio / trop court ; `429` ; `502` ; `503` voix désactivée |
+| GET | `/api/assistant/exchanges` | **humain** | `?hours=24` (720 au plus) | `{exchanges:[…], recording_until}` : ce qui a été dit à Moli (720 h au plus) — ce qui est commun (satellites, portes, échanges plus anciens) pour tout le foyer, et **seulement ses propres questions** posées depuis le tableau de bord ; qui a demandé n'y figure jamais | `403` sans session humaine ; `503` |
+| POST | `/api/assistant/listen` | **humain** | corps = audio brut, `content-type: audio/*`, ≥ 200 octets | `{text, engine}` (transcription) | `400` pas de l'audio / trop court ; `403` sans session humaine ; `429` ; `502` ; `503` voix désactivée |
+| POST | `/api/assistant/recap` | **humain** | aucune | `{sent}` : le récap de 24 h est envoyé maintenant (Telegram si configuré) | `403` sans session humaine ; `503` |
 | PUT | `/api/assistant/recording` | **humain** | `{days}` (7 au plus, 0 = arrêt) | `{recording_until}` : ce qu'entendent les boîtiers est gardé jusque-là | `403` ; `503` |
 | GET | `/api/assistant/recordings/{name}` | **humain** | aucune | le WAV d'un boîtier (gardé 7 jours) | `403` ; `404` |
 
@@ -617,9 +492,13 @@ changements tiennent dans `points`, sinon `buckets` pour un point numérique (ou
 changements les plus récents et `truncated:true` pour un point non numérique).
 
 **`Summary`** (`/api/energy`) : `{currency, timezone, since?, period?, price_now?, period_point?,
+planning?:[{days:["mon",…], from:"HH:MM", to:"HH:MM", period}], tariff_prices?:{<période>:prix},
 meters:[{id, name, role:"grid"|"total"|"circuit", point, power?, power_w?, power_ts?}],
 live?:{point, max, warn, unit?, value?, ts?}, today, yesterday, month, last_month, month_projection?, monthly_fee?, budget_point?,
-house_price?, house_prices?:[{since, price}]}` (`price_now` : le prix de la période tarifaire, sinon celui de la maison) ; chaque période =
+house_price?, house_prices?:[{since, price}]}` ;
+`planning` : le planning hebdomadaire fixe, quand le tarif n'utilise pas un point d'observation ;
+`tariff_prices` : les prix configurés par période ;
+`price_now` : le prix de la période tarifaire, sinon celui de la maison ; chaque période =
 `{from, to, total:{kwh, cost?}, meters:{<id>:{kwh, cost?}}, unmeasured?}`.
 
 **Vue d'automatisme** (réponses de `/api/automations*`) :
@@ -741,8 +620,11 @@ qui les concernent ; les événements de ces appareils seulement, jamais `journa
 `notice`. Un appareil qui entre dans ses pièces ou en sort lui vaut une photo fraîche.
 
 Flux comptés (celui-ci et `/api/automations/live` ensemble) : 8 ouverts au plus par
-appelant (`Caller::key`), 64 en tout ; au-delà, `503` avec un message. Un flux qui se ferme
-rend sa place.
+appelant (`Caller::key`) ; au-delà, `503` avec un message. La maison compte 64 en tout ;
+quand la limite est atteinte, le flux le plus ancien est évincé (sa connexion se ferme)
+plutôt que de refuser un nouveau : un client dont l'adresse tourne en boucle (extensions
+de confidentialité IPv6) ne peut pas priver la maison de ses vues live. Un flux qui se
+ferme rend sa place.
 
 `Event` est étiqueté par `type` (snake_case) :
 
@@ -753,9 +635,7 @@ rend sa place.
 | `state` | `point`, `value`, `ts`, `pulse?` | nouvelle valeur (seulement si elle change, sauf points « impulsion » type bouton, diffusés à chaque occurrence, alors avec `pulse: true`) ; aussi à la restauration du cache |
 | `availability` | `device`, `online` (booléen) | joignable / injoignable |
 | `driver_status` | `instance`, `status` (`DriverStatus`, § 2.2) | état d'un pilote |
-| `driver_registered` | `instance`, `kind`, `integration` | pilote enregistré ; les surfaces connaissent son type avant les premiers relevés |
 | `label_changed` | `device`, `label` `{name?, room?}` | étiquette modifiée (label complet après fusion) |
-| `layout_changed` | aucun | disposition modifiée : recharger `/api/home` ; aussi à recharger après une reconnexion/snapshot |
 | `journal` | `entry` : `JournalEntry` (§ 1.6) | toute écriture journalisée |
 | `approval_requested` | `request` : `ApprovalRequest` (`id`, `ts`, `expires`, `point`, `value`, `origin`, `actor?`, `reason`, `device_name`, `native_name`, `rooms`) | un ordre attend un humain |
 | `approval_resolved` | `id`, `decision` : `approved` \| `denied` \| `expired` | décision ou expiration |
@@ -992,8 +872,22 @@ Restent ouverts (non urgents) :
   de confiance) et sans objet avec le déploiement actuel en `--network host` ;
 - lectures et coûts ouverts sans session, par conception (réseau local + garde `Host`) :
   état, journal, historique, énergie, images des pièces non protégées, et les routes qui
-  consomment le modèle de Moli (`/api/assistant`, `/draft`, `/import`), bornées par les
+  consomment le modèle de Moli (`/api/automations/draft`, `/import`), bornées par les
   limites de débit. À revoir avant toute exposition hors du réseau local ;
+- les routes de conversation de Moli (`POST /api/assistant`, `/listen`, `exchanges`,
+  `recap`) exigent une session humaine (code) : un appareil ou un script du foyer ne peut
+  plus conduire la conversation ni lire son historique.
 - le commentaire de `crates/moli-api/src/lib.rs` ne liste ni `/api/system`, ni
   `/api/home`, `/api/bench`, `/api/history`, `/api/devices/{id}/snapshot` ; la plupart des
   handlers de `rest.rs` et `automations.rs` n'ont pas de commentaire de documentation.
+
+## Visibilité locale des appareils
+
+| Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
+|---|---|---|---|---|---|
+| PUT | `/api/devices/{id}/visibility` | session humaine + origine `ui`, invités refusés | `{hidden:bool}`, champs inconnus refusés, 1 KiB maximum | `{hidden:bool}` | `403` non-humain ; `404` appareil inconnu ; `422` identifiant invalide ; `503` layout non configuré ; `500` sauvegarde impossible |
+
+Une session humaine du dashboard peut masquer ou restaurer un appareil dans Moli.
+La modification persiste dans `home.json`, ne commande pas l’appareil et ne retire
+ni sa définition ni son historique. Un succès diffuse `layout_changed` pour que
+les autres vues rechargent leur disposition, et journalise une action `visibility`.

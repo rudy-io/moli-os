@@ -107,7 +107,7 @@ mod tests {
         response: &'static str,
         delay: Duration,
     ) -> (Client, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
         let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
@@ -145,7 +145,7 @@ mod tests {
         });
         (
             Client::new(
-                PinnedHttps::new("localhost", port, None).unwrap(),
+                PinnedHttps::new("127.0.0.1", port, None).unwrap(),
                 "synthetic-test-token".into(),
             ),
             count,

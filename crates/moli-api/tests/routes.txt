@@ -31,16 +31,10 @@ POST   /api/phones/{id}/report             foyer   oui   # a phone's own token l
 GET    /api/mobile/phones                  foyer   oui
 PUT    /api/mobile/phones/{id}             foyer   oui
 DELETE /api/phones/{id}                    foyer   oui
-GET    /api/integrations/airzone                                 humain non
-POST   /api/integrations/airzone/discover                        humain non
-POST   /api/integrations/airzone/probe                           humain non
-POST   /api/integrations/airzone                                 humain non
-POST   /api/integrations/airzone/{instance}/probe                humain non
-PUT    /api/integrations/airzone/{instance}                      humain non
-POST   /api/integrations/airzone/{instance}/withdraw             humain non
-POST   /api/integrations/airzone/{instance}/mode                 humain non
 GET    /api/integrations/tuya-cloud        foyer   non
 PUT    /api/integrations/tuya-cloud        foyer   non
+POST   /api/ring/link                      public  oui   # Ring backend posts a one-time code (machine-to-machine)
+GET    /api/ring/linked                    public  oui   # Ring browser redirect; a human session (PIN) is still required inside
 PUT    /api/session/pin                    foyer   oui
 GET    /api/people                         foyer   oui
 POST   /api/people                         foyer   oui

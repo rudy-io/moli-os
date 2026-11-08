@@ -21,8 +21,17 @@
 Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gardés à vie dans
 `data/energy.db`.
 
-- Configuration `[energy]` de `moli.toml` : tarif (période courante lue sur un point, prix
-  par période : par exemple HC 0,14 €, HP 0,17 €), et `[[energy.meter]]` avec un rôle :
+- Configuration `[energy]` de `moli.toml` : tarif (prix par période : par exemple
+  HC 0,14 €, HP 0,17 €) — soit `period` = le point qui porte la période courante
+  (index Linky PTEC), soit `planning` (les deux s'excluent) : un planning hebdomadaire
+  fixe (planning EDF « heures creuses ») en fenêtres `[[energy.tariff.planning]]`
+  (`days = ["mon", …]` en minuscules, `from`/`to` en « HH:MM » local, `to` peut être
+  « 24:00 », `period` = un nom de `prices`) ; les fenêtres de chaque jour doivent
+  paver exactement [00:00, 24:00) sans trou ni chevauchement. La période de chaque
+  instant est déduite de l'horloge locale du fuseau configuré : un jour d'heure
+  d'été dure 23 h ou 25 h, une fenêtre qui s'achève à « 24:00 » s'arrête au minuit
+  local suivant, et une heure répétée pendant le repli d'horloge est comptée deux fois.
+  Et `[[energy.meter]]` avec un rôle :
   - `grid` : ce que le fournisseur facture (index Linky HC / HP, au kWh près) ;
   - `total` : toute la maison mesurée finement (par exemple un compteur EM06 sur l'arrivée
     générale, au Wh) ;
@@ -33,7 +42,10 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   - `integrate = true` : `point` est une **puissance** (W) ; Moli en fait l'énergie
     (puissance tenue × temps, au plus 15 min d'un coup, un tic toutes les 5 min, rien de
     compté hors ligne ni pendant un arrêt de Moli). Pour les prises Tuya, dont `add_ele`
-    repart de zéro à chaque envoi et n'est pas un compteur fiable.
+    repart de zéro à chaque envoi et n'est pas un compteur fiable. Sert aussi au point de
+    recharge d'une voiture (pilote `tesla`) : `point = "tesla:<id_véhicule>/charge_power"`,
+    `role = "appliance"`, `integrate = true` ; la puissance est remise à zéro quand la
+    voiture s'endort, donc plus rien n'est compté entre deux recharges.
   - `estimate = true` (appareil seulement, sans `integrate` ni `power`) : une **lumière connectée** qui ne mesure rien ; `point` = un point de la lampe ou d'un luminaire `lumieres:…`. Moli estime sa puissance d'après le profil mesuré de son modèle (powercalc, licence MIT, condensé par `scripts/light-profiles.py` dans `crates/moli-energy/src/estimate.rs` : LCA006, LTW001, LWA017, L530) : luminosité, blanc ou couleur, veille éteinte, **0 quand elle est coupée au mur** ; un luminaire = la somme de ses ampoules. Comptée dans le temps comme `integrate`, jamais ajoutée aux totaux, `estimated: true` dans l'API, « ≈ estimé » à l'écran. Modèle inconnu : pas d'estimation (jamais de chiffre inventé).
   - Pas repris de HA : ses capteurs « powercalc » (estimations, pas des mesures).
   - `history = true` : `point` donne une consommation déjà découpée par heure, en texte JSON
@@ -76,7 +88,9 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   confirmée ; nouveau socle après 3 relevés cohérents ; chaque heure au prix de sa période
   (l'index HC n'est étalé que sur du temps HC).
 - Chiffre principal = la plus complète des deux mesures (`grid` et `total`, par exemple Linky
-  et EM06).
+  et EM06). Sans aucun compteur `grid`/`total`/`circuit` déclaré, le chiffre principal est la
+  somme des compteurs `appliance` déclarés (prises, point de recharge de la voiture…) : c'est
+  la consommation mesurée de la maison, pas une estimation du reste.
 - **Historique repris de HA** (statistiques long terme, lecture seule) :
   `tools/home-assistant/ha-energy-export.py … | docker exec -i moli-os /moli-os energy
   import`, relançable sans doublon.

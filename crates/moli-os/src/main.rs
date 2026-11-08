@@ -4,9 +4,9 @@ mod airzone;
 mod backup;
 mod catalogue;
 mod config;
-mod managed_airzone;
 mod timezone;
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -144,8 +144,9 @@ enum SecretsCommand {
     /// Restart moli-os afterwards.
     Forget { instance: String, name: String },
     /// Store one secret of a driver instance, read from standard input
-    /// (never from the command line, never printed). Safe while moli-os runs;
-    /// restart it afterwards (drivers read their secrets at start).
+    /// (never from the command line, never printed), at most 64 KiB; a
+    /// trailing newline (or any trailing whitespace) is trimmed. Safe while
+    /// moli-os runs; restart it afterwards (drivers read their secrets at start).
     Set { instance: String, name: String },
 }
 
@@ -168,22 +169,6 @@ fn model_command(command: &ModelCommand) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-fn load_config(cli: &Cli) -> anyhow::Result<Config> {
-    // A new house starts without a configuration: `serve` writes a minimal
-    // one; recovery commands must remain usable with a damaged registry.
-    let serving = matches!(cli.command, None | Some(Command::Serve));
-    if serving && !cli.config.exists() && fresh(&cli.config) {
-        Config::starter(&cli.config)
-    } else if matches!(
-        cli.command,
-        Some(Command::Backup { .. } | Command::Restore { .. })
-    ) {
-        Config::load_for_recovery(&cli.config)
-    } else {
-        Config::load(&cli.config)
-    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -211,7 +196,14 @@ fn main() -> anyhow::Result<()> {
     if let Some(Command::Model(command)) = &cli.command {
         return model_command(command);
     }
-    let config = load_config(&cli)?;
+    // A new house starts without a configuration: `serve` writes a minimal
+    // one; every other command needs the real thing.
+    let serving = matches!(cli.command, None | Some(Command::Serve));
+    let config = if serving && !cli.config.exists() && fresh(&cli.config) {
+        Config::starter(&cli.config)?
+    } else {
+        Config::load(&cli.config)?
+    };
     match cli.command.unwrap_or(Command::Serve) {
         Command::Profile(_) | Command::Catalogue(_) | Command::Health | Command::Model(_) => {
             unreachable!("handled above")
@@ -226,7 +218,24 @@ fn main() -> anyhow::Result<()> {
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
         Command::AirzoneInspect(args) => airzone::run(&config, &args),
-        Command::Secrets(SecretsCommand::Forget { instance, name }) => {
+        Command::Secrets(command) => secrets_command(&command, &config),
+        Command::Serve => tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(config.server.worker_threads)
+            .enable_all()
+            .build()?
+            .block_on(serve(config, boot)),
+    }
+}
+
+/// A secret's ceiling on standard input: 64 KiB is generous for a key, and
+/// a pathological pipe must not inflate memory and secrets.enc without bound.
+const MAX_SECRET_BYTES: usize = 64 * 1024;
+
+/// Reads a secret in from a pipe, or forgets one. Values never ride the
+/// command line (process list, shell history…) and are never displayed.
+fn secrets_command(command: &SecretsCommand, config: &Config) -> anyhow::Result<()> {
+    match command {
+        SecretsCommand::Forget { instance, name } => {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
             )?;
@@ -243,9 +252,8 @@ fn main() -> anyhow::Result<()> {
                 "{instance}/{name}: {}",
                 if existed { "forgotten" } else { "not found" }
             );
-            Ok(())
         }
-        Command::Secrets(SecretsCommand::Set { instance, name }) => {
+        SecretsCommand::Set { instance, name } => {
             // Typed at a terminal, the value would echo on screen (and end
             // up in scrollback, recordings…): demand a pipe.
             if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
@@ -256,8 +264,15 @@ fn main() -> anyhow::Result<()> {
             let key = master_key(&config.server.data_dir, false)?.context(
                 "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
             )?;
-            let mut value = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut value)?;
+            // Capped read: a pathological pipe must not inflate memory and
+            // secrets.enc without bound (64 KiB is a generous ceiling).
+            let mut stdin = std::io::BufReader::new(std::io::stdin());
+            let mut buf: Vec<u8> = Vec::new();
+            let read = Read::take(&mut stdin, MAX_SECRET_BYTES as u64 + 1).read_to_end(&mut buf)?;
+            if read > MAX_SECRET_BYTES {
+                bail!("value too long (over 64 KiB)");
+            }
+            let value = String::from_utf8(buf)?;
             let value = value.trim();
             if value.is_empty() {
                 bail!("empty value on standard input");
@@ -276,14 +291,9 @@ fn main() -> anyhow::Result<()> {
                 "{instance}/{name}: stored ({} characters)",
                 value.chars().count()
             );
-            Ok(())
         }
-        Command::Serve => tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(config.server.worker_threads)
-            .enable_all()
-            .build()?
-            .block_on(serve(config, boot)),
     }
+    Ok(())
 }
 
 /// The file that says a data directory is a demo's: only such a directory
@@ -370,7 +380,6 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     })
     .context("cannot open the data directory (labels, journal, secrets)")?;
     let cancel = CancellationToken::new();
-    let airzone_setup = managed_airzone::Manager::new(hub.clone(), &config, cancel.clone())?;
 
     // History first: it must be listening before drivers publish anything.
     let (history, recorder) = start_history(&config, &hub, &cancel)?.unzip();
@@ -389,7 +398,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         None => (None, None),
     };
 
-    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
+    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
@@ -399,7 +408,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .with_context(|| format!("cannot listen on {}", config.server.listen))?;
     tracing::info!(
         listen = %config.server.listen,
-        drivers = hub.snapshot().drivers.len(),
+        drivers = tasks.len(),
         boot_ms = boot.elapsed().as_millis(),
         "moli-os ready"
     );
@@ -414,7 +423,6 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
     let surfaces = moli_api::Options {
-        airzone_setup: Some(Arc::new(airzone_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
         ui_pin,
         history,
@@ -428,6 +436,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         household: Some(household),
         phones: gates.phones,
         machines: gates.machines,
+        ring: gates.ring,
         weather: weather(&config),
         timezone: Some(config.zone.name.clone()),
     };
@@ -443,18 +452,8 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         shutdown.cancel();
     })
     .await?;
-    airzone_setup.shutdown().await;
-    for task in tasks {
-        let _ = task.await;
-    }
-    let _ = saver.await;
-    let _ = automating.await;
-    if let Some(recorder) = recorder {
-        let _ = recorder.await; // flushes its last batch
-    }
-    if let Some(metering) = metering {
-        let _ = metering.await; // files its queued readings
-    }
+    // Drain the remaining background writers.
+    drain_background(tasks, saver, automating, recorder, metering).await;
     hub.persist_state()
         .await
         .context("final state cache write")?;
@@ -538,7 +537,7 @@ async fn start_brains(
 /// `moli-os check-config`: every driver builds, the assistant's providers hold together.
 fn check_config(config: &Config) -> anyhow::Result<()> {
     for driver in &config.drivers {
-        build_driver(driver, &config.server.data_dir)?;
+        build_driver(driver, &config.server.data_dir, None)?;
     }
     if let Some(assistant) = &config.assistant {
         assistant.check().context("[assistant]")?;
@@ -822,6 +821,20 @@ fn profile_command(command: &ProfileCommand, config_path: &std::path::Path) -> a
                 file.sha256,
                 trust_file.display()
             );
+            // A trust change is a security-relevant act: leave it in the
+            // log, not only on the caller's screen.
+            if matches!(
+                recorded,
+                moli_profile::Recorded::Added | moli_profile::Recorded::Replaced
+            ) {
+                tracing::info!(
+                    what,
+                    profile = %file.path,
+                    sha256 = %file.sha256,
+                    trust_file = %trust_file.display(),
+                    "profile approval recorded"
+                );
+            }
         }
     }
     Ok(())
@@ -986,10 +999,13 @@ const KINDS: &[&str] = &[
     "sonos",
     "airplay",
     "reolink",
+    "ring",
     "tuya",
+    "tesla",
     "helpers",
     "presence",
     "telegram",
+    "teleinfo",
     "phones",
     "moonraker",
     "ipp",
@@ -1038,7 +1054,7 @@ fn spawn_house_drivers(
                     hub.clone(),
                     energy_config.loads.clone(),
                     tz,
-                    energy_config.tariff.as_ref().map(|t| t.period.clone()),
+                    energy_config.tariff.as_ref().and_then(|t| t.period.clone()),
                 )),
                 cancel.clone(),
             ));
@@ -1077,25 +1093,26 @@ fn spawn_household(
 struct Gateways {
     phones: Option<moli_phones::Gateway>,
     machines: Option<moli_host::agents::Agents>,
+    /// Ring's linking flow (`ring_link.rs` in the API): the unclaimed token
+    /// pairs, until the person confirms the account.
+    ring: Option<moli_api::RingGate>,
 }
 
 fn spawn_drivers(
     config: &Config,
     hub: &Hub,
     cancel: &CancellationToken,
-    airzone: &managed_airzone::Manager,
 ) -> anyhow::Result<(Vec<tokio::task::JoinHandle<()>>, Gateways)> {
     let mut tasks = Vec::new();
     let mut gates = Gateways::default();
     for driver in config.drivers.iter().filter(|d| d.enabled != Some(false)) {
-        if driver.kind == "airzone" {
-            continue;
-        }
         let context = || format!("driver {:?} options", driver.id);
         let built: Arc<dyn Driver> = match driver.kind.as_str() {
             "phones" => {
                 let options = driver.options.clone().try_into().with_context(context)?;
-                let (gateway, phones_driver) = moli_phones::open(options, &config.server.data_dir)?;
+                let instance = InstanceId::from(driver.id.as_str());
+                let (gateway, phones_driver) =
+                    moli_phones::open(options, &config.server.data_dir, Some(hub), &instance)?;
                 gates.phones = Some(gateway);
                 Arc::new(phones_driver)
             }
@@ -1105,7 +1122,14 @@ fn spawn_drivers(
                 gates.machines = Some(agents);
                 Arc::new(host)
             }
-            _ => build_driver(driver, &config.server.data_dir)?,
+            "ring" => {
+                let options = driver.options.clone().try_into().with_context(context)?;
+                gates.ring = Some(moli_api::RingGate::new(InstanceId::from(
+                    driver.id.as_str(),
+                )));
+                Arc::new(moli_ring::Ring::new(options))
+            }
+            _ => build_driver(driver, &config.server.data_dir, Some(hub))?,
         };
         tasks.push(spawn_driver(
             hub,
@@ -1114,16 +1138,11 @@ fn spawn_drivers(
             cancel.clone(),
         ));
     }
-    airzone.start_configured()?;
     Ok((tasks, gates))
 }
 
-#[allow(clippy::too_many_lines)] // one short arm per kind of driver
-fn build_driver(
-    config: &DriverConfig,
-    data_dir: &std::path::Path,
-) -> anyhow::Result<Arc<dyn Driver>> {
-    let context = || format!("driver {:?} options", config.id);
+/// Refuses a `kind` not in `KINDS`: early, listing the known kinds.
+fn check_kind(config: &DriverConfig) -> anyhow::Result<()> {
     if !KINDS.contains(&config.kind.as_str()) {
         bail!(
             "unknown driver kind {:?} (driver {:?}; known: {})",
@@ -1132,6 +1151,26 @@ fn build_driver(
             KINDS.join(", ")
         );
     }
+    Ok(())
+}
+
+fn build_driver(
+    config: &DriverConfig,
+    data_dir: &std::path::Path,
+    hub: Option<&Hub>,
+) -> anyhow::Result<Arc<dyn Driver>> {
+    check_kind(config)?;
+    build_kind(config, data_dir, hub)
+}
+
+/// One arm per known kind: how a driver is built from its options.
+#[allow(clippy::too_many_lines)] // one short arm per kind of driver
+fn build_kind(
+    config: &DriverConfig,
+    data_dir: &std::path::Path,
+    hub: Option<&Hub>,
+) -> anyhow::Result<Arc<dyn Driver>> {
+    let context = || format!("driver {:?} options", config.id);
     Ok(match config.kind.as_str() {
         "z2m" => Arc::new(moli_z2m::Z2m::new(
             config.options.clone().try_into().with_context(context)?,
@@ -1205,6 +1244,9 @@ fn build_driver(
         "reolink" => Arc::new(moli_reolink::Reolink::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "ring" => Arc::new(moli_ring::Ring::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "tuya" => Arc::new(moli_tuya::Tuya::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1213,11 +1255,18 @@ fn build_driver(
             moli_phones::open(
                 config.options.clone().try_into().with_context(context)?,
                 data_dir,
+                hub,
+                &InstanceId::from(config.id.as_str()),
             )?
             .1,
         ),
         "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
-        "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "teleinfo" => configured_driver(config, moli_teleinfo::Teleinfo::new)?,
+        "tesla" => configured_driver(config, moli_tesla::Tesla::new)?,
+        "helpers" => Arc::new(moli_helpers::Helpers::new(
+            config.options.clone().try_into().with_context(context)?,
+            hub.cloned(),
+        )?),
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,
@@ -1225,6 +1274,28 @@ fn build_driver(
         )?),
         other => bail!("driver kind {other:?} is in KINDS but never built"),
     })
+}
+
+/// Awaits the background tasks and the last writers, ignoring join failures
+/// (their own logs say what went wrong).
+async fn drain_background(
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+    saver: tokio::task::JoinHandle<()>,
+    automating: tokio::task::JoinHandle<()>,
+    recorder: Option<tokio::task::JoinHandle<()>>,
+    metering: Option<tokio::task::JoinHandle<()>>,
+) {
+    for task in tasks {
+        let _ = task.await;
+    }
+    let _ = saver.await;
+    let _ = automating.await;
+    if let Some(recorder) = recorder {
+        let _ = recorder.await; // flushes its last batch
+    }
+    if let Some(metering) = metering {
+        let _ = metering.await; // files its queued readings
+    }
 }
 
 /// Drivers with validated constructors share option decoding and error context.
@@ -1291,12 +1362,12 @@ mod tests {
         let data = std::env::temp_dir();
         for kind in KINDS {
             // Empty options: built, or refused for its options, never for its kind.
-            if let Err(e) = build_driver(&driver(kind), &data) {
+            if let Err(e) = build_driver(&driver(kind), &data, None) {
                 let e = format!("{e:#}");
                 assert!(!e.contains("driver kind"), "{kind}: {e}");
             }
         }
-        let Err(e) = build_driver(&driver("x10"), &data) else {
+        let Err(e) = build_driver(&driver("x10"), &data, None) else {
             panic!("an unknown kind is built");
         };
         assert!(e.to_string().contains("unknown driver kind"), "{e}");

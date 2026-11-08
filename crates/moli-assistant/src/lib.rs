@@ -4300,6 +4300,8 @@ mod tests {
             period: None,
             price_now: None,
             period_point: None,
+            planning: None,
+            tariff_prices: std::collections::BTreeMap::new(),
             meters: vec![meter("g", "Linky", Role::Grid, "linky/index", None, None)],
             live: None,
             flows: None,

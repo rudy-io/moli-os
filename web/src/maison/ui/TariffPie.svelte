@@ -8,7 +8,7 @@
    *  (the two tariffs), an outer ring (the parts of the house in each), a
    *  legend with the volumes. The tariff of each hour comes from the
    *  off-peak windows learnt off the meter (`windows`). */
-  let { windows = [] } = $props();
+  let { windows = [], planning = null } = $props();
 
   const SPANS = [
     ['today', 'energie.span.today'],
@@ -42,7 +42,7 @@
     const acc = parts.map((p) => ({ p, hc: 0, hp: 0, hcCost: 0, hpCost: 0, priced: false }));
     for (const b of report.buckets) {
       if (b.start < period.from || b.start >= period.to) continue;
-      const share = offPeakShare(b.start, windows);
+      const share = offPeakShare(b.start, windows, planning);
       for (const a of acc) {
         const k = a.p.kwh(b);
         const c = a.p.cost(b);
@@ -118,7 +118,7 @@
     </div>
   </div>
   {#if !windows.length}
-    <p class="muted">{t('energie.tarif.pas_apprises')}</p>
+    <p class="muted">{t(planning ? 'energie.tarif.pas_creuses' : 'energie.tarif.pas_apprises')}</p>
   {:else if !rings}
     <p class="muted">{report ? t('energie.repartition.vide') : t('energie.chargement')}</p>
   {:else}

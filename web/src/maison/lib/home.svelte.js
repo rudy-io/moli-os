@@ -3,7 +3,7 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
+import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve } from './capabilities.js';
 
 export { hub, positionPoint, coverOrder };
 
@@ -212,6 +212,34 @@ export function outletsOf(id) {
     .map(([key, name]) => ({ key, name }));
 }
 
+// ---- mode helpers (house-wide mode switches, e.g. « Mode Chauffage ») ----------
+
+/** Test-only values that never surface on the family's screens. */
+const HIDDEN_MODE_VALUES = new Set(['burn test']);
+
+/** A mode helper: a device whose control is a writable enum `state` (a
+ *  helpers' device carries exactly one writable point). Returns its values,
+ *  test-only ones excluded, or null when the device is not a mode. */
+export function modeValues(d) {
+  const p = d?.points.find(
+    (p) => p.key === 'state' && p.kind?.type === 'enum' && p.access?.write,
+  );
+  if (!p) return null;
+  return p.kind.values.filter((v) => !HIDDEN_MODE_VALUES.has(String(v).trim().toLowerCase()));
+}
+
+/** Catalogue key for a mode value (lowercase, accent-stripped). */
+export function modeValueKey(v) {
+  return `maison.accueil.mode.${String(v).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')}`;
+}
+
+/** A mode value in the house's language (an unknown one shows as it is). */
+export function modeValueName(v) {
+  const key = modeValueKey(v);
+  const word = t(key);
+  return word === key ? v : word;
+}
+
 const LIGHTISH = /lumi|lamp|light|spot|plafon|applique|ampoule|globe|suspension|bureau|salon|cuisine|couloir|studio|véranda|veranda|entrée|chambre|toilette|combles|meuble|bulb|ceiling|desk|kitchen|hallway|bedroom|attic|fixture|lounge|éclairage|eclairage|néon|neon|\bleds?\b|veilleuse|guirlande|phare/i;
 /** On/off things that are not lights, whatever their bridge calls them. */
 const NOT_LIGHT = /vmc|ventil|pompe|prise|chauffe|\bfan\b|pump|heater|outlet|socket/i;
@@ -224,14 +252,24 @@ export function deviceKind(d) {
   // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
   if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
+  // A Tesla's car (the driver's account device has no model).
+  if (d.manufacturer === 'Tesla' && d.model) return 'car';
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
   if (has(d, 'target_temperature') || isValve(d)) return 'climate';
-  if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
-  if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
+  if (has(d, 'playing', true) && has(d, 'volume')) return 'speaker';
+  // A shutter is recognised by the `position` sense, or by its open / close
+  // order (a plain motor has no position). Tuya's own names stay until that
+  // driver labels its opening point with the sense.
+  if (
+    has(d, 'percent_control') ||
+    positionPoint(d) ||
+    coverOrder(d) ||
+    (has(d, 'control', true) && d.points.find((p) => p.key === 'control')?.kind.values?.includes('open'))
+  )
     return 'cover';
-  if (impulsePoints(d).length) return 'impulse';
+  if (modeValues(d)) return 'mode';
   if (powerKey(d, false)) {
     if (isGroup(d)) return 'group';
     if (isFixture(d)) return 'light';
@@ -261,18 +299,26 @@ export function roomList() {
     .filter(([, list]) => list.length)
     .map(([name, list]) => {
       const by = (...kinds) => list.filter((d) => kinds.includes(deviceKind(d)));
+      const plugs = by('plug').filter((d) => !quiet(d.id));
+      // How many of the room's outlets are on: a strip's, one by one, a
+      // plain plug's by itself.
+      const plugsOn = plugs.reduce((n, d) => {
+        const outlets = outletsOf(d.id);
+        return n + (outlets.length ? outlets.filter((o) => isOn(d.id, o.key)).length : isOn(d.id) ? 1 : 0);
+      }, 0);
       return {
         name,
         icon: defs.find((r) => r.name === name)?.icon ?? 'home',
         group: by('group')[0] ?? null,
         lights: by('light'),
-        plugs: by('plug').filter((d) => !quiet(d.id)),
+        plugs,
         covers: by('cover'),
-        impulses: by('impulse'),
+        modes: by('mode'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
-        sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
+        sensors: [...by('sensor', 'camera', 'printer', 'car'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        plugsOn,
       };
     });
 }
@@ -370,6 +416,8 @@ export async function setLook(lights, look, label) {
 function humanError(message) {
   if (/unreachable|injoignable|did not answer|no answer/i.test(message)) return t('commun.appareil_injoignable');
   if (/read-only|lecture seule|cannot be set/i.test(message)) return t('commun.non_pilotable');
+  const notAllowed = /^invalid value:\s*"(.*)" is not one of the allowed values$/i.exec(message);
+  if (notAllowed) return t('commun.valeur_non_acceptee', { value: notAllowed[1] });
   return message;
 }
 
@@ -397,7 +445,7 @@ export async function confirmHeld(pin) {
   }
   if (held.custom) {
     home.held = null;
-    await held.custom(held.freshPin ? pin : undefined);
+    await held.custom();
     return null;
   }
   await decide({ id: held.id, point: held.point }, true);

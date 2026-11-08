@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use moli_core::{DeviceId, Origin, PointId, Value};
+use moli_core::{DeviceId, Origin, PointId, Value, is_private_point};
 use moli_history::History;
 use moli_runtime::{CommandError, DeviceView, Hub, LabelPatch};
 use rmcp::handler::server::wrapper::Parameters;
@@ -230,7 +230,7 @@ impl MoliMcp {
         Parameters(args): Parameters<DeviceArgs>,
     ) -> Result<CallToolResult, McpError> {
         match self.hub.device(&DeviceId::from(args.device)) {
-            Some(view) => ok(&serde_json::to_value(view).unwrap_or_default()),
+            Some(view) => ok(&strip_private(&view)),
             None => Ok(fail("unknown device")),
         }
     }
@@ -344,6 +344,16 @@ impl MoliMcp {
         let Some(history) = &self.history else {
             return Ok(fail("history is disabled on this instance"));
         };
+        // Where someone was is as private as where they are: exact position
+        // and Wi-Fi stay on the household's own surfaces, never the agent's.
+        if PointId::from(args.point.as_str())
+            .split()
+            .is_some_and(|(_, key)| is_private_point(key))
+        {
+            return Ok(fail(
+                "private point: exact position, accuracy and Wi-Fi are not shared with agents",
+            ));
+        }
         let to = moli_core::now_ms();
         let from = to.saturating_sub(crate::rest::window_ms(args.hours.unwrap_or(24.0)));
         match history.series(&args.point, from, to, 60).await {
@@ -492,7 +502,7 @@ impl MoliMcp {
     }
 
     #[tool(
-        description = "Run ONE read-only SQL query (SQLite) over the recorded history. View: history(point, ts ms, kind b/i/f/t/z, num, txt). Writes, ATTACH and PRAGMA are refused; 2 s and 200 rows max. Use it for questions the other tools cannot answer (counts, durations, comparisons)."
+        description = "Run ONE read-only SQL query (SQLite) over the recorded history. View: history(point, ts ms, kind b/i/f/t/z, num, txt). Private points (position, Wi-Fi) are not in the view, and the base tables are off-limits. Writes, ATTACH and PRAGMA are refused; 2 s and 200 rows max. Use it for questions the other tools cannot answer (counts, durations, comparisons)."
     )]
     async fn history_sql(
         &self,
@@ -571,12 +581,14 @@ fn room_of(view: &DeviceView) -> Option<&str> {
         .or(view.device.native_room.as_deref())
 }
 
-/// One device, condensed for a model's context window.
+/// One device, condensed for a model's context window. Private points
+/// (position, Wi-Fi) never reach the agent.
 fn compact(view: &DeviceView) -> Json {
     let points: Vec<Json> = view
         .device
         .points
         .iter()
+        .filter(|p| !is_private_point(&p.key))
         .map(|p| {
             let mut point = json!({
                 "key": p.key,
@@ -600,6 +612,23 @@ fn compact(view: &DeviceView) -> Json {
         "online": view.online,
         "points": points,
     })
+}
+
+/// Serializes a device view for the agent, hiding private points (position,
+/// Wi-Fi) from both the point list and the current values.
+fn strip_private(view: &DeviceView) -> Json {
+    let mut out = serde_json::to_value(view).unwrap_or_default();
+    if let Some(points) = out.get_mut("points").and_then(Json::as_array_mut) {
+        points.retain(|p| {
+            p.get("key")
+                .and_then(Json::as_str)
+                .is_none_or(|k| !is_private_point(k))
+        });
+    }
+    if let Some(state) = out.get_mut("state").and_then(Json::as_object_mut) {
+        state.retain(|key, _| !is_private_point(key));
+    }
+    out
 }
 
 #[allow(clippy::unnecessary_wraps)]

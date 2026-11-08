@@ -22,13 +22,6 @@ pub fn wav(pcm: &[u8], rate: u32) -> Vec<u8> {
     out
 }
 
-/// A tenth of a second of silence: what the device plays when a speaker said
-/// the answer, so that it listens again once it has.
-#[must_use]
-pub fn silence() -> Vec<u8> {
-    moli_audio::flac::encode(&[0; 2_205], 22_050)
-}
-
 /// Two soft notes going down (A5 then E5): the conversation is over.
 /// Like a spoken answer, TTS_END plays this through the media player's
 /// announcement decoder. Some firmwares decode FLAC and MP3, but not WAV.

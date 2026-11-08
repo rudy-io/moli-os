@@ -28,6 +28,7 @@
   "moteur.verif.pas_bascule": "“{nom}” can’t be turned on or off.",
   "moteur.verif.attente": "A wait must last between 1 second and 24 hours.",
   "moteur.verif.delai": "The maximum delay must be between 1 second and 24 hours.",
+  "moteur.verif.maintien": "A hold must not last more than 24 hours.",
   "moteur.verif.message_vide": "The message is empty.",
   "moteur.verif.canal_manquant": "Choose where to notify.",
   "moteur.verif.telegram": "Telegram isn’t connected (telegram driver and its bot): only the house will be notified.",
@@ -169,6 +170,7 @@
 
   "moteur.pourquoi.essai": "Dry run",
   "moteur.pourquoi.main": "Started manually",
+  "moteur.pourquoi.deja_lancee": "Already running: this launch was ignored",
   "moteur.pourquoi.demarrage": "Moli has just started",
   "moteur.pourquoi.heure": "It’s {heure}",
   "moteur.pourquoi.interrompu": "{pourquoi} · interrupted by a Moli restart",

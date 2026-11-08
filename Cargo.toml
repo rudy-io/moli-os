@@ -33,6 +33,7 @@ moli-tuya = { path = "crates/moli-tuya" }
 moli-net = { path = "crates/moli-net" }
 moli-hermes = { path = "crates/moli-hermes" }
 moli-reolink = { path = "crates/moli-reolink" }
+moli-ring = { path = "crates/moli-ring" }
 moli-sonos = { path = "crates/moli-sonos" }
 moli-bambu = { path = "crates/moli-bambu" }
 moli-frigate = { path = "crates/moli-frigate" }
@@ -50,6 +51,7 @@ moli-helpers = { path = "crates/moli-helpers" }
 moli-lights = { path = "crates/moli-lights" }
 moli-presence = { path = "crates/moli-presence" }
 moli-telegram = { path = "crates/moli-telegram" }
+moli-teleinfo = { path = "crates/moli-teleinfo" }
 moli-i18n = { path = "crates/moli-i18n" }
 moli-phones = { path = "crates/moli-phones" }
 moli-ambiance = { path = "crates/moli-ambiance" }
@@ -57,6 +59,7 @@ moli-moonraker = { path = "crates/moli-moonraker" }
 moli-androidtv = { path = "crates/moli-androidtv" }
 moli-esphome = { path = "crates/moli-esphome" }
 moli-alexa = { path = "crates/moli-alexa" }
+moli-tesla = { path = "crates/moli-tesla" }
 moli-demo = { path = "crates/moli-demo" }
 moli-weather = { path = "crates/moli-weather" }
 
@@ -88,6 +91,7 @@ rust-embed = "8"
 schemars = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+serialport = "4"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -112,6 +116,14 @@ must_use_candidate = "allow"
 doc_markdown = "allow"
 # `assert!(x.is_empty())` reads better than an assert_eq! against a typed empty array.
 assert_is_empty = "allow"
+
+[profile.dev]
+# Keep target/ small: line tables for backtraces, no full DWARF.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Never step into deps: no debug info for them at all.
+debug = false
 
 [profile.release]
 opt-level = "s"

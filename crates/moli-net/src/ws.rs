@@ -14,7 +14,6 @@ use ring::rand::{SecureRandom, SystemRandom};
 use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 use crate::{PinnedTls, TIMEOUT, public_tls};
@@ -80,7 +79,7 @@ impl WebSocket {
         headers: &[(&str, &str)],
         tls: Option<Arc<ClientConfig>>,
     ) -> anyhow::Result<Self> {
-        let tcp = tokio::time::timeout(TIMEOUT, TcpStream::connect((host, port)))
+        let tcp = tokio::time::timeout(TIMEOUT, crate::checked_connect(host, port))
             .await
             .context("connect timeout")?
             .with_context(|| format!("cannot reach {host}:{port}"))?;

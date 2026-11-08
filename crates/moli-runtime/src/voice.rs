@@ -97,13 +97,6 @@ pub trait VoiceBrain: Send + Sync + std::fmt::Debug {
     /// Whether `text` only closes the conversation (« merci », « c'est tout »…).
     fn is_goodbye(&self, text: &str) -> bool;
 
-    /// Says `text` on a speaker Moli drives (`point`: its announcement point)
-    /// and resolves once it has been said. `Err` when it was not: the
-    /// satellite then says it itself.
-    fn say_on(&self, _point: &str, _text: &str) -> BoxFuture<'_, Result<(), String>> {
-        Box::pin(async { Err("no speaker".to_owned()) })
-    }
-
     /// The satellite woke and heard nothing it understood (a wake word said
     /// for nothing, or a false activation): for the history, with what it
     /// heard when no transcription was asked (`wav`).
