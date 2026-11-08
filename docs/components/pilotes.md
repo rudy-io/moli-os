@@ -864,6 +864,64 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
   tient ; provisionnement borné par la MAC).
 
+## `tesla` : la voiture (`crates/moli-tesla`)
+
+- **Couvre** : la voiture Tesla de la maison, un appareil par véhicule du compte, par
+  l'API officielle (celle que l'appli officielle utilise) : batterie, autonomie, recharge,
+  puissance, prises, portes, mode vigie, températures.
+- **Protocole** : HTTPS Fleet API régionale — `fleet-api.prd.eu.vn.cloud.tesla.com`
+  (Europe, défaut), `fleet-api.prd.na.vn.cloud.tesla.com` (Amérique du Nord, Asie),
+  `api.tesla.cn` (Chine) —
+  `GET /api/1/vehicles`, `GET /api/1/vehicles/{id}/vehicle_data`,
+  `POST /api/1/vehicles/{id}/command/{cmd}` — devant le point de jeton `auth.tesla.com`
+  (`/oauth2/v3/token`, OAuth PKCE avec l'application personnelle de la maison ; l'échange
+  de code porte l'`audience` de la Fleet API régionale). Avant tout appel, l'application
+  doit être enregistrée dans la région (`POST /api/1/partner_accounts` avec un jeton
+  `client_credentials` : idempotent, le pilote le fait à chaque connexion). L'état est relu
+  toutes les `poll_charging_s` s (60) en recharge ou branchée, `poll_idle_s` (180) au
+  repos, `poll_asleep_s` (600) endormie ; une commande a 4,5 s pour arriver (l'horloge
+  du cœur donne 5 s). Si Tesla rate-limit (429), Moli respecte le `Retry-After` demandé.
+- **Connexion** : une fois, depuis le tableau de bord (pilote « Compte Tesla ») : le
+  pilote affiche l'adresse de la page de connexion de Tesla ; on s'y connecte, puis on
+  colle l'adresse de la dernière page (elle porte le `code=`). C'est un geste de la
+  personne : un assistant peut lire l'URL (point `sign_in_url`) mais son écriture sur
+  `sign_in` (sémantique contrôle) reste en attente jusqu'à validation par un humain.
+  Le jeton de
+  rafraîchissement reçu est à usage unique et tourne à chaque échange : le dernier vit au
+  coffre chiffré (`refresh_token`), jamais dans un fichier ; il expire après trois mois
+  (reconnecter le compte, pareille opération). Le client public partagé de Tesla
+  ayant été retiré (2026), une application personnelle (developer.tesla.com) est
+  obligatoire : permissions `openid`, `offline_access`, `user_data`,
+  `vehicle_device_data`, `vehicle_cmds` ; secrets `client_id` et `client_secret`
+  (tous deux obligatoires : l'enregistrement de l'application dans la région utilise un
+  jeton `client_credentials`) au coffre chiffré, jamais dans un fichier.
+  Sans `client_id`, le pilote se gare avec l'invitation à les déposer ;
+  `redirect_uri` (option du pilote, obligatoire) doit être l'URI de redirection
+  enregistrée sur l'application ; `partner_domain` (option du pilote, défaut : l'hôte
+  de `redirect_uri`) doit être le domaine racine des origines autorisées de
+  l'application, où la clé publique EC P-256 (PEM) doit être hébergée de façon
+  permanente (`https://domaine/.well-known/appspecific/com.tesla.3p.public-key.pem`) ;
+  sans cette clé accessible, l'activation régionale échoue (424).
+- **Plafond de facturation** : l'API est facturée à l'usage (plafond par
+  défaut : 0 $). Quand le compte dépasse son contingent, Tesla le désactive :
+  chaque appel répond `403 account disabled: EXCEEDED_LIMIT`, jusqu'à ce que le
+  plafond soit relevé (developer.tesla.com) ou que le cycle de facturation
+  recommence. Moli le marque « plafond atteint » sur l'état du compte et
+  espace ses tentatives à 6 h ; le pilote reprend tout seul à la réactivation.
+- **Points** (normalisés en SI) : `soc` (%), `range` (km), `charging`,
+  `charge_power` (W), `plugged_in`, `doors_locked` (sémantique verrou : vrai =
+  verrouillé — la garde demande l'accord d'un humain quand un agent veut ouvrir),
+  `sentry`, `awake`,
+  `inside_temp` / `outside_temp` (°C) ; `command` (texte, écriture seule,
+  sémantique contrôle) : `start_charging`, `stop_charging`, `lock`, `unlock`,
+  `sentry_on`, `sentry_off`. Unités à l'entrée : tous les `*_range` de l'API
+  (dont `battery_range`) sont **toujours en miles, quel que soit le réglage
+  GUI de la voiture** — le pilote les convertit systématiquement en km (pas de
+  lecture de `gui_range_units`) ; les températures suivent `gui_settings`
+  (°F→°C quand la voiture est réglée en impérial).
+- **Vie privée** : rien ne quitte la maison pour un tiers ; seul le compte Tesla de la
+  personne est interrogé, avec ses permissions.
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -917,6 +975,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say` | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
+| `tesla` | `moli-tesla` | HTTPS, API officielle (OAuth PKCE) | oui : `command` (charge, portes, vigie) | Model Y (depuis octobre 2026) |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |

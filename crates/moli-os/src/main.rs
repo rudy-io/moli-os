@@ -1105,6 +1105,7 @@ const KINDS: &[&str] = &[
     "airplay",
     "reolink",
     "tuya",
+    "tesla",
     "helpers",
     "presence",
     "telegram",
@@ -1335,6 +1336,7 @@ fn build_driver(
             .1,
         ),
         "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
+        "tesla" => configured_driver(config, moli_tesla::Tesla::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
