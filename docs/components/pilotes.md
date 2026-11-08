@@ -74,7 +74,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, shelly, igd, helpers, profile
+kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, shelly, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -737,6 +737,33 @@ host = "192.168.1.x"
 - **Pièges** : ampoule coupée au mur : statut `waiting` et nouvel essai chaque minute. Session expirée : une nouvelle poignée de main, une fois. Un changement de teinte/saturation remet `color_temp` à 0 (et inversement côté appareil).
 - **Tests** : session KLAP identique **octet par octet** à python-kasa ; lecture de `get_device_info`.
 
+## `lifx` : ampoules Wi-Fi LIFX (`crates/moli-lifx`)
+
+- **Couvre** : marche/arrêt, luminosité, et selon le modèle température de couleur et couleur. Une instance pilote **toutes** les ampoules qu'elle trouve.
+- **Protocole** : 100 % local, protocole LAN de LIFX en UDP (port 56700), sans compte ni secret ; écrit d'après la documentation publique de LIFX. Interrogation toutes les 5 s : **un seul `LightGet` par ampoule et par relevé**, envoyé une fois (le relevé suivant tient lieu de nouvel essai). Version, micrologiciel et groupe sont lus à la rencontre de l'ampoule seulement ; le signal Wi-Fi à la rencontre puis à chaque recherche.
+- **Configuration** (tout est facultatif) :
+
+```toml
+[[driver]]
+id = "lifx"
+kind = "lifx"
+[driver.options]
+hosts = ["192.168.1.x"]   # adresses interrogées directement
+# discovery = true        # diffusion GetService sur le réseau local
+# poll_secs = 5           # 1 à 3600
+# transition_ms = 0       # fondu de chaque changement
+```
+
+  Sans `hosts` et avec `discovery = false`, la configuration est refusée.
+- **Secrets** : aucun.
+- **Recherche** : `GetService` aux adresses de `hosts` et en diffusion, deux fois, réponses écoutées 0,6 s à chaque fois. Puis chaque minute tant qu'une ampoule manque (publiée avant, adresse de `hosts` muette, ou hors ligne), sinon toutes les 5 min (nouvelles ampoules, adresses changées).
+- **Identité** : numéro de série de l'ampoule (cible des trames, 12 chiffres hexadécimaux, la MAC Wi-Fi moins 1). Une réponse n'est prise que si elle porte le numéro attendu. Une ampoule qui répond ailleurs avec le même numéro est suivie (ligne `lifx found at a new address` dans les traces) ; une autre ampoule qui répond à une adresse connue est une autre ampoule et ne remplace jamais la première.
+- **Capacités** : `GetVersion` (produit) et `GetHostFirmware` (version) cherchés dans la table du pilote (`src/products.rs`, faits de la liste publique des produits LIFX : couleur, plage en kelvins et ses évolutions selon le micrologiciel). Modèle inconnu : marche et luminosité seulement, avec un avertissement.
+- **Points** : `on`, `brightness` (1-100 %), `color_temp` (K, bornes du modèle, si la plage est réglable), `color` (`#rrggbb`, modèles couleur), `rssi` (dBm, lecture seule). Un ordre de luminosité, de température ou de couleur part en `LightSetColor` à partir de la dernière couleur lue ; la température remet la saturation à 0. Chaque ordre demande un accusé de réception (`ack_required`) et est envoyé deux fois au plus ; la valeur n'est publiée qu'une fois l'accusé reçu, sans accusé l'ordre échoue.
+- **Nom et pièce** : le nom LIFX devient `native_name` (suivi s'il change dans l'appli), le groupe LIFX `native_room`.
+- **Pièges** : une ampoule LIFX manque souvent un relevé : elle ne passe hors ligne qu'après **3 relevés manqués de suite** (comme HA). Hors ligne (coupée au mur), elle n'est plus interrogée qu'un relevé sur six pour ne pas retarder les autres et les ordres.
+- **Tests** : trames et lecture des messages (`src/proto.rs`), conversions pourcentage et couleur, table des produits, ordres selon le modèle ; et le pilote entier face à de fausses ampoules sur la boucle locale (`127.0.0.x`) : publication seulement après accusé, un seul `LightGet` par relevé, identité par numéro de série. Numéros de série factices (`02:00:00:00:00:0x`).
+
 ## `igd` : box internet (`crates/moli-igd`)
 
 - **Couvre** : toute passerelle UPnP IGD (Livebox, Freebox…) : connexion, IP publique, durée, débit de ligne. **Lecture seule.**
@@ -909,6 +936,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `bambu` | `moli-bambu` | MQTT TLS 8883, épinglé | lumière, `control` (humain pour un agent) | pas encore (cible : Bambu Lab A1) |
 | `moonraker` | `moli-moonraker` | HTTP local 7125 | lumière, `control` (humain pour un agent) | Snapmaker U1, Creality K2 Combo |
 | `tapo` | `moli-tapo` | HTTP 80 + KLAP v2 | oui : tout | pas encore (cible : Tapo L530) |
+| `lifx` | `moli-lifx` | UDP 56700 (protocole LAN), diffusion | oui : marche, luminosité, température, couleur (selon le modèle) | pas encore (cible : LIFX Mini W, LIFX White) |
 | `shelly` | `moli-shelly` | WebSocket local 80 (JSON-RPC Gen2), notifications poussées, digest SHA-256 | oui : sorties (`on`) | Pro 4PM, Pro 3EM (une phase câblée) : lecture identique à HA au Wh près ; ordre sur une sortie : pas encore |
 | `igd` | `moli-igd` | UPnP IGD (SSDP + SOAP) | non | Livebox |
 | `ipp` | `moli-ipp` | IPP 2.0 HTTP 631 | identifier, annuler, imprimer (tableau de bord) | Canon MG3600 |

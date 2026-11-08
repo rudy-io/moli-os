@@ -1,0 +1,27 @@
+[integration]
+id = "lifx"
+name = "LIFX (ampoules Wi-Fi, protocole LAN)"
+brands = ["LIFX"]
+# The models seen so far (in the reference home).
+models = ["LIFX Mini W", "LIFX White"]
+# UDP datagrams to each bulb, and a broadcast for discovery.
+transport = "native"
+driver = "lifx"
+crate = "moli-lifx"
+
+[discovery]
+# The driver broadcasts LIFX's own GetService; bulbs also announce
+# _lifx._udp over mDNS (not used by the driver).
+mdns = ["_lifx._udp"]
+ssdp = []
+ports = [56700]
+
+[needs]
+secrets = []
+vars = []
+# All optional: hosts (fixed addresses), discovery, poll_secs, transition_ms.
+options = []
+
+[origin]
+reused = "aucun code repris. Protocole : documentation publique du protocole LAN de LIFX (lan.developer.lifx.com). Table des produits (src/products.rs) : uniquement les faits utiles (identifiant, nom, couleur oui/non, plage en kelvins et ses évolutions selon le micrologiciel), relevés dans la liste publique des produits LIFX, sans copier son fichier. Règle des 3 relevés manqués : comme l'intégration lifx de Home Assistant (comportement, pas de code)"
+author = "agent"

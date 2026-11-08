@@ -1,0 +1,25 @@
+[package]
+name = "moli-lifx"
+description = "Moli OS driver for LIFX Wi-Fi lights (local LAN protocol, UDP)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+ring.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tokio-util.workspace = true
+
+[lints]
+workspace = true
