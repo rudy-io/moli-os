@@ -1627,6 +1627,7 @@ dependencies = [
  "moli-runtime",
  "ring",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml",

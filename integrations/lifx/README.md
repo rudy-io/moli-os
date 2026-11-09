@@ -22,9 +22,12 @@ Pilote natif `crates/moli-lifx`. Une instance = toutes les ampoules LIFX qu'elle
 
 | Modèle | Produit | Micrologiciel | Vérifié | Date |
 |---|---|---|---|---|
-| LIFX Mini W | à relever | à relever | pas encore | |
-| LIFX White | à relever | à relever | pas encore | |
+| LIFX White | 88 | 3.90 | lecture (capture rejouée en fixture) ; ordres : pas encore | 2026-11-09 |
+| LIFX Mini W | 51 | 3.90 | lecture (capture rejouée en fixture) ; ordres : pas encore | 2026-11-09 |
 
+- La LIFX White, blanc fixe 2700 K, annonce 3500 K dans son état : sans conséquence, la
+  température n'est proposée que si la plage du modèle est réglable.
+- Chaque ampoule envoie parfois deux fois sa réponse à `GetService` : le pilote ignore le double.
 - **Couleur** (`color`) et **température réglable** (`color_temp`) : **non testées sur du vrai
   matériel** (aucune ampoule couleur ni à blanc réglable dans la maison de référence) ; couvertes
   seulement par des tests sur des trames construites d'après la documentation.

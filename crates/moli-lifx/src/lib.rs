@@ -970,6 +970,74 @@ mod tests {
             Bulb { seen, acks, stop }
         }
 
+        /// A bulb that answers every question with a real answer kept in
+        /// `integrations/lifx/fixtures/` (and does not take orders).
+        async fn replaying(at: SocketAddrV4, serial: Serial, fixture: &str) -> CancellationToken {
+            let answers: HashMap<String, String> = serde_json::from_str(fixture).unwrap();
+            let answer = |name: &str| {
+                let hex = &answers[name];
+                (0..hex.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                    .collect::<Vec<u8>>()
+            };
+            let table: HashMap<u16, (u16, Vec<u8>)> = [
+                (proto::GET_SERVICE, proto::STATE_SERVICE, "state_service"),
+                (
+                    proto::GET_HOST_FIRMWARE,
+                    proto::STATE_HOST_FIRMWARE,
+                    "state_host_firmware",
+                ),
+                (
+                    proto::GET_WIFI_INFO,
+                    proto::STATE_WIFI_INFO,
+                    "state_wifi_info",
+                ),
+                (proto::GET_VERSION, proto::STATE_VERSION, "state_version"),
+                (proto::GET_GROUP, proto::STATE_GROUP, "state_group"),
+                (proto::LIGHT_GET, proto::LIGHT_STATE, "light_state"),
+            ]
+            .into_iter()
+            .map(|(get, state, name)| (get, (state, answer(name))))
+            .collect();
+            let mut service = table[&proto::GET_SERVICE].1.clone();
+            // The real answer names port 56700; this bulb listens elsewhere.
+            service[1..5].copy_from_slice(&u32::from(at.port()).to_le_bytes());
+            let socket = UdpSocket::bind(at).await.unwrap();
+            let stop = CancellationToken::new();
+            let done = stop.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let (n, from) = tokio::select! {
+                        () = done.cancelled() => return,
+                        got = socket.recv_from(&mut buf) => got.unwrap(),
+                    };
+                    let Some(m) = proto::decode(&buf[..n]) else {
+                        continue;
+                    };
+                    let Some((kind, payload)) = table.get(&m.kind) else {
+                        continue;
+                    };
+                    let payload = if m.kind == proto::GET_SERVICE {
+                        &service
+                    } else {
+                        payload
+                    };
+                    let frame = proto::encode(
+                        m.source,
+                        Some(serial),
+                        m.sequence,
+                        *kind,
+                        payload,
+                        Reply::Response,
+                    );
+                    let _ = socket.send_to(&frame, from).await;
+                }
+            });
+            stop
+        }
+
         const ONE: Serial = [0x02, 0, 0, 0, 0, 0x01];
         const TWO: Serial = [0x02, 0, 0, 0, 0, 0x02];
 
@@ -1027,6 +1095,48 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
             panic!("never: {what}");
+        }
+
+        #[tokio::test]
+        async fn real_answers_replay_through_the_driver() {
+            let port = free_port();
+            let _white = replaying(
+                at(2, port),
+                ONE,
+                include_str!("../../../integrations/lifx/fixtures/lifx-white.json"),
+            )
+            .await;
+            let _mini = replaying(
+                at(3, port),
+                TWO,
+                include_str!("../../../integrations/lifx/fixtures/lifx-mini-w.json"),
+            )
+            .await;
+            let (hub, _cancel) = start(&[2, 3], port, Duration::from_secs(60));
+            until("both bulbs are published", || {
+                online(&hub, "lifx:020000000001") == Some(true)
+                    && online(&hub, "lifx:020000000002") == Some(true)
+            })
+            .await;
+            let devices = hub.snapshot().devices;
+            let view = |id: &str| devices.iter().find(|d| d.device.id.as_str() == id).unwrap();
+            let state = |id: &str, key: &str| view(id).state[key].value.clone();
+            for (id, model, on, brightness, rssi) in [
+                ("lifx:020000000001", "LIFX White", true, 92, -53),
+                ("lifx:020000000002", "LIFX Mini W", false, 83, -55),
+            ] {
+                let device = &view(id).device;
+                assert_eq!(device.model.as_deref(), Some(model));
+                assert_eq!(&*device.native_name, "Lampe");
+                assert_eq!(device.native_room.as_deref(), Some("Pièce"));
+                // Fixed whites (2700 K): no temperature, no colour, even
+                // though the White reports 3500 K in its state.
+                let keys: Vec<&str> = device.points.iter().map(|p| &*p.key).collect();
+                assert_eq!(keys, ["on", "brightness", "rssi"]);
+                assert_eq!(state(id, "on"), Value::Bool(on));
+                assert_eq!(state(id, "brightness"), Value::Int(brightness));
+                assert_eq!(state(id, "rssi"), Value::Int(rssi));
+            }
         }
 
         #[tokio::test]

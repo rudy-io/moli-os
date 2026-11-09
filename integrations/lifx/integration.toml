@@ -9,6 +9,16 @@ transport = "native"
 driver = "lifx"
 crate = "moli-lifx"
 
+# Real answers (LIFX White, product 88, and LIFX Mini W, product 51,
+# firmware 3.90), anonymised by lifx-capture: payloads only (no header, so
+# no serial), name "Lampe", group "Pièce". Replayed through the driver by
+# moli-lifx's tests.
+[[fixture]]
+file = "fixtures/lifx-white.json"
+
+[[fixture]]
+file = "fixtures/lifx-mini-w.json"
+
 [discovery]
 # The driver broadcasts LIFX's own GetService; bulbs also announce
 # _lifx._udp over mDNS (not used by the driver).
