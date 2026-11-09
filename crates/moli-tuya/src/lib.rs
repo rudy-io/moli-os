@@ -786,6 +786,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn loopback_source_accepts_private_ipv4_ranges_from_json() {
+        for s in ["10.1.2.3", "172.16.5.4", "192.168.70.10"] {
+            let json = serde_json::json!({ "ip": s });
+            assert_eq!(
+                broadcast_address("127.0.0.1".parse::<IpAddr>().unwrap(), &json),
+                Some(s.parse::<Ipv4Addr>().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn loopback_source_rejects_link_local_and_cgnat_from_json() {
+        for s in ["169.254.1.1", "100.64.0.1"] {
+            let json = serde_json::json!({ "ip": s });
+            assert_eq!(
+                broadcast_address("127.0.0.1".parse::<IpAddr>().unwrap(), &json),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn ipv6_loopback_source_uses_announced_address() {
+        let json = serde_json::json!({ "ip": "192.168.70.10" });
+        assert_eq!(
+            broadcast_address("::1".parse::<IpAddr>().unwrap(), &json),
+            Some("192.168.70.10".parse::<Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn ipv6_non_loopback_source_is_rejected() {
+        let json = serde_json::json!({ "ip": "192.168.70.10" });
+        assert_eq!(
+            broadcast_address("fe80::1".parse::<IpAddr>().unwrap(), &json),
+            None
+        );
+    }
+
     /// A gateway (0) carrying a probe (1), both followed by the cloud.
     fn gateway_and_probe() -> Fallback {
         Fallback {
