@@ -395,6 +395,90 @@ async fn mcp_tools_drive_the_home() {
 }
 
 #[tokio::test]
+async fn mcp_reads_a_device_by_device_id_or_device() {
+    // Devices without a room are protected, as in a real home that asks so.
+    let hub = Hub::new(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protect_unassigned: true,
+            ..moli_runtime::guard::GuardPolicy::default()
+        },
+        ..HubOptions::default()
+    })
+    .unwrap();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(Lamp),
+        CancellationToken::new(),
+    );
+    for _ in 0..200 {
+        if hub.stats().drivers_running == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let addr = serve(&hub, &moli_api::Options::default()).await;
+    let call = |id: u64, name: &str, arguments: Json| {
+        rpc(
+            id,
+            "tools/call",
+            &json!({ "name": name, "arguments": arguments }),
+        )
+    };
+
+    // The schema says `device_id`; the old `device` still reads (#161).
+    let (_, tools) = request(
+        &addr,
+        "POST",
+        "/mcp",
+        Some(&rpc(1, "tools/list", &json!({}))),
+    )
+    .await;
+    assert!(tools.contains("device_id"), "{tools}");
+    for (id, arguments) in [
+        (2, json!({ "device_id": "fake:lamp" })),
+        (3, json!({ "device": "fake:lamp" })),
+    ] {
+        let (status, body) = request(
+            &addr,
+            "POST",
+            "/mcp",
+            Some(&call(id, "get_device", arguments)),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains(r#"\"id\":\"fake:lamp\""#), "{body}");
+    }
+
+    // An unknown camera is unknown, not « protected »; a known one in a
+    // protected place (here: no room) is still refused.
+    let (_, body) = request(
+        &addr,
+        "POST",
+        "/mcp",
+        Some(&call(
+            4,
+            "camera_snapshot",
+            json!({ "device_id": "fake:nope" }),
+        )),
+    )
+    .await;
+    assert!(body.contains("unknown device"), "{body}");
+    let (_, body) = request(
+        &addr,
+        "POST",
+        "/mcp",
+        Some(&call(
+            5,
+            "camera_snapshot",
+            json!({ "device_id": "fake:lamp" }),
+        )),
+    )
+    .await;
+    assert!(body.contains("protected room"), "{body}");
+}
+
+#[tokio::test]
 async fn speaking_without_an_assistant_says_so() {
     let (addr, _hub) = server().await;
     let (status, body) = request(
