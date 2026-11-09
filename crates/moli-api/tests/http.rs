@@ -2398,7 +2398,7 @@ async fn airzone_existing_gateways_share_the_installation_rate_budget() {
         "{}x-moli-origin: ui\r\n",
         pin_session(&addr, "482915").await
     );
-    let body = json!({"instance":"existing","host":"192.168.1.2","port":3000,"expected_mac":"aabbccddeeff"});
+    let body = json!({"instance":"existing","host":"192.168.77.2","port":3000,"expected_mac":"aabbccddeeff"});
     let routes = [
         ("POST", "/api/integrations/airzone/probe"),
         ("POST", "/api/integrations/airzone/existing/probe"),

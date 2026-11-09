@@ -60,7 +60,7 @@ fn only_private_hosts_not_network_or_broadcast_addresses_can_be_discovered() {
     ] {
         assert_eq!(private_host(value), None, "{value}");
     }
-    for value in ["10.0.0.1", "172.16.0.1", "172.31.255.1", "192.168.1.1"] {
+    for value in ["10.0.0.1", "172.16.0.1", "172.31.255.1", "192.168.77.1"] {
         assert_eq!(private_host(value), Some(host(value)));
     }
 }
@@ -80,19 +80,19 @@ fn no_network_hint_is_an_explicit_incomplete_empty_search() {
 
 #[test]
 fn configured_network_precedes_a_container_bridge_and_scans_at_most_two_subnets() {
-    let known = [gateway("192.168.1.20", 3000, None)];
+    let known = [gateway("192.168.77.20", 3000, None)];
     let plan = plan_targets(
         &known,
         &[host("10.0.0.5")],
         &[host("172.16.0.1"), host("8.8.8.8")],
     );
-    assert_eq!(plan.targets[0].host, host("192.168.1.20"));
+    assert_eq!(plan.targets[0].host, host("192.168.77.20"));
     assert_eq!(plan.targets.len(), 508);
     assert!(plan.incomplete);
     assert!(
         plan.targets
             .iter()
-            .all(|target| matches!(prefix(target.host), [192, 168, 1] | [10, 0, 0]))
+            .all(|target| matches!(prefix(target.host), [192, 168, 77] | [10, 0, 0]))
     );
     assert_eq!(
         plan.targets

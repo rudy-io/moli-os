@@ -77,12 +77,12 @@ hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 md-5 = "0.11"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
-rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 mime_guess = { version = "2", default-features = false }
-rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp = { version = "3.9", features = ["server", "macros", "transport-streamable-http-server"] }
 rumqttc = { version = "0.25", default-features = false }
 rust-embed = "8"
 schemars = "1"

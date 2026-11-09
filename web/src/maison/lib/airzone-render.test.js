@@ -311,14 +311,14 @@ test('installation diagnostics expose optional availability without treating uns
 });
 
 test('discovery choices distinguish identical models accessibly and keep existing gateways out of the add flow', () => {
-  const candidate = {host:'192.168.1.20',port:3000,mac:'aabbccddeeff',gateway_type:'ws_az',zones:1,existing_instance:null,existing_enabled:null};
-  const gateways = [candidate,{...candidate,host:'192.168.1.21',mac:'112233445566'}, {...candidate,host:'192.168.1.22',mac:'aabbcc112233',existing_instance:'paused',existing_enabled:false}];
+  const candidate = {host:'192.168.77.20',port:3000,mac:'aabbccddeeff',gateway_type:'ws_az',zones:1,existing_instance:null,existing_enabled:null};
+  const gateways = [candidate,{...candidate,host:'192.168.77.21',mac:'112233445566'}, {...candidate,host:'192.168.77.22',mac:'aabbcc112233',existing_instance:'paused',existing_enabled:false}];
   const html = render(DiscoveryResults,{props:{report:{gateways,incomplete:false}}}).body;
   const choices = tags(html,'button');
   assert.equal(choices.length,2,'an existing gateway only offers management');
-  assert.match(choices[0],/aria-label="Choisir cette passerelle[^\"]+192\.168\.1\.20"/);
-  assert.match(choices[1],/aria-label="Choisir cette passerelle[^\"]+192\.168\.1\.21"/);
-  assert.match(tags(html,'a')[0],/href="#\/airzone\/installation"[^>]+aria-label="Gérer cette passerelle[^\"]+192\.168\.1\.22"/);
+  assert.match(choices[0],/aria-label="Choisir cette passerelle[^\"]+192\.168\.77\.20"/);
+  assert.match(choices[1],/aria-label="Choisir cette passerelle[^\"]+192\.168\.77\.21"/);
+  assert.match(tags(html,'a')[0],/href="#\/airzone\/installation"[^>]+aria-label="Gérer cette passerelle[^\"]+192\.168\.77\.22"/);
   assert.match(text(html),/1 zone disponible/);
   assert.doesNotMatch(text(html),/1 zones/);
   assert.ok(tags(html,'details').every((tag)=>!tag.includes(' open')),'network identities remain optional details');

@@ -18,7 +18,7 @@ before(async()=>{
  `);
 });
 after(()=>{for(const[k,d]of globals){if(d)Object.defineProperty(globalThis,k,d);else delete globalThis[k];}});
-const gateway={host:'192.168.1.20',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',gateway_type:'ws_az',api_version:null,firmware:'4.21',systems:2,zones:12,incomplete:false,read_only:true,existing_instance:null,existing_enabled:null};
+const gateway={host:'192.168.77.20',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',gateway_type:'ws_az',api_version:null,firmware:'4.21',systems:2,zones:12,incomplete:false,read_only:true,existing_instance:null,existing_enabled:null};
 const report={gateways:[gateway],scanned:254,target_count:254,incomplete:false};
 const preview={...gateway,instance:'airzone-2'};
 const saved={instance:'airzone-2',stored:true,read_only:true,already_installed:false};
@@ -44,9 +44,9 @@ test('stopping a search aborts its request and discards a late response',async(t
 });
 
 test('switching to manual input invalidates pending discovery and preserves a typed address on return',async(t)=>{
- let resolve;const{component}=fixture(t,()=>new Promise(done=>{resolve=done;}));const searching=component.scan();component.enterManually();component.change('host','192.168.1.30');
+ let resolve;const{component}=fixture(t,()=>new Promise(done=>{resolve=done;}));const searching=component.scan();component.enterManually();component.change('host','192.168.77.30');
  resolve(response(report));await searching;assert.equal(component.inspect().stage,'manual');assert.equal(component.inspect().results,null);
- component.goBack();component.enterManually();assert.equal(component.inspect().draft.host,'192.168.1.30');
+ component.goBack();component.enterManually();assert.equal(component.inspect().draft.host,'192.168.77.30');
 });
 
 test('leaving or cancelling scan authentication cannot start a delayed search',async(t)=>{
