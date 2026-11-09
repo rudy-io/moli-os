@@ -316,9 +316,9 @@ test('discovery choices distinguish identical models accessibly and keep existin
   const html = render(DiscoveryResults,{props:{report:{gateways,incomplete:false}}}).body;
   const choices = tags(html,'button');
   assert.equal(choices.length,2,'an existing gateway only offers management');
-  assert.match(choices[0],/aria-label="Choisir cette passerelle[^\"]+192.168.77.20"/);
-  assert.match(choices[1],/aria-label="Choisir cette passerelle[^\"]+192.168.77.21"/);
-  assert.match(tags(html,'a')[0],/href="#\/airzone\/installation"[^>]+aria-label="Gérer cette passerelle[^\"]+192.168.77.22"/);
+  assert.match(choices[0],/aria-label="Choisir cette passerelle[^\"]+192\.168\.77\.20"/);
+  assert.match(choices[1],/aria-label="Choisir cette passerelle[^\"]+192\.168\.77\.21"/);
+  assert.match(tags(html,'a')[0],/href="#\/airzone\/installation"[^>]+aria-label="Gérer cette passerelle[^\"]+192\.168\.77\.22"/);
   assert.match(text(html),/1 zone disponible/);
   assert.doesNotMatch(text(html),/1 zones/);
   assert.ok(tags(html,'details').every((tag)=>!tag.includes(' open')),'network identities remain optional details');
