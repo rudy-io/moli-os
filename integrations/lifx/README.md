@@ -30,8 +30,8 @@ Pilote natif `crates/moli-lifx`. Une instance = toutes les ampoules LIFX qu'elle
 
 | Modèle | Produit | Micrologiciel | Vérifié | Date |
 |---|---|---|---|---|
-| LIFX White | 88 | 3.90 | lecture (capture rejouée en fixture) ; marche/arrêt et luminosité depuis Moli (avec `LightSetColor`, avant la revue #170 : `LightSetWaveformOptional` à revérifier) | 2026-11-09 |
-| LIFX Mini W | 51 | 3.90 | lecture (capture rejouée en fixture) ; ordres : pas encore | 2026-11-09 |
+| LIFX White | 88 | 3.90 | lecture (capture rejouée en fixture) ; marche/arrêt et luminosité (`LightSetWaveformOptional`), luminosité sur ampoule éteinte | 2026-11-09 |
+| LIFX Mini W | 51 | 3.90 | lecture (capture rejouée en fixture) ; marche/arrêt et luminosité (`LightSetWaveformOptional`), luminosité sur ampoule éteinte | 2026-11-09 |
 
 - Maison de référence : 4 ampoules (2 White, 2 Mini W), adresses fixes dans `hosts`. Nom et
   groupe LIFX repris en nom et pièce. Une ampoule coupée à l'interrupteur au démarrage de Moli
