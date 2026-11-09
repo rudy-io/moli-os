@@ -189,6 +189,13 @@ pub async fn set_secret(path: &Path, key: &MasterKey, name: &str, value: &str) -
     store.set(name, value).await
 }
 
+/// Reads one stored secret (operator tool: the cloud keys a person gave in
+/// the dashboard, for an import run beside moli-os). Never printed.
+pub fn get_secret(path: &Path, key: &MasterKey, name: &str) -> io::Result<Option<String>> {
+    let store = SecretStore::open(path.to_path_buf(), &parse_master_key(&key.0)?)?;
+    Ok(store.get(name))
+}
+
 pub(crate) fn master_key_bytes(key: &MasterKey) -> io::Result<[u8; 32]> {
     parse_master_key(&key.0)
 }

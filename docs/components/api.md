@@ -893,7 +893,7 @@ La configuration est chargée et validée pour toutes les commandes **sauf** `pr
 | `profile check <profile>` | fichier de profil ou id intégré | valide un profil déclaratif et affiche variables, requêtes et points (la porte que tout profil écrit par un agent doit passer) ; sans configuration |
 | `profile list` | aucun | liste les profils intégrés ; sans configuration |
 | `energy import` | aucun | importe un historique horaire depuis l'entrée standard (lignes JSON `{"meter", "hour" (ms, début d'heure UTC), "kwh"}`) ; seules les heures antérieures à l'enregistrement de Moli sont prises ; rejouable, possible pendant que `serve` tourne ; exige `[energy]` |
-| `tuya import` | `--instance <id>` (défaut `tuya`), `--devices-file <chemin>` (défaut `data/tuya.json`) | lit l'export JSON de `tools/home-assistant/tuya-export.py` sur l'entrée standard (refuse un terminal) : clés locales dans le coffre chiffré, le reste dans le fichier d'appareils ; redémarrer ensuite |
+| `tuya import` | `--instance <id>` (défaut `tuya`), `--devices-file <chemin>` (défaut : le `devices_file` du pilote, sinon `tuya.json` du dossier de données), `--cloud`, `--summary` | lit l'export JSON de `tools/home-assistant/tuya-export.py` sur l'entrée standard (refuse un terminal), ou avec `--cloud` le cloud Tuya lui-même, avec les clés du projet cloud du pilote (son fichier `cloud_keys`, sinon celles données dans le tableau de bord) et sa `cloud_region` : clés locales dans le coffre chiffré, le reste dans le fichier d'appareils ; `--summary` liste seulement, sans clé ni écriture ; redémarrer ensuite |
 
 **Les secrets passent toujours par un tube, jamais par la ligne de commande ni le
 clavier** (sinon ils restent à l'écran, dans l'historique du shell ou la liste des

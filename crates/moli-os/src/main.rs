@@ -82,10 +82,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum TuyaCommand {
-    /// File what the Tuya cloud knows (JSON on standard input, see
-    /// tools/home-assistant/tuya-export.py): local keys into the encrypted store,
+    /// File what the Tuya cloud knows: local keys into the encrypted store,
     /// the rest into the devices file. Keys are never printed. Restart
-    /// moli-os afterwards.
+    /// moli-os afterwards. Read on standard input (the JSON of
+    /// tools/home-assistant/tuya-export.py), or with `--cloud` straight from
+    /// the cloud project whose keys Moli holds (no Home Assistant).
     Import {
         /// The tuya driver instance the keys belong to.
         #[arg(long, default_value = "tuya")]
@@ -93,6 +94,13 @@ enum TuyaCommand {
         /// Default: `tuya.json` in the data directory.
         #[arg(long)]
         devices_file: Option<std::path::PathBuf>,
+        /// Ask the Tuya cloud itself, with the driver's cloud keys (given in
+        /// the dashboard, or its `cloud_keys` file) and `cloud_region`.
+        #[arg(long)]
+        cloud: bool,
+        /// Only list what would be filed (no key shown, nothing written).
+        #[arg(long)]
+        summary: bool,
     },
 }
 
@@ -221,7 +229,9 @@ fn main() -> anyhow::Result<()> {
         Command::Tuya(TuyaCommand::Import {
             instance,
             devices_file,
-        }) => tuya_import(&config, &instance, devices_file),
+            cloud,
+            summary,
+        }) => tuya_import(&config, &instance, devices_file, cloud, summary),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
@@ -593,25 +603,54 @@ fn tuya_import(
     config: &Config,
     instance: &str,
     devices_file: Option<std::path::PathBuf>,
+    cloud: bool,
+    summary: bool,
 ) -> anyhow::Result<()> {
-    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        bail!("pipe the export in: it holds local keys, never type or paste them");
+    if !cloud && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        bail!(
+            "pipe the export in (it holds local keys, never type or paste them), or ask the cloud: --cloud"
+        );
     }
     let key = master_key(&config.server.data_dir, false)?
         .context("no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)")?;
-    let devices_file = devices_file.unwrap_or_else(|| config.server.data_dir.join("tuya.json"));
-    let import: moli_tuya::ImportFile = serde_json::from_reader(std::io::stdin().lock())
-        .context("invalid import (expected the JSON of tuya-export.py)")?;
-    let existing = match std::fs::read(&devices_file) {
-        Ok(bytes) => Some(serde_json::from_slice(&bytes)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.into()),
-    };
-    let (file, keys) = moli_tuya::merge_import(import, existing);
+    // The file the driver reads (its `devices_file`), else the data directory's.
+    let devices_file = devices_file
+        .or_else(|| tuya_driver(config, instance).ok().map(|t| t.devices_file))
+        .unwrap_or_else(|| config.server.data_dir.join("tuya.json"));
     let path = config.server.data_dir.join("secrets.enc");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut import: moli_tuya::ImportFile = if cloud {
+        let (keys, region) = tuya_cloud_access(config, instance, &path, &key)?;
+        runtime
+            .block_on(moli_tuya::cloud::import(keys, region))
+            .context("the Tuya cloud did not give the devices")?
+    } else {
+        serde_json::from_reader(std::io::stdin().lock())
+            .context("invalid import (expected the JSON of tuya-export.py)")?
+    };
+    let existing: Option<moli_tuya::DeviceFile> = match std::fs::read(&devices_file) {
+        Ok(bytes) => Some(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if cloud {
+        // The cloud names some points its own way: what works stays.
+        moli_tuya::import::keep_known(&mut import, existing.as_ref());
+    }
+    if summary {
+        for line in moli_tuya::import::summary(&import) {
+            println!("{line}");
+        }
+        println!(
+            "{} devices, nothing written (--summary); the import would write {}",
+            import.devices.len(),
+            devices_file.display()
+        );
+        return Ok(());
+    }
+    let (file, keys) = moli_tuya::merge_import(import, existing);
     for (name, value) in &keys {
         runtime.block_on(moli_runtime::set_secret(
             &path,
@@ -623,6 +662,7 @@ fn tuya_import(
     let text = serde_json::to_string_pretty(&file)?;
     std::fs::write(&devices_file, text + "\n")
         .with_context(|| format!("cannot write {}", devices_file.display()))?;
+    keep_owner(&config.server.data_dir, &[&devices_file, &path]);
     println!(
         "{} devices filed in {}, {} local keys stored (encrypted)",
         file.devices.len(),
@@ -630,6 +670,84 @@ fn tuya_import(
         keys.len()
     );
     Ok(())
+}
+
+/// Files written by a tool run as root (the import) go back to whoever
+/// owns the data directory: moli-os runs as that user and must still read
+/// its vault and its devices file.
+#[cfg(unix)]
+fn keep_owner(data_dir: &std::path::Path, files: &[&std::path::Path]) {
+    use std::os::unix::fs::MetadataExt as _;
+    let Ok(dir) = std::fs::metadata(data_dir) else {
+        return;
+    };
+    for file in files {
+        let Ok(meta) = std::fs::metadata(file) else {
+            continue;
+        };
+        if (meta.uid(), meta.gid()) != (dir.uid(), dir.gid())
+            && let Err(e) = std::os::unix::fs::chown(file, Some(dir.uid()), Some(dir.gid()))
+        {
+            eprintln!(
+                "{} keeps its owner ({e}): give it to the data directory's",
+                file.display()
+            );
+        }
+    }
+}
+
+/// Elsewhere, files keep the owner the system gives them.
+#[cfg(not(unix))]
+fn keep_owner(_data_dir: &std::path::Path, _files: &[&std::path::Path]) {}
+
+/// The options of the tuya driver `instance`.
+fn tuya_driver(config: &Config, instance: &str) -> anyhow::Result<moli_tuya::Config> {
+    let driver = config
+        .drivers
+        .iter()
+        .find(|d| d.id == instance && d.kind == "tuya")
+        .with_context(|| format!("no tuya driver `{instance}` in the configuration"))?;
+    driver
+        .options
+        .clone()
+        .try_into()
+        .context("the tuya driver's options")
+}
+
+/// The cloud project's keys and region of the tuya driver `instance`: its
+/// `cloud_keys` file, else what a person gave in the dashboard (the vault).
+fn tuya_cloud_access(
+    config: &Config,
+    instance: &str,
+    vault: &std::path::Path,
+    key: &MasterKey,
+) -> anyhow::Result<(moli_tuya::cloud::Keys, moli_tuya::cloud::Region)> {
+    let tuya = tuya_driver(config, instance)?;
+    let region = moli_tuya::cloud::Region::named(&tuya.cloud_region).with_context(|| {
+        format!(
+            "unknown cloud_region `{}` (known: {})",
+            tuya.cloud_region,
+            moli_tuya::cloud::Region::names()
+        )
+    })?;
+    let from_file = std::fs::read_to_string(&tuya.cloud_keys)
+        .ok()
+        .and_then(|text| moli_tuya::cloud::Keys::parse(&text));
+    let stored = |name: &str| {
+        moli_runtime::get_secret(vault, key, &format!("{instance}/{name}"))
+            .ok()
+            .flatten()
+    };
+    let keys = from_file
+        .or_else(|| {
+            stored(moli_tuya::cloud::STORED_ID)
+                .zip(stored(moli_tuya::cloud::STORED_SECRET))
+                .and_then(|(id, secret)| moli_tuya::cloud::Keys::new(&id, &secret))
+        })
+        .context(
+            "no Tuya cloud keys: give them in the dashboard (Système), or in the driver's cloud_keys file",
+        )?;
+    Ok((keys, region))
 }
 
 /// `moli-os energy import`: hourly history from elsewhere (HA statistics).
