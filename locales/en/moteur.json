@@ -112,6 +112,7 @@
   "moteur.changement.plus_rien": "no longer detects anything",
   "moteur.changement.fumee": "detects smoke",
   "moteur.changement.fuite": "detects a leak",
+  "moteur.changement.soif": "says the plant is thirsty",
   "moteur.changement.allume": "turns on",
   "moteur.changement.eteint": "turns off",
   "moteur.changement.valeur": "· {libelle} changes to {valeur}",

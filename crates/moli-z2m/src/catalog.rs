@@ -137,6 +137,7 @@ impl Entry {
         }
         let id = DeviceId::new(instance, &raw.ieee_address);
         mark_impulses(&id, impulses, &mut points, &mut codecs, applied);
+        mark_soil(&mut points);
         let device = Device {
             id,
             instance: instance.clone(),
@@ -508,6 +509,19 @@ fn mark_impulses(
     }
 }
 
+/// A plant sensor's `dry` (Tuya soil sensors): its alarm is the plant's thirst.
+/// Only beside a soil moisture reading: elsewhere a bare `dry` says nothing.
+fn mark_soil(points: &mut [PointSpec]) {
+    if !points.iter().any(|p| p.semantic == Semantic::SoilMoisture) {
+        return;
+    }
+    for point in points.iter_mut() {
+        if &*point.key == "dry" && point.kind == Kind::Binary && !point.access.write {
+            point.semantic = Semantic::SoilDry;
+        }
+    }
+}
+
 /// A lamp's settable `color {x, y}` composite (`color_xy`).
 fn is_xy_color(expose: &RawExpose) -> bool {
     let has = |axis: &str| {
@@ -639,10 +653,56 @@ mod tests {
         all[ieee].as_object().unwrap().clone()
     }
 
+    /// A Tuya soil sensor (COOLO CS-201Z): its soil is a plant's, its `dry` the
+    /// plant's thirst (#163). A bare `dry` elsewhere stays what it is.
+    #[test]
+    fn a_soil_sensor_is_a_plant_and_its_dry_is_thirst() {
+        let numeric = |property: &str, unit: &str| json!({ "type": "numeric", "name": property, "property": property, "access": 1, "unit": unit });
+        let dry = json!({ "type": "binary", "name": "dry", "property": "dry", "access": 1, "value_on": true, "value_off": false });
+        let bridge = json!([
+            { "ieee_address": "0x00124b00000000b1", "type": "EndDevice", "friendly_name": "plante",
+              "definition": { "model": "CS-201Z", "vendor": "COOLO", "description": "Soil moisture sensor",
+                "exposes": [dry, numeric("soil_moisture", "%"), numeric("temperature", "°C"), numeric("humidity", "%")] } },
+            { "ieee_address": "0x00124b00000000b2", "type": "EndDevice", "friendly_name": "autre",
+              "definition": { "model": "X", "vendor": "Y", "description": "Not a plant", "exposes": [dry] } }
+        ]);
+        let catalog = Catalog::from_bridge_devices(
+            &InstanceId::from("z2m"),
+            serde_json::to_vec(&bridge).unwrap().as_slice(),
+        )
+        .unwrap();
+        let plant = catalog.by_name("plante").unwrap();
+        let semantic = |key| plant.device.point(key).unwrap().semantic;
+        assert_eq!(semantic("soil_moisture"), Semantic::SoilMoisture);
+        assert_eq!(semantic("dry"), Semantic::SoilDry);
+        assert_eq!(semantic("temperature"), Semantic::Temperature);
+        let other = catalog.by_name("autre").unwrap();
+        assert_eq!(other.device.point("dry").unwrap().semantic, Semantic::Other);
+    }
+
+    /// The real frames of a COOLO CS-201Z (HOBEIAN ZG-303Z) soil sensor.
+    #[test]
+    fn a_real_soil_sensor_reads_as_a_plant() {
+        let catalog = catalog();
+        let plant = catalog.by_name("0x00124b000000000b").unwrap();
+        let semantic = |key| plant.device.point(key).unwrap().semantic;
+        assert_eq!(semantic("soil_moisture"), Semantic::SoilMoisture);
+        assert_eq!(semantic("dry"), Semantic::SoilDry);
+        assert_eq!(semantic("temperature"), Semantic::Temperature);
+        assert_eq!(semantic("humidity"), Semantic::Humidity);
+        let values: HashMap<_, _> = plant
+            .decode(&state("0x00124b000000000b"))
+            .into_iter()
+            .collect();
+        assert_eq!(values["soil_moisture"].as_f64(), Some(54.0));
+        assert_eq!(values["dry"], Value::Bool(false));
+        assert_eq!(values["soil_warning"].as_f64(), Some(50.0));
+    }
+
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 9, "coordinator excluded, 9 real devices");
+        assert_eq!(catalog.len(), 10, "coordinator excluded, 10 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),

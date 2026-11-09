@@ -456,6 +456,8 @@ fn sensor(e: &Entity, s: &mut Snapshot, state: &str, a: &Map<String, Json>) -> a
             "energy" => "energy",
             "humidity" => "humidity",
             "battery" => "battery",
+            // A numeric moisture is a soil's, in % (the binary one is a leak).
+            "moisture" => "soil_moisture",
             _ => "value",
         };
         let semantic = Semantic::infer(key, unit.as_ref());

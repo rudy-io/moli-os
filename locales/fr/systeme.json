@@ -179,6 +179,8 @@
   "systeme.format.binaire.occupancy.off": "Personne",
   "systeme.format.binaire.water_leak.on": "Fuite !",
   "systeme.format.binaire.water_leak.off": "Sec",
+  "systeme.format.binaire.soil_dry.on": "À arroser",
+  "systeme.format.binaire.soil_dry.off": "Arrosée",
   "systeme.format.binaire.smoke.on": "Fumée !",
   "systeme.format.binaire.smoke.off": "RAS",
   "systeme.format.binaire.battery_low.on": "Pile faible",

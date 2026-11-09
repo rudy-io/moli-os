@@ -184,6 +184,8 @@
   "commun.piece.ouverte": "{name} ouverte",
   "commun.piece.fermee": "{name} fermée",
   "commun.piece.presence": "Présence",
+  "commun.piece.plante": "{name} : terre à {n}",
+  "commun.piece.plante_soif": "{name} : terre à {n}, à arroser",
   "commun.piece.pile_faible": "{name} : pile faible",
   "commun.piece.imprimante_eteinte": "éteinte",
   "commun.piece.lecture": "{name} · {label} : {value}",

@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -80,9 +80,21 @@
       return every ? [{ tone: '', icon: 'power', text: t('commun.piece.au_repos', { name: nameOf(d.id) }) }] : [];
     }
     // A silent sensor's last readings are old news: say it is silent.
-    if (d.online === false && deviceKind(d) === 'sensor') {
+    if (d.online === false && ['sensor', 'plant'].includes(deviceKind(d))) {
       const dead = lowBattery(d.id);
       return [{ tone: dead ? 'alert' : '', icon: dead ? 'battery-alert' : 'offline', text: t(dead ? 'commun.piece.pile_vide' : 'commun.piece.hors_ligne', { name: nameOf(d.id) }) }];
+    }
+    // A plant says its soil, and whether it is thirsty; its pot's air is no room's.
+    if (deviceKind(d) === 'plant') {
+      const { moisture, thirsty } = plantNeeds(d);
+      const shown = moisture == null ? '' : t('commun.pourcent', { n: num(moisture) });
+      const plant = thirsty
+        ? [{ tone: 'warm', icon: 'sprout', text: shown, title: t('commun.piece.plante_soif', { name: nameOf(d.id), n: shown }) }]
+        : every || moisture != null
+          ? [{ tone: 'good', icon: 'sprout', text: shown, title: t('commun.piece.plante', { name: nameOf(d.id), n: shown }) }]
+          : [];
+      if (lowBattery(d.id)) plant.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
+      return plant;
     }
     const out = [];
     const v = (k) => value(d.id, k);
@@ -125,7 +137,7 @@
 
   const roomTemperature = $derived.by(() => {
     const readings = [...room.sensors, ...room.climates]
-      .filter((d) => d.online !== false)
+      .filter((d) => d.online !== false && deviceKind(d) !== 'plant')
       // Tuya's Zigbee probes say `va_temperature`.
       .map((d) => {
         const key = ['temperature', 'temp_current', 'va_temperature'].find((key) => Number.isFinite(value(d.id, key)));

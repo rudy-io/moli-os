@@ -41,6 +41,7 @@
   "assistant.house.offline": "unreachable, state unknown",
   "assistant.house.offline_builder": "(unreachable for now)",
   "assistant.house.camera": "(camera)",
+  "assistant.house.plant": "(plant sensor: how wet its soil is, not the room's reading)",
   "assistant.tools.automation.description": "Creates an automation, as a draft, from a request: “when… then…”, “every evening at…”, “let me know if…”. An adult approves it (button on the card) before it runs. Pass the full request, in English.",
   "assistant.tools.show.description": "Chooses what the screen displays below your answer, in order. device: one device (light, plug, AC, camera, TV, speaker, sensor… the screen picks the right control). room: a whole room. energy: electricity consumption. weather: the weather. remote: a TV's remote control (the TV's id). cameras: all the cameras. history: the curve of a value (point = id/key, hours).",
   "assistant.tools.show.id": "Device id (device, remote).",

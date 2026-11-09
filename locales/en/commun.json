@@ -193,6 +193,8 @@
   "commun.piece.ouverte": "{name} open",
   "commun.piece.fermee": "{name} closed",
   "commun.piece.presence": "Presence",
+  "commun.piece.plante": "{name}: soil at {n}",
+  "commun.piece.plante_soif": "{name}: soil at {n}, needs water",
   "commun.piece.pile_faible": "{name}: low battery",
   "commun.piece.imprimante_eteinte": "off",
   "commun.piece.lecture": "{name} · {label}: {value}",

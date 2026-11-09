@@ -227,6 +227,9 @@ pub(crate) fn inventory(
             if view.camera {
                 let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.camera"));
             }
+            if plant(view) {
+                let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.plant"));
+            }
             let points = points_of(view, reader);
             if !points.is_empty() {
                 let _ = write!(out, " · {}", points.join(", "));
@@ -288,6 +291,9 @@ pub(crate) fn inventory_static(
             if view.camera {
                 let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.camera"));
             }
+            if plant(view) {
+                let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.plant"));
+            }
             let points = static_points_of(view);
             if !points.is_empty() {
                 let _ = write!(out, " · {}", points.join(", "));
@@ -307,6 +313,7 @@ fn static_points_of(view: &DeviceView) -> Vec<String> {
     writable
         .chain(readings)
         .filter(|p| !private(&p.key) && !setting(&p.key, p.semantic) && !noise(&p.key))
+        .filter(|p| !pot_climate(view, p))
         .take(MAX_POINTS)
         .map(|p| {
             let unit = p.unit.as_ref().map(|u| u.symbol().to_owned());
@@ -442,6 +449,24 @@ pub(crate) fn private(key: &str) -> bool {
     PRIVATE_POINTS.iter().any(|p| key.eq_ignore_ascii_case(p))
 }
 
+/// A plant sensor: it has a soil moisture reading.
+pub(crate) fn plant(view: &DeviceView) -> bool {
+    view.device
+        .points
+        .iter()
+        .any(|p| p.semantic == moli_core::Semantic::SoilMoisture)
+}
+
+/// A plant sensor's temperature and humidity are the pot's: the conversation never
+/// takes them for the room's (the dashboard leaves them out of the room too).
+/// Drafting automations keeps them (« préviens-moi s'il gèle près du ficus »).
+fn pot_climate(view: &DeviceView, p: &moli_core::PointSpec) -> bool {
+    matches!(
+        p.semantic,
+        moli_core::Semantic::Temperature | moli_core::Semantic::Humidity
+    ) && plant(view)
+}
+
 fn points_of(view: &DeviceView, reader: Reader) -> Vec<String> {
     let writable = view.device.points.iter().filter(|p| p.access.write);
     let readings = view
@@ -464,6 +489,7 @@ fn points_of(view: &DeviceView, reader: Reader) -> Vec<String> {
     writable
         .chain(readings)
         .filter(|p| !private(&p.key))
+        .filter(|p| reader == Reader::Builder || !pot_climate(view, p))
         .take(max)
         .map(|p| {
             let value = view
@@ -737,6 +763,80 @@ mod tests {
         );
         let chat = inventory(&static_house(), &layout, &protected, Reader::Chat);
         assert!(chat.contains("## Salon (étage : en bas)\n"), "{chat}");
+    }
+
+    /// A plant sensor's temperature is the pot's: the conversation never reads it as
+    /// the room's (#163), drafting automations still can.
+    #[test]
+    fn a_plant_sensor_says_its_soil_not_the_rooms_climate() {
+        let numeric = Kind::Numeric {
+            min: None,
+            max: None,
+            step: None,
+        };
+        let with = |mut p: moli_core::PointSpec, semantic| {
+            p.semantic = semantic;
+            p
+        };
+        let mut plant = named(
+            "z2m:plant",
+            "Capteur plante",
+            "Salon",
+            vec![
+                with(
+                    spec(
+                        "soil_moisture",
+                        numeric.clone(),
+                        false,
+                        Some(moli_core::Unit::Percent),
+                    ),
+                    moli_core::Semantic::SoilMoisture,
+                ),
+                with(
+                    spec("dry", Kind::Binary, false, None),
+                    moli_core::Semantic::SoilDry,
+                ),
+                with(
+                    spec(
+                        "temperature",
+                        numeric.clone(),
+                        false,
+                        Some(moli_core::Unit::Celsius),
+                    ),
+                    moli_core::Semantic::Temperature,
+                ),
+                with(
+                    spec("humidity", numeric, false, Some(moli_core::Unit::Percent)),
+                    moli_core::Semantic::Humidity,
+                ),
+            ],
+        );
+        for (key, value) in [
+            ("soil_moisture", Value::Float(54.0)),
+            ("dry", Value::Bool(false)),
+            ("temperature", Value::Float(21.9)),
+            ("humidity", Value::Float(75.0)),
+        ] {
+            plant
+                .state
+                .insert(key.into(), moli_core::Sample { value, ts: 1 });
+        }
+        let devices = [plant];
+        let (text, _) = inventory_static(&devices, &layout(), &[]);
+        assert!(text.contains("(capteur de plante"), "{text}");
+        assert!(text.contains("soil_moisture %"), "{text}");
+        assert!(
+            !text.contains("temperature") && !text.contains("humidity"),
+            "{text}"
+        );
+        let chat = inventory(&devices, &layout(), &[], Reader::Chat);
+        assert!(chat.contains("soil_moisture"), "{chat}");
+        assert!(
+            !chat.contains("temperature") && !chat.contains("humidity"),
+            "{chat}"
+        );
+        let builder = inventory(&devices, &layout(), &[], Reader::Builder);
+        assert!(builder.contains("temperature"), "{builder}");
     }
 
     #[test]

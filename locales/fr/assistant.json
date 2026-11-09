@@ -41,6 +41,7 @@
   "assistant.house.offline": "injoignable, état inconnu",
   "assistant.house.offline_builder": "(injoignable pour l'instant)",
   "assistant.house.camera": "(caméra)",
+  "assistant.house.plant": "(capteur de plante : humidité de sa terre, pas la mesure de la pièce)",
   "assistant.tools.automation.description": "Crée une automatisation, en brouillon, à partir d'une demande : « quand… alors… », « tous les soirs à… », « préviens-moi si… ». Un adulte la valide (bouton sur la carte) avant qu'elle ne tourne. Passe la demande complète, en français.",
   "assistant.tools.show.description": "Choisit ce que l'écran affiche sous ta réponse, dans l'ordre. device : un appareil (lumière, prise, clim, caméra, télé, enceinte, capteur… l'écran choisit la bonne commande). room : une pièce entière. energy : la consommation électrique. weather : la météo. remote : la télécommande d'une télé (id de la télé). cameras : toutes les caméras. history : la courbe d'une valeur (point = id/clé, hours).",
   "assistant.tools.show.id": "Id d'appareil (device, remote).",
