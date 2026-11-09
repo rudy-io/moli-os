@@ -767,6 +767,11 @@ mod tests {
                 "cycle_time"
             ]
         );
+        check_power_point(&d);
+        check_access_and_units(&d);
+    }
+
+    fn check_power_point(d: &Device) {
         let power = d.point("cur_power").unwrap();
         assert_eq!(power.unit, Some(Unit::Watt));
         assert_eq!(power.semantic, Semantic::Power);
@@ -774,13 +779,16 @@ mod tests {
             matches!(power.kind, Kind::Numeric { max: Some(m), .. } if (m - 8000.0).abs() < 1e-9)
         );
         assert!(!power.access.write);
+        assert_eq!(&*power.label, "Puissance");
+    }
+
+    fn check_access_and_units(d: &Device) {
         assert!(d.point("switch_1").unwrap().access.write);
         assert!(
             !d.point("cycle_time").unwrap().access.write,
             "free text is never written"
         );
         assert_eq!(d.point("cur_current").unwrap().unit, Some(Unit::Ampere));
-        assert_eq!(&*power.label, "Puissance");
         assert_eq!(&*d.point("cycle_time").unwrap().label, "Cycle time");
     }
 
