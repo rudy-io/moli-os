@@ -22,8 +22,12 @@ Pilote natif `crates/moli-lifx`. Une instance = toutes les ampoules LIFX qu'elle
 
 | Modèle | Produit | Micrologiciel | Vérifié | Date |
 |---|---|---|---|---|
-| LIFX White | 88 | 3.90 | lecture (capture rejouée en fixture) ; ordres : pas encore | 2026-11-09 |
+| LIFX White | 88 | 3.90 | lecture (capture rejouée en fixture) ; marche/arrêt et luminosité depuis Moli | 2026-11-09 |
 | LIFX Mini W | 51 | 3.90 | lecture (capture rejouée en fixture) ; ordres : pas encore | 2026-11-09 |
+
+- Maison de référence : 4 ampoules (2 White, 2 Mini W), adresses fixes dans `hosts`. Nom et
+  groupe LIFX repris en nom et pièce. Une ampoule coupée à l'interrupteur au démarrage de Moli
+  est trouvée seule à la recherche suivante, une fois remise sous tension.
 
 - La LIFX White, blanc fixe 2700 K, annonce 3500 K dans son état : sans conséquence, la
   température n'est proposée que si la plage du modèle est réglable.
