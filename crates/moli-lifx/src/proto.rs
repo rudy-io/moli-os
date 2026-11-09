@@ -24,6 +24,9 @@ pub const LIGHT_GET: u16 = 101;
 pub const LIGHT_SET_COLOR: u16 = 102;
 pub const LIGHT_STATE: u16 = 107;
 pub const LIGHT_SET_POWER: u16 = 117;
+pub const LIGHT_SET_WAVEFORM_OPTIONAL: u16 = 119;
+/// The answer of a firmware that does not know the message asked.
+pub const STATE_UNHANDLED: u16 = 223;
 
 /// A device's serial number: the six first bytes of a frame's target (its
 /// Wi-Fi MAC minus one).
@@ -205,6 +208,42 @@ pub fn set_color(color: Hsbk, duration_ms: u32) -> Vec<u8> {
     out
 }
 
+/// Which parts of a colour `LightSetWaveformOptional` changes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Parts {
+    pub hue: bool,
+    pub saturation: bool,
+    pub brightness: bool,
+    pub kelvin: bool,
+}
+
+/// `LightSetWaveformOptional`'s payload: only the `parts` of `color` are
+/// set, the bulb keeps the others as they are (one changed in the LIFX app
+/// since the last reading included). One half-sine cycle of `duration_ms`,
+/// not transient: the bulb stays on the new colour.
+#[must_use]
+pub fn set_waveform_optional(color: Hsbk, duration_ms: u32, parts: Parts) -> Vec<u8> {
+    let mut out = vec![0u8, 0];
+    for v in [color.hue, color.saturation, color.brightness, color.kelvin] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&duration_ms.to_le_bytes());
+    out.extend_from_slice(&1.0f32.to_le_bytes());
+    out.extend_from_slice(&0i16.to_le_bytes());
+    out.push(2); // half sine
+    for set in [parts.hue, parts.saturation, parts.brightness, parts.kelvin] {
+        out.push(u8::from(set));
+    }
+    out
+}
+
+/// `StateUnhandled`: the type of the message the firmware does not know.
+#[must_use]
+pub fn unhandled(payload: &[u8]) -> Option<u16> {
+    u16_at(payload, 0)
+}
+
 /// `LightSetPower`'s payload.
 #[must_use]
 pub fn set_power(on: bool, duration_ms: u32) -> Vec<u8> {
@@ -301,6 +340,60 @@ mod tests {
             frame,
             bytes("240000340200000000000000000000000000000000000100000000000000000002000000")
         );
+    }
+
+    #[test]
+    fn the_set_color_example_of_the_lifx_documentation() {
+        // "Building a LIFX packet": SetColor to green (hue 120°), full
+        // saturation and brightness, 3500 K, over 1024 ms, to every device,
+        // source 0, sequence 0, no answer asked.
+        let color = Hsbk {
+            hue: 21_845,
+            saturation: 65_535,
+            brightness: 65_535,
+            kelvin: 3500,
+        };
+        let mut frame = encode(
+            0,
+            None,
+            0,
+            LIGHT_SET_COLOR,
+            &set_color(color, 1024),
+            Reply::Response,
+        );
+        frame[22] = 0; // the example asks for nothing back
+        assert_eq!(
+            frame,
+            bytes(concat!(
+                "3100003400000000000000000000000000000000000000000000000000000000",
+                "66000000005555ffffffffac0d00040000"
+            ))
+        );
+    }
+
+    #[test]
+    fn waveform_optional_sets_only_the_parts_asked() {
+        let color = Hsbk {
+            hue: 1,
+            saturation: 2,
+            brightness: 0x8000,
+            kelvin: 2700,
+        };
+        let payload = set_waveform_optional(
+            color,
+            500,
+            Parts {
+                brightness: true,
+                ..Parts::default()
+            },
+        );
+        assert_eq!(payload.len(), 25);
+        assert_eq!(&payload[6..8], &[0x00, 0x80]);
+        assert_eq!(&payload[10..14], &500u32.to_le_bytes());
+        assert_eq!(&payload[14..18], &1.0f32.to_le_bytes());
+        assert_eq!(payload[20], 2);
+        assert_eq!(&payload[21..], &[0, 0, 1, 0]);
+        assert_eq!(unhandled(&119u16.to_le_bytes()), Some(119));
     }
 
     #[test]

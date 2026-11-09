@@ -157,6 +157,8 @@
   "pilotes.lifx.ne_se_regle_pas": "“{point}” cannot be set on this bulb",
   "pilotes.lifx.couleur_invalide": "colour expected as #rrggbb",
   "pilotes.lifx.injoignable": "unknown or unreachable bulb",
+  "pilotes.lifx.trop": "at most {max} bulbs per instance: the next ones are ignored",
+  "pilotes.lifx.transition_ms": "transition_ms must be between 0 and 60000",
   "pilotes.voltalis.allume": "On",
   "pilotes.voltalis.mode": "Mode",
   "pilotes.voltalis.consigne": "Setpoint",

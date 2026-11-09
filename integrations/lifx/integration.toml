@@ -33,5 +33,5 @@ vars = []
 options = []
 
 [origin]
-reused = "aucun code repris. Protocole : documentation publique du protocole LAN de LIFX (lan.developer.lifx.com). Table des produits (src/products.rs) : uniquement les faits utiles (identifiant, nom, couleur oui/non, plage en kelvins et ses évolutions selon le micrologiciel), relevés dans la liste publique des produits LIFX, sans copier son fichier. Règle des 3 relevés manqués : comme l'intégration lifx de Home Assistant (comportement, pas de code)"
+reused = "aucun code repris. Protocole : documentation publique du protocole LAN de LIFX (lan.developer.lifx.com). Table des produits (src/products.rs) : uniquement les faits utiles (identifiant, nom, couleur oui/non, plage en kelvins et ses évolutions selon le micrologiciel), relevés dans la liste publique des produits LIFX, sans copier son fichier. Règle des 3 relevés manqués : comme l'intégration lifx de Home Assistant (comportement, pas de code). Idées reprises de gladys-lifx (guim31/gladys-lifx, Apache-2.0), réécrites en Rust : réponse acceptée selon l'adresse et la séquence, renvois espacés dans un délai total, modèle redemandé seulement si le micrologiciel change, StateUnhandled, pas de relevé pendant un fondu, LightSetWaveformOptional pour ne changer qu'une composante, ampoule éteinte qui prend la valeur puis s'allume en fondu"
 author = "agent"

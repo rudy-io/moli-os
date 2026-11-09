@@ -157,6 +157,8 @@
   "pilotes.lifx.ne_se_regle_pas": "« {point} » ne se règle pas sur cette ampoule",
   "pilotes.lifx.couleur_invalide": "couleur attendue au format #rrggbb",
   "pilotes.lifx.injoignable": "ampoule inconnue ou injoignable",
+  "pilotes.lifx.trop": "{max} ampoules au plus par instance : les suivantes sont ignorées",
+  "pilotes.lifx.transition_ms": "transition_ms doit être compris entre 0 et 60000",
   "pilotes.voltalis.allume": "Allumé",
   "pilotes.voltalis.mode": "Mode",
   "pilotes.voltalis.consigne": "Consigne",

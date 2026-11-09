@@ -739,8 +739,8 @@ host = "192.168.1.x"
 
 ## `lifx` : ampoules Wi-Fi LIFX (`crates/moli-lifx`)
 
-- **Couvre** : marche/arrêt, luminosité, et selon le modèle température de couleur et couleur. Une instance pilote **toutes** les ampoules qu'elle trouve.
-- **Protocole** : 100 % local, protocole LAN de LIFX en UDP (port 56700), sans compte ni secret ; écrit d'après la documentation publique de LIFX. Interrogation toutes les 5 s : **un seul `LightGet` par ampoule et par relevé**, envoyé une fois (le relevé suivant tient lieu de nouvel essai). Version, micrologiciel et groupe sont lus à la rencontre de l'ampoule seulement ; le signal Wi-Fi à la rencontre puis à chaque recherche.
+- **Couvre** : marche/arrêt, luminosité, et selon le modèle température de couleur et couleur. Une instance pilote **toutes** les ampoules qu'elle trouve (100 au plus).
+- **Protocole** : 100 % local, protocole LAN de LIFX en UDP (port 56700), sans compte ni secret ; écrit d'après la documentation publique de LIFX. Interrogation toutes les 5 s : **un seul `LightGet` par ampoule et par relevé**, envoyé une fois (le relevé suivant tient lieu de nouvel essai), et aucun pendant un fondu.
 - **Configuration** (tout est facultatif) :
 
 ```toml
@@ -751,18 +751,24 @@ kind = "lifx"
 hosts = ["192.168.1.x"]   # adresses interrogées directement
 # discovery = true        # diffusion GetService sur le réseau local
 # poll_secs = 5           # 1 à 3600
-# transition_ms = 0       # fondu de chaque changement
+# transition_ms = 0       # fondu de chaque changement, 0 à 60 000
 ```
 
   Sans `hosts` et avec `discovery = false`, la configuration est refusée.
 - **Secrets** : aucun.
-- **Recherche** : `GetService` aux adresses de `hosts` et en diffusion, deux fois, réponses écoutées 0,6 s à chaque fois. Puis chaque minute tant qu'une ampoule manque (publiée avant, adresse de `hosts` muette, ou hors ligne), sinon toutes les 5 min (nouvelles ampoules, adresses changées).
-- **Identité** : numéro de série de l'ampoule (cible des trames, 12 chiffres hexadécimaux, la MAC Wi-Fi moins 1). Une réponse n'est prise que si elle porte le numéro attendu. Une ampoule qui répond ailleurs avec le même numéro est suivie (ligne `lifx found at a new address` dans les traces) ; une autre ampoule qui répond à une adresse connue est une autre ampoule et ne remplace jamais la première.
-- **Capacités** : `GetVersion` (produit) et `GetHostFirmware` (version) cherchés dans la table du pilote (`src/products.rs`, faits de la liste publique des produits LIFX : couleur, plage en kelvins et ses évolutions selon le micrologiciel). Modèle inconnu : marche et luminosité seulement, avec un avertissement.
-- **Points** : `on`, `brightness` (1-100 %), `color_temp` (K, bornes du modèle, si la plage est réglable), `color` (`#rrggbb`, modèles couleur), `rssi` (dBm, lecture seule). Un ordre de luminosité, de température ou de couleur part en `LightSetColor` à partir de la dernière couleur lue ; la température remet la saturation à 0. Chaque ordre demande un accusé de réception (`ack_required`) et est envoyé deux fois au plus ; la valeur n'est publiée qu'une fois l'accusé reçu, sans accusé l'ordre échoue.
-- **Nom et pièce** : le nom LIFX devient `native_name` (suivi s'il change dans l'appli), le groupe LIFX `native_room`.
-- **Pièges** : une ampoule LIFX manque souvent un relevé : elle ne passe hors ligne qu'après **3 relevés manqués de suite** (comme HA). Hors ligne (coupée au mur), elle n'est plus interrogée qu'un relevé sur six pour ne pas retarder les autres et les ordres.
-- **Tests** : trames et lecture des messages (`src/proto.rs`), conversions pourcentage et couleur, table des produits, ordres selon le modèle ; et le pilote entier face à de fausses ampoules sur la boucle locale (`127.0.0.x`) : publication seulement après accusé, un seul `LightGet` par relevé, identité par numéro de série. Numéros de série factices (`02:00:00:00:00:0x`).
+- **Ce que le pilote croit** : le protocole n'a aucune authentification (tout appareil du réseau peut piloter les ampoules, le pilote n'y peut rien). Une réponse ne compte que venue de l'adresse **et** du port interrogés, avec notre identifiant (aléatoire), la séquence (départ aléatoire) et le numéro de série demandés. Avec `discovery = false`, seules les réponses des adresses de `hosts` comptent à la recherche.
+- **Recherche** : `GetService` aux adresses de `hosts` et en diffusion, deux fois, réponses écoutées 0,6 s à chaque fois ; puis chaque minute tant qu'une ampoule manque (aucune connue, publiée avant, adresse de `hosts` muette, ou hors ligne : une ampoule qui passe hors ligne avance la recherche), sinon toutes les 5 min. Ce qu'elle entend est mis en file et traité **une pièce à la fois, entre les ordres** (les ordres passent d'abord, puis les relevés) :
+  - **rencontre** d'un numéro nouveau : il doit répondre à un `LightGet` en 2 s (envois à 0, 0,4 et 1,2 s) ; 8 rencontres en attente au plus, **un seul numéro nouveau par adresse et par recherche** (une ampoule a un numéro), un numéro qui ne répond pas n'est pas redemandé avant 5 min ; au-delà de 100 ampoules, les suivantes sont ignorées avec un avertissement ;
+  - **déménagement** : une ampoule connue entendue ailleurs n'y est adoptée que si elle **ne répond plus** à son adresse et répond à la nouvelle (`LightGet`) ; une ampoule qui répond ne peut pas être détournée (ligne `lifx found at a new address` dans les traces) ;
+  - **complément** : micrologiciel, modèle (redemandé seulement si le micrologiciel a changé ou s'il est inconnu) et groupe, chacun une fois, reposés à chaque recherche tant qu'ils manquent ; l'appareil est republié une fois complet ;
+  - **signal** Wi-Fi de chaque ampoule en ligne.
+- **Identité** : numéro de série de l'ampoule (cible des trames, 12 chiffres hexadécimaux, la MAC Wi-Fi moins 1). Une autre ampoule qui répond à une adresse connue est une autre ampoule et ne remplace jamais la première.
+- **Capacités** : `GetVersion` (produit) et `GetHostFirmware` (version) cherchés dans la table du pilote (`src/products.rs`, faits de la liste publique des produits LIFX : couleur, plage en kelvins et ses évolutions selon le micrologiciel). Modèle inconnu : marche et luminosité seulement, avec un avertissement. Un message que le micrologiciel dit ne pas connaître (`StateUnhandled`) n'est plus envoyé.
+- **Points** : `on`, `brightness` (1-100 %), `color_temp` (K, bornes du modèle, si la plage est réglable), `color` (`#rrggbb`, modèles couleur), `rssi` (dBm, lecture seule).
+- **Ordres** : avec accusé de réception (`ack_required`), renvoyés à 0, 0,4, 1,2 et 2,7 s dans 4 s au plus ; la valeur n'est publiée qu'une fois l'accusé reçu, sans accusé l'ordre échoue. Luminosité, température et couleur partent en `LightSetWaveformOptional` qui ne change **que** la composante demandée (une couleur changée dans l'appli LIFX depuis le dernier relevé n'est pas écrasée) ; un micrologiciel qui ne le connaît pas reçoit la couleur entière (`LightSetColor`). La température remet la saturation à 0 sur une ampoule couleur. Une ampoule éteinte prend la nouvelle valeur aussitôt puis s'allume en fondu, sans éclair de l'ancienne.
+- **Nom et pièce** : le nom LIFX devient `native_name` (suivi s'il change dans l'appli), le groupe LIFX `native_room` (relu tant qu'il manque, sinon au redémarrage).
+- **Pièges** : une ampoule LIFX manque souvent un relevé : elle ne passe hors ligne qu'après **3 relevés manqués de suite** (comme HA). Hors ligne (coupée au mur), elle n'est plus interrogée qu'un relevé sur six pour ne pas retarder les autres et les ordres. Chaque ampoule envoie parfois deux fois sa réponse à `GetService` : le double est ignoré.
+- **Tests** : trames et lecture des messages (`src/proto.rs`, dont l'exemple `SetColor` de la documentation LIFX à l'octet), conversions, table des produits, ordres selon le modèle ; et le pilote entier à travers le hub face à de fausses ampoules sur `127.0.0.1`, un port chacune (`src/tests.rs`) : publication seulement après accusé, accusé venu d'ailleurs refusé, réponses d'ailleurs ignorées sans découverte, un seul `LightGet` par relevé, ampoule qui répond non détournée, ampoule muette suivie sans qu'une autre prenne sa place, déluge de numéros sans bloquer les ordres, plafond, modèle redemandé, ampoule éteinte, micrologiciel ancien, aucun relevé pendant un fondu, et les deux captures réelles rejouées. Numéros de série factices (`02:00:00:00:00:0x`).
 
 ## `igd` : box internet (`crates/moli-igd`)
 
