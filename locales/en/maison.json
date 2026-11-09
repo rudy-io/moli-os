@@ -244,5 +244,14 @@
   "maison.robot.demarrer": "Start",
   "maison.robot.arreter": "Stop",
   "maison.robot.base": "Back to base",
-  "maison.robot.sonner": "Ring"
+  "maison.robot.sonner": "Ring",
+  "maison.accueil.voiture_batterie": "Battery",
+  "maison.accueil.voiture_autonomie": "Range",
+  "maison.accueil.voiture_recharge": "Charging",
+  "maison.accueil.voiture_recharge_vale": "Charging · {power}",
+  "maison.accueil.voiture_portes": "Doors",
+  "maison.accueil.voiture_verrouillees": "locked",
+  "maison.accueil.voiture_ouvertes": "unlocked",
+  "maison.accueil.voiture_vigie": "Sentry mode",
+  "maison.accueil.voiture_endormie": "Asleep"
 }

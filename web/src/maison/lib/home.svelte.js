@@ -228,6 +228,8 @@ export function deviceKind(d) {
   // `camera` means « makes images »: a printer or a TV may too, and stays what it is.
   if (has(d, 'key', true)) return 'tv';
   if (d.camera) return 'camera';
+  // A Tesla's car (the driver's account device has no model).
+  if (d.manufacturer === 'Tesla' && d.model) return 'car';
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
@@ -275,7 +277,7 @@ export function roomList() {
         impulses: by('impulse'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
-        sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
+        sensors: [...by('sensor', 'camera', 'printer', 'car'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
       };
     });

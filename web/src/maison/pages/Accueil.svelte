@@ -139,6 +139,42 @@
   );
   const bell = $derived((cfg.favorites?.cameras ?? [])[0]);
 
+  // The car, if the house has one (its points: battery, range, charging, doors).
+  const car = $derived(Object.values(hub.devices).find((d) => d.manufacturer === 'Tesla' && d.model) ?? null);
+  const carName = $derived(car ? [car.native_name, car.model].filter(Boolean).join(' · ') : '');
+  const carSoc = $derived(car ? value(car.id, 'soc') : null);
+  const carRange = $derived(car ? value(car.id, 'range') : null);
+  const carCharging = $derived(car ? value(car.id, 'charging') === true : false);
+  const carPower = $derived(car ? value(car.id, 'charge_power') : null);
+  const carDoors = $derived(car ? value(car.id, 'doors_locked') : null);
+  const carSentry = $derived(car ? value(car.id, 'sentry') : null);
+  const carAsleep = $derived(car ? value(car.id, 'awake') === false : false);
+  /** The state worth a word: charging, sentry, asleep, or the doors. */
+  const carState = $derived.by(() => {
+    if (!car) return '';
+    if (carCharging && typeof carPower === 'number' && carPower > 0) {
+      return t('maison.accueil.voiture_recharge_vale', { power: carPower >= 1000 ? `${num(carPower / 1000, 1)} kW` : `${num(carPower)} W` });
+    }
+    if (carSentry === true) return t('maison.accueil.voiture_vigie');
+    if (carAsleep) return t('maison.accueil.voiture_endormie');
+    if (carDoors === true) return t('maison.accueil.voiture_verrouillees');
+    if (carDoors === false) return t('maison.accueil.voiture_ouvertes');
+    return '';
+  });
+  /** Charging: its power (kilowatts above a kilowatt); nothing, otherwise. */
+  const chargeText = $derived(
+    carCharging && typeof carPower === 'number' && carPower > 0
+      ? carPower >= 1000 ? `${num(carPower / 1000, 1)} kW` : `${num(carPower)} W`
+      : '—',
+  );
+  const doorsText = $derived(
+    carDoors === true
+      ? t('maison.accueil.voiture_verrouillees')
+      : carDoors === false
+        ? t('maison.accueil.voiture_ouvertes')
+        : '—',
+  );
+
   // The last real passage at the door (the history knows; the live value
   // is refreshed every few seconds whatever happens).
   let passage = $state(null);
@@ -247,6 +283,19 @@
       </span>
       <span class="go"><Icon name="arrow-top-right" size={20} /></span>
     </a>
+
+    {#if car}
+      <a class="card car" href="#/pieces">
+        <div class="card-head"><h2><Icon name="car" size={18} />{carName}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
+        <div class="facts">
+          <div><small>{t('maison.accueil.voiture_batterie')}</small><b class="num">{typeof carSoc === 'number' ? `${num(carSoc, 0)} %` : '—'}</b></div>
+          <div><small>{t('maison.accueil.voiture_autonomie')}</small><b class="num">{typeof carRange === 'number' ? `${num(carRange, 0)} km` : '—'}</b></div>
+          <div><small>{t('maison.accueil.voiture_recharge')}</small><b class="num">{chargeText}</b></div>
+          <div><small>{t('maison.accueil.voiture_portes')}</small><b>{doorsText}</b></div>
+        </div>
+        {#if carState}<p class="muted small">{carState}</p>{/if}
+      </a>
+    {/if}
 
     <a class="card outside" href="#/dehors">
       <div class="card-head"><h2><Icon name="flower-outline" size={18} />{t('maison.accueil.dehors')}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
@@ -357,6 +406,13 @@
     grid-column: span 3;
   }
 
+  .car {
+    grid-column: span 3;
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.2s var(--ease);
+  }
+
   .outside {
     grid-column: span 4;
   }
@@ -448,6 +504,7 @@
   }
 
   .remote:hover,
+  .car:hover,
   .outside:hover {
     transform: translateY(-2px);
   }
