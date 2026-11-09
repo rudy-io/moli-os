@@ -22,7 +22,7 @@ mod seek;
 pub mod vacuum;
 
 use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -615,9 +615,14 @@ async fn discover(addresses: HashMap<String, seek::Wanted>) {
                 ) else {
                     continue;
                 };
-                // Where the broadcast came from, not what it claims.
-                let ip = from.ip().to_string();
-                if found_tx.send((id.to_owned(), ip, version)).await.is_err() {
+                let Some(ip) = broadcast_address(from.ip(), &json) else {
+                    continue;
+                };
+                if found_tx
+                    .send((id.to_owned(), ip.to_string(), version))
+                    .await
+                    .is_err()
+                {
                     return;
                 }
             }
@@ -641,6 +646,30 @@ async fn discover(addresses: HashMap<String, seek::Wanted>) {
                 true
             });
         }
+    }
+}
+
+/// Where a broadcast says the device is: where it came from, not what it
+/// claims, unless it seems to come from this host itself. Behind the NAT of
+/// a container on a Mac (Docker Desktop, OrbStack) every broadcast arrives
+/// from 127.0.0.1, and taking that address would replace the one the search
+/// by key found; only the device's own `ip` says where it is then. The link
+/// still has to prove the key at that address.
+fn broadcast_address(from: IpAddr, json: &serde_json::Value) -> Option<Ipv4Addr> {
+    let usable = |ip: Ipv4Addr| {
+        !(ip.is_loopback() || ip.is_unspecified() || ip.is_broadcast() || ip.is_multicast())
+    };
+    match from {
+        IpAddr::V4(ip) if usable(ip) => Some(ip),
+        IpAddr::V4(ip) if !ip.is_loopback() => None,
+        IpAddr::V6(ip) if !ip.is_loopback() => None,
+        // A claim is believed only for a home network address: a program
+        // on this host cannot send the links anywhere else.
+        _ => json
+            .get("ip")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .filter(|ip: &Ipv4Addr| usable(*ip) && ip.is_private()),
     }
 }
 
@@ -721,6 +750,41 @@ pub fn merge_import(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broadcast_is_placed_where_it_came_from_unless_it_came_from_this_host() {
+        let claim = serde_json::json!({"ip": "192.168.68.97", "gwId": "bf00"});
+        let lan: IpAddr = "192.168.68.20".parse().unwrap();
+        assert_eq!(
+            broadcast_address(lan, &claim),
+            Some("192.168.68.20".parse().unwrap()),
+            "a real sender beats what the broadcast claims"
+        );
+        let nat: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(
+            broadcast_address(nat, &claim),
+            Some("192.168.68.97".parse().unwrap()),
+            "behind a container's NAT, the device's own address"
+        );
+        for bad in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "8.8.8.8",
+            "nonsense",
+        ] {
+            let claim = serde_json::json!({"ip": bad});
+            assert_eq!(broadcast_address(nat, &claim), None, "{bad} is no address");
+        }
+        assert_eq!(broadcast_address(nat, &serde_json::json!({})), None);
+        let unspecified: IpAddr = "0.0.0.0".parse().unwrap();
+        assert_eq!(
+            broadcast_address(unspecified, &claim),
+            None,
+            "only a broadcast from this host may use its claim"
+        );
+    }
 
     /// A gateway (0) carrying a probe (1), both followed by the cloud.
     fn gateway_and_probe() -> Fallback {
