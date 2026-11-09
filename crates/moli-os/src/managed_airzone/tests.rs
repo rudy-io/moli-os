@@ -23,7 +23,7 @@ async fn discovery_never_uses_an_address_learned_for_an_old_configuration() {
     let hub = Hub::new(HubOptions::default()).unwrap();
     let manager = Manager::new(hub.clone(), &config, CancellationToken::new()).unwrap();
     for (configured, expected) in [
-        ("192.168.1.2", vec!["10.0.0.2"]),
+        ("192.168.77.2", vec!["10.0.0.2"]),
         ("10.0.0.2", vec!["10.1.0.3", "10.0.0.2"]),
     ] {
         hub.remember_address(
@@ -1421,7 +1421,7 @@ fn loopback_connections_are_rejected_by_the_production_validation_policy() {
         );
     }
     let mut private = request(3000);
-    private.host = "192.168.1.2".into();
+    private.host = "192.168.77.2".into();
     assert!(validate_connection(private, false).is_ok());
 }
 
@@ -1446,7 +1446,7 @@ fn onboarding_accepts_only_bounded_private_ipv4_endpoints_and_normalizes_identit
         );
     }
     let mut canonical = request(3000);
-    canonical.host = "192.168.1.2".into();
+    canonical.host = "192.168.77.2".into();
     canonical.expected_mac = Some("AA:BB:CC:DD:EE:FF".into());
     canonical.tls_fingerprint = Some("AB:".repeat(31) + "AB");
     let canonical = normalize(canonical).unwrap();

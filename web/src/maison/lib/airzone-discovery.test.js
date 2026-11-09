@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as onboarding from './airzone-onboarding.js';
 
-const gateway={host:'192.168.1.20',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',gateway_type:'ws_az',api_version:null,firmware:'4.21',systems:2,zones:12,incomplete:false,read_only:true,existing_instance:null,existing_enabled:null};
+const gateway={host:'192.168.77.20',port:3000,tls_fingerprint:null,mac:'aabbccddeeff',gateway_type:'ws_az',api_version:null,firmware:'4.21',systems:2,zones:12,incomplete:false,read_only:true,existing_instance:null,existing_enabled:null};
 const report={gateways:[gateway],scanned:254,target_count:254,incomplete:false};
 const response=(data,status=200)=>({ok:status===200,status,json:async()=>data});
 const discover=(...args)=>{assert.equal(typeof onboarding.discoverGateways,'function','the guided flow needs a bounded read-only discovery request');return onboarding.discoverGateways(...args);};
@@ -19,7 +19,7 @@ test('discovery accepts empty and explicitly incomplete results',async()=>{
 });
 
 test('discovery refuses malformed identities, unsafe endpoints, writes and duplicate controllers',async()=>{
- const bad=[{...gateway,host:'8.8.8.8'},{...gateway,host:'127.0.0.1'},{...gateway,host:'192.168.1.0'},{...gateway,host:'192.168.1.255'},{...gateway,port:0},{...gateway,read_only:false},{...gateway,mac:'not-a-mac'},{...gateway,zones:-1},{...gateway,gateway_type:'other'},{...gateway,existing_instance:'known',existing_enabled:null},{...gateway,existing_instance:null,existing_enabled:true},{...gateway,tls_fingerprint:'invalid'}];
+ const bad=[{...gateway,host:'8.8.8.8'},{...gateway,host:'127.0.0.1'},{...gateway,host:'192.168.77.0'},{...gateway,host:'192.168.77.255'},{...gateway,port:0},{...gateway,read_only:false},{...gateway,mac:'not-a-mac'},{...gateway,zones:-1},{...gateway,gateway_type:'other'},{...gateway,existing_instance:'known',existing_enabled:null},{...gateway,existing_instance:null,existing_enabled:true},{...gateway,tls_fingerprint:'invalid'}];
  for(const item of bad)assert.equal((await discover({},async()=>response({...report,gateways:[item]}))).error,'response');
  assert.equal((await discover({},async()=>response({...report,gateways:[gateway,gateway]}))).error,'response');
  for(const invalid of [{...report,scanned:0},{...report,scanned:255},{...report,target_count:513},{...report,scanned:-1},{...report,incomplete:'yes'}])assert.equal((await discover({},async()=>response(invalid))).error,'response');
