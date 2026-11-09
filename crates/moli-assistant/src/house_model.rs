@@ -1486,13 +1486,18 @@ fn is_noise(label: &str) -> bool {
 }
 
 /// What a point is called in French, and the stems of the words that ask for it.
-const POINTS: [(&str, &str, &[&str]); 12] = [
+const POINTS: [(&str, &str, &[&str]); 13] = [
     (
         "temperature",
         "température",
         &["temperat", "degre", "chaud", "froid"],
     ),
     ("humidity", "humidité", &["humid"]),
+    (
+        "soil_moisture",
+        "humidité de la terre",
+        &["arros", "soif", "=terre", "=sol"],
+    ),
     ("battery", "batterie", &["batter", "=pile"]),
     ("power", "puissance", &["puissance", "consomm", "watt"]),
     ("energy", "énergie", &["energie", "kwh"]),

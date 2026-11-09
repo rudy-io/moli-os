@@ -179,6 +179,8 @@
   "systeme.format.binaire.occupancy.off": "Nobody",
   "systeme.format.binaire.water_leak.on": "Leak!",
   "systeme.format.binaire.water_leak.off": "Dry",
+  "systeme.format.binaire.soil_dry.on": "Needs water",
+  "systeme.format.binaire.soil_dry.off": "Watered",
   "systeme.format.binaire.smoke.on": "Smoke!",
   "systeme.format.binaire.smoke.off": "All clear",
   "systeme.format.binaire.battery_low.on": "Low battery",

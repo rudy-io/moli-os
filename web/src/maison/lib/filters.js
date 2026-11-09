@@ -7,7 +7,7 @@ export const CATEGORIES = [
   { id: 'lumieres', label: 'commun.filtre.lumieres', icon: 'light', kinds: ['light', 'group'] },
   { id: 'prises', label: 'commun.filtre.prises', icon: 'power', kinds: ['plug'] },
   { id: 'climat', label: 'commun.filtre.climat', icon: 'air-conditioner', kinds: ['climate', 'cover', 'impulse'] },
-  { id: 'capteurs', label: 'commun.filtre.capteurs', icon: 'thermometer', kinds: ['sensor'] },
+  { id: 'capteurs', label: 'commun.filtre.capteurs', icon: 'thermometer', kinds: ['sensor', 'plant'] },
   { id: 'cameras', label: 'commun.filtre.cameras', icon: 'cctv', kinds: ['camera'] },
   { id: 'medias', label: 'commun.filtre.medias', icon: 'tv', kinds: ['tv', 'speaker'] },
 ];

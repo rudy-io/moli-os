@@ -18,6 +18,8 @@ const BINARY_ALARM = {
   contact: false,
   occupancy: false,
   water_leak: true,
+  // A thirsty plant is shown as one (in its own words), never as a leak.
+  soil_dry: true,
   smoke: true,
   battery_low: true,
   tamper: true,
@@ -28,6 +30,7 @@ const BINARY_ALARM = {
 const PRIMARY = new Set([
   'on_off', 'brightness', 'power', 'apparent_power', 'energy', 'temperature',
   'humidity', 'pressure', 'illuminance', 'contact', 'occupancy', 'water_leak',
+  'soil_moisture', 'soil_dry',
   'smoke', 'current', 'alert',
 ]);
 

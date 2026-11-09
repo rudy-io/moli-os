@@ -809,3 +809,31 @@ test('the security panel lists a presence radar beside the motion sensors', () =
   assert.match(html, /PIR cellier/);
   assert.doesNotMatch(html, /Le foyer/);
 });
+
+test('a plant sensor shows its soil, and its pot stays out of the room readings (#163)', () => {
+  const celsius = (key) => ({ ...point(key, number(), false, 'temperature'), unit: '°C' });
+  const percent = (key, semantic) => ({ ...point(key, number(0, 100), false, semantic), unit: '%' });
+  const plant = (values) => ({
+    id: 'z2m:plant',
+    points: [percent('soil_moisture', 'soil_moisture'), point('dry', { type: 'binary' }, false, 'soil_dry'),
+      celsius('temperature'), percent('humidity', 'humidity'), percent('soil_warning', 'other')],
+    values: { temperature: 30, humidity: 75, soil_warning: 20, dry: false, ...values },
+  });
+  const thermometer = { id: 'z2m:room', points: [celsius('temperature')], values: { temperature: 20 } };
+
+  const fine = showRoom([plant({ soil_moisture: 54 }), thermometer]);
+  assert.equal(home.deviceKind(hub.devices['z2m:plant']), 'plant');
+  // The room's temperature is the thermometer's alone (not 25 °C with the pot's 30).
+  assert.match(fine, />20,0°C</);
+  // The pot's air is no humidity of the room.
+  assert.doesNotMatch(fine, /75 %/);
+  assert.match(fine, /title="z2m:plant : terre à 54 %"/);
+  assert.doesNotMatch(fine, /à arroser/);
+
+  // Thirsty: under the sensor's threshold, or by its own alarm. Never a leak.
+  for (const values of [{ soil_moisture: 12 }, { soil_moisture: 54, dry: true }]) {
+    const thirsty = showRoom([plant(values), thermometer]);
+    assert.match(thirsty, /class="chip warm[^"]*" title="z2m:plant : terre à \d+ %, à arroser"/);
+    assert.doesNotMatch(thirsty, /fuite/i);
+  }
+});

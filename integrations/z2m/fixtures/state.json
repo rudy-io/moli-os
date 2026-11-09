@@ -102,5 +102,20 @@
   "state_l1": "ON",
   "state_l2": "OFF",
   "switch_type": "momentary"
+ },
+ "0x00124b000000000b": {
+  "battery": 100,
+  "dry": false,
+  "humidity": 74,
+  "humidity_calibration": 0,
+  "linkquality": 116,
+  "soil_calibration": 0,
+  "soil_moisture": 54,
+  "soil_sampling": 30,
+  "soil_warning": 50,
+  "temperature": 21.2,
+  "temperature_calibration": 0,
+  "temperature_sampling": 30,
+  "temperature_unit": "celsius"
  }
 }

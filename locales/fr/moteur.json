@@ -112,6 +112,7 @@
   "moteur.changement.plus_rien": "ne détecte plus rien",
   "moteur.changement.fumee": "détecte de la fumée",
   "moteur.changement.fuite": "détecte une fuite",
+  "moteur.changement.soif": "signale que la plante a soif",
   "moteur.changement.allume": "s'allume",
   "moteur.changement.eteint": "s'éteint",
   "moteur.changement.valeur": "· {libelle} passe à {valeur}",

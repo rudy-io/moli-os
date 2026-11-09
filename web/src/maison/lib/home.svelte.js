@@ -96,6 +96,20 @@ export function doorOpen(id) {
   return typeof tuya === 'boolean' ? tuya : null;
 }
 
+/** A plant sensor: it reads how wet a pot's soil is (#163). */
+export const isPlant = (d) => Boolean(d?.points.some((p) => p.semantic === 'soil_moisture'));
+const pointWith = (d, semantic) => d?.points.find((p) => p.semantic === semantic)?.key;
+/** A plant's soil, in %, and whether it asks for water: its own alarm (`soil_dry`)
+ *  or the threshold set on the sensor (`soil_warning`). Never a leak, never an alert. */
+export function plantNeeds(d) {
+  const moisture = value(d.id, pointWith(d, 'soil_moisture'));
+  const dryKey = pointWith(d, 'soil_dry');
+  const warning = value(d.id, 'soil_warning');
+  const thirsty =
+    (dryKey != null && value(d.id, dryKey) === true) ||
+    (typeof moisture === 'number' && typeof warning === 'number' && moisture < warning);
+  return { moisture: typeof moisture === 'number' ? moisture : null, thirsty };
+}
 export const leak = (id) => value(id, 'water_leak') === true || value(id, 'watersensor_state') === 'alarm';
 
 /** Someone is there: any point the server reads as presence (`occupancy`,
@@ -245,6 +259,8 @@ export function deviceKind(d) {
     if (d.id.startsWith('hue:') || LIGHTISH.test(name) || ['brightness', 'color_temp', 'color'].some((k) => has(d, k, true))) return 'light';
     return 'plug';
   }
+  // Its temperature is the pot's: it never counts as the room's.
+  if (isPlant(d)) return 'plant';
   return 'sensor';
 }
 
@@ -275,7 +291,7 @@ export function roomList() {
         impulses: by('impulse'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
-        sensors: [...by('sensor', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
+        sensors: [...by('sensor', 'plant', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
       };
     });
