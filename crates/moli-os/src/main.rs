@@ -909,6 +909,8 @@ fn zigbee_import(
     }
     state.import_pending = false;
     state.save(&store_path)?;
+    // Run as root, the vault and the store go back to moli-os's user.
+    keep_owner(data_dir, &[&store_path, &secrets]);
     let record = &import.record;
     Ok(format!(
         "{instance}: network PAN {:#06x}, channel {}, {} imported into {}\n\
