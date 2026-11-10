@@ -3,10 +3,14 @@
 //!
 //! The account is connected once, from the dashboard, the way Alexa is: the
 //! driver displays the sign-in address (Tesla's own OAuth, PKCE), the person
-//! signs in and pastes the last address back into Moli — it carries the sign-in
-//! code. The refresh token Tesla gives in return is single-use and rotates at
-//! every exchange; each new one is kept in the encrypted secret store, never in
-//! a file.
+//! signs in and pastes the last address back into Moli through the
+//! owner-only route (`POST /api/integrations/tesla/{instance}/sign-in`) — it
+//! carries the sign-in code. That code never reaches the journal, and a
+//! verified `state` parameter binds the pasted code to this sign-in. The
+//! refresh token Tesla gives in return is single-use and rotates at every
+//! exchange; each new one is kept in the encrypted secret store, never in a
+//! file. The owner can disconnect at any time: `sign-out` erases the refresh
+//! token from the vault and puts the driver back in the waiting state.
 //!
 //! Tesla has retired its shared public client, so the sign-in runs with the
 //! house's own application (developer.tesla.com): its id and secret are kept
@@ -32,8 +36,14 @@ const REFRESH: &str = "refresh_token";
 const VERIFIER: &str = "code_verifier";
 const CLIENT_ID: &str = "client_id";
 const CLIENT_SECRET: &str = "client_secret";
+/// The OAuth `state` parameter of the sign-in page, kept until the pasted
+/// callback address proves it belongs to this sign-in.
+const STATE: &str = "state";
 /// The access token is about to end: renew it, restart the session.
 const RENEW: &str = "the Tesla session is renewed";
+/// The owner signed the account out from the dashboard: a normal, expected
+/// transition back to the waiting state (not an error, no backoff).
+const SIGNED_OUT: &str = "the Tesla account was signed out by the owner";
 const RETRY_MIN: Duration = Duration::from_secs(30);
 const RETRY_MAX: Duration = Duration::from_secs(15 * 60);
 /// The account's vehicles, looked at this often (a car sold, a name changed).
@@ -44,6 +54,21 @@ const MIN_PERIOD_S: u64 = 10;
 /// often: the state only ends when the limit is raised or the billing cycle
 /// turns, so hammering it would only burn calls against a closed door.
 const BILLING_RETRY: Duration = Duration::from_secs(6 * 3600);
+/// A renewed session that died before running this long was refused right
+/// away: the next renewal then waits longer and longer, so a refused token
+/// cannot spin the (paid) refresh loop at network speed.
+const RENEW_OK_MIN: Duration = Duration::from_secs(20);
+
+/// Tesla's regional Fleet API hosts. `api_host` must be one of these: a
+/// copied-over `moli.toml` must never send the client secret and the refresh
+/// token to a different host.
+const KNOWN_API_HOSTS: [&str; 3] = [
+    "fleet-api.prd.eu.vn.cloud.tesla.com",
+    "fleet-api.prd.na.vn.cloud.tesla.com",
+    "api.tesla.cn",
+];
+/// Tesla's OAuth hosts, for the sign-in page and the token endpoint.
+const KNOWN_AUTH_HOSTS: [&str; 2] = ["auth.tesla.com", "auth.tesla.cn"];
 
 fn default_api_host() -> String {
     "fleet-api.prd.eu.vn.cloud.tesla.com".into()
@@ -62,7 +87,7 @@ fn default_poll_idle() -> u64 {
 }
 
 fn default_poll_asleep() -> u64 {
-    600
+    900
 }
 
 /// `[driver.options]`: the hosts (region) and the poll periods.
@@ -122,6 +147,17 @@ impl Tesla {
         anyhow::ensure!(
             !auth_host.is_empty(),
             "auth_host: a host, without the scheme"
+        );
+        // Closed list (like MELCloud and Voltalis): a copied-over moli.toml
+        // must not send the client secret and the refresh token to a third
+        // party. Refused at load, not at runtime.
+        anyhow::ensure!(
+            KNOWN_API_HOSTS.contains(&api_host.as_str()),
+            moli_i18n::tr!("pilotes.tesla.hote_inconnu", host = api_host)
+        );
+        anyhow::ensure!(
+            KNOWN_AUTH_HOSTS.contains(&auth_host.as_str()),
+            moli_i18n::tr!("pilotes.tesla.hote_inconnu", host = auth_host)
         );
         anyhow::ensure!(!redirect_uri.is_empty(), "redirect_uri: an address");
         anyhow::ensure!(
@@ -188,24 +224,19 @@ fn account_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
                 &moli_i18n::tr!("pilotes.tesla.etat_compte"),
                 false,
             ),
-            text_point(
-                "sign_in_url",
-                &moli_i18n::tr!("pilotes.tesla.page_tesla"),
-                false,
-            ),
-            text_point(
-                "sign_in",
-                &moli_i18n::tr!("pilotes.tesla.adresse_collee"),
-                true,
-            ),
+            // Sign-in plumbing is internal: the URL is served by the owner-only
+            // setup route, and the pasted code travels through a redacted
+            // command. Making them readable/writable here would let any
+            // household member complete a sign-in without a fresh PIN.
+            internal_point("sign_in_url", &moli_i18n::tr!("pilotes.tesla.page_tesla")),
+            internal_point("sign_in", &moli_i18n::tr!("pilotes.tesla.adresse_collee")),
+            internal_point("sign_out", &moli_i18n::tr!("pilotes.tesla.deconnexion")),
         ],
     }
 }
 
-/// A text point. A writable one carries `Semantic::Control` on purpose: the
-/// sign-in address is a person's move — the dashboard pastes it directly, an
-/// agent's write is held until a human validates it, so no agent can ever
-/// complete the sign-in by itself. Read-only texts stay `Config`.
+/// A text point. A writable one carries `Semantic::Control` on purpose: an
+/// agent's write is held until a human validates it.
 fn text_point(key: &str, label: &str, write: bool) -> PointSpec {
     PointSpec {
         key: key.into(),
@@ -218,6 +249,24 @@ fn text_point(key: &str, label: &str, write: bool) -> PointSpec {
         } else {
             Semantic::Config
         },
+    }
+}
+
+/// An internal point the driver manages itself: nobody reads or writes it
+/// through the normal surfaces. The value only moves through the owner-only
+/// setup route, which delivers it to the driver as a redacted command, so it
+/// never appears in the journal or the approvals list.
+fn internal_point(key: &str, label: &str) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: label.into(),
+        kind: Kind::Text,
+        access: Access {
+            read: false,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Config,
     }
 }
 
@@ -238,23 +287,24 @@ fn credentials(ctx: &DriverCtx) -> anyhow::Result<Credentials> {
     })
 }
 
-/// A fresh PKCE verifier: 32 random bytes, base64url (43 characters).
-fn verifier() -> anyhow::Result<String> {
+/// A fresh random token (32 bytes, base64url, 43 characters) — the PKCE
+/// verifier or the OAuth `state`.
+fn fresh_token() -> anyhow::Result<String> {
     let mut bytes = [0u8; 32];
     ring::rand::SystemRandom::new()
         .fill(&mut bytes)
-        .map_err(|_| anyhow::anyhow!("cannot make the sign-in verifier"))?;
+        .map_err(|_| anyhow::anyhow!("cannot make the sign-in tokens"))?;
     Ok(api::base64url(&bytes))
 }
 
-/// Shows `reason` on every surface and idles until shutdown.
-async fn park(ctx: &DriverCtx, reason: String) -> anyhow::Result<()> {
-    ctx.wait_for(reason);
-    ctx.cancelled().await;
-    Ok(())
-}
-
-fn authorize_url(config: &Config, credentials: &Credentials, verifier: &str) -> String {
+/// The sign-in page's address: PKCE challenge derived from the verifier, plus
+/// the `state` parameter that binds the pasted callback back to this page.
+fn authorize_url(
+    config: &Config,
+    credentials: &Credentials,
+    verifier: &str,
+    state: &str,
+) -> String {
     let challenge = api::challenge_of(verifier);
     let query = api::form(&[
         ("client_id", credentials.client_id.as_str()),
@@ -263,6 +313,7 @@ fn authorize_url(config: &Config, credentials: &Credentials, verifier: &str) -> 
         ("redirect_uri", config.redirect_uri.as_str()),
         ("response_type", "code"),
         ("scope", api::SCOPE),
+        ("state", state),
     ]);
     format!("https://{}/oauth2/v3/authorize?{query}", config.auth_host)
 }
@@ -274,7 +325,10 @@ struct Car {
     id: String,
     awake: bool,
     charging: bool,
-    plugged: bool,
+    /// `vehicle_data` has been read since the car last woke up: an awake,
+    /// already-read, not-charging car is parked — it only costs the cheap
+    /// `/vehicles` state probe until it charges again or wakes from sleep.
+    read: bool,
 }
 
 fn car_device(ctx: &DriverCtx, id: &DeviceId, v: &Vehicle) -> Device {
@@ -312,13 +366,17 @@ async fn discover(
             ctx.set_state(&id, "charge_power", Value::Float(0.0));
             ctx.set_state(&id, "charging", Value::Bool(false));
         }
+        // A car that was awake, already read, and is still awake stays idle:
+        // the cheap `/vehicles` probe alone tracks its sleep state. It is
+        // read again when it wakes from sleep or when seen for the first time.
+        let read = previous.get(&id).is_some_and(|p| p.awake && p.read);
         cars.insert(
             id,
             Car {
                 id: v.id.to_string(),
                 awake: v.awake,
                 charging: false,
-                plugged: false,
+                read,
             },
         );
     }
@@ -342,7 +400,32 @@ async fn refresh_cars(
         if !car.awake {
             continue; // Asleep: its last word stays.
         }
-        let answer = api::vehicle_data(config.api_host.as_str(), token, &car.id).await?;
+        // A parked, already-read car costs nothing more: only the `/vehicles`
+        // probe keeps tracking its state. `vehicle_data` is pulled again once
+        // the car starts charging.
+        if car.read && !car.charging {
+            continue;
+        }
+        let answer = match api::vehicle_data(config.api_host.as_str(), token, &car.id).await {
+            Ok(answer) => answer,
+            Err(e) if e.to_string().contains(api::VEHICLE_AWAY) => {
+                // A 408 is a per-vehicle condition, not a session failure:
+                // mark just this car asleep and keep polling the others.
+                tracing::info!(
+                    instance = %ctx.instance(),
+                    vehicle = %car.id,
+                    "tesla vehicle went to sleep (408): session stays connected"
+                );
+                car.awake = false;
+                car.charging = false;
+                ctx.set_state(id, "awake", Value::Bool(false));
+                ctx.set_state(id, "charge_power", Value::Float(0.0));
+                ctx.set_state(id, "charging", Value::Bool(false));
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        car.read = true;
         let r = model::readings_of(&answer);
         if let Some(v) = r.soc {
             ctx.set_state(id, "soc", Value::Float(v));
@@ -358,7 +441,6 @@ async fn refresh_cars(
             ctx.set_state(id, "charge_power", Value::Float(v));
         }
         if let Some(v) = r.plugged {
-            car.plugged = v;
             ctx.set_state(id, "plugged_in", Value::Bool(v));
         }
         if let Some(v) = r.doors_locked {
@@ -431,9 +513,12 @@ async fn poll_with_patience(
     }
 }
 
-/// How often to look, from the last words of the cars.
+/// How often to look, from the last words of the cars. The fast period is for
+/// active charging only: a car that is plugged in but not drawing charge is
+/// parked, and a parked car costs the cheap `/vehicles` state probe, not the
+/// full `vehicle_data` pull.
 fn period_of(cars: &HashMap<DeviceId, Car>, config: &Config) -> Duration {
-    let value = if cars.values().any(|c| c.charging || c.plugged) {
+    let value = if cars.values().any(|c| c.charging) {
         config.poll_charging_s
     } else if cars.values().any(|c| c.awake) {
         config.poll_idle_s
@@ -443,49 +528,80 @@ fn period_of(cars: &HashMap<DeviceId, Car>, config: &Config) -> Duration {
     Duration::from_secs(value.max(MIN_PERIOD_S))
 }
 
-/// A fresh sign-in page: a new verifier kept in the store, and its address on
-/// the account's `sign_in_url` point.
+/// A fresh sign-in page: a new verifier and a new `state` kept in the store,
+/// and the address on the account's `sign_in_url` point.
 async fn start_page(
     config: &Config,
     ctx: &DriverCtx,
     account: &DeviceId,
     credentials: &Credentials,
 ) -> anyhow::Result<()> {
-    let v = verifier()?;
+    let v = fresh_token()?;
+    let s = fresh_token()?;
     ctx.store_secret(VERIFIER, &v)
+        .await
+        .map_err(|e| anyhow::anyhow!(moli_i18n::tr!("pilotes.tesla.coffre", why = e)))?;
+    ctx.store_secret(STATE, &s)
         .await
         .map_err(|e| anyhow::anyhow!(moli_i18n::tr!("pilotes.tesla.coffre", why = e)))?;
     set_text(
         ctx,
         account,
         "sign_in_url",
-        &authorize_url(config, credentials, &v),
+        &authorize_url(config, credentials, &v, &s),
     );
     Ok(())
 }
 
 /// Waits for the person to sign in from the dashboard. `false`: stopped.
+///
+/// While the vault lacks the house's application credentials the account
+/// stays `app_required` and re-checks on every wake-up: `moli-os secrets set`
+/// makes the sign-in page appear without restarting Moli.
 async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> anyhow::Result<bool> {
-    // Tesla's shared public client is retired: without the house's own
-    // application credentials there is no sign-in page to show.
-    let credentials = match credentials(ctx) {
-        Ok(credentials) => credentials,
-        Err(why) => {
-            set_text(ctx, account, "status", "app_required");
-            set_text(ctx, account, "sign_in_url", "");
-            park(ctx, why.to_string()).await?;
-            return Ok(false);
-        }
-    };
-    start_page(config, ctx, account, &credentials).await?;
-    set_text(ctx, account, "status", "sign_in");
-    ctx.wait_for(moli_i18n::tr!("pilotes.tesla.a_connecter"));
+    let mut app_creds: Option<Credentials> = None;
     loop {
+        let creds = match app_creds.as_ref() {
+            Some(creds) => creds.clone(),
+            None => match credentials(ctx) {
+                Ok(creds) => {
+                    start_page(config, ctx, account, &creds).await?;
+                    set_text(ctx, account, "status", "sign_in");
+                    ctx.wait_for(moli_i18n::tr!("pilotes.tesla.a_connecter"));
+                    app_creds = Some(creds.clone());
+                    creds
+                }
+                Err(why) => {
+                    // Tesla's shared public client is retired: the house's own
+                    // application (developer.tesla.com) is required.
+                    set_text(ctx, account, "status", "app_required");
+                    set_text(ctx, account, "sign_in_url", "");
+                    ctx.wait_for(why.to_string());
+                    // Poll until the credentials land (no restart needed).
+                    tokio::select! {
+                        () = tokio::time::sleep(RETRY_MIN) => {}
+                        () = ctx.cancelled() => return Ok(false),
+                    }
+                    continue;
+                }
+            },
+        };
         // `None` once Moli stops.
         let Some(command) = ctx.next_command().await else {
             return Ok(false);
         };
-        if command.device.id != *account || &*command.key != "sign_in" {
+        if command.device.id != *account {
+            command.reply(Err(moli_i18n::tr!("pilotes.tesla.pas_connecte")));
+            continue;
+        }
+        if &*command.key == "sign_out" {
+            // Sign-out while waiting: the pending page is dropped and a fresh
+            // one is shown (its `state` must match the next pasted address).
+            start_page(config, ctx, account, &creds).await?;
+            command.reply(Ok(()));
+            continue;
+        }
+        if &*command.key != "sign_in" {
             command.reply(Err(moli_i18n::tr!("pilotes.tesla.pas_connecte")));
             continue;
         }
@@ -497,11 +613,23 @@ async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> an
             command.reply(Err(moli_i18n::tr!("pilotes.tesla.adresse_sans_code")));
             continue;
         };
+        // The `state` parameter binds the pasted address to this sign-in: a
+        // stale or foreign page must not be exchanged for a token. A bare
+        // code (no `state`) is still accepted — PKCE covers it.
+        let expected_state = ctx.secret(STATE);
+        if let (Some(expected), Some(pasted_state)) =
+            (expected_state.as_deref(), model::state_of(pasted))
+            && expected != pasted_state
+        {
+            start_page(config, ctx, account, &creds).await?;
+            command.reply(Err(moli_i18n::tr!("pilotes.tesla.state_invalide")));
+            continue;
+        }
         let stored = ctx.secret(VERIFIER).unwrap_or_default();
         let audience = format!("https://{}", config.api_host);
         match api::code_for(
             config.auth_host.as_str(),
-            &credentials,
+            &creds,
             &code,
             stored.as_str(),
             &config.redirect_uri,
@@ -515,6 +643,7 @@ async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> an
                     return Err(anyhow::anyhow!("{e}"));
                 }
                 let _ = ctx.forget_secret(VERIFIER).await;
+                let _ = ctx.forget_secret(STATE).await;
                 set_text(ctx, account, "sign_in_url", "");
                 command.reply(Ok(()));
                 tracing::info!(instance = %ctx.instance(), "tesla account connected");
@@ -528,7 +657,7 @@ async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> an
                     "tesla sign-in refused"
                 );
                 // A code serves once: a new page for the next try.
-                start_page(config, ctx, account, &credentials).await?;
+                start_page(config, ctx, account, &creds).await?;
                 command.reply(Err(moli_i18n::tr!(
                     "pilotes.tesla.refuse",
                     why = format!("{e:#}")
@@ -593,7 +722,27 @@ async fn connected(
                 let Some(command) = command else {
                     return Ok(());
                 };
-                let result = order(config, ctx, &credentials, &token, &cars, &command).await;
+                if command.device.id == *account && &*command.key == "sign_out" {
+                    // The owner signed out from the dashboard: erase the
+                    // refresh token (and the pending sign-in tokens) and let
+                    // `run` take the driver back to the waiting state.
+                    match ctx.forget_secret(REFRESH).await {
+                        Ok(_) => {
+                            let _ = ctx.forget_secret(VERIFIER).await;
+                            let _ = ctx.forget_secret(STATE).await;
+                            set_text(ctx, account, "status", "sign_in");
+                            command.reply(Ok(()));
+                            anyhow::bail!("{SIGNED_OUT}");
+                        }
+                        Err(e) => {
+                            // The session is still valid; surface the failure
+                            // so the dashboard can report it and retry.
+                            command.reply(Err(moli_i18n::tr!("pilotes.tesla.coffre", why = e)));
+                            continue;
+                        }
+                    }
+                }
+                let result = order(config, ctx, &credentials, &token, &cars, account, &command).await;
                 command.reply(result.map_err(|why| {
                     moli_i18n::tr!("pilotes.tesla.echec", why = why)
                 }));
@@ -619,6 +768,7 @@ async fn order(
     credentials: &Credentials,
     token: &Token,
     cars: &HashMap<DeviceId, Car>,
+    account: &DeviceId,
     command: &CommandRequest,
 ) -> Result<(), String> {
     let Some(car) = cars.get(&command.device.id) else {
@@ -642,12 +792,22 @@ async fn order(
                     Ok(fresh) => fresh,
                     Err(e) => return Err(format!("{e:#}")),
                 };
+            // The token dance can take up to ten seconds: the hub's command
+            // deadline (five) may have passed while it ran. A finished order
+            // no one waits for must not reach the car.
+            if command.abandoned() {
+                return Err(moli_i18n::tr!("pilotes.tesla.trop_tard"));
+            }
             if let Err(e) = ctx.store_secret(REFRESH, &fresh.refresh).await {
+                // The rotated token is lost: the next renewal will be refused
+                // and the account must sign in again. The account status says
+                // so until then (a later successful renewal clears it).
                 tracing::warn!(
                     instance = %ctx.instance(),
                     error = %e,
                     "tesla rotated refresh token not kept"
                 );
+                set_text(ctx, account, "status", "token_not_kept");
             }
             match api::command(config.api_host.as_str(), &fresh, &car.id, cmd, body).await {
                 Ok(result) => result,
@@ -676,7 +836,29 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         match connected(config, ctx, &account, refresh).await {
             Ok(()) => return Ok(()),
             Err(e) if format!("{e:#}").contains(RENEW) => {
+                // A session that dies before RENEW_OK_MIN was refused right
+                // away: grow the backoff so a refused token cannot spin the
+                // (paid) refresh loop at network speed. A healthy session
+                // (at least RENEW_OK_MIN old) just resets the backoff — the
+                // renewal is then the normal token turnover.
                 tracing::info!(instance = %ctx.instance(), "tesla session renewed");
+                if started.elapsed() < RENEW_OK_MIN {
+                    pause = (pause * 2).min(RETRY_MAX);
+                } else {
+                    pause = RETRY_MIN;
+                }
+                tokio::select! {
+                    () = tokio::time::sleep(pause) => {}
+                    () = ctx.cancelled() => return Ok(()),
+                }
+            }
+            Err(e) if format!("{e:#}").contains(SIGNED_OUT) => {
+                // A normal owner action, not a failure: back to the waiting
+                // state for a fresh sign-in, no backoff.
+                tracing::info!(
+                    instance = %ctx.instance(),
+                    "tesla signed out by the owner: back to sign-in"
+                );
             }
             Err(e) if format!("{e:#}").contains(api::REFRESH_INVALID) => {
                 tracing::warn!(
@@ -741,7 +923,7 @@ mod tests {
                 parsed.poll_idle_s,
                 parsed.poll_asleep_s
             ),
-            (60, 180, 600)
+            (60, 180, 900)
         );
         assert!(
             serde_json::from_value::<Config>(serde_json::json!({ "nope": 1 })).is_err(),
@@ -799,28 +981,33 @@ mod tests {
             partner_domain: String::new(),
             poll_charging_s: 60,
             poll_idle_s: 180,
-            poll_asleep_s: 600,
+            poll_asleep_s: 900,
         };
         let empty: HashMap<DeviceId, Car> = HashMap::new();
-        assert_eq!(period_of(&empty, &config), Duration::from_secs(600));
+        assert_eq!(period_of(&empty, &config), Duration::from_secs(900));
         let id = DeviceId::new(&InstanceId::from("tesla"), "1");
-        let awake_only = HashMap::from([(
+        // Awake, read, not charging: the car is parked (plugged or not —
+        // `plugged` no longer feeds the period) — idle period applies.
+        let awake_read_idle = HashMap::from([(
             id.clone(),
             Car {
                 id: "1".into(),
                 awake: true,
                 charging: false,
-                plugged: false,
+                read: true,
             },
         )]);
-        assert_eq!(period_of(&awake_only, &config), Duration::from_secs(180));
+        assert_eq!(
+            period_of(&awake_read_idle, &config),
+            Duration::from_secs(180)
+        );
         let charging = HashMap::from([(
             id,
             Car {
                 id: "1".into(),
                 awake: true,
                 charging: true,
-                plugged: false,
+                read: true,
             },
         )]);
         assert_eq!(period_of(&charging, &config), Duration::from_secs(60));
@@ -835,7 +1022,7 @@ mod tests {
             partner_domain: String::new(),
             poll_charging_s: 2,
             poll_idle_s: 180,
-            poll_asleep_s: 600,
+            poll_asleep_s: 900,
         };
         let id = DeviceId::new(&InstanceId::from("tesla"), "1");
         let charging = HashMap::from([(
@@ -844,12 +1031,45 @@ mod tests {
                 id: "1".into(),
                 awake: true,
                 charging: true,
-                plugged: false,
+                read: false,
             },
         )]);
         assert_eq!(
             period_of(&charging, &config),
             Duration::from_secs(MIN_PERIOD_S)
+        );
+    }
+
+    #[test]
+    fn an_unknown_host_is_refused_at_load() {
+        let config = Config {
+            api_host: "evil.example.com".into(),
+            auth_host: "auth.tesla.com".into(),
+            redirect_uri: "https://example.com/moli-tesla".into(),
+            partner_domain: String::new(),
+            poll_charging_s: 60,
+            poll_idle_s: 180,
+            poll_asleep_s: 900,
+        };
+        let err = Tesla::new(config).unwrap_err();
+        assert!(
+            err.to_string().contains("evil.example.com"),
+            "unknown api_host must be refused at load: {err}"
+        );
+
+        let config = Config {
+            api_host: "fleet-api.prd.eu.vn.cloud.tesla.com".into(),
+            auth_host: "evil.example.com".into(),
+            redirect_uri: "https://example.com/moli-tesla".into(),
+            partner_domain: String::new(),
+            poll_charging_s: 60,
+            poll_idle_s: 180,
+            poll_asleep_s: 900,
+        };
+        let err = Tesla::new(config).unwrap_err();
+        assert!(
+            err.to_string().contains("evil.example.com"),
+            "unknown auth_host must be refused at load: {err}"
         );
     }
 }

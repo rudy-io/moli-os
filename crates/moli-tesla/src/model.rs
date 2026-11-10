@@ -1,6 +1,5 @@
 //! What Tesla's API says, in Moli's words: the account's vehicles, what a car
-//! reports (normalized to SI units), the orders it takes, and the points it
-//! offers (the demo fixture mirrors them).
+//! reports (normalized to SI units), and the orders it takes.
 
 use moli_core::{Access, Kind, PointSpec, Semantic, Unit};
 use serde_json::Value as Json;
@@ -212,19 +211,41 @@ pub fn api_command(order: Order) -> (&'static str, Option<&'static str>) {
     }
 }
 
+/// One query parameter of a pasted address, percent-decoded. The parameter
+/// must start after `?` or `&`, so `xcode=` is not read as `code=`.
+fn param_of(pasted: &str, name: &str) -> Option<String> {
+    let pasted = pasted.trim();
+    let key = format!("{name}=");
+    let pos = pasted.find(&key)?;
+    let boundary_ok =
+        pos == 0 || pasted.as_bytes()[pos - 1] == b'?' || pasted.as_bytes()[pos - 1] == b'&';
+    if !boundary_ok {
+        return None;
+    }
+    let tail = &pasted[pos + key.len()..];
+    let value = tail.split(['&', '#']).next().unwrap_or(tail).trim();
+    (!value.is_empty()).then(|| percent_decode(value))
+}
+
+/// The sign-in's `state` parameter: a pasted callback address must carry the
+/// same state as the sign-in page that produced it, or it is not this
+/// sign-in's answer (a stale or foreign page).
+#[must_use]
+pub fn state_of(pasted: &str) -> Option<String> {
+    param_of(pasted, "state")
+}
+
 /// What the dashboard pasted back: the sign-in's last address (the app's
-/// callback URI, e.g. `https://example.com/moli-tesla?code=…`), or the code
-/// itself copied from that page. `None`: something else (the middle pages,
-/// a failure…).
+/// callback URI, e.g. `https://example.com/moli-tesla?code=…&state=…`), or
+/// the code itself copied from that page. `None`: something else (the middle
+/// pages, a failure…).
 #[must_use]
 pub fn code_of(pasted: &str) -> Option<String> {
-    let pasted = pasted.trim();
-    if let Some(pos) = pasted.find("code=") {
-        let tail = &pasted[pos + "code=".len()..];
-        let code = percent_decode(tail.split(['&', '#']).next().unwrap_or(tail).trim());
+    if let Some(code) = param_of(pasted, "code") {
         return code_is(&code).then_some(code);
     }
     // The code copied from the page's field.
+    let pasted = pasted.trim();
     code_is(pasted).then(|| pasted.to_owned())
 }
 
@@ -260,7 +281,7 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The points a car offers, in this order (the demo fixture mirrors them).
+/// The points a car offers, in this order.
 #[must_use]
 pub fn points() -> Vec<PointSpec> {
     let mut points = readings();
@@ -622,6 +643,45 @@ mod tests {
         assert_eq!(
             code_of(url),
             Some("AQAbC+defGHIJKLMNOPQRSTUVWXYZ01234".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_pasted_address_yields_its_state() {
+        // The state may follow or precede the code in the query.
+        let url = "https://auth.tesla.com/redirect?code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789&state=ST123";
+        assert_eq!(state_of(url), Some("ST123".to_owned()));
+        let url = "https://auth.tesla.com/redirect?state=ST123&code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789";
+        assert_eq!(state_of(url), Some("ST123".to_owned()));
+        assert_eq!(state_of("state=ST123"), Some("ST123".to_owned()));
+        // A middle page (the authorize URL itself) or a code-only address
+        // carries no state.
+        assert_eq!(
+            state_of("https://auth.tesla.com/oauth2/v3/authorize?client_id=x&code_challenge=y"),
+            None
+        );
+        assert_eq!(
+            state_of(
+                "https://auth.tesla.com/redirect?code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_percent_encoded_state_is_decoded() {
+        let url = "https://auth.tesla.com/redirect?code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789&state=ST%3123";
+        assert_eq!(state_of(url), Some("ST123".to_owned()));
+    }
+
+    #[test]
+    fn an_adjacent_parameter_name_is_not_misread() {
+        // `xcode=` / `xstate=` share a suffix but are not `code=` / `state=`.
+        let url = "https://auth.tesla.com/redirect?xcode=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789";
+        assert_eq!(code_of(url), None);
+        assert_eq!(
+            state_of("https://auth.tesla.com/redirect?xstate=ST123"),
+            None
         );
     }
 
