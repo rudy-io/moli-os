@@ -1,0 +1,29 @@
+[integration]
+id = "linky-tic"
+name = "Linky (lecture sur place, par la sortie TIC)"
+brands = ["Enedis"]
+models = ["Compteur Linky avec un module TIC en USB (uTinfo, Micro-Teleinfo…)"]
+transport = "native"
+driver = "linky-tic"
+crate = "moli-linky-tic"
+
+[discovery]
+# No discovery: a serial port, named in the options.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["port", "mode", "silence_seconds", "publish_seconds"]
+
+[origin]
+reused = "aucun code repris : spécification TIC d'Enedis (trames, somme de contrôle), réglages série et somme lus dans linkytic (MIT) comme référence ; trames de test fabriquées"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/frame_standard.tic"
+
+[[fixture]]
+file = "fixtures/frame_historic.tic"
