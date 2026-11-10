@@ -193,6 +193,10 @@ lights = ["lumieres:suspensions", "hue:…"]
   scène ne nomme pas n'est pas touchée. Un simple interrupteur est allumé ou éteint. Les ordres
   partent l'un après l'autre, au nom de la maison (comme ceux d'un luminaire) ; choisir une autre
   scène interrompt celle qui s'installe.
+- **Le reste de la maison** : `orders = [{ point = "tele:…/ambilight_mode", value = "relax" }]`,
+  des ordres simples (texte, nombre, vrai/faux) envoyés après les lumières : l'Ambilight d'une
+  télé, une prise. Un ordre refusé (télé éteinte) est noté au journal, la scène reste en place.
+  Une scène ne peut pas en commander une autre.
 - **Fin d'une scène** : `scene` revient à `none` quand toutes ses lumières allumées sont éteintes
   (jamais dans les 30 premières secondes), ou quand on écrit `none` (les lumières ne bougent pas).
 - **Rythme de la journée** : une lumière de `lights` qu'on allume, sans scène en place, prend le

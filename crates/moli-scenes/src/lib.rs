@@ -71,7 +71,42 @@ pub struct Scene {
     /// One of the scenes `order` goes round (all of them when none says so).
     #[serde(default)]
     pub cycle: bool,
+    #[serde(default)]
     pub lights: Vec<Step>,
+    /// Anything else the scene sets, as plain orders (a TV's ambient light,
+    /// a plug): `{ point = "device/key", value = … }`.
+    #[serde(default)]
+    pub orders: Vec<Order>,
+}
+
+/// One plain order of a scene.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Order {
+    /// A point id, `device/key`.
+    pub point: String,
+    pub value: Plain,
+}
+
+/// A value as `moli.toml` writes it.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Plain {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(String),
+}
+
+impl Plain {
+    fn value(&self) -> Value {
+        match self {
+            Self::Bool(b) => Value::Bool(*b),
+            Self::Int(i) => Value::Int(*i),
+            Self::Float(f) => Value::Float(*f),
+            Self::Text(t) => Value::from(t.as_str()),
+        }
+    }
 }
 
 /// What a scene asks of one light.
@@ -134,8 +169,19 @@ pub fn check(scenes: &[Scene], rhythm: Option<&Rhythm>) -> Result<(), String> {
         if scene.name.trim().is_empty() {
             return Err(format!("scene {:?}: a name", scene.id));
         }
-        if scene.lights.is_empty() {
+        if scene.lights.is_empty() && scene.orders.is_empty() {
             return Err(format!("scene {:?}: at least one light", scene.id));
+        }
+        for order in &scene.orders {
+            let whole = PointId::from(order.point.as_str())
+                .split()
+                .is_some_and(|(device, key)| device.as_str().contains(':') && !key.is_empty());
+            if !whole || order.point.starts_with(INSTANCE) {
+                return Err(format!(
+                    "scene {:?}: {:?} is not a point a scene may set",
+                    scene.id, order.point
+                ));
+            }
         }
         let mut lights = HashSet::new();
         for step in &scene.lights {
@@ -286,6 +332,19 @@ async fn apply(hub: Hub, scene: Scene, generation: Arc<AtomicU64>, mine: u64) {
             return;
         }
         set_light(&hub, step).await;
+    }
+    // The rest of the house last: an order refused (a TV asleep) is only
+    // noted, the lights are in place.
+    for order in &scene.orders {
+        if generation.load(Ordering::Relaxed) != mine {
+            return;
+        }
+        send(
+            &hub,
+            &PointId::from(order.point.as_str()),
+            order.value.value(),
+        )
+        .await;
     }
 }
 
@@ -661,6 +720,11 @@ mod tests {
         id = "fete"
         name = "Fête"
         lights = [{ id = "z2m:0x01", effect = "colorloop" }]
+        orders = [
+          { point = "tele:10.0.0.2/ambilight_mode", value = "party" },
+          { point = "tuya:0a/switch_1", value = true },
+          { point = "hue:b/brightness", value = 40 },
+        ]
     "##;
 
     #[derive(Deserialize)]
@@ -683,6 +747,11 @@ mod tests {
         assert_eq!(strip.brightness, Some(22.0));
         assert_eq!(strip.effect.as_deref(), Some("flame"));
         assert_eq!(scenes[0].lights[2].setting().white, Some(2400));
+        let orders: Vec<Value> = scenes[2].orders.iter().map(|o| o.value.value()).collect();
+        assert_eq!(
+            orders,
+            [Value::from("party"), Value::Bool(true), Value::Int(40)]
+        );
     }
 
     #[test]
@@ -722,6 +791,9 @@ mod tests {
         assert!(broken(|s| s[0].lights[1].color = Some("orange".into())).is_err());
         assert!(broken(|s| s[0].lights[2].white = Some(900)).is_err());
         assert!(broken(|s| s[0].lights[2].brightness = Some(0.0)).is_err());
+        assert!(broken(|s| s[2].orders[0].point = "ambilight".into()).is_err());
+        assert!(broken(|s| s[2].orders[0].point = "tele:10.0.0.2".into()).is_err());
+        assert!(broken(|s| s[2].orders[0].point = "scenes:maison/scene".into()).is_err());
         let rhythm = Rhythm {
             lights: Vec::new(),
             curve: rhythm::default_curve(),
