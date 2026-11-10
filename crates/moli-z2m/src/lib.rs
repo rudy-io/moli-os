@@ -204,6 +204,10 @@ fn on_publish(
         let id = &entry.device.id;
         let playing = flames.contains_key(id);
         for (key, value) in entry.decode(&payload) {
+            // The lamp knows nothing of the flame: what plays is ours to say.
+            if entry.flame && &*key == "effect" {
+                continue;
+            }
             // The fades of the flame are not what the person chose: the level
             // and the colour on record stay theirs.
             if playing && is_look(&key) {
