@@ -35,6 +35,22 @@
       const d = a.device && hub.devices[a.device];
       return { target: d ? deviceName(d) : a.device || a.instance, detail: t('systeme.journal.adresse', { from: a.from, to: a.to }) };
     }
+    if (a.kind === 'driver_added') {
+      return {target:a.instance,detail:t(a.read_only ? 'systeme.journal.pilote_lecture_seule' : 'systeme.journal.pilote_ajoute', {kind:a.driver_kind})};
+    }
+    if (a.kind === 'driver_configured') {
+      return {target:a.instance,detail:t(!a.enabled ? 'systeme.journal.pilote_pause' : a.read_only ? 'systeme.journal.pilote_reconfigure_lecture_seule' : 'systeme.journal.pilote_reconfigure', {kind:a.driver_kind})};
+    }
+
+    if (a.kind === 'visibility') {
+      const d = hub.devices[a.device];
+      return {target:d ? deviceName(d) : a.device, detail:t(a.hidden ? 'systeme.journal.masque' : 'systeme.journal.restaure')};
+    }
+    if (a.kind === 'setting') {
+      const SETTINGS = ['energy.price'];
+      const target = SETTINGS.includes(a.name) ? t(`systeme.journal.reglage.${a.name}`) : a.name;
+      return { target, detail: t('systeme.journal.reglage_change', { from: a.from ?? '—', to: a.to }) };
+    }
     const d = hub.devices[a.device];
     const parts = [a.label.name, a.label.room].filter(Boolean).join(' · ');
     return { target: d ? deviceName(d) : a.device, detail: t('systeme.journal.etiquette', { value: parts || t('systeme.journal.effacee') }) };

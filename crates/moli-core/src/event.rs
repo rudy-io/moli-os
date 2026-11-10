@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Device, DeviceId, InstanceId, Label, PointId, Value};
+use crate::{Device, DeviceId, InstanceId, Label, PointId, Sample, Value};
 
 /// Everything that happens in the system, as broadcast on the bus and
 /// streamed to the surfaces.
@@ -11,6 +12,12 @@ use crate::{Device, DeviceId, InstanceId, Label, PointId, Value};
 pub enum Event {
     DeviceUpserted {
         device: Arc<Device>,
+    },
+    /// A retained offline inventory snapshot, never a fresh measurement.
+    DeviceRestored {
+        device: Arc<Device>,
+        states: BTreeMap<Arc<str>, Sample>,
+        label: Label,
     },
     DeviceRemoved {
         device: DeviceId,
@@ -35,10 +42,22 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         warning: Option<String>,
     },
+    /// A newly registered integration, including its classification for live UIs.
+    DriverRegistered {
+        instance: InstanceId,
+        kind: String,
+        integration: Arc<str>,
+    },
+    /// A configured driver was stopped and detached; its known devices remain.
+    DriverUnregistered {
+        instance: InstanceId,
+    },
     LabelChanged {
         device: DeviceId,
         label: Label,
     },
+    /// The dashboard layout changed on disk; surfaces reload `/api/home`.
+    LayoutChanged {},
     Journal {
         entry: Arc<JournalEntry>,
     },
@@ -144,6 +163,19 @@ pub enum Origin {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
+    /// A person's persisted integration installation; no address or credential.
+    DriverAdded {
+        instance: InstanceId,
+        driver_kind: String,
+        read_only: bool,
+    },
+    /// A person's persisted integration change; no address or credential.
+    DriverConfigured {
+        instance: InstanceId,
+        driver_kind: String,
+        enabled: bool,
+        read_only: bool,
+    },
     Command {
         point: PointId,
         value: Value,
@@ -151,6 +183,11 @@ pub enum Action {
     Label {
         device: DeviceId,
         label: Label,
+    },
+    /// Visibility in Moli, without removing the device or changing its driver.
+    Visibility {
+        device: DeviceId,
+        hidden: bool,
     },
     /// A human's decision on a held order (and, when approved, its execution).
     Approval {
@@ -175,6 +212,14 @@ pub enum Action {
         device: Option<DeviceId>,
         from: String,
         to: String,
+    },
+    /// A setting of the house changed by a person (`energy.price`, the price
+    /// of a kWh): what it was, what it is now.
+    Setting {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Value>,
+        to: Value,
     },
 }
 

@@ -9,6 +9,9 @@
 //! [`Event`]: moli_core::Event
 
 mod addresses;
+mod device_cache;
+#[cfg(test)]
+mod device_cache_tests;
 mod driver;
 pub mod guard;
 mod hub;
@@ -24,10 +27,10 @@ pub mod voice;
 pub use addresses::KnownAddress;
 pub use driver::{BoxFuture, CommandRequest, Driver, DriverCtx, MediaPublisher};
 pub use hub::{
-    ApprovalError, CORE_NAMESPACE, CommandError, DeviceView, DriverView, Hub, HubOptions,
-    LabelError, LabelPatch, MAX_LABEL, MAX_PENDING, MAX_PENDING_PER_CALLER, Opener, Snapshot,
-    opener,
+    ApprovalError, CONFIRM_WINDOW, CORE_NAMESPACE, CommandError, DeviceView, DriverView, Hub,
+    HubOptions, LabelError, LabelPatch, MAX_LABEL, MAX_PENDING, MAX_PENDING_PER_CALLER, MAX_SENDS,
+    Opener, Snapshot, opener,
 };
-pub use secrets::{MasterKey, forget_secret, set_secret};
+pub use secrets::{DurableLease, DurableSecrets, MasterKey, forget_secret, get_secret, set_secret};
 pub use stats::Stats;
 pub use supervisor::spawn_driver;

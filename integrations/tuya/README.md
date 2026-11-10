@@ -2,7 +2,9 @@
 
 - Aucun code repris : trames 3.3 / 3.4 / 3.5 vérifiées octet par octet contre la sortie
   d'implémentations existantes (localtuya, tinytuya), règle de tinytuya pour les en-têtes de version ; l'import lit le
-  compte Tuya déjà lié à HA (`tools/home-assistant/tuya-export.py`).
+  cloud Tuya : directement, avec les clés du projet cloud que Moli garde déjà pour le repli
+  (`moli-os tuya import --cloud`), ou par le compte déjà lié à HA
+  (`tools/home-assistant/tuya-export.py`).
 - Pas de fixture d'appareil : les tests (`src/protocol.rs`) utilisent des trames produites
   par ces implémentations (vecteurs d'interopérabilité), pas des captures.
 - Vérifié en vrai : import depuis HA, lecture et écriture locales sur des prises Tuya.
@@ -84,10 +86,57 @@
   l'état de ce `cid` dans les 100 ms ; une autre valeur (`remote_control`) n'est pas
   appliquée, même bouton réveillé par des appuis. Pas encore essayé sur un relais ou une
   prise Zigbee, toujours alimentés : le seul essai qui prouverait qu'un ordre est exécuté.
-- Reste : la version 3.1 n'est pas gérée ; l'import dépend encore de HA ; une sonde sur pile
+- **Import sans Home Assistant** : `moli-os tuya import --cloud` lit la liste des appareils du
+  projet cloud (`/v1.0/iot-01/associated-users/devices` : nom, catégorie, produit, clé locale,
+  `node_id`) puis le modèle de chaque appareil (`/v2.0/cloud/thing/{id}/model` : les DP, leur
+  type, leur plage, lecture ou écriture), et donne au même `merge_import` le même fichier que
+  `tuya-export.py` (passerelle d'un sous-appareil devinée de la même façon). `--summary` liste
+  ce qui serait rangé, sans clé ni écriture. Le modèle du cloud nomme certains DP autrement que
+  l'appareil, pour le même numéro (une ampoule : `bright_value` pour `bright_value_v2`, DP 22 à
+  26 ; un interrupteur à scènes : `switch_type_1` pour `switch_mode1`) : l'import rend ces noms
+  d'appareil, retire `test_bit` (contrôle d'usine), et un appareil déjà dans `tuya.json` garde
+  ses DP tels quels, aucun compris (une caméra ou une télécommande infrarouge importée sans DP
+  par HA n'en reçoit pas du cloud : `sd_format`, sirène, codes bruts) ; seule sa clé locale est
+  mise à jour. Une caméra (`sp`), un hub infrarouge (`wnykq`) ou une télécommande (`infrared_*`)
+  nouvelle n'en reçoit pas non plus, comme par l'export HA. Lancé en root, l'import rend `tuya.json` et le coffre au propriétaire du dossier
+  de données (moli-os tourne sous cet utilisateur). Essayé le 8 novembre 2026 sur un vrai
+  compte (43 appareils : prises, ampoules, passerelle Zigbee et ses sous-appareils, hub
+  infrarouge et ses télécommandes, caméras, Fingerbot) : chaque sous-appareil rattaché à la
+  bonne passerelle, les 42 appareils déjà connus inchangés, le nouveau (une ampoule) ajouté avec
+  ses noms d'appareil ; Moli redémarré charge les 43. Puis une prise neuve (LSC avec mesure),
+  ajoutée dans l'application Smart Life et récupérée par `--cloud` : en ligne dans Moli au
+  redémarrage, commandée en local (marche, arrêt), sans Home Assistant.
+- Reste : la version 3.1 n'est pas gérée ; une sonde sur pile
   ne répond pas à la requête d'état : sa valeur arrive à son prochain envoi.
 - Limites des sous-appareils en local : la disponibilité est celle de la passerelle (un
   sous-appareil sur pile éteint reste « en ligne » tant que sa passerelle l'est) ; l'accusé
   d'un ordre vient de la passerelle, pas de l'appareil Zigbee : seul l'état renvoyé ensuite
   pour son `cid` prouve que l'ordre a été exécuté ; l'état de chaque sous-appareil n'est
   demandé qu'à la connexion, ensuite seul ce que la passerelle pousse arrive.
+
+## Aspirateurs robots : Rowenta et Tefal X-plorer Serie 75
+
+- Ces robots sont des appareils Tuya : ils passent par ce pilote (`src/vacuum.rs`),
+  **en local**, sans cloud une fois la clé obtenue.
+- Points : `clean`, `pause`, `dock`, `mode`, `locate`, `state`, `battery`, `fan_speed`,
+  `clean_time`, `clean_area`, `edge_brush`, `main_brush`, `fault`, `detail`.
+- La Serie 75 répond sur les points 101 à 144. Le cloud en décrit d'autres (`power_go` sur 2, `mode` sur 3,
+  `seek` sur 13) qu'elle ne renvoie pas : le produit `X-Plorer Serie 75` reçoit toujours la table de
+  `src/vacuum.rs`, y compris après un import. Table reprise de `tefal_xplorer_vacuum.yaml` de
+  `make-all/tuya-local` (MIT), confirmée sur un vrai robot.
+- Les Serie 75 S et 95 S utilisent d'autres numéros (1 à 31, d'après `xplorer-rs`) et n'ont pas de table ici.
+  Non essayés. Un robot décrit par le cloud avec les codes standards garde cette description.
+- Volontairement absents : effacer la carte, remettre à zéro les compteurs, conduire à la main, nettoyer
+  une zone ou une pièce (il faudrait lire la carte, un format brut non décodé ici).
+- Les ordres qui font bouger le robot sont des `Control` : un agent passe par l'accord d'un humain.
+- `fixtures/robot_status.json` : réponse d'un vrai robot, sans identifiant, pendant son retour à la base.
+- **Vérifié sur du vrai matériel** (3 novembre 2026, Rowenta X-Plorer Serie 75, protocole 3.3, à travers
+  Moli) : lecture, `clean`, `pause` dans les deux sens, `dock`, `fan_speed`, arrêt par `clean = false`, `locate` (son entendu).
+- Constaté : `clean = true` pendant une pause relance une session (la surface repart à 0), `pause = false`
+  reprend la session en cours. `clean_time` est en secondes mais n'avance que par minute. `clean = false` arrête
+  le robot sur place, après un bref `tocharge`.
+- Non vérifié : `mode = pose`, les noms des
+  défauts, repris de `tuya-local` et jamais vus en panne réelle. Un défaut `code 27`, absent de cette liste, a
+  été vu quand le robot s'est arrêté hors de sa base ; il a disparu une fois remis en charge, sens inconnu.
+- Tableau de bord : une carte sur l'accueil, avec seulement les ordres possibles dans l'état du robot. Rendu vérifié ; boutons Démarrer, Faire sonner et aspiration cliqués sur la vraie page, ordres interceptés, et ces mêmes ordres envoyés au robot par l'API.
+- Reste : carte et zones, langues, programmation, Serie 75 S et 95 S.

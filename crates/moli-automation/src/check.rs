@@ -216,6 +216,9 @@ impl Ctx<'_> {
             if let Some(room) = self.hub.protected_room(&device) {
                 self.protected.push(room);
             }
+            if let Some(name) = self.hub.protected_device(&device) {
+                self.protected.push(name);
+            }
         }
         Some(spec)
     }
@@ -478,6 +481,11 @@ fn said(hub: &Hub, point: &str) -> Said {
     }
 }
 
+/// A plant sensor's thirst (`dry` on a Tuya soil sensor): no leak, no alarm.
+fn is_soil_dry(spec: Option<&PointSpec>) -> bool {
+    spec.is_some_and(|s| s.semantic == moli_core::Semantic::SoilDry)
+}
+
 fn is_power(spec: Option<&PointSpec>) -> bool {
     spec.is_some_and(|s| {
         toggles(s)
@@ -585,6 +593,7 @@ fn change_words(key: &str, spec: Option<&PointSpec>, to: Option<&Json>) -> Strin
         ("motion" | "occupancy" | "presence", Some(false)) => "moteur.changement.plus_rien",
         ("smoke", Some(true)) => "moteur.changement.fumee",
         ("water_leak", Some(true)) => "moteur.changement.fuite",
+        (_, Some(true)) if is_soil_dry(spec) => "moteur.changement.soif",
         (_, Some(true)) if is_power(spec) => "moteur.changement.allume",
         (_, Some(false)) if is_power(spec) => "moteur.changement.eteint",
         _ => {
@@ -997,6 +1006,24 @@ pub fn describe(graph: &Graph, hub: &Hub) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_thirsty_plant_reads_as_thirst_never_as_a_leak() {
+        let dry = PointSpec {
+            key: "dry".into(),
+            label: "Dry".into(),
+            kind: moli_core::Kind::Binary,
+            access: moli_core::Access {
+                read: true,
+                write: false,
+            },
+            unit: None,
+            semantic: moli_core::Semantic::SoilDry,
+        };
+        let words = change_words("dry", Some(&dry), Some(&serde_json::json!(true)));
+        assert_eq!(words, tr!("moteur.changement.soif"));
+        assert_ne!(words, tr!("moteur.changement.fuite"));
+    }
 
     #[test]
     fn durations_read_naturally() {

@@ -19,7 +19,7 @@ Mesures sur une installation réelle, à côté de son Home Assistant (détail d
 
 Ce qui marche aujourd'hui :
 - 24 intégrations : Zigbee (Zigbee2MQTT), Hue, Tuya (local et cloud), Reolink, Sonos (et ses
-  annonces vocales), télé Philips, Frigate, Bambu (et son AMS), Klipper, Tapo, box UPnP,
+  annonces vocales), télé Philips, Frigate, Bambu (et son AMS), Klipper, Tapo, LIFX, box UPnP,
   imprimante IPP, l'hôte et les ordinateurs, la présence par Wi-Fi, les aides de la maison,
   **Telegram** (votre bot, sans relais), les **téléphones** (appli Moli), et des profils
   déclaratifs (Daikin, Meross, Open-Meteo, Tempo, iopool) ;
@@ -43,6 +43,7 @@ téléphones passent sans Access, avec leur propre jeton.
 |---|---|
 | installer Moli chez soi (Docker, code d'installation, premiers appareils) | [components/installation.md](components/installation.md) |
 | comprendre comment c'est construit, et les décisions prises | [ARCHITECTURE.md](ARCHITECTURE.md), puis la carte vivante `#/systeme` du dashboard |
+| la sécurité : ce qu'on protège, contre qui, les règles et leurs preuves | [SECURITY-MODEL.md](SECURITY-MODEL.md) |
 | l'appli mobile (`mobile/`) | [components/api.md](components/api.md) |
 | connaître la règle de performance et les mesures | [PERFORMANCE.md](PERFORMANCE.md) |
 | compiler, déployer, opérer, gérer les secrets | [components/exploitation.md](components/exploitation.md) |

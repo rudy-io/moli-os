@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
-  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered } from '../lib/home.svelte.js';
+  import { hub, value, nameOf, deviceKind, isOn, toggle, num, note, roomOf, savePref, doorOpen, leak, motion, isGroup, isFixture, unpowered, plantNeeds } from '../lib/home.svelte.js';
   import { asHuman, CANCELLED } from '../lib/auto.svelte.js';
   import Drawing from '../plan/Drawing.svelte';
   import House3D from '../plan/House3D.svelte';
@@ -143,7 +143,7 @@
 
   // ---- what a token shows -------------------------------------------------------
 
-  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter' };
+  const ICON = { light: 'light', group: 'light-group', plug: 'power', climate: 'air-conditioner', camera: 'cctv', speaker: 'speaker', tv: 'tv', cover: 'shutter', plant: 'sprout' };
   const has = (d, key) => d.points.some((p) => p.key === key);
 
   function iconOf(d) {
@@ -159,6 +159,10 @@
 
   /** A short reading next to the token (sensors). */
   function reading(d) {
+    if (deviceKind(d) === 'plant') {
+      const { moisture } = plantNeeds(d);
+      return moisture == null ? '' : `${num(moisture)} %`;
+    }
     const t = value(d.id, 'temperature') ?? value(d.id, 'temp_current') ?? value(d.id, 'va_temperature');
     if (typeof t === 'number' && deviceKind(d) !== 'climate' && !floor?.size) return `${num(t, 1)}°`;
     const p = value(d.id, 'power') ?? value(d.id, 'cur_power');

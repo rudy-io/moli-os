@@ -60,6 +60,7 @@ struct Entry {
     id: DeviceId,
     /// What a rename or a move changes: compared with events.
     name: String,
+    /// What the hub says of this device, never its product's room.
     room: Option<String>,
     feeds: Vec<Feed>,
     /// `color` is computed from `colorHue` and `colorSaturation`.
@@ -421,6 +422,7 @@ fn add<'p>(
 /// Builds devices and the routing index from the `devices` of `/v1/home`.
 pub fn load(instance: &InstanceId, raw: &[Json]) -> Load {
     let mut load = Load::default();
+    let rooms = product_rooms(raw);
     for item in raw {
         let (Some(native), Some(device_type)) = (
             item["id"].as_str().filter(|id| !id.is_empty()),
@@ -428,9 +430,17 @@ pub fn load(instance: &InstanceId, raw: &[Json]) -> Load {
         ) else {
             continue;
         };
-        let Some((device, entry)) = device(instance, native, device_type, item, &mut load) else {
+        let Some((mut device, entry)) = device(instance, native, device_type, item, &mut load)
+        else {
             continue;
         };
+        // Read-only devices only: a room also says who may command a device.
+        if device.native_room.is_none() && device.points.iter().all(|p| !p.access.write) {
+            device.native_room = item["relationId"]
+                .as_str()
+                .and_then(|product| rooms.get(product).copied().flatten())
+                .map(Into::into);
+        }
         load.index
             .natives
             .insert(device.id.clone(), native.to_owned());
@@ -438,6 +448,24 @@ pub fn load(instance: &InstanceId, raw: &[Json]) -> Load {
         load.devices.push(device);
     }
     load
+}
+
+/// The room of each product (`relationId`): the hub may give it to one of its
+/// devices only (a MYGGSPRAY's presence has it, its light does not). `None`
+/// when its devices sit in different rooms: no guess. A device the driver does
+/// not publish counts too: its move goes unnoticed until the next load.
+fn product_rooms(raw: &[Json]) -> HashMap<&str, Option<&str>> {
+    let mut rooms = HashMap::new();
+    for item in raw {
+        let product = item["relationId"].as_str().filter(|id| !id.is_empty());
+        if let (Some(product), Some(room)) = (product, text(&item["room"], "name")) {
+            rooms
+                .entry(product)
+                .and_modify(|known: &mut Option<&str>| *known = known.filter(|k| *k == room))
+                .or_insert(Some(room));
+        }
+    }
+    rooms
 }
 
 /// One device and its entry; `None` when it is not published.
@@ -890,7 +918,8 @@ mod tests {
         // One MYGGSPRAY, two devices (`_1` light, `_2` presence), one battery each.
         let lux = named(&load, "Luminosité 1");
         assert_eq!(keys(lux), ["illuminance", "battery"]);
-        assert_eq!(lux.native_room, None);
+        // The hub gives the light no room: it takes its presence's.
+        assert_eq!(lux.native_room.as_deref(), Some("Chambre"));
         assert!(lux.id.as_str().ends_with("_1"));
         let presence = named(&load, "Présence 1");
         assert_eq!(keys(presence), ["motion", "battery"]);
@@ -1551,6 +1580,113 @@ mod tests {
             .encode(&lamp.id, "on", &Value::Bool(true))
             .unwrap();
         assert_eq!(native, "a/b_1", "the hub gets its own id back");
+    }
+
+    #[test]
+    fn the_devices_of_a_product_share_its_room() {
+        let half = |id: &str, product: Option<&str>, room: Option<(&str, &str)>| {
+            let mut item = json!({"id": id, "type": "sensor", "deviceType": "lightSensor",
+                "isReachable": true, "attributes": {"illuminance": 1},
+                "capabilities": {"canSend": [], "canReceive": []}});
+            if let Some(product) = product {
+                item["relationId"] = json!(product);
+            }
+            if let Some((id, name)) = room {
+                item["room"] = json!({"id": id, "name": name});
+            }
+            item
+        };
+        let rooms = |raw: &[Json]| -> Vec<Option<String>> {
+            load(&InstanceId::from("ikea"), raw)
+                .devices
+                .iter()
+                .map(|d| d.native_room.as_deref().map(str::to_owned))
+                .collect()
+        };
+        let salon = Some("Salon".to_owned());
+        let chambre = Some("Chambre".to_owned());
+        let in_salon = Some(("r1", "Salon"));
+
+        // Wherever the room is in the list.
+        for raw in [
+            [
+                half("a_1", Some("p"), None),
+                half("a_2", Some("p"), in_salon),
+            ],
+            [
+                half("a_2", Some("p"), in_salon),
+                half("a_1", Some("p"), None),
+            ],
+        ] {
+            assert_eq!(rooms(&raw), [salon.clone(), salon.clone()]);
+        }
+        // A device's own room comes first.
+        assert_eq!(
+            rooms(&[
+                half("a_1", Some("p"), Some(("r2", "Chambre"))),
+                half("a_2", Some("p"), in_salon),
+                half("a_3", None, None),
+            ]),
+            [chambre.clone(), salon.clone(), None]
+        );
+        // Two rooms for one product: nothing is guessed, even with a majority.
+        assert_eq!(
+            rooms(&[
+                half("a_1", Some("p"), None),
+                half("a_2", Some("p"), in_salon),
+                half("a_3", Some("p"), Some(("r2", "Chambre"))),
+                half("a_4", Some("p"), in_salon),
+            ]),
+            [None, salon.clone(), chambre.clone(), salon.clone()]
+        );
+        // Nor across other products, or an empty relation.
+        assert_eq!(
+            rooms(&[
+                half("a_1", Some("q"), None),
+                half("a_2", Some("p"), in_salon),
+            ]),
+            [None, salon.clone()]
+        );
+        assert_eq!(
+            rooms(&[half("a_1", Some(""), None), half("a_2", Some(""), in_salon),]),
+            [None, salon.clone()]
+        );
+        // A sensor takes a lamp's room; a lamp, which takes orders, guesses none.
+        let mut lamp = light(&json!({"isOn": true}), &["isOn"]);
+        lamp["relationId"] = json!("p");
+        assert_eq!(
+            rooms(&[lamp.clone(), half("a_1", Some("p"), None)]),
+            [salon.clone(), salon.clone()]
+        );
+        lamp.as_object_mut().unwrap().remove("room");
+        assert_eq!(
+            rooms(&[lamp, half("a_2", Some("p"), in_salon)]),
+            [None, salon.clone()]
+        );
+
+        // Events compare what the hub says of this device: a room taken from
+        // another is not its own.
+        let shared = load(
+            &InstanceId::from("ikea"),
+            &[
+                half("a_1", Some("p"), None),
+                half("a_2", Some("p"), in_salon),
+            ],
+        );
+        for event in [
+            json!({"type": "deviceStateChanged",
+                "data": {"id": "a_1", "attributes": {"illuminance": 26010}}}),
+            json!({"type": "deviceStateChanged", "data": {"id": "a_1", "room": null}}),
+        ] {
+            assert_eq!(shared.index.classify(&event), Event::State(&event["data"]));
+        }
+        // The other device moving reloads, and so does this one getting a
+        // room of its own, even the same.
+        for (id, room) in [("a_2", "r2"), ("a_1", "r1")] {
+            let moved = json!({"type": "deviceStateChanged",
+                "data": {"id": id, "room": {"id": room, "name": "Salon"}}});
+            assert_eq!(shared.index.classify(&moved), Event::Reload, "{id}");
+        }
     }
 
     #[test]

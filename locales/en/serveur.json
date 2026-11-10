@@ -90,11 +90,14 @@
   "serveur.systeme.surface.rest.quoi": "scripts and apps",
 
   "serveur.garde.piece_protegee": "protected room ({room})",
+  "serveur.garde.appareil_protege": "protected device ({name})",
   "serveur.garde.sans_piece_connue": "device with no known room",
   "serveur.garde.heures_calmes": "quiet hours ({from} → {to})",
   "serveur.garde.machine": "command to a machine (printer, computer): a human decides",
   "serveur.garde.code_partout": "code required for every command (pin mode)",
   "serveur.garde.en_attente": "awaiting human approval #{id}: {reason}",
+  "serveur.ordre.renvoi": "resent {envoi}/{envois}",
+  "serveur.ordre.non_confirme": "the device did not confirm after {envois} sends",
   "serveur.garde.remplacee": "replaced by a more recent request",
   "serveur.garde.cedee": "gave way to a more recent request: too many waiting",
   "serveur.garde.expiree": "expired",
@@ -131,6 +134,9 @@
   "serveur.energie.point.projection_kwh": "Usage this month at the current pace",
   "serveur.energie.point.bill_projection": "Bill this month at the current pace (plan fee included)",
   "serveur.energie.point.over_budget": "Estimated bill over budget",
+  "serveur.energie.prix_humain": "only a person (with the code) or an owner can change the price of a kWh",
+  "serveur.energie.prix_invalide": "invalid price of a kWh: a positive number, in {currency} per kWh (0.2319, not 23.19)",
+  "serveur.energie.absente": "no [energy] section in the configuration",
   "serveur.energie.charge.modele": "Driven load",
   "serveur.energie.charge.mode": "Mode",
   "serveur.energie.charge.raison": "What Moli is doing",
@@ -172,5 +178,8 @@
   "serveur.personnes.point_quelquun": "Someone at home",
   "serveur.personnes.point_tous_partis": "Everyone has left",
   "serveur.garde.ouverture": "opening a lock, a garage door or a gate: a person approves",
-  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen"
+  "serveur.personnes.deja_configuree": "this person is already set up: remove them from the People screen",
+  "serveur.visibilite.identifiant_invalide": "Invalid device identifier.",
+  "serveur.visibilite.indisponible": "Dashboard configuration unavailable.",
+  "serveur.visibilite.enregistrement_impossible": "Unable to save visibility."
 }

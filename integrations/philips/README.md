@@ -6,7 +6,8 @@
   n'appaire pas) ; `pilotes.md` : « à vérifier, probablement repris de HA ».
 - Pas de fixture : aucune réponse de la télé gardée dans les tests.
 - ⚠️ Identité = l'adresse `host` : un changement d'IP créerait un nouvel appareil.
-- **Côté Android** (`moli-androidtv`, module `android.rs`) :
+- **Côté Android** (le cœur `moli-androidtv::tv` ; `src/android.rs` n'y ajoute que les touches
+  JointSpace) :
   - Android TV Remote v2 (TLS 6466, certificat client) : appli au premier plan (point `app`,
     que JointSpace ne connaît pas sur une Google TV) et ouverture d'une appli (écrire `app` :
     paquet Android → `market://launch?id=…`, ou un lien). Appairage **repris de HA**

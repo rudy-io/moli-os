@@ -12,6 +12,7 @@
   import BenchPanel from './components/BenchPanel.svelte';
   import EnergyStrip from './components/EnergyStrip.svelte';
   import EnergyPanel from './components/EnergyPanel.svelte';
+  import { airzonePresent } from './maison/lib/airzone.js';
 
   let energyOpen = $state(false);
 
@@ -44,6 +45,9 @@
 </script>
 
 <Header />
+{#if airzonePresent(hub.drivers)}
+  <a class="integration-link" href="#/airzone"><strong>{t('airzone_ui.open')}</strong><span>{t('airzone_ui.workshop_link')}</span></a>
+{/if}
 <Approvals />
 <DriverWarnings drivers={hub.drivers} />
 
@@ -99,6 +103,19 @@
 </div>
 
 <style>
+  .integration-link {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    align-items: center;
+    min-height: 48px;
+    padding: 14px 28px;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--sun) 16%, var(--card));
+    text-decoration: none;
+  }
+  .integration-link strong { text-decoration: underline; text-underline-offset: 3px; }
+  .integration-link span { font-size: 14px; color: var(--ink-2); }
   main {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;

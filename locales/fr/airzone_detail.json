@@ -1,0 +1,14 @@
+{
+  "airzone_detail.view_history": "Voir l’historique",
+  "airzone_detail.changed_at": "Valeur enregistrée : {time}",
+  "airzone_detail.thermostat": "État du thermostat",
+  "airzone_detail.no_battery": "Non applicable (filaire)",
+  "airzone_detail.personalise": "Personnaliser cette zone",
+  "airzone_detail.personalise_help": "Nom, pièce et visibilité dans Moli",
+  "airzone_detail.parameters_help": "Toutes les valeurs transmises par Airzone",
+  "airzone_detail.shared_hint": "Réglages partagés avec d’autres zones",
+  "airzone_detail.demand.heat_demand": "Chauffage",
+  "airzone_detail.demand.cold_demand": "Refroidissement",
+  "airzone_detail.demand.air_demand": "Air",
+  "airzone_detail.demand.floor_demand": "Plancher"
+}

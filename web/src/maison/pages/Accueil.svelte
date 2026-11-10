@@ -1,11 +1,14 @@
 <script>
   import { onMount } from 'svelte';
-  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, act, pending } from '../lib/home.svelte.js';
+  import { home, hub, value, device, isOn, clock, num, relative, lastSeen, roomList, lampsOf, nameOf, doorOpen, leak, lowBattery, deviceKind, hidden, act, pending } from '../lib/home.svelte.js';
   import { isPrinter, phase } from '../lib/printers.js';
+  import { isValve } from '../lib/capabilities.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import LightTile from '../ui/LightTile.svelte';
   import ClimateCard from '../ui/ClimateCard.svelte';
+  import ValveCard from '../ui/ValveCard.svelte';
+  import VacuumCard from '../ui/VacuumCard.svelte';
   import EnergyCard from '../ui/EnergyCard.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
@@ -14,6 +17,8 @@
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
+  // A robot goes through every room: it belongs to none.
+  const robots = $derived(Object.values(hub.devices).filter((d) => deviceKind(d) === 'vacuum' && !hidden(d.id)));
 
   const lights = $derived(cfg.favorites?.lights ?? []);
   const litCount = $derived(lights.filter((l) => [l.id, ...(l.also ?? [])].some((i) => isOn(i))).length);
@@ -210,11 +215,15 @@
         <div class="card-head"><h2><Icon name="air-conditioner" size={18} />{t('maison.accueil.clim')}</h2></div>
         <div class="clims">
           {#each cfg.favorites?.climate ?? [] as c (c.id)}
-            <ClimateCard id={c.id} name={c.name} />
+            {#if isValve(device(c.id))}<ValveCard id={c.id} name={c.name} />{:else}<ClimateCard id={c.id} name={c.name} />{/if}
           {/each}
         </div>
       </section>
     {/if}
+
+    {#each robots as robot (robot.id)}
+      <div class="robot-slot"><VacuumCard id={robot.id} /></div>
+    {/each}
 
     {#if bell}
       <section class="card doorbell">
@@ -328,6 +337,11 @@
 
   .side {
     grid-column: span 4;
+  }
+
+  .robot-slot {
+    grid-column: span 5;
+    display: grid;
   }
 
   .climate {

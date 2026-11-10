@@ -10,5 +10,6 @@
   "overkiz.position": "Position ouverte",
   "overkiz.command": "Mouvement",
   "overkiz.state": "État d’ouverture",
-  "overkiz.favourite_position": "Position favorite"
+  "overkiz.favourite_position": "Position favorite",
+  "overkiz.slow_position": "Position d’ouverture à vitesse lente"
 }

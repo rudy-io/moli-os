@@ -335,6 +335,61 @@ fn base64(text: &str) -> Option<Vec<u8>> {
 /// The devices the cloud speaks for, by Tuya id: (index in the driver, device).
 pub type Watched = HashMap<String, (usize, Arc<TuyaDevice>)>;
 
+/// Devices per page of the cloud's list.
+const PAGE: usize = 50;
+
+/// Every device the cloud project sees (its linked app accounts), with its
+/// local key and data points, as `moli-os tuya import` takes them: no Home
+/// Assistant needed. One list, then one data model per device.
+pub async fn import(keys: Keys, region: Region) -> anyhow::Result<crate::ImportFile> {
+    let mut api = Api {
+        keys,
+        region,
+        token: None,
+    };
+    let mut raws: Vec<Json> = Vec::new();
+    let mut last = String::new();
+    loop {
+        // The query sorted, as Tuya signs it.
+        let path = if last.is_empty() {
+            format!("/v1.0/iot-01/associated-users/devices?size={PAGE}")
+        } else {
+            format!("/v1.0/iot-01/associated-users/devices?last_row_key={last}&size={PAGE}")
+        };
+        let page = api.call(&path).await?;
+        raws.extend(page["devices"].as_array().cloned().unwrap_or_default());
+        let more = page["has_more"].as_bool().unwrap_or(false);
+        match page["last_row_key"].as_str() {
+            Some(next) if more && !next.is_empty() && next != last && raws.len() < 5000 => {
+                next.clone_into(&mut last);
+            }
+            _ => break,
+        }
+    }
+    let mut models = Vec::with_capacity(raws.len());
+    for raw in &raws {
+        let id = raw["id"].as_str().unwrap_or_default();
+        let path = format!("/v2.0/cloud/thing/{id}/model");
+        // The cloud is sometimes slow for one device: once more.
+        let answer = match api.call(&path).await {
+            Ok(answer) => Ok(answer),
+            Err(_) => api.call(&path).await,
+        };
+        let model = match answer {
+            Ok(answer) => answer["model"]
+                .as_str()
+                .and_then(|text| serde_json::from_str(text).ok())
+                .unwrap_or(Json::Null),
+            Err(e) => {
+                tracing::warn!(device = id, error = %e, "tuya cloud: no data model, no data points");
+                Json::Null
+            }
+        };
+        models.push(model);
+    }
+    Ok(crate::import::from_cloud(&raws, &models))
+}
+
 /// Reads the states, then follows the changes, for ever (reconnecting).
 pub async fn watch(keys: Keys, region: Region, devices: Watched, up: mpsc::Sender<Up>) {
     let mut api = Api {

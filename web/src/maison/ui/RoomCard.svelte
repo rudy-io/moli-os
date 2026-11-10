@@ -1,13 +1,15 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
   import ClimateCard from './ClimateCard.svelte';
+  import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
+  import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
-  import { canWrite, pointOf } from '../lib/capabilities.js';
+  import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
   import { climateMode } from '../lib/climate.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
@@ -78,9 +80,21 @@
       return every ? [{ tone: '', icon: 'power', text: t('commun.piece.au_repos', { name: nameOf(d.id) }) }] : [];
     }
     // A silent sensor's last readings are old news: say it is silent.
-    if (d.online === false && deviceKind(d) === 'sensor') {
+    if (d.online === false && ['sensor', 'plant'].includes(deviceKind(d))) {
       const dead = lowBattery(d.id);
       return [{ tone: dead ? 'alert' : '', icon: dead ? 'battery-alert' : 'offline', text: t(dead ? 'commun.piece.pile_vide' : 'commun.piece.hors_ligne', { name: nameOf(d.id) }) }];
+    }
+    // A plant says its soil, and whether it is thirsty; its pot's air is no room's.
+    if (deviceKind(d) === 'plant') {
+      const { moisture, thirsty } = plantNeeds(d);
+      const shown = moisture == null ? '' : t('commun.pourcent', { n: num(moisture) });
+      const plant = thirsty
+        ? [{ tone: 'warm', icon: 'sprout', text: shown, title: t('commun.piece.plante_soif', { name: nameOf(d.id), n: shown }) }]
+        : every || moisture != null
+          ? [{ tone: 'good', icon: 'sprout', text: shown, title: t('commun.piece.plante', { name: nameOf(d.id), n: shown }) }]
+          : [];
+      if (lowBattery(d.id)) plant.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
+      return plant;
     }
     const out = [];
     const v = (k) => value(d.id, k);
@@ -121,14 +135,20 @@
 
   // ---- the room's temperature ----------------------------------------------------------
 
-  const temp = $derived.by(() => {
+  const roomTemperature = $derived.by(() => {
     const readings = [...room.sensors, ...room.climates]
-      .filter((d) => d.online !== false)
+      .filter((d) => d.online !== false && deviceKind(d) !== 'plant')
       // Tuya's Zigbee probes say `va_temperature`.
-      .map((d) => value(d.id, 'temperature') ?? value(d.id, 'temp_current') ?? value(d.id, 'va_temperature'))
-      .filter((x) => typeof x === 'number');
-    return readings.length ? readings.reduce((a, b) => a + b, 0) / readings.length : null;
+      .map((d) => {
+        const key = ['temperature', 'temp_current', 'va_temperature'].find((key) => Number.isFinite(value(d.id, key)));
+        return { value: key ? value(d.id, key) : null, unit: pointOf(d, key)?.unit };
+      })
+      .filter((reading) => Number.isFinite(reading.value));
+    // An average cannot mix Celsius/Fahrenheit or readings without a known scale.
+    if (!readings.length || !readings[0].unit || readings.some((reading) => reading.unit !== readings[0].unit)) return null;
+    return { value: readings.reduce((sum, reading) => sum + reading.value, 0) / readings.length, unit: readings[0].unit };
   });
+  const temp = $derived(roomTemperature?.value ?? null);
   const tone = (deg) => (deg < 18 ? 'cold' : deg < 20 ? 'cool' : deg <= 24 ? 'good' : deg <= 27 ? 'warm' : 'hot');
   const gaugeAt = (deg) => Math.min(100, Math.max(0, ((deg - 14) / 16) * 100));
 
@@ -230,7 +250,7 @@
       <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
     </div>
     {#if temp != null}
-      <span class="temp {tone(temp)}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}°</b><i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i></span>
+      <span class="temp {roomTemperature.unit === '°C' ? tone(temp) : ''}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}{roomTemperature.unit}</b>{#if roomTemperature.unit === '°C'}<i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i>{/if}</span>
     {/if}
     {#if lamps.length}
       <button class="round" class:open={showLooks} onclick={() => (showLooks = !showLooks)} aria-expanded={showLooks} title={t('commun.piece.ambiances')} aria-label={t('commun.piece.ambiances_de', { name: room.name })}>
@@ -279,24 +299,29 @@
   {/if}
 
   {#each room.covers as d (d.id)}
-    <CoverTile id={d.id} />
+    <CoverTile id={d.id} {icons} />
+  {/each}
+
+  {#each room.impulses as d (d.id)}
+    <ImpulseTile id={d.id} {icons} />
   {/each}
 
   {#each room.climates as d (d.id)}
-    {@const mode = pointOf(d, 'mode') ? value(d.id, 'mode') : null}
+    {@const keys = climateKeys(d)}
+    {@const mode = pointOf(d, keys.mode) ? value(d.id, keys.mode) : null}
     {@const on = pointOf(d, 'on') ? value(d.id, 'on') : mode == null ? null : mode !== 'off'}
-    {@const temperature = pointOf(d, 'temperature') ? value(d.id, 'temperature') : null}
-    {@const target = pointOf(d, 'target_temperature') ? value(d.id, 'target_temperature') : null}
+    {@const temperature = pointOf(d, keys.temperature) ? value(d.id, keys.temperature) : null}
+    {@const target = pointOf(d, keys.target) ? value(d.id, keys.target) : null}
     <button class="clim" class:on={on === true} onclick={() => (openClim = openClim === d.id ? null : d.id)} aria-expanded={openClim === d.id}>
       <Icon name="air-conditioner" size={18} />
       <b>{nameOf(d.id)}</b>
       {#if Number.isFinite(temperature) || Number.isFinite(target)}
-        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}°{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}°{/if}</span>
+        <span class="num">{#if Number.isFinite(temperature)}{num(temperature, 0)}{pointOf(d, keys.temperature)?.unit ?? ''}{/if}{#if Number.isFinite(temperature) && Number.isFinite(target)} → {/if}{#if Number.isFinite(target)}{num(target, 1)}{pointOf(d, keys.target)?.unit ?? ''}{/if}</span>
       {/if}
       <span class="state">{climateState(on, mode)}</span>
     </button>
     {#if openClim === d.id}
-      <ClimateCard id={d.id} name={nameOf(d.id)} />
+      {#if isValve(d)}<ValveCard id={d.id} name={nameOf(d.id)} />{:else}<ClimateCard id={d.id} name={nameOf(d.id)} />{/if}
     {/if}
   {/each}
 

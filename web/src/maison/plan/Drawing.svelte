@@ -1,5 +1,5 @@
 <script>
-  import { hub, home, value, deviceKind, isOn, roomOf, num } from '../lib/home.svelte.js';
+  import { hub, home, value, deviceKind, isOn, roomOf, num, isPlant } from '../lib/home.svelte.js';
   import { area, bbox, inside, labelAt, points } from './geometry.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
@@ -229,7 +229,8 @@
   /** A probe's temperature now (an unreachable one says nothing). */
   function tempOf(id) {
     const d = id ? hub.devices[id] : null;
-    if (!d || d.online === false) return null;
+    // A plant sensor reads its pot's air, not the room's.
+    if (!d || d.online === false || isPlant(d)) return null;
     for (const key of ['temperature', 'temp_current', 'va_temperature']) {
       const v = value(id, key);
       if (typeof v === 'number') return v;

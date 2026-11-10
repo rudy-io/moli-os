@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/rudy-io/moli-os"
-rust-version = "1.88"
+rust-version = "1.89"
 
 [workspace.dependencies]
 moli-core = { path = "crates/moli-core" }
@@ -39,6 +39,7 @@ moli-frigate = { path = "crates/moli-frigate" }
 moli-philips = { path = "crates/moli-philips" }
 moli-melcloud = { path = "crates/moli-melcloud" }
 moli-tapo = { path = "crates/moli-tapo" }
+moli-lifx = { path = "crates/moli-lifx" }
 moli-shelly = { path = "crates/moli-shelly" }
 moli-izypower = { path = "crates/moli-izypower" }
 moli-solarman = { path = "crates/moli-solarman" }
@@ -80,12 +81,12 @@ ring = "0.17"
 # Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
 num-bigint = "0.4"
 num-traits = "0.2"
-rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 mime_guess = { version = "2", default-features = false }
-rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp = { version = "3.9", features = ["server", "macros", "transport-streamable-http-server"] }
 rumqttc = { version = "0.25", default-features = false }
 rust-embed = "8"
 schemars = "1"

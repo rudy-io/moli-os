@@ -275,6 +275,13 @@ logs = "warn"                                 # none, error, warn, info, debug
 | `wake_words` | vide | ids des mots à activer parmi ceux du firmware |
 | `mac` | absent | adresse attendue : garde-fou du provisionnement et recherche d'un appareil qui a changé d'adresse |
 | `logs` | `warn` | le journal de l'appareil, reversé dans celui de Moli |
+| `speaker` | absent | une enceinte qui dit les réponses à la place de l'appareil : son point `announce` (par exemple `sonos:RINCON_…/announce`) |
+
+**Les réponses sur une enceinte** (`speaker`) : l'appareil écoute et garde ses petits sons (réveil,
+carillon de fin), l'enceinte dit la réponse par-dessus ce qu'elle joue (une Sonos baisse la télé le temps de
+la phrase). L'appareil affiche qu'il répond, attend que l'enceinte ait fini (son point `speaking`), puis
+joue un dixième de seconde de silence et se remet à écouter : il n'entend jamais la réponse. Si l'enceinte
+est en silence (`quiet`), refuse, ou ne commence pas dans les 5 s, l'appareil dit la réponse lui-même.
 
 **La clé chiffrée** vit dans le coffre, jamais dans `moli.toml` :
 
@@ -294,6 +301,14 @@ clé Noise (`noise::psk_from_base64`).
 | `muted` | oui | vrai / faux |
 | `wake_word` | non | le dernier mot de réveil entendu (son id dans le firmware) |
 | `say` | oui | un texte (500 caractères au plus) dit à voix haute, dans la voix de Moli |
+| `mic_muted` | oui | vrai / faux : coupe les micros (interrupteur `Mute` du firmware) |
+| `buttons_disabled` | oui | vrai / faux : le bouton et la molette ne font plus rien (interrupteur `Disable physical controls` du firmware) |
+
+Les deux derniers points n'existent que si le firmware a ces interrupteurs, ce qui est le cas du Voice PE.
+`muted` coupe le **haut-parleur** et laisse les micros allumés ; `mic_muted` coupe les **micros**. Un
+interrupteur matériel de micro resté en position coupée l'emporte sur `mic_muted`.
+`buttons_disabled` laisse active la remise à zéro par un appui très long sur le bouton (22 s sur le Voice PE),
+qui effacerait le Wi-Fi et la clé.
 
 `say` est une **annonce** : elle passe par-dessus ce que l'appareil joue, qui revient ensuite.
 C'est une commande comme une autre — **la garde s'applique** (pièce protégée, heures calmes).
@@ -317,15 +332,43 @@ C'est une commande comme une autre — **la garde s'applique** (pièce protégé
    produit d'abord un WAV complet, converti en FLAC pour l'annonce. À la fin de la lecture,
    l'appareil envoie `VoiceAssistantAnnounceFinished`.
 7. Moli attend alors une nouvelle demande pendant `CONTINUE_WAIT` (5 s) : la conversation reste
-   ouverte **sans redire le mot de réveil**. Sinon, retour à `idle`.
-8. Pour raccrocher : une phrase de fin (« merci », « c'est tout », « stop », « au revoir »…), un
-   double appui, ou **une transcription vide** — une seule suffit sur un satellite (le silence
+   ouverte **sans redire le mot de réveil**, mais **seulement si le tour a agi** (un ordre, une
+   proposition, un outil qui change quelque chose) : « et la cuisine aussi » marche après
+   « allume le salon ». Après une simple réponse (l'heure, la météo, « je ne comprends pas »),
+   la réponse est dite puis le carillon clôt la conversation. Sans cette règle, un salon
+   vivant était pris pour la question suivante, et la suivante, pendant des minutes
+   (7 nov. 2026). Sinon, retour à `idle`.
+8. Pour raccrocher : une phrase de fin dite seule (« merci », « c'est tout », « stop »,
+   « au revoir »…), une **phrase d'arrêt n'importe où dans ce qui est dit** (« arrête de nous
+   écouter », « tais-toi », « éteins-toi », « laisse tomber », « chut », « ça suffit » :
+   `assistant.voice.stop`, vérifiée avant le modèle, qui avait pris « éteins-toi » pour la
+   lumière du salon), un double appui, ou **une transcription vide**. Une transcription
+   surtout dans un autre alphabet (cyrillique, chinois…) compte comme vide : c'est le bruit de
+   la pièce mal transcrit. Une seule suffit sur un satellite (le silence
    est enregistré dans l'historique comme une fausse activation, mais il n'y a pas de second
    essai : la conversation s'arrête). Moli envoie alors
    `INTENT_END{continue_conversation=0}` et **un carillon** qu'il fabrique lui-même
    (`sound.rs`, aucun fichier sur l'appareil). Ce carillon est un média FLAC complet sous
    `/api/media/<nom aléatoire>.flac`, valable **5 minutes**, distinct des réponses sous
    `/api/voice/`.
+9. Si l'appareil demande l'arrêt (`VoiceAssistantRequest{start=false}`, un appui sur le bouton), Moli oublie
+   la conversation et envoie toujours `RUN_END`. Sans lui, un arrêt pendant que Moli réfléchit laisse le firmware
+   attendre pour de bon (`AWAITING_RESPONSE`) : ses LED clignotent et il n'entend plus son mot de réveil.
+
+## Près d'une télé
+
+Un satellite posé près d'un écran prend parfois un dialogue pour son mot de réveil, puis la suite du film
+pour une conversation. Avec cette option, tant qu'un écran joue dans sa pièce, il ne parle que s'il a
+fait quelque chose, et il raccroche toujours après un tour :
+
+```toml
+[assistant]
+quiet_during_tv = true
+```
+
+Un écran joue quand un appareil de la pièce publie `media_state = "playing"`, ou `source = "tv"` avec
+`playing` vrai (la barre de son qui porte le son de la télé). Pendant une pause, il répond normalement. Une
+simple question (« quelle heure est-il ? ») reste sans réponse tant que l'écran joue, le carillon marquant la fin.
 
 ## ⚠️ Un seul cerveau : Home Assistant **ou** Moli
 

@@ -14,13 +14,15 @@
 pub mod cloud;
 mod connections;
 mod device;
+pub mod import;
 pub mod light;
 pub mod model;
 pub mod protocol;
 mod seek;
+pub mod vacuum;
 
 use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -104,111 +106,29 @@ fn parse_key(key: &str) -> Option<[u8; 16]> {
     <[u8; 16]>::try_from(key.as_bytes()).ok()
 }
 
-#[allow(clippy::too_many_lines)] // one pass: each device, its link, its sub-devices
 async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-    let file: DeviceFile = match tokio::fs::read(&config.devices_file).await {
-        Ok(bytes) => serde_json::from_slice(&bytes)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            ctx.wait_for(moli_i18n::tr!(
-                "pilotes.tuya.aucun_appareil",
-                file = config.devices_file.display()
-            ));
-            ctx.cancelled().await;
-            return Ok(());
-        }
-        Err(e) => return Err(e.into()),
+    let Some(file) = read_devices_file(config, ctx).await? else {
+        return Ok(());
     };
 
     let (up_tx, mut up) = mpsc::channel::<Up>(256);
-    let mut orders: HashMap<DeviceId, (usize, mpsc::Sender<Order>)> = HashMap::new();
-    let mut addresses: HashMap<String, seek::Wanted> = HashMap::new();
-    let mut wanted = Vec::new();
-    let mut devices: Vec<(DeviceId, Arc<TuyaDevice>)> = Vec::new();
-    let mut tasks = tokio::task::JoinSet::new();
-    let connections = Arc::new(connections::Connections::default());
-    let mut missing_keys = 0;
     let keys = cloud_keys(config, ctx).await;
-    let mut silent_seen = false;
-    let mut watched = cloud::Watched::new();
-    let mut fallback = Fallback::default();
-    let (mut children, rest) = split_children(ctx, file.devices, &mut devices);
-    // Sub-devices read locally still need the cloud when their gateway is
-    // out of reach: keys given later restart the driver for them too.
-    silent_seen |= !children.is_empty();
-    for dev in rest {
-        // Never on the LAN: a battery sensor without an address, a device
-        // behind a gateway. The cloud speaks for them, when it can.
-        let silent = dev.gateway.is_some()
-            || (dev.ip.is_none() && cloud::SLEEPY.contains(&dev.category.as_str()));
-        silent_seen |= silent;
-        if silent && keys.is_some() {
-            let device = dev.device(ctx.instance());
-            let id = device.id.clone();
-            ctx.upsert_device(device);
-            let dev = Arc::new(dev);
-            watched.insert(dev.id.clone(), (devices.len(), Arc::clone(&dev)));
-            devices.push((id, dev));
-            continue;
-        }
-        if dev.gateway.is_some() {
-            continue; // behind a hub: not reachable on its own
-        }
-        let Some(key) = ctx
-            .secret(&key_name(&dev.id))
-            .as_deref()
-            .and_then(parse_key)
-        else {
-            missing_keys += 1;
-            continue;
-        };
-        let device = dev.device(ctx.instance());
-        let id = device.id.clone();
-        ctx.upsert_device(device);
-        let dev = Arc::new(dev);
-        let local = local_device(&dev, key, Arc::clone(&connections));
-        let addr_rx = local.address.subscribe();
-        let reachability = Arc::clone(&local.reachability);
-        if !silent {
-            wanted.push(local.clone());
-        }
-        let (order_tx, order_rx) = mpsc::channel(8);
-        let index = devices.len();
-        let carried = children.remove(&dev.id).unwrap_or_default();
-        for child in &carried {
-            orders.insert(
-                devices[child.index].0.clone(),
-                (child.index, order_tx.clone()),
-            );
-            // The cloud, when it can, speaks for the sub-device while its
-            // gateway is out of reach.
-            if keys.is_some() {
-                fallback.gateway.insert(child.index, index);
-                watched.insert(
-                    child.device.id.clone(),
-                    (child.index, Arc::clone(&child.device)),
-                );
-            }
-        }
-        addresses.insert(dev.id.clone(), local);
-        orders.insert(id.clone(), (index, order_tx));
-        devices.push((id, Arc::clone(&dev)));
-        tasks.spawn(
-            Link {
-                index,
-                device: dev,
-                key,
-                address: addr_rx,
-                reachability,
-                connections: Arc::clone(&connections),
-                orders: order_rx,
-                up: up_tx.clone(),
-                children: carried,
-            }
-            .run(),
-        );
-    }
+    let mut registry = Registry::new(keys.is_some(), up_tx);
+    let (children, rest) = split_children(ctx, file.devices, &mut registry.devices);
+    let scan = registry.register(ctx, rest, children);
+    let Registry {
+        orders,
+        addresses,
+        wanted,
+        devices,
+        watched,
+        mut fallback,
+        mut tasks,
+        up_tx,
+        ..
+    } = registry;
     // Keys given later in the dashboard: a restart takes them.
-    let await_keys = keys.is_none() && silent_seen;
+    let await_keys = keys.is_none() && scan.silent_seen;
     // Apart from the links: what the cloud says of a sub-device is used
     // only while its gateway is out of reach.
     let (cloud_tx, mut cloud_up) = mpsc::channel::<Up>(256);
@@ -226,17 +146,13 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // only if the cloud stops, never because it did not start.
     let idle_cloud = (!matches!(cloud, Cloud::Started)).then_some(cloud_tx);
     drop(up_tx);
-    if missing_keys > 0 {
-        tracing::warn!(instance = %ctx.instance(), missing_keys, "tuya devices without a local key are skipped (re-run the import)");
-    }
+    scan.warn_missing_keys(ctx);
     locate(config, &devices, addresses, wanted, &mut tasks);
     let refused = if let Cloud::Refused(why) = cloud {
         // No cloud: what it alone reads is offline (before `ready`, which
         // would bring back what a previous run showed), and a gateway out of
         // reach has nothing to fall back on.
-        for index in cloud_only {
-            ctx.set_availability(&devices[index].0, false);
-        }
+        set_offline(ctx, &devices, &cloud_only);
         fallback = Fallback::default();
         Some(why)
     } else {
@@ -261,6 +177,200 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         anyhow::bail!(moli_i18n::tr!("pilotes.tuya.cles_cloud"));
     }
     Ok(())
+}
+
+/// The imported devices; none (and the driver waits to be stopped) while the
+/// file does not exist.
+async fn read_devices_file(
+    config: &Config,
+    ctx: &mut DriverCtx,
+) -> anyhow::Result<Option<DeviceFile>> {
+    match tokio::fs::read(&config.devices_file).await {
+        Ok(bytes) => {
+            let mut file: DeviceFile = serde_json::from_slice(&bytes)?;
+            file.devices.iter_mut().for_each(TuyaDevice::complete);
+            Ok(Some(file))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ctx.wait_for(moli_i18n::tr!(
+                "pilotes.tuya.aucun_appareil",
+                file = config.devices_file.display()
+            ));
+            ctx.cancelled().await;
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn set_offline(ctx: &DriverCtx, devices: &[(DeviceId, Arc<TuyaDevice>)], indexes: &[usize]) {
+    for &index in indexes {
+        ctx.set_availability(&devices[index].0, false);
+    }
+}
+
+/// What going through the devices found out.
+struct Scan {
+    /// Some device is read through the cloud, or could be.
+    silent_seen: bool,
+    missing_keys: usize,
+}
+
+impl Scan {
+    fn warn_missing_keys(&self, ctx: &DriverCtx) {
+        let missing_keys = self.missing_keys;
+        if missing_keys > 0 {
+            tracing::warn!(instance = %ctx.instance(), missing_keys, "tuya devices without a local key are skipped (re-run the import)");
+        }
+    }
+}
+
+/// What `run` builds while it goes through the devices.
+struct Registry {
+    orders: HashMap<DeviceId, (usize, mpsc::Sender<Order>)>,
+    addresses: HashMap<String, seek::Wanted>,
+    wanted: Vec<seek::Wanted>,
+    devices: Vec<(DeviceId, Arc<TuyaDevice>)>,
+    watched: cloud::Watched,
+    fallback: Fallback,
+    tasks: tokio::task::JoinSet<()>,
+    connections: Arc<connections::Connections>,
+    up_tx: mpsc::Sender<Up>,
+    /// Whether the cloud keys are there.
+    has_cloud_keys: bool,
+}
+
+impl Registry {
+    fn new(has_cloud_keys: bool, up_tx: mpsc::Sender<Up>) -> Self {
+        Self {
+            orders: HashMap::new(),
+            addresses: HashMap::new(),
+            wanted: Vec::new(),
+            devices: Vec::new(),
+            watched: cloud::Watched::new(),
+            fallback: Fallback::default(),
+            tasks: tokio::task::JoinSet::new(),
+            connections: Arc::new(connections::Connections::default()),
+            up_tx,
+            has_cloud_keys,
+        }
+    }
+
+    /// Goes through the devices no gateway carries locally.
+    fn register(
+        &mut self,
+        ctx: &DriverCtx,
+        rest: Vec<TuyaDevice>,
+        mut children: HashMap<String, Vec<device::Child>>,
+    ) -> Scan {
+        // Sub-devices read locally still need the cloud when their gateway is
+        // out of reach: keys given later restart the driver for them too.
+        let mut scan = Scan {
+            silent_seen: !children.is_empty(),
+            missing_keys: 0,
+        };
+        for dev in rest {
+            // Never on the LAN: a battery sensor without an address, a device
+            // behind a gateway. The cloud speaks for them, when it can.
+            let silent = dev.gateway.is_some()
+                || (dev.ip.is_none() && cloud::SLEEPY.contains(&dev.category.as_str()));
+            scan.silent_seen |= silent;
+            if silent && self.has_cloud_keys {
+                self.watch_through_cloud(ctx, dev);
+                continue;
+            }
+            if dev.gateway.is_some() {
+                continue; // behind a hub: not reachable on its own
+            }
+            let Some(key) = ctx
+                .secret(&key_name(&dev.id))
+                .as_deref()
+                .and_then(parse_key)
+            else {
+                scan.missing_keys += 1;
+                continue;
+            };
+            self.start_link(ctx, dev, key, silent, &mut children);
+        }
+        scan
+    }
+
+    /// A device only the cloud speaks for.
+    fn watch_through_cloud(&mut self, ctx: &DriverCtx, dev: TuyaDevice) {
+        let device = dev.device(ctx.instance());
+        let id = device.id.clone();
+        ctx.upsert_device(device);
+        let dev = Arc::new(dev);
+        self.watched
+            .insert(dev.id.clone(), (self.devices.len(), Arc::clone(&dev)));
+        self.devices.push((id, dev));
+    }
+
+    /// A device reached on the LAN, with the sub-devices its link carries.
+    fn start_link(
+        &mut self,
+        ctx: &DriverCtx,
+        dev: TuyaDevice,
+        key: [u8; 16],
+        silent: bool,
+        children: &mut HashMap<String, Vec<device::Child>>,
+    ) {
+        let device = dev.device(ctx.instance());
+        let id = device.id.clone();
+        ctx.upsert_device(device);
+        let dev = Arc::new(dev);
+        let local = local_device(&dev, key, Arc::clone(&self.connections));
+        let address = local.address.subscribe();
+        let reachability = Arc::clone(&local.reachability);
+        if !silent {
+            self.wanted.push(local.clone());
+        }
+        let (order_tx, orders) = mpsc::channel(8);
+        let index = self.devices.len();
+        let carried = children.remove(&dev.id).unwrap_or_default();
+        self.route_children(index, &order_tx, &carried);
+        self.addresses.insert(dev.id.clone(), local);
+        self.orders.insert(id.clone(), (index, order_tx));
+        self.devices.push((id, Arc::clone(&dev)));
+        self.tasks.spawn(
+            Link {
+                index,
+                device: dev,
+                key,
+                address,
+                reachability,
+                connections: Arc::clone(&self.connections),
+                orders,
+                up: self.up_tx.clone(),
+                children: carried,
+            }
+            .run(),
+        );
+    }
+
+    /// Orders for sub-devices go through their gateway's link.
+    fn route_children(
+        &mut self,
+        gateway: usize,
+        order_tx: &mpsc::Sender<Order>,
+        carried: &[device::Child],
+    ) {
+        for child in carried {
+            self.orders.insert(
+                self.devices[child.index].0.clone(),
+                (child.index, order_tx.clone()),
+            );
+            // The cloud, when it can, speaks for the sub-device while its
+            // gateway is out of reach.
+            if self.has_cloud_keys {
+                self.fallback.gateway.insert(child.index, gateway);
+                self.watched.insert(
+                    child.device.id.clone(),
+                    (child.index, Arc::clone(&child.device)),
+                );
+            }
+        }
+    }
 }
 
 /// Sub-devices whose gateway is reached locally speak through it: they are
@@ -419,8 +529,7 @@ async fn serve(
     while links_open || cloud_open {
         tokio::select! {
             _ = look.tick(), if await_keys => {
-                if stored_keys(ctx).is_some() {
-                    tracing::info!(instance = %ctx.instance(), "tuya cloud keys given in the dashboard");
+                if keys_given(ctx) {
                     return true;
                 }
             }
@@ -429,42 +538,81 @@ async fn serve(
                 let Some(command) = command else { break };
                 dispatch(ctx, command, orders, devices);
             }
-            message = sources.links.recv(), if links_open => match message {
-                Some(Up::State(index, values)) => set_states(ctx, &devices[index].0, values),
-                Some(Up::Pressed(index, presses)) => {
-                    for (key, value) in presses {
-                        ctx.pulse_state(&devices[index].0, &key, value);
-                    }
-                }
-                Some(Up::Online(index, online)) => {
-                    let was_up = sources.fallback.up.contains(&index);
-                    let online = sources.fallback.local(index, online);
-                    if was_up && !sources.fallback.up.contains(&index) {
-                        tracing::info!(
-                            gateway = devices[index].1.name,
-                            "tuya gateway out of reach: its sub-devices are read through the cloud"
-                        );
-                    }
-                    ctx.set_availability(&devices[index].0, online);
-                }
-                None => links_open = false,
-            },
-            message = sources.cloud.recv(), if cloud_open => match message {
-                Some(Up::State(index, values) | Up::Pressed(index, values)) => {
-                    if sources.fallback.cloud_speaks(index) {
-                        set_states(ctx, &devices[index].0, values);
-                    }
-                }
-                Some(Up::Online(index, online)) => {
-                    if let Some(online) = sources.fallback.cloud(index, online) {
-                        ctx.set_availability(&devices[index].0, online);
-                    }
-                }
-                None => cloud_open = false,
-            },
+            message = sources.links.recv(), if links_open => {
+                let Some(up) = message else {
+                    links_open = false;
+                    continue;
+                };
+                link_said(ctx, &mut sources.fallback, devices, up);
+            }
+            message = sources.cloud.recv(), if cloud_open => {
+                let Some(up) = message else {
+                    cloud_open = false;
+                    continue;
+                };
+                cloud_said(ctx, &mut sources.fallback, devices, up);
+            }
         }
     }
     false
+}
+
+/// What a device's link reported.
+fn link_said(
+    ctx: &DriverCtx,
+    fallback: &mut Fallback,
+    devices: &[(DeviceId, Arc<TuyaDevice>)],
+    up: Up,
+) {
+    match up {
+        Up::State(index, values) => set_states(ctx, &devices[index].0, values),
+        Up::Pressed(index, presses) => {
+            for (key, value) in presses {
+                ctx.pulse_state(&devices[index].0, &key, value);
+            }
+        }
+        Up::Online(index, online) => {
+            let was_up = fallback.up.contains(&index);
+            let online = fallback.local(index, online);
+            if was_up && !fallback.up.contains(&index) {
+                tracing::info!(
+                    gateway = devices[index].1.name,
+                    "tuya gateway out of reach: its sub-devices are read through the cloud"
+                );
+            }
+            ctx.set_availability(&devices[index].0, online);
+        }
+    }
+}
+
+/// What the cloud reported.
+fn cloud_said(
+    ctx: &DriverCtx,
+    fallback: &mut Fallback,
+    devices: &[(DeviceId, Arc<TuyaDevice>)],
+    up: Up,
+) {
+    match up {
+        Up::State(index, values) | Up::Pressed(index, values) => {
+            if fallback.cloud_speaks(index) {
+                set_states(ctx, &devices[index].0, values);
+            }
+        }
+        Up::Online(index, online) => {
+            if let Some(online) = fallback.cloud(index, online) {
+                ctx.set_availability(&devices[index].0, online);
+            }
+        }
+    }
+}
+
+/// Whether a person has just given the cloud keys in the dashboard.
+fn keys_given(ctx: &DriverCtx) -> bool {
+    let given = stored_keys(ctx).is_some();
+    if given {
+        tracing::info!(instance = %ctx.instance(), "tuya cloud keys given in the dashboard");
+    }
+    given
 }
 
 fn set_states(ctx: &DriverCtx, id: &DeviceId, values: Vec<(String, moli_core::Value)>) {
@@ -594,50 +742,86 @@ async fn discover(addresses: HashMap<String, seek::Wanted>) {
     }
     let (found_tx, mut found) = mpsc::channel::<(String, String, Version)>(64);
     for socket in sockets {
-        let found_tx = found_tx.clone();
-        tokio::spawn(async move {
-            let mut buf = vec![0u8; 2048];
-            loop {
-                let Ok((n, from)) = socket.recv_from(&mut buf).await else {
-                    return;
-                };
-                let Some(json) = protocol::open_broadcast(&buf[..n]) else {
-                    continue;
-                };
-                let (Some(id), Some(version)) = (
-                    json.get("gwId").and_then(|v| v.as_str()),
-                    json.get("version")
-                        .and_then(|v| v.as_str())
-                        .and_then(Version::parse),
-                ) else {
-                    continue;
-                };
-                // Where the broadcast came from, not what it claims.
-                let ip = from.ip().to_string();
-                if found_tx.send((id.to_owned(), ip, version)).await.is_err() {
-                    return;
-                }
-            }
-        });
+        tokio::spawn(hear(socket, found_tx.clone()));
     }
     drop(found_tx);
     while let Some((id, ip, version)) = found.recv().await {
         if let Some(device) = addresses.get(&id) {
-            let state = *device.reachability.borrow();
-            if state.online {
-                continue;
-            }
-            let version = version.max(state.version.unwrap_or(Version::V33));
-            device.address.send_if_modified(|current| {
-                let next = Some((ip.clone(), version));
-                if *current == next {
-                    return false;
-                }
-                tracing::info!(device = id, ip, ?version, "tuya device found");
-                *current = next;
-                true
-            });
+            note_address(&id, device, &ip, version);
         }
+    }
+}
+
+/// Passes on the (id, address, version) of each device heard on this socket.
+async fn hear(socket: UdpSocket, found: mpsc::Sender<(String, String, Version)>) {
+    let mut buf = vec![0u8; 2048];
+    loop {
+        let Ok((n, from)) = socket.recv_from(&mut buf).await else {
+            return;
+        };
+        let Some(json) = protocol::open_broadcast(&buf[..n]) else {
+            continue;
+        };
+        let (Some(id), Some(version)) = (
+            json.get("gwId").and_then(|v| v.as_str()),
+            json.get("version")
+                .and_then(|v| v.as_str())
+                .and_then(Version::parse),
+        ) else {
+            continue;
+        };
+        let Some(ip) = broadcast_address(from.ip(), &json) else {
+            continue;
+        };
+        if found
+            .send((id.to_owned(), ip.to_string(), version))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
+/// Gives a device the address it was heard at, unless its link is healthy.
+fn note_address(id: &str, device: &seek::Wanted, ip: &str, version: Version) {
+    let state = *device.reachability.borrow();
+    if state.online {
+        return;
+    }
+    let version = version.max(state.version.unwrap_or(Version::V33));
+    device.address.send_if_modified(|current| {
+        let next = Some((ip.to_owned(), version));
+        if *current == next {
+            return false;
+        }
+        tracing::info!(device = id, ip, ?version, "tuya device found");
+        *current = next;
+        true
+    });
+}
+
+/// Where a broadcast says the device is: where it came from, not what it
+/// claims, unless it seems to come from this host itself. Behind the NAT of
+/// a container on a Mac (Docker Desktop, OrbStack) every broadcast arrives
+/// from 127.0.0.1, and taking that address would replace the one the search
+/// by key found; only the device's own `ip` says where it is then. The link
+/// still has to prove the key at that address.
+fn broadcast_address(from: IpAddr, json: &serde_json::Value) -> Option<Ipv4Addr> {
+    let usable = |ip: Ipv4Addr| {
+        !(ip.is_loopback() || ip.is_unspecified() || ip.is_broadcast() || ip.is_multicast())
+    };
+    match from {
+        IpAddr::V4(ip) if usable(ip) => Some(ip),
+        IpAddr::V4(ip) if !ip.is_loopback() => None,
+        IpAddr::V6(ip) if !ip.is_loopback() => None,
+        // A claim is believed only for a home network address: a program
+        // on this host cannot send the links anywhere else.
+        _ => json
+            .get("ip")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .filter(|ip: &Ipv4Addr| usable(*ip) && ip.is_private()),
     }
 }
 
@@ -718,6 +902,81 @@ pub fn merge_import(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broadcast_is_placed_where_it_came_from_unless_it_came_from_this_host() {
+        let claim = serde_json::json!({"ip": "192.168.68.97", "gwId": "bf00"});
+        let lan: IpAddr = "192.168.68.20".parse().unwrap();
+        assert_eq!(
+            broadcast_address(lan, &claim),
+            Some("192.168.68.20".parse().unwrap()),
+            "a real sender beats what the broadcast claims"
+        );
+        let nat: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(
+            broadcast_address(nat, &claim),
+            Some("192.168.68.97".parse().unwrap()),
+            "behind a container's NAT, the device's own address"
+        );
+        for bad in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "8.8.8.8",
+            "nonsense",
+        ] {
+            let claim = serde_json::json!({"ip": bad});
+            assert_eq!(broadcast_address(nat, &claim), None, "{bad} is no address");
+        }
+        assert_eq!(broadcast_address(nat, &serde_json::json!({})), None);
+        let unspecified: IpAddr = "0.0.0.0".parse().unwrap();
+        assert_eq!(
+            broadcast_address(unspecified, &claim),
+            None,
+            "only a broadcast from this host may use its claim"
+        );
+    }
+
+    #[test]
+    fn loopback_source_accepts_private_ipv4_ranges_from_json() {
+        for s in ["10.1.2.3", "172.16.5.4", "192.168.70.10"] {
+            let json = serde_json::json!({ "ip": s });
+            assert_eq!(
+                broadcast_address("127.0.0.1".parse::<IpAddr>().unwrap(), &json),
+                Some(s.parse::<Ipv4Addr>().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn loopback_source_rejects_link_local_and_cgnat_from_json() {
+        for s in ["169.254.1.1", "100.64.0.1"] {
+            let json = serde_json::json!({ "ip": s });
+            assert_eq!(
+                broadcast_address("127.0.0.1".parse::<IpAddr>().unwrap(), &json),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn ipv6_loopback_source_uses_announced_address() {
+        let json = serde_json::json!({ "ip": "192.168.70.10" });
+        assert_eq!(
+            broadcast_address("::1".parse::<IpAddr>().unwrap(), &json),
+            Some("192.168.70.10".parse::<Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn ipv6_non_loopback_source_is_rejected() {
+        let json = serde_json::json!({ "ip": "192.168.70.10" });
+        assert_eq!(
+            broadcast_address("fe80::1".parse::<IpAddr>().unwrap(), &json),
+            None
+        );
+    }
 
     /// A gateway (0) carrying a probe (1), both followed by the cloud.
     fn gateway_and_probe() -> Fallback {

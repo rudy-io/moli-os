@@ -63,6 +63,17 @@ export function coverOrder(device, allowPartial = false) {
   return points.length === 1 ? points[0] : null;
 }
 
+/** Triggers (a gate's contacts, a garage door): writable `control` points whose
+ *  only value is `cycle`. They are orders, never a state, and never a cover:
+ *  `coverOrder` handles one `control` point with open/close, this is one button
+ *  per point. */
+export function impulsePoints(device) {
+  return device?.points?.filter((point) => point.semantic === 'control'
+    && point.kind?.type === 'enum'
+    && point.kind.values?.length === 1
+    && point.kind.values[0] === 'cycle') ?? [];
+}
+
 /** Reading power and commanding it are separate capabilities. */
 export function powerPoint(device, writable = true) {
   // A shutter's state is a motor order, never an on/off switch.
@@ -74,6 +85,18 @@ export function powerPoint(device, writable = true) {
         && enumChoice(point.kind.values, 'on') && enumChoice(point.kind.values, 'off'))));
   return point?.key ?? null;
 }
+
+/** A Zigbee thermostatic valve (SONOFF TRVZB, TRV-ZBT) states its setpoint the
+ *  ZCL way, never as an air conditioner's `target_temperature`. Recognised by
+ *  what it exposes, nothing is declared. Zigbee2MQTT thermostats only: a valve
+ *  on another protocol may name its points differently (a Z-Wave Danfoss has
+ *  `temperature` and a setpoint but no `system_mode`) and is not matched. */
+export const isValve = (device) => !!pointOf(device, 'occupied_heating_setpoint') && !!pointOf(device, 'system_mode');
+
+/** The points a climate device is read and ordered through. */
+export const climateKeys = (device) => isValve(device)
+  ? { temperature: 'local_temperature', target: 'occupied_heating_setpoint', mode: 'system_mode' }
+  : { temperature: 'temperature', target: 'target_temperature', mode: 'mode' };
 
 const BRIDGE_KINDS = new Map([
   ['Airzone system', 'climate'],

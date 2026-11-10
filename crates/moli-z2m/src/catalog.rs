@@ -5,7 +5,7 @@
 //! of the ~4 000 Zigbee devices Z2M knows, without one line of
 //! device-specific code.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use moli_core::color::{hex_to_xy, xy_to_hex};
@@ -34,7 +34,13 @@ struct Codec {
     /// The colour people pick (« #rrggbb »), sent to the lamp as CIE xy and
     /// read back from its `color {x, y}`, as the Hue driver does.
     xy_hex: bool,
+    /// A relay wired as a trigger (a gate, a garage door): its point is an
+    /// order, never a state. The wire value that fires it (`"ON"`).
+    impulse: Option<Json>,
 }
+
+/// The only value of an impulse point: one order, no state.
+pub const IMPULSE: &str = "cycle";
 
 /// One Z2M device with everything needed to decode its messages.
 #[derive(Clone, Debug)]
@@ -58,15 +64,32 @@ pub struct Catalog {
 impl Catalog {
     /// Rebuilds the catalog from a `bridge/devices` payload.
     pub fn from_bridge_devices(instance: &InstanceId, payload: &[u8]) -> serde_json::Result<Self> {
+        Self::with_impulses(instance, payload, &[])
+    }
+
+    /// Like [`Self::from_bridge_devices`], with the relays the user declared
+    /// as triggers (`impulse_points`: point ids such as `z2m:0x…/state_l1`).
+    /// Zigbee2MQTT does not say what a relay is wired to, and a pulse relay
+    /// looks like a plain switch whose state falls back to off: only the
+    /// owner knows.
+    pub fn with_impulses(
+        instance: &InstanceId,
+        payload: &[u8],
+        impulses: &[String],
+    ) -> serde_json::Result<Self> {
         let raw: Vec<RawDevice> = serde_json::from_slice(payload)?;
+        let mut applied = HashSet::new();
         let entries: HashMap<String, Entry> = raw
             .into_iter()
             .filter(|d| d.kind != "Coordinator" && !d.disabled)
             .map(|d| {
-                let entry = Entry::from_raw(instance, d);
+                let entry = Entry::from_raw(instance, d, impulses, &mut applied);
                 (entry.ieee.clone(), entry)
             })
             .collect();
+        for id in impulses.iter().filter(|id| !applied.contains(*id)) {
+            tracing::warn!(point = %id, "impulse_points: not a writable on/off point of a known device");
+        }
         let by_name = entries
             .values()
             .map(|e| (e.friendly_name.clone(), e.ieee.clone()))
@@ -100,15 +123,23 @@ impl Catalog {
 }
 
 impl Entry {
-    fn from_raw(instance: &InstanceId, raw: RawDevice) -> Self {
+    fn from_raw(
+        instance: &InstanceId,
+        raw: RawDevice,
+        impulses: &[String],
+        applied: &mut HashSet<String>,
+    ) -> Self {
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
         let definition = raw.definition.unwrap_or_default();
         for expose in &definition.exposes {
             flatten(expose, "", "", &mut points, &mut codecs);
         }
+        let id = DeviceId::new(instance, &raw.ieee_address);
+        mark_impulses(&id, impulses, &mut points, &mut codecs, applied);
+        mark_soil(&mut points);
         let device = Device {
-            id: DeviceId::new(instance, &raw.ieee_address),
+            id,
             instance: instance.clone(),
             native_name: raw.friendly_name.as_str().into(),
             manufacturer: definition.vendor.or(raw.manufacturer).map(Into::into),
@@ -154,8 +185,13 @@ impl Entry {
             .points
             .iter()
             .filter_map(|point| {
-                let json = lookup(payload, &point.key)?;
                 let codec = self.codecs.get(&point.key);
+                // A trigger has no state: the relay falling back to off is
+                // the device finishing its pulse, not something to show.
+                if codec.is_some_and(|c| c.impulse.is_some()) {
+                    return None;
+                }
+                let json = lookup(payload, &point.key)?;
                 if codec.is_some_and(|c| c.xy_hex) {
                     let axis = |a: &str| json.get(a).and_then(Json::as_f64);
                     let hex = axis("x")
@@ -203,7 +239,12 @@ impl Entry {
             }
             _ => None,
         };
-        let wire = if let Some(xy) = xy {
+        let wire = if let Some(fire) = codec
+            .and_then(|c| c.impulse.as_ref())
+            .filter(|_| matches!(value, Value::Text(t) if &**t == IMPULSE))
+        {
+            fire.clone()
+        } else if let Some(xy) = xy {
             xy
         } else if let Some((max, percent)) = level {
             Json::from(percent_to_level(percent, max))
@@ -372,6 +413,7 @@ fn flatten<'a>(
         numeric_enum: !expose.values.is_empty() && expose.values.iter().all(Json::is_number),
         level_max: None,
         xy_hex: false,
+        impulse: None,
     };
     let unit = expose.unit.as_deref().and_then(Unit::parse);
     // A calibration offset in °C is configuration, not a temperature reading.
@@ -426,6 +468,60 @@ fn flatten<'a>(
     codecs.insert(key, codec);
 }
 
+/// Turns the relays the user declared as triggers into `cycle` orders:
+/// an enum with that single value, a `Control` (an agent always asks a
+/// person first), write-only, never read back. Only a plain writable on/off
+/// point qualifies; anything else is left as Zigbee2MQTT exposes it.
+fn mark_impulses(
+    device: &DeviceId,
+    impulses: &[String],
+    points: &mut [PointSpec],
+    codecs: &mut HashMap<Arc<str>, Codec>,
+    applied: &mut HashSet<String>,
+) {
+    for point in points.iter_mut() {
+        let id = format!("{device}/{}", point.key);
+        let Some(codec) = codecs.get_mut(&point.key) else {
+            continue;
+        };
+        let fire = match &codec.binary {
+            Some((on, _))
+                if impulses.contains(&id)
+                    && point.kind == Kind::Binary
+                    && point.access.write
+                    && point.semantic == Semantic::OnOff =>
+            {
+                on.clone()
+            }
+            _ => continue,
+        };
+        point.kind = Kind::Enum {
+            values: vec![IMPULSE.into()],
+        };
+        point.semantic = Semantic::Control;
+        point.access = Access {
+            read: false,
+            write: true,
+        };
+        codec.impulse = Some(fire);
+        codec.gettable = false;
+        applied.insert(id);
+    }
+}
+
+/// A plant sensor's `dry` (Tuya soil sensors): its alarm is the plant's thirst.
+/// Only beside a soil moisture reading: elsewhere a bare `dry` says nothing.
+fn mark_soil(points: &mut [PointSpec]) {
+    if !points.iter().any(|p| p.semantic == Semantic::SoilMoisture) {
+        return;
+    }
+    for point in points.iter_mut() {
+        if &*point.key == "dry" && point.kind == Kind::Binary && !point.access.write {
+            point.semantic = Semantic::SoilDry;
+        }
+    }
+}
+
 /// A lamp's settable `color {x, y}` composite (`color_xy`).
 fn is_xy_color(expose: &RawExpose) -> bool {
     let has = |axis: &str| {
@@ -473,6 +569,7 @@ fn push_color(
             numeric_enum: false,
             level_max: None,
             xy_hex: true,
+            impulse: None,
         },
     );
 }
@@ -556,10 +653,56 @@ mod tests {
         all[ieee].as_object().unwrap().clone()
     }
 
+    /// A Tuya soil sensor (COOLO CS-201Z): its soil is a plant's, its `dry` the
+    /// plant's thirst (#163). A bare `dry` elsewhere stays what it is.
+    #[test]
+    fn a_soil_sensor_is_a_plant_and_its_dry_is_thirst() {
+        let numeric = |property: &str, unit: &str| json!({ "type": "numeric", "name": property, "property": property, "access": 1, "unit": unit });
+        let dry = json!({ "type": "binary", "name": "dry", "property": "dry", "access": 1, "value_on": true, "value_off": false });
+        let bridge = json!([
+            { "ieee_address": "0x00124b00000000b1", "type": "EndDevice", "friendly_name": "plante",
+              "definition": { "model": "CS-201Z", "vendor": "COOLO", "description": "Soil moisture sensor",
+                "exposes": [dry, numeric("soil_moisture", "%"), numeric("temperature", "°C"), numeric("humidity", "%")] } },
+            { "ieee_address": "0x00124b00000000b2", "type": "EndDevice", "friendly_name": "autre",
+              "definition": { "model": "X", "vendor": "Y", "description": "Not a plant", "exposes": [dry] } }
+        ]);
+        let catalog = Catalog::from_bridge_devices(
+            &InstanceId::from("z2m"),
+            serde_json::to_vec(&bridge).unwrap().as_slice(),
+        )
+        .unwrap();
+        let plant = catalog.by_name("plante").unwrap();
+        let semantic = |key| plant.device.point(key).unwrap().semantic;
+        assert_eq!(semantic("soil_moisture"), Semantic::SoilMoisture);
+        assert_eq!(semantic("dry"), Semantic::SoilDry);
+        assert_eq!(semantic("temperature"), Semantic::Temperature);
+        let other = catalog.by_name("autre").unwrap();
+        assert_eq!(other.device.point("dry").unwrap().semantic, Semantic::Other);
+    }
+
+    /// The real frames of a COOLO CS-201Z (HOBEIAN ZG-303Z) soil sensor.
+    #[test]
+    fn a_real_soil_sensor_reads_as_a_plant() {
+        let catalog = catalog();
+        let plant = catalog.by_name("0x00124b000000000b").unwrap();
+        let semantic = |key| plant.device.point(key).unwrap().semantic;
+        assert_eq!(semantic("soil_moisture"), Semantic::SoilMoisture);
+        assert_eq!(semantic("dry"), Semantic::SoilDry);
+        assert_eq!(semantic("temperature"), Semantic::Temperature);
+        assert_eq!(semantic("humidity"), Semantic::Humidity);
+        let values: HashMap<_, _> = plant
+            .decode(&state("0x00124b000000000b"))
+            .into_iter()
+            .collect();
+        assert_eq!(values["soil_moisture"].as_f64(), Some(54.0));
+        assert_eq!(values["dry"], Value::Bool(false));
+        assert_eq!(values["soil_warning"].as_f64(), Some(50.0));
+    }
+
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 8, "coordinator excluded, 8 real devices");
+        assert_eq!(catalog.len(), 10, "coordinator excluded, 10 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),
@@ -568,6 +711,97 @@ mod tests {
             );
             assert!(entry.device.id.as_str().starts_with("z2m:0x"));
         }
+    }
+
+    const GATE: &str = "0x00124b000000000a";
+
+    fn gate_catalog(impulses: &[&str]) -> Catalog {
+        let impulses: Vec<String> = impulses.iter().map(|id| (*id).to_owned()).collect();
+        Catalog::with_impulses(
+            &InstanceId::from("z2m"),
+            include_bytes!("../../../integrations/z2m/fixtures/bridge_devices.json"),
+            &impulses,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_two_relay_switch_is_two_plain_switches_by_default() {
+        let catalog = catalog();
+        let gate = catalog.by_name(GATE).unwrap();
+        for key in ["state_l1", "state_l2"] {
+            let point = gate.device.point(key).unwrap();
+            assert_eq!(point.kind, Kind::Binary);
+            assert_eq!(point.semantic, Semantic::OnOff);
+        }
+    }
+
+    #[test]
+    fn a_declared_relay_is_a_trigger_never_a_state() {
+        let catalog = gate_catalog(&["z2m:0x00124b000000000a/state_l1"]);
+        let gate = catalog.by_name(GATE).unwrap();
+        let relay = gate.device.point("state_l1").unwrap();
+        assert_eq!(
+            relay.kind,
+            Kind::Enum {
+                values: vec![IMPULSE.into()]
+            }
+        );
+        // An order to a machine: an agent always asks a person first.
+        assert_eq!(relay.semantic, Semantic::Control);
+        assert!(relay.access.write && !relay.access.read);
+        // The other relay was not declared: it stays what Zigbee2MQTT says.
+        let other = gate.device.point("state_l2").unwrap();
+        assert_eq!(other.kind, Kind::Binary);
+        assert_eq!(other.semantic, Semantic::OnOff);
+    }
+
+    #[test]
+    fn a_trigger_fires_the_relay_and_ignores_its_fall_back() {
+        let catalog = gate_catalog(&[
+            "z2m:0x00124b000000000a/state_l1",
+            "z2m:0x00124b000000000a/state_l2",
+        ]);
+        let gate = catalog.by_name(GATE).unwrap();
+        assert_eq!(
+            gate.encode("state_l1", &Value::from(IMPULSE)),
+            json!({"state_l1": "ON"})
+        );
+        assert_eq!(
+            gate.encode("state_l2", &Value::from(IMPULSE)),
+            json!({"state_l2": "ON"})
+        );
+        // Real frame taken while relay 1 was pulsing: no state to show.
+        let decoded: HashMap<_, _> = gate.decode(&state(GATE)).into_iter().collect();
+        assert!(!decoded.contains_key("state_l1"));
+        assert!(!decoded.contains_key("state_l2"));
+        // The rest of the device keeps reading normally.
+        assert_eq!(decoded["switch_type"], Value::from("momentary"));
+    }
+
+    #[test]
+    fn a_trigger_is_never_polled() {
+        let catalog = gate_catalog(&["z2m:0x00124b000000000a/state_l1"]);
+        let request = catalog.by_name(GATE).unwrap().read_request().unwrap();
+        assert!(request.get("state_l1").is_none());
+        assert!(request.get("state_l2").is_some());
+    }
+
+    #[test]
+    fn only_a_writable_switch_can_be_declared() {
+        // A sensor reading, an unknown point and an unknown device change nothing.
+        let catalog = gate_catalog(&[
+            "z2m:0x00124b000000000a/linkquality",
+            "z2m:0x00124b000000000a/inching_control_set.inching_control_1",
+            "z2m:0x00124b000000000a/nope",
+            "z2m:0x00124b00000000ff/state_l1",
+        ]);
+        let gate = catalog.by_name(GATE).unwrap();
+        assert_eq!(gate.device.point("state_l1").unwrap().kind, Kind::Binary);
+        assert!(matches!(
+            gate.device.point("linkquality").unwrap().kind,
+            Kind::Numeric { .. }
+        ));
     }
 
     #[test]

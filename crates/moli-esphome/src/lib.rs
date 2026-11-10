@@ -79,6 +79,11 @@ pub struct Config {
     /// `error`, `warn`, `info`, `debug`.
     #[serde(default = "default_logs")]
     pub logs: String,
+    /// A speaker that says the answers instead of the device (its
+    /// `announce` point, e.g. a Sonos's); the device keeps its own sounds,
+    /// and says an answer itself when the speaker does not.
+    #[serde(default)]
+    pub speaker: Option<String>,
 }
 
 fn default_logs() -> String {
@@ -134,7 +139,69 @@ fn device(
     ctx: &DriverCtx,
     info: &api::DeviceInfo,
     hello: &frame::ServerHello,
+    entities: &Entities,
 ) -> Device {
+    let mut points = vec![
+        spec(
+            "state",
+            &moli_i18n::tr!("pilotes.esphome.etat"),
+            Kind::Enum {
+                values: STATES.iter().map(|s| (*s).into()).collect(),
+            },
+            false,
+            None,
+        ),
+        spec(
+            "volume",
+            &moli_i18n::tr!("pilotes.esphome.volume"),
+            Kind::Numeric {
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0),
+            },
+            true,
+            Some(Unit::Percent),
+        ),
+        spec(
+            "muted",
+            &moli_i18n::tr!("pilotes.esphome.sourdine"),
+            Kind::Binary,
+            true,
+            None,
+        ),
+        spec(
+            "wake_word",
+            &moli_i18n::tr!("pilotes.esphome.mot_activation"),
+            Kind::Text,
+            false,
+            None,
+        ),
+        spec(
+            "say",
+            &moli_i18n::tr!("pilotes.esphome.dire"),
+            Kind::Text,
+            true,
+            None,
+        ),
+    ];
+    if entities.mic_muted.is_some() {
+        points.push(spec(
+            MIC_MUTED,
+            &moli_i18n::tr!("pilotes.esphome.micro_coupe"),
+            Kind::Binary,
+            true,
+            None,
+        ));
+    }
+    if entities.buttons_disabled.is_some() {
+        points.push(spec(
+            BUTTONS_DISABLED,
+            &moli_i18n::tr!("pilotes.esphome.boutons_desactives"),
+            Kind::Binary,
+            true,
+            None,
+        ));
+    }
     let name = [&info.friendly_name, &info.name, &hello.name]
         .into_iter()
         .find(|n| !n.is_empty())
@@ -158,49 +225,7 @@ fn device(
         description: None,
         native_room: None,
         members: Vec::new(),
-        points: vec![
-            spec(
-                "state",
-                &moli_i18n::tr!("pilotes.esphome.etat"),
-                Kind::Enum {
-                    values: STATES.iter().map(|s| (*s).into()).collect(),
-                },
-                false,
-                None,
-            ),
-            spec(
-                "volume",
-                &moli_i18n::tr!("pilotes.esphome.volume"),
-                Kind::Numeric {
-                    min: Some(0.0),
-                    max: Some(100.0),
-                    step: Some(1.0),
-                },
-                true,
-                Some(Unit::Percent),
-            ),
-            spec(
-                "muted",
-                &moli_i18n::tr!("pilotes.esphome.sourdine"),
-                Kind::Binary,
-                true,
-                None,
-            ),
-            spec(
-                "wake_word",
-                &moli_i18n::tr!("pilotes.esphome.mot_activation"),
-                Kind::Text,
-                false,
-                None,
-            ),
-            spec(
-                "say",
-                &moli_i18n::tr!("pilotes.esphome.dire"),
-                Kind::Text,
-                true,
-                None,
-            ),
-        ],
+        points,
     }
 }
 
@@ -462,11 +487,50 @@ impl Drop for Reader {
     }
 }
 
+/// The point of the firmware's switch that cuts the microphones.
+const MIC_MUTED: &str = "mic_muted";
+/// The point of the firmware's switch that disables its button and dial.
+const BUTTONS_DISABLED: &str = "buttons_disabled";
+
 /// What the session learnt of the device's entities.
 #[derive(Debug, Default)]
 struct Entities {
     media_player: Option<u32>,
     button: Option<u32>,
+    mic_muted: Option<u32>,
+    buttons_disabled: Option<u32>,
+}
+
+impl Entities {
+    /// A switch of the firmware, if it is one Moli shows (by its name in the
+    /// Voice PE's configuration; other firmwares simply have no such points).
+    fn note_switch(&mut self, switch: &api::Entity) {
+        match switch.name.as_str() {
+            "Mute" => self.mic_muted = Some(switch.key),
+            "Disable physical controls" => self.buttons_disabled = Some(switch.key),
+            _ => {}
+        }
+    }
+
+    /// The point a switch feeds.
+    fn point_of_switch(&self, key: u32) -> Option<&'static str> {
+        if self.mic_muted == Some(key) {
+            Some(MIC_MUTED)
+        } else if self.buttons_disabled == Some(key) {
+            Some(BUTTONS_DISABLED)
+        } else {
+            None
+        }
+    }
+
+    /// The switch behind a point.
+    fn switch_of_point(&self, point: &str) -> Option<u32> {
+        match point {
+            MIC_MUTED => self.mic_muted,
+            BUTTONS_DISABLED => self.buttons_disabled,
+            _ => None,
+        }
+    }
 }
 
 /// A connection open and introduced: hello said, the device and its entities known.
@@ -513,6 +577,11 @@ async fn open(config: &Config, psk: &[u8; 32]) -> anyhow::Result<Opened> {
             api::LIST_ENTITIES_DONE => break,
             api::LIST_MEDIA_PLAYER => entities.media_player = api::entity(&payload).map(|e| e.key),
             api::LIST_EVENT => entities.button = api::entity(&payload).map(|e| e.key),
+            api::LIST_SWITCH => {
+                if let Some(switch) = api::entity(&payload) {
+                    entities.note_switch(&switch);
+                }
+            }
             _ => {}
         }
     }
@@ -542,7 +611,7 @@ async fn session(
         entities,
     } = open(config, psk).await?;
     let id = ctx.device_id(&hello.mac);
-    ctx.upsert_device(device(&id, ctx, &info, &hello));
+    ctx.upsert_device(device(&id, ctx, &info, &hello, &entities));
     ctx.set_state(&id, "state", Value::Text("idle".into()));
     ctx.set_availability(&id, true);
     *known = Some(id.clone());
@@ -569,6 +638,7 @@ async fn session(
         Duration::from_secs(config.window_s),
         config.media_base.clone(),
         id.clone(),
+        config.speaker.clone(),
     );
 
     let mut ping = tokio::time::interval(PING_EVERY);
@@ -704,6 +774,13 @@ async fn on_message(
                 ctx.set_state(id, "muted", Value::Bool(state.muted));
             }
         }
+        api::SWITCH_STATE => {
+            if let Some((point, on)) = api::switch_state(payload)
+                .and_then(|(key, on)| Some((entities.point_of_switch(key)?, on)))
+            {
+                ctx.set_state(id, point, Value::Bool(on));
+            }
+        }
         api::LOG => {
             if let Some((level, line)) = api::log_line(payload) {
                 tracing::info!(instance = %ctx.instance(), level, "device: {line}");
@@ -732,8 +809,9 @@ async fn until(at: Option<Instant>) {
 /// What a satellite may say at once.
 const MAX_SAY: usize = 500;
 
-/// A command for the device: the volume or mute of its media player, or a
-/// sentence in Moli's voice (an announcement over what it plays).
+/// A command for the device: one of its switches, the volume or mute of its
+/// media player, or a sentence in Moli's voice (an announcement over what it
+/// plays).
 async fn order(
     ctx: &DriverCtx,
     tx: &mut Outbox,
@@ -741,6 +819,14 @@ async fn order(
     media_base: Option<&str>,
     command: &CommandRequest,
 ) -> Result<(), String> {
+    if let (Some(switch), Value::Bool(on)) =
+        (entities.switch_of_point(&command.key), &command.value)
+    {
+        return tx
+            .send(api::SWITCH_COMMAND, &api::set_switch(switch, *on))
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
     let key = entities
         .media_player
         .ok_or_else(|| moli_i18n::tr!("pilotes.esphome.sans_lecteur"))?;
@@ -899,6 +985,7 @@ mod tests {
             wake_words: Vec::new(),
             mac: Some("AA:BB:CC:DD:EE:FF".into()),
             logs: "none".into(),
+            speaker: None,
         };
         let cancel = CancellationToken::new();
         spawn_driver(
@@ -937,6 +1024,30 @@ mod tests {
             reason.contains("moli-os secrets forget voix api_key"),
             "{reason}"
         );
+    }
+
+    #[test]
+    fn the_switches_moli_shows_are_found_by_name() {
+        let mut entities = Entities::default();
+        for (key, name) in [
+            (1, "Mute"),
+            (2, "Disable physical controls"),
+            (3, "Wake sound"),
+        ] {
+            entities.note_switch(&api::Entity {
+                key,
+                name: name.into(),
+            });
+        }
+        assert_eq!(entities.point_of_switch(1), Some(MIC_MUTED));
+        assert_eq!(entities.point_of_switch(2), Some(BUTTONS_DISABLED));
+        assert_eq!(entities.point_of_switch(3), None);
+        assert_eq!(entities.switch_of_point(MIC_MUTED), Some(1));
+        assert_eq!(entities.switch_of_point(BUTTONS_DISABLED), Some(2));
+        assert_eq!(entities.switch_of_point("volume"), None);
+        // A firmware without them has no such points to write.
+        let bare = Entities::default();
+        assert_eq!(bare.switch_of_point(MIC_MUTED), None);
     }
 
     #[test]

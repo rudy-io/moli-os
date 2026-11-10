@@ -1,6 +1,6 @@
 //! The hub: single source of truth for the live model of the home.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -8,13 +8,14 @@ use std::time::{Duration, Instant};
 
 use moli_core::{
     Action, ApprovalRequest, Decision, Device, DeviceId, DriverStatus, Event, InstanceId,
-    JournalEntry, Label, Origin, Outcome, PointId, PointSpec, Sample, Value, ValueError, now_ms,
-    validate,
+    JournalEntry, Kind, Label, Origin, Outcome, PointId, PointSpec, Sample, Semantic, Value,
+    ValueError, now_ms, validate,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::addresses::{self, KnownAddress};
+use crate::device_cache::{self, CachedDevice};
 use crate::driver::CommandRequest;
 use crate::guard::{GuardPolicy, GuardStatus, Verdict};
 use crate::journal_log::JournalLog;
@@ -112,6 +113,14 @@ pub const MAX_PENDING_PER_CALLER: usize = 32;
 const MAX_POINT: usize = 256;
 /// Who acts, as declared by an agent: a name, not a message.
 const MAX_ACTOR: usize = 64;
+/// How long a switch has to say it obeyed before the order goes again: a
+/// bridge that restarts (Zigbee2MQTT when its coordinator drops) swallows
+/// what it was sent, and the driver had answered « sent » all the same.
+pub const CONFIRM_WINDOW: Duration = Duration::from_secs(30);
+/// How often a followed order looks at the switch's state.
+const CONFIRM_POLL: Duration = Duration::from_millis(500);
+/// Sends of one order to a switch, at most, the first one counted.
+pub const MAX_SENDS: u32 = 5;
 
 /// An agent's declared name, as journaled: bounded, no control characters.
 fn clean_actor(actor: Option<String>) -> Option<String> {
@@ -125,6 +134,55 @@ fn clean_actor(actor: Option<String>) -> Option<String> {
         .filter(|a| !a.trim().is_empty())
 }
 
+/// An order to a switch being followed, and what the house heard since it left.
+struct Watch {
+    point: PointId,
+    wanted: Value,
+    order: u64,
+    /// When the order left: a value restored from the cache is older.
+    since: u64,
+    events: broadcast::Receiver<Event>,
+}
+
+impl Watch {
+    /// Whether a report heard since the order left says it was obeyed.
+    fn heard(&mut self) -> bool {
+        loop {
+            match self.events.try_recv() {
+                Ok(Event::State {
+                    point, value, ts, ..
+                }) if point == self.point && ts >= self.since && switched(&value, &self.wanted) => {
+                    return true;
+                }
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(_) => return false,
+            }
+        }
+    }
+}
+
+/// A failure that may not happen again: the order is worth sending later.
+fn transient(e: &CommandError) -> bool {
+    matches!(
+        e,
+        CommandError::DriverUnavailable
+            | CommandError::Busy
+            | CommandError::Timeout
+            | CommandError::Driver(_)
+    )
+}
+
+/// Whether a switch's state is the one ordered (`ON` is true).
+fn switched(current: &Value, wanted: &Value) -> bool {
+    let truth = |v: &Value| match v {
+        Value::Bool(b) => Some(*b),
+        Value::Text(t) if t.eq_ignore_ascii_case("on") => Some(true),
+        Value::Text(t) if t.eq_ignore_ascii_case("off") => Some(false),
+        _ => None,
+    };
+    truth(current).is_some_and(|c| truth(wanted) == Some(c))
+}
+
 /// An order resolved and validated, ready for its driver.
 struct Prepared {
     point: PointId,
@@ -132,6 +190,11 @@ struct Prepared {
     key: Arc<str>,
     value: Value,
     commands: mpsc::Sender<CommandRequest>,
+    /// An on/off switch that reports its state: its order is followed until
+    /// the state says it was obeyed (see [`CONFIRM_WINDOW`]). Sending it again
+    /// changes nothing when it was; a momentary point (a gate's pulse) is
+    /// never resent.
+    confirm: bool,
 }
 
 /// An order held for a human, and who asked for it.
@@ -276,6 +339,9 @@ pub struct DeviceView {
     /// Prints documents (`/api/devices/{id}/print`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub printer: bool,
+    /// Live video the browser plays (`/api/devices/{id}/live`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub live: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -315,19 +381,44 @@ struct Inner {
     /// Serializes address writes so the file always matches the book.
     address_write: tokio::sync::Mutex<()>,
     journal_log: Option<JournalLog>,
-    secrets: Option<SecretStore>,
+    secrets: Option<Arc<SecretStore>>,
     /// Why there is no secret store, in words a human can act on.
     secrets_problem: Option<String>,
     /// Values changed since the state cache was last written.
     state_dirty: AtomicBool,
+    /// Definitions changed independently of their frequently updated samples.
+    definitions_dirty: AtomicBool,
+    /// Serializes cache replacements and retains the committed inventory generation.
+    state_write: Arc<tokio::sync::Mutex<device_cache::Generation>>,
     /// The last image of each camera, shared by every viewer for a second.
     images: Mutex<HashMap<DeviceId, LastImage>>,
     /// Short-lived media a device fetches back (an announcement's sound).
     published: Mutex<HashMap<String, (Instant, crate::media::Image)>>,
     /// The assistant voice satellites talk to (set after the drivers start).
     voice: std::sync::OnceLock<Arc<dyn crate::voice::VoiceBrain>>,
+    /// The latest order sent to each point, numbered: a followed order gives
+    /// way to a newer one on the same point (see [`CONFIRM_WINDOW`]).
+    orders: Mutex<HashMap<PointId, u64>>,
     opts: HubOptions,
     started: Instant,
+}
+
+/// A failed or panicking writer must not consume the only retry signal.
+struct CacheWriteRetry {
+    hub: Hub,
+    definitions_changed: bool,
+    completed: bool,
+}
+
+impl Drop for CacheWriteRetry {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.hub.0.state_dirty.store(true, Ordering::Release);
+            if self.definitions_changed {
+                self.hub.0.definitions_dirty.store(true, Ordering::Release);
+            }
+        }
+    }
 }
 
 /// Two screens showing the same camera live cost one fetch, not two.
@@ -348,6 +439,14 @@ struct Model {
     /// Cached values not yet claimed by a device (its driver has not
     /// published it yet in this run).
     restored: States,
+    /// Original definitions and coherent samples, including dormant instances.
+    cached_devices: device_cache::Devices,
+    /// Restored/retired definitions cannot be revived by availability alone.
+    /// The bool records an explicit offline report since restoration.
+    unconfirmed: HashMap<DeviceId, bool>,
+    /// Retained values are displayable, but not usable as current observations
+    /// until each point receives its first sample from this driver run.
+    awaiting_samples: HashMap<DeviceId, BTreeSet<Arc<str>>>,
     availability: HashMap<DeviceId, bool>,
     /// Devices taken offline because their driver failed, with what they
     /// were before: given back when the driver runs again, unless it said
@@ -358,6 +457,7 @@ struct Model {
     labels: BTreeMap<DeviceId, Label>,
     snapshots: HashMap<DeviceId, Arc<dyn crate::media::SnapshotSource>>,
     printers: HashMap<DeviceId, Arc<dyn crate::media::PrintSink>>,
+    lives: HashMap<DeviceId, Arc<dyn crate::media::LiveSource>>,
 }
 
 #[derive(Debug)]
@@ -384,13 +484,26 @@ impl Hub {
             Some(path) => labels::load(path)?,
             None => BTreeMap::new(),
         };
-        let restored = match &opts.state_path {
+        let mut restored = match &opts.state_path {
             Some(path) => state_cache::load(path).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "state cache unreadable, starting empty");
                 States::new()
             }),
             None => States::new(),
         };
+        let inventory = opts.state_path.as_deref().map(device_cache::load)
+            .transpose().unwrap_or_else(|error| {
+                tracing::warn!(%error, "device inventory cache unreadable; waiting for fresh definitions");
+                None
+            }).flatten();
+        let generation = inventory.as_ref().map_or([0; 16], |cache| cache.generation);
+        let migrate_inventory = inventory.is_some() && generation == [0; 16];
+        // A sidecar definition and its samples are one generation. Never pair
+        // it with state.json from an interrupted older/newer replacement.
+        let cached_devices = inventory.map_or_else(device_cache::Devices::new, |inventory| {
+            restored = inventory.unclaimed;
+            inventory.devices
+        });
         let (journal_log, past) = match &opts.journal_path {
             Some(path) => {
                 let (log, past) = JournalLog::open(path, opts.journal_capacity)?;
@@ -411,7 +524,7 @@ impl Hub {
             Some((path, master)) => match secrets::master_key_bytes(master)
                 .and_then(|key| SecretStore::open(path.clone(), &key))
             {
-                Ok(store) => (Some(store), None),
+                Ok(store) => (Some(Arc::new(store)), None),
                 Err(e) => {
                     tracing::error!(error = %e, "secret store unavailable");
                     (
@@ -426,6 +539,7 @@ impl Hub {
         Ok(Self(Arc::new(Inner {
             model: RwLock::new(Model {
                 restored,
+                cached_devices,
                 labels,
                 ..Model::default()
             }),
@@ -442,9 +556,12 @@ impl Hub {
             addresses: Mutex::new(book),
             address_write: tokio::sync::Mutex::new(()),
             state_dirty: AtomicBool::new(false),
+            definitions_dirty: AtomicBool::new(migrate_inventory),
+            state_write: Arc::new(tokio::sync::Mutex::new(generation)),
             images: Mutex::new(HashMap::new()),
             published: Mutex::new(HashMap::new()),
             voice: std::sync::OnceLock::new(),
+            orders: Mutex::new(HashMap::new()),
             opts,
             started: Instant::now(),
         })))
@@ -520,6 +637,23 @@ impl Hub {
     pub fn state(&self, point: &PointId) -> Option<Sample> {
         let (device, key) = point.split()?;
         self.read().states.get(&device)?.get(key).cloned()
+    }
+
+    /// A usable current observation, for consumers that may act on it.
+    #[must_use]
+    pub fn current_state(&self, point: &PointId) -> Option<Sample> {
+        let (device, key) = point.split()?;
+        let model = self.read();
+        if model.availability.get(&device) == Some(&false)
+            || model.unconfirmed.contains_key(&device)
+            || model
+                .awaiting_samples
+                .get(&device)
+                .is_some_and(|keys| keys.contains(key))
+        {
+            return None;
+        }
+        model.states.get(&device)?.get(key).cloned()
     }
 
     /// Most recent journal entries first.
@@ -601,7 +735,7 @@ impl Hub {
         let result = match self.prepare(point, &value) {
             Err(e) => Err(e),
             Ok(prepared) => match self.verdict_for(point, &value, origin) {
-                Verdict::Allow => self.send(prepared).await,
+                Verdict::Allow => self.send_followed(prepared, origin, actor.as_ref()).await,
                 Verdict::Approval(reason) => {
                     let id = self.hold(point, &value, origin, actor.clone(), caller, &reason);
                     Err(CommandError::NeedsApproval { id, reason })
@@ -661,6 +795,17 @@ impl Hub {
         let agent = !matches!(origin, Origin::Ui | Origin::System | Origin::Automation);
         if agent && self.is_control(point) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.machine"));
+        }
+        // A protected device is the same call, on every point of it: a
+        // countdown cuts a plug as surely as its switch.
+        if agent
+            && let Some((device, _)) = point.split()
+            && let Some(name) = self.protected_device(&device)
+        {
+            return Verdict::Approval(moli_i18n::tr!(
+                "serveur.garde.appareil_protege",
+                name = name
+            ));
         }
         let rooms = point
             .split()
@@ -774,6 +919,53 @@ impl Hub {
             .protected_rooms
             .iter()
             .filter(|p| !known.iter().any(|k| crate::guard::same_room(p, k)))
+            .cloned()
+            .collect()
+    }
+
+    /// The name of the protected device this order reaches (itself, or a
+    /// member if it is a group), if any.
+    #[must_use]
+    pub fn protected_device(&self, device: &DeviceId) -> Option<String> {
+        let protected = &self.0.opts.guard.protected_devices;
+        if protected.is_empty() {
+            return None;
+        }
+        let model = self.read();
+        // Groups may nest (a group of fixtures): walk them all, once each.
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![device];
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if protected.iter().any(|p| p == id.as_str()) {
+                return Some(
+                    model
+                        .labels
+                        .get(id)
+                        .and_then(|l| l.name.clone())
+                        .unwrap_or_else(|| id.as_str().to_owned()),
+                );
+            }
+            if let Some(d) = model.devices.get(id) {
+                todo.extend(&d.members);
+            }
+        }
+        None
+    }
+
+    /// Protected devices the hub does not know: a typo, or a device gone.
+    /// Then protection silently stopped applying — say so.
+    #[must_use]
+    pub fn unmatched_protected_devices(&self) -> Vec<String> {
+        let model = self.read();
+        self.0
+            .opts
+            .guard
+            .protected_devices
+            .iter()
+            .filter(|p| !model.devices.keys().any(|id| id.as_str() == p.as_str()))
             .cloned()
             .collect()
     }
@@ -917,7 +1109,7 @@ impl Hub {
         }
         let (decision, outcome, result) = if approve {
             let sent = match self.prepare(&request.point, &request.value) {
-                Ok(prepared) => self.send(prepared).await,
+                Ok(prepared) => self.send_followed(prepared, origin, actor.as_ref()).await,
                 Err(e) => Err(e),
             };
             match sent {
@@ -1014,6 +1206,75 @@ impl Hub {
         );
     }
 
+    /// Journals a human's persisted driver installation without its address.
+    pub fn record_driver_added(
+        &self,
+        instance: InstanceId,
+        driver_kind: &str,
+        read_only: bool,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        self.record(
+            Origin::Ui,
+            actor,
+            Action::DriverAdded {
+                instance,
+                driver_kind: driver_kind.to_owned(),
+                read_only,
+            },
+            outcome,
+            Instant::now(),
+        );
+    }
+
+    /// Journals a human's persisted driver edit without its address or secrets.
+    pub fn record_driver_configured(
+        &self,
+        instance: InstanceId,
+        driver_kind: &str,
+        enabled: bool,
+        read_only: bool,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        self.record(
+            Origin::Ui,
+            actor,
+            Action::DriverConfigured {
+                instance,
+                driver_kind: driver_kind.to_owned(),
+                enabled,
+                read_only,
+            },
+            outcome,
+            Instant::now(),
+        );
+    }
+
+    /// Records a persisted visibility edit and tells dashboards to reload the
+    /// layout only when it succeeded. No device capability or state changes.
+    pub fn record_visibility(
+        &self,
+        device: DeviceId,
+        hidden: bool,
+        origin: Origin,
+        actor: Option<String>,
+        outcome: Outcome,
+    ) {
+        let saved = outcome == Outcome::Ok;
+        self.record(
+            origin,
+            actor,
+            Action::Visibility { device, hidden },
+            outcome,
+            Instant::now(),
+        );
+        if saved {
+            self.emit(Event::LayoutChanged {});
+        }
+    }
+
     /// Where `instance` last reached its device.
     #[must_use]
     pub fn known_address(&self, instance: &InstanceId) -> Option<KnownAddress> {
@@ -1068,6 +1329,28 @@ impl Hub {
                 device,
                 from: from.to_owned(),
                 to: to.to_owned(),
+            },
+            Outcome::Ok,
+            Instant::now(),
+        );
+    }
+
+    /// Journals a setting of the house changed by a person.
+    pub fn record_setting(
+        &self,
+        origin: Origin,
+        actor: Option<String>,
+        name: &str,
+        from: Option<Value>,
+        to: Value,
+    ) {
+        self.record(
+            origin,
+            actor,
+            Action::Setting {
+                name: name.to_owned(),
+                from,
+                to,
             },
             Outcome::Ok,
             Instant::now(),
@@ -1149,6 +1432,7 @@ impl Hub {
     pub fn guard_status(&self) -> GuardStatus {
         let mut status = self.0.opts.guard.status(jiff::Timestamp::now());
         status.unmatched_protected_rooms = self.unmatched_protected_rooms();
+        status.unmatched_protected_devices = self.unmatched_protected_devices();
         status
     }
 
@@ -1249,7 +1533,7 @@ impl Hub {
     /// Resolves and validates an order without sending it.
     fn prepare(&self, point: &PointId, value: &Value) -> Result<Prepared, CommandError> {
         let (device_id, key) = point.split().ok_or(CommandError::UnknownPoint)?;
-        let (device, key, kind, commands) = {
+        let (device, key, kind, commands, confirm) = {
             let model = self.read();
             let device = model
                 .devices
@@ -1263,21 +1547,147 @@ impl Hub {
                 .drivers
                 .get(&device.instance)
                 .ok_or(CommandError::DriverUnavailable)?;
+            let confirm =
+                spec.semantic == Semantic::OnOff && spec.kind == Kind::Binary && spec.access.read;
             (
                 Arc::clone(device),
                 spec.key.clone(),
                 spec.kind.clone(),
                 slot.commands.clone(),
+                confirm,
             )
         };
         let value = validate(&kind, value)?;
+        // A gate, a garage door or a lock whose report was lost has still
+        // moved: sent again, it would open, close and open with nobody there.
+        // Its order goes once, as before.
+        let confirm = confirm && matches!(self.opener_of(point), Opener::None);
         Ok(Prepared {
             point: point.clone(),
             device,
             key,
             value,
             commands,
+            confirm,
         })
+    }
+
+    /// [`Hub::send`], then, for a switch, the order is followed: sent again
+    /// while its state does not say it was obeyed, [`MAX_SENDS`] times at most.
+    async fn send_followed(
+        &self,
+        prepared: Prepared,
+        origin: Origin,
+        actor: Option<&String>,
+    ) -> Result<(), CommandError> {
+        let order = self.next_order(&prepared.point);
+        // Listening starts before the order leaves: a relay that falls back
+        // at once (a gate's pulse nobody declared as such) is on for less
+        // than a look at its state, but its report is heard.
+        let follow = prepared.confirm.then(|| Watch {
+            point: prepared.point.clone(),
+            wanted: prepared.value.clone(),
+            order,
+            since: now_ms(),
+            events: self.subscribe(),
+        });
+        let sent = self.send(prepared).await;
+        if let Some(watch) = follow
+            && sent.as_ref().err().is_none_or(transient)
+        {
+            self.follow(watch, origin, actor.cloned());
+        }
+        sent
+    }
+
+    /// Numbers a new order on `point`: the orders before it stop being followed.
+    fn next_order(&self, point: &PointId) -> u64 {
+        let mut orders = self.0.orders.lock().unwrap_or_else(PoisonError::into_inner);
+        let n = orders.entry(point.clone()).or_insert(0);
+        *n += 1;
+        *n
+    }
+
+    fn is_latest(&self, point: &PointId, order: u64) -> bool {
+        self.0
+            .orders
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(point)
+            == Some(&order)
+    }
+
+    /// Sends `wanted` again each time [`CONFIRM_WINDOW`] passes without the
+    /// switch saying it obeyed, each send journaled as such; after the last
+    /// one, journals that it never did. A newer order on the point, or a
+    /// guard that would now hold it, ends the follow-up.
+    fn follow(&self, mut watch: Watch, origin: Origin, actor: Option<String>) {
+        let hub = self.clone();
+        tokio::spawn(async move {
+            let (point, wanted) = (watch.point.clone(), watch.wanted.clone());
+            let action = Action::Command {
+                point: point.clone(),
+                value: wanted.clone(),
+            };
+            for send in 2..=MAX_SENDS {
+                if hub.settled(&mut watch).await
+                    || !matches!(hub.verdict_for(&point, &wanted, origin), Verdict::Allow)
+                {
+                    return;
+                }
+                let started = Instant::now();
+                let sent = match hub.prepare(&point, &wanted) {
+                    Ok(prepared) => hub.send(prepared).await,
+                    Err(e) => Err(e),
+                };
+                let note = moli_i18n::tr!("serveur.ordre.renvoi", envoi = send, envois = MAX_SENDS);
+                let by = match &actor {
+                    Some(actor) => format!("{note} · {actor}"),
+                    None => note,
+                };
+                let outcome = match &sent {
+                    Ok(()) => Outcome::Ok,
+                    Err(e) => Outcome::Err(e.to_string()),
+                };
+                hub.record(origin, Some(by), action.clone(), outcome, started);
+                if sent.as_ref().err().is_some_and(|e| !transient(e)) {
+                    return;
+                }
+            }
+            if !hub.settled(&mut watch).await {
+                hub.record(
+                    origin,
+                    actor,
+                    action,
+                    Outcome::Err(moli_i18n::tr!(
+                        "serveur.ordre.non_confirme",
+                        envois = MAX_SENDS
+                    )),
+                    Instant::now(),
+                );
+            }
+        });
+    }
+
+    /// Whether, within [`CONFIRM_WINDOW`], the switch says it obeyed (now,
+    /// or in any report since the order left) or a newer order took over:
+    /// either way, nothing is left to follow.
+    async fn settled(&self, watch: &mut Watch) -> bool {
+        let polls = CONFIRM_WINDOW.as_millis() / CONFIRM_POLL.as_millis();
+        for poll in 0..=polls {
+            if !self.is_latest(&watch.point, watch.order)
+                || watch.heard()
+                || self
+                    .current_state(&watch.point)
+                    .is_some_and(|s| switched(&s.value, &watch.wanted))
+            {
+                return true;
+            }
+            if poll < polls {
+                tokio::time::sleep(CONFIRM_POLL).await;
+            }
+        }
+        false
     }
 
     /// Hands a prepared order to its driver and waits for the answer.
@@ -1288,6 +1698,7 @@ impl Hub {
             key,
             value,
             commands,
+            confirm: _,
         } = prepared;
         let (reply, answer) = oneshot::channel();
         commands
@@ -1376,6 +1787,13 @@ impl Hub {
         self.0.secrets.is_some()
     }
 
+    pub(crate) fn durable_secrets(&self, instance: &InstanceId) -> Option<secrets::DurableSecrets> {
+        Some(secrets::DurableSecrets::new(
+            self.0.secrets.as_ref()?.clone(),
+            instance.to_string(),
+        ))
+    }
+
     pub(crate) fn secrets_problem(&self) -> Option<&str> {
         self.0.secrets_problem.as_deref()
     }
@@ -1422,22 +1840,135 @@ impl Hub {
         integration: Arc<str>,
     ) -> mpsc::Receiver<CommandRequest> {
         let (commands, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.write().drivers.insert(
-            instance.clone(),
-            DriverSlot {
-                kind,
-                integration,
-                status: DriverStatus::Starting,
-                warning: None,
-                commands,
-            },
-        );
+        let restored = {
+            let mut model = self.write();
+            model.drivers.insert(
+                instance.clone(),
+                DriverSlot {
+                    kind,
+                    integration: integration.clone(),
+                    status: DriverStatus::Starting,
+                    warning: None,
+                    commands,
+                },
+            );
+            let foreign: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && (&*cached.kind != kind || cached.integration != integration)
+                })
+                .map(|cached| cached.device.id.clone())
+                .collect();
+            let mut restored = Vec::new();
+            for id in foreign {
+                if model.devices.remove(&id).is_some() {
+                    model.states.remove(&id);
+                    model.availability.remove(&id);
+                    model.unconfirmed.remove(&id);
+                    model.awaiting_samples.remove(&id);
+                    model.held_offline.remove(&id);
+                    restored.push(Event::DeviceRemoved { device: id });
+                }
+            }
+            let cached: Vec<_> = model
+                .cached_devices
+                .values()
+                .filter(|cached| {
+                    &cached.device.instance == instance
+                        && &*cached.kind == kind
+                        && cached.integration == integration
+                })
+                .cloned()
+                .collect();
+            for cached in cached {
+                let mut device = (*cached.device).clone();
+                for point in &mut device.points {
+                    point.access.write = false;
+                }
+                let device = Arc::new(device);
+                let id = device.id.clone();
+                let states = model.states.get(&id).cloned().unwrap_or(cached.states);
+                model.devices.insert(id.clone(), Arc::clone(&device));
+                model.states.insert(id.clone(), states.clone());
+                model
+                    .awaiting_samples
+                    .insert(id.clone(), states.keys().cloned().collect());
+                model.availability.insert(id.clone(), false);
+                model.unconfirmed.insert(id.clone(), false);
+                model.held_offline.remove(&id);
+                let label = model.labels.get(&id).cloned().unwrap_or_default();
+                restored.push(Event::DeviceRestored {
+                    device,
+                    states,
+                    label,
+                });
+            }
+            restored
+        };
+        self.emit(Event::DriverRegistered {
+            instance: instance.clone(),
+            kind: kind.to_owned(),
+            integration,
+        });
         self.emit(Event::DriverStatus {
             instance: instance.clone(),
             status: DriverStatus::Starting,
             warning: None,
         });
+        for event in restored {
+            self.emit(event);
+        }
         rx
+    }
+
+    /// Detaches an already stopped driver. Call only after cancelling and
+    /// awaiting its task: an old task must not publish over a replacement.
+    /// Labels, history and original cached definitions are retained.
+    pub fn unregister_driver(&self, instance: &InstanceId) {
+        let devices = {
+            let mut model = self.write();
+            if model.drivers.remove(instance).is_none() {
+                return;
+            }
+            let mut devices: Vec<_> = model
+                .devices
+                .values()
+                .filter(|device| &device.instance == instance)
+                .map(|device| (**device).clone())
+                .collect();
+            for device in &mut devices {
+                let states = model.states.get(&device.id).cloned().unwrap_or_default();
+                if let Some(cached) = model.cached_devices.get_mut(&device.id) {
+                    cached.states = states;
+                }
+                for point in &mut device.points {
+                    point.access.write = false;
+                }
+                model
+                    .devices
+                    .insert(device.id.clone(), Arc::new(device.clone()));
+                model.availability.insert(device.id.clone(), false);
+                model.unconfirmed.insert(device.id.clone(), false);
+                model.held_offline.remove(&device.id);
+                model.snapshots.remove(&device.id);
+                model.printers.remove(&device.id);
+            }
+            devices
+        };
+        for device in devices {
+            self.emit(Event::Availability {
+                device: device.id.clone(),
+                online: false,
+            });
+            self.emit(Event::DeviceUpserted {
+                device: Arc::new(device),
+            });
+        }
+        self.emit(Event::DriverUnregistered {
+            instance: instance.clone(),
+        });
     }
 
     pub(crate) fn set_driver_status(&self, instance: &InstanceId, status: DriverStatus) {
@@ -1466,10 +1997,11 @@ impl Hub {
                     .held_offline
                     .keys()
                     .filter(|d| {
-                        model
-                            .devices
-                            .get(*d)
-                            .is_some_and(|d| &d.instance == instance)
+                        !model.unconfirmed.contains_key(*d)
+                            && model
+                                .devices
+                                .get(*d)
+                                .is_some_and(|d| &d.instance == instance)
                     })
                     .cloned()
                     .collect();
@@ -1520,26 +2052,52 @@ impl Hub {
 
     pub(crate) fn upsert_device(&self, device: Device) {
         let device = Arc::new(device);
-        let restored = {
+        let (restored, revived) = {
             let mut model = self.write();
-            if model
-                .devices
-                .get(&device.id)
-                .is_some_and(|d| **d == *device)
+            let unconfirmed = model.unconfirmed.remove(&device.id);
+            let revived = unconfirmed == Some(false);
+            if revived {
+                model.availability.insert(device.id.clone(), true);
+                model.held_offline.remove(&device.id);
+            }
+            if unconfirmed.is_none()
+                && model
+                    .devices
+                    .get(&device.id)
+                    .is_some_and(|d| **d == *device)
             {
                 return;
+            }
+            let identity = model
+                .drivers
+                .get(&device.instance)
+                .map(|slot| (Arc::<str>::from(slot.kind), slot.integration.clone()));
+            if model.cached_devices.get(&device.id).is_some_and(|cached| {
+                identity.as_ref().is_some_and(|(kind, integration)| {
+                    &cached.kind != kind || &cached.integration != integration
+                })
+            }) {
+                model.states.remove(&device.id);
+                model.restored.remove(&device.id);
             }
             // Claim cached values for the points this definition declares.
             // The rest stays cached: a device first published without its
             // definition (interview in progress) must not lose its history.
             let mut cached = model.restored.remove(&device.id).unwrap_or_default();
             let states = model.states.entry(device.id.clone()).or_default();
-            states.retain(|key, _| device.point(key).is_some());
+            states.retain(|key, sample| {
+                device
+                    .point(key)
+                    .is_some_and(|point| device_cache::sample_matches(&point.kind, &sample.value))
+            });
             let mut restored = Vec::new();
+            let mut awaiting = Vec::new();
             for point in &device.points {
                 if let Some(sample) = cached.remove(&point.key)
                     && !states.contains_key(&point.key)
+                    && device_cache::sample_matches(&point.kind, &sample.value)
                 {
+                    awaiting.push(point.key.clone());
                     restored.push(Event::State {
                         point: PointId::new(&device.id, &point.key),
                         value: sample.value.clone(),
@@ -1552,10 +2110,32 @@ impl Hub {
             if !cached.is_empty() {
                 model.restored.insert(device.id.clone(), cached);
             }
+            let pending = model.awaiting_samples.entry(device.id.clone()).or_default();
+            pending.retain(|key| device.point(key).is_some());
+            pending.extend(awaiting);
+            if let Some((kind, integration)) = identity {
+                let cached = CachedDevice {
+                    kind,
+                    integration,
+                    device: Arc::clone(&device),
+                    states: BTreeMap::new(),
+                };
+                if model.cache_definition(cached) {
+                    self.0.definitions_dirty.store(true, Ordering::Release);
+                }
+            }
             model.devices.insert(device.id.clone(), Arc::clone(&device));
-            restored
+            self.0.state_dirty.store(true, Ordering::Release);
+            (restored, revived)
         };
+        let id = device.id.clone();
         self.emit(Event::DeviceUpserted { device });
+        if revived {
+            self.emit(Event::Availability {
+                device: id,
+                online: true,
+            });
+        }
         for event in restored {
             self.emit(event);
         }
@@ -1567,30 +2147,72 @@ impl Hub {
         let Some(path) = &self.0.opts.state_path else {
             return Ok(false);
         };
-        if !self.0.state_dirty.swap(false, Ordering::AcqRel) {
-            return Ok(false);
-        }
-        let all = {
+        let mut generation = Arc::clone(&self.0.state_write).lock_owned().await;
+        let (all, devices, definitions_changed) = {
             let model = self.read();
+            // Consume flags while holding the same lock as mutations: changes
+            // during the subsequent async writes remain dirty for the next flush.
+            let states_changed = self.0.state_dirty.swap(false, Ordering::AcqRel);
+            let definitions_changed = self.0.definitions_dirty.swap(false, Ordering::AcqRel);
+            if !states_changed && !definitions_changed {
+                return Ok(false);
+            }
+            let definitions_changed = definitions_changed || *generation == [0; 16];
             let mut all = model.restored.clone();
-            all.extend(model.states.iter().map(|(k, v)| (k.clone(), v.clone())));
-            all
+            for (id, states) in &model.states {
+                all.entry(id.clone()).or_default().extend(states.clone());
+            }
+            // Disabled instances keep their samples without cloning definitions.
+            for (id, cached) in &model.cached_devices {
+                if !model.states.contains_key(id) {
+                    all.entry(id.clone())
+                        .or_default()
+                        .extend(cached.states.clone());
+                }
+            }
+            let devices = definitions_changed.then(|| model.cached_devices.clone());
+            (all, devices, definitions_changed)
         };
-        if let Err(e) = state_cache::save(path, &all).await {
-            self.0.state_dirty.store(true, Ordering::Release);
-            return Err(e);
-        }
-        Ok(true)
+        let path = path.clone();
+        let mut retry = CacheWriteRetry {
+            hub: self.clone(),
+            definitions_changed,
+            completed: false,
+        };
+        // Tokio filesystem operations can outlive a cancelled caller. Keep the
+        // writer and its owned lock alive together so a subsequent flush cannot
+        // race an unfinished .tmp write or lose a committed generation.
+        tokio::spawn(async move {
+            device_cache::save_snapshot(&path, devices, all, &mut generation).await?;
+            retry.completed = true;
+            drop(retry);
+            Ok(true)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     pub(crate) fn remove_device(&self, id: &DeviceId) {
         let removed = {
             let mut model = self.write();
-            model.states.remove(id);
+            let states_removed = model.states.remove(id).is_some();
+            let restored_removed = model.restored.remove(id).is_some();
+            let cached_removed = model.cached_devices.remove(id).is_some();
+            model.unconfirmed.remove(id);
+            model.awaiting_samples.remove(id);
+            model.held_offline.remove(id);
             model.availability.remove(id);
             model.snapshots.remove(id);
             model.printers.remove(id);
-            model.devices.remove(id).is_some()
+            model.lives.remove(id);
+            let removed = model.devices.remove(id).is_some();
+            if states_removed || restored_removed || cached_removed || removed {
+                self.0.state_dirty.store(true, Ordering::Release);
+            }
+            if cached_removed || removed {
+                self.0.definitions_dirty.store(true, Ordering::Release);
+            }
+            removed
         };
         self.0
             .images
@@ -1608,6 +2230,42 @@ impl Hub {
         source: Arc<dyn crate::media::SnapshotSource>,
     ) {
         self.write().snapshots.insert(device.clone(), source);
+    }
+
+    pub(crate) fn provide_live(
+        &self,
+        device: &DeviceId,
+        source: Arc<dyn crate::media::LiveSource>,
+    ) {
+        self.write().lives.insert(device.clone(), source);
+    }
+
+    /// The device's answer to a browser's offer for its live video. The
+    /// source is called without the model lock.
+    pub async fn live_answer(
+        &self,
+        device: &DeviceId,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> Result<String, crate::media::LiveError> {
+        use crate::media::LiveError;
+        let source = {
+            let model = self.read();
+            if !model.devices.contains_key(device) {
+                return Err(LiveError::UnknownDevice);
+            }
+            model.lives.get(device).cloned().ok_or(LiveError::NoLive)?
+        };
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            source.answer(offer, viewer),
+        )
+        .await
+        {
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(e)) => Err(LiveError::Failed(format!("{e:#}"))),
+            Err(_) => Err(LiveError::Timeout),
+        }
     }
 
     pub(crate) fn provide_printing(
@@ -1723,8 +2381,16 @@ impl Hub {
             .keys()
             .chain(model.labels.keys())
             .chain(model.restored.keys())
+            .chain(model.cached_devices.keys())
             .chain(model.states.keys())
-            .filter(|id| &id.instance() == instance)
+            .filter(|id| {
+                &id.instance() == instance
+                    && model.cached_devices.get(*id).is_none_or(|cached| {
+                        model.drivers.get(instance).is_some_and(|slot| {
+                            slot.kind == &*cached.kind && slot.integration == cached.integration
+                        })
+                    })
+            })
             .collect();
         ids.into_iter().cloned().collect()
     }
@@ -1750,8 +2416,12 @@ impl Hub {
             };
             let key = spec.key.clone();
             self.0.state_dirty.store(true, Ordering::Release);
+            let first_live = model
+                .awaiting_samples
+                .get_mut(device)
+                .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || states.get(&key).is_none_or(|s| s.value != value);
+            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
             states.insert(
                 key.clone(),
                 Sample {
@@ -1775,6 +2445,12 @@ impl Hub {
         let changed = {
             let mut model = self.write();
             if !model.devices.contains_key(device) {
+                return;
+            }
+            if let Some(explicit_offline) = model.unconfirmed.get_mut(device) {
+                if !online {
+                    *explicit_offline = true;
+                }
                 return;
             }
             // The driver speaks for it again.
@@ -1841,6 +2517,32 @@ impl Hub {
 }
 
 impl Model {
+    /// Returns whether the persistent definition set actually changed.
+    fn cache_definition(&mut self, cached: CachedDevice) -> bool {
+        let id = &cached.device.id;
+        if !device_cache::valid_definition(id, &cached) {
+            tracing::warn!("invalid definition omitted from device inventory cache");
+            return self.cached_devices.remove(id).is_some();
+        }
+        if self.cached_devices.get(id).is_some_and(|previous| {
+            previous.device == cached.device
+                && previous.kind == cached.kind
+                && previous.integration == cached.integration
+        }) {
+            return false;
+        }
+        if !self.cached_devices.contains_key(id)
+            && self.cached_devices.len() >= device_cache::MAX_DEVICES
+        {
+            tracing::warn!(
+                "device inventory cache full; fresh discovery will be required for additional devices"
+            );
+            return false;
+        }
+        self.cached_devices.insert(id.clone(), cached);
+        true
+    }
+
     fn view(&self, device: &Arc<Device>) -> DeviceView {
         DeviceView {
             device: Arc::clone(device),
@@ -1849,6 +2551,7 @@ impl Model {
             state: self.states.get(&device.id).cloned().unwrap_or_default(),
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),
+            live: self.lives.contains_key(&device.id),
         }
     }
 }
