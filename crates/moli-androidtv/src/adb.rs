@@ -38,6 +38,10 @@ pub const ASKING: Duration = Duration::from_secs(120);
 const ANSWER: Duration = Duration::from_secs(10);
 /// The token the TV sends to be signed: a SHA-1 digest's length, always.
 const TOKEN_LEN: usize = 20;
+/// A shell command's output at most (`dumpsys media_session` is some tens
+/// of kilobytes), and the time it has, whatever the TV keeps sending.
+const SHELL_MAX: usize = 4 * 1024 * 1024;
+const SHELL_TIME: Duration = Duration::from_secs(15);
 /// `DigestInfo` of a SHA-1 digest: the token is signed as one (as `adb` does).
 const SHA1_INFO: [u8; 15] = [
     0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
@@ -381,8 +385,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Adb<S> {
         }
     }
 
-    /// A shell command's output (stdout and stderr together).
+    /// A shell command's output (stdout and stderr together): at most
+    /// [`SHELL_MAX`], within [`SHELL_TIME`].
     pub async fn shell(&mut self, command: &str) -> anyhow::Result<String> {
+        tokio::time::timeout(SHELL_TIME, self.shell_unbounded(command))
+            .await
+            .context("adb: the command took too long")?
+    }
+
+    async fn shell_unbounded(&mut self, command: &str) -> anyhow::Result<String> {
         let local = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let mut service = format!("shell:{command}").into_bytes();
@@ -402,6 +413,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Adb<S> {
                 OKAY => remote = m.arg0,
                 WRTE => {
                     remote = m.arg0;
+                    if out.len() + m.data.len() > SHELL_MAX {
+                        bail!("adb: more than {SHELL_MAX} bytes of output");
+                    }
                     out.extend(m.data);
                     send(&mut self.stream, OKAY, local, remote, &[]).await?;
                 }
@@ -577,6 +591,53 @@ mod tests {
             .unwrap_err();
         assert!(format!("{error:#}").contains("300 bytes"), "{error:#}");
         device.await.unwrap();
+    }
+
+    /// A TV that answers a command with `chunk` again and again, `every`
+    /// apart, never closing it: how many it sent before Moli stopped.
+    async fn endless_output(chunk: usize, every: Duration) -> (anyhow::Error, usize) {
+        let (client, mut tv) = tokio::io::duplex(1024 * 1024);
+        let device = tokio::spawn(async move {
+            let open = read(&mut tv).await.unwrap();
+            let data = vec![b'x'; chunk];
+            let mut sent = 0;
+            loop {
+                if send(&mut tv, WRTE, 42, open.arg0, &data).await.is_err()
+                    || read(&mut tv).await.is_err()
+                {
+                    return sent;
+                }
+                sent += 1;
+                tokio::time::sleep(every).await;
+            }
+        });
+        let mut adb = Adb {
+            stream: client,
+            next_id: 1,
+        };
+        let error = adb.shell("dumpsys media_session").await.unwrap_err();
+        drop(adb);
+        (error, device.await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn an_output_past_the_cap_is_an_error_not_kept() {
+        let (error, sent) = endless_output(MAX_DATA as usize, Duration::ZERO).await;
+        assert!(
+            format!("{error:#}").contains("bytes of output"),
+            "{error:#}"
+        );
+        // 16 chunks of 256 KiB fill the 4 MiB; the 17th is refused.
+        assert_eq!(sent, SHELL_MAX / MAX_DATA as usize);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_command_that_never_ends_stops_in_time() {
+        let started = tokio::time::Instant::now();
+        let (error, _) = endless_output(10, Duration::from_secs(5)).await;
+        assert!(format!("{error:#}").contains("too long"), "{error:#}");
+        // Each message came within the per-message wait: the whole one ends it.
+        assert!(started.elapsed() >= SHELL_TIME && started.elapsed() < SHELL_TIME + ANSWER);
     }
 
     #[tokio::test]
