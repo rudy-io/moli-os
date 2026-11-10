@@ -16,22 +16,35 @@
   let busy = $state(false);
   let error = $state('');
 
-  async function connect(id) {
+  /** Sign-in goes through the owner-only route, not /api/command: the pasted
+   *  address never reaches the journal or the approvals queue. A fresh PIN in
+   *  the body is asked through the PIN sheet (403 → « c'est moi »), then the
+   *  request is retried with it. */
+  async function connect(instance, pin) {
     busy = true;
     error = '';
     try {
-      const res = await fetch('/api/command', {
+      const body = { code: pasted.trim() };
+      if (pin) body.pin = pin;
+      const res = await fetch(`/api/integrations/tesla/${encodeURIComponent(instance)}/sign-in`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-moli-origin': 'ui' },
-        body: JSON.stringify({ point: `${id}/sign_in`, value: pasted.trim() }),
+        body: JSON.stringify(body),
       });
-      if (res.status === 403) {
-        home.held = { label: t('systeme.tesla.connecter'), reason: 'ta voiture', custom: () => connect(id) };
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 403 && !pin) {
+        // No session yet (owner_required) or pin missing (pin_required):
+        // ask for the code, then retry with the fresh PIN.
+        home.held = {
+          label: t('systeme.tesla.connecter'),
+          reason: 'tesla_sign_in',
+          freshPin: true,
+          custom: (p) => connect(instance, p),
+        };
         return;
       }
-      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        error = body.error ?? res.statusText;
+        error = explainError(json.error, res.status);
         return;
       }
       pasted = '';
@@ -39,6 +52,32 @@
       error = e.message;
     } finally {
       busy = false;
+    }
+  }
+
+  /** The route's machine codes, turned into the house's words. */
+  function explainError(code, status) {
+    switch (code) {
+      case 'owner_required':
+        return t('systeme.tesla.err_owner');
+      case 'invalid_pin':
+        return t('commun.code_incorrect');
+      case 'pin_rate_limited':
+        return t('commun.trop_d_essais');
+      case 'pin_disabled':
+        return t('systeme.tesla.err_pin_disabled');
+      case 'driver_not_running':
+        return t('systeme.tesla.err_not_running');
+      case 'driver_busy':
+        return t('systeme.tesla.err_busy');
+      case 'timeout':
+        return t('systeme.tesla.err_timeout');
+      case 'driver_refused':
+        return t('systeme.tesla.err_refused');
+      case 'invalid':
+        return t('systeme.tesla.err_invalid');
+      default:
+        return code ?? String(status);
     }
   }
 </script>
@@ -86,7 +125,7 @@
         <li>{t('systeme.tesla.etape2')}</li>
         <li>{t('systeme.tesla.etape3')}</li>
       </ol>
-      <form class="form" onsubmit={(e) => (e.preventDefault(), connect(a.id))} autocomplete="off">
+      <form class="form" onsubmit={(e) => (e.preventDefault(), connect(a.instance))} autocomplete="off">
         <label for="tesla-pasted">{t('systeme.tesla.coller')}</label>
         <input id="tesla-pasted" bind:value={pasted} placeholder="https://example.com/moli-tesla?code=…" spellcheck="false" />
         <button class="btn primary" disabled={busy || !pasted.includes('code=')}>{busy ? t('systeme.tesla.verification') : t('systeme.tesla.connecter')}</button>

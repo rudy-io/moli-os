@@ -39,7 +39,9 @@
           ? t('airzone_gateways.read_only_pin')
         : home.held?.reason === 'discovery'
           ? t('airzone_wizard.discovery_pin')
-        : /configuration/i.test(home.held?.reason ?? '')
+          : home.held?.reason === 'tesla_sign_in'
+            ? t('systeme.tesla.pin_raison')
+            : /configuration/i.test(home.held?.reason ?? '')
           ? t('commun.code.raison_configuration')
         : /calme|quiet/i.test(home.held?.reason ?? '')
           ? t('commun.code.raison_calme')

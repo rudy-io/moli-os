@@ -388,5 +388,13 @@
   "systeme.tesla.coller": "Adresse de la dernière page",
   "systeme.tesla.connecter": "Connecter",
   "systeme.tesla.verification": "Connexion…",
-  "systeme.tesla.aide": "Moli garde le jeton de rafraîchissement chiffré dans son coffre. Il expire au bout de trois mois : il faudra reconnecter le compte depuis cette page."
+  "systeme.tesla.aide": "Moli garde le jeton de rafraîchissement chiffré dans son coffre. Il expire au bout de trois mois : il faudra reconnecter le compte depuis cette page.",
+  "systeme.tesla.pin_raison": "Tu connectes ta voiture : la maison demande que ce soit bien toi.",
+  "systeme.tesla.err_owner": "Cette action est réservée au propriétaire de la maison.",
+  "systeme.tesla.err_pin_disabled": "Le code de sécurité de la maison est désactivé.",
+  "systeme.tesla.err_not_running": "Le pilote Tesla ne tourne pas : vérifie que l’instance est configurée dans moli.toml, puis relance Moli.",
+  "systeme.tesla.err_busy": "Le pilote Tesla est occupé, réessaie dans un instant.",
+  "systeme.tesla.err_timeout": "Le pilote Tesla n’a pas répondu à temps, réessaie.",
+  "systeme.tesla.err_refused": "Le pilote Tesla a refusé cette adresse de connexion (code expiré ou déjà utilisé).",
+  "systeme.tesla.err_invalid": "L’adresse collée n’est pas valide : elle doit contenir code=."
 }

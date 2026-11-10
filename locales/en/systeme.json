@@ -388,5 +388,13 @@
   "systeme.tesla.coller": "Address of the last page",
   "systeme.tesla.connecter": "Connect",
   "systeme.tesla.verification": "Connecting…",
-  "systeme.tesla.aide": "Moli keeps the refresh token encrypted in its vault. It expires after three months: reconnect the account from this page."
+  "systeme.tesla.aide": "Moli keeps the refresh token encrypted in its vault. It expires after three months: reconnect the account from this page.",
+  "systeme.tesla.pin_raison": "You're connecting your car: the house wants to be sure it's you.",
+  "systeme.tesla.err_owner": "This action is reserved for the house owner.",
+  "systeme.tesla.err_pin_disabled": "The house security code is disabled.",
+  "systeme.tesla.err_not_running": "The Tesla driver is not running: check that the instance is configured in moli.toml, then restart Moli.",
+  "systeme.tesla.err_busy": "The Tesla driver is busy, try again in a moment.",
+  "systeme.tesla.err_timeout": "The Tesla driver did not answer in time, try again.",
+  "systeme.tesla.err_refused": "The Tesla driver refused this sign-in address (code expired or already used).",
+  "systeme.tesla.err_invalid": "The pasted address is not valid: it must contain code=."
 }
