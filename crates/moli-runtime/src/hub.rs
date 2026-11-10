@@ -763,6 +763,103 @@ impl Hub {
         result
     }
 
+    /// [`Hub::command`] for credentials a person hands over once (an OAuth
+    /// sign-in code). The value reaches the driver but is journaled as
+    /// `Value::Null`: it must never appear in the journal, `get_journal`, or
+    /// the approvals list. The calling surface verified the caller (owner,
+    /// fresh PIN), so the guard and the approval queue do not see this order.
+    pub async fn command_redacted(
+        &self,
+        point: &PointId,
+        value: Value,
+        origin: Origin,
+        actor: Option<String>,
+    ) -> Result<(), CommandError> {
+        let started = Instant::now();
+        let oversized = point.as_str().len() > MAX_POINT
+            || matches!(&value, Value::Text(t) if t.chars().count() > moli_core::MAX_TEXT);
+        if oversized {
+            let short: String = point.as_str().chars().take(MAX_POINT).collect();
+            let error = CommandError::Invalid(ValueError::TooLong);
+            self.record(
+                origin,
+                actor,
+                Action::Command {
+                    point: PointId::from(short),
+                    value: Value::Null,
+                },
+                Outcome::Err(error.to_string()),
+                started,
+            );
+            return Err(error);
+        }
+        let prepared = match self.prepare_redacted(point, &value) {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                self.record(
+                    origin,
+                    actor,
+                    Action::Command {
+                        point: point.clone(),
+                        value: Value::Null,
+                    },
+                    Outcome::Err(e.to_string()),
+                    started,
+                );
+                return Err(e);
+            }
+        };
+        let result = self.send(prepared).await;
+        let outcome = match &result {
+            Ok(()) => Outcome::Ok,
+            Err(e) => Outcome::Err(e.to_string()),
+        };
+        self.record(
+            origin,
+            actor,
+            Action::Command {
+                point: point.clone(),
+                value: Value::Null,
+            },
+            outcome,
+            started,
+        );
+        result
+    }
+
+    /// [`prepare`] without the read-only refusal (the surface verified the
+    /// caller) and never followed: a one-shot credential must not be resent.
+    fn prepare_redacted(&self, point: &PointId, value: &Value) -> Result<Prepared, CommandError> {
+        let (device_id, key) = point.split().ok_or(CommandError::UnknownPoint)?;
+        let (device, key, kind, commands) = {
+            let model = self.read();
+            let device = model
+                .devices
+                .get(&device_id)
+                .ok_or(CommandError::UnknownPoint)?;
+            let spec = device.point(key).ok_or(CommandError::UnknownPoint)?;
+            let slot = model
+                .drivers
+                .get(&device.instance)
+                .ok_or(CommandError::DriverUnavailable)?;
+            (
+                Arc::clone(device),
+                spec.key.clone(),
+                spec.kind.clone(),
+                slot.commands.clone(),
+            )
+        };
+        let value = validate(&kind, value)?;
+        Ok(Prepared {
+            point: point.clone(),
+            device,
+            key,
+            value,
+            commands,
+            confirm: false,
+        })
+    }
+
     /// What the guard would say, now, about an order on this point from this
     /// origin: the reason it would be held, or `None` if it would go
     /// through. Nothing is sent.
