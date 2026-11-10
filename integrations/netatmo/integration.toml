@@ -1,0 +1,25 @@
+[integration]
+id = "netatmo"
+name = "Caméras Netatmo (Presence, Welcome, sonnette)"
+brands = ["Netatmo"]
+models = ["Presence", "Welcome", "Smart Video Doorbell"]
+transport = "https"
+driver = "netatmo"
+crate = "moli-netatmo"
+
+[discovery]
+mdns = ["_hap._tcp"]
+ssdp = []
+ports = []
+
+[needs]
+secrets = ["client_id", "client_secret", "refresh_token"]
+vars = []
+options = []
+
+[origin]
+reused = "Netatmo Security API (dev.netatmo.com: /api/homesdata, /api/homestatus, /api/setstate, local /live/snapshot_720.jpg)"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/homestatus.json"
