@@ -191,7 +191,7 @@
   "commun.piece.voiture_autonomie": "autonomie {km} km",
   "commun.piece.voiture_recharge": "en recharge",
   "commun.piece.voiture_vigie": "mode vigie",
-  "commun.piece.voiture_portes_ouvertes": "portes ouvertes",
+  "commun.piece.voiture_portes_ouvertes": "portes déverrouillées",
   "commun.piece.voiture_endormie": "endormie",
   "commun.piece.imprimante_eteinte": "éteinte",
   "commun.piece.lecture": "{name} · {label} : {value}",

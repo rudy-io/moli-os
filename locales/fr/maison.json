@@ -251,7 +251,7 @@
   "maison.accueil.voiture_recharge_vale": "En recharge · {power}",
   "maison.accueil.voiture_portes": "Portes",
   "maison.accueil.voiture_verrouillees": "verrouillées",
-  "maison.accueil.voiture_ouvertes": "ouvertes",
+  "maison.accueil.voiture_ouvertes": "déverrouillées",
   "maison.accueil.voiture_vigie": "Mode vigie",
   "maison.accueil.voiture_endormie": "Endormie"
 }
