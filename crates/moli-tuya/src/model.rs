@@ -4,8 +4,8 @@
 //! A DP has an id (« 1 »), a code (« switch_1 ») and a type. The code
 //! becomes the point key; integers carry a decimal `scale`.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,17 @@ pub struct TuyaDevice {
     pub parent: Option<String>,
     #[serde(default)]
     pub dps: Vec<Dp>,
+    /// Enum DPs this device names in its own words (`off`) rather than the
+    /// cloud's (`power_off`): learned from what it sends, used for what is
+    /// sent to it.
+    #[serde(skip)]
+    own_words: Arc<Mutex<BTreeSet<u32>>>,
 }
+
+/// The cloud's word for an enum value, and the one some devices use locally
+/// (the Woox R6128 plug's `relay_status` answers `off` / `on`). Only words
+/// seen on a real device: its word for `last` is unknown, `last` is sent as is.
+const WORDS: [(&str, &str); 2] = [("power_off", "off"), ("power_on", "on")];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Dp {
@@ -236,6 +246,18 @@ impl Dp {
             (DpKind::Enum | DpKind::String, Json::String(s)) => Value::Text(s.as_str().into()),
             _ => return None,
         })
+    }
+
+    /// The cloud's word for a value this enum DP does not list but a device
+    /// sends in its own words (`off` for `power_off`).
+    fn cloud_word(&self, raw: &str) -> Option<&'static str> {
+        if self.kind != DpKind::Enum || self.range.iter().any(|v| v == raw) {
+            return None;
+        }
+        WORDS
+            .iter()
+            .find(|(cloud, own)| *own == raw && self.range.iter().any(|v| v == cloud))
+            .map(|(cloud, _)| *cloud)
     }
 
     /// A Moli value (already validated against the point) → raw DP value.
@@ -429,7 +451,13 @@ impl TuyaDevice {
         }
         let lamp = self.is_lamp();
         let dp = self.dp_by_key(key)?;
-        let raw = dp.encode(lamp, value)?;
+        let mut raw = dp.encode(lamp, value)?;
+        if let Json::String(word) = &raw
+            && self.speaks_own_words(dp.id)
+            && let Some((_, own)) = WORDS.iter().find(|(cloud, _)| cloud == word)
+        {
+            raw = Json::from(*own);
+        }
         let Some(setting) = dp.setting(lamp) else {
             return Some(serde_json::Map::from_iter([(dp.id.to_string(), raw)]));
         };
@@ -440,6 +468,13 @@ impl TuyaDevice {
             .find(|d| d.setting(lamp) == Some(Light::Colour))
             .map(|d| d.id);
         light::order(setting, value, dp.id, raw, mode, colour, current)
+    }
+
+    fn speaks_own_words(&self, dp: u32) -> bool {
+        self.own_words
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&dp)
     }
 
     #[must_use]
@@ -459,6 +494,20 @@ impl TuyaDevice {
             .iter()
             .filter_map(|(id, raw)| {
                 let dp = by_id.get(&id.parse().ok()?)?;
+                if let Some(word) = raw.as_str().filter(|_| dp.kind == DpKind::Enum) {
+                    let mut own = self
+                        .own_words
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(cloud) = dp.cloud_word(word) {
+                        own.insert(dp.id);
+                        return Some((dp.key(self.is_lamp()).to_owned(), Value::from(cloud)));
+                    }
+                    // Back to the cloud's words (a new firmware, a new plug).
+                    if WORDS.iter().any(|(cloud, _)| *cloud == word) {
+                        own.remove(&dp.id);
+                    }
+                }
                 Some((
                     dp.key(self.is_lamp()).to_owned(),
                     dp.decode(self.is_lamp(), raw)?,
@@ -659,6 +708,49 @@ mod tests {
     }
 
     #[test]
+    fn a_device_that_speaks_its_own_words_is_answered_in_them() {
+        let plug = plug();
+        let none = |_: &str| None;
+        let order = |value: &str| {
+            plug.order("relay_status", &Value::from(value), &none)
+                .unwrap()["38"]
+                .clone()
+        };
+        let seen = |word: &str| {
+            let dps = serde_json::Map::from_iter([("38".to_owned(), Json::from(word))]);
+            plug.decode_dps(&dps)
+        };
+        let shown = |word: &str| vec![("relay_status".to_owned(), Value::from(word))];
+        assert_eq!(
+            order("power_on"),
+            "power_on",
+            "the cloud's words until it speaks"
+        );
+        assert_eq!(seen("off"), shown("power_off"));
+        assert_eq!(order("power_on"), "on");
+        assert_eq!(
+            order("last"),
+            "last",
+            "no word guessed for a value never seen"
+        );
+        assert_eq!(
+            seen("power_on"),
+            shown("power_on"),
+            "listed words pass as they are"
+        );
+        assert_eq!(
+            order("power_on"),
+            "power_on",
+            "and the cloud's words are spoken again"
+        );
+        assert_eq!(
+            seen("sideways"),
+            shown("sideways"),
+            "an unknown word is shown, not guessed"
+        );
+    }
+
+    #[test]
     fn dps_become_points_with_units_and_scale() {
         let d = plug().device(&InstanceId::from("tuya"));
         assert_eq!(d.id.as_str(), "tuya:bf123");
@@ -675,6 +767,11 @@ mod tests {
                 "cycle_time"
             ]
         );
+        check_power_point(&d);
+        check_access_and_units(&d);
+    }
+
+    fn check_power_point(d: &Device) {
         let power = d.point("cur_power").unwrap();
         assert_eq!(power.unit, Some(Unit::Watt));
         assert_eq!(power.semantic, Semantic::Power);
@@ -682,13 +779,16 @@ mod tests {
             matches!(power.kind, Kind::Numeric { max: Some(m), .. } if (m - 8000.0).abs() < 1e-9)
         );
         assert!(!power.access.write);
+        assert_eq!(&*power.label, "Puissance");
+    }
+
+    fn check_access_and_units(d: &Device) {
         assert!(d.point("switch_1").unwrap().access.write);
         assert!(
             !d.point("cycle_time").unwrap().access.write,
             "free text is never written"
         );
         assert_eq!(d.point("cur_current").unwrap().unit, Some(Unit::Ampere));
-        assert_eq!(&*power.label, "Puissance");
         assert_eq!(&*d.point("cycle_time").unwrap().label, "Cycle time");
     }
 
