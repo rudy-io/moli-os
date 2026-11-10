@@ -1,0 +1,35 @@
+{
+  "tadoMode": "HOME",
+  "geolocationOverride": false,
+  "setting": {
+    "type": "HEATING",
+    "power": "ON",
+    "temperature": {
+      "celsius": 20.5,
+      "fahrenheit": 68.9
+    }
+  },
+  "overlayType": null,
+  "overlay": null,
+  "openWindow": null,
+  "openWindowDetected": false,
+  "link": {
+    "state": "ONLINE"
+  },
+  "activityDataPoints": {
+    "heatingPower": {
+      "type": "PERCENTAGE",
+      "percentage": 35.0
+    }
+  },
+  "sensorDataPoints": {
+    "insideTemperature": {
+      "celsius": 19.8,
+      "fahrenheit": 67.6
+    },
+    "humidity": {
+      "type": "PERCENTAGE",
+      "percentage": 54.2
+    }
+  }
+}
