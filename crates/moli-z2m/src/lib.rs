@@ -291,6 +291,10 @@ type Flames = HashMap<DeviceId, (Flame, Instant)>;
 /// How often due flames are looked for (a fade lasts one to two seconds).
 const FLAME_TICK: Duration = Duration::from_millis(250);
 
+/// The lamp's own colour loop (Zigbee), and the order that ends it.
+const COLORLOOP: &str = "colorloop";
+const STOP_COLORLOOP: &str = "stop_colorloop";
+
 /// The level a flame moves around when the lamp never said its own.
 const FLAME_BASE: f64 = 30.0;
 
@@ -369,7 +373,11 @@ fn flame_order(
             Some(entry.flame_frame(&first, true))
         }
         ("effect", Some(NO_EFFECT)) => {
+            let looping = ctx.current(id, "effect") == Some(Value::from(COLORLOOP));
             ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+            if looping {
+                return Some(entry.encode("effect", &Value::from(STOP_COLORLOOP)));
+            }
             flames
                 .remove(id)
                 .map(|(flame, _)| entry.flame_rest(flame.base()))
@@ -388,6 +396,24 @@ fn flame_order(
             let off = key == "state" && *value == Value::Bool(false);
             if (off || is_look(key) || key == "effect") && flames.remove(id).is_some() {
                 ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+            }
+            // The lamp's own colour loop goes on until told to stop, and the
+            // lamp never says it plays it: the driver keeps that on record,
+            // so that whoever sets a look next knows to stop it first.
+            match (key, text) {
+                ("effect", Some(COLORLOOP)) => {
+                    ctx.set_state(id, "effect", Value::from(COLORLOOP));
+                }
+                ("effect", Some(STOP_COLORLOOP)) => {
+                    ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+                }
+                _ => {}
+            }
+            // A level is on record at once: a flame started right after it
+            // (a scene sets the level, then the flame) moves around it, not
+            // around the level before.
+            if key == "brightness" {
+                ctx.set_state(id, "brightness", value.clone());
             }
             Some(entry.encode(key, value))
         }
