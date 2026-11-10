@@ -627,7 +627,7 @@
   "pilotes.tesla.etat_compte": "État du compte",
   "pilotes.tesla.page_tesla": "Page de connexion Tesla",
   "pilotes.tesla.adresse_collee": "Adresse de la dernière page",
-  "pilotes.tesla.a_connecter": "Connecte le compte Tesla depuis le tableau de bord : l'adresse à ouvrir s'affiche sur le pilote « Compte Tesla », la dernière adresse (celle qui porte le code) s'y colle",
+  "pilotes.tesla.a_connecter": "Connecte le compte Tesla depuis le tableau de bord : ouvre l'adresse affichée sur le pilote « Compte Tesla », connecte-toi chez Tesla, puis colle la dernière adresse (celle qui porte le code) dans le formulaire Tesla",
   "pilotes.tesla.app_requise": "le client public de Tesla n'existe plus : crée une application sur developer.tesla.com (permissions openid, offline_access, user_data, vehicle_device_data, vehicle_cmds), dépose ses identifiants au coffre (moli-os secrets set tesla client_id puis client_secret, valeurs par un tube), indique l'URI de redirection enregistrée dans redirect_uri (moli.toml), puis redémarre Moli",
   "pilotes.tesla.pas_connecte": "le compte Tesla n'est pas connecté",
   "pilotes.tesla.adresse_fausse": "ce n'est pas l'adresse de fin de connexion (elle porte un code=)",
@@ -650,5 +650,10 @@
   "pilotes.tesla.reveillee": "Réveillée",
   "pilotes.tesla.interieur": "Température intérieure",
   "pilotes.tesla.exterieur": "Température extérieure",
-  "pilotes.tesla.commande": "Commande"
+  "pilotes.tesla.commande": "Commande",
+  "pilotes.tesla.deconnexion": "Déconnexion",
+  "pilotes.tesla.hote_inconnu": "hôte inconnu {host} : seuls les hôtes officiels Tesla sont acceptés (EU/NA : fleet-api.prd.eu.vn.cloud.tesla.com / fleet-api.prd.na.vn.cloud.tesla.com, Chine : api.tesla.cn ; auth.tesla.com / auth.tesla.cn)",
+  "pilotes.tesla.state_invalide": "l'adresse collée ne correspond pas à la page de connexion ouverte (state invalide) : ouvre la nouvelle adresse affichée sur le pilote « Compte Tesla » et recommence",
+  "pilotes.tesla.trop_tard": "l'ordre a expiré pendant le renouvellement de session : retente la commande",
+  "pilotes.tesla.refus_sans_detail": "refusé (HTTP {status}), sans explication"
 }

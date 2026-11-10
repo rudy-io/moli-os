@@ -14,6 +14,10 @@ use serde_json::Value as Json;
 pub const REFRESH_INVALID: &str = "the Tesla refresh token is no longer valid";
 /// An answer went out with an access token Tesla no longer accepts.
 pub const TOKEN_EXPIRED: &str = "the Tesla access token expired";
+/// A vehicle-level endpoint timed out: that car is asleep or unreachable.
+/// It is a per-vehicle condition, not a session failure — the account stays
+/// connected and the other cars keep polling.
+pub const VEHICLE_AWAY: &str = "the Tesla vehicle did not answer";
 /// The account is disabled by Tesla's billing limit: the Fleet API is paid
 /// per use, and once the allowance is spent every call (vehicles, data,
 /// commands, even partner registration) answers `403` with
@@ -342,8 +346,34 @@ fn billing_limit(status: StatusCode, raw: &[u8]) -> bool {
         && std::str::from_utf8(raw).is_ok_and(|body| body.contains("EXCEEDED_LIMIT"))
 }
 
-/// A `GET` of the vehicles' API, bearer-authenticated.
-async fn get(host: &str, token: &Token, uri: &str) -> anyhow::Result<Json> {
+/// A 408 on a per-vehicle endpoint means that car went to sleep: a
+/// per-vehicle condition, not a session failure.
+fn vehicle_away(status: StatusCode, per_vehicle_408: bool) -> bool {
+    per_vehicle_408 && status == StatusCode::REQUEST_TIMEOUT
+}
+
+/// The reason a failed command answer gives; when Tesla sends none, name the
+/// HTTP status instead of bailing with an empty, undecipherable error.
+fn refusal_reason(answer: &Json, status: StatusCode) -> String {
+    let why = ["error_description", "error"]
+        .iter()
+        .filter_map(|k| answer.get(*k).and_then(Json::as_str))
+        .find(|s| !s.is_empty());
+    match why {
+        Some(why) => why.to_owned(),
+        None => moli_i18n::tr!("pilotes.tesla.refus_sans_detail", status = status.as_u16()),
+    }
+}
+
+/// A `GET` of the vehicles' API, bearer-authenticated. With
+/// `vehicle_away_on_408`, a 408 is reported as a per-vehicle condition
+/// ([`VEHICLE_AWAY`]) instead of a session-level error.
+async fn get(
+    host: &str,
+    token: &Token,
+    uri: &str,
+    vehicle_away_on_408: bool,
+) -> anyhow::Result<Json> {
     let request = Request::builder()
         .method(Method::GET)
         .uri(uri)
@@ -367,6 +397,9 @@ async fn get(host: &str, token: &Token, uri: &str) -> anyhow::Result<Json> {
     }
     if status == StatusCode::UNAUTHORIZED {
         bail!("{TOKEN_EXPIRED}");
+    }
+    if vehicle_away(status, vehicle_away_on_408) {
+        bail!("{VEHICLE_AWAY}");
     }
     let answer: Json = serde_json::from_slice(&bytes).map_err(|_| {
         anyhow::anyhow!(moli_i18n::tr!(
@@ -398,15 +431,17 @@ async fn get(host: &str, token: &Token, uri: &str) -> anyhow::Result<Json> {
 
 /// `GET /api/1/vehicles`.
 pub async fn vehicles(host: &str, token: &Token) -> anyhow::Result<Json> {
-    get(host, token, "/api/1/vehicles").await
+    get(host, token, "/api/1/vehicles", false).await
 }
 
-/// `GET /api/1/vehicles/{id}/vehicle_data`.
+/// `GET /api/1/vehicles/{id}/vehicle_data`. A 408 here means the car just
+/// went to sleep: the session is fine, the car is not ([`VEHICLE_AWAY`]).
 pub async fn vehicle_data(host: &str, token: &Token, vehicle_id: &str) -> anyhow::Result<Json> {
     get(
         host,
         token,
         &format!("/api/1/vehicles/{vehicle_id}/vehicle_data"),
+        true,
     )
     .await
 }
@@ -458,12 +493,7 @@ pub async fn command(
         if billing_limit(status, &bytes) {
             bail!("{ACCOUNT_DISABLED} (HTTP {status})");
         }
-        let why = answer
-            .get("error_description")
-            .or_else(|| answer.get("error"))
-            .and_then(Json::as_str)
-            .unwrap_or("");
-        bail!("{why}");
+        bail!("{}", refusal_reason(&answer, status));
     }
     let response = &answer["response"];
     if response.get("result").and_then(Json::as_bool) == Some(true) {
@@ -523,5 +553,30 @@ mod tests {
             challenge_of("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
+    }
+
+    #[test]
+    fn a_408_is_vehicle_away_only_on_the_per_vehicle_flag() {
+        assert!(vehicle_away(StatusCode::REQUEST_TIMEOUT, true));
+        // The list endpoint takes the 408 as a plain failure.
+        assert!(!vehicle_away(StatusCode::REQUEST_TIMEOUT, false));
+        // Other statuses are not « the car went to sleep ».
+        assert!(!vehicle_away(StatusCode::UNAUTHORIZED, true));
+        assert!(!vehicle_away(StatusCode::FORBIDDEN, true));
+    }
+
+    #[test]
+    fn an_empty_refusal_falls_back_to_the_status() {
+        let empty: Json = Json::Object(serde_json::Map::default());
+        let reason = refusal_reason(&empty, StatusCode::FORBIDDEN);
+        assert!(
+            reason.contains("403"),
+            "the fallback names the status: {reason}"
+        );
+        let why: Json = serde_json::json!({ "error": "door locked" });
+        assert_eq!(refusal_reason(&why, StatusCode::FORBIDDEN), "door locked");
+        // A populated-but-empty `error_description` loses to the fallback.
+        let empty_desc: Json = serde_json::json!({ "error_description": "" });
+        assert!(refusal_reason(&empty_desc, StatusCode::BAD_REQUEST).contains("400"));
     }
 }

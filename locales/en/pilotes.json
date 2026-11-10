@@ -627,7 +627,7 @@
   "pilotes.tesla.etat_compte": "Account status",
   "pilotes.tesla.page_tesla": "Tesla sign-in page",
   "pilotes.tesla.adresse_collee": "Address of the last page",
-  "pilotes.tesla.a_connecter": "Connect the Tesla account from the dashboard: the address to open is shown on the « Tesla account » driver, and its last address (the one carrying the code) is pasted there",
+  "pilotes.tesla.a_connecter": "Connect the Tesla account from the dashboard: open the address shown on the « Tesla account » driver, sign in at Tesla, then submit the last address (the one carrying the code) in the Tesla form",
   "pilotes.tesla.app_requise": "Tesla's shared public client no longer exists: create an application at developer.tesla.com (permissions openid, offline_access, user_data, vehicle_device_data, vehicle_cmds), store its credentials in the vault (moli-os secrets set tesla client_id then client_secret, values through a pipe), set the registered redirect URI in redirect_uri (moli.toml), then restart Moli",
   "pilotes.tesla.pas_connecte": "the Tesla account is not connected",
   "pilotes.tesla.adresse_fausse": "this is not the sign-in's last address (it carries a code=)",
@@ -650,5 +650,10 @@
   "pilotes.tesla.reveillee": "Awake",
   "pilotes.tesla.interieur": "Inside temperature",
   "pilotes.tesla.exterieur": "Outside temperature",
-  "pilotes.tesla.commande": "Command"
+  "pilotes.tesla.commande": "Command",
+  "pilotes.tesla.deconnexion": "Sign-out",
+  "pilotes.tesla.hote_inconnu": "unknown host {host}: only the official Tesla hosts are accepted (EU/NA: fleet-api.prd.eu.vn.cloud.tesla.com / fleet-api.prd.na.vn.cloud.tesla.com, China: api.tesla.cn; auth.tesla.com / auth.tesla.cn)",
+  "pilotes.tesla.state_invalide": "the pasted address does not match the open sign-in page (invalid state): open the new address shown on the « Tesla account » driver and start again",
+  "pilotes.tesla.trop_tard": "the order expired while the session was being renewed: try the order again",
+  "pilotes.tesla.refus_sans_detail": "refused (HTTP {status}), with no explanation"
 }
