@@ -144,6 +144,7 @@
   "commun.lampe.couleur": "{label} color",
   "commun.lampe.couleurs": "{label} colors",
   "commun.lampe.autre_couleur": "Other color",
+  "commun.lampe.flamme": "Flame",
   "commun.lampe.blanc_chaud": "Warm white",
   "commun.lampe.blanc_neutre": "Neutral white",
   "commun.lampe.blanc_froid": "Cool white",
