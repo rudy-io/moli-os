@@ -17,6 +17,20 @@ use super::Lifx;
 use crate::bulb::{Change, change, merge};
 use crate::proto::{self, Hsbk, Parts, Reply, Serial};
 
+/// Uses up one of the answers still to lose, if any is left. A plain
+/// `compare_exchange` loop: `fetch_update` is deprecated by the latest stable
+/// Rust, and its new name `try_update` is newer than our `rust-version`.
+fn take_one(left: &AtomicU32) -> bool {
+    let mut n = left.load(Ordering::SeqCst);
+    while n > 0 {
+        match left.compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(now) => n = now,
+        }
+    }
+    false
+}
+
 fn config(toml: &str) -> anyhow::Result<Lifx> {
     Lifx::new(toml::from_str(toml)?)
 }
@@ -268,10 +282,7 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
                         answers.push((s, proto::STATE_SERVICE, p.clone()));
                     }
                 }
-                proto::LIGHT_GET
-                    if lights_lost
-                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                        .is_ok() => {}
+                proto::LIGHT_GET if take_one(&lights_lost) => {}
                 proto::LIGHT_GET => {
                     let p = real("light_state").unwrap_or_else(|| {
                         let mut p = Vec::new();
