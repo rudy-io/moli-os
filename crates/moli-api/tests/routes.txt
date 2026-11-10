@@ -39,6 +39,9 @@ POST   /api/integrations/airzone/{instance}/probe                humain non
 PUT    /api/integrations/airzone/{instance}                      humain non
 POST   /api/integrations/airzone/{instance}/withdraw             humain non
 POST   /api/integrations/airzone/{instance}/mode                 humain non
+GET    /api/integrations/tesla/{instance}                        humain non
+POST   /api/integrations/tesla/{instance}/sign-in                humain non
+POST   /api/integrations/tesla/{instance}/sign-out               humain non
 GET    /api/integrations/tuya-cloud        foyer   non
 PUT    /api/integrations/tuya-cloud        foyer   non
 PUT    /api/session/pin                    foyer   oui
