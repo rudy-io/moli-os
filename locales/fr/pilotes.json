@@ -644,5 +644,19 @@
   "pilotes.zwave.point_lu_seul": "le point {point} est en lecture seule",
   "pilotes.zwave.point_sans_cible": "le point {point} n'a pas de cible d'écriture",
   "pilotes.zwave.niveau_attend_nombre": "le point niveau attend un nombre",
-  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen"
+  "pilotes.zwave.on_attend_booleen": "le point on attend un booléen",
+  "pilotes.linky_tic.compteur": "Compteur Linky (lecture locale)",
+  "pilotes.linky_tic.puissance": "Puissance apparente",
+  "pilotes.linky_tic.energie_totale": "Énergie soutirée totale",
+  "pilotes.linky_tic.index": "Index {numero}",
+  "pilotes.linky_tic.periode": "Période tarifaire en cours",
+  "pilotes.linky_tic.numero_periode": "Numéro de l’index en cours",
+  "pilotes.linky_tic.courant": "Courant de la phase {numero}",
+  "pilotes.linky_tic.tension": "Tension de la phase 1",
+  "pilotes.linky_tic.puissance_max": "Puissance maximale du jour",
+  "pilotes.linky_tic.port_manquant": "port série non précisé : renseigner `port` (par exemple /dev/ttyACM0) dans les options de l’instance, puis redémarrer Moli",
+  "pilotes.linky_tic.ouverture": "ouverture de {port} impossible : {cause}",
+  "pilotes.linky_tic.lecture": "lecture du port série impossible : {cause}",
+  "pilotes.linky_tic.port_ferme": "le port série s’est fermé (module débranché ?)",
+  "pilotes.linky_tic.silence": "aucune trame valide du compteur depuis {secondes} s : le port est rouvert (vérifier le câble, le port et le mode standard ou historique)"
 }
