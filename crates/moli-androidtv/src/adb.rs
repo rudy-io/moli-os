@@ -443,7 +443,7 @@ pub fn playing(out: &str) -> Option<(String, Playing)> {
     let uptime_ms = out
         .lines()
         .rev()
-        .find_map(|l| l.split_whitespace().next()?.parse::<f64>().ok())
+        .find_map(|l| finite(l.split_whitespace().next()?))
         .map(|s| s * 1000.0);
     let stack = out.split("Sessions Stack").nth(1)?;
     let stack = stack
@@ -503,7 +503,7 @@ fn playback(state: &str, now_ms: Option<f64>) -> (u8, Option<String>, Option<f64
             .split(", ")
             .find_map(|kv| kv.strip_prefix(name)?.strip_prefix('='))
     };
-    let number = |name: &str| field(name).and_then(|v| v.parse::<f64>().ok());
+    let number = |name: &str| field(name).and_then(finite);
     // Android 14 writes `PLAYING(3)`, Android 11 the bare code `3`.
     let raw = field("state").unwrap_or("");
     let code = raw
@@ -531,12 +531,35 @@ fn playback(state: &str, now_ms: Option<f64>) -> (u8, Option<String>, Option<f64
         };
         (p + since * speed) / 1000.0
     });
+    // Huge numbers, finite each, may still add up to infinity.
+    let position = position.filter(|p| p.is_finite());
     (rank, Some(word.to_owned()), position)
+}
+
+/// A number, as long as it is one (`inf` and `NaN` parse too).
+fn finite(s: &str) -> Option<f64> {
+    s.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_position_that_is_not_a_number_is_none() {
+        for bad in ["inf", "NaN", "-inf", "1e400"] {
+            let (_, p) =
+                playing(&DUMP.replace("position=1576", &format!("position={bad}"))).unwrap();
+            assert_eq!(p.position, None, "{bad}");
+        }
+        let (_, p) = playing(&DUMP.replace("169354.629 ", "inf ")).unwrap();
+        assert!(
+            (p.position.unwrap() - 1.576).abs() < 0.01,
+            "no clock: as told"
+        );
+        let (_, p) = playing(&DUMP.replace("speed=1.0", "speed=1e308")).unwrap();
+        assert_eq!(p.position, None, "infinite once moved on");
+    }
 
     fn key() -> Key {
         Key::generate_bits(1024).unwrap()
