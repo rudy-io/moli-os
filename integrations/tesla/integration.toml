@@ -2,9 +2,11 @@
 id = "tesla"
 name = "Voiture Tesla (API officielle)"
 # Official: Tesla's owner API, the same one the car's own app uses. Battery,
-# range, charging, doors and sentry, plus the six orders the tile gives. The
-# account is connected once from the dashboard (PKCE sign-in); the refresh
-# token it rotates is kept in the encrypted secret store.
+# range, charging, doors and sentry, plus the six orders the house gives. The
+# account is connected once from the dashboard (owner-only PKCE sign-in, the
+# pasted callback is state-bound and redacted from the journal); the refresh
+# token it rotates is kept in the encrypted secret store. Sign-out erases the
+# refresh token from the vault and restarts the waiting state.
 brands = ["Tesla"]
 models = ["Model S", "Model 3", "Model X", "Model Y"]
 transport = "https"
