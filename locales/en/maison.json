@@ -244,5 +244,21 @@
   "maison.robot.demarrer": "Start",
   "maison.robot.arreter": "Stop",
   "maison.robot.base": "Back to base",
-  "maison.robot.sonner": "Ring"
+  "maison.robot.sonner": "Ring",
+  "maison.pieces.toutes_pieces": "Overview",
+  "maison.pieces.choisir": "Pick a room",
+  "maison.pieces.confort": "Temperature",
+  "maison.dehors.uv": "UV · {word}",
+  "maison.scene.ajouter_photo": "Add a photo of the room",
+  "maison.scene.changer_photo": "Change the photo",
+  "maison.scene.luminosite": "Room brightness",
+  "maison.scene.tout_eteindre": "Turn all off",
+  "maison.scene.tout_allumer": "Turn all on",
+  "maison.scene.plein_ecran": "Full screen",
+  "maison.scene.envoi": "Sending the photo…",
+  "maison.scene.erreur_photo": "The photo could not be saved",
+  "maison.scene.allumer": "Turn on {name}",
+  "maison.scene.eteindre": "Turn off {name}",
+  "maison.scene.label_photo": "Photo of the room {name}",
+  "maison.scene.label_page": "Photo for the {name} page"
 }

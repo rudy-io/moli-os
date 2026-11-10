@@ -192,6 +192,252 @@
   margin-top: 4px;
 }
 
+/* ───────────── Depth, light and motion ─────────────
+   Everything below is look only: no page changes what it does.
+   - a soft living backdrop (two slow colour clouds behind the glass);
+   - cards of frosted glass that rise in when a page opens, one after the
+     other, and lean towards the finger or the mouse (--rx/--ry, set by
+     the shell from the pointer: a gentle 3D tilt);
+   - buttons that press in, toggles and chips that glow when « on ». */
+
+.maison {
+  --glass: color-mix(in srgb, var(--surface) 78%, transparent);
+  --glass-line: color-mix(in srgb, #fff 70%, transparent);
+  --glass-blur: saturate(150%) blur(10px);
+  --grad-warm: linear-gradient(135deg, #ffbf5c, #f08a3a);
+  --grad-cool: linear-gradient(135deg, #6f95ff, #4b5ff2);
+  --grad-good: linear-gradient(135deg, #45c9a6, #2c9a88);
+  --accent: #ffb547;
+  --accent-2: #f07a3a;
+  --cloud-a: color-mix(in srgb, var(--accent) 55%, transparent);
+  --cloud-b: rgb(120 150 255 / 50%);
+  --cloud-c: rgb(80 210 180 / 36%);
+  --shadow: 0 1px 1px rgb(23 32 56 / 4%), 0 4px 10px -4px rgb(23 32 56 / 8%), 0 18px 40px -18px rgb(23 32 56 / 22%);
+  --shadow-lift: 0 2px 4px rgb(23 32 56 / 6%), 0 14px 28px -10px rgb(23 32 56 / 18%), 0 36px 70px -26px rgb(23 32 56 / 34%);
+  --r-lg: 28px;
+  position: relative;
+  isolation: isolate;
+}
+
+.maison[data-theme='night'] {
+  --glass: color-mix(in srgb, var(--surface) 72%, transparent);
+  --glass-line: color-mix(in srgb, #fff 9%, transparent);
+  --cloud-a: color-mix(in srgb, var(--accent-2) 20%, transparent);
+  --cloud-b: rgb(90 110 255 / 22%);
+  --cloud-c: rgb(40 190 160 / 12%);
+}
+
+/* The backdrop: fixed, behind everything. It settles once when the page
+   opens and then stays still: a cloud that never stops moving under
+   frosted glass keeps a wall tablet's graphics busy all day. */
+.maison::before {
+  content: '';
+  position: fixed;
+  inset: -20vmax;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38vmax 30vmax at 12% 8%, var(--cloud-a), transparent 70%),
+    radial-gradient(42vmax 34vmax at 92% 18%, var(--cloud-b), transparent 70%),
+    radial-gradient(36vmax 30vmax at 60% 100%, var(--cloud-c), transparent 70%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1.5px) 0 0 / 24px 24px;
+  animation: maison-drift 2.4s var(--ease) backwards;
+}
+
+/* A watermark: the page's own icon, very large and faint, in its colour. */
+.maison::after {
+  content: '';
+  position: fixed;
+  right: -6vmax;
+  bottom: -8vmax;
+  width: 48vmax;
+  height: 48vmax;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+  opacity: 0.07;
+  transform: rotate(-12deg);
+}
+
+@keyframes maison-drift {
+  from {
+    opacity: 0;
+    transform: translate3d(3vmax, -2vmax, 0) scale(1.05);
+  }
+}
+
+/* Cards: frosted glass with a thin bright rim and a gentle 3D lean. */
+.maison .card {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+  transition:
+    transform 0.5s var(--ease),
+    box-shadow 0.35s var(--ease);
+  /* backwards, never forwards: once in place a card keeps no transform, so
+     a full-screen sheet opened from inside it still covers the screen. */
+  animation: maison-rise 0.7s var(--ease) backwards;
+}
+
+.maison .card.tilting {
+  transform: perspective(1200px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+  transition: transform 0.12s linear, box-shadow 0.35s var(--ease);
+  box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line);
+}
+
+/* A soft highlight follows the pointer across a leaning card. */
+.maison .card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgb(255 255 255 / 22%), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease);
+}
+
+.maison[data-theme='night'] .card::after {
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgb(255 255 255 / 6%), transparent 45%);
+}
+
+.maison .card.tilting::after {
+  opacity: 1;
+}
+
+/* The page's cards come in one after another. */
+.maison .content .card:nth-child(2) { animation-delay: 0.05s; }
+.maison .content .card:nth-child(3) { animation-delay: 0.1s; }
+.maison .content .card:nth-child(4) { animation-delay: 0.15s; }
+.maison .content .card:nth-child(5) { animation-delay: 0.2s; }
+.maison .content .card:nth-child(6) { animation-delay: 0.25s; }
+.maison .content .card:nth-child(n + 7) { animation-delay: 0.3s; }
+
+@keyframes maison-rise {
+  from {
+    opacity: 0;
+    transform: perspective(1200px) rotateX(10deg) translate3d(0, 26px, -40px);
+  }
+}
+
+/* A page arriving: the title slides in behind its badge, a glossy tile
+   in the page's colours that turns in like a coin and then floats. */
+.maison .page-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  animation: maison-title 0.6s var(--ease) both;
+}
+
+.maison .page-title::before {
+  content: '';
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background:
+    var(--page-icon) center / 26px no-repeat,
+    radial-gradient(circle at 30% 20%, rgb(255 255 255 / 55%), transparent 55%),
+    linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow:
+    0 10px 22px -10px var(--accent-2),
+    inset 0 -3px 0 rgb(0 0 0 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
+  animation:
+    maison-coin 0.9s var(--ease) backwards,
+    maison-float 6s ease-in-out 1s infinite;
+}
+
+@keyframes maison-coin {
+  from {
+    opacity: 0;
+    transform: perspective(300px) rotateY(-120deg) scale(0.6);
+  }
+}
+
+@keyframes maison-float {
+  0%,
+  100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-4deg); }
+}
+
+/* Each card's title icon sits in a small tile of the page's colour. */
+.maison .card-head h2 > svg:first-child {
+  box-sizing: content-box;
+  width: 18px;
+  height: 18px;
+  padding: 7px;
+  border-radius: 11px;
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.maison[data-theme='night'] .card-head h2 > svg:first-child {
+  color: var(--accent);
+}
+
+@keyframes maison-title {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+    filter: blur(6px);
+  }
+}
+
+/* Every button gives under the finger. */
+.maison button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.maison button {
+  transition:
+    transform 0.15s var(--ease),
+    background 0.25s var(--ease),
+    box-shadow 0.25s var(--ease),
+    color 0.25s var(--ease);
+}
+
+.maison .chip.warm {
+  box-shadow: 0 6px 16px -8px var(--warm-glow);
+}
+
+.maison .card-head h2 {
+  font-size: 15.5px;
+  color: var(--ink);
+}
+
+.maison .card-head .more {
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.maison .card-head .more:hover {
+  background: var(--ink);
+  color: var(--bg);
+  transform: rotate(-8deg) scale(1.06);
+}
+
+/* Thin, quiet scrollbars. */
+.maison * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maison::before,
+  .maison .page-title::before {
+    animation: none;
+  }
+
+  .maison .card {
+    transform: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .maison *,
   .maison *::before,

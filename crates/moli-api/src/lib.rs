@@ -32,6 +32,7 @@ mod whereabouts;
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
 mod phones;
+mod photos;
 mod plan;
 mod rest;
 mod session;
@@ -194,6 +195,12 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
             upload(post(plan::upload), plan::MAX_IMAGE, humans),
         )
         .route("/api/plan/images/{name}", get(plan::image))
+        .route("/api/photos", get(photos::list))
+        .route(
+            "/api/photos/{room}",
+            upload(put(photos::put), photos::MAX_PHOTO, humans).delete(photos::remove),
+        )
+        .route("/api/photos/images/{name}", get(photos::image))
         .route("/api/mobile/register", post(phones::register))
         .route("/api/phones/{id}/report", post(phones::report))
         // Under /api/mobile: behind Cloudflare Access like the dashboard

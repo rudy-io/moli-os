@@ -26,6 +26,10 @@ GET    /api/plan                           foyer   oui
 PUT    /api/plan                           humain  oui
 POST   /api/plan/images                    humain  oui
 GET    /api/plan/images/{name}             foyer   oui
+GET    /api/photos                         foyer   oui
+PUT    /api/photos/{room}                  humain  oui
+DELETE /api/photos/{room}                  humain  oui
+GET    /api/photos/images/{name}           foyer   oui
 POST   /api/mobile/register                foyer   oui
 POST   /api/phones/{id}/report             foyer   oui   # a phone's own token lets it through (checked by the route)
 GET    /api/mobile/phones                  foyer   oui

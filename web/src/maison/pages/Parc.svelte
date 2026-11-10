@@ -2,6 +2,7 @@
   import { hub, value, nameOf, hidden, num, watches } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
+  import LitRing from '../ui/LitRing.svelte';
 
   /** What the house watches beyond itself: every device with an `alert`
    *  point (semantic `alert`, true = something is wrong). Nothing is listed
@@ -56,11 +57,14 @@
       <p class="page-sub">{t('systeme.parc.sous_titre')}</p>
     </div>
     {#if items.length}
+      <span class="health">
+      <LitRing on={items.length - wrong} total={items.length} color={wrong ? 'var(--warm)' : 'var(--good)'} label={wrong ? t('systeme.parc.a_voir', { count: wrong }) : t('systeme.parc.tout_va_bien')} />
       {#if wrong}
         <span class="chip warm"><Icon name="warning" size={15} />{t('systeme.parc.a_voir', { count: wrong })}</span>
       {:else}
         <span class="chip good"><Icon name="ok" size={15} />{t('systeme.parc.tout_va_bien')}</span>
       {/if}
+      </span>
     {/if}
   </header>
 
@@ -126,7 +130,35 @@
   }
 
   .card.alert h2 {
-    color: var(--warm);
+    color: var(--warm-ink);
+  }
+
+  /* Something to look at: a warm wash and a beacon that breathes. */
+  .card.alert {
+    background: linear-gradient(160deg, color-mix(in srgb, var(--warm) 16%, var(--glass)), var(--glass) 60%);
+  }
+
+  .card.alert h2 :global(svg) {
+    border-radius: 999px;
+    animation: beacon 2s ease-in-out infinite;
+  }
+
+  @keyframes beacon {
+    50% {
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--warm) 25%, transparent);
+    }
+  }
+
+  .health {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card.alert h2 :global(svg) {
+      animation: none;
+    }
   }
 
   .detail {

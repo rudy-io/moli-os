@@ -49,7 +49,7 @@
 <div class="moli-page" class:started={moli.messages.length}>
   {#if !moli.messages.length}
     <section class="hero">
-      <Orb size={132} state={orbState} level={talk.level} />
+      <div class="halo"><i></i><i></i><i></i><Orb size={132} state={orbState} level={talk.level} /></div>
       <p class="date">{date}</p>
       <h1>{t('moli.page.titre', { greeting: greeting(home.now) })}</h1>
       {#if moli.status && !moli.status.ready}
@@ -180,7 +180,30 @@
     gap: 4px;
     padding: 16px;
     border-radius: var(--r-md);
-    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    background: var(--glass);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--glass-line);
+    animation: skill-in 0.7s var(--ease) backwards;
+    transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
+  }
+
+  .skills li:nth-child(2) {
+    animation-delay: 0.08s;
+  }
+
+  .skills li:nth-child(3) {
+    animation-delay: 0.16s;
+  }
+
+  .skills li:hover {
+    transform: translateY(-4px) rotateX(6deg);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--glass-line);
+  }
+
+  @keyframes skill-in {
+    from {
+      opacity: 0;
+      transform: translateY(18px) scale(0.96);
+    }
   }
 
   .skills span {
@@ -189,9 +212,56 @@
     border-radius: 12px;
     display: grid;
     place-items: center;
-    background: var(--surface);
-    color: var(--ink-2);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 8px 16px -8px var(--accent-2);
     margin-bottom: 6px;
+  }
+
+  /* The orb's halo: three soft rings that ripple out, slowly. */
+  .halo {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+
+  .halo i {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    animation: ripple 4.5s ease-out infinite;
+    pointer-events: none;
+  }
+
+  .halo i:nth-child(2) {
+    animation-delay: 1.5s;
+  }
+
+  .halo i:nth-child(3) {
+    animation-delay: 3s;
+  }
+
+  @keyframes ripple {
+    from {
+      opacity: 0.8;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.7);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .halo i,
+    .skills li {
+      animation: none;
+    }
+
+    .halo i {
+      display: none;
+    }
   }
 
   .skills small {
@@ -212,6 +282,17 @@
   .asleep {
     color: var(--ink-2);
     max-width: 520px;
+  }
+
+  .asleep a {
+    color: var(--accent-2);
+    font-weight: 650;
+    text-decoration: none;
+    border-bottom: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  .asleep a:hover {
+    border-bottom-color: var(--accent-2);
   }
 
   code {
