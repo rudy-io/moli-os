@@ -53,6 +53,13 @@ pub struct Config {
     /// (D12). Moli runs them as instance `lumieres`.
     #[serde(default, rename = "fixture")]
     pub fixtures: Vec<moli_lights::Fixture>,
+    /// Scenes: lights of several rooms set to a look in one gesture. Moli
+    /// runs them (and the rhythm) as instance `scenes`.
+    #[serde(default, rename = "scene")]
+    pub scenes: Vec<moli_scenes::Scene>,
+    /// The rhythm of the day: the white and the level lights take by the hour.
+    #[serde(default)]
+    pub rhythm: Option<moli_scenes::Rhythm>,
     /// The home's own assistant (absent: no conversation in the dashboard).
     /// Its API key: `moli-os secrets set assistant api_key`.
     #[serde(default)]
@@ -228,6 +235,7 @@ pub(crate) fn reserved_instance(id: &str) -> bool {
         moli_energy::points::INSTANCE,
         moli_energy::load::INSTANCE,
         moli_lights::INSTANCE,
+        moli_scenes::INSTANCE,
         moli_api::PEOPLE_INSTANCE,
     ]
     .contains(&id)
@@ -391,6 +399,8 @@ impl Config {
                 .map_err(|e| anyhow::anyhow!("[energy] {e}"))?;
         }
         moli_lights::check(&self.fixtures).map_err(|e| anyhow::anyhow!("[[fixture]] {e}"))?;
+        moli_scenes::check(&self.scenes, self.rhythm.as_ref())
+            .map_err(|e| anyhow::anyhow!("[[scene]] {e}"))?;
         Ok(())
     }
 }

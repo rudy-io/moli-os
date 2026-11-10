@@ -80,9 +80,16 @@ telles que les appareils les nomment).
   "safety":  ["z2m:…"],
   "hidden":  ["tuya:…", "compteur:…"],
   "quiet":   ["tuya:…"],
-  "outlets": { "tuya:…": { "switch_1": "Prise 1", "switch_2": "Prise 2", "switch_3": "Prise 3" } }
+  "outlets": { "tuya:…": { "switch_1": "Prise 1", "switch_2": "Prise 2", "switch_3": "Prise 3" } },
+  "scenes":  [{ "id": "soiree", "name": "Soirée", "icon": "fire", "colors": ["#ff7a00", "#ffb060"] }]
 }
 ```
+
+- `scenes` : les scènes de la maison (`[[scene]]` dans `moli.toml`, voir [pilotes.md](pilotes.md))
+  montrées sur l'Accueil, sous les lumières, dans cet ordre : nom, icône et couleurs de la pastille.
+  Sans cette liste, toutes les scènes déclarées s'affichent sous leur identifiant. Un appui met la
+  scène ; celle en place est entourée. Avec un `[rhythm]`, un bouton « Rythme de la journée » dit si
+  les lumières suivent l'heure.
 
 - `rooms[].aliases` : les noms que HA, Hue ou Tuya donnent à la même pièce (le dashboard et
   Moli les ramènent au nom canonique).

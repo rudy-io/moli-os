@@ -161,6 +161,49 @@ du firmware ne sont pas des opérations de la Local API.
 Configuration, garde des groupes, limites des réponses, commandes et restrictions :
 [guide Airzone](../../integrations/airzone/README.md).
 
+## Scènes et rythme de la journée (`crates/moli-scenes`)
+
+Pas un pilote à déclarer : dès que `moli.toml` a un `[[scene]]` ou un `[rhythm]`, Moli lance
+l'instance `scenes` et publie **un** appareil, `scenes:maison`.
+
+```toml
+[[scene]]
+id = "soiree"          # stable : c'est la valeur de scenes:maison/scene
+name = "Soirée"
+cycle = true           # fait partie de la ronde du bouton (toutes, si aucune ne le dit)
+lights = [
+  { id = "lumieres:suspensions", off = true },
+  { id = "z2m:0x…", color = "#ffb060", brightness = 22, effect = "flame" },
+  { id = "hue:…", white = 2400, brightness = 30 },
+]
+
+[rhythm]
+lights = ["lumieres:suspensions", "hue:…"]
+# curve = [{ at = "07:00", white = 2700, brightness = 60 }, …]   # facultatif
+```
+
+- **Points** : `scene` (énumération : `none` et les identifiants ; l'écrire met la scène),
+  `order` (`next` / `previous`, en écriture seule : la ronde depuis un bouton mural ou un
+  automatisme), `rhythm` (interrupteur, seulement avec un `[rhythm]`). Tout passe par le hub :
+  page, automatisme (`set`), agent, assistant.
+- **Une scène** dit, lumière par lumière : éteinte (`off`), ou une couleur (`color`, « #rrggbb »),
+  un blanc (`white`, kelvins : pris par les lampes sans couleur, ou quand aucune couleur n'est
+  donnée), une luminosité (`brightness`, %), une animation (`effect`, jouée là où la lampe l'a ;
+  pour un luminaire, par ses ampoules). Ce qui n'est pas dit reste tel quel ; une lumière que la
+  scène ne nomme pas n'est pas touchée. Un simple interrupteur est allumé ou éteint. Les ordres
+  partent l'un après l'autre, au nom de la maison (comme ceux d'un luminaire) ; choisir une autre
+  scène interrompt celle qui s'installe.
+- **Fin d'une scène** : `scene` revient à `none` quand toutes ses lumières allumées sont éteintes
+  (jamais dans les 30 premières secondes), ou quand on écrit `none` (les lumières ne bougent pas).
+- **Rythme de la journée** : une lumière de `lights` qu'on allume, sans scène en place, prend le
+  blanc et le niveau de l'heure (heure de la maison), puis les suit toutes les dix minutes. La
+  courbe par défaut : 05:00 2200 K 30 %, 07:00 2700 K 60 %, 09:00 4300 K 100 %, 16:00 4000 K 100 %,
+  19:00 3000 K 80 %, 21:30 2400 K 50 %, 23:30 2200 K 30 %, en glissant de l'une à l'autre. Une
+  lumière qu'une personne a réglée (niveau à plus de 4 points de celui donné, ou une couleur)
+  n'est plus suivie jusqu'à sa prochaine extinction. Le rythme n'allume jamais rien.
+- Les identifiants de scène `none`, `next` et `previous` sont réservés. `moli-os check-config`
+  refuse une scène mal écrite (lumière nommée deux fois, `off` avec un réglage, couleur invalide…).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.

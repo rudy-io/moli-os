@@ -1,0 +1,24 @@
+[package]
+name = "moli-scenes"
+description = "Moli OS scenes: several lights across rooms set to a look in one gesture, and whites that follow the time of day."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-ambiance.workspace = true
+moli-i18n.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true
