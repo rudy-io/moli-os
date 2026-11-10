@@ -400,10 +400,9 @@ fn speak_and_tell_the_time(config: &Config) {
     }
 }
 
-async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
-    // Before anything opens the data directory.
-    demo_fresh(&config)?;
-    speak_and_tell_the_time(&config);
+/// The hub over the data directory: labels, state, journal, addresses, the
+/// vault when a master key is given, the guard and the mirror switch.
+fn open_hub(config: &Config) -> anyhow::Result<Hub> {
     // The master key comes from the environment (a secrets manager), or a
     // new house's key file.
     let secrets = master_key(&config.server.data_dir, true)?
@@ -411,7 +410,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     if secrets.is_none() {
         tracing::warn!("no master key: drivers cannot persist pairing credentials");
     }
-    let hub = Hub::new(HubOptions {
+    Hub::new(HubOptions {
         labels_path: Some(config.server.data_dir.join("labels.toml")),
         state_path: Some(config.server.data_dir.join("state.json")),
         journal_path: Some(config.server.data_dir.join("journal.jsonl")),
@@ -421,7 +420,14 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         mirror: config.server.mirror,
         ..HubOptions::default()
     })
-    .context("cannot open the data directory (labels, journal, secrets)")?;
+    .context("cannot open the data directory (labels, journal, secrets)")
+}
+
+async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
+    // Before anything opens the data directory.
+    demo_fresh(&config)?;
+    speak_and_tell_the_time(&config);
+    let hub = open_hub(&config)?;
     let cancel = CancellationToken::new();
     let airzone_setup = managed_airzone::Manager::new(hub.clone(), &config, cancel.clone())?;
 
