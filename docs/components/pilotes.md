@@ -877,16 +877,28 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   (`/oauth2/v3/token`, OAuth PKCE avec l'application personnelle de la maison ; l'échange
   de code porte l'`audience` de la Fleet API régionale). Avant tout appel, l'application
   doit être enregistrée dans la région (`POST /api/1/partner_accounts` avec un jeton
-  `client_credentials` : idempotent, le pilote le fait à chaque connexion). L'état est relu
-  toutes les `poll_charging_s` s (60) en recharge ou branchée, `poll_idle_s` (180) au
-  repos, `poll_asleep_s` (600) endormie ; une commande a 4,5 s pour arriver (l'horloge
-  du cœur donne 5 s). Si Tesla rate-limit (429), Moli respecte le `Retry-After` demandé.
-- **Connexion** : une fois, depuis le tableau de bord (pilote « Compte Tesla ») : le
-  pilote affiche l'adresse de la page de connexion de Tesla ; on s'y connecte, puis on
-  colle l'adresse de la dernière page (elle porte le `code=`). C'est un geste de la
-  personne : un assistant peut lire l'URL (point `sign_in_url`) mais son écriture sur
-  `sign_in` (sémantique contrôle) reste en attente jusqu'à validation par un humain.
-  Le jeton de
+  `client_credentials` : idempotent, le pilote le fait à chaque connexion). La lecture
+  complète (`vehicle_data`) n'est demandée que pendant la recharge effective
+  (`poll_charging_s`, 60 s) ; une voiture branchée sans charge est au repos
+  (`poll_idle_s`, 180 s) et endormie (`poll_asleep_s`, 900 s) : seules les sondes bon
+  marché `/vehicles` (état réveil/sommeil) continuent à ces périodes. Un 408 par
+  véhicule ne casse pas la session : la voiture est marquée endormie, les autres sont
+  servies. Les hôtes `api_host`/`auth_host` sont une liste fermée (adresses officielles
+  Tesla), refusée au chargement : un fichier copié ne peut pas rediriger le secret du
+  client et le jeton de rafraîchissement vers un tiers. Une commande a 4,5 s pour
+  arriver (l'horloge du cœur donne 5 s). Si Tesla rate-limit (429), Moli respecte le
+  `Retry-After` demandé.
+- **Connexion** : une fois, depuis le tableau de bord, réservée au propriétaire
+  (routes `humain` : origine UI + rôle propriétaire + code frais dans la
+  demande) : le pilote affiche l'adresse de la page de connexion de Tesla ; on
+  s'y connecte, puis on colle l'adresse de la dernière page (elle porte le
+  `code=` et le `state` qui la lie à la page affichée — un code d'une page
+  ancienne est refusé). Les points `sign_in_url`/`sign_in`/`sign_out` sont
+  internes (ni lecture ni écriture par la maison ni les agents) : la valeur
+  collée est délivrée au pilote en commande masquée, jamais journalisée ni
+  proposée en approbation. La déconnexion (action « Déconnexion », code
+  requis) efface le jeton de rafraîchissement du coffre et ramène le pilote à
+  l'attente avec une page fraîche. Le jeton de
   rafraîchissement reçu est à usage unique et tourne à chaque échange : le dernier vit au
   coffre chiffré (`refresh_token`), jamais dans un fichier ; il expire après trois mois
   (reconnecter le compte, pareille opération). Le client public partagé de Tesla

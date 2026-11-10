@@ -18,10 +18,11 @@ coût selon les conditions de Tesla : à vérifier avant de créer l'application
   contiennent pas `vehicle_location` — Tesla ne renvoie donc pas la position.
 - Pas de démarrage à distance : les commandes portent sur la recharge, le verrou,
   la vigie — pas sur la marche du véhicule.
-- La connexion du compte est un geste de la personne, depuis le tableau de bord.
-  L'assistant peut lire l'adresse de la page de connexion (point `sign_in_url`) et la
-  donner, mais ne peut pas mener le flux tout seul : ce qu'il tente d'écrire sur le
-  point `sign_in` reste en attente jusqu'à ce qu'un humain le valide.
+- La connexion du compte est un geste du propriétaire, depuis le tableau de bord :
+  l'adresse de la page de connexion n'est servie que par la route réservée au
+  propriétaire (session + code de la maison), et la valeur collée ne passe jamais
+  par le journal ni la file d'approbation. L'assistant ne peut ni lire l'adresse
+  ni la transmettre : les points `sign_in_url` et `sign_in` sont internes.
 - Le jeton de rafraîchissement ne vit qu'au coffre chiffré : jamais dans un fichier,
   un point ou le journal.
 - Le pilote ne réveille jamais la voiture lui-même : il lit quand elle répond, aux
@@ -30,13 +31,17 @@ coût selon les conditions de Tesla : à vérifier avant de créer l'application
 
 ## Connexion
 
-Le compte se connecte une fois, depuis le tableau de bord (Système, pilote tesla) : le
-pilote affiche l'adresse de la page de connexion de Tesla ; on s'y connecte avec son
-compte Tesla, et la page finit sur l'URI de redirection enregistrée sur l'application
-(l'option `redirect_uri` du pilote) avec le `code=` dans l'adresse — souvent une page
-d'erreur dans le navigateur, c'est normal : c'est l'adresse qui compte. On copie cette
-dernière adresse et on la colle dans le point « Adresse de la dernière page » du
-pilote. Tout se passe chez Tesla, Moli ne voit jamais le mot de passe.
+Le compte se connecte une fois, depuis le tableau de bord (Système, pilote tesla),
+par le propriétaire seul (session + code de la maison) : le pilote affiche
+l'adresse de la page de connexion de Tesla ; on s'y connecte avec son compte
+Tesla, et la page finit sur l'URI de redirection enregistrée sur l'application
+(l'option `redirect_uri` du pilote) avec le `code=` dans l'adresse — souvent une
+page d'erreur dans le navigateur, c'est normal : c'est l'adresse qui compte. On
+copie cette dernière adresse et on la colle dans le formulaire Tesla du
+tableau de bord. L'adresse porte aussi un paramètre `state` qui la lie à la
+page affichée : un code d'une page plus ancienne ou d'un autre navigateur est
+refusé. Tout se passe chez Tesla, Moli ne voit jamais le mot de passe, et le
+code collé ne passe jamais par le journal ni la file d'approbation.
 
 En échange, Tesla donne un jeton de rafraîchissement qui vit au coffre chiffré
 (`refresh_token`) : il est à usage unique et tourne à chaque échange — Moli en garde
@@ -60,6 +65,15 @@ une clé publique EC P-256 (PEM) à
 clé accessible, Tesla refuse l'activation (424).
 Sans `client_id`, le pilote se gare et invite à les déposer depuis le tableau de bord.
 
+## Déconnexion
+
+Le propriétaire déconnecte le compte à tout moment, depuis le même endroit que
+la connexion (action « Déconnexion », code de la maison requis). Moli efface
+alors le jeton de rafraîchissement du coffre chiffré, et le pilote revient à
+l'état d'attente : le statut du compte repasse à « à connecter » et une page de
+connexion fraîche s'affiche. C'est une action normale, pas une erreur : la
+reprise est une nouvelle connexion, sans attente supplémentaire.
+
 ## Configuration
 
 ```toml
@@ -69,18 +83,27 @@ kind = "tesla"
 
 [driver.options]
 api_host = "fleet-api.prd.eu.vn.cloud.tesla.com" # l'API, défaut Europe ; Amérique du Nord / Asie : fleet-api.prd.na.vn.cloud.tesla.com, Chine : api.tesla.cn
-auth_host = "auth.tesla.com"                     # la connexion et le point de jeton (défaut)
+auth_host = "auth.tesla.com"                     # la connexion et le point de jeton (défaut) ; Chine : auth.tesla.cn
 redirect_uri = "https://example.com/moli-tesla"  # OBLIGATOIRE : l'URI de redirection enregistrée sur l'application
 partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
-poll_charging_s = 60                             # interrogation pendant la recharge ou branchée
+poll_charging_s = 60                             # lecture complète pendant la recharge
 poll_idle_s = 180                                # éveillée et au repos
-poll_asleep_s = 600                              # endormie
+poll_asleep_s = 900                              # endormie
 ```
+
+Les hôtes sont une **liste fermée** : tout `api_host` ou `auth_host` qui n'est pas
+une adresse officielle de Tesla est refusé au chargement de la configuration —
+un `moli.toml` copié ne peut pas rediriger le secret du client et le jeton de
+rafraîchissement vers un tiers.
 
 ## Ce que Moli voit
 
 Un appareil par véhicule du compte, identifié par son numéro (`tesla:<id>`) ; un
-appareil « Compte Tesla » porte l'état de la connexion.
+appareil « Compte Tesla » porte l'état de la connexion. Le point `status` du
+compte prend ces valeurs : `sign_in` (à connecter), `app_required` (identifiants
+de l'application à déposer au coffre), `connecting`, `connected`, `billing_limit`
+(plafond de facturation Tesla atteint), `token_not_kept` (le jeton tournant n'a
+pas pu être conservé : reconnecter le compte) et `error`.
 
 | Point | Sens |
 |---|---|
@@ -111,12 +134,24 @@ Les températures suivent les réglages de la voiture (les °F sont convertis en
 - Tesla refuse parfois une commande sans autre explication (les voitures récentes
   exigent des commandes signées par l'appli officielle pour certains actes) : le refus
   arrive dans le journal, la maison ne réessaie pas seule.
-- L'état est relu avec les périodes ci-dessus (60 s en recharge, 3 minutes au repos,
-  10 minutes endormie) : l'API compte les requêtes, Moli ne dépasse pas 60 par minute.
-  Si Tesla demande un temps d'attente (429, `Retry-After`), Moli le respecte tout entier
+- L'état est relu avec les périodes ci-dessus : la lecture complète
+  (`vehicle_data`) n'est demandée que **pendant la recharge** (60 s) ; au repos
+  (3 min) ou endormie (15 min), seule la sonde bon marché `/vehicles`
+  (réveil/sommeil) est interrogée. Une voiture branchée mais qui ne charge pas
+  est donc au repos. L'API compte les requêtes, Moli ne dépasse pas 60 par
+  minute. Si une voiture s'endort en cours de lecture (408), Moli la marque
+  endormie sans rien changer à la session ni aux autres voitures. Si Tesla
+  demande un temps d'attente (429, `Retry-After`), Moli le respecte tout entier
   avant de reprendre.
-- **Vérifié sur du vrai matériel** (Model Y, depuis octobre 2026) : connexion du compte
-  depuis le tableau de bord, suivi batterie/autonomie/recharge/portes/vigie/températures
-  et les six commandes données par la tuile et les automatismes. Le cas où le compte est
-  désactivé par sa limite de facturation (403 `EXCEEDED_LIMIT`) a été rencontré pour de
-  vrai : le pilote se gare et reprend seul quand le compte est réactivé.
+- **Vérifié sur du vrai matériel** (Model Y, depuis octobre 2026) : connexion du
+  compte depuis le tableau de bord, suivi batterie/autonomie/recharge/portes/
+  vigie/températures, et les commandes démarrer la charge, stopper la charge et
+  verrouiller.
+- **Exposées mais pas vérifiées sur la voiture** : déverrouiller et le mode
+  vigie on/off. Ces commandes sont exposées et envoyées à Tesla comme les
+  autres, mais leur effet sur le véhicule n'a pas été confirmé (les voitures
+  récentes exigent parfois des commandes signées par l'appli officielle) : à
+  tester avec prudence avant de s'y fier.
+- Le cas où le compte est désactivé par sa limite de facturation (403
+  `EXCEEDED_LIMIT`) a été rencontré pour de vrai : le pilote se gare et reprend
+  seul quand le compte est réactivé.

@@ -156,10 +156,11 @@ base_topic = "zigbee2mqtt"
 # host = "192.168.0.x"
 
 # La voiture (son API officielle) : batterie, autonomie, recharge, puissance,
-# portes, mode vigie et les six commandes de la tuile. Le compte se connecte
-# une fois depuis le tableau de bord (Système, pilote tesla : l'adresse à
-# ouvrir s'y affiche, la dernière adresse s'y colle) ; le jeton de
-# rafraîchissement vit au coffre chiffré, jamais dans un fichier.
+# portes, mode vigie et les six commandes (charge, verrou, vigie). Le compte
+# se connecte une fois depuis le tableau de bord, réservé au propriétaire
+# (formulaire Tesla, code de la maison requis : l'adresse affichée s'y colle) ;
+# le jeton de rafraîchissement vit au coffre chiffré, jamais dans un fichier ;
+# la déconnexion l'efface du coffre.
 #
 # Le client public partagé de Tesla n'existe plus (2026) : une application
 # personnelle est requise. Crée-la sur developer.tesla.com (permissions
@@ -177,9 +178,9 @@ base_topic = "zigbee2mqtt"
 # auth_host = "auth.tesla.com"                     # la connexion et le point de jeton
 # redirect_uri = "https://example.com/moli-tesla"  # l'URI enregistrée sur l'application (obligatoire, identique)
 # partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
-# poll_charging_s = 60                             # pendant la recharge ou branchée
-# poll_idle_s = 180                                # éveillée et au repos
-# poll_asleep_s = 600                              # endormie
+# poll_charging_s = 60                             # lecture complète pendant la recharge
+# poll_idle_s = 180                                # éveillée et au repos (branchée sans charge y compris)
+# poll_asleep_s = 900                              # endormie
 
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]

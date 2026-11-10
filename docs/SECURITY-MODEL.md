@@ -78,6 +78,27 @@ tests de modes dans `crates/moli-os/src/managed_airzone/tests/modes.rs` ;
 `legacy_restore_clears_newer_airzone_registry_but_preserves_unrelated_omissions` dans
 `crates/moli-os/src/backup.rs`.
 
+### Tesla : connecter le compte voiture
+
+Les routes du compte Tesla (`GET /api/integrations/tesla/{instance}`,
+`POST …/sign-in`, `POST …/sign-out`) sont classées `humain non` : une personne
+authentifiée depuis le tableau de bord, et le serveur vérifie en plus le rôle
+propriétaire. Pour coller l'adresse de fin de connexion (ou pour se déconnecter),
+le code de la maison doit aussi figurer dans la demande, avec le même compteur
+d'essais que la connexion. L'adresse collée porte un `state` que le pilote doit
+reconnaître : un code d'une page plus ancienne ou d'un autre navigateur est
+refusé. Le code ne parvient ni au journal ni à la file d'approbation (la commande
+est masquée, valeur journalisée en `null`), et les points `sign_in_url` /
+`sign_in` / `sign_out` sont internes : ni la maison ni les agents ne peuvent lire
+l'URL ni compléter la connexion. La déconnexion efface le jeton de rafraîchissement
+du coffre chiffré, et les hôtes `api_host` / `auth_host` sont bornés à la liste
+fermée des adresses officielles Tesla, refusée au chargement (I5) : un fichier
+copié ne peut pas rediriger le secret du client vers un tiers.
+
+Preuves : les tests `tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_session`
+et `tesla_setup_denies_non_owners_even_with_the_code` dans `crates/moli-api/tests/http.rs` ;
+`an_unknown_host_is_refused_at_load` dans `crates/moli-tesla/src/lib.rs`.
+
 ## 5. Règles de conception
 
 Ce que les PR suivantes respectent, décidé dans #136 :
