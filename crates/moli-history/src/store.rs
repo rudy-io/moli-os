@@ -164,7 +164,7 @@ impl Store {
             Ok(conn)
         };
         let reader = read_only()?;
-        let agents = read_only()?;
+        let mut agents = read_only()?;
         agents.pragma_update(None, "query_only", true)?;
         // Agents read data; they never attach files, change settings, or
         // hold transactions open (a pinned read snapshot would stall the WAL).
@@ -339,7 +339,7 @@ impl Store {
 
     /// Runs an agent's query: one read-only statement, bounded in time and rows.
     pub fn query_sql(&self, sql: &str, max_rows: usize) -> Result<SqlResult, HistoryError> {
-        let conn = lock(&self.agents);
+        let mut conn = lock(&self.agents);
         let started = Instant::now();
         conn.progress_handler(10_000, Some(move || started.elapsed() > SQL_BUDGET))?;
         let result = run_sql(&conn, sql, max_rows);
@@ -364,11 +364,7 @@ fn run_sql(conn: &Connection, sql: &str, max_rows: usize) -> Result<SqlResult, H
     if !stmt.readonly() {
         return Err(HistoryError::NotReadOnly);
     }
-    let columns: Vec<String> = stmt
-        .column_names()
-        .iter()
-        .map(|c| (*c).to_owned())
-        .collect();
+    let columns: Vec<String> = stmt.column_names().map(str::to_owned).collect();
     let width = columns.len();
     let mut rows = Vec::new();
     let mut truncated = false;

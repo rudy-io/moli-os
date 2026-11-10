@@ -126,7 +126,10 @@ struct ListDevicesArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct DeviceArgs {
     /// Device id, e.g. `z2m:0x00124b0000000001`.
-    device: String,
+    // `device_id`, not `device`: some MCP gateways keep a `device` argument
+    // for themselves and drop it (#161). The old name still reads.
+    #[serde(alias = "device")]
+    device_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -143,7 +146,8 @@ struct CommandArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct LabelArgs {
     /// Device id.
-    device: String,
+    #[serde(alias = "device")]
+    device_id: String,
     /// Human name. Empty string clears it.
     #[serde(default)]
     name: Option<String>,
@@ -229,7 +233,7 @@ impl MoliMcp {
         &self,
         Parameters(args): Parameters<DeviceArgs>,
     ) -> Result<CallToolResult, McpError> {
-        match self.hub.device(&DeviceId::from(args.device)) {
+        match self.hub.device(&DeviceId::from(args.device_id)) {
             Some(view) => ok(&serde_json::to_value(view).unwrap_or_default()),
             None => Ok(fail("unknown device")),
         }
@@ -242,7 +246,12 @@ impl MoliMcp {
         &self,
         Parameters(args): Parameters<DeviceArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let id = DeviceId::from(args.device);
+        let id = DeviceId::from(args.device_id);
+        // An unknown id has no room: say it is unknown, not « protected »
+        // (with `protect_unassigned`, a device without a room is).
+        if self.hub.describe(&id).is_none() {
+            return Ok(fail("unknown device"));
+        }
         if let Some(room) = self.hub.protected_room(&id) {
             return Ok(fail(&format!(
                 "protected room « {room} »: images are for humans in the dashboard only"
@@ -309,7 +318,7 @@ impl MoliMcp {
         if self.demo {
             return Ok(fail(&moli_i18n::tr!("serveur.demo.reserve")));
         }
-        let device = DeviceId::from(args.device);
+        let device = DeviceId::from(args.device_id);
         let patch = LabelPatch {
             name: args.name,
             room: args.room,
@@ -635,6 +644,19 @@ fn base64(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_device_reads_as_device_id_or_device() {
+        for args in [
+            serde_json::json!({ "device_id": "z2m:lamp" }),
+            serde_json::json!({ "device": "z2m:lamp" }),
+        ] {
+            let read: super::DeviceArgs = serde_json::from_value(args.clone()).unwrap();
+            assert_eq!(read.device_id, "z2m:lamp", "{args}");
+            let label: super::LabelArgs = serde_json::from_value(args.clone()).unwrap();
+            assert_eq!(label.device_id, "z2m:lamp", "{args}");
+        }
+    }
+
     #[test]
     fn base64_matches_the_standard() {
         assert_eq!(super::base64(b""), "");

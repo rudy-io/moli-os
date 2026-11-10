@@ -1,0 +1,37 @@
+[integration]
+id = "lifx"
+name = "LIFX (ampoules Wi-Fi, protocole LAN)"
+brands = ["LIFX"]
+# The models seen so far (in the reference home).
+models = ["LIFX Mini W", "LIFX White"]
+# UDP datagrams to each bulb, and a broadcast for discovery.
+transport = "native"
+driver = "lifx"
+crate = "moli-lifx"
+
+# Real answers (LIFX White, product 88, and LIFX Mini W, product 51,
+# firmware 3.90), anonymised by lifx-capture: payloads only (no header, so
+# no serial), name "Lampe", group "Pièce". Replayed through the driver by
+# moli-lifx's tests.
+[[fixture]]
+file = "fixtures/lifx-white.json"
+
+[[fixture]]
+file = "fixtures/lifx-mini-w.json"
+
+[discovery]
+# The driver broadcasts LIFX's own GetService; bulbs also announce
+# _lifx._udp over mDNS (not used by the driver).
+mdns = ["_lifx._udp"]
+ssdp = []
+ports = [56700]
+
+[needs]
+secrets = []
+vars = []
+# All optional: hosts (fixed addresses), discovery, poll_secs, transition_ms.
+options = []
+
+[origin]
+reused = "aucun code repris. Protocole : documentation publique du protocole LAN de LIFX (lan.developer.lifx.com). Table des produits (src/products.rs) : uniquement les faits utiles (identifiant, nom, couleur oui/non, plage en kelvins et ses évolutions selon le micrologiciel), relevés dans la liste publique des produits LIFX, sans copier son fichier. Règle des 3 relevés manqués : comme l'intégration lifx de Home Assistant (comportement, pas de code). Idées reprises de gladys-lifx (guim31/gladys-lifx, Apache-2.0), réécrites en Rust : réponse acceptée selon l'adresse et la séquence, renvois espacés dans un délai total, modèle redemandé seulement si le micrologiciel change, StateUnhandled, pas de relevé pendant un fondu, LightSetWaveformOptional pour ne changer qu'une composante, ampoule éteinte qui prend la valeur puis s'allume en fondu"
+author = "agent"

@@ -155,6 +155,12 @@ pub enum Semantic {
     Position,
     Occupancy,
     WaterLeak,
+    /// How wet a plant's soil is, in %. A device with one is a plant sensor:
+    /// its temperature and humidity are the pot's, never the room's.
+    SoilMoisture,
+    /// A plant asks for water (binary, true: the soil is too dry). A plant's
+    /// thirst, never a security alert like `WaterLeak`.
+    SoilDry,
     Smoke,
     Tamper,
     Config,
@@ -204,6 +210,8 @@ impl Semantic {
             "contact" => Self::Contact,
             "occupancy" | "presence" | "motion" => Self::Occupancy,
             "water_leak" => Self::WaterLeak,
+            "soil_moisture" => Self::SoilMoisture,
+            "soil_dry" => Self::SoilDry,
             "smoke" => Self::Smoke,
             "tamper" => Self::Tamper,
             _ => Self::Other,
@@ -336,6 +344,14 @@ mod tests {
             "a position is never deduced to be a shutter's opening"
         );
         assert_eq!(Semantic::infer("whatever", None), Semantic::Other);
+        assert_eq!(
+            Semantic::infer("soil_moisture", Some(&Unit::Percent)),
+            Semantic::SoilMoisture
+        );
+        assert_eq!(Semantic::infer("soil_dry", None), Semantic::SoilDry);
+        // A bare `dry` says nothing alone (a fan's mode, a relay's contact):
+        // a driver that knows the device is a plant sensor says so.
+        assert_eq!(Semantic::infer("dry", None), Semantic::Other);
     }
 
     #[test]

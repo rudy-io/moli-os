@@ -285,6 +285,29 @@ async fn concurrent_flushes_are_serialized_and_definitions_stay_legacy_compatibl
 }
 
 #[tokio::test]
+async fn unregister_disables_commands_and_reregistration_keeps_newer_live_samples() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.persist_state().await.unwrap();
+    hub.set_state(&id(), "on", Value::Bool(false));
+    let latest = hub.state(&PointId::new(&id(), "on")).unwrap();
+    hub.unregister_driver(&instance());
+    assert!(hub.snapshot().drivers.is_empty());
+    let retired = hub.device(&id()).unwrap();
+    assert_eq!(retired.online, Some(false));
+    assert!(!retired.device.points[0].access.write);
+    let _next_commands = register(&hub);
+    assert_eq!(hub.state(&PointId::new(&id(), "on")).unwrap(), latest);
+    hub.set_availability(&id(), true);
+    assert!(!hub.device(&id()).unwrap().device.points[0].access.write);
+    hub.upsert_device(definition());
+    assert!(hub.device(&id()).unwrap().device.points[0].access.write);
+}
+
+#[tokio::test]
 async fn malformed_identity_and_oversized_sidecars_are_discarded() {
     let f = Fixture::new();
     save_fixture(&f).await;
@@ -301,6 +324,25 @@ async fn malformed_identity_and_oversized_sidecars_are_discarded() {
     let oversized = f.hub();
     let _oversized_commands = register(&oversized);
     assert!(oversized.device(&id()).is_none());
+}
+
+#[tokio::test]
+async fn reregistered_instance_does_not_expose_another_integration_inventory() {
+    let f = Fixture::new();
+    let hub = f.hub();
+    let _commands = register(&hub);
+    hub.upsert_device(definition());
+    hub.set_state(&id(), "on", Value::Bool(true));
+    hub.unregister_driver(&instance());
+    let _other = hub.register_driver(&instance(), "other", "other-package".into());
+    assert!(hub.device(&id()).is_none());
+    assert!(hub.known_device_ids_of(&instance()).is_empty());
+    hub.unregister_driver(&instance());
+    let _original = register(&hub);
+    assert_eq!(
+        hub.device(&id()).unwrap().state["on"].value,
+        Value::Bool(true)
+    );
 }
 
 #[derive(Debug)]

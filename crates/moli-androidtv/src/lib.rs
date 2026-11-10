@@ -7,9 +7,13 @@
 //!   playing or paused) and play / pause.
 //!
 //! Each runs one connection until it fails; the driver reconnects.
+//!
+//! - [`tv`]: one TV through both, kept connected: what any Android TV
+//!   driver needs (a maker's, like Philips, runs it beside its own API).
 
 pub mod cast;
 pub mod remote;
+pub mod tv;
 
 /// The protobuf codec, shared with the other protocols.
 pub use moli_net::proto;

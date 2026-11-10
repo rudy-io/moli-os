@@ -37,6 +37,9 @@ data_dir = {data_dir}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Startup provenance: only accepted registry entries may become managed.
+    #[serde(skip)]
+    pub(crate) managed_airzone: Option<crate::managed_airzone::Registry>,
     #[serde(default)]
     pub server: Server,
     #[serde(default, rename = "driver")]
@@ -225,6 +228,20 @@ fn empty_table() -> toml::Value {
     toml::Value::Table(toml::Table::new())
 }
 
+/// Names owned by built-in services, never available to a configured driver.
+pub(crate) fn reserved_instance(id: &str) -> bool {
+    [
+        moli_runtime::CORE_NAMESPACE,
+        "assistant",
+        "automations",
+        moli_energy::points::INSTANCE,
+        moli_energy::load::INSTANCE,
+        moli_lights::INSTANCE,
+        moli_api::PEOPLE_INSTANCE,
+    ]
+    .contains(&id)
+}
+
 impl Config {
     /// A new house has no configuration yet: a minimal one (no driver, data
     /// next to it) is written there and used. When it cannot be written, the
@@ -263,17 +280,27 @@ impl Config {
                 );
             }
         }
-        let config = Self::parse(&text).context("starter configuration")?;
+        let mut config = Self::parse(&text).context("starter configuration")?;
+        crate::managed_airzone::load_into(&mut config)?;
         config.check()?;
         Ok(config)
     }
 
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
+    /// Backup/restore must remain usable when the managed registry is damaged.
+    /// Load the hand-written configuration without reading that registry.
+    pub fn load_for_recovery(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read {}", path.display()))?;
         let mut config =
             Self::parse(&text).with_context(|| format!("invalid {}", path.display()))?;
         config.beside(path.parent().unwrap_or(Path::new(".")));
+        config.check()?;
+        Ok(config)
+    }
+
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let mut config = Self::load_for_recovery(path)?;
+        crate::managed_airzone::load_into(&mut config)?;
         config.check()?;
         Ok(config)
     }
@@ -356,17 +383,7 @@ impl Config {
             }
             // `assistant` holds the assistant's key in the secret store;
             // `energie` is the « Énergie » device Moli runs itself.
-            if [
-                moli_runtime::CORE_NAMESPACE,
-                "assistant",
-                "automations",
-                moli_energy::points::INSTANCE,
-                moli_energy::load::INSTANCE,
-                moli_lights::INSTANCE,
-                moli_api::PEOPLE_INSTANCE,
-            ]
-            .contains(&driver.id.as_str())
-            {
+            if reserved_instance(&driver.id) {
                 bail!("driver id {:?} is reserved", driver.id);
             }
             if !seen.insert(&driver.id) {

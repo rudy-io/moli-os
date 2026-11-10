@@ -103,7 +103,9 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
   autorité est remplacé avant le miroir legacy : si ce dernier échoue, la suppression
   déjà enregistrée reste effective ; si l'écriture faisant autorité échoue, le précédent
   snapshot cohérent reste en place.
-  L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne.
+  L'arrêt du superviseur vide la file de commandes et marque ses appareils hors ligne ;
+  `unregister_driver`, appelé après avoir attendu sa tâche, détache le pilote et retire
+  les droits d'écriture des fiches conservées, sans effacer leurs noms ni leurs valeurs.
   `data/addresses.json` (où chaque pilote a joint son appareil, sa MAC, son identité : de quoi
   le retrouver si la box lui donne une autre adresse ; seulement appris : hors des sauvegardes,
   perdu il se réapprend).

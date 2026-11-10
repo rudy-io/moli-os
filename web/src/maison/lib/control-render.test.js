@@ -22,10 +22,11 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -735,4 +736,104 @@ test('a valve offers its chart, which opens on its three periods', () => {
   assert.match(html, /aria-pressed="true"[^>]*>24 h/);
   // Nothing is drawn before the hub has answered.
   assert.doesNotMatch(html, /<svg/);
+});
+
+// A gate's contacts: trigger relays, one `cycle` order each, no state to show.
+const trigger = (key, label) => ({ key, label, kind: enumeration('cycle'), access: { read: false, write: true }, semantic: 'control' });
+
+test('trigger relays are not shutters and show one Impulsion button each', () => {
+  const points = [trigger('state_l1', 'State'), trigger('state_l2', 'State')];
+  assert.equal(home.deviceKind({ id: 'z2m:0xa', points, state: {} }), 'impulse');
+  const html = show('ImpulseTile', points, {});
+  assert.match(html, /Fixture/);
+  assert.equal(buttons(html).length, 2);
+  assert.match(html, /Impulsion · Relais 1/);
+  assert.match(html, /Impulsion · Relais 2/);
+  assert.match(html, /aria-label="Fixture : Impulsion · Relais 1"/);
+  // A trigger has no on/off state: nothing says it is on, off, open or closed.
+  assert.doesNotMatch(html, /Allumée|Éteinte|Ouvert|Fermé|<input/);
+});
+
+test('trigger buttons stay disabled while the hub is down or the relay is offline', () => {
+  const points = [trigger('state_l1', 'State')];
+  hub.connected = false;
+  assert.match(buttons(show('ImpulseTile', points, {}))[0], /disabled/);
+  hub.connected = true;
+  assert.match(buttons(show('ImpulseTile', points, {}, { online: false }))[0], /disabled/);
+  assert.doesNotMatch(buttons(show('ImpulseTile', points, {}))[0], /disabled/);
+});
+
+test('icons-only trigger relays keep a label on every icon button', () => {
+  const html = show('ImpulseTile', [trigger('state_l1', 'State'), trigger('state_l2', 'State')], {}, {}, { icons: true });
+  assert.equal(buttons(html).length, 2);
+  assert.match(html, /aria-label="Fixture : Impulsion · Relais 1"/);
+  assert.doesNotMatch(html, />Impulsion · Relais 1</);
+});
+
+test('a room shows its trigger device and a lone control point stays a cover', () => {
+  const room = showRoom([
+    { id: 'z2m:gate', points: [trigger('state_l1', 'State')], values: {} },
+    { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
+  ]);
+  assert.match(room, /Impulsion · Relais 1/);
+  assert.match(room, /data-cover-command="open"/);
+});
+
+test('a presence radar shows someone there, whatever the key of its presence point', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const lux = { ...point('illuminance', number(0, 10000), false, 'illuminance'), unit: 'lx' };
+  const room = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: true } },
+  ]);
+  assert.match(room, /title="Présence"/);
+  const empty = showRoom([
+    { id: 'z2m:radar', points: [lux, presence('presence')], values: { illuminance: 2000, presence: false } },
+    { id: 'z2m:pir', points: [presence('occupancy')], values: { occupancy: false } },
+  ]);
+  assert.doesNotMatch(empty, /title="Présence"/);
+});
+
+test('the security panel lists a presence radar beside the motion sensors', () => {
+  const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
+  const at = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, ts: Date.now() }]));
+  hub.devices = {
+    'z2m:radar': { id: 'z2m:radar', native_name: 'Radar salon', model: null, label: { room: 'Salon' }, online: true, members: [], points: [presence('presence')], state: at({ presence: true }) },
+    'z2m:pir': { id: 'z2m:pir', native_name: 'PIR cellier', model: null, label: { room: 'Cellier' }, online: true, members: [], points: [presence('occupancy')], state: at({ occupancy: false }) },
+    // Who is home is no sensor, whatever the people driver's instance is called.
+    'personnes:maison': { id: 'personnes:maison', instance: 'personnes', native_name: 'Le foyer', model: null, label: {}, online: true, members: [], points: [presence('anyone_home')], state: at({}) },
+  };
+  hub.drivers = [{ instance: 'personnes', kind: 'people' }];
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  hub.drivers = [];
+  assert.match(html, /Radar salon/);
+  assert.match(html, /PIR cellier/);
+  assert.doesNotMatch(html, /Le foyer/);
+});
+
+test('a plant sensor shows its soil, and its pot stays out of the room readings (#163)', () => {
+  const celsius = (key) => ({ ...point(key, number(), false, 'temperature'), unit: '°C' });
+  const percent = (key, semantic) => ({ ...point(key, number(0, 100), false, semantic), unit: '%' });
+  const plant = (values) => ({
+    id: 'z2m:plant',
+    points: [percent('soil_moisture', 'soil_moisture'), point('dry', { type: 'binary' }, false, 'soil_dry'),
+      celsius('temperature'), percent('humidity', 'humidity'), percent('soil_warning', 'other')],
+    values: { temperature: 30, humidity: 75, soil_warning: 20, dry: false, ...values },
+  });
+  const thermometer = { id: 'z2m:room', points: [celsius('temperature')], values: { temperature: 20 } };
+
+  const fine = showRoom([plant({ soil_moisture: 54 }), thermometer]);
+  assert.equal(home.deviceKind(hub.devices['z2m:plant']), 'plant');
+  // The room's temperature is the thermometer's alone (not 25 °C with the pot's 30).
+  assert.match(fine, />20,0°C</);
+  // The pot's air is no humidity of the room.
+  assert.doesNotMatch(fine, /75 %/);
+  assert.match(fine, /title="z2m:plant : terre à 54 %"/);
+  assert.doesNotMatch(fine, /à arroser/);
+
+  // Thirsty: under the sensor's threshold, or by its own alarm. Never a leak.
+  for (const values of [{ soil_moisture: 12 }, { soil_moisture: 54, dry: true }]) {
+    const thirsty = showRoom([plant(values), thermometer]);
+    assert.match(thirsty, /class="chip warm[^"]*" title="z2m:plant : terre à \d+ %, à arroser"/);
+    assert.doesNotMatch(thirsty, /fuite/i);
+  }
 });

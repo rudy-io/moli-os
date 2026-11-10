@@ -4,6 +4,7 @@ mod airzone;
 mod backup;
 mod catalogue;
 mod config;
+mod managed_airzone;
 mod timezone;
 
 use std::path::PathBuf;
@@ -84,10 +85,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum TuyaCommand {
-    /// File what the Tuya cloud knows (JSON on standard input, see
-    /// tools/home-assistant/tuya-export.py): local keys into the encrypted store,
+    /// File what the Tuya cloud knows: local keys into the encrypted store,
     /// the rest into the devices file. Keys are never printed. Restart
-    /// moli-os afterwards.
+    /// moli-os afterwards. Read on standard input (the JSON of
+    /// tools/home-assistant/tuya-export.py), or with `--cloud` straight from
+    /// the cloud project whose keys Moli holds (no Home Assistant).
     Import {
         /// The tuya driver instance the keys belong to.
         #[arg(long, default_value = "tuya")]
@@ -95,6 +97,13 @@ enum TuyaCommand {
         /// Default: `tuya.json` in the data directory.
         #[arg(long)]
         devices_file: Option<std::path::PathBuf>,
+        /// Ask the Tuya cloud itself, with the driver's cloud keys (given in
+        /// the dashboard, or its `cloud_keys` file) and `cloud_region`.
+        #[arg(long)]
+        cloud: bool,
+        /// Only list what would be filed (no key shown, nothing written).
+        #[arg(long)]
+        summary: bool,
     },
 }
 
@@ -210,6 +219,22 @@ fn model_command(command: &ModelCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn load_config(cli: &Cli) -> anyhow::Result<Config> {
+    // A new house starts without a configuration: `serve` writes a minimal
+    // one; recovery commands must remain usable with a damaged registry.
+    let serving = matches!(cli.command, None | Some(Command::Serve));
+    if serving && !cli.config.exists() && fresh(&cli.config) {
+        Config::starter(&cli.config)
+    } else if matches!(
+        cli.command,
+        Some(Command::Backup { .. } | Command::Restore { .. })
+    ) {
+        Config::load_for_recovery(&cli.config)
+    } else {
+        Config::load(&cli.config)
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let boot = Instant::now();
     tracing_subscriber::fmt()
@@ -235,14 +260,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(Command::Model(command)) = &cli.command {
         return model_command(command);
     }
-    // A new house starts without a configuration: `serve` writes a minimal
-    // one; every other command needs the real thing.
-    let serving = matches!(cli.command, None | Some(Command::Serve));
-    let config = if serving && !cli.config.exists() && fresh(&cli.config) {
-        Config::starter(&cli.config)?
-    } else {
-        Config::load(&cli.config)?
-    };
+    let config = load_config(&cli)?;
     match cli.command.unwrap_or(Command::Serve) {
         Command::Profile(_) | Command::Catalogue(_) | Command::Health | Command::Model(_) => {
             unreachable!("handled above")
@@ -252,7 +270,9 @@ fn main() -> anyhow::Result<()> {
         Command::Tuya(TuyaCommand::Import {
             instance,
             devices_file,
-        }) => tuya_import(&config, &instance, devices_file),
+            cloud,
+            summary,
+        }) => tuya_import(&config, &instance, devices_file, cloud, summary),
         Command::Zigbee(command) => zigbee_command(&config, command),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
@@ -403,6 +423,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     })
     .context("cannot open the data directory (labels, journal, secrets)")?;
     let cancel = CancellationToken::new();
+    let airzone_setup = managed_airzone::Manager::new(hub.clone(), &config, cancel.clone())?;
 
     // History first: it must be listening before drivers publish anything.
     let (history, recorder) = start_history(&config, &hub, &cancel)?.unzip();
@@ -421,7 +442,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         None => (None, None),
     };
 
-    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel)?;
+    let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
@@ -431,7 +452,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .with_context(|| format!("cannot listen on {}", config.server.listen))?;
     tracing::info!(
         listen = %config.server.listen,
-        drivers = tasks.len(),
+        drivers = hub.snapshot().drivers.len(),
         boot_ms = boot.elapsed().as_millis(),
         "moli-os ready"
     );
@@ -446,6 +467,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
     let surfaces = moli_api::Options {
+        airzone_setup: Some(Arc::new(airzone_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
         ui_pin,
         history,
@@ -474,6 +496,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         shutdown.cancel();
     })
     .await?;
+    airzone_setup.shutdown().await;
     for task in tasks {
         let _ = task.await;
     }
@@ -623,25 +646,54 @@ fn tuya_import(
     config: &Config,
     instance: &str,
     devices_file: Option<std::path::PathBuf>,
+    cloud: bool,
+    summary: bool,
 ) -> anyhow::Result<()> {
-    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        bail!("pipe the export in: it holds local keys, never type or paste them");
+    if !cloud && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        bail!(
+            "pipe the export in (it holds local keys, never type or paste them), or ask the cloud: --cloud"
+        );
     }
     let key = master_key(&config.server.data_dir, false)?
         .context("no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)")?;
-    let devices_file = devices_file.unwrap_or_else(|| config.server.data_dir.join("tuya.json"));
-    let import: moli_tuya::ImportFile = serde_json::from_reader(std::io::stdin().lock())
-        .context("invalid import (expected the JSON of tuya-export.py)")?;
-    let existing = match std::fs::read(&devices_file) {
-        Ok(bytes) => Some(serde_json::from_slice(&bytes)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.into()),
-    };
-    let (file, keys) = moli_tuya::merge_import(import, existing);
+    // The file the driver reads (its `devices_file`), else the data directory's.
+    let devices_file = devices_file
+        .or_else(|| tuya_driver(config, instance).ok().map(|t| t.devices_file))
+        .unwrap_or_else(|| config.server.data_dir.join("tuya.json"));
     let path = config.server.data_dir.join("secrets.enc");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut import: moli_tuya::ImportFile = if cloud {
+        let (keys, region) = tuya_cloud_access(config, instance, &path, &key)?;
+        runtime
+            .block_on(moli_tuya::cloud::import(keys, region))
+            .context("the Tuya cloud did not give the devices")?
+    } else {
+        serde_json::from_reader(std::io::stdin().lock())
+            .context("invalid import (expected the JSON of tuya-export.py)")?
+    };
+    let existing: Option<moli_tuya::DeviceFile> = match std::fs::read(&devices_file) {
+        Ok(bytes) => Some(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if cloud {
+        // The cloud names some points its own way: what works stays.
+        moli_tuya::import::keep_known(&mut import, existing.as_ref());
+    }
+    if summary {
+        for line in moli_tuya::import::summary(&import) {
+            println!("{line}");
+        }
+        println!(
+            "{} devices, nothing written (--summary); the import would write {}",
+            import.devices.len(),
+            devices_file.display()
+        );
+        return Ok(());
+    }
+    let (file, keys) = moli_tuya::merge_import(import, existing);
     for (name, value) in &keys {
         runtime.block_on(moli_runtime::set_secret(
             &path,
@@ -653,6 +705,7 @@ fn tuya_import(
     let text = serde_json::to_string_pretty(&file)?;
     std::fs::write(&devices_file, text + "\n")
         .with_context(|| format!("cannot write {}", devices_file.display()))?;
+    keep_owner(&config.server.data_dir, &[&devices_file, &path]);
     println!(
         "{} devices filed in {}, {} local keys stored (encrypted)",
         file.devices.len(),
@@ -694,6 +747,30 @@ fn zigbee_command(config: &Config, command: ZigbeeCommand) -> anyhow::Result<()>
     }
 }
 
+/// Files written by a tool run as root (the import) go back to whoever
+/// owns the data directory: moli-os runs as that user and must still read
+/// its vault and its devices file.
+#[cfg(unix)]
+fn keep_owner(data_dir: &std::path::Path, files: &[&std::path::Path]) {
+    use std::os::unix::fs::MetadataExt as _;
+    let Ok(dir) = std::fs::metadata(data_dir) else {
+        return;
+    };
+    for file in files {
+        let Ok(meta) = std::fs::metadata(file) else {
+            continue;
+        };
+        if (meta.uid(), meta.gid()) != (dir.uid(), dir.gid())
+            && let Err(e) = std::os::unix::fs::chown(file, Some(dir.uid()), Some(dir.gid()))
+        {
+            eprintln!(
+                "{} keeps its owner ({e}): give it to the data directory's",
+                file.display()
+            );
+        }
+    }
+}
+
 /// `moli-os zigbee export`: the network the driver runs, as an Open
 /// Coordinator Backup Zigbee2MQTT restores (to go back to it), written to
 /// `path` (private, never over a file without `force`). Its keys are read
@@ -724,7 +801,7 @@ fn zigbee_export(
     let secrets = data_dir.join("secrets.enc");
     let key = |name: &str| -> anyhow::Result<network::Key> {
         let entry = format!("{instance}/{name}");
-        let held = moli_runtime::read_secret(&secrets, master, &entry)
+        let held = moli_runtime::get_secret(&secrets, master, &entry)
             .with_context(|| format!("the vault ({}) cannot be read", secrets.display()))?
             .with_context(|| format!("no {entry} in the vault: nothing is exported without it"))?;
         network::Key::from_hex(&held)
@@ -845,6 +922,60 @@ fn zigbee_import(
         moli_zigbee::backup::FRAME_COUNTER_MARGIN,
         moli_i18n::tr!("pilotes.zigbee.import_avertissement", path = file.display()),
     ))
+}
+
+/// Elsewhere, files keep the owner the system gives them.
+#[cfg(not(unix))]
+fn keep_owner(_data_dir: &std::path::Path, _files: &[&std::path::Path]) {}
+
+/// The options of the tuya driver `instance`.
+fn tuya_driver(config: &Config, instance: &str) -> anyhow::Result<moli_tuya::Config> {
+    let driver = config
+        .drivers
+        .iter()
+        .find(|d| d.id == instance && d.kind == "tuya")
+        .with_context(|| format!("no tuya driver `{instance}` in the configuration"))?;
+    driver
+        .options
+        .clone()
+        .try_into()
+        .context("the tuya driver's options")
+}
+
+/// The cloud project's keys and region of the tuya driver `instance`: its
+/// `cloud_keys` file, else what a person gave in the dashboard (the vault).
+fn tuya_cloud_access(
+    config: &Config,
+    instance: &str,
+    vault: &std::path::Path,
+    key: &MasterKey,
+) -> anyhow::Result<(moli_tuya::cloud::Keys, moli_tuya::cloud::Region)> {
+    let tuya = tuya_driver(config, instance)?;
+    let region = moli_tuya::cloud::Region::named(&tuya.cloud_region).with_context(|| {
+        format!(
+            "unknown cloud_region `{}` (known: {})",
+            tuya.cloud_region,
+            moli_tuya::cloud::Region::names()
+        )
+    })?;
+    let from_file = std::fs::read_to_string(&tuya.cloud_keys)
+        .ok()
+        .and_then(|text| moli_tuya::cloud::Keys::parse(&text));
+    let stored = |name: &str| {
+        moli_runtime::get_secret(vault, key, &format!("{instance}/{name}"))
+            .ok()
+            .flatten()
+    };
+    let keys = from_file
+        .or_else(|| {
+            stored(moli_tuya::cloud::STORED_ID)
+                .zip(stored(moli_tuya::cloud::STORED_SECRET))
+                .and_then(|(id, secret)| moli_tuya::cloud::Keys::new(&id, &secret))
+        })
+        .context(
+            "no Tuya cloud keys: give them in the dashboard (Système), or in the driver's cloud_keys file",
+        )?;
+    Ok((keys, region))
 }
 
 /// `moli-os energy import`: hourly history from elsewhere (HA statistics).
@@ -1189,6 +1320,7 @@ const KINDS: &[&str] = &[
     "igd",
     "melcloud",
     "tapo",
+    "lifx",
     "voltalis",
     "shelly",
     "airzone",
@@ -1299,10 +1431,14 @@ fn spawn_drivers(
     config: &Config,
     hub: &Hub,
     cancel: &CancellationToken,
+    airzone: &managed_airzone::Manager,
 ) -> anyhow::Result<(Vec<tokio::task::JoinHandle<()>>, Gateways)> {
     let mut tasks = Vec::new();
     let mut gates = Gateways::default();
     for driver in config.drivers.iter().filter(|d| d.enabled != Some(false)) {
+        if driver.kind == "airzone" {
+            continue;
+        }
         let context = || format!("driver {:?} options", driver.id);
         let built: Arc<dyn Driver> = match driver.kind.as_str() {
             "phones" => {
@@ -1326,6 +1462,7 @@ fn spawn_drivers(
             cancel.clone(),
         ));
     }
+    airzone.start_configured()?;
     Ok((tasks, gates))
 }
 
@@ -1374,6 +1511,9 @@ fn build_driver(
         "tapo" => Arc::new(moli_tapo::Tapo::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "lifx" => Arc::new(moli_lifx::Lifx::new(
+            config.options.clone().try_into().with_context(context)?,
+        )?),
         "voltalis" => Arc::new(moli_voltalis::Voltalis::new(
             config.options.clone().try_into().with_context(context)?,
         )),
