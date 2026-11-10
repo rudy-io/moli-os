@@ -39,6 +39,7 @@ mod session;
 pub mod settings;
 mod sse;
 mod system;
+mod tesla_setup;
 mod visibility;
 mod weather;
 
@@ -357,6 +358,20 @@ fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Rou
         .route(
             "/api/integrations/airzone/{instance}/mode",
             upload(post(airzone_setup::set_mode), 1024, humans),
+        )
+        .route(
+            "/api/integrations/tesla/{instance}",
+            get(tesla_setup::status),
+        )
+        .route(
+            "/api/integrations/tesla/{instance}/sign-in",
+            // The pasted callback address can be long (percent-encoded URL,
+            // capped at the point's 4000-char text limit).
+            upload(post(tesla_setup::sign_in), 4096, humans),
+        )
+        .route(
+            "/api/integrations/tesla/{instance}/sign-out",
+            upload(post(tesla_setup::sign_out), 1024, humans),
         )
         .merge(overkiz::routes())
         .layer(Extension(airzone_setup::Setup(

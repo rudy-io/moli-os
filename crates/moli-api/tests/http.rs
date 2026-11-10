@@ -3056,3 +3056,207 @@ async fn airzone_fresh_code_attempts_share_the_session_lockout() {
     );
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
+
+#[allow(clippy::too_many_lines)] // one block per gate, PIN and redaction assertion
+#[tokio::test]
+async fn tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_session() {
+    let hub = lamp_hub().await;
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let base = "/api/integrations/tesla/t1";
+
+    // No session: the gate refuses even a declared UI origin, on all three
+    // routes.
+    assert_eq!(
+        request_with(&addr, "GET", base, None, "x-moli-origin: ui\r\n")
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            &format!("{base}/sign-in"),
+            Some(&json!({"code":"abc","pin":"482915"})),
+            "x-moli-origin: ui\r\n"
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            &format!("{base}/sign-out"),
+            Some(&json!({"pin":"482915"})),
+            "x-moli-origin: ui\r\n"
+        )
+        .await
+        .0,
+        403
+    );
+
+    let session = pin_session(&addr, "482915").await;
+    let human = format!("{session}x-moli-origin: ui\r\n");
+
+    // Owner session, read-only: goes through the gate. The test hub has no
+    // tesla driver, so the account device is absent: driver_not_running.
+    let (status, body) = request_with(&addr, "GET", base, None, &human).await;
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["error"],
+        "driver_not_running"
+    );
+
+    // Write without a fresh PIN in the body: refused before touching the
+    // driver.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-in"),
+        Some(&json!({"code":"abc"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["error"],
+        "pin_required"
+    );
+
+    // Wrong PIN: 401.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-in"),
+        Some(&json!({"code":"abc","pin":"000000"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 401, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["error"],
+        "invalid_pin"
+    );
+
+    // Empty code: 422.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-in"),
+        Some(&json!({"code":"   ","pin":"482915"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
+
+    // Owner + fresh PIN: the pasted address reaches the driver redacted.
+    // UnknownPoint here (no tesla driver in the test hub) -> 503, and the
+    // journal entry must carry a null value, never the pasted code.
+    let (status, body) = request_with(
+		&addr,
+		"POST",
+		&format!("{base}/sign-in"),
+		Some(
+			&json!({"code":"https://auth.tesla.com/authorize?code=SECRET-PASTED-CODE&state=xyz","pin":"482915"}),
+		),
+		&human,
+	)
+	.await;
+    assert_eq!(status, 503, "{body}");
+    assert!(
+        !body.contains("SECRET-PASTED-CODE"),
+        "the pasted code must never leak in the response: {body}"
+    );
+    let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+    assert_eq!(entry["action"]["kind"], "command");
+    assert_eq!(entry["action"]["value"], Json::Null);
+    assert_eq!(entry["origin"], "ui");
+    assert!(
+        !entry.to_string().contains("SECRET-PASTED-CODE"),
+        "the pasted code must never leak in the journal: {entry}"
+    );
+
+    // Sign-out: same PIN gate, same redaction.
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-out"),
+        Some(&json!({})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["error"],
+        "pin_required"
+    );
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-out"),
+        Some(&json!({"pin":"000000"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 401, "{body}");
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        &format!("{base}/sign-out"),
+        Some(&json!({"pin":"482915"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 503, "{body}");
+}
+
+#[tokio::test]
+async fn tesla_setup_denies_non_owners_even_with_the_code() {
+    let hub = lamp_hub().await;
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            access: Some(
+                serde_json::from_value(
+                    json!({"team":"example","aud":"test-audience","owners":["owner@example.org"]}),
+                )
+                .unwrap(),
+            ),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let base = "/api/integrations/tesla/t1";
+    let sign_in = format!("{base}/sign-in");
+    let sign_out = format!("{base}/sign-out");
+    for (method, path, body) in [
+        ("GET", base, None),
+        (
+            "POST",
+            sign_in.as_str(),
+            Some(json!({"code":"abc","pin":"482915"})),
+        ),
+        ("POST", sign_out.as_str(), Some(json!({"pin":"482915"}))),
+    ] {
+        let (status, resp) = request_with(&addr, method, path, body.as_ref(), &human).await;
+        assert_eq!(status, 403, "{method} {path}: {resp}");
+        assert_eq!(
+            serde_json::from_str::<Json>(&resp).unwrap()["error"],
+            "owner_required"
+        );
+    }
+}
