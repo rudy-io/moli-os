@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,11 +23,11 @@ fn config(toml: &str) -> anyhow::Result<Lifx> {
 
 #[test]
 fn options_are_checked() {
-    let lifx = config(r#"hosts = ["192.168.1.10"]"#).unwrap();
+    let lifx = config(r#"hosts = ["192.168.77.10"]"#).unwrap();
     assert_eq!(
         lifx.hosts,
         [SocketAddrV4::new(
-            Ipv4Addr::new(192, 168, 1, 10),
+            Ipv4Addr::new(192, 168, 77, 10),
             proto::PORT
         )]
     );
@@ -106,6 +106,12 @@ struct Fake {
     waveform: bool,
     /// `GetVersion`s left unanswered first.
     version_silences: u32,
+    /// `GetVersion`s answered, then no more (`None`: all).
+    version_answers: Option<u32>,
+    /// `GetHostFirmware`s left unanswered first.
+    firmware_silences: u32,
+    /// `GetGroup`s left unanswered first.
+    group_silences: u32,
     /// Every answer leaves from another socket (another port).
     elsewhere: bool,
     /// Only the acknowledgements do.
@@ -126,6 +132,9 @@ impl Default for Fake {
             on: true,
             waveform: true,
             version_silences: 0,
+            version_answers: None,
+            firmware_silences: 0,
+            group_silences: 0,
             elsewhere: false,
             acks_elsewhere: false,
             flood: Vec::new(),
@@ -143,6 +152,8 @@ struct Running {
     acks: Arc<AtomicBool>,
     /// Does not answer the search.
     quiet: Arc<AtomicBool>,
+    /// `LightGet`s to leave unanswered from now on.
+    light_silences: Arc<AtomicU32>,
     stop: CancellationToken,
 }
 
@@ -213,8 +224,10 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let acks = Arc::new(AtomicBool::new(true));
     let quiet = Arc::new(AtomicBool::new(false));
+    let light_silences = Arc::new(AtomicU32::new(0));
     let stop = CancellationToken::new();
     let (log, ack, hush, done) = (seen.clone(), acks.clone(), quiet.clone(), stop.clone());
+    let lights_lost = light_silences.clone();
     let fixture: Option<HashMap<String, String>> =
         fake.fixture.map(|f| serde_json::from_str(f).unwrap());
     tokio::spawn(async move {
@@ -255,6 +268,10 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
                         answers.push((s, proto::STATE_SERVICE, p.clone()));
                     }
                 }
+                proto::LIGHT_GET
+                    if lights_lost
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                        .is_ok() => {}
                 proto::LIGHT_GET => {
                     let p = real("light_state").unwrap_or_else(|| {
                         let mut p = Vec::new();
@@ -275,7 +292,15 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
                     answers.push((me, proto::LIGHT_STATE, p));
                 }
                 proto::GET_VERSION if fake.version_silences > 0 => fake.version_silences -= 1,
+                proto::GET_VERSION if fake.version_answers == Some(0) => {}
+                proto::GET_HOST_FIRMWARE if fake.firmware_silences > 0 => {
+                    fake.firmware_silences -= 1;
+                }
+                proto::GET_GROUP if fake.group_silences > 0 => fake.group_silences -= 1,
                 proto::GET_VERSION => {
+                    if let Some(n) = &mut fake.version_answers {
+                        *n -= 1;
+                    }
                     let p = real("state_version").unwrap_or_else(|| {
                         let mut p = 1u32.to_le_bytes().to_vec();
                         p.extend_from_slice(&fake.pid.to_le_bytes());
@@ -370,6 +395,7 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
         seen,
         acks,
         quiet,
+        light_silences,
         stop,
     }
 }
@@ -377,6 +403,7 @@ async fn bulb(at: SocketAddrV4, serial: Serial, fake: Fake) -> Running {
 /// How the driver under test runs.
 struct Setup {
     hosts: Vec<SocketAddrV4>,
+    poll: Duration,
     transition: u32,
     search_missing: Duration,
     search_again: Duration,
@@ -387,6 +414,7 @@ impl Setup {
     fn new(hosts: &[&Running]) -> Self {
         Self {
             hosts: hosts.iter().map(|r| r.at).collect(),
+            poll: Duration::from_millis(300),
             transition: 0,
             search_missing: Duration::from_secs(60),
             search_again: Duration::from_secs(60),
@@ -406,7 +434,7 @@ impl Setup {
         let lifx = Lifx {
             hosts: self.hosts,
             broadcast: None,
-            poll: Duration::from_millis(300),
+            poll: self.poll,
             transition: self.transition,
             search_missing: self.search_missing,
             search_again: self.search_again,
@@ -891,4 +919,110 @@ async fn real_answers_replay_through_the_driver() {
         assert_eq!(driven.value(id, "brightness"), Value::Int(brightness));
         assert_eq!(driven.value(id, "rssi"), Value::Int(rssi));
     }
+}
+
+#[tokio::test]
+async fn silent_bulbs_do_not_hold_the_orders() {
+    let live = bulb(free().await, ONE, Fake::default()).await;
+    let mut gone = Vec::new();
+    for i in 0..10u8 {
+        gone.push(bulb(free().await, [0x02, 0, 0, 0, 2, i], Fake::default()).await);
+    }
+    let mut hosts: Vec<&Running> = vec![&live];
+    hosts.extend(gone.iter());
+    // Eight meetings per search: the last three at the next one.
+    let driven = Setup::new(&hosts).searching(Duration::from_secs(1)).start();
+    driven
+        .until("all published", |d| d.hub.snapshot().devices.len() == 11)
+        .await;
+    // Ten bulbs switched off at the wall: 500 ms each per reading, a
+    // whole poll of 5 s; the orders to the live one still pass.
+    gone.clear();
+    for i in 0..12 {
+        driven
+            .set(FIRST, "on", Value::Bool(i % 2 == 0))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+#[tokio::test]
+async fn the_group_is_asked_again_when_meeting() {
+    let fake = bulb(
+        free().await,
+        ONE,
+        Fake {
+            group_silences: 1,
+            ..Fake::default()
+        },
+    )
+    .await;
+    // No search before a minute: only the resends can bring the group.
+    let driven = Setup::new(&[&fake]).start();
+    driven
+        .until("published", |d| d.online(FIRST) == Some(true))
+        .await;
+    let room = driven.hub.snapshot().devices[0].device.native_room.clone();
+    assert_eq!(room.as_deref(), Some("Bureau"));
+}
+
+#[tokio::test]
+async fn one_lost_reading_does_not_hand_a_bulb_over() {
+    let real = bulb(free().await, ONE, Fake::default()).await;
+    let liar = bulb(free().await, ONE, Fake::default()).await;
+    liar.quiet.store(true, Ordering::SeqCst);
+    let mut setup = Setup::new(&[&real, &liar]).searching(Duration::from_millis(300));
+    // No poll in the way: only the check of the old address asks it.
+    setup.poll = Duration::from_secs(60);
+    let driven = setup.start();
+    driven
+        .until("published", |d| d.online(FIRST) == Some(true))
+        .await;
+    real.light_silences.store(1, Ordering::SeqCst);
+    real.quiet.store(true, Ordering::SeqCst);
+    liar.quiet.store(false, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        real.light_silences.load(Ordering::SeqCst),
+        0,
+        "never checked"
+    );
+    real.forget();
+    liar.forget();
+    driven.set(FIRST, "on", Value::Bool(false)).await.unwrap();
+    assert!(real.orders().contains(&proto::LIGHT_SET_POWER));
+    assert!(!liar.orders().contains(&proto::LIGHT_SET_POWER));
+}
+
+#[tokio::test]
+async fn a_firmware_found_late_keeps_the_model() {
+    let fake = bulb(
+        free().await,
+        ONE,
+        Fake {
+            pid: 1, // LIFX Original: colour, 2500-9000 K
+            firmware_silences: 1,
+            version_answers: Some(1),
+            ..Fake::default()
+        },
+    )
+    .await;
+    let driven = Setup::new(&[&fake])
+        .searching(Duration::from_millis(300))
+        .start();
+    driven
+        .until("published", |d| d.online(FIRST) == Some(true))
+        .await;
+    let colour = ["on", "brightness", "color_temp", "color", "rssi"];
+    assert_eq!(driven.keys(FIRST), colour);
+    // The firmware answers at the next searches; the model must stay.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let firmwares = fake
+        .seen()
+        .iter()
+        .filter(|&&k| k == proto::GET_HOST_FIRMWARE)
+        .count();
+    assert!(firmwares >= 2, "asked {firmwares} times");
+    assert_eq!(driven.keys(FIRST), colour);
 }

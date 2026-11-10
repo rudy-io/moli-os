@@ -147,6 +147,8 @@ enum Job {
     /// Model, firmware or group still to ask.
     Complete(DeviceId),
     Signal(DeviceId),
+    /// One reading of one bulb.
+    Read(DeviceId),
 }
 
 struct Bulbs {
@@ -224,8 +226,9 @@ impl Bulbs {
         }
     }
 
-    /// One piece of work.
-    async fn work(&mut self, job: Job, link: &mut Link, ctx: &DriverCtx) {
+    /// One piece of work. Whether a bulb went offline.
+    async fn work(&mut self, job: Job, link: &mut Link, ctx: &DriverCtx) -> bool {
+        let mut lost = false;
         match job {
             Job::Meet(serial, at) => self.meet(serial, at, link, ctx).await,
             Job::Move(id, at) => {
@@ -235,7 +238,7 @@ impl Bulbs {
             }
             Job::Complete(id) => {
                 if let Some(bulb) = self.by_id.get_mut(&id)
-                    && bulb.complete(link).await
+                    && bulb.complete(link, false).await
                 {
                     ctx.upsert_device(bulb.device(ctx));
                 }
@@ -247,8 +250,14 @@ impl Bulbs {
                     ctx.set_state(&bulb.id, "rssi", Value::Int(rssi));
                 }
             }
+            Job::Read(id) => {
+                if let Some(bulb) = self.by_id.get_mut(&id) {
+                    lost = read(bulb, link, ctx).await;
+                }
+            }
         }
         self.warnings(ctx);
+        lost
     }
 
     /// A serial heard for the first time: it must answer a `LightGet` as a
@@ -271,7 +280,7 @@ impl Bulbs {
             return;
         };
         let mut bulb = Bulb::new(ctx, serial, at, &state);
-        bulb.complete(link).await;
+        bulb.complete(link, true).await;
         let rssi = bulb.signal(link).await;
         ctx.upsert_device(bulb.device(ctx));
         ctx.set_availability(&bulb.id, true);
@@ -298,39 +307,22 @@ impl Bulbs {
         }
     }
 
-    /// Reads every bulb once: one `LightGet`, sent once, per bulb. Whether
-    /// one went offline.
-    async fn poll(&mut self, link: &mut Link, ctx: &DriverCtx) -> bool {
-        let mut lost = false;
+    /// A poll: one reading per bulb queued (a bulb fading, or offline
+    /// outside its turn, is skipped). Each reading is its own piece of
+    /// work, so silent bulbs never hold an order longer than one reading.
+    fn poll(&mut self) {
+        let mut reads = Vec::new();
+        let now = Instant::now();
         for bulb in self.by_id.values_mut() {
             bulb.polls = bulb.polls.wrapping_add(1);
-            if Instant::now() < bulb.settle_until
-                || (!bulb.online && bulb.polls % OFFLINE_EVERY != 1)
-            {
+            if now < bulb.settle_until || (!bulb.online && bulb.polls % OFFLINE_EVERY != 1) {
                 continue;
             }
-            let state = bulb
-                .ask(
-                    link,
-                    (proto::LIGHT_GET, proto::LIGHT_STATE),
-                    (Instant::now() + link::ONCE, false),
-                )
-                .await
-                .message()
-                .and_then(|m| proto::light_state(&m.payload));
-            let Some(state) = state else {
-                bulb.misses += 1;
-                if bulb.online && bulb.misses >= MISSES {
-                    bulb.online = false;
-                    lost = true;
-                    ctx.set_availability(&bulb.id, false);
-                    tracing::warn!(instance = %ctx.instance(), bulb = %bulb.id, "lifx unreachable");
-                }
-                continue;
-            };
-            seen(bulb, &state, ctx);
+            reads.push(Job::Read(bulb.id.clone()));
         }
-        lost
+        for job in reads {
+            self.queue(job);
+        }
     }
 
     /// Whether to search again soon: none known, one known before this run
@@ -362,6 +354,35 @@ fn pick(lifx: &Lifx, addresses: &[SocketAddrV4]) -> SocketAddrV4 {
         .unwrap_or(addresses[0])
 }
 
+/// One `LightGet`, sent once (the next poll is its retry). Whether the bulb
+/// went offline.
+async fn read(bulb: &mut Bulb, link: &mut Link, ctx: &DriverCtx) -> bool {
+    if Instant::now() < bulb.settle_until {
+        return false;
+    }
+    let state = bulb
+        .ask(
+            link,
+            (proto::LIGHT_GET, proto::LIGHT_STATE),
+            (Instant::now() + link::ONCE, false),
+        )
+        .await
+        .message()
+        .and_then(|m| proto::light_state(&m.payload));
+    let Some(state) = state else {
+        bulb.misses += 1;
+        if bulb.online && bulb.misses >= MISSES {
+            bulb.online = false;
+            ctx.set_availability(&bulb.id, false);
+            tracing::warn!(instance = %ctx.instance(), bulb = %bulb.id, "lifx unreachable");
+            return true;
+        }
+        return false;
+    };
+    seen(bulb, &state, ctx);
+    false
+}
+
 /// A reading of a bulb: online, values, and its LIFX name if it changed.
 fn seen(bulb: &mut Bulb, state: &proto::LightState, ctx: &DriverCtx) {
     bulb.misses = 0;
@@ -386,11 +407,13 @@ fn seen(bulb: &mut Bulb, state: &proto::LightState, ctx: &DriverCtx) {
 /// longer answers where it was, and does answer there. A bulb that still
 /// answers cannot be taken away by a datagram claiming its serial.
 async fn follow(bulb: &mut Bulb, at: SocketAddrV4, link: &mut Link, ctx: &DriverCtx) {
+    // Silent means silent through the resends: one lost datagram must not
+    // hand the bulb to whoever claims its serial.
     let here = bulb
         .ask(
             link,
             (proto::LIGHT_GET, proto::LIGHT_STATE),
-            (Instant::now() + link::ONCE, false),
+            (Instant::now() + link::READ, true),
         )
         .await;
     if let Answer::Got(_) = here {
@@ -452,8 +475,10 @@ async fn run(lifx: &Lifx, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             announced = true;
         }
         tokio::select! {
-            // Orders first, then readings: an order waits at most for the
-            // piece of work under way.
+            // Orders first, then the search when it is due, then the poll
+            // (it only queues readings), then the queued work one piece at
+            // a time: an order waits at most for the piece under way, and a
+            // queue that never empties cannot hold the search back.
             biased;
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
@@ -468,23 +493,21 @@ async fn run(lifx: &Lifx, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 });
                 command.reply(result);
             }
-            _ = tick.tick() => {
-                if bulbs.poll(&mut link, ctx).await {
-                    next_search = next_search.min(Instant::now() + lifx.search_missing);
-                }
-            }
-            Some(job) = async { bulbs.jobs.pop_front() }, if !bulbs.jobs.is_empty() => {
-                bulbs.work(job, &mut link, ctx).await;
-                if announced {
-                    bulbs.status(ctx);
-                }
-            }
             () = tokio::time::sleep_until(next_search) => {
                 bulbs.search(lifx, &mut link).await;
                 if announced {
                     bulbs.status(ctx);
                 }
                 next_search = after(&bulbs);
+            }
+            _ = tick.tick() => bulbs.poll(),
+            Some(job) = async { bulbs.jobs.pop_front() }, if !bulbs.jobs.is_empty() => {
+                if bulbs.work(job, &mut link, ctx).await {
+                    next_search = next_search.min(Instant::now() + lifx.search_missing);
+                }
+                if announced {
+                    bulbs.status(ctx);
+                }
             }
         }
     }

@@ -198,13 +198,16 @@ impl Bulb {
         answer
     }
 
-    /// Model, firmware and group, as far as they answer (each asked once:
-    /// what is missing is asked again at the next search). The model is
-    /// asked again only when the firmware changed or it is unknown. Whether
-    /// anything changed.
-    pub async fn complete(&mut self, link: &mut Link) -> bool {
+    /// Model, firmware and group, as far as they answer (each asked once,
+    /// the group with resends when `meeting`: the guard knows a protected
+    /// room by it; what is missing is asked again at the next search). The
+    /// model is asked again only when the firmware changed or it is
+    /// unknown, and kept until a new answer replaces it. Whether anything
+    /// changed.
+    pub async fn complete(&mut self, link: &mut Link, meeting: bool) -> bool {
         let before = (self.version, self.firmware, self.room.clone());
         let once = || (Instant::now() + link::ONCE, false);
+        let mut ask_version = self.product().is_none();
         if let Some(m) = self
             .ask(
                 link,
@@ -215,23 +218,33 @@ impl Bulb {
             .message()
             && let Some(firmware) = proto::firmware(&m.payload)
         {
-            if self.firmware != Some(firmware) {
-                self.version = None;
+            // Changed, not merely found after a lost answer.
+            if self.firmware.is_some_and(|known| known != firmware) {
+                ask_version = true;
             }
             self.firmware = Some(firmware);
         }
-        if (self.version.is_none() || self.product().is_none())
+        if ask_version
             && let Some(m) = self
                 .ask(link, (proto::GET_VERSION, proto::STATE_VERSION), once())
                 .await
                 .message()
+            && let Some(version) = proto::version(&m.payload)
         {
-            self.version = proto::version(&m.payload);
+            self.version = Some(version);
         }
         if self.room.is_none()
             && !self.unhandled.contains(&proto::GET_GROUP)
             && let Some(m) = self
-                .ask(link, (proto::GET_GROUP, proto::STATE_GROUP), once())
+                .ask(
+                    link,
+                    (proto::GET_GROUP, proto::STATE_GROUP),
+                    if meeting {
+                        (Instant::now() + link::READ, true)
+                    } else {
+                        once()
+                    },
+                )
                 .await
                 .message()
         {
