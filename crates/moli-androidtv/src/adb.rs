@@ -36,6 +36,8 @@ const BITS: usize = 2048;
 /// The time a person has to answer the TV's question.
 pub const ASKING: Duration = Duration::from_secs(120);
 const ANSWER: Duration = Duration::from_secs(10);
+/// The token the TV sends to be signed: a SHA-1 digest's length, always.
+const TOKEN_LEN: usize = 20;
 /// `DigestInfo` of a SHA-1 digest: the token is signed as one (as `adb` does).
 const SHA1_INFO: [u8; 15] = [
     0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
@@ -349,6 +351,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Adb<S> {
                     };
                     return Ok((Self { stream, next_id: 1 }, auth));
                 }
+                // Anything but a digest is not signed: a longer one would
+                // not fit the key, and no TV sends it.
+                (AUTH, AUTH_TOKEN) if m.data.len() != TOKEN_LEN => {
+                    bail!("adb: a token of {} bytes", m.data.len());
+                }
                 (AUTH, AUTH_TOKEN) if !signed => {
                     signed = true;
                     send(&mut stream, AUTH, AUTH_SIGNATURE, 0, &key.sign(&m.data)).await?;
@@ -553,6 +560,23 @@ mod tests {
         let n0: BigUint = &key.n % &r32;
         let n0inv = &r32 - n0.modinv(&r32).unwrap();
         assert_eq!((&n0inv * &key.n + 1u32) % &r32, BigUint::zero());
+    }
+
+    #[tokio::test]
+    async fn a_token_of_the_wrong_length_is_refused_not_signed() {
+        let key = key();
+        let (client, mut tv) = tokio::io::duplex(64 * 1024);
+        let device = tokio::spawn(async move {
+            read(&mut tv).await.unwrap();
+            send(&mut tv, AUTH, AUTH_TOKEN, 0, &[1; 300]).await.unwrap();
+            // Nothing signed comes back: the connection ends.
+            assert!(read(&mut tv).await.is_err());
+        });
+        let error = Adb::handshake(client, &key, "moli-os", || {})
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("300 bytes"), "{error:#}");
+        device.await.unwrap();
     }
 
     #[tokio::test]
