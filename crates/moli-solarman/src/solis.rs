@@ -16,10 +16,45 @@ const LAST: u16 = 3043;
 /// What the inverter is doing, from register 3043.
 pub const STATES: [&str; 4] = ["waiting", "starting", "generating", "fault"];
 
-/// The lifetime counter last accepted: a read that goes back is a misread.
+/// The production counter, in tenths of a kWh: the inverter's lifetime
+/// counter is in whole kWh (a tick an hour at best, a whole day's
+/// production missing until it moves), its day counter in tenths. The
+/// lifetime count when the day began, as well as the two tell it, plus the
+/// day's count, gives the total to the tenth.
 #[derive(Debug, Default)]
 pub struct Counters {
+    /// The total last given: it never goes back (a lower read is a misread).
     total: Option<f64>,
+    /// The day counter last read: lower, a new day began.
+    today: Option<f64>,
+    /// The lifetime count when the day's counter started.
+    base: Option<f64>,
+}
+
+impl Counters {
+    /// The total to the tenth, from the lifetime count (whole kWh) and the
+    /// day's (tenths); `None` when it would go back.
+    fn total(&mut self, lifetime: f64, today: f64) -> Option<f64> {
+        if self.today.is_some_and(|t| today < t) {
+            self.base = None;
+        }
+        self.today = Some(today);
+        // Every bound is below the real one: the highest is the nearest.
+        let mut base = lifetime - today;
+        if let Some(b) = self.base {
+            base = base.max(b);
+        }
+        if let Some(t) = self.total {
+            base = base.max(t - today);
+        }
+        self.base = Some(base);
+        let total = round(base + today, 1);
+        if self.total.is_some_and(|t| total < t) {
+            return None;
+        }
+        self.total = Some(total);
+        Some(total)
+    }
 }
 
 fn spec(key: &str, label: &str, unit: Option<Unit>, semantic: Semantic) -> PointSpec {
@@ -177,12 +212,11 @@ pub fn readings(regs: &[u16], counters: &mut Counters) -> Vec<(String, Value)> {
     let mut put = |key: &str, v: f64| out.push((key.to_owned(), Value::Float(v)));
     put("power", u32_at(3004, 3005));
     put("pv_power", u32_at(3006, 3007));
-    put("energy_today", round(r(3014) / 10.0, 1));
+    let today = round(r(3014) / 10.0, 1);
+    put("energy_today", today);
     put("energy_month", u32_at(3010, 3011));
     put("energy_year", u32_at(3016, 3017));
-    let total = u32_at(3008, 3009);
-    if counters.total.is_none_or(|t| total >= t) {
-        counters.total = Some(total);
+    if let Some(total) = counters.total(u32_at(3008, 3009), today) {
         put("energy", total);
     }
     let (v1, i1, v2, i2) = (
@@ -281,11 +315,38 @@ mod tests {
         back[usize::from(3043 - FIRST)] = 0x1015;
         let got = readings(&back, &mut counters);
         assert!(
-            got.iter().all(|(k, _)| k != "energy"),
-            "a misread total is dropped"
+            got.iter()
+                .all(|(k, v)| k != "energy" || *v == Value::Float(4352.0)),
+            "a misread total is dropped: {got:?}"
         );
         assert!(got.contains(&("state".into(), Value::Text("fault".into()))));
         assert!(got.contains(&("fault_code".into(), Value::Float(4117.0))));
         assert!(readings(&[0; 3], &mut counters).is_empty());
+    }
+
+    #[test]
+    fn the_total_counts_tenths_from_the_day_counter() {
+        let mut counters = Counters::default();
+        let energy = |regs: &[u16], counters: &mut Counters| {
+            readings(regs, counters)
+                .into_iter()
+                .find(|(k, _)| k == "energy")
+                .map(|(_, v)| v)
+        };
+        let mut regs = registers();
+        // 0.1 kWh today, 4352 in all.
+        assert_eq!(energy(&regs, &mut counters), Some(Value::Float(4352.0)));
+        // 0.7 today: the lifetime count has not moved, the total has.
+        regs[usize::from(3014 - FIRST)] = 7;
+        assert_eq!(energy(&regs, &mut counters), Some(Value::Float(4352.6)));
+        // It ticks over at 1.2 today: the day began at 4351.9 at least.
+        regs[usize::from(3009 - FIRST)] = 4353;
+        regs[usize::from(3014 - FIRST)] = 12;
+        assert_eq!(energy(&regs, &mut counters), Some(Value::Float(4353.1)));
+        // A new morning: the day counter back to 0, never the total.
+        regs[usize::from(3014 - FIRST)] = 0;
+        assert_eq!(energy(&regs, &mut counters), Some(Value::Float(4353.1)));
+        regs[usize::from(3014 - FIRST)] = 3;
+        assert_eq!(energy(&regs, &mut counters), Some(Value::Float(4353.4)));
     }
 }
