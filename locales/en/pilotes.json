@@ -653,5 +653,13 @@
   "pilotes.linky_tic.ouverture": "cannot open {port}: {cause}",
   "pilotes.linky_tic.lecture": "cannot read the serial port: {cause}",
   "pilotes.linky_tic.port_ferme": "the serial port closed (module unplugged?)",
-  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)"
+  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)",
+  "pilotes.kasa.prise": "Plug",
+  "pilotes.kasa.voyant": "Indicator light",
+  "pilotes.kasa.puissance": "Power",
+  "pilotes.kasa.tension": "Voltage",
+  "pilotes.kasa.courant": "Current",
+  "pilotes.kasa.energie": "Total energy",
+  "pilotes.kasa.lecture_seule": "{point} cannot be set",
+  "pilotes.kasa.refus": "the plug refused the order (code {code})"
 }

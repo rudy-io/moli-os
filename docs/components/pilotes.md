@@ -897,6 +897,22 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
   tient ; provisionnement borné par la MAC).
 
+## `kasa` : prises TP-Link Kasa, protocole local historique (`crates/moli-kasa`)
+
+- **Couvre** : les prises Kasa qui parlent encore le protocole local d'origine (HS100, HS110…),
+  d'abord une HS110 matériel 1.0 (prise avec mesure). Les firmwares récents en KLAP (port 80)
+  relèvent de `tapo`.
+- **Protocole** : JSON sur TCP **9999**, chaque message chiffré par XOR à clé glissante (171),
+  précédé de sa longueur (4 octets gros-boutiens) ; une connexion par requête. Aucun compte.
+- **Configuration** : `host`, `port` (9999), `poll_seconds` (10, de 2 à 3600).
+- **Points** : `state` (relais) et `led` (voyant) écrits par `set_relay_state` / `set_led_off`
+  (le code d'erreur de la prise est vérifié) ; avec mesure (`feature` contient `ENE`) : `power` W,
+  `voltage` V, `current` A, `energy` kWh (compteur à vie). Matériel 1 en W/V/A/kWh, matériel 2 en
+  mW/mV/mA/Wh : les deux sont lus.
+- **Identité** : la MAC de la prise.
+- **Tests** : `src/lib.rs` (chiffrement XOR aller-retour, `get_sysinfo`, les deux générations de
+  mesure, période refusée), fixtures anonymisées de `integrations/kasa/fixtures/`.
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
