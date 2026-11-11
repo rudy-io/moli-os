@@ -707,5 +707,6 @@
   "pilotes.engie.objectif_invalide": "the charge target goes from 0 to 100 %",
   "pilotes.engie.lecture_seule": "{point} cannot be set",
   "pilotes.engie.solde": "Available reward balance",
-  "pilotes.engie.seuil_paiement": "Reward payout threshold"
+  "pilotes.engie.seuil_paiement": "Reward payout threshold",
+  "pilotes.engie.connecte_toi": "Sign the ENGIE account in from the dashboard: open ENGIE's page, sign in, then paste the address it ends on"
 }

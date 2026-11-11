@@ -707,5 +707,6 @@
   "pilotes.engie.objectif_invalide": "l'objectif de charge va de 0 à 100 %",
   "pilotes.engie.lecture_seule": "{point} ne se règle pas",
   "pilotes.engie.solde": "Solde de récompenses disponible",
-  "pilotes.engie.seuil_paiement": "Seuil de versement des récompenses"
+  "pilotes.engie.seuil_paiement": "Seuil de versement des récompenses",
+  "pilotes.engie.connecte_toi": "Connecte le compte ENGIE depuis le tableau de bord : ouvre la page ENGIE, connecte-toi, puis colle l'adresse de fin"
 }

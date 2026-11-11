@@ -40,8 +40,14 @@ const MAX_BODY: usize = 2 * 1024 * 1024;
 const FAST: Duration = Duration::from_secs(5 * 60);
 /// Prices, peaks and rewards: every 12 fast turns (an hour).
 const SLOW_EVERY: u32 = 12;
-/// After a failure that is not the session's: try again in a minute.
-const RETRY: Duration = Duration::from_secs(60);
+/// After a failure that is not the session's: try again in a minute, then
+/// twice as long each time up to half an hour (each try renews the session:
+/// not one renewal a minute while ENGIE answers badly).
+const RETRY_MIN: Duration = Duration::from_secs(60);
+const RETRY_MAX: Duration = Duration::from_secs(30 * 60);
+/// The full history of sessions (two years) is read again this often; the
+/// current month's every slow turn.
+const HISTORY_EVERY: Duration = Duration::from_secs(24 * 3600);
 /// ENGIE takes a departure at most this far ahead.
 const MAX_AHEAD: Duration = Duration::from_secs(7 * 24 * 3600);
 const STATUSES: [&str; 4] = ["sign_in", "connecting", "connected", "error"];
@@ -165,13 +171,17 @@ fn account_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
                 false,
                 None,
             ),
-            point(
-                "sign_in",
-                &moli_i18n::tr!("pilotes.engie.adresse_collee"),
-                Kind::Text,
-                true,
-                None,
-            ),
+            {
+                let mut p = point(
+                    "sign_in",
+                    &moli_i18n::tr!("pilotes.engie.adresse_collee"),
+                    Kind::Text,
+                    true,
+                    None,
+                );
+                p.semantic = Semantic::Config;
+                p
+            },
             point(
                 "reward_balance",
                 &moli_i18n::tr!("pilotes.engie.solde"),
@@ -195,9 +205,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let account = ctx.device_id("account");
     ctx.upsert_device(account_device(ctx, &account));
     ctx.set_availability(&account, true);
-    ctx.ready();
     // The stored token was refused: only a new sign-in helps.
     let mut refused = false;
+    let mut retry = RETRY_MIN;
     loop {
         let stored = ctx.secret(REFRESH).filter(|t| !t.is_empty() && !refused);
         let tokens = if let Some(stored) = stored {
@@ -215,9 +225,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 Err(Failure::Other(e)) => {
                     tracing::warn!(instance = %ctx.instance(), error = %format!("{e:#}"), "engie unreachable");
                     set_text(ctx, &account, "status", "error");
-                    if pause(ctx, RETRY).await {
+                    if pause(ctx, retry).await {
                         return Ok(());
                     }
+                    retry = (retry * 2).min(RETRY_MAX);
                     continue;
                 }
             }
@@ -228,7 +239,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             }
         };
         refused = false;
-        match connected(config, ctx, &tz, &account, tokens).await {
+        // Connected: the driver runs (it waited for a person until now).
+        ctx.ready();
+        let started = tokio::time::Instant::now();
+        let outcome = connected(config, ctx, &tz, &account, tokens).await;
+        if started.elapsed() >= RETRY_MAX {
+            retry = RETRY_MIN; // it held a good while: a new trouble
+        }
+        match outcome {
             Ok(()) => return Ok(()),
             Err(Failure::Refused) => {
                 tracing::warn!(instance = %ctx.instance(), "engie session refused: sign in again");
@@ -237,9 +255,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             Err(Failure::Other(e)) => {
                 tracing::warn!(instance = %ctx.instance(), error = %format!("{e:#}"), "engie failed");
                 set_text(ctx, &account, "status", "error");
-                if pause(ctx, RETRY).await {
+                if pause(ctx, retry).await {
                     return Ok(());
                 }
+                retry = (retry * 2).min(RETRY_MAX);
             }
         }
     }
@@ -269,6 +288,7 @@ async fn sign_in(
     let mut pending = auth::SignIn::new(&config.language)?;
     set_text(ctx, account, "sign_in_url", &pending.url);
     set_text(ctx, account, "status", "sign_in");
+    ctx.wait_for(moli_i18n::tr!("pilotes.engie.connecte_toi"));
     loop {
         let Some(command) = ctx.next_command().await else {
             return Ok(None);
@@ -362,7 +382,16 @@ impl Api {
                 .map_err(|_| Failure::Other(anyhow::anyhow!("{API_HOST} unreachable")))?;
             match status.as_u16() {
                 401 if attempt == 0 => self.renew(ctx).await?,
-                401 | 403 => return Err(Failure::Refused),
+                // A 401 after a renewal: the session itself is refused.
+                401 => return Err(Failure::Refused),
+                // One resource this account may not read (a shared account
+                // without every right): that resource is left aside, said
+                // once, and the session goes on.
+                403 => {
+                    return Err(Failure::Other(anyhow::anyhow!(
+                        "{API_HOST}: HTTP 403 (this resource is not open to the account)"
+                    )));
+                }
                 404 => return Ok(None),
                 s if (200..300).contains(&s) => {
                     return Ok(Some(serde_json::from_slice(&bytes).unwrap_or(Json::Null)));
@@ -424,6 +453,10 @@ struct Known {
     left_out: std::collections::HashSet<u64>,
     /// Vehicle → its name, as sessions name it.
     names: HashMap<u64, String>,
+    /// The rewards of the sessions before this month, by vehicle name
+    /// (lowercase), and when they were read, for which month.
+    history: HashMap<String, model::Rewards>,
+    history_at: Option<(tokio::time::Instant, Timestamp)>,
 }
 
 /// A JSON answer's shape, for a log: keys and list lengths, never a value.
@@ -532,8 +565,9 @@ async fn slow(
     };
     for agreement in known.agreements.clone() {
         let ban = &agreement.number;
+        let ban_ = encode::percent(ban);
         let path = format!(
-            "/engie/ms/billing/customer/v1/business-agreements/{ban}/supplier-energy-prices?maxGranularity=MONTHLY"
+            "/engie/ms/billing/customer/v1/business-agreements/{ban_}/supplier-energy-prices?maxGranularity=MONTHLY"
         );
         let r = api.get(ctx, &path, BROWSER_AGENT).await;
         let prices_json = tolerate(ctx, &mut known.last_error, r)?.flatten();
@@ -546,7 +580,10 @@ async fn slow(
                 if known.divisions.contains_key(ean) {
                     continue;
                 }
-                let path = format!("/engie/ms/premises/customer/v1/service-points/{ean}");
+                let path = format!(
+                    "/engie/ms/premises/customer/v1/service-points/{}",
+                    encode::percent(ean)
+                );
                 let r = api.get(ctx, &path, BROWSER_AGENT).await;
                 if let Some(division) = tolerate(ctx, &mut known.last_error, r)?
                     .flatten()
@@ -559,7 +596,7 @@ async fn slow(
             prices = model::prices(json, today, |ean| known.divisions.get(ean).cloned());
         }
         let path = format!(
-            "/engie/ms/b2c-energy-insights/v1/private/customers/me/contract-accounts/{ban}/energy-insights/peaks?year={}&month={}",
+            "/engie/ms/b2c-energy-insights/v1/private/customers/me/contract-accounts/{ban_}/energy-insights/peaks?year={}&month={}",
             today.year(),
             today.month()
         );
@@ -606,7 +643,7 @@ async fn slow(
         }
     }
 
-    if let Some(can) = known.can.clone() {
+    if let Some(can) = known.can.as_deref().map(encode::percent) {
         let path =
             format!("/engie/ms/rewards/customer/v1/customer-accounts/{can}/reward-balance-details");
         let r = api.get(ctx, &path, auth::APP_AGENT).await;
@@ -623,47 +660,87 @@ async fn slow(
 /// At most this many pages of sessions (20 each) are read for the rewards.
 const MAX_PAGES: u64 = 25;
 
+/// The sessions' rewards from `from` to `to` (dates), counted when they
+/// started in `[start, end)`; `None` when a page could not be read.
+async fn sessions(
+    ctx: &DriverCtx,
+    api: &mut Api,
+    known: &mut Known,
+    can: &str,
+    (from, to): (jiff::civil::Date, jiff::civil::Date),
+    (start, end): (Option<Timestamp>, Option<Timestamp>),
+) -> Result<Option<HashMap<String, model::Rewards>>, Failure> {
+    let mut by_vehicle = HashMap::new();
+    let mut page = 0;
+    loop {
+        let path = format!(
+            "/engie/ms/ev/customer/v2/customer-accounts/{can}/charging-sessions?startDate={from}&endDate={to}&pageSize=20&pageNumber={page}"
+        );
+        let r = api.get(ctx, &path, auth::APP_AGENT).await;
+        let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() else {
+            return Ok(None);
+        };
+        let pages = model::add_rewards(&json, start, end, &mut by_vehicle);
+        page += 1;
+        if page >= pages.min(MAX_PAGES) {
+            break;
+        }
+    }
+    Ok(Some(by_vehicle))
+}
+
 /// What smart charging earned for each followed vehicle, from its own
 /// sessions of the last two years (the account's summary would mix in the
-/// other cars of a shared account).
+/// other cars of a shared account). The months before this one are read
+/// once a day, this month's every hour. Sessions name their vehicle, they
+/// carry no number: two followed vehicles of the same name get none.
 async fn rewards(
     ctx: &DriverCtx,
     tz: &TimeZone,
     api: &mut Api,
     known: &mut Known,
 ) -> Result<(), Failure> {
-    let (Some(can), Some((_, month, today))) =
-        (known.can.clone(), day_and_month(tz, Timestamp::now()))
-    else {
+    let (Some(can), Some((_, month, today))) = (
+        known.can.as_deref().map(encode::percent),
+        day_and_month(tz, Timestamp::now()),
+    ) else {
         return Ok(());
     };
     if known.vehicles.is_empty() {
         return Ok(());
     }
-    let from = jiff::civil::Date::new(today.year() - 2, today.month(), 1).unwrap_or(today);
-    let mut by_vehicle = HashMap::new();
-    let mut page = 0;
-    loop {
-        let path = format!(
-            "/engie/ms/ev/customer/v2/customer-accounts/{can}/charging-sessions?startDate={from}&endDate={today}&pageSize=20&pageNumber={page}"
-        );
-        let r = api.get(ctx, &path, auth::APP_AGENT).await;
-        let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() else {
-            return Ok(()); // incomplete: the figures stay as they were
-        };
-        let pages = model::add_rewards(&json, month, &mut by_vehicle);
-        page += 1;
-        if page >= pages.min(MAX_PAGES) {
-            break;
+    let first = jiff::civil::Date::new(today.year(), today.month(), 1).unwrap_or(today);
+    let due = known
+        .history_at
+        .is_none_or(|(at, m)| m != month || at.elapsed() >= HISTORY_EVERY);
+    if due {
+        let from = jiff::civil::Date::new(today.year() - 2, today.month(), 1).unwrap_or(today);
+        let before = first.yesterday().unwrap_or(first);
+        match sessions(ctx, api, known, &can, (from, before), (None, Some(month))).await? {
+            Some(history) => {
+                known.history = history;
+                known.history_at = Some((tokio::time::Instant::now(), month));
+            }
+            None => return Ok(()), // incomplete: the figures stay as they were
         }
     }
+    let Some(this_month) =
+        sessions(ctx, api, known, &can, (first, today), (Some(month), None)).await?
+    else {
+        return Ok(());
+    };
+    let names: Vec<String> = known.names.values().map(|n| n.to_lowercase()).collect();
     for (vehicle, id) in &known.vehicles {
-        let name = known.names.get(vehicle).map(|n| n.to_lowercase());
-        let r = name
-            .and_then(|n| by_vehicle.get(&n).copied())
-            .unwrap_or_default();
-        set_number(ctx, id, "reward_month", Some(r.month));
-        set_number(ctx, id, "reward_total", Some(r.total));
+        let Some(name) = known.names.get(vehicle).map(|n| n.to_lowercase()) else {
+            continue;
+        };
+        if names.iter().filter(|n| **n == name).count() > 1 {
+            continue; // which car a session was is not known
+        }
+        let m = this_month.get(&name).map_or(0.0, |r| r.total);
+        let before = known.history.get(&name).map_or(0.0, |r| r.total);
+        set_number(ctx, id, "reward_month", Some(m));
+        set_number(ctx, id, "reward_total", Some(before + m));
     }
     Ok(())
 }
@@ -884,7 +961,7 @@ async fn fast(
     api: &mut Api,
     known: &mut Known,
 ) -> Result<(), Failure> {
-    let Some(can) = known.can.clone() else {
+    let Some(can) = known.can.as_deref().map(encode::percent) else {
         return Ok(());
     };
     let path =
@@ -921,6 +998,12 @@ async fn fast(
             ctx.upsert_device(vehicle_device(ctx, &id, &v));
             e.insert(id.clone());
             known.names.insert(v.id, v.name.clone());
+            first_sight = true;
+        } else if known.names.get(&v.id) != Some(&v.name) {
+            // Renamed in the app: the device and the rewards follow.
+            ctx.upsert_device(vehicle_device(ctx, &id, &v));
+            known.names.insert(v.id, v.name.clone());
+            known.history_at = None;
             first_sight = true;
         }
         ctx.set_availability(&id, true);

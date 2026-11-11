@@ -20,6 +20,23 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
     out
 }
 
+/// URL-safe base64 back to bytes (padding or not); `None` if it is not.
+pub(crate) fn from_base64url(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim_end_matches('=');
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut n, mut bits) = (0u32, 0u32);
+    for c in text.bytes() {
+        let v = URL_SAFE.iter().position(|&a| a == c)?;
+        n = (n << 6) | u32::try_from(v).ok()?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((n >> bits) & 0xff).ok()?);
+        }
+    }
+    Some(out)
+}
+
 /// Lowercase hexadecimal.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes

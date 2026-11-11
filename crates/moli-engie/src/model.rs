@@ -309,34 +309,36 @@ pub fn settings_body(departure: Timestamp, target: u8, direct: bool) -> Json {
     })
 }
 
-/// What smart charging earned for one vehicle: this month, and over all the
-/// sessions asked.
+/// What smart charging earned for one vehicle over the sessions counted.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rewards {
-    pub month: f64,
     pub total: f64,
     pub sessions: u64,
 }
 
-/// One page of `GET …/customer-accounts/{can}/charging-sessions`: each
-/// session's rewards added to its vehicle's (by name, lowercase), and the
-/// number of pages.
+/// One page of `GET …/customer-accounts/{can}/charging-sessions`: the
+/// rewards of each session started in `[start, end)` added to its vehicle's
+/// (by name, lowercase: sessions carry no vehicle number), and the number
+/// of pages. Counting by start, a session the API gives in two ranges is
+/// counted once.
 pub fn add_rewards(
     json: &Json,
-    month_start: Timestamp,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
     by_vehicle: &mut std::collections::HashMap<String, Rewards>,
 ) -> u64 {
     for s in items(&json["items"]) {
         let Some(name) = text(&s["vehicleName"]) else {
             continue;
         };
-        let r = by_vehicle.entry(name.to_lowercase()).or_default();
-        let reward = number(&s["reward"]).unwrap_or(0.0);
-        r.total += reward;
-        r.sessions += 1;
-        if time(&s["start"]).is_some_and(|t| t >= month_start) {
-            r.month += reward;
+        let at = time(&s["start"]);
+        let inside = at.is_some_and(|t| start.is_none_or(|s| t >= s) && end.is_none_or(|e| t < e));
+        if !inside {
+            continue;
         }
+        let r = by_vehicle.entry(name.to_lowercase()).or_default();
+        r.total += number(&s["reward"]).unwrap_or(0.0);
+        r.sessions += 1;
     }
     json["page"]["totalPages"].as_u64().unwrap_or(1)
 }
@@ -464,14 +466,26 @@ mod tests {
     }
 
     #[test]
-    fn rewards_by_vehicle_this_month_and_in_all() {
+    fn rewards_by_vehicle_this_month_and_before() {
         let month: Timestamp = "2026-10-31T23:00:00Z".parse().unwrap();
-        let mut by = std::collections::HashMap::new();
-        assert_eq!(add_rewards(&fixture("sessions"), month, &mut by), 2);
-        let mine = by["ma voiture"];
-        assert!((mine.total - 1.37).abs() < 1e-9);
-        assert!((mine.month - 0.87).abs() < 1e-9);
-        assert_eq!(mine.sessions, 2);
-        assert!((by["autre voiture"].total - 4.0).abs() < 1e-9, "kept apart");
+        let mut now = std::collections::HashMap::new();
+        assert_eq!(
+            add_rewards(&fixture("sessions"), Some(month), None, &mut now),
+            2
+        );
+        let mine = now["ma voiture"];
+        assert!((mine.total - 0.87).abs() < 1e-9);
+        assert_eq!(mine.sessions, 1);
+        let mut before = std::collections::HashMap::new();
+        add_rewards(&fixture("sessions"), None, Some(month), &mut before);
+        assert!((before["ma voiture"].total - 0.5).abs() < 1e-9);
+        assert!(
+            (before["autre voiture"].total - 4.0).abs() < 1e-9,
+            "kept apart"
+        );
+        // The same page read for both ranges: each session counted once.
+        let mut all = std::collections::HashMap::new();
+        add_rewards(&fixture("sessions"), None, None, &mut all);
+        assert_eq!(all["ma voiture"].sessions, 2);
     }
 }

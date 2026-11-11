@@ -44,6 +44,8 @@ fn random(n: usize) -> anyhow::Result<Vec<u8>> {
 pub(crate) struct SignIn {
     verifier: String,
     state: String,
+    /// What the identity token must carry back.
+    nonce: String,
     /// ENGIE's sign-in page, for the person.
     pub url: String,
 }
@@ -82,6 +84,7 @@ impl SignIn {
         Ok(Self {
             verifier,
             state,
+            nonce,
             url: format!("https://{AUTH_HOST}/authorize?{query}"),
         })
     }
@@ -101,16 +104,28 @@ impl SignIn {
             .ok_or(Pasted::NoCode)
     }
 
-    /// The code's tokens.
+    /// The code's tokens; an identity token for another sign-in (its nonce
+    /// is not this one's) is refused.
     pub async fn tokens(&self, code: &str) -> Result<Tokens, Failure> {
-        token_request(&[
+        let tokens = token_request(&[
             ("code", code),
             ("grant_type", "authorization_code"),
             ("redirect_uri", REDIRECT_URI),
             ("code_verifier", &self.verifier),
             ("client_id", CLIENT_ID),
         ])
-        .await
+        .await?;
+        self.check_nonce(&tokens)?;
+        Ok(tokens)
+    }
+
+    fn check_nonce(&self, tokens: &Tokens) -> Result<(), Failure> {
+        match &tokens.nonce {
+            Some(n) if *n != self.nonce => Err(Failure::Other(anyhow::anyhow!(
+                "the identity token is not this sign-in's"
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -130,6 +145,16 @@ pub(crate) struct Tokens {
     pub access: String,
     pub refresh: String,
     pub expires: tokio::time::Instant,
+    /// The `nonce` of the identity token, when ENGIE gives one.
+    pub nonce: Option<String>,
+}
+
+/// The `nonce` claim of an identity token (a JWT); its signature is not
+/// checked here: the token comes straight from ENGIE over TLS.
+fn id_nonce(id_token: &str) -> Option<String> {
+    let payload = id_token.split('.').nth(1)?;
+    let claims: Json = serde_json::from_slice(&encode::from_base64url(payload)?).ok()?;
+    claims["nonce"].as_str().map(str::to_owned)
 }
 
 impl std::fmt::Debug for Tokens {
@@ -230,12 +255,33 @@ pub(crate) fn tokens_from(status: u16, body: &[u8]) -> Result<Tokens, Failure> {
         access,
         refresh,
         expires: tokio::time::Instant::now() + Duration::from_secs(lifetime),
+        nonce: json["id_token"].as_str().and_then(id_nonce),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_identity_token_must_be_this_sign_ins() {
+        let sign_in = SignIn::new("fr").unwrap();
+        let jwt = |nonce: &str| {
+            let claims = serde_json::json!({ "nonce": nonce }).to_string();
+            format!("e30.{}.sig", encode::base64url(claims.as_bytes()))
+        };
+        let answer = |id: &str| {
+            serde_json::json!({"access_token": "a", "refresh_token": "r", "id_token": id})
+                .to_string()
+        };
+        let ok = tokens_from(200, answer(&jwt(&sign_in.nonce)).as_bytes()).unwrap();
+        assert!(sign_in.check_nonce(&ok).is_ok());
+        let other = tokens_from(200, answer(&jwt("someone-else")).as_bytes()).unwrap();
+        assert!(sign_in.check_nonce(&other).is_err());
+        // No identity token at all (a renewal): nothing to check.
+        let none = tokens_from(200, br#"{"access_token": "a", "refresh_token": "r"}"#).unwrap();
+        assert!(sign_in.check_nonce(&none).is_ok());
+    }
 
     #[test]
     fn the_sign_in_page_is_engies_with_pkce() {

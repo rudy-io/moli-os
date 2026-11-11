@@ -907,7 +907,7 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   (`be.engie.smart://login-callback/…?code=…`) dans la carte du tableau de bord (point `sign_in`).
   Le jeton de rafraîchissement **tourne** à chaque usage : le nouveau est rangé aussitôt.
 - **Configuration** : rien d'obligatoire ; `language` (page de connexion, `fr`), `timezone`
-  (`Europe/Brussels` : jours et mois des pics, heures de départ), `vehicles` (les véhicules suivis,
+  (`Europe/Brussels` : jours et mois des pics, heures de départ lues et écrites dans ce fuseau), `vehicles` (les véhicules suivis,
   par nom ou numéro ; vide : tous ; les autres ne sont jamais lus et leur appareil est retiré).
 - **Secrets** : `refresh_token`, posé par la connexion, jamais tapé.
 - **Points** : compte : `status`, `sign_in_url`, `sign_in`, `reward_balance` (solde de
@@ -919,7 +919,11 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   derniers s'écrivent), `session_kwh`, `session_cost`, `session_reward`, `session_outcome`,
   `reward_month`, `reward_total`. Unités données telles quelles (`€/kWh`, `kW`, `€`) : jamais
   confondues avec la puissance ou l'énergie de la maison.
-- **Rythme** : véhicules toutes les 5 min ; prix, pics et gains toutes les heures.
+- **Rythme** : véhicules toutes les 5 min ; prix, pics et gains du mois toutes les heures ;
+  gains des mois d'avant une fois par jour. En panne, un essai après 1 min, puis deux fois plus
+  tard à chaque fois, jusqu'à 30 min. Le pilote attend une personne (`wait_for`) tant que le
+  compte n'est pas connecté. Un 403 laisse de côté la seule ressource refusée (dit une fois) ;
+  seul un 401 après renouvellement redemande une connexion.
 - **Pièges** : ⚠️ une connexion avec le même compte dans l'appli ou sur engie.be révoque la
   session de Moli (`status = sign_in` à nouveau). Une écriture renvoie les trois réglages de la
   session (départ, objectif, `direct`) : ENGIE les veut ensemble. Départ à 7 jours au plus.
