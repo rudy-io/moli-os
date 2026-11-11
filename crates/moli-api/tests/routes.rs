@@ -98,6 +98,7 @@ async fn every_route_is_listed_and_holds_its_level() {
     );
     let mut code = declared(lib);
     code.extend(declared(weather));
+    code.extend(declared(include_str!("../src/overkiz.rs")));
     // The MCP service is nested, not routed.
     assert!(
         lib.contains("\"/mcp\""),

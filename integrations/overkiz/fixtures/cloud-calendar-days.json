@@ -1,0 +1,38 @@
+[
+  {
+    "oid": "00000000-0000-4000-8000-000000000002",
+    "label": "Synthetic work day",
+    "type": "WORK_DAY",
+    "dayTimeTriggers": [
+      {
+        "startActionGroupTimeTrigger": {
+          "id": "00000000-0000-4000-8000-000000000010",
+          "triggerType": "TIME",
+          "hours": 7,
+          "minutes": 30,
+          "actionGroupOID": "00000000-0000-4000-8000-000000000001"
+        }
+      },
+      {
+        "startActionGroupTimeTrigger": {
+          "id": "00000000-0000-4000-8000-000000000011",
+          "triggerType": "DUSK",
+          "localActionGroup": {
+            "label": "Synthetic embedded action",
+            "actions": [
+              {
+                "deviceURL": "io://example.invalid/synthetic-shutter",
+                "commands": [
+                  {
+                    "name": "close",
+                    "parameters": []
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+]
