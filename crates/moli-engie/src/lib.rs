@@ -391,6 +391,26 @@ struct Known {
     price_keys: HashMap<String, Vec<String>>,
     vehicles: HashMap<u64, DeviceId>,
     last_error: Option<String>,
+    told_no_vehicle: bool,
+}
+
+/// A JSON answer's shape, for a log: keys and list lengths, never a value.
+fn shape(json: &Json) -> String {
+    match json {
+        Json::Object(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| match v {
+                    Json::Array(a) => format!("{k}[{}]", a.len()),
+                    Json::Object(_) => format!("{k}{{…}}"),
+                    _ => k.clone(),
+                })
+                .collect();
+            format!("{{{}}}", inner.join(", "))
+        }
+        Json::Array(a) => format!("[{}]", a.len()),
+        _ => "scalar".to_owned(),
+    }
 }
 
 async fn connected(
@@ -791,11 +811,24 @@ async fn fast(
     let path =
         format!("/engie/ms/ev/customer/v2/customer-accounts/{can}/vehicles?includeInactive=true");
     let r = api.get(ctx, &path, auth::APP_AGENT).await;
-    let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() else {
-        return Ok(());
-    };
+    let answer = tolerate(ctx, &mut known.last_error, r)?;
+    let found = answer
+        .as_ref()
+        .and_then(Option::as_ref)
+        .map(model::vehicles)
+        .unwrap_or_default();
+    if found.is_empty() && !known.told_no_vehicle {
+        // Once: what came back, by its shape only (no value of the account).
+        let shape = match &answer {
+            None => "unreachable".to_owned(),
+            Some(None) => "404".to_owned(),
+            Some(Some(json)) => shape(json),
+        };
+        tracing::info!(instance = %ctx.instance(), shape, "engie: no smart-charging vehicle");
+        known.told_no_vehicle = true;
+    }
     let mut first_sight = false;
-    for v in model::vehicles(&json) {
+    for v in found {
         let id = ctx.device_id(&format!("vehicle-{}", v.id));
         if let std::collections::hash_map::Entry::Vacant(e) = known.vehicles.entry(v.id) {
             ctx.upsert_device(vehicle_device(ctx, &id, &v));
@@ -1038,6 +1071,14 @@ mod tests {
     fn price_points_have_readable_labels() {
         assert!(!price_label("electricity_offtake_peak").is_empty());
         assert!(!price_label("gas_offtake").is_empty());
+    }
+
+    #[test]
+    fn a_shape_tells_no_value() {
+        let json = serde_json::json!({"items": [{"vin": "SECRET"}], "page": {"n": 1}, "total": 7});
+        let s = shape(&json);
+        assert_eq!(s, "{items[1], page{…}, total}");
+        assert!(!s.contains("SECRET"));
     }
 
     #[test]
