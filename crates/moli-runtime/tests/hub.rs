@@ -151,6 +151,38 @@ async fn command_round_trip_updates_state_and_journal() {
 }
 
 #[tokio::test]
+async fn a_mirror_house_journals_every_order_and_sends_none() {
+    let (hub, _cancel) = start_with(HubOptions {
+        mirror: true,
+        ..HubOptions::default()
+    })
+    .await;
+    let before = hub.state(&point("state")).map(|s| s.value);
+
+    // From the dashboard, an agent, an automation: none reaches the plug.
+    for origin in [Origin::Ui, Origin::Mcp, Origin::Automation] {
+        let sent = hub
+            .command(&point("state"), Value::Bool(true), origin, None)
+            .await;
+        assert_eq!(sent, Err(CommandError::Mirror), "{origin:?}");
+    }
+    assert_eq!(hub.state(&point("state")).map(|s| s.value), before);
+    // Each one is in the journal, refused as a mirror's.
+    let journal = hub.journal(10);
+    assert_eq!(journal.len(), 3);
+    assert!(journal.iter().all(|entry| matches!(
+        &entry.outcome,
+        Outcome::Err(e) if e.contains("mirror")
+    )));
+    // An invalid order is still refused for what it is.
+    assert_eq!(
+        hub.command(&point("power"), Value::Int(5), Origin::Ui, None)
+            .await,
+        Err(CommandError::ReadOnly)
+    );
+}
+
+#[tokio::test]
 async fn invalid_writes_are_refused_and_journaled() {
     let (hub, _cancel) = start(false).await;
 
@@ -1364,6 +1396,71 @@ async fn oversized_orders_are_refused_and_journaled_without_their_bulk() {
             assert_eq!(*value, Value::Null);
         }
         other => panic!("{other:?}"),
+    }
+}
+
+/// Once `next_command()` ends (Moli stops), still has something to finish
+/// (a last write to its device), or never finishes when `hang` is set.
+struct Tidy {
+    done: Arc<std::sync::atomic::AtomicBool>,
+    hang: bool,
+}
+
+impl Driver for Tidy {
+    fn kind(&self) -> &'static str {
+        "tidy"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                cmd.reply(Ok(()));
+            }
+            if self.hang {
+                std::future::pending::<()>().await;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            self.done.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stopping_driver_may_finish_within_a_grace() {
+    for hang in [false, true] {
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let cancel = CancellationToken::new();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let task = spawn_driver(
+            &hub,
+            InstanceId::from("tidy"),
+            Arc::new(Tidy {
+                done: done.clone(),
+                hang,
+            }),
+            cancel.clone(),
+        );
+        wait_running(&hub).await;
+        let asked = tokio::time::Instant::now();
+        cancel.cancel();
+        task.await.unwrap();
+        let took = asked.elapsed();
+        let status = hub.snapshot().drivers[0].status.clone();
+        assert_eq!(status, DriverStatus::Stopped, "hang {hang}");
+        if hang {
+            // Given up after the grace (4 s): the shutdown never hangs.
+            assert!(!done.load(Ordering::SeqCst));
+            assert!(
+                took >= Duration::from_secs(4) && took < Duration::from_secs(5),
+                "{took:?}"
+            );
+        } else {
+            // Its last step ran, and nothing was reported as a failure.
+            assert!(done.load(Ordering::SeqCst));
+            assert!(took < Duration::from_secs(1), "{took:?}");
+        }
     }
 }
 

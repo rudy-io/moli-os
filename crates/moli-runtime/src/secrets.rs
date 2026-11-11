@@ -216,8 +216,11 @@ pub async fn set_secret(path: &Path, key: &MasterKey, name: &str, value: &str) -
     store.set(name, value).await
 }
 
-/// Reads one stored secret (operator tool: the cloud keys a person gave in
-/// the dashboard, for an import run beside moli-os). Never printed.
+/// Reads one stored secret (operator tools: the cloud keys a person gave in
+/// the dashboard, for an import run beside moli-os; `moli-os zigbee export`
+/// puts a network key into the backup file a person asked for). `None` when
+/// it is not stored; an error when the file cannot be read or opened with
+/// this key. Never printed.
 pub fn get_secret(path: &Path, key: &MasterKey, name: &str) -> io::Result<Option<String>> {
     let store = SecretStore::open(path.to_path_buf(), &parse_master_key(&key.0)?)?;
     Ok(store.get(name))
@@ -595,6 +598,17 @@ mod tests {
 
         let reopened = SecretStore::open(path.clone(), &key).unwrap();
         assert_eq!(reopened.get("hue/app_key").as_deref(), Some("s3cret-value"));
+        let master = MasterKey::new(KEY.into());
+        assert_eq!(
+            get_secret(&path, &master, "hue/app_key")
+                .unwrap()
+                .as_deref(),
+            Some("s3cret-value")
+        );
+        assert_eq!(get_secret(&path, &master, "hue/other").unwrap(), None);
+        let mut wrong = KEY.to_owned();
+        wrong.replace_range(..2, "ff");
+        assert!(get_secret(&path, &MasterKey::new(wrong), "hue/app_key").is_err());
 
         assert!(reopened.remove("hue/app_key").await.unwrap());
         assert!(!reopened.remove("hue/app_key").await.unwrap());
