@@ -22,7 +22,10 @@ const FEATURES: u64 = 1 | 2 | 4 | 32 | 64 | 512;
 /// The TV pings every 5 s: three missed and the connection is gone.
 const IDLE: Duration = Duration::from_secs(16);
 const MAX_MESSAGE: usize = 64 * 1024;
-/// `RemoteDirection.SHORT`: a press.
+/// `RemoteDirection`: a key held down (`START_LONG`), let go (`END_LONG`),
+/// or pressed (`SHORT`).
+const START_LONG: u64 = 1;
+const END_LONG: u64 = 2;
 const SHORT: u64 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +53,9 @@ pub enum Order {
     Launch(String),
     /// An Android key code, pressed once.
     Key(u32),
+    /// An Android key code held down (`true`) or let go: held, the TV
+    /// repeats it as a held key on its own remote (a video seeks faster).
+    Hold(u32, bool),
     /// The text of the field open on the TV (a search box…), all of it.
     Text(String),
 }
@@ -263,9 +269,8 @@ fn text_field(frame: &[u8]) -> Option<(u64, u64)> {
 fn encode(order: &Order, (ime, field): (u64, u64)) -> Vec<u8> {
     match order {
         Order::Launch(link) => Writer::new().msg(90, Writer::new().str(1, link)).finish(),
-        Order::Key(code) => Writer::new()
-            .msg(10, Writer::new().uint(1, u64::from(*code)).uint(2, SHORT))
-            .finish(),
+        Order::Key(code) => key(*code, SHORT),
+        Order::Hold(code, down) => key(*code, if *down { START_LONG } else { END_LONG }),
         // `RemoteEditInfo { insert = 1, RemoteImeObject { start, end, value } }`,
         // the cursor after the last character.
         Order::Text(text) => {
@@ -276,6 +281,16 @@ fn encode(order: &Order, (ime, field): (u64, u64)) -> Vec<u8> {
             Writer::new().msg(21, edit).finish()
         }
     }
+}
+
+/// `RemoteKeyInject { key_code = 1, direction = 2 }`.
+fn key(code: u32, direction: u64) -> Vec<u8> {
+    Writer::new()
+        .msg(
+            10,
+            Writer::new().uint(1, u64::from(code)).uint(2, direction),
+        )
+        .finish()
 }
 
 async fn read_frame<R: AsyncRead + Unpin>(read: &mut R) -> anyhow::Result<Vec<u8>> {
@@ -431,6 +446,25 @@ mod tests {
         assert_eq!(object.str(3), Some("Dune"));
         assert_eq!((object.uint(1), object.uint(2)), (Some(3), Some(3)));
         assert!(text_field(&encode(&Order::Key(ENTER), field)).is_none());
+    }
+
+    #[test]
+    fn a_held_key_starts_long_and_ends_long() {
+        let direction = |order: Order| {
+            let frame = encode(&order, (0, 0));
+            let m = parse(&frame).unwrap();
+            let key = m.msg(10).unwrap();
+            (key.uint(1), key.uint(2))
+        };
+        assert_eq!(direction(Order::Key(22)), (Some(22), Some(SHORT)));
+        assert_eq!(
+            direction(Order::Hold(22, true)),
+            (Some(22), Some(START_LONG))
+        );
+        assert_eq!(
+            direction(Order::Hold(22, false)),
+            (Some(22), Some(END_LONG))
+        );
     }
 
     #[tokio::test]
