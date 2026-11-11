@@ -653,5 +653,13 @@
   "pilotes.linky_tic.ouverture": "cannot open {port}: {cause}",
   "pilotes.linky_tic.lecture": "cannot read the serial port: {cause}",
   "pilotes.linky_tic.port_ferme": "the serial port closed (module unplugged?)",
-  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)"
+  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)",
+  "pilotes.recycleapp.nom": "Waste collections",
+  "pilotes.recycleapp.description": "The address's waste collection calendar, from RecycleApp (Fost Plus).",
+  "pilotes.recycleapp.aujourdhui": "Collected today",
+  "pilotes.recycleapp.demain": "Collected tomorrow",
+  "pilotes.recycleapp.dans_jours": "{nom}: in (days)",
+  "pilotes.recycleapp.code_postal": "RecycleApp does not know the postal code {code}",
+  "pilotes.recycleapp.rue": "RecycleApp finds no street \"{rue}\" at this postal code: check its spelling (in Dutch or French)",
+  "pilotes.recycleapp.lecture_seule": "the collection calendar can only be read"
 }

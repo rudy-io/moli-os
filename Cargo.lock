@@ -1781,6 +1781,7 @@ dependencies = [
  "moli-phones",
  "moli-presence",
  "moli-profile",
+ "moli-recycleapp",
  "moli-reolink",
  "moli-runtime",
  "moli-shelly",
@@ -1893,6 +1894,24 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "moli-recycleapp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "http-body-util",
+ "jiff",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
