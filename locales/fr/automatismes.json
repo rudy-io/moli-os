@@ -338,5 +338,8 @@
   "automatismes.routines.titre": "Routines",
   "automatismes.routines.tous": "Tous les automatismes",
   "automatismes.routines.lancee": "« {nom} » lancée",
-  "automatismes.routines.erreur": "{nom} : {message}"
+  "automatismes.routines.erreur": "{nom} : {message}",
+  "automatismes.inspecteur.une_semaine_sur": "Une semaine sur",
+  "automatismes.inspecteur.a_partir_de": "À partir de la semaine du",
+  "automatismes.texte.semaines": "{texte} · 1 sem. sur {n}"
 }

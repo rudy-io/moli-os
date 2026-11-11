@@ -156,6 +156,15 @@ fn out() -> String {
     "out".into()
 }
 
+fn one() -> u8 {
+    1
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if
+fn is_one(n: &u8) -> bool {
+    *n == 1
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Step {
@@ -180,11 +189,16 @@ pub enum Step {
         #[serde(default)]
         for_s: u64,
     },
-    /// Every day (or some days) at a time.
+    /// Every day (or some days) at a time; with `weeks` above 1, only one
+    /// week in `weeks`: the week of `from` (a date) and every `weeks` after.
     AtTime {
         at: String,
         #[serde(default)]
         days: Vec<u8>,
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        weeks: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
     },
     /// At sunrise or sunset, give or take some minutes.
     AtSun {

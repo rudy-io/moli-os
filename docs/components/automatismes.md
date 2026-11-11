@@ -46,7 +46,7 @@ Une automatisation = un **graphe** de nœuds reliés (comme n8n), stocké dans
 |---|---|---|
 | Déclencheurs | `when_state` | `point`, `to?`, `from?`, `for_s` (maintenu N s) |
 | | `when_threshold` | `point`, `above?`, `below?`, `for_s` (franchissement) |
-| | `at_time` | `at` « HH:MM », `days` (1 = lundi … 7) |
+| | `at_time` | `at` « HH:MM », `days` (1 = lundi … 7), `weeks` (1 à 8, défaut 1 : une semaine sur N) et `from` (date de la semaine de départ, obligatoire dès que `weeks` > 1 ; les semaines vont du lundi au dimanche) |
 | | `at_sun` | `event` rise/set, `offset_min`, `days` |
 | | `every` | `minutes` |
 | | `on_start`, `manual` | — |
