@@ -915,6 +915,9 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   est refusée).
 - **Tests** : `src/lib.rs` (chiffrement XOR aller-retour, `get_sysinfo`, les deux générations de
   mesure, période refusée), fixtures anonymisées de `integrations/kasa/fixtures/`.
+- **Vérifié sur du vrai matériel** : HS110(EU) matériel 1.0, firmware 1.2.6 : lecture (relais,
+  voyant, puissance, tension, courant, énergie), voyant allumé puis éteint, relais allumé (la
+  charge mesurée à 2,2 kW) puis éteint, depuis Moli. Matériel 2 : pas encore.
 
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
