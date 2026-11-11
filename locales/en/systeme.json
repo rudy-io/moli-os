@@ -371,5 +371,19 @@
   "systeme.airzone.add": "Add a gateway",
   "systeme.journal.pilote_pause": "{kind} driver paused",
   "systeme.journal.pilote_reconfigure_lecture_seule": "{kind} driver reconfigured as read-only",
-  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured"
+  "systeme.journal.pilote_reconfigure": "{kind} driver reconfigured",
+  "systeme.engie.titre": "ENGIE (prices, capacity tariff, smart charging)",
+  "systeme.engie.connecte": "ENGIE account connected: prices, peaks and smart charging followed by Moli.",
+  "systeme.engie.a_connecter": "Connect your ENGIE account so Moli follows your prices, your capacity peak and your smart charging.",
+  "systeme.engie.erreur": "ENGIE is not answering right now: Moli tries again on its own.",
+  "systeme.engie.connexion": "Connecting to ENGIE…",
+  "systeme.engie.etape1": "Open ENGIE's sign-in page, on a computer.",
+  "systeme.engie.ouvrir": "Open the ENGIE page",
+  "systeme.engie.etape2": "Sign in: e-mail, password, then the code ENGIE sends by text or e-mail. It all happens at ENGIE.",
+  "systeme.engie.etape3": "The page stays blank at the end: that is expected, it wants to open the ENGIE app. Open the browser's console (F12, Console tab): copy the address starting with be.engie.smart://login-callback (Firefox also shows it in the address bar) and paste it below within 5 minutes.",
+  "systeme.engie.coller": "Address the sign-in ends on",
+  "systeme.engie.connecter": "Connect",
+  "systeme.engie.verification": "Connecting…",
+  "systeme.engie.aide": "Moli never sees your password: it only keeps an encrypted token in its secret store. Signing in with the same account in the app or on engie.be closes Moli's session: it will then ask you to connect it again.",
+  "systeme.engie.officieux": "ENGIE offers no official interface: Moli uses the ENGIE Smart app's, which may change without notice."
 }

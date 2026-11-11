@@ -1,0 +1,8 @@
+{
+  "oldestSessionReached": true,
+  "items": [
+    {"start": "2026-09-01T00:00:00+02:00", "sessionCount": 12, "totalConsumptionKwh": 160.2, "managedConsumptionKwh": 150.0, "cost": 21.4, "reward": 6.5},
+    {"start": "2026-10-01T00:00:00+02:00", "sessionCount": 14, "totalConsumptionKwh": 190.1, "managedConsumptionKwh": 181.3, "cost": 25.9, "reward": 5.25},
+    {"start": "2026-11-01T00:00:00+01:00", "sessionCount": 5, "totalConsumptionKwh": 60.0, "cost": 7.1, "reward": 2.5}
+  ]
+}

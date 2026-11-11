@@ -7,6 +7,7 @@
   import AssistantExchanges from '../ui/AssistantExchanges.svelte';
   import Rules from '../moli/Rules.svelte';
   import AlexaAccount from '../ui/AlexaAccount.svelte';
+  import EngieAccount from '../ui/EngieAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
   import { hub, home, hidden, watches } from '../lib/home.svelte.js';
@@ -183,6 +184,8 @@
   <Rules />
 
   <AlexaAccount />
+
+  <EngieAccount />
 
   <TuyaCloudKeys />
 
