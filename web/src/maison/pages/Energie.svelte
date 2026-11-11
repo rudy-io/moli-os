@@ -10,6 +10,7 @@
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
+  import EnergyFlow from '../ui/EnergyFlow.svelte';
 
   onMount(useEnergy);
 
@@ -317,6 +318,8 @@
       {/if}
 
     </div>
+
+    <EnergyFlow />
 
     {#if tips.length}
       <section class="card tips">
