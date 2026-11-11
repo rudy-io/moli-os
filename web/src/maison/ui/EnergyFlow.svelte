@@ -9,6 +9,10 @@
    *  panels, the house, and gas today. From the meters' live powers
    *  (`power` of the grid, export and solar meters): the house is what was
    *  bought plus what the panels made, less what went out. */
+  /** On the home page (`home`), only when there is more than the grid:
+   *  without panels nor export, the energy card above says it all. */
+  let { home = false } = $props();
+
   onMount(useEnergy);
 
   const s = $derived(energy.summary);
@@ -19,23 +23,29 @@
     return typeof v === 'number' && Number.isFinite(v) ? v : null;
   };
   // Several meters can share one power point (a P1's day and night
-  // indexes): each point once.
+  // indexes): each point once. Signed: a single clamp on the supply reads
+  // below zero when the house sends power out.
   const powerOf = (role) => {
     const points = [...new Set((s?.meters ?? []).filter((m) => m.role === role && m.power).map((m) => m.power))];
     if (!points.length) return null;
     const values = points.map(current).filter((v) => v != null);
-    return values.length ? values.reduce((a, v) => a + Math.max(0, v), 0) : null;
+    return values.length ? values.reduce((a, v) => a + v, 0) : null;
   };
+  const positive = (v) => (v == null ? null : Math.max(0, v));
   const kwhOf = (role, period) => {
     const ids = (s?.meters ?? []).filter((m) => m.role === role).map((m) => m.id);
     if (!ids.length || !period) return null;
     return ids.reduce((a, id) => a + (period.meters[id]?.kwh ?? 0), 0);
   };
 
-  const bought = $derived(powerOf('grid') ?? powerOf('total'));
-  const sent = $derived(powerOf('export') ?? 0);
-  const made = $derived(powerOf('solar'));
+  const hasExport = $derived((s?.meters ?? []).some((m) => m.role === 'export'));
+  const gridNow = $derived(powerOf('grid') ?? powerOf('total'));
+  const bought = $derived(positive(gridNow));
+  // Without an export meter, what the grid meter reads below zero went out.
+  const sent = $derived(hasExport ? (positive(powerOf('export')) ?? 0) : gridNow == null ? 0 : Math.max(0, -gridNow));
+  const made = $derived(positive(powerOf('solar')));
   const hasSolar = $derived((s?.meters ?? []).some((m) => m.role === 'solar'));
+  const shown = $derived(!home || hasSolar || hasExport);
   const hasGas = $derived((s?.meters ?? []).some((m) => m.role === 'gas'));
   const house = $derived(bought == null ? null : Math.max(0, bought + (made ?? 0) - sent));
   // The panels feed the house first; the rest goes out.
@@ -60,8 +70,8 @@
   };
 </script>
 
-{#if s && bought != null}
-  <section class="card flow" aria-label={t('energie.flux.titre')}>
+{#if s && bought != null && shown}
+  <section class="card flow" class:home aria-label={t('energie.flux.titre')}>
     <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.flux.titre')}</h2></div>
     <svg viewBox="0 0 400 236" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
       {#if hasSolar}
@@ -113,6 +123,11 @@
 {/if}
 
 <style>
+  /* On the home page, spaced like the other cards of its column. */
+  .flow.home {
+    margin-top: 20px;
+  }
+
   .flow svg {
     width: 100%;
     height: auto;
@@ -135,8 +150,8 @@
 
   .line.export,
   .dot.export {
-    stroke: #9b7bf0;
-    fill: #9b7bf0;
+    stroke: var(--good);
+    fill: var(--good);
   }
 
   .line.grid,
@@ -146,7 +161,7 @@
   }
 
   .line.gas {
-    stroke: #a33b3b;
+    stroke: var(--alert);
   }
 
   .line.solar,
@@ -174,7 +189,7 @@
   }
 
   .node.gas circle {
-    stroke: #a33b3b;
+    stroke: var(--alert);
   }
 
   text {
@@ -201,7 +216,7 @@
   }
 
   text.out {
-    fill: #9b7bf0;
+    fill: var(--good);
     font-size: 12px;
     font-weight: 600;
   }
