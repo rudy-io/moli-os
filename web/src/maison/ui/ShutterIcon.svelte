@@ -6,7 +6,7 @@
   let { id, size = 46, compact = false } = $props();
 
   const pct = $derived(coverPosition(id));
-  const isOpen = $derived(pct != null && pct >= 50);
+  const isOpen = $derived(pct != null && pct > 0);
 
   // Icon state: open (>80%), semi (20-80%), closed (<20%)
   const iconName = $derived.by(() => {
