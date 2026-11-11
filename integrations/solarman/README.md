@@ -26,3 +26,16 @@ aux micro-onduleurs Deye). **Lecture seule** : seule la fonction Modbus 0x03 est
 - **Pas encore** : les autres familles de la carte ha-solarman (onduleurs string, hybrides,
   batteries), la limitation de puissance (écriture), le code d'alarme en clair (le registre
   d'alarme d'un micro-onduleur sain n'est pas nul : sa table reste à établir).
+
+## Solis (S6-GR1P)
+
+`model = "solis"` : un onduleur string Solis S6-GR1P derrière son enregistreur. Registres
+d'entrée (fonction Modbus 0x04) 3004 à 3043, lus en deux blocs : puissance AC (`power`) et des
+panneaux (`pv_power`), production du jour, du mois, de l'année et totale (`energy`, compteur à
+vie, jamais en recul), entrées PV 1 et 2, réseau (tension, courant, fréquence), température,
+`state` (`waiting`, `starting`, `generating`, `fault`) et `fault_code`. Carte de
+`solis_s6-gr1p.yaml` (ha-solarman), valeurs vérifiées contre Home Assistant au même moment.
+
+Certains enregistreurs (une clé Solis en est) parlent **Modbus TCP** sur le port 8899 au lieu
+des trames V5 : `transport = "modbus_tcp"`. Ces clés ne servent qu'un client à la fois : Home
+Assistant et Moli ne peuvent pas la lire ensemble.

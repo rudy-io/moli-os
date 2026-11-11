@@ -185,6 +185,56 @@ pub fn parse(
     Ok(Frame::Registers(registers, total))
 }
 
+/// Modbus TCP (some loggers, a Solis stick among them, speak it on the
+/// same port instead of V5): a request with transaction `tid`.
+#[must_use]
+pub fn tcp_request(tid: u16, slave: u8, function: u8, start: u16, count: u16) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(12);
+    frame.extend_from_slice(&tid.to_be_bytes());
+    frame.extend_from_slice(&[0, 0, 0, 6, slave, function]);
+    frame.extend_from_slice(&start.to_be_bytes());
+    frame.extend_from_slice(&count.to_be_bytes());
+    frame
+}
+
+/// The Modbus TCP answer to transaction `tid`, `count` registers read with
+/// `function`.
+pub fn tcp_parse(buf: &[u8], tid: u16, function: u8, count: u16) -> anyhow::Result<Frame> {
+    if buf.len() < 9 {
+        return Ok(Frame::Partial);
+    }
+    let length = usize::from(u16::from_be_bytes([buf[4], buf[5]]));
+    ensure!((2..=260).contains(&length), "bad modbus tcp length");
+    let total = 6 + length;
+    if buf.len() < total {
+        return Ok(Frame::Partial);
+    }
+    if u16::from_be_bytes([buf[0], buf[1]]) != tid || buf[2..4] != [0, 0] {
+        return Ok(Frame::Other(total));
+    }
+    let pdu = &buf[7..total];
+    if pdu[0] == function | 0x80 {
+        return Err(NoData::Refused(pdu.get(1).copied().unwrap_or(0)).into());
+    }
+    ensure!(
+        pdu[0] == function,
+        "unexpected modbus function {:#x}",
+        pdu[0]
+    );
+    let bytes = usize::from(pdu[1]);
+    ensure!(pdu.len() >= 2 + bytes, "short modbus answer");
+    if bytes != usize::from(count) * 2 {
+        bail!("asked {count} registers, got {bytes} bytes");
+    }
+    let registers = pdu[2..2 + bytes]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|w| u16::from_be_bytes(*w))
+        .collect();
+    Ok(Frame::Registers(registers, total))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -194,6 +244,27 @@ pub(crate) mod tests {
             .step_by(2)
             .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn modbus_tcp_reads_registers() {
+        let req = tcp_request(0x10, 1, INPUT, 3004, 2);
+        assert_eq!(req, [0, 0x10, 0, 0, 0, 6, 1, 4, 0x0B, 0xBC, 0, 2]);
+        let answer = [0, 0x10, 0, 0, 0, 7, 1, 4, 4, 0, 0, 0, 0x32];
+        assert_eq!(
+            tcp_parse(&answer, 0x10, INPUT, 2).unwrap(),
+            Frame::Registers(vec![0, 50], 13)
+        );
+        assert_eq!(
+            tcp_parse(&answer[..8], 0x10, INPUT, 2).unwrap(),
+            Frame::Partial
+        );
+        assert_eq!(
+            tcp_parse(&answer, 0x11, INPUT, 2).unwrap(),
+            Frame::Other(13)
+        );
+        let refused = [0, 0x10, 0, 0, 0, 3, 1, 0x84, 2];
+        assert!(tcp_parse(&refused, 0x10, INPUT, 2).is_err());
     }
 
     #[test]

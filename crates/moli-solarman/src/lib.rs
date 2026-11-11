@@ -67,6 +67,18 @@ pub struct Config {
     /// or `solis` (S6-GR1P string inverter).
     #[serde(default)]
     pub model: Model,
+    /// How the logger is spoken to on its port: `v5` (Solarman's frames,
+    /// the default) or `modbus_tcp` (some sticks, a Solis one among them).
+    #[serde(default)]
+    pub transport: Transport,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    #[default]
+    V5,
+    ModbusTcp,
 }
 
 /// The inverter's register map.
@@ -125,6 +137,7 @@ struct Logger {
     serial: u32,
     slave: u8,
     sequence: u16,
+    transport: Transport,
 }
 
 impl Logger {
@@ -141,7 +154,13 @@ impl Logger {
     ) -> anyhow::Result<Vec<u16>> {
         self.sequence = self.sequence % 255 + 1;
         let sequence = self.sequence;
-        let request = v5::read_request(self.serial, sequence, self.slave, function, start, count);
+        let request = match self.transport {
+            Transport::V5 => {
+                v5::read_request(self.serial, sequence, self.slave, function, start, count)
+            }
+            Transport::ModbusTcp => v5::tcp_request(sequence, self.slave, function, start, count),
+        };
+        let transport = self.transport;
         let exchange = async {
             let mut stream = TcpStream::connect((self.host.as_str(), self.port))
                 .await
@@ -149,7 +168,11 @@ impl Logger {
             stream.write_all(&request).await?;
             let mut buf = Vec::new();
             loop {
-                match v5::parse(&buf, self.serial, sequence, function, count)? {
+                let frame = match transport {
+                    Transport::V5 => v5::parse(&buf, self.serial, sequence, function, count)?,
+                    Transport::ModbusTcp => v5::tcp_parse(&buf, sequence, function, count)?,
+                };
+                match frame {
                     Frame::Registers(registers, _) => return Ok(registers),
                     Frame::Other(n) => {
                         buf.drain(..n);
@@ -234,6 +257,7 @@ impl Solarman {
                 serial,
                 slave,
                 sequence: 0,
+                transport: self.config.transport,
             };
             match there.read(deye::INFO).await {
                 Ok(_) => true,
@@ -357,6 +381,7 @@ async fn run(solarman: &Solarman, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         serial,
         slave: config.slave,
         sequence: 0,
+        transport: config.transport,
     };
     let id = ctx.device_id(&serial.to_string());
     if config.model == Model::Solis {
