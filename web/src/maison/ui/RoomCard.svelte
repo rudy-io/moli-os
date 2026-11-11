@@ -267,20 +267,13 @@
     <div class="title">
       <h2>{room.name}{#if locked}<span class="lock" title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}</h2>
       <span class="muted">
-        {#if room.lit && room.opened}
-          {t('commun.piece.allumees', { count: room.lit })} · {t('commun.piece.ouverts', { count: room.opened })}
-        {:else if room.lit}
-          {t('commun.piece.allumees', { count: room.lit })}
-        {:else if room.opened}
-          {t('commun.piece.ouverts', { count: room.opened })}
-        {:else if room.lights.length && room.covers.length}
-          {t('commun.piece.tout_eteint')}{#if !room.coversUnknown} · {t('commun.piece.tout_ferme')}{/if}
-        {:else if room.lights.length}
-          {t('commun.piece.tout_eteint')}
+        {room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}
+        {#if room.opened}
+          · {t('commun.piece.ouverts', { count: room.opened })}
+        {:else if room.covers.length && !room.coversUnknown}
+          · {t('commun.piece.tout_ferme')}
         {:else if room.covers.length}
-          {#if room.coversUnknown}{t('commun.volet.position_inconnue')}{:else}{t('commun.piece.tout_ferme')}{/if}
-        {:else}
-          {t('commun.piece.tout_eteint')}
+          · {t('commun.volet.position_inconnue')}
         {/if}
       </span>
     </div>
@@ -308,6 +301,7 @@
         {@const cut = unpowered(d.id) && !isFixture(d)}
         {@const more = isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
         {@const label = name ?? nameOf(d.id)}
+        {@const coverCommand = isCover ? coverCommands(d).find((c) => c.command === (lit ? 'close' : 'open'))?.command : undefined}
         <div class="pad-wrap">
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
@@ -321,7 +315,7 @@
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!isCover && !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!isCover && !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico">
                 {#if isCover}
                   <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
