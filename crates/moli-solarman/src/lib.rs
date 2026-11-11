@@ -8,6 +8,7 @@
 //! address, looked for only by day (at night its silence is normal).
 
 mod deye;
+mod solis;
 mod v5;
 
 use std::net::Ipv4Addr;
@@ -62,6 +63,19 @@ pub struct Config {
     /// Where the day ends (the day's production goes back to 0).
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    /// The inverter behind the logger: `deye` (micro-inverter, the default)
+    /// or `solis` (S6-GR1P string inverter).
+    #[serde(default)]
+    pub model: Model,
+}
+
+/// The inverter's register map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Model {
+    #[default]
+    Deye,
+    Solis,
 }
 
 fn default_port() -> u16 {
@@ -114,11 +128,20 @@ struct Logger {
 }
 
 impl Logger {
-    /// Reads `count` registers from `start`.
-    async fn read(&mut self, (start, count): (u16, u16)) -> anyhow::Result<Vec<u16>> {
+    /// Reads `count` holding registers from `start` (Deye).
+    async fn read(&mut self, block: (u16, u16)) -> anyhow::Result<Vec<u16>> {
+        self.read_with(v5::HOLDING, block).await
+    }
+
+    /// Reads `count` registers from `start` with a Modbus read `function`.
+    async fn read_with(
+        &mut self,
+        function: u8,
+        (start, count): (u16, u16),
+    ) -> anyhow::Result<Vec<u16>> {
         self.sequence = self.sequence % 255 + 1;
         let sequence = self.sequence;
-        let request = v5::read_request(self.serial, sequence, self.slave, start, count);
+        let request = v5::read_request(self.serial, sequence, self.slave, function, start, count);
         let exchange = async {
             let mut stream = TcpStream::connect((self.host.as_str(), self.port))
                 .await
@@ -126,7 +149,7 @@ impl Logger {
             stream.write_all(&request).await?;
             let mut buf = Vec::new();
             loop {
-                match v5::parse(&buf, self.serial, sequence, count)? {
+                match v5::parse(&buf, self.serial, sequence, function, count)? {
                     Frame::Registers(registers, _) => return Ok(registers),
                     Frame::Other(n) => {
                         buf.drain(..n);
@@ -336,6 +359,9 @@ async fn run(solarman: &Solarman, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         sequence: 0,
     };
     let id = ctx.device_id(&serial.to_string());
+    if config.model == Model::Solis {
+        return run_solis(ctx, &mut logger, &id).await;
+    }
     let mut inverter: Option<Inverter> = None;
     let mut online: Option<bool> = None;
     let mut failures = 0u32;
@@ -436,6 +462,58 @@ async fn run(solarman: &Solarman, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     } else if let Some(mac) = mac.as_deref() {
                         solarman.look(ctx, &mut logger, &configured, mac).await;
                     }
+                }
+            }
+        }
+        if !pause(ctx, POLL).await {
+            return Ok(());
+        }
+    }
+}
+
+/// A Solis inverter: no identity block to read, two blocks of input
+/// registers every turn. Silent at night like the micro-inverters: the
+/// device goes offline without a word.
+async fn run_solis(ctx: &mut DriverCtx, logger: &mut Logger, id: &DeviceId) -> anyhow::Result<()> {
+    let mut counters = solis::Counters::default();
+    let mut shown = false;
+    let mut online: Option<bool> = None;
+    if !ctx.known_devices().is_empty() {
+        ctx.ready();
+    }
+    loop {
+        let mut regs = Vec::new();
+        let mut failed = None;
+        for block in solis::BLOCKS {
+            match logger.read_with(v5::INPUT, block).await {
+                Ok(r) => regs.extend(r),
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        match failed {
+            None => {
+                if !shown {
+                    ctx.upsert_device(solis::device(ctx.instance(), id.clone()));
+                    ctx.ready();
+                    shown = true;
+                    tracing::info!(instance = %ctx.instance(), "solis inverter read");
+                }
+                for (key, value) in solis::readings(&regs, &mut counters) {
+                    ctx.set_state(id, &key, value);
+                }
+                if online != Some(true) {
+                    online = Some(true);
+                    ctx.set_availability(id, true);
+                }
+            }
+            Some(e) => {
+                if online != Some(false) {
+                    online = Some(false);
+                    ctx.set_availability(id, false);
+                    tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "solis inverter silent");
                 }
             }
         }
