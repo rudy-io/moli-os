@@ -893,12 +893,17 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Points** : un satellite (l'appareil annonce une voix ou un `media_player`) : `state`
   (`idle`, `listening`, `thinking`, `speaking`), `volume` et `muted` (le `media_player` de
   l'appareil), `wake_word`, `say` (texte, 500 caractères). Tout autre appareil : un point par
-  entité, de clé l'`object_id` de l'entité (sinon son nom réduit en clé, accents repliés ; un
-  doublon prend `_2`) ; les interrupteurs s'écrivent (`OnOff`), le reste se lit. Les
-  diagnostics de l'appareil (catégorie `diagnostic` : Wi-Fi, uptime, adresse…) et les entités
-  cachées par défaut sont laissés de côté. Un capteur en `kW` devient des `W` (arrondi aux
-  décimales que l'appareil annonce, moins trois) ; une valeur absente (`missing_state`, `NaN`)
-  n'est pas publiée.
+  entité, de clé l'`object_id` de l'entité (sinon son nom), réduit en clé : minuscules, accents
+  repliés, tout autre caractère (`-`, espace, `__`…) devient un seul `_`. Deux types qui
+  partagent une clé : le premier de capteur, capteur binaire, capteur texte, interrupteur la
+  garde, les autres prennent leur type en suffixe (`<clé>_switch`), quel que soit l'ordre de la
+  liste. Les interrupteurs s'écrivent (`OnOff`), le reste se lit. Les réglages de l'appareil
+  (catégorie `config` : `restart`, `safe_mode`, `factory_reset`…), ses diagnostics (catégorie
+  `diagnostic` : Wi-Fi, uptime, adresse…) et les entités cachées par défaut sont laissés de
+  côté ; au-delà de 500 entités, la connexion est refusée. Une valeur arrive telle quelle (les
+  décimales annoncées ne sont qu'une indication d'affichage), sauf un capteur en `kW`, qui
+  devient des `W` arrondis aux décimales annoncées moins trois ; une valeur absente
+  (`missing_state`, `NaN`) n'est pas publiée.
 - **Identité** : la MAC de l'appareil (`ctx.device_id(&hello.mac)`).
 - **Pièges** : ⚠️ l'assistant vocal d'ESPHome n'accepte **qu'un client**, et Home Assistant s'y
   abonne dès qu'il gère l'appareil : si les deux sont branchés, **HA gagne et Moli se tait sans

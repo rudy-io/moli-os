@@ -37,6 +37,8 @@ const PING_EVERY: Duration = Duration::from_secs(20);
 /// Nothing at all from the device for this long (it pings after 60 s of
 /// silence): the connection is dead.
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
+/// More entities than this from one device: something is wrong.
+const MAX_ENTITIES: usize = 500;
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(60);
 /// Just after Moli gave a device its key, the device may still answer in
@@ -522,7 +524,9 @@ struct Entities {
 /// How an entity's state becomes its point's value.
 #[derive(Clone, Debug, PartialEq)]
 enum Feed {
-    /// A number, times `scale` (kW → W), rounded to `decimals`.
+    /// A number, times `scale` (kW → W) and then rounded to `decimals`;
+    /// as it arrives otherwise (the device's decimals are only a display
+    /// hint, and energy is counted on an index).
     Sensor {
         scale: f64,
         decimals: Option<i32>,
@@ -545,60 +549,96 @@ struct Extra {
 
 impl Extra {
     /// The entities worth a point, keyed by `object_id` (else the name made
-    /// a key), each key once. Diagnostics and entities the firmware hides by
-    /// default are left out.
+    /// a key), each key once. The device's own settings (`restart`,
+    /// `factory_reset`…), its diagnostics and the entities the firmware
+    /// hides by default are left out. Two kinds sharing a key: the first of
+    /// sensor, binary sensor, text sensor, switch keeps it, the others take
+    /// their kind as a suffix (`<key>_switch`), whatever the order of the
+    /// list, so adding an entity to the firmware moves no other key.
     fn from_listed(listed: &[(u16, api::Listed)]) -> Vec<Self> {
+        const ORDER: [u16; 4] = [
+            api::LIST_SENSOR,
+            api::LIST_BINARY_SENSOR,
+            api::LIST_TEXT_SENSOR,
+            api::LIST_SWITCH,
+        ];
         let mut extras: Vec<Self> = Vec::new();
-        for (kind, l) in listed {
-            if l.category == api::CATEGORY_DIAGNOSTIC || l.disabled_by_default {
-                continue;
-            }
-            let base = point_key(if l.object_id.is_empty() {
-                &l.name
-            } else {
-                &l.object_id
-            });
-            if base.is_empty() {
-                continue;
-            }
-            let mut point = base.clone();
-            let mut n = 2;
-            while extras.iter().any(|e| e.point == point) {
-                point = format!("{base}_{n}");
-                n += 1;
-            }
-            let (feed, unit) = match *kind {
-                api::LIST_SENSOR => {
-                    let (unit, scale, shift) = match l.unit.trim() {
-                        "kW" => (Some(Unit::Watt), 1000.0, 3),
-                        other => (Unit::parse(other), 1.0, 0),
-                    };
-                    let decimals = (l.decimals >= 0).then(|| {
-                        i32::try_from(l.decimals)
-                            .unwrap_or(0)
-                            .saturating_sub(shift)
-                            .max(0)
-                    });
-                    (Feed::Sensor { scale, decimals }, unit)
+        let mut bases = std::collections::HashSet::new();
+        for kind in ORDER {
+            for (_, l) in listed.iter().filter(|(k, _)| *k == kind) {
+                if l.category == api::CATEGORY_DIAGNOSTIC
+                    || l.category == api::CATEGORY_CONFIG
+                    || l.disabled_by_default
+                {
+                    continue;
                 }
-                api::LIST_BINARY_SENSOR => (Feed::Binary, None),
-                api::LIST_TEXT_SENSOR => (Feed::Text, None),
-                api::LIST_SWITCH => (Feed::Switch, None),
-                _ => continue,
-            };
-            extras.push(Self {
-                key: l.key,
-                label: if l.name.is_empty() {
-                    point.clone()
+                let base = point_key(if l.object_id.is_empty() {
+                    &l.name
                 } else {
-                    l.name.clone()
-                },
-                point,
-                feed,
-                unit,
-                device_class: l.device_class.clone(),
-            });
+                    &l.object_id
+                });
+                if base.is_empty() {
+                    continue;
+                }
+                // ESPHome keeps object_ids unique within a kind: a twin there
+                // is a firmware mistake, and its entity gets no point.
+                if !bases.insert((kind, base.clone())) {
+                    continue;
+                }
+                let mut point = base.clone();
+                if extras.iter().any(|e| e.point == point) {
+                    point = format!("{base}_{}", kind_suffix(kind));
+                }
+                if extras.iter().any(|e| e.point == point) {
+                    continue;
+                }
+                let (feed, unit) = match kind {
+                    api::LIST_SENSOR => match l.unit.trim() {
+                        "kW" => {
+                            // In watts, three decimals fewer.
+                            let decimals = (l.decimals >= 0).then(|| {
+                                i32::try_from(l.decimals)
+                                    .unwrap_or(0)
+                                    .saturating_sub(3)
+                                    .max(0)
+                            });
+                            (
+                                Feed::Sensor {
+                                    scale: 1000.0,
+                                    decimals: Some(decimals.unwrap_or(1)),
+                                },
+                                Some(Unit::Watt),
+                            )
+                        }
+                        other => (
+                            Feed::Sensor {
+                                scale: 1.0,
+                                decimals: None,
+                            },
+                            Unit::parse(other),
+                        ),
+                    },
+                    api::LIST_BINARY_SENSOR => (Feed::Binary, None),
+                    api::LIST_TEXT_SENSOR => (Feed::Text, None),
+                    _ => (Feed::Switch, None),
+                };
+                extras.push(Self {
+                    key: l.key,
+                    label: if l.name.is_empty() {
+                        point.clone()
+                    } else {
+                        l.name.clone()
+                    },
+                    point,
+                    feed,
+                    unit,
+                    device_class: l.device_class.clone(),
+                });
+            }
         }
+        // The points in the order the device listed its entities.
+        let rank = |key: u32| listed.iter().position(|(_, l)| l.key == key);
+        extras.sort_by_key(|e| rank(e.key));
         extras
     }
 
@@ -636,7 +676,8 @@ impl Extra {
         let Feed::Sensor { scale, decimals } = self.feed else {
             return None;
         };
-        let v = f64::from(raw) * scale;
+        // The f32's shortest decimal form: 531.473, not 531.4730224609375.
+        let v = raw.to_string().parse::<f64>().ok()? * scale;
         let v = match decimals {
             Some(d) => {
                 let f = 10f64.powi(d.min(9));
@@ -645,6 +686,16 @@ impl Extra {
             None => v,
         };
         v.is_finite().then_some(Value::Float(v))
+    }
+}
+
+/// The suffix of a key two kinds share.
+fn kind_suffix(kind: u16) -> &'static str {
+    match kind {
+        api::LIST_BINARY_SENSOR => "binary",
+        api::LIST_TEXT_SENSOR => "text",
+        api::LIST_SWITCH => "switch",
+        _ => "sensor",
     }
 }
 
@@ -747,8 +798,13 @@ async fn open(config: &Config, psk: &[u8; 32]) -> anyhow::Result<Opened> {
     tx.send(api::LIST_ENTITIES_REQUEST, &[]).await?;
     let mut entities = Entities::default();
     let mut listed = Vec::new();
+    let mut seen = 0usize;
     loop {
         let (kind, payload) = next(&mut inbox, &mut tx).await?;
+        seen += 1;
+        if seen > MAX_ENTITIES {
+            bail!("the device lists more than {MAX_ENTITIES} entities");
+        }
         match kind {
             api::LIST_ENTITIES_DONE => break,
             api::LIST_MEDIA_PLAYER => entities.media_player = api::entity(&payload).map(|e| e.key),
@@ -1294,6 +1350,16 @@ mod tests {
         wifi.1.category = api::CATEGORY_DIAGNOSTIC;
         let mut hidden = sensor("debug", 10, "", -1);
         hidden.1.disabled_by_default = true;
+        // The device's own settings never become points one could switch.
+        let restart = (
+            api::LIST_SWITCH,
+            api::Listed {
+                object_id: "restart".into(),
+                key: 11,
+                category: api::CATEGORY_CONFIG,
+                ..api::Listed::default()
+            },
+        );
         let listed = vec![
             sensor("p1_momentary_active_import", 1, "kW", 3),
             sensor("p1mini_cumulative_active_import_day", 2, "kWh", 3),
@@ -1315,10 +1381,21 @@ mod tests {
                     ..api::Listed::default()
                 },
             ),
-            // The same object_id twice: the second gets a suffix.
-            sensor("p1_gas_consumption", 6, "m³", 3),
+            // A switch sharing a sensor's object_id, listed first: the
+            // sensor keeps the key, the switch takes its kind.
+            (
+                api::LIST_SWITCH,
+                api::Listed {
+                    object_id: "p1_gas_consumption".into(),
+                    key: 6,
+                    ..api::Listed::default()
+                },
+            ),
+            // A twin within one kind (a firmware mistake): no point.
+            sensor("p1_momentary_active_import", 7, "kW", 3),
             wifi,
             hidden,
+            restart,
         ];
         let extras = Extra::from_listed(&listed);
         let points: Vec<&str> = extras.iter().map(|e| e.point.as_str()).collect();
@@ -1330,7 +1407,7 @@ mod tests {
                 "p1_gas_consumption",
                 "lsc_plug_6_prise",
                 "p1_meter_id",
-                "p1_gas_consumption_2",
+                "p1_gas_consumption_switch",
             ]
         );
         // kW becomes W: the dashboard and the energy page speak watts.
@@ -1346,6 +1423,9 @@ mod tests {
         assert_eq!((spec.semantic, spec.access.write), (Semantic::OnOff, true));
         assert!(!extras[2].spec().access.write, "a sensor is read-only");
         assert_eq!(extras[4].number(1.0), None, "a text has no number");
+        // As it arrives, whatever decimals the device announces.
+        assert_eq!(extras[2].number(1234.567), Some(Value::Float(1234.567)));
+        assert_eq!(extras[5].spec().semantic, Semantic::OnOff);
     }
 
     #[test]

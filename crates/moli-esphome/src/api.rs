@@ -130,6 +130,9 @@ pub fn entity(payload: &[u8]) -> Option<Entity> {
     })
 }
 
+/// `EntityCategory`: the device's own settings (`restart`, `safe_mode`,
+/// `factory_reset`…), not what it measures or drives.
+pub const CATEGORY_CONFIG: u64 = 1;
 /// `EntityCategory`: the device's own diagnostics (Wi-Fi signal, uptime,
 /// address…), not what it measures or drives.
 pub const CATEGORY_DIAGNOSTIC: u64 = 2;
