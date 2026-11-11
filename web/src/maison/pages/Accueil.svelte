@@ -12,6 +12,7 @@
   import EnergyCard from '../ui/EnergyCard.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
+  import ScenePicker from '../ui/ScenePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
 
@@ -190,6 +191,7 @@
           <LightTile id={l.id} name={l.name} icon={l.icon} also={l.also ?? []} />
         {/each}
       </div>
+      <ScenePicker />
       {#if mood}
         <div class="moods">
           <div class="moods-head">

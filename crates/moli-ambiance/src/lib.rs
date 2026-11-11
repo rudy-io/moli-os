@@ -195,6 +195,43 @@ pub enum Look<'a> {
     Color(&'a str),
     /// A white (kelvins) on every lamp that has whites.
     White(u32),
+    /// A look written out for one light (a scene's).
+    Set(&'a Setting),
+}
+
+/// A look written out, each part optional: what is left out stays as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Setting {
+    /// `#rrggbb`, for a lamp that takes colours.
+    pub color: Option<String>,
+    /// Kelvins: for a lamp without colour, or when no colour is given.
+    pub white: Option<u32>,
+    /// Percent.
+    pub brightness: Option<f64>,
+    /// An animation, played where the lamp has it.
+    pub effect: Option<String>,
+}
+
+/// The order that switches this device on or off: its writable on/off point,
+/// in its own words. `None`: nothing to switch.
+#[must_use]
+pub fn switch(view: &DeviceView, on: bool) -> Option<(PointId, Value)> {
+    let word = if on { "on" } else { "off" };
+    view.device
+        .points
+        .iter()
+        .filter(|p| p.access.write && p.semantic == Semantic::OnOff)
+        .find_map(|p| {
+            let value = match &p.kind {
+                Kind::Binary => Value::Bool(on),
+                Kind::Enum { values } => values
+                    .iter()
+                    .find(|v| v.eq_ignore_ascii_case(word))
+                    .map(|v| Value::Text(v.clone()))?,
+                _ => return None,
+            };
+            Some((PointId::new(&view.device.id, &p.key), value))
+        })
 }
 
 /// What a lamp can take, read from its points.
@@ -260,11 +297,15 @@ impl Lamp {
         })
     }
 
-    fn can_play(&self, effect: &str) -> bool {
+    /// The lamp has this animation.
+    #[must_use]
+    pub fn can_play(&self, effect: &str) -> bool {
         self.effects.iter().any(|e| &**e == effect)
     }
 
-    fn playing(&self) -> bool {
+    /// An animation is running on it.
+    #[must_use]
+    pub fn playing(&self) -> bool {
         self.effect_now.as_deref().is_some_and(|e| e != NO_EFFECT)
     }
 }
@@ -333,13 +374,31 @@ pub fn plan(look: Look<'_>, lamps: &[Lamp]) -> Vec<Vec<(PointId, Value)>> {
                         orders.push((point("color_temp"), temperature(white, a.white)));
                     }
                     if let Some((key, min, max)) = &lamp.brightness {
-                        // A 0–254 scale (Zigbee) as well as a percent one.
-                        let v = if *max > 100.0 {
-                            (a.brightness / 100.0 * max).round()
-                        } else {
-                            a.brightness
-                        };
-                        orders.push((point(key), Value::Float(v.clamp(*min, *max))));
+                        orders.push((point(key), level(a.brightness, *min, *max)));
+                    }
+                    if let Some(effect) = effect {
+                        orders.push((point("effect"), Value::from(effect)));
+                    }
+                }
+                Look::Set(s) => {
+                    orders.push((point(key), on.clone()));
+                    let effect = s.effect.as_deref().filter(|e| lamp.can_play(e));
+                    if effect.is_none() && lamp.playing() {
+                        orders.push((point("effect"), Value::from(NO_EFFECT)));
+                    }
+                    match (&s.color, s.white, lamp.white) {
+                        (Some(hex), _, _) if lamp.color => {
+                            orders.push((point("color"), Value::from(hex.as_str())));
+                        }
+                        (_, Some(kelvin), Some(white)) => {
+                            orders.push((point("color_temp"), temperature(white, kelvin)));
+                        }
+                        _ => {}
+                    }
+                    if let Some((percent, (key, min, max))) =
+                        s.brightness.zip(lamp.brightness.as_ref())
+                    {
+                        orders.push((point(key), level(percent, *min, *max)));
                     }
                     if let Some(effect) = effect {
                         orders.push((point("effect"), Value::from(effect)));
@@ -349,6 +408,16 @@ pub fn plan(look: Look<'_>, lamps: &[Lamp]) -> Vec<Vec<(PointId, Value)>> {
             orders
         })
         .collect()
+}
+
+/// A percent on the lamp's own scale: 0–254 (Zigbee) as well as a percent one.
+fn level(percent: f64, min: f64, max: f64) -> Value {
+    let v = if max > 100.0 {
+        (percent / 100.0 * max).round()
+    } else {
+        percent
+    };
+    Value::Float(v.clamp(min, max))
 }
 
 /// Kelvins in the lamp's own unit, within its range.
@@ -548,6 +617,49 @@ mod tests {
             keys(&plans[0]),
             ["on=true", "effect=\"no_effect\"", "color=\"#ff0000\""]
         );
+    }
+
+    #[test]
+    fn a_written_look_gives_each_lamp_what_it_can_take() {
+        let look = Setting {
+            color: Some("#ff8800".into()),
+            white: Some(2500),
+            brightness: Some(20.0),
+            effect: Some("flame".into()),
+        };
+        let lamps = [
+            hue("strip", true, &["no_effect", "flame"], None),
+            hue("globe", true, &["no_effect", "fire"], Some("fire")),
+            hue("white", false, &[], None),
+        ];
+        let plans = plan(Look::Set(&look), &lamps);
+        assert_eq!(
+            keys(&plans[0]),
+            [
+                "on=true",
+                "color=\"#ff8800\"",
+                "brightness=20.0",
+                "effect=\"flame\""
+            ]
+        );
+        // It cannot play this one: its own animation stops.
+        assert_eq!(
+            keys(&plans[1]),
+            [
+                "on=true",
+                "effect=\"no_effect\"",
+                "color=\"#ff8800\"",
+                "brightness=20.0"
+            ]
+        );
+        // No colour: the white instead (2500 K is 400 mireds).
+        assert_eq!(
+            keys(&plans[2]),
+            ["on=true", "color_temp=400.0", "brightness=20.0"]
+        );
+        // Nothing asked: only switched on.
+        let plans = plan(Look::Set(&Setting::default()), &lamps[..1]);
+        assert_eq!(keys(&plans[0]), ["on=true"]);
     }
 
     #[test]

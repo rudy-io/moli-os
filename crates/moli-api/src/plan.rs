@@ -42,7 +42,22 @@ const MAX_POINTS: usize = 64;
 const MAX_SIDE_CM: f64 = 10_000.0;
 
 /// How the dashboard may draw a drawn floor.
-const SKINS: &[&str] = &["plan", "blueprint", "nuit", "aquarelle"];
+const SKINS: &[&str] = &["plan", "blueprint", "nuit", "aquarelle", "reel"];
+/// What a room's floor is made of (the « Réel » skin draws it).
+const FLOOR_KINDS: &[&str] = &[
+    "tile",
+    "wood",
+    "wood_dark",
+    "concrete",
+    "stone",
+    "carpet",
+    "grass",
+    "deck",
+    "gravel",
+];
+/// What a painted wall band is printed with.
+const PATTERNS: &[&str] = &["leaves", "stripes"];
+const MAX_ACCENTS: usize = 16;
 const ROOM_KINDS: &[&str] = &[
     "living", "kitchen", "bedroom", "bath", "wc", "office", "hall", "veranda", "storage", "void",
     "roof", "garden", "deck", "pool", "terrace", "driveway", "garage", "other",
@@ -72,6 +87,12 @@ const ITEM_KINDS: &[&str] = &[
     "lounger",
     "trampoline",
     "bin",
+    "rug",
+    "bookcase",
+    "pendant",
+    "hammock",
+    "slide",
+    "tree",
     "other",
 ];
 /// Heights (cm) a wall, a fixture, a floor or a roof may say.
@@ -110,6 +131,11 @@ struct Floor {
     /// from outside when this floor is looked at).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     roof: Option<Roof>,
+    /// The colour of the walls seen from outside, and of the roof's edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    facade: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trim: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     walls: Vec<Shape>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -149,6 +175,12 @@ struct Shape {
     height: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     label: Option<String>,
+    /// Its real colours (`#rrggbb`): the main one, and a second (cushions,
+    /// a frame, a cover).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accent: Option<String>,
 }
 
 /// A room: its outline in cm, what it is, and the Moli room it is (for the
@@ -162,6 +194,66 @@ struct Area {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     room: Option<String>,
     poly: Vec<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finish: Option<Finish>,
+}
+
+/// How a room really looks: its floor (what it is made of, its tint), the
+/// paint of its walls, painted bands on some of them (`edge` = the side of
+/// its outline from point `edge` to the next, `from`–`to` cm high), and how
+/// far it is raised (a step, an above-ground pool's walls).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Finish {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    floor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    paint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    accents: Vec<Accent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raise: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Accent {
+    edge: usize,
+    color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pattern: Option<String>,
+}
+
+/// `#rrggbb`, nothing else (it ends up in a style).
+fn color_ok(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+impl Finish {
+    fn ok(&self, corners: usize) -> bool {
+        let color = |c: &Option<String>| c.as_deref().is_none_or(color_ok);
+        let high = |h: Option<f64>| h.is_none_or(|h| h.is_finite() && (0.0..=1000.0).contains(&h));
+        self.floor
+            .as_deref()
+            .is_none_or(|f| FLOOR_KINDS.contains(&f))
+            && color(&self.tint)
+            && color(&self.paint)
+            && high(self.raise)
+            && self.accents.len() <= MAX_ACCENTS
+            && self.accents.iter().all(|a| {
+                a.edge < corners
+                    && color_ok(&a.color)
+                    && high(a.from)
+                    && high(a.to)
+                    && a.pattern.as_deref().is_none_or(|p| PATTERNS.contains(&p))
+            })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,6 +311,12 @@ impl Floor {
         {
             return Err(moli_i18n::tr!("serveur.plan.altitude"));
         }
+        if [&self.facade, &self.trim]
+            .iter()
+            .any(|c| c.as_deref().is_some_and(|c| !color_ok(c)))
+        {
+            return Err(moli_i18n::tr!("serveur.plan.couleur"));
+        }
         if self.height.is_some_and(|h| !HEIGHTS.contains(&h))
             || self.roof.as_ref().is_some_and(|r| {
                 !matches!(r.ridge.as_str(), "x" | "y") || !HEIGHTS.contains(&r.rise)
@@ -243,7 +341,11 @@ impl Floor {
             };
             let label = s.label.as_deref().is_none_or(|l| text_ok(l, 40));
             let high = s.height.is_none_or(|h| HEIGHTS.contains(&h));
+            let colored = [&s.color, &s.accent]
+                .iter()
+                .all(|c| c.as_deref().is_none_or(color_ok));
             if sized
+                && colored
                 && turned
                 && kind
                 && label
@@ -288,6 +390,12 @@ impl Floor {
                 &moli_i18n::tr!("serveur.plan.forme.element"),
             )?;
         }
+        self.check_rooms(&inside)
+    }
+
+    /// Its rooms: named, of a known kind, outlined inside the floor, their
+    /// finish sane.
+    fn check_rooms(&self, inside: &impl Fn(f64, f64) -> bool) -> Result<(), String> {
         if self.rooms.len() > 100 {
             return Err(moli_i18n::tr!("serveur.plan.trop_de_pieces"));
         }
@@ -300,6 +408,7 @@ impl Floor {
                 || !text_ok(&room.name, 60)
                 || !ROOM_KINDS.contains(&room.kind.as_str())
                 || room.room.as_deref().is_some_and(|r| !text_ok(r, 60))
+                || room.finish.as_ref().is_some_and(|f| !f.ok(room.poly.len()))
                 || !shape
             {
                 return Err(moli_i18n::tr!(
@@ -663,5 +772,47 @@ mod tests {
         let shapes_without_size = plan(json!({ "floors": [{ "id": "a", "name": "A",
             "walls": [{ "x": 0, "y": 0, "w": 1, "h": 1 }] }] }));
         assert!(shapes_without_size.check(&dir).is_err());
+    }
+
+    #[test]
+    fn a_room_says_how_it_really_looks() {
+        let dir = std::env::temp_dir();
+        let drawn = |extra: serde_json::Value| {
+            let mut floor = json!({ "id": "rdc", "name": "Rez-de-chaussée", "size": [900, 1200],
+                "walls": [{ "x": 0, "y": 0, "w": 900, "h": 20 }] });
+            if let (Some(f), Some(e)) = (floor.as_object_mut(), extra.as_object()) {
+                for (k, v) in e {
+                    f.insert(k.clone(), v.clone());
+                }
+            }
+            serde_json::from_value::<Plan>(json!({ "skin": "reel", "floors": [floor] })).unwrap()
+        };
+        let finished = |finish: serde_json::Value| {
+            drawn(json!({ "facade": "#1f2a44", "trim": "#e8c547",
+                "rooms": [{ "id": "salon", "name": "Salon", "kind": "living",
+                            "poly": [[20, 20], [500, 20], [500, 400], [20, 400]], "finish": finish }],
+                "items": [{ "kind": "rug", "x": 50, "y": 50, "w": 200, "h": 140, "color": "#e9dcc4" }] }))
+        };
+        assert_eq!(
+            finished(json!({ "floor": "tile", "tint": "#c9c8c4", "paint": "#ffffff", "raise": 90,
+                "accents": [{ "edge": 1, "color": "#1d3fd1", "from": 80 }, { "edge": 1, "color": "#d9482b", "to": 80, "pattern": "stripes" }] }))
+            .check(&dir),
+            Ok(())
+        );
+        assert!(finished(json!({ "floor": "lava" })).check(&dir).is_err());
+        assert!(finished(json!({ "paint": "red" })).check(&dir).is_err());
+        assert!(
+            finished(json!({ "accents": [{ "edge": 4, "color": "#000000" }] }))
+                .check(&dir)
+                .is_err(),
+            "a side of the room"
+        );
+        assert!(serde_json::from_value::<Finish>(json!({ "shine": 1 })).is_err());
+        assert!(drawn(json!({ "facade": "url(x)" })).check(&dir).is_err());
+        assert!(
+            drawn(json!({ "items": [{ "kind": "sofa", "x": 1, "y": 1, "w": 1, "h": 1, "color": "#12345" }] }))
+                .check(&dir)
+                .is_err()
+        );
     }
 }

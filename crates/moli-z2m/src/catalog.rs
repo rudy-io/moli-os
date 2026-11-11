@@ -13,6 +13,8 @@ use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic,
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
+use crate::flame::{FLAME, Frame, NO_EFFECT};
+
 /// Z2M `access` bitmask.
 const ACCESS_STATE: u64 = 1;
 const ACCESS_SET: u64 = 2;
@@ -50,6 +52,9 @@ pub struct Entry {
     pub device: Device,
     /// Mains-powered (router): always listening, can be read on demand.
     pub mains: bool,
+    /// A colour lamp that dims: the driver can play a flame on it
+    /// (`effect` = `flame`, see [`crate::flame`]).
+    pub flame: bool,
     codecs: HashMap<Arc<str>, Codec>,
 }
 
@@ -138,6 +143,7 @@ impl Entry {
         let id = DeviceId::new(instance, &raw.ieee_address);
         mark_impulses(&id, impulses, &mut points, &mut codecs, applied);
         mark_soil(&mut points);
+        let flame = mark_flame(&mut points, &mut codecs);
         let device = Device {
             id,
             instance: instance.clone(),
@@ -154,8 +160,43 @@ impl Entry {
             friendly_name: raw.friendly_name,
             device,
             mains: raw.kind == "Router",
+            flame,
             codecs,
         }
+    }
+
+    /// One fade of the flame as a `{friendly_name}/set` payload: level, amber
+    /// and the time the lamp takes to get there. `switch_on`: the first one
+    /// also lights the lamp.
+    #[must_use]
+    pub fn flame_frame(&self, frame: &Frame, switch_on: bool) -> Json {
+        let mut payload = match self.encode("brightness", &Value::Float(frame.brightness)) {
+            Json::Object(map) => map,
+            _ => Map::new(),
+        };
+        if switch_on && let Json::Object(state) = self.encode("state", &Value::Bool(true)) {
+            payload.extend(state);
+        }
+        payload.insert(
+            "color".into(),
+            serde_json::json!({ "hue": frame.hue, "saturation": frame.saturation }),
+        );
+        payload.insert(
+            "transition".into(),
+            Json::from(frame.transition.as_secs_f64()),
+        );
+        Json::Object(payload)
+    }
+
+    /// The level to come back to when the flame stops, as a payload.
+    #[must_use]
+    pub fn flame_rest(&self, brightness: f64) -> Json {
+        let mut payload = match self.encode("brightness", &Value::Float(brightness)) {
+            Json::Object(map) => map,
+            _ => Map::new(),
+        };
+        payload.insert("transition".into(), Json::from(1));
+        Json::Object(payload)
     }
 
     /// `{name}/get` payload asking a listening device for its current
@@ -466,6 +507,59 @@ fn flatten<'a>(
         key: key.clone(),
     });
     codecs.insert(key, codec);
+}
+
+/// A lamp that takes a colour and dims can play the driver's flame: its
+/// `effect` gains `flame` and `no_effect` (the point is created when the lamp
+/// has none), and becomes readable, since the driver knows what it plays.
+fn mark_flame(points: &mut Vec<PointSpec>, codecs: &mut HashMap<Arc<str>, Codec>) -> bool {
+    let writable = |key: &str| points.iter().any(|p| &*p.key == key && p.access.write);
+    let colour = writable("color") && codecs.get("color").is_some_and(|c| c.xy_hex);
+    if !colour || !writable("brightness") || !writable("state") {
+        return false;
+    }
+    let ours = [NO_EFFECT, FLAME].map(Arc::<str>::from);
+    if let Some(point) = points.iter_mut().find(|p| &*p.key == "effect") {
+        let Kind::Enum { values } = &mut point.kind else {
+            return false;
+        };
+        if !point.access.write {
+            return false;
+        }
+        for value in ours {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+        point.access.read = true;
+    } else {
+        let key: Arc<str> = "effect".into();
+        points.push(PointSpec {
+            label: "Effect".into(),
+            kind: Kind::Enum {
+                values: ours.to_vec(),
+            },
+            access: Access {
+                read: true,
+                write: true,
+            },
+            unit: None,
+            semantic: Semantic::infer(&key, None),
+            key: key.clone(),
+        });
+        codecs.insert(
+            key,
+            Codec {
+                binary: None,
+                gettable: false,
+                numeric_enum: false,
+                level_max: None,
+                xy_hex: false,
+                impulse: None,
+            },
+        );
+    }
+    true
 }
 
 /// Turns the relays the user declared as triggers into `cycle` orders:
@@ -986,6 +1080,7 @@ mod tests {
             ieee: "0x2".into(),
             friendly_name: "trv".into(),
             mains: false,
+            flame: false,
             device: Device {
                 id: DeviceId::from("z2m:0x2"),
                 instance: InstanceId::from("z2m"),
@@ -1017,10 +1112,12 @@ mod tests {
         let mut points = Vec::new();
         let mut codecs = HashMap::new();
         flatten(&expose, "", "", &mut points, &mut codecs);
+        let flame = mark_flame(&mut points, &mut codecs);
         Entry {
             ieee: "0x3".into(),
             friendly_name: "bulb".into(),
             mains: true,
+            flame,
             device: Device {
                 id: DeviceId::from("z2m:0x3"),
                 instance: InstanceId::from("z2m"),
@@ -1285,6 +1382,69 @@ mod tests {
         assert_eq!(warm["color_temp"], Value::Int(370));
     }
 
+    fn colour_lamp(effect: Option<serde_json::Value>) -> Entry {
+        let mut features = vec![
+            json!({"type": "binary", "property": "state", "access": 7, "value_on": "ON", "value_off": "OFF"}),
+            json!({"type": "numeric", "property": "brightness", "access": 7, "value_min": 0, "value_max": 254}),
+            json!({"type": "composite", "name": "color_xy", "property": "color", "access": 7, "features": [
+                {"type": "numeric", "property": "x", "access": 7},
+                {"type": "numeric", "property": "y", "access": 7}
+            ]}),
+        ];
+        features.extend(effect);
+        entry_of(json!({"type": "light", "features": features}))
+    }
+
+    fn effects(entry: &Entry) -> Vec<&str> {
+        match &entry.device.point("effect").expect("an effect point").kind {
+            Kind::Enum { values } => values.iter().map(|v| &**v).collect(),
+            other => panic!("effect is an enum, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_colour_lamp_can_play_the_flame() {
+        // Its own Zigbee effects stay, the flame comes after them.
+        let strip = colour_lamp(Some(json!(
+            {"type": "enum", "property": "effect", "access": 2, "values": ["blink", "breathe"]}
+        )));
+        assert!(strip.flame);
+        assert_eq!(effects(&strip), ["blink", "breathe", "no_effect", "flame"]);
+        let effect = strip.device.point("effect").unwrap();
+        assert!(effect.access.read && effect.access.write);
+        // A lamp without any effect gets the point.
+        let bulb = colour_lamp(None);
+        assert!(bulb.flame);
+        assert_eq!(effects(&bulb), ["no_effect", "flame"]);
+        // A white lamp has no flame: nothing is added.
+        let white = entry_of(light(254));
+        assert!(!white.flame);
+        assert!(white.device.point("effect").is_none());
+    }
+
+    #[test]
+    fn a_fade_of_the_flame_is_one_order() {
+        let strip = colour_lamp(None);
+        let frame = Frame {
+            brightness: 22.0,
+            hue: 28,
+            saturation: 90,
+            transition: std::time::Duration::from_millis(1500),
+        };
+        assert_eq!(
+            strip.flame_frame(&frame, false),
+            json!({"brightness": 56, "color": {"hue": 28, "saturation": 90}, "transition": 1.5})
+        );
+        assert_eq!(
+            strip.flame_frame(&frame, true),
+            json!({"state": "ON", "brightness": 56, "color": {"hue": 28, "saturation": 90}, "transition": 1.5})
+        );
+        assert_eq!(
+            strip.flame_rest(22.0),
+            json!({"brightness": 56, "transition": 1})
+        );
+    }
+
     #[test]
     fn composite_keys_round_trip() {
         let expose: RawExpose = serde_json::from_value(json!({
@@ -1313,6 +1473,7 @@ mod tests {
             ieee: "0x1".into(),
             friendly_name: "lamp".into(),
             mains: true,
+            flame: false,
             device: Device {
                 id: DeviceId::from("z2m:0x1"),
                 instance: InstanceId::from("z2m"),
