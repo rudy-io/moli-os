@@ -75,7 +75,7 @@
     load();
   }
 
-  const turns = $derived((all ?? []).filter((e) => e.kind !== 'silence' && e.kind !== 'door'));
+  const turns = $derived((all ?? []).filter((e) => e.kind !== 'silence' && e.kind !== 'door' && e.kind !== 'receipt'));
   const silences = $derived((all ?? []).filter((e) => e.kind === 'silence').length);
   const orders = $derived(turns.reduce((n, e) => n + (e.orders?.length ?? 0), 0));
   const searches = $derived(turns.filter((e) => e.tools?.includes('web_search')).length);

@@ -33,7 +33,7 @@ pub(crate) fn next_after(now: &Zoned, at: Time) -> Option<Zoned> {
 pub(crate) fn compose(exchanges: &[Exchange], tz: &TimeZone, day: &str) -> Option<String> {
     let turns: Vec<&Exchange> = exchanges
         .iter()
-        .filter(|e| !matches!(e.kind, Kind::Silence | Kind::Door))
+        .filter(|e| !matches!(e.kind, Kind::Silence | Kind::Door | Kind::Receipt))
         .collect();
     let silences = exchanges.iter().filter(|e| e.kind == Kind::Silence).count();
     let doors: Vec<&Exchange> = exchanges.iter().filter(|e| e.kind == Kind::Door).collect();
@@ -276,6 +276,20 @@ mod tests {
         assert!(text.lines().last().unwrap().contains('1'), "{text}");
         // All three still in the counts.
         assert!(text.lines().nth(1).unwrap().contains('3'), "{text}");
+    }
+
+    #[test]
+    fn a_receipt_read_is_paid_for_but_is_not_a_conversation() {
+        let tz = TimeZone::get("Europe/Paris").unwrap();
+        let at = 1_791_552_000_000;
+        let all = [
+            exchange(at, Kind::Turn, "bubble", "Allume le salon", "C'est allumé."),
+            exchange(at + 1, Kind::Receipt, "cellier", "ticket de caisse", "12"),
+        ];
+        let text = compose(&all, &tz, "samedi").unwrap();
+        let listed = text.lines().filter(|l| l.contains("→")).count();
+        assert_eq!(listed, 1, "{text}");
+        assert!(text.contains("0,002") || text.contains("0.002"), "{text}");
     }
 
     #[test]

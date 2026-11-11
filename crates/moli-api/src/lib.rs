@@ -3,6 +3,7 @@
 //! - `/api/*`    REST (snapshot, commands, labels, journal, approvals, health)
 //! - `/api/energy` consumption and cost (headline figures, series)
 //! - `/api/weather` the forecast and the clouds seen from space
+//! - `/api/cellier` the pantry: shopping list, products, price comparison
 //! - `/api/assistant` Moli, the conversation that acts and picks what to show
 //! - `/api/automations` automations (graphs), their runs and Moli's drafts
 //! - `/api/events` server-sent events: a snapshot, then every change
@@ -26,6 +27,7 @@ mod limit;
 mod machines;
 mod mcp;
 mod overkiz;
+mod pantry;
 mod people;
 mod people_api;
 mod whereabouts;
@@ -138,6 +140,8 @@ pub struct Options {
     /// The sky over the house (forecast, satellite), when its position is
     /// known.
     pub weather: Option<moli_weather::Weather>,
+    /// The household's pantry (« Le Cellier »), when `[pantry]` is configured.
+    pub pantry: Option<moli_pantry::Pantry>,
     /// The house's time zone (IANA), as resolved at start: shown in
     /// `/api/system`.
     pub timezone: Option<String>,
@@ -155,12 +159,16 @@ fn upload(
     max: usize,
     humans: &Arc<session::Sessions>,
 ) -> MethodRouter<Hub> {
-    route
-        .layer(DefaultBodyLimit::max(max))
-        .layer(middleware::from_fn_with_state(
-            Arc::clone(humans),
-            session::human_first,
-        ))
+    human_only(route.layer(DefaultBodyLimit::max(max)), humans)
+}
+
+/// An order only a person gives (checked before the body is read): a script
+/// or an agent is refused, whatever it claims.
+fn human_only(route: MethodRouter<Hub>, humans: &Arc<session::Sessions>) -> MethodRouter<Hub> {
+    route.layer(middleware::from_fn_with_state(
+        Arc::clone(humans),
+        session::human_first,
+    ))
 }
 
 /// The devices, their images, their printing.
@@ -190,6 +198,7 @@ fn house_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hu
         .map(|dir| dir.join("infra.json"));
     Router::new()
         .merge(weather::routes(options.weather.clone()))
+        .merge(pantry::routes(options.pantry.clone(), humans))
         .route("/api/infra", get(rest::infra))
         .layer(Extension(rest::InfraFile(infra)))
         .route("/api/plan", get(plan::get).put(plan::put))
@@ -431,6 +440,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
                 options.bench_path.clone(),
                 options.energy.clone(),
                 options.automations.clone(),
+                options.pantry.clone(),
                 options.demo,
             ),
         )

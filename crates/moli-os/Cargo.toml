@@ -55,6 +55,7 @@ moli-telegram.workspace = true
 moli-phones.workspace = true
 moli-assistant.workspace = true
 moli-automation.workspace = true
+moli-pantry.workspace = true
 anyhow.workspace = true
 rusqlite.workspace = true
 moli-net.workspace = true

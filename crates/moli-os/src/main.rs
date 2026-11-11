@@ -434,19 +434,9 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     // History first: it must be listening before drivers publish anything.
     let (history, recorder) = start_history(&config, &hub, &cancel)?.unzip();
     // Energy too: a reading missed is energy filed in the wrong hour.
-    let (energy, metering) = match &config.energy {
-        Some(energy) => {
-            let (energy, task) = moli_energy::Energy::start(
-                &hub,
-                &config.server.data_dir.join("energy.db"),
-                energy.clone(),
-                cancel.clone(),
-            )
-            .context("cannot open the energy database")?;
-            (Some(energy), Some(task))
-        }
-        None => (None, None),
-    };
+    let (energy, metering) = start_energy(&config, &hub, &cancel)?.unzip();
+    // Opened at start, so a broken database shows in the log at once.
+    let pantry = pantry(&config, &hub);
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
     tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
@@ -464,6 +454,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     );
 
     let saver = housekeeping(&hub, &cancel);
+    let purger = pantry.as_ref().map(|p| pantry_upkeep(p, &cancel));
     let shutdown = cancel.clone();
     // Given, even empty: the house is set up (its vault is wrong); absent:
     // a new house, which may ask for its installation.
@@ -488,6 +479,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         phones: gates.phones,
         machines: gates.machines,
         weather: weather(&config),
+        pantry,
         timezone: Some(config.zone.name.clone()),
         overkiz_cloud: overkiz_cloud(&config.drivers)?,
     };
@@ -508,6 +500,9 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         let _ = task.await;
     }
     let _ = saver.await;
+    if let Some(purger) = purger {
+        let _ = purger.await;
+    }
     let _ = automating.await;
     if let Some(recorder) = recorder {
         let _ = recorder.await; // flushes its last batch
@@ -554,6 +549,41 @@ fn new_weather(config: &Config) -> Option<moli_weather::Weather> {
     Some(match latitude.zip(longitude) {
         Some((lat, lon)) => moli_weather::Weather::new(lat, lon, data_dir),
         None => moli_weather::Weather::unplaced(data_dir),
+    })
+}
+
+/// The pantry, « Le Cellier »: only with a `[pantry]` section, never in the
+/// demo house. A database that cannot be opened is logged, and the house
+/// starts without it.
+fn pantry(config: &Config, hub: &Hub) -> Option<moli_pantry::Pantry> {
+    let pantry = config.pantry.as_ref().filter(|_| !config.server.demo)?;
+    moli_pantry::Pantry::open_with(hub, &config.server.data_dir, pantry)
+        .inspect_err(|e| tracing::error!(error = %e, "cannot open the pantry, started without it"))
+        .ok()
+}
+
+/// How often the pantry erases the receipt photos past their keeping time.
+const PHOTO_PURGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Receipt photos are kept 90 days after their receipt is validated: erased
+/// at start, then every day, whether or not another receipt is validated.
+fn pantry_upkeep(
+    pantry: &moli_pantry::Pantry,
+    cancel: &CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    let (pantry, cancel) = (pantry.clone(), cancel.clone());
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(PHOTO_PURGE);
+        loop {
+            tokio::select! {
+                () = cancel.cancelled() => break,
+                // The first tick is immediate: the purge at start.
+                _ = tick.tick() => {}
+            }
+            if let Err(e) = pantry.purge_photos(moli_core::now_ms()).await {
+                tracing::warn!(error = %e, "cannot erase the old receipt photos");
+            }
+        }
     })
 }
 
@@ -1314,6 +1344,25 @@ fn start_history(
     Ok(Some(started))
 }
 
+/// Energy: kWh and € per hour, only with an `[energy]` section.
+fn start_energy(
+    config: &Config,
+    hub: &Hub,
+    cancel: &CancellationToken,
+) -> anyhow::Result<Option<(moli_energy::Energy, tokio::task::JoinHandle<()>)>> {
+    let Some(energy) = &config.energy else {
+        return Ok(None);
+    };
+    let started = moli_energy::Energy::start(
+        hub,
+        &config.server.data_dir.join("energy.db"),
+        energy.clone(),
+        cancel.clone(),
+    )
+    .context("cannot open the energy database")?;
+    Ok(Some(started))
+}
+
 /// Every driver kind this binary builds (`[[driver]] kind`): what the
 /// catalogue checks packages against, without building anything. A kind
 /// missing here is unknown, whatever `build_driver`'s match says.
@@ -1708,6 +1757,27 @@ mod tests {
         let mut invalid = driver("overkiz");
         invalid.options = toml::from_str("[cloud]\npoll_secs = 1").unwrap();
         assert!(overkiz_cloud(&[invalid]).is_err());
+    }
+
+    #[test]
+    fn the_pantry_opens_with_its_section_and_never_in_the_demo() {
+        let dir = std::env::temp_dir().join(format!("moli-pantry-main-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data_dir = toml::Value::String(dir.display().to_string());
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let config = |extra: &str| -> Config {
+            toml::from_str(&format!("[server]\ndata_dir = {data_dir}\n{extra}")).unwrap()
+        };
+        assert!(pantry(&config(""), &hub).is_none(), "no section, no pantry");
+        assert!(!dir.join("pantry.db").exists(), "nothing opened");
+        assert!(
+            pantry(&config("demo = true\n[pantry]\n"), &hub).is_none(),
+            "never in the demo house"
+        );
+        assert!(!dir.join("pantry.db").exists());
+        assert!(pantry(&config("[pantry]\n"), &hub).is_some());
+        assert!(dir.join("pantry.db").exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -1242,6 +1242,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "futures",
  "http",
  "mime_guess",
@@ -1255,6 +1256,7 @@ dependencies = [
  "moli-i18n",
  "moli-net",
  "moli-overkiz",
+ "moli-pantry",
  "moli-phones",
  "moli-runtime",
  "moli-weather",
@@ -1749,6 +1751,7 @@ dependencies = [
  "moli-moonraker",
  "moli-net",
  "moli-overkiz",
+ "moli-pantry",
  "moli-philips",
  "moli-phones",
  "moli-presence",
@@ -1796,6 +1799,24 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
+]
+
+[[package]]
+name = "moli-pantry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jiff",
+ "moli-core",
+ "moli-runtime",
+ "rusqlite",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

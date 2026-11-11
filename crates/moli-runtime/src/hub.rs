@@ -2642,6 +2642,11 @@ impl Hub {
         self.emit(Event::Notice { notice });
     }
 
+    /// The pantry (« Le Cellier ») changed: the dashboards re-read it.
+    pub fn pantry_changed(&self) {
+        self.emit(Event::PantryChanged);
+    }
+
     // ---- internals -----------------------------------------------------------
 
     fn emit(&self, event: Event) {

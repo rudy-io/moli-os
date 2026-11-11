@@ -1,0 +1,26 @@
+[package]
+name = "moli-pantry"
+description = "Moli OS pantry (Le Cellier): the household shopping list, products and grocery-drive price comparison, kept in SQLite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+jiff.workspace = true
+moli-runtime.workspace = true
+rusqlite.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+moli-core.workspace = true
+
+[lints]
+workspace = true
