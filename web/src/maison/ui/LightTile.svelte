@@ -187,6 +187,14 @@
     if (!colorPoint) return setLook(members, { color: c.toLowerCase() }, label);
     act(`${id}/color`, c.toLowerCase(), label);
   }
+
+  // A flame the lamp (or its driver) can play: a mode next to the colours.
+  // Any colour or white picked afterwards ends it.
+  const canFlame = $derived(!!writable('effect')?.kind?.values?.includes('flame'));
+  const flaming = $derived(value(id, 'effect') === 'flame');
+  function flame() {
+    act(`${id}/effect`, flaming ? 'no_effect' : 'flame', label);
+  }
 </script>
 
 <div class="tile" class:on class:busy class:off-grid={!ok || !d || cut} class:compact>
@@ -258,6 +266,11 @@
             <input type="color" value={hex ?? '#ffffff'} onchange={(e) => paint(e.currentTarget.value)} aria-label={t('commun.lampe.autre_couleur')} />
           </label>
         {/if}
+        {#if canFlame}
+          <button class="mode" class:on={flaming} onclick={flame} aria-pressed={flaming}>
+            <Icon name="fire" size={18} /><span>{t('commun.lampe.flamme')}</span>
+          </button>
+        {/if}
       </div>
     {/if}
     {#if apart}
@@ -285,6 +298,26 @@
 </div>
 
 <style>
+  .mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mode.on {
+    background: var(--warm);
+    color: #3a2a10;
+  }
+
   .fan {
     display: flex;
     align-items: center;

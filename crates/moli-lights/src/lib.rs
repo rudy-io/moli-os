@@ -192,8 +192,13 @@ impl Reading {
             .copied()
             .filter(|b| b.on == Some(true))
             .collect();
-        let on = if self.bulbs.is_empty() {
-            self.supply.is_some_and(|s| s.answers && s.on == Some(true))
+        let fed = self.supply.is_some_and(|s| s.answers && s.on == Some(true));
+        // Fed by its relay and no bulb answers: they are coming back (a
+        // Wi-Fi bulb takes a minute after the power returns) and shine in
+        // the meantime. Shown lit, so that a tap switches it off (the relay
+        // cuts) rather than asking silent bulbs to light up.
+        let on = if self.bulbs.is_empty() || answering.is_empty() {
+            fed
         } else {
             !cut && !lit.is_empty()
         };
@@ -918,6 +923,12 @@ mod tests {
         assert!(shown.on && shown.powered);
         assert_eq!(shown.brightness, Some(80.0));
         assert!(salon(Some(true), vec![]).shown().on);
+        // The relay just came back on, the bulbs have not answered yet: lit,
+        // and switching it off cuts the relay.
+        let back = salon(Some(true), vec![bulb(false, false)]);
+        let shown = back.shown();
+        assert!(shown.on && !shown.powered && shown.online);
+        assert_eq!(plan(&back, &Setting::On(false)), Plan::PowerDown);
     }
 
     #[test]
