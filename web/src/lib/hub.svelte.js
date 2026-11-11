@@ -1,5 +1,6 @@
 import { setLanguage, t } from './i18n.svelte.js';
 import { applyDriverStatus, applyDriverRegistration, applyDriverUnregistration } from './driver-status.js';
+import { cellier, reloadCellier } from '../maison/lib/cellier.svelte.js';
 
 // Live model of the hub, fed by /api/events (SSE) and /api/health.
 
@@ -56,6 +57,9 @@ function splitPoint(point) {
   const i = point.indexOf('/');
   return [point.slice(0, i), point.slice(i + 1)];
 }
+
+/** The pantry's coming re-read (see `pantry_changed`). */
+let pantryTimer = null;
 
 function applyEvent(e) {
   switch (e.type) {
@@ -118,6 +122,13 @@ function applyEvent(e) {
       break;
     case 'approval_resolved':
       hub.approvals = hub.approvals.filter((a) => a.id !== e.id);
+      break;
+    case 'pantry_changed':
+      // A burst of writes (an agent recording prices) is one read; a
+      // dashboard that never opened the pantry does not read it at all.
+      if (!cellier.loaded) break;
+      clearTimeout(pantryTimer);
+      pantryTimer = setTimeout(reloadCellier, 300);
       break;
     case 'notice': {
       const id = `${e.notice.ts}-${Math.random()}`;

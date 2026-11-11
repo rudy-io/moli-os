@@ -57,6 +57,7 @@
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
+    { path: 'cellier', label: 'commun.nav.cellier', icon: 'basket' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
     // Only when something is watched: a house with nothing to watch sees no empty page.
@@ -177,6 +178,9 @@
       <Impression />
     {:else if page === 'dehors'}
       <Dehors />
+    {:else if page === 'cellier'}
+      <!-- The pantry: loaded only when visited. -->
+      {#await import('./pages/Cellier.svelte') then { default: Cellier }}<Cellier {route} />{/await}
     {:else if page === 'moli'}
       <Moli />
     {:else if page === 'automatismes'}

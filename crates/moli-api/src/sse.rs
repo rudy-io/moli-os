@@ -1,7 +1,8 @@
 //! Live stream: one `snapshot` on connect, then one `event` per change.
 //! A subscriber too slow to keep up gets a fresh `snapshot` instead of
 //! blocking anyone. A guest follows its rooms only: their devices and the
-//! orders held for them, never the journal nor the house's notices.
+//! orders held for them, never the journal, the house's notices nor its
+//! pantry.
 //!
 //! Live streams (this one and the automations') are counted: each holds a
 //! connection and a seat on the bus, so a caller holds a few at most, and
@@ -191,8 +192,10 @@ impl View {
             | Event::DriverUnregistered { .. }
             | Event::ApprovalResolved { .. }
             | Event::LayoutChanged {} => return Pass::Event,
-            // The house's journal and notices are the household's.
-            Event::Journal { .. } | Event::Notice { .. } => return Pass::Drop,
+            // The house's journal, its notices and its pantry are the household's.
+            Event::Journal { .. } | Event::Notice { .. } | Event::PantryChanged => {
+                return Pass::Drop;
+            }
         };
         // Described anew, moved, gone: what the guest sees may have changed.
         if moved && guest.guest_devices(hub, &hub.snapshot()) != self.sight {
@@ -208,6 +211,35 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::people::Role;
+
+    #[test]
+    fn the_pantry_is_the_households_not_a_guests() {
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let household = View {
+            asker: "person:alex".into(),
+            guest: None,
+            sight: HashSet::new(),
+        };
+        let guest = View {
+            asker: "person:sam".into(),
+            guest: Some(PersonRef {
+                id: "sam".into(),
+                name: "Sam".into(),
+                role: Role::Guest,
+                rooms: vec!["chambre".into()],
+            }),
+            sight: HashSet::new(),
+        };
+        assert!(matches!(
+            household.pass(&hub, &Event::PantryChanged),
+            Pass::Event
+        ));
+        assert!(matches!(
+            guest.pass(&hub, &Event::PantryChanged),
+            Pass::Drop
+        ));
+    }
 
     #[test]
     fn an_answer_for_one_person_is_shown_to_them_only() {

@@ -15,7 +15,7 @@ aucune logique d'appareil (c'est le rôle des [pilotes](pilotes.md)) et aucun LL
 | `PointSpec` | clé, libellé, `kind` (`binary` / `numeric{min,max,step}` / `enum{values}` / `text`), accès lecture/écriture, unité, sémantique (`on_off`, `brightness`, `power`…) |
 | `Value` | `Null`, `Bool`, `Int`, `Float`, `Text` ; `validate(kind, value)` refuse ce qui ne colle pas |
 | `Label` | nom et pièce choisis par l'humain : **une étiquette ne change jamais une identité** |
-| `Event` | `device_upserted`, `device_removed`, `state`, `availability`, `driver_status`, `label_changed`, `journal`, `approval_requested`, `approval_resolved`, `notice` |
+| `Event` | `device_upserted`, `device_removed`, `state`, `availability`, `driver_status`, `label_changed`, `journal`, `approval_requested`, `approval_resolved`, `notice`, `pantry_changed` |
 | `Origin` | `ui`, `api`, `mcp`, `cli`, `system`, `assistant`, `automation` : par où arrive une action |
 
 ## `moli-runtime` : le hub

@@ -27,6 +27,14 @@ mégaoctets au plus, avec les règles apprises dans `assistant-rules.json`, qui 
 maison). Elles ne sont envoyées nulle part : elles ne quittent la maison
 que si vous les exportez vous-même, à la main, par exemple pour réentraîner votre modèle.
 
+**Appareil photo.** Il n'est utilisé que lorsque vous scannez un ticket de caisse dans le Cellier.
+La photo va à votre serveur Moli, qui peut, selon la façon dont vous l'avez configuré, la transmettre
+au service de lecture que vous avez choisi. Sur votre serveur Moli, elle est effacée 90 jours après
+la validation du ticket (Moli y veille au démarrage puis chaque jour) ; le service de lecture applique
+sa propre politique de conservation. La photo d'un brouillon que personne n'a validé
+reste sur votre serveur jusqu'à ce que quelqu'un le supprime ; le supprimer efface aussitôt ses
+photos.
+
 **Notifications.** Si vous les autorisez, votre maison peut vous en envoyer, par le service de
 notifications d'Expo et d'Apple. Le jeton de notification n'est envoyé qu'à votre serveur Moli.
 
@@ -60,6 +68,13 @@ service you chose.
 right action are written on your Moli server (`assistant-corrections.jsonl`, the last two megabytes at
 most, with the rules learned in `assistant-rules.json`, read with the house code). They are sent nowhere: they only leave the house if you export them yourself,
 by hand, for instance to retrain your model.
+
+**Camera.** Used only when you scan a till receipt in the Cellier. The photo goes to your Moli
+server, which may, depending on how you set it up, pass it to the reading service you chose. On your
+Moli server, it is erased 90 days after the receipt is validated (Moli checks at startup, then every
+day); the reading service applies its own retention policy. The
+photo of a draft nobody has validated stays on your server until someone deletes the draft; deleting
+it erases its photos right away.
 
 **Notifications.** If you allow them, your house can send you notifications through Expo's and
 Apple's notification services. The notification token is only sent to your Moli server.

@@ -60,6 +60,10 @@ pub struct Config {
     /// Automations: the house's position (sunrise, sunset).
     #[serde(default)]
     pub automations: moli_automation::Config,
+    /// The pantry, « Le Cellier » (absent: no shopping list). `[pantry]`,
+    /// even empty, switches it on; never in a demo house.
+    #[serde(default)]
+    pub pantry: Option<moli_pantry::Config>,
     /// The house's time zone, resolved once and given to every section.
     #[serde(skip)]
     pub zone: crate::timezone::Zone,
@@ -323,6 +327,9 @@ impl Config {
         if let Some(assistant) = &mut config.assistant {
             assistant.timezone.clone_from(&zone);
         }
+        if let Some(pantry) = &mut config.pantry {
+            pantry.timezone.clone_from(&zone);
+        }
         if let Some(quiet) = &mut config.guard.quiet_hours {
             quiet.timezone = Some(zone);
         }
@@ -430,15 +437,29 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_pantry_section_switches_the_pantry_on() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.pantry.is_none(), "absent: no pantry");
+        let config: Config = toml::from_str("[pantry]\n").unwrap();
+        assert!(config.pantry.is_some());
+        assert!(
+            toml::from_str::<Config>("[pantry]\nx = 1\n").is_err(),
+            "an unknown pantry option is refused"
+        );
+    }
+
+    #[test]
     fn every_section_inherits_the_house_zone() {
         let config = Config::parse(
             "[server]\ntimezone = \"Indian/Reunion\"\n\
              [assistant]\n\
              [energy]\n\
+             [pantry]\n\
              [guard.quiet_hours]\nfrom = \"21:00\"\nto = \"07:30\"",
         )
         .unwrap();
         assert_eq!(config.zone.source, crate::timezone::Source::Server);
+        assert_eq!(config.pantry.as_ref().unwrap().timezone, "Indian/Reunion");
         assert_eq!(config.automations.timezone, "Indian/Reunion");
         assert_eq!(config.energy.unwrap().timezone, "Indian/Reunion");
         assert_eq!(config.assistant.unwrap().timezone, "Indian/Reunion");

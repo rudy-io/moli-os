@@ -540,6 +540,43 @@ Limites de `Turn` : 14 derniers messages renvoyés au modèle, 2 000 caractères
 | GET | `/api/automations/runs` | libre | `?automation=<id>&limit=` (défaut 50, max 500) | `[Run]`, plus récente d'abord | `503` |
 | GET | `/api/automations/live` | libre | aucune | flux SSE (§ 3.2) | `503` (dont trop de flux ouverts, § 3.1) |
 
+**Le Cellier : tickets de caisse et achats** (`crates/moli-api/src/pantry.rs`)
+
+Sans `[pantry]`, toutes ces routes répondent `404` `the pantry is not set up ([pantry])`. Un invité y est
+refusé (`403`), et en maison démo les écritures le sont aussi. Les autres routes `/api/cellier*` (liste,
+produits, fiches, réglages, paniers) sont décrites dans l'en-tête de `pantry.rs`. Les montants sont en
+centimes, les dates en ms. Un ticket est un `Receipt` : `{id, status:"draft"\|"validated", photos (encore
+gardées), sent_at, sent_by, validated_at, validated_by, reader, draft, read, gap_cents, duplicate_of,
+drive_twin, version}`,
+où `draft` = `{provider, store, at?, total_cents?, lines:[{label, name, qty, unit?, price_cents,
+discount_cents, line_cents, vat?, aisle?, keep, reason, product?, new_product?}], unreadable,
+items_done}`, `read` la lecture du modèle réduite aux champs du schéma (rien d'autre n'est gardé : ni
+paiement ni numéro de carte), `gap_cents` le total imprimé moins la somme des lignes, `duplicate_of` un
+ticket déjà validé de même enseigne, même minute et même total, `drive_twin` (`{basket, at,
+total_cents}`, brouillon seulement, simple avertissement) un panier drive confirmé de la même enseigne,
+le même jour de la maison et à 2 % du total près, que le ticket compterait une seconde fois, et
+`version` un compteur qui avance à chaque enregistrement. À la lecture, une ligne dont le libellé a déjà
+été rapproché d'un produit par une personne (validation, ou correction d'un achat de ticket) reçoit ce
+produit, quoi qu'ait proposé le modèle.
+
+| Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
+|---|---|---|---|---|---|
+| GET | `/api/cellier/reader` | le foyer | aucune | `{provider, model, allowed, reason\|null, host, at_home}` : qui lit les tickets, s'il en a le droit (niveau 1 seulement, clé présente sauf point d'accès local), et où partent les photos (`host`, `at_home` vrai pour une adresse privée ou un nom local) ; sans assistant : `{allowed:false, reason:"no assistant"}` | `404` |
+| POST | `/api/cellier/receipts` | **humain** | `{photos:[…]}` : 1 à 4 JPEG en base64, d'un seul ticket ; 12 Mo de corps au plus | `201` `Receipt` en **brouillon** (rien n'est encore un achat) | `400` nombre de photos, base64 invalide, pas du JPEG ; `403` pas une personne ; `404` ; `413` corps trop gros (texte brut) ; `422` `unreadable` : les photos ne sont pas un ticket lisible, rien n'est créé ; `429` Moli occupé ; `502` fournisseur en échec, ou lecture inutilisable (`the reading of the receipt is not usable`) ; `503` pas d'assistant, ou lecteur refusé (`reason` de `/reader`) |
+| GET | `/api/cellier/receipts?status=` | le foyer | `status` : `draft` ou `validated` (absent = tous) | `[Receipt]` sans la lecture brute (`read: null`) | `400` `unknown receipt status` ; `404` |
+| GET | `/api/cellier/receipts/{id}` | le foyer | aucune | `Receipt` | `404` |
+| PUT | `/api/cellier/receipts/{id}` | le foyer | le `draft` corrigé (même forme que `Receipt.draft`), avec `version?` : celle du ticket chargé | `Receipt` | `400` ticket déjà validé (`… cannot be edited`), ligne avec `product` **et** `new_product` ; `404` ; `409` enregistré ailleurs depuis cette `version` (`conflict: receipt N was changed elsewhere …`) ; `422` corps de mauvaise forme |
+| DELETE | `/api/cellier/receipts/{id}` | le foyer | aucune | `204` : le brouillon et ses photos sont supprimés | `400` ticket validé (`… cannot be abandoned`) ; `404` |
+| POST | `/api/cellier/receipts/{id}/validate` | **humain** (vérifié avant la lecture du corps) | `{force?, version?}` (corps JSON obligatoire, `{}` suffit) | `Receipt` validé : ses lignes gardées (`keep`) deviennent des achats `ticket` `confirmed`, les produits `new_product` sont créés, les articles de `items_done` sont soldés ; un ticket déjà validé est rendu tel quel | `400` ligne refusée (`line N: …` : sans produit, `product` et `new_product` ensemble, nouveau produit sans nom, montant ou quantité refusés), ou ticket déjà enregistré (`this receipt looks already recorded: <id>`, contourné par `force:true` ; cette garde ne joue que si le ticket a une date et un `total_cents`) ; `403` pas une personne ; `404` ticket ou produit inconnu ; `409` enregistré ailleurs depuis `version` |
+| GET | `/api/cellier/receipts/{id}/photos/{n}` | le foyer | `n` de 1 à 4 | la photo, `image/jpeg`, `cache-control: private, max-age=86400` | `404` `no such photo` (numéro hors de 1 à 4, ou photo déjà effacée : Moli efface les photos d'un ticket 90 jours après sa validation, au démarrage puis chaque jour ; un brouillon jamais validé garde les siennes jusqu'à ce que quelqu'un le supprime, ce qui les efface aussitôt) |
+| GET | `/api/cellier/purchases?from=&to=` | le foyer | `from`, `to` en ms (défaut : les 12 derniers mois, jusqu'à demain) | `{purchases:[Purchase], receipts:[Receipt]}` : les achats, oldest first, avec les tickets dont ils viennent et les brouillons à vérifier, tous sans lecture brute | `400` paramètre inconnu ou non numérique (texte brut) ; `404` |
+| PUT | `/api/cellier/purchases/{id}` | le foyer | `{qty, price_cents, line_cents?, product}` (`line_cents` absent : recalculé, remise déduite) | le `Purchase` corrigé | `400` valeurs refusées ; `404` achat ou produit inconnu |
+| DELETE | `/api/cellier/purchases/{id}` | le foyer | aucune | `204` | `404` |
+
+Un agent n'a pas ces routes : il lit les achats avec l'outil MCP `pantry_purchases` et enregistre un
+ticket qu'il a lu lui-même avec `pantry_record_purchases` et son argument `receipt` (§ 4.2). Aucune
+photo n'est envoyée à Moli par MCP.
+
 **Flux et MCP**
 
 | Méthode | Chemin | Accès | Entrée | Réponse | Erreurs |
@@ -762,6 +799,7 @@ rend sa place.
 | `approval_requested` | `request` : `ApprovalRequest` (`id`, `ts`, `expires`, `point`, `value`, `origin`, `actor?`, `reason`, `device_name`, `native_name`, `rooms`) | un ordre attend un humain |
 | `approval_resolved` | `id`, `decision` : `approved` \| `denied` \| `expired` | décision ou expiration |
 | `notice` | `notice` : `{title?, message, from?, ts}` (`from` = nom de l'automatisme) | message pour la maison (nœud `notify`, canal `maison`) |
+| `pantry_changed` | aucun | le Cellier a changé (liste, produit, prix, panier) : le relire ; jamais envoyé à un invité |
 
 Exemple :
 
@@ -817,7 +855,7 @@ exception : `camera_snapshot` renvoie un bloc image (base64 + type MIME).
 Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/mcp`
 (Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent.
 
-### 4.2 Les 14 outils
+### 4.2 Les 24 outils
 
 | Outil | Paramètres | Renvoie | Notes |
 |---|---|---|---|
@@ -835,10 +873,26 @@ Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/m
 | `get_automation` | `id` | `{automation, check, runs (5 dernières, étape par étape)}` | `unknown automation` |
 | `save_automation_draft` | `automation` : objet comme `get_automation` le renvoie (`name`, `mode`, `graph` ; `id` pour retravailler un existant ; `id` et `enabled` complétés par défaut) | `{id, status:"draft: a person must approve it in the dashboard", check}` | toujours un **brouillon** d'auteur `agent` ; modifier la logique d'un automatisme validé lui fait perdre sa validation ; ne peut pas allumer |
 | `test_automation` | `id` | `Run` à blanc (chemin suivi, étape par étape) | conditions lues pour de vrai, rien n'agit, rien n'attend |
+| `pantry_overview` | aucun | `{items, products, offers, providers:[{info, settings}], threshold, basket\|null}` (fiche : `status` pending\|confirmed ; article : `basket`, le panier choisi qui l'achète, ou `null`) | tout le Cellier d'un coup ; brique absente : `Le Cellier n'est pas activé sur cette instance` |
+| `pantry_add_item` | `text`, `product?`, `qty?` (défaut 1), `actor?`, `on_behalf_of?` | l'article | canal `agent`, auteur `"{actor} (de la part de {on_behalf_of})"` ou `actor` seul (`agent` par défaut) ; redemander un besoin ouvert en augmente la quantité ; refusé en maison démo |
+| `pantry_remove_item` | `id`, `actor?`, `on_behalf_of?` | `{ok, id}` | refusé en maison démo |
+| `pantry_save_product` | `product` (`id`, `name`, `detail?`, `flexibility?`, `fixed_provider?`, `aisle?`), `offers?` (`provider`, `reference`, `label?`, `ean?`, `unit_qty?`, `unit?`) | `{ok, product, offers}` (les fiches du produit, avec leur `id`) | une fiche créée par un agent reste `pending` jusqu'à la confirmation d'un humain ; un agent ne peut jamais confirmer ; modifier le libellé, l'EAN, le conditionnement ou l'unité d'une fiche confirmée la remet à `pending` (mêmes données : statut conservé) ; pas d'`actor` (aucun auteur n'est gardé) |
+| `pantry_record_prices` | `readings:[{offer, store, price_cents, unit_price_cents?, promo?, available}]`, `actor?`, `on_behalf_of?` | `{ok, recorded}` | `read_at` = maintenant, `read_by` = qui agit ; le prix se relève dans le magasin réglé de l'enseigne ; liste vide : rien n'est écrit ; tout ou rien |
+| `pantry_propose_basket` | `deviations?:[{product, kind, text, gain_cents}]`, `actor?`, `on_behalf_of?` | le panier (`options.recommended`, `singles`, `split`, `nowhere`…) | seuls les relevés de moins de 12 h comptent ; rien n'est acheté |
+| `pantry_choose_option` | `basket`, `option` (id d'un magasin ou `split`), `accepted?` (index d'écarts), `actor?`, `on_behalf_of?` | le panier choisi | confirme les fiches de l'option choisie |
+| `pantry_set_basket_status` | `basket`, `status` (`filled`, `ordered` ou `dropped`), `actor?`, `on_behalf_of?` | le panier | `done` n'existe pas ici : un panier n'est jamais payé par un agent |
+| `pantry_purchases` | `from?`, `to?` (ms ; défaut les 30 derniers jours) | `{purchases:[Purchase], receipts:[Receipt]}` : les achats, du plus ancien au plus récent, avec les tickets dont ils viennent et les brouillons qui attendent qu'un humain les vérifie ; sans la lecture brute du modèle | lecture seule ; `line_cents` = ce que la ligne a vraiment coûté, remise déduite ; brique absente : `Le Cellier n'est pas activé sur cette instance` |
+| `pantry_record_purchases` | `basket?`, `lines:[Purchase]`, `confirm?` (défaut faux), `receipt?` (`{provider, store, at, total_cents?}`) | `{ok, recorded}`, `{ok, confirmed}` ou, avec `receipt`, `{ok, recorded, receipt:<id>}` | `confirm: true` (au retrait) remplace toutes les lignes `drive` du panier (provisoires ou déjà confirmées) par `lines`, gardées en source `drive` et statut `confirmed` quoi qu'elles disent : le même appel répété ne compte qu'une fois ; sans `basket` : `basket is required to confirm purchases` ; `receipt` (un ticket de caisse que l'agent a lu lui-même : aucune photo n'est envoyée à Moli) l'enregistre **validé** avec ses `lines` (toutes de source `ticket`, sinon `line N: a receipt only holds lines of source ticket`), sans lignes `a receipt needs at least one line`, sans enseigne `a receipt needs a provider` ; un ticket de même enseigne, même minute et même total qu'un ticket enregistré est refusé (`this receipt looks already recorded: <id>`), donc un nouvel essai ne compte pas deux fois, à condition que `total_cents` soit donné (sans total, la garde ne joue pas) ; `receipt` avec `confirm` est refusé (`receipt cannot be used with confirm`) ; hors `receipt`, le `receipt` et l'`id` des lignes sont ignorés (une ligne ne se rattache pas d'elle-même à un ticket) ; `actor` et `on_behalf_of` ne sont gardés que sur un ticket |
 
 Il n'existe volontairement **aucun** outil MCP pour approuver un ordre, valider, allumer,
-lancer pour de vrai, restaurer ou supprimer un automatisme : c'est réservé à l'humain du
-dashboard.
+lancer pour de vrai, restaurer ou supprimer un automatisme, ni pour confirmer une fiche du
+Cellier, ni pour valider un brouillon de ticket, ni pour payer un panier : c'est réservé à l'humain du dashboard. Pour le Cellier,
+cette limite est celle du MCP, pas du serveur : confirmer une fiche
+(`POST /api/cellier/offers/{id}/confirm`) passe par l'API REST, qui est la surface du tableau de
+bord et répond à tout appelant du foyer sur le réseau de la maison (ni aux invités, ni en maison
+démo) ; aucune garde ne distingue un humain d'un programme qui l'appellerait. Choisir une option
+(`pantry_choose_option`, ou la route REST `…/choose`) confirme les fiches qu'elle utilise. Le
+skill `cellier` interdit à l'agent l'API REST du Cellier.
 
 ### 4.3 Règles de `history_sql`
 

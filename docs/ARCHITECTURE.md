@@ -77,6 +77,7 @@ La carte vivante de ce schéma est dans le dashboard : `#/systeme` (« Comment �
 | `moli-history` | historique SQLite, SQL en lecture seule pour agents | [historique & énergie](components/historique-energie.md) |
 | `moli-energy` | kWh et € par heure, Linky + circuits, import HA | [historique & énergie](components/historique-energie.md) |
 | `moli-automation` | automatismes en graphe, moteur déterministe, validation humaine | [automatismes](components/automatismes.md) |
+| `moli-pantry` | Le Cellier : liste de courses du foyer, produits, comparaison des prix des drives (SQLite, dormant sans `[pantry]`) | [crate](../crates/moli-pantry/src/lib.rs) |
 | `moli-helpers` | aides de la maison (mode, alarme, budget), comme les `input_*` de HA | [pilotes](components/pilotes.md) |
 | `moli-assistant` | Moli : conversation, création d'automatismes, import HA, textes | [moli](components/moli.md) |
 | `moli-api` | REST, SSE, MCP, sessions humaines, garde Host, bornes, dashboard embarqué | [api](components/api.md) |

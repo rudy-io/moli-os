@@ -73,6 +73,10 @@ pub enum Event {
     Notice {
         notice: Notice,
     },
+    /// Something changed in the pantry (« Le Cellier »): the list, a product,
+    /// a price, a basket… The dashboards re-read it; who did what stays in
+    /// the pantry's own rows.
+    PantryChanged,
 }
 
 /// A message shown in the dashboard.
