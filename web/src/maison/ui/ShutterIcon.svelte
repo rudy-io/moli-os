@@ -8,13 +8,8 @@
   const pct = $derived(coverPosition(id));
   const isOpen = $derived(pct != null && pct > 0);
 
-  // Icon state: open (>80%), semi (20-80%), closed (<20%)
-  const iconName = $derived.by(() => {
-    if (pct == null) return 'shutter';
-    if (pct >= 80) return 'shutter-open';
-    if (pct >= 20) return 'shutter-alert';
-    return 'shutter';
-  });
+  // Any opening uses the open shutter; the alert icon reads as a fault.
+  const iconName = $derived(pct != null && pct > 0 ? 'shutter-open' : 'shutter');
 </script>
 
 <div class="shutter-icon" class:compact class:open={isOpen} style:--size="{size}px" style:--glow="var(--warm-glow)">

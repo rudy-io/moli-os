@@ -9,6 +9,7 @@ let vite;
 let hub;
 let home;
 let energy;
+let icons;
 let render;
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const components = {};
@@ -22,7 +23,8 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -780,6 +782,16 @@ test('a room shows its trigger device and a lone control point stays a cover', (
   // No measured position: the pad opens the cover tile instead of sending open.
   assert.match(room, /shutter-icon/);
   assert.doesNotMatch(room, /data-cover-command/);
+});
+
+test('a partly open cover shows the open shutter, never the alert icon', () => {
+  const position = [point('opening', number(0, 100, 1), false, 'position')];
+  const opened = show('ShutterIcon', position, { opening: 42 });
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.ok(!opened.includes(icons['shutter-alert']));
+  const closed = show('ShutterIcon', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.ok(!closed.includes(icons['shutter-alert']));
 });
 
 test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
