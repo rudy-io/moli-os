@@ -145,10 +145,12 @@
         <Icon name="branch" size={20} />
         <span class="label">{t('commun.nav.systeme')}</span>
       </a>
-      <a class="atelier" href="#/atelier" title={t('commun.nav.atelier_titre')}>
-        <Icon name="atelier" size={20} />
-        <span class="label">{t('commun.nav.atelier')}</span>
-      </a>
+      {#if hub.session.atelier !== false}
+        <a class="atelier" href="#/atelier" class:active={page === 'atelier'} title={t('commun.nav.atelier_titre')}>
+          <Icon name="atelier" size={20} />
+          <span class="label">{t('commun.nav.atelier')}</span>
+        </a>
+      {/if}
     </div>
   </nav>
 
@@ -188,6 +190,9 @@
     {:else if page === 'infra'}
       <!-- The house's machines: loaded only when visited. -->
       {#await import('./pages/Infra.svelte') then { default: Infra }}<Infra />{/await}
+    {:else if page === 'atelier'}
+      <!-- Every device, raw (owners): loaded only when visited. -->
+      {#await import('../Atelier.svelte') then { default: Atelier }}<Atelier />{/await}
     {:else if page === 'parc'}
       <!-- What the house watches beyond itself: loaded only when visited. -->
       {#await import('./pages/Parc.svelte') then { default: Parc }}<Parc />{/await}
@@ -197,7 +202,7 @@
     <!-- On a phone the rail's foot is hidden: the same three, at the bottom. -->
     <footer class="phone-foot">
       <a href="#/systeme"><Icon name="branch" size={16} />{t('commun.nav.comment_ca_marche')}</a>
-      <a href="#/atelier"><Icon name="atelier" size={16} />{t('commun.nav.atelier')}</a>
+      {#if hub.session.atelier !== false}<a href="#/atelier"><Icon name="atelier" size={16} />{t('commun.nav.atelier')}</a>{/if}
       <button onclick={cycleTheme}><Icon name={theme === 'night' ? 'moon' : 'sun'} size={16} />{home.theme === 'auto' ? t('commun.theme.auto_pied') : themeName}</button>
     </footer>
   </main>
@@ -268,7 +273,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 22px 0 18px;
+    padding: 22px 0 calc(18px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
     gap: 18px;
   }
 
@@ -493,7 +498,10 @@
       height: auto;
       flex-direction: row;
       justify-content: center;
-      padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+      /* Above the home indicator and clear of the screen's edges: a swipe
+         along the very bottom switches apps, one from the side goes back. */
+      padding: 8px max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
       background: var(--surface);
       box-shadow: var(--shadow-lift);
       z-index: 25;
@@ -511,6 +519,7 @@
       margin: 0;
       gap: 0;
       overflow-x: auto;
+      overscroll-behavior-x: contain;
       scrollbar-width: none;
       justify-content: safe center;
     }
@@ -534,7 +543,7 @@
     }
 
     .content {
-      padding: 20px 16px 140px;
+      padding: 20px 16px calc(150px + env(safe-area-inset-bottom));
     }
 
     .phone-foot {
@@ -561,7 +570,7 @@
 
     .orb {
       right: 16px;
-      bottom: 86px;
+      bottom: calc(96px + env(safe-area-inset-bottom));
       padding: 8px;
     }
 
@@ -570,7 +579,7 @@
     }
 
     .notes {
-      bottom: 150px;
+      bottom: calc(160px + env(safe-area-inset-bottom));
       width: calc(100% - 32px);
     }
   }
