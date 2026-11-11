@@ -25,6 +25,7 @@ mod integrations;
 mod limit;
 mod machines;
 mod mcp;
+mod overkiz;
 mod people;
 mod people_api;
 mod whereabouts;
@@ -140,6 +141,9 @@ pub struct Options {
     /// The house's time zone (IANA), as resolved at start: shown in
     /// `/api/system`.
     pub timezone: Option<String>,
+    /// Explicit enabled cloud observers; no credentials.
+    pub overkiz_cloud:
+        std::collections::BTreeMap<moli_core::InstanceId, moli_overkiz::cloud::Config>,
 }
 
 /// Builds the complete HTTP application. Live streams end when `shutdown`
@@ -324,7 +328,7 @@ fn assistant_routes() -> Router<Hub> {
         .route("/api/assistant/key", put(assistant::set_key))
 }
 
-fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
+fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hub> {
     Router::new()
         .route(
             "/api/integrations/airzone/discover",
@@ -354,6 +358,13 @@ fn integration_routes(humans: &Arc<session::Sessions>) -> Router<Hub> {
             "/api/integrations/airzone/{instance}/mode",
             upload(post(airzone_setup::set_mode), 1024, humans),
         )
+        .merge(overkiz::routes())
+        .layer(Extension(airzone_setup::Setup(
+            options.airzone_setup.clone(),
+        )))
+        .layer(Extension(overkiz::Configured(Arc::new(
+            options.overkiz_cloud.clone(),
+        ))))
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
@@ -365,7 +376,7 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
     }
     Router::new()
         .route("/api/health", get(rest::health))
-        .merge(integration_routes(&humans))
+        .merge(integration_routes(&humans, options))
         .merge(device_routes())
         .route("/api/media/{name}", get(rest::media))
         .route("/api/command", post(rest::command))
@@ -425,9 +436,6 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         )
         .fallback(assets::serve)
         .layer(Extension(shutdown))
-        .layer(Extension(airzone_setup::Setup(
-            options.airzone_setup.clone(),
-        )))
         .layer(Extension(sse::Streams::default()))
         .layer(Extension(rest::Recorded(options.history.clone())))
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))

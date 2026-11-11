@@ -703,5 +703,19 @@
   "pilotes.zwave.point_lu_seul": "point {point} is read-only",
   "pilotes.zwave.point_sans_cible": "point {point} has no write target",
   "pilotes.zwave.niveau_attend_nombre": "point level expects a number",
-  "pilotes.zwave.on_attend_booleen": "point on expects a boolean"
+  "pilotes.zwave.on_attend_booleen": "point on expects a boolean",
+  "pilotes.linky_tic.compteur": "Linky meter (local reading)",
+  "pilotes.linky_tic.puissance": "Apparent power",
+  "pilotes.linky_tic.energie_totale": "Total energy drawn",
+  "pilotes.linky_tic.index": "Index {numero}",
+  "pilotes.linky_tic.periode": "Current tariff period",
+  "pilotes.linky_tic.numero_periode": "Current index number",
+  "pilotes.linky_tic.courant": "Phase {numero} current",
+  "pilotes.linky_tic.tension": "Phase 1 voltage",
+  "pilotes.linky_tic.puissance_max": "Maximum power of the day",
+  "pilotes.linky_tic.port_manquant": "serial port not set: fill `port` (for example /dev/ttyACM0) in the instance options, then restart Moli",
+  "pilotes.linky_tic.ouverture": "cannot open {port}: {cause}",
+  "pilotes.linky_tic.lecture": "cannot read the serial port: {cause}",
+  "pilotes.linky_tic.port_ferme": "the serial port closed (module unplugged?)",
+  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)"
 }

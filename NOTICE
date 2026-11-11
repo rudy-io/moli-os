@@ -25,3 +25,10 @@ This product includes data derived from tuya-local
 in crates/moli-tuya/src/vacuum.rs.
 Copyright 2018 Nik Rolls, 2026 Jason Rumney, 2022-2026 other contributors.
 Licensed under the MIT License; see licenses/tuya-local-MIT.txt.
+
+This product includes application constants derived from PyOverkiz
+(https://github.com/iMicknl/python-overkiz-api), pyoverkiz/const.py
+at commit 5f31858570e14be4f58e6cc58b7a448000556449, used by
+crates/moli-overkiz/src/cloud/protocol.rs.
+Copyright (c) 2020 Mick Vleeshouwer. Licensed under the MIT License;
+see licenses/pyoverkiz-MIT.txt.

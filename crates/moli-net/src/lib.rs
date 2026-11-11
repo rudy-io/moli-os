@@ -649,6 +649,23 @@ pub async fn plain_with_headers(
         .with_context(|| format!("{host} did not answer in time"))?
 }
 
+/// Connection establishment failed before any HTTP request could be sent.
+/// Only the TCP/DNS stage can produce this marker; timeouts after connection
+/// and response failures remain ambiguous for rotating credentials.
+#[derive(Debug)]
+pub struct RequestNotDispatched(std::io::Error);
+
+impl std::fmt::Display for RequestNotDispatched {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("request not dispatched: connection failed")
+    }
+}
+impl std::error::Error for RequestNotDispatched {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
 /// One request to a web API (an LLM, a cloud service), on its own
 /// connection: TLS checked against the public CAs when `tls`, the whole
 /// exchange within `limit`, the answer capped at `max_body` bytes. The
@@ -735,6 +752,7 @@ async fn web_response(
     let exchange = async {
         let tcp = TcpStream::connect((host, port))
             .await
+            .map_err(RequestNotDispatched)
             .with_context(|| format!("cannot reach {host}:{port}"))?;
         let response = if tls {
             let name = ServerName::try_from(host.to_owned()).context("host name")?;
@@ -885,5 +903,82 @@ mod web_url_tests {
         assert_eq!((l.tls, l.port, l.path.as_str()), (false, 5678, "/"));
         assert!(WebUrl::parse("ftp://x").is_err());
         assert!(WebUrl::parse("https://user@host/").is_err());
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    fn request() -> Request<Full<Bytes>> {
+        Request::builder()
+            .method("POST")
+            .uri("/rotate")
+            .body(Full::new(Bytes::from_static(b"test")))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn refused_connection_is_provably_not_dispatched() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error = web_with_headers(
+            "127.0.0.1",
+            port,
+            false,
+            request(),
+            Duration::from_secs(2),
+            1024,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.is::<RequestNotDispatched>());
+    }
+
+    #[tokio::test]
+    async fn failed_name_resolution_is_provably_not_dispatched() {
+        let error = web_with_headers(
+            "invalid hostname",
+            443,
+            true,
+            request(),
+            Duration::from_secs(2),
+            1024,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.is::<RequestNotDispatched>());
+    }
+
+    #[tokio::test]
+    async fn lost_response_and_deadline_after_connection_are_ambiguous() {
+        for lose_response in [true, false] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = [0u8; 1024];
+                let read = tokio::io::AsyncReadExt::read(&mut stream, &mut bytes)
+                    .await
+                    .unwrap();
+                assert!(read > 0);
+                if !lose_response {
+                    std::future::pending::<()>().await;
+                }
+            });
+            let error = web_with_headers(
+                "127.0.0.1",
+                port,
+                false,
+                request(),
+                Duration::from_millis(100),
+                1024,
+            )
+            .await
+            .unwrap_err();
+            assert!(!error.is::<RequestNotDispatched>());
+            server.abort();
+        }
     }
 }
