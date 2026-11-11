@@ -11,7 +11,8 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 fn config() -> Config {
     Config {
-        host: "gateway-example.local".into(),
+        host: Some("gateway-example.local".into()),
+        cloud: None,
         port: 8443,
         poll_secs: 5,
         cert_sha256: None,
@@ -32,7 +33,7 @@ fn construction_is_pure_and_rejects_invalid_config() {
     ] {
         assert!(
             Overkiz::new(Config {
-                host: host.into(),
+                host: Some(host.into()),
                 ..config()
             })
             .is_err()
@@ -60,7 +61,7 @@ fn construction_is_pure_and_rejects_invalid_config() {
         .is_err()
     );
 }
-async fn fixture_server(
+pub(super) async fn fixture_server(
     hub: &Hub,
     instance: &InstanceId,
     posts: Arc<AtomicUsize>,
@@ -157,7 +158,8 @@ async fn real_driver_pins_before_token_and_refreshes_before_every_write() {
         instance.clone(),
         Arc::new(
             Overkiz::new(Config {
-                host: "localhost".into(),
+                host: Some("localhost".into()),
+                cloud: None,
                 port,
                 poll_secs: 300,
                 cert_sha256: None,
@@ -338,6 +340,26 @@ impl Rig {
         stale_publication: bool,
         poll_secs: u64,
     ) -> Self {
+        Self::start_sources(
+            snapshot,
+            writable_openers,
+            command_timeout,
+            read_only,
+            stale_publication,
+            poll_secs,
+            false,
+        )
+        .await
+    }
+    async fn start_sources(
+        snapshot: serde_json::Value,
+        writable_openers: Vec<ReviewedOpener>,
+        command_timeout: Duration,
+        read_only: bool,
+        stale_publication: bool,
+        poll_secs: u64,
+        cloud_enabled: bool,
+    ) -> Self {
         let (path, hub, instance) = test_vault(command_timeout).await;
         let snapshot = Arc::new(std::sync::Mutex::new(snapshot));
         let posts = Arc::new(AtomicUsize::new(0));
@@ -363,13 +385,14 @@ impl Rig {
         }
         .spawn(listener);
         let cancel = CancellationToken::new();
-        let config: Config = serde_json::from_value(serde_json::json!({
+        let mut config: Config = serde_json::from_value(serde_json::json!({
             "host":"localhost","port":port,"poll_secs":poll_secs,"read_only":read_only,
             "writable_openers":writable_openers.iter().map(|p| serde_json::json!({
                 "device_url":p.device_url,"ui_class":p.ui_class
             })).collect::<Vec<_>>()
         }))
         .unwrap();
+        config.cloud = cloud_enabled.then(cloud::Config::default);
         let driver: Arc<dyn Driver> = if stale_publication {
             Arc::new(StalePublicationProbe {
                 config,
@@ -380,7 +403,12 @@ impl Rig {
         };
         spawn_driver(&hub, instance.clone(), driver, cancel.clone());
         tokio::time::timeout(Duration::from_secs(5), async {
-            while hub.stats().drivers_running != 1 {
+            while hub.stats().drivers_running != 1
+                || (cloud_enabled
+                    && !hub.snapshot().devices.iter().any(|device| {
+                        !cloud::owns_device(&device.device.id) && device.online == Some(true)
+                    }))
+            {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
@@ -885,13 +913,18 @@ impl Driver for StalePublicationProbe {
     }
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
-            let probe = PinnedHttps::new(&self.config.host, self.config.port, None)?;
+            let probe =
+                PinnedHttps::new(self.config.host.as_deref().unwrap(), self.config.port, None)?;
             probe.handshake().await?;
             let pin = probe.pinned_fingerprint().unwrap();
             drop(probe);
             ctx.store_secret("cert_sha256", &pin).await?;
             let client = Client::new(
-                PinnedHttps::new(&self.config.host, self.config.port, Some(pin))?,
+                PinnedHttps::new(
+                    self.config.host.as_deref().unwrap(),
+                    self.config.port,
+                    Some(pin),
+                )?,
                 "synthetic-test-token".into(),
             );
             for entry in model::parse(&self.snapshot)? {
@@ -1152,8 +1185,24 @@ async fn refused_commands_do_not_restart_driver_or_remove_other_devices() {
 }
 #[tokio::test]
 async fn missing_devices_go_offline_reappear_and_need_three_absent_snapshots_for_removal() {
+    check_missing_device_lifecycle(false).await;
+}
+#[tokio::test]
+async fn combined_sources_preserve_native_missing_device_lifecycle() {
+    check_missing_device_lifecycle(true).await;
+}
+async fn check_missing_device_lifecycle(cloud_enabled: bool) {
     let raw = opener_fixture();
-    let rig = Rig::start_mode(raw.clone(), vec![], Duration::from_secs(5), false, false, 1).await;
+    let rig = Rig::start_sources(
+        raw.clone(),
+        vec![],
+        Duration::from_secs(5),
+        false,
+        false,
+        1,
+        cloud_enabled,
+    )
+    .await;
     let id = rig.point(0, "percent_control").split().unwrap().0;
     rig.hub
         .set_label(
@@ -1203,6 +1252,48 @@ async fn missing_devices_go_offline_reappear_and_need_three_absent_snapshots_for
     assert!(rig.hub.device(&id).is_none());
     assert_eq!(rig.hub.stats().drivers_running, 1);
     assert_eq!(rig.posts.load(Ordering::SeqCst), 0);
+    if cloud_enabled {
+        assert!(
+            rig.hub
+                .device(&cloud::summary_device_id(&rig.instance))
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn combined_sources_keep_native_available_after_refused_execution() {
+    let rig = Rig::start_sources(
+        opener_fixture(),
+        vec![],
+        Duration::from_secs(5),
+        false,
+        false,
+        300,
+        true,
+    )
+    .await;
+    let point = rig.point(0, "percent_control");
+    let next = rig.point(1, "control");
+    rig.post_status.store(500, Ordering::SeqCst);
+    assert!(
+        rig.hub
+            .command(&point, Value::Float(60.), Origin::Ui, None)
+            .await
+            .is_err()
+    );
+    rig.post_status.store(200, Ordering::SeqCst);
+    rig.hub
+        .command(&next, Value::from("open"), Origin::Ui, None)
+        .await
+        .expect("ordinary refused execution must not park the native source");
+    assert!(rig.gets.load(Ordering::SeqCst) >= 4);
+    assert_eq!(rig.posts.load(Ordering::SeqCst), 2);
+    assert!(
+        rig.hub
+            .device(&cloud::summary_device_id(&rig.instance))
+            .is_some()
+    );
 }
 #[tokio::test]
 async fn failed_refresh_does_not_count_as_missing_devices() {

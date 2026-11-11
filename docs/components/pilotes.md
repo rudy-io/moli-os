@@ -270,6 +270,170 @@ base_topic = "zwave"        # défaut
   encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
   et de config.
 
+## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
+
+- **Couvre** (phases 1 à 3, essayées sur une clé ZBDongle-E et une ampoule Innr RB 287 C ;
+  capteurs et prises sur simulateur à ce jour) : la clé coordinateur et son réseau (formé s'il
+  n'existe pas, repris sinon, restauré depuis une sauvegarde importée), l'appairage ouvert depuis
+  Moli, l'import et l'export d'une sauvegarde Zigbee2MQTT, et les appareils (voir **Appareils**).
+  Pas encore : familles propriétaires (Tuya, Xiaomi, Lixee), actions des télécommandes, retrait
+  d'un appareil depuis Moli (phase 4) : d'ici là, `z2m` reste le pilote d'une maison.
+- **Appareils** (`src/fleet.rs`, `src/interview.rs`, `src/devices.rs`, `src/zcl.rs`) :
+  - **Interview** à l'arrivée, une à la fois, 2 s après l'annonce : descripteur de nœud, endpoints,
+    descripteurs simples (3 essais chacun : la 1re requête après un appairage se perd souvent),
+    `Basic` attribut par attribut, capacités de couleur, type de zone et inscription IAS (les deux
+    procédures de herdsman, puis vérification de `zoneState`), diviseurs de mesure. Un silence à
+    n'importe quelle étape l'arrête, ce qu'elle a appris gardé dans le `store` : `ctx.warn` le dit,
+    et la suivante repart de là, sans délai, au prochain message de l'appareil (1 min d'écart au
+    moins) ou toutes les 10 min. Une réponse sans l'attribut est une réponse. Après 3 échecs, seuls
+    les descripteurs et l'inscription IAS retiennent l'appareil : une lampe sans modèle vaut mieux
+    que pas de lampe. Un appareil du
+    `store` pas encore interrogé l'est au démarrage. Réussie, elle n'est refaite que si l'appareil
+    rejoint « de rien » (`STANDARD_SECURITY_UNSECURED_JOIN`) : il a été réinitialisé et a tout
+    oublié. Un appareil qui part sans avoir été interrogé est oublié.
+  - **Points** : génériques par cluster, mêmes clés et mêmes unités que `moli-z2m`
+    (`brightness` en %, `contact` vrai = fermé, `color` en `#rrggbb` avec `color.x`, `color.y`
+    en lecture). Un 2e endpoint porte son numéro (`state_2`). `color_temp` vaut `Null` tant que
+    la lampe est en couleur : elle continue d'en rapporter une, au bout de sa plage. Sa plage
+    est bornée à 150-600 mired : une lampe peut déclarer bien plus qu'elle ne fait.
+  - **Rapports** : bind vers l'endpoint 1 du coordinateur et configure reporting (valeurs de
+    `reporting.ts` de herdsman-converters ; pour une prise, 5 W, 5 V, 50 mA et 0,1 kWh, ramenés aux
+    diviseurs de l'appareil, comme `genericMeter`, et `power` lu sur Electrical s'il existe) ; un
+    refus est une réponse, un silence se retente (1 h d'écart). Un rapport qui demande une réponse
+    par défaut la reçoit, jamais un broadcast.
+  - **Ordres** : remis à la clé dans l'ordre reçu par la boucle, puis suivis à part : un appareil
+    muet ne retient ni la boucle ni les autres. Réponse par défaut en erreur = refus rapporté à
+    l'auteur ; accusé radio sans réponse = pris ; rien à 300 ms de l'échéance du hub = échec dit à
+    l'auteur. Un appareil dormant : « remis » dès que la clé l'a pris (il le recevra à son réveil,
+    bien après les 5 s du hub), et un avis à la maison s'il ne l'a finalement pas. Valeur optimiste affichée dès que l'appareil l'a, confirmée par son
+    rapport. Échec : ses valeurs sont relues.
+  - **Disponibilité** (valeurs de Z2M) : tout message = en ligne ; à l'écoute et muet 10 min → une
+    lecture (une par silence de 10 min, pas plus), sans réponse → hors ligne ; dormant muet 25 h →
+    hors ligne (sa lecture manquée ne compte pas : il dort) ; parti du réseau → hors ligne, gardé
+    dans le `store`. Silence noté toutes les heures et à l'arrêt : il continue à travers un
+    redémarrage, sans compter le temps où Moli était arrêté. Lectures cadencées à 500 ms, toutes refaites au retour du réseau.
+- **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
+  `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
+  EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
+  (`setConfigurationValue`, liste et valeurs du pilote `ember` de zigbee-herdsman, provenance
+  ligne par ligne dans `src/coordinator.rs` ; une valeur refusée par la clé est journalisée
+  et la sienne gardée), l'endpoint 1 du coordinateur (`addEndpoint` : profil Home Automation,
+  identifiant et clusters de `FIXED_ENDPOINTS` de herdsman ; refusé, le démarrage échoue),
+  les politiques du centre de confiance (`setPolicy`, comme `initTrustCenter` de herdsman),
+  puis `networkInit` :
+  - réseau gardé par la clé → attente de `stackStatusHandler` « réseau levé » (10 s), puis
+    `getNetworkParameters` + `getEui64` : le réseau n'est repris (et recopié dans le `store`,
+    canal et `nwk_update_id` compris) que si la clé en est le coordinateur et que c'est le
+    réseau du `store` (même PAN et PAN étendu), ou, `store` vide, si le coffre a déjà une
+    `network_key` (première formation interrompue). Sinon le pilote attend en le disant
+    (`pilotes.zigbee.pas_coordinateur`, `autre_reseau`, `reseau_inconnu`) **sans rien
+    changer** : ni le réseau de la clé (jamais quitté ni effacé), ni le `store` ;
+  - pas de réseau et `store` vide → **formation** (`src/network.rs`, séquence `formNetwork` de
+    herdsman) : clé réseau et clé de lien du centre de confiance aléatoires (`ring`), rangées
+    au coffre **avant** toute commande de sécurité (reprises si le coffre les a déjà, après un
+    essai interrompu), `setInitialSecurityState`, masque de sécurité étendu, table des clés
+    vidée, `formNetwork` (canal `channel` ou 15, PAN et PAN étendu aléatoires), attente du
+    réseau levé, puis paramètres écrits dans le `store` ;
+  - pas de réseau mais un réseau connu du `store` → **restauration** (`src/backup.rs`,
+    `formNetwork` « depuis une sauvegarde » de herdsman) avec les clés du coffre, sur la clé
+    d'origine seulement, depuis un compteur de trames frais seulement (+ 65 536), sinon le
+    pilote attend en le disant ; jamais de formation par-dessus. Un relevé de plus de 24 h
+    (ou sans date) n'est pas restauré non plus (`pilotes.zigbee.compteur_ancien`) : une clé
+    restée sous tension, Moli arrêté, a pu dépasser la marge.
+  - **compteur de trames** : dès que le réseau tourne (formé, restauré ou repris et reconnu),
+    puis toutes les heures tant qu'il est levé, le pilote lit le compteur de trames NWK sortant
+    de la clé (`getNetworkKeyInfo`, comme `backup()` de l'adaptateur ember de herdsman ; statut
+    `SlStatus` sur 32 bits en EZSP 13 comme 14) et l'écrit dans le `store`
+    (`frame_counter`, `frame_counter_fresh`, jamais à la baisse, daté en secondes unix dans
+    `frame_counter_recorded_at`, comme l'import, daté de son heure). À l'arrêt propre de Moli,
+    sur un réseau levé et vérifié, le pilote referme l'appairage s'il est ouvert et relève le
+    compteur une dernière fois (3 s au plus : le superviseur lui laisse 5 s), pour qu'un
+    export juste après parte de là. La lecture horaire laisse les
+    rappels de la clé être lus ; une lecture ratée est journalisée et retentée l'heure
+    suivante, sans effacer le relevé. Une restauration ou un export part de ce relevé
+    + 65 536 (`FRAME_COUNTER_MARGIN` : la clé émet en continu, le relevé peut dater d'une heure).
+    Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé. Un réseau repris
+    qui reste « down » au démarrage n'est pas vérifié : le relevé du `store` cesse d'être
+    restaurable (valeur gardée, `frame_counter_fresh` à faux), sauf si la clé se lit comme un
+    autre réseau (ce relevé n'est alors pas le sien) ; quand il se lève, il est vérifié comme
+    au démarrage (même réseau, coordinateur ; sinon le pilote attend en le disant, rien n'est
+    adopté), puis son compteur est relevé aussitôt et toutes les heures. Tant que cette
+    vérification n'a pas pu lire la clé (nouvel essai à l'heure), l'appairage est refusé
+    (`pilotes.zigbee.reseau_non_verifie`) et aucune arrivée n'est notée dans le `store`.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "zigbee"
+kind = "zigbee"
+[driver.options]
+port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
+# baud = 115200         # défaut
+# flow = "software"     # défaut (XON/XOFF, ZBDongle-E) ; "hardware" ou "none"
+# channel = 15          # canal d'un nouveau réseau (11 à 26, sinon Moli refuse de démarrer) ; 15 par défaut
+```
+
+- **Secrets** : `network_key` et `tc_link_key` (32 chiffres hexadécimaux), écrites dans le
+  coffre (jamais dans un fichier ni un journal, `Debug` masqué) par le pilote lui-même quand il
+  forme le réseau, ou par `moli-os zigbee import` (Moli arrêté) depuis une sauvegarde
+  Zigbee2MQTT ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
+  pilote attend (`pilotes.zigbee.coffre_indisponible`).
+- **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
+  réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, compteur de trames
+  et numéro de séquence de la clé, **sans clé**), appareils. Écrit dans `<fichier>.tmp` puis
+  renommé. Aucun fichier de sauvegarde avec la clé n'est tenu à jour : la clé ne vit qu'au
+  coffre.
+- **Retour à Zigbee2MQTT** : `moli-os zigbee export <fichier> [--instance <id>] [--force]`
+  (Moli arrêté) écrit une sauvegarde Open Coordinator Backup au format de l'adaptateur ember
+  de herdsman (`toUnifiedBackup`) : réseau et appareils du `store`, `network_key` et
+  `hashed_tclk` lus au coffre à ce moment, compteur = relevé + 65 536. Fichier privé (0600),
+  écrit atomiquement, jamais par-dessus un fichier existant sans `--force` ; rien n'est écrit
+  sans les deux clés au coffre ni sans compteur frais relevé depuis 24 h au plus
+  (`pilotes.zigbee.export_compteur_ancien`). La clé n'est jamais affichée ; un
+  avertissement (`pilotes.zigbee.export_avertissement`) rappelle de supprimer le fichier après
+  usage. `moli-os zigbee import` relit ce fichier.
+- **Points** : appareil `coordinator` : `firmware` (texte, `7.4.4.0`), `ezsp_version`
+  (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`), en lecture seule ;
+  `permit_join` (booléen, **écrivable**) : vrai ouvre l'appairage 254 s comme le `permitJoin`
+  de herdsman (clé transitoire « ZigBeeAlliance09 », politique d'arrivée, `permitJoining`
+  sur la clé, puis `Mgmt_Permit_Joining_req` diffusé à `0xFFFC`), et retombe seul à faux au
+  bout de 254 s ; faux le referme tout de suite ; refusé si le réseau n'est pas levé
+  (`pilotes.zigbee.reseau_absent`) ou pas encore reconnu comme celui du `store`
+  (`pilotes.zigbee.reseau_non_verifie`) ; sémantique `control` : un agent qui le demande attend
+  l'accord d'un humain ; une ouverture qui échoue en route est refermée sur la clé (au mieux)
+  avant que l'erreur soit rendue ; `joining` (texte) : l'IEEE du dernier appareil arrivé
+  (`trustCenterJoinHandler` ou annonce ZDO), noté dans le `store` (`interviewed: false`) ;
+  un appareil qui part reste dans le `store` (v1).
+- **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
+  `pilotes.zigbee.firmware_ancien` avec la version trouvée) **sans relance en boucle** : seul
+  un nouveau firmware y fait quelque chose. Une clé qui redémarre seule ou un lien perdu
+  termine l'exécution (le superviseur relance, tout recommence au RST). Un ordre reçu avant
+  que le coordinateur soit prêt est refusé (`pilotes.zigbee.pas_pret`). Les rappels de la clé
+  sont lus en continu (au-delà de 256 en attente, le client les jetterait). Un réseau repris
+  qui ne se lève pas en 10 s laisse le pilote prêt avec `network = down`, sans relance en
+  boucle : le `stackStatusHandler` suivant remet le point à jour (un « réseau tombé » pendant
+  l'attente est ignoré, comme herdsman). Une clé qui porte un autre réseau que celui du
+  `store`, un réseau inconnu sans clé au coffre ou un réseau dont elle n'est pas le
+  coordinateur n'est jamais adoptée : le `store` et le coffre restent ceux du même réseau. Le
+  port série est pris en exclusivité (`flock`, comme Zigbee2MQTT, puis `TIOCEXCL`, rendu à la
+  fermeture) : un port déjà tenu par un autre programme est refusé en le nommant
+  (`pilotes.zigbee.port_occupe`), le superviseur réessaie.
+- **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
+  sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
+  refusés avant d'être prêt, lien perdu, formation (clé au coffre avant la clé, canal 15,
+  `store` sans clé), clé du coffre reprise, sans coffre pas de réseau, réseau connu jamais
+  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause), réseau
+  levé tard vérifié puis relevé, autre réseau, réseau inconnu sans clé ou clé non coordinateur jamais
+  adoptés, formation interrompue reprise ; restauration d'un réseau importé (compteur inconnu,
+  usé, épuisé, de plus de 24 h, autre clé, import interrompu : rien n'est touché), import
+  (`moli-os zigbee import` : clés au coffre seulement, `--force`, sauvegarde plus ancienne
+  refusée), export (format de herdsman, fichier privé, compteur trop ancien refusé),
+  appairage (accord humain pour un agent, ouverture et fermeture, échec refermé, refusé sur
+  un réseau pas encore vérifié), arrivées notées, relevé horaire du compteur, arrêt propre
+  (appairage refermé, dernier relevé, jamais bloquant), port série exclusif (pty).
+- **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
+  `--device`, groupe du port, mise à jour du firmware).
+
 ## `hue` : Philips Hue (`crates/moli-hue`)
 
 - **Couvre** : lumières, interrupteurs (boutons), détecteurs (mouvement, température, luminosité, contact), batteries, pièces et zones Hue.
@@ -930,6 +1094,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | Pilote | Crate | Protocole | Écriture possible | Vérifié sur du vrai matériel |
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
+| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent), `state`, `brightness`, `color_temp`, `color`, thermostat | ZBDongle-E (EmberZNet 7.4.4.0) + Innr RB 287 C |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `melcloud` | `moli-melcloud` | HTTPS vers le MELCloud classique, clé de contexte | oui : marche, mode, consigne, ventilateur, ailettes | deux unités air-air (lecture) ; commandes sur l'une |

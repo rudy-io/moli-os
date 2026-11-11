@@ -63,6 +63,9 @@ enum Command {
     /// Tuya devices.
     #[command(subcommand)]
     Tuya(TuyaCommand),
+    /// Native Zigbee (EZSP coordinator).
+    #[command(subcommand)]
+    Zigbee(ZigbeeCommand),
     /// The house model's contract and training prompts (for the data generator).
     #[command(subcommand, hide = true)]
     Model(ModelCommand),
@@ -101,6 +104,44 @@ enum TuyaCommand {
         /// Only list what would be filed (no key shown, nothing written).
         #[arg(long)]
         summary: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ZigbeeCommand {
+    /// Take over a Zigbee2MQTT network: read its coordinator backup
+    /// (`coordinator_backup.json`, Open Coordinator Backup), put its keys
+    /// into the encrypted store and its network into the driver's state;
+    /// the driver restores it on the dongle at its next start, without
+    /// re-pairing. Keys are never printed. Stop moli-os first (a running
+    /// Moli keeps its vault and the driver's state in memory and would
+    /// overwrite the import at its next save), start it again afterwards.
+    Import {
+        /// The backup file Zigbee2MQTT writes in its data folder.
+        file: PathBuf,
+        /// The zigbee driver instance that takes the network over.
+        #[arg(long, default_value = "zigbee")]
+        instance: String,
+        /// Replace the network this instance already records.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Write the network Moli runs as an Open Coordinator Backup, to go
+    /// back to Zigbee2MQTT: its parameters and devices from the driver's
+    /// state, its keys from the encrypted store, its frame counter the last
+    /// one recorded plus a margin. The file holds the network key in clear:
+    /// private (0600), delete it once Zigbee2MQTT has it. Stop moli-os
+    /// first, and keep it stopped (one program per dongle and network).
+    Export {
+        /// Where to write it (Zigbee2MQTT reads `coordinator_backup.json`
+        /// in its data folder).
+        path: PathBuf,
+        /// The zigbee driver instance whose network is written.
+        #[arg(long, default_value = "zigbee")]
+        instance: String,
+        /// Replace a file already there.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -232,6 +273,7 @@ fn main() -> anyhow::Result<()> {
             cloud,
             summary,
         }) => tuya_import(&config, &instance, devices_file, cloud, summary),
+        Command::Zigbee(command) => zigbee_command(&config, command),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
@@ -358,10 +400,9 @@ fn speak_and_tell_the_time(config: &Config) {
     }
 }
 
-async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
-    // Before anything opens the data directory.
-    demo_fresh(&config)?;
-    speak_and_tell_the_time(&config);
+/// The hub over the data directory: labels, state, journal, addresses, the
+/// vault when a master key is given, the guard and the mirror switch.
+fn open_hub(config: &Config) -> anyhow::Result<Hub> {
     // The master key comes from the environment (a secrets manager), or a
     // new house's key file.
     let secrets = master_key(&config.server.data_dir, true)?
@@ -369,16 +410,24 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     if secrets.is_none() {
         tracing::warn!("no master key: drivers cannot persist pairing credentials");
     }
-    let hub = Hub::new(HubOptions {
+    Hub::new(HubOptions {
         labels_path: Some(config.server.data_dir.join("labels.toml")),
         state_path: Some(config.server.data_dir.join("state.json")),
         journal_path: Some(config.server.data_dir.join("journal.jsonl")),
         addresses_path: Some(config.server.data_dir.join("addresses.json")),
         secrets,
         guard: config.guard.policy()?,
+        mirror: config.server.mirror,
         ..HubOptions::default()
     })
-    .context("cannot open the data directory (labels, journal, secrets)")?;
+    .context("cannot open the data directory (labels, journal, secrets)")
+}
+
+async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
+    // Before anything opens the data directory.
+    demo_fresh(&config)?;
+    speak_and_tell_the_time(&config);
+    let hub = open_hub(&config)?;
     let cancel = CancellationToken::new();
     let airzone_setup = managed_airzone::Manager::new(hub.clone(), &config, cancel.clone())?;
 
@@ -440,6 +489,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         machines: gates.machines,
         weather: weather(&config),
         timezone: Some(config.zone.name.clone()),
+        overkiz_cloud: overkiz_cloud(&config.drivers)?,
     };
     // Client addresses matter: human sessions are bound to them.
     axum::serve(
@@ -672,6 +722,38 @@ fn tuya_import(
     Ok(())
 }
 
+fn zigbee_command(config: &Config, command: ZigbeeCommand) -> anyhow::Result<()> {
+    match command {
+        ZigbeeCommand::Import {
+            file,
+            instance,
+            force,
+        } => {
+            // Keys filed under a mistyped instance would never be read.
+            zigbee_instance(config, &instance)?;
+            let key = master_key(&config.server.data_dir, false)?.context(
+                "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
+            )?;
+            let summary = zigbee_import(&config.server.data_dir, &key, &instance, &file, force)?;
+            println!("{summary}");
+            Ok(())
+        }
+        ZigbeeCommand::Export {
+            path,
+            instance,
+            force,
+        } => {
+            zigbee_instance(config, &instance)?;
+            let key = master_key(&config.server.data_dir, false)?.context(
+                "no master key (MOLI_MASTER_KEY[_FILE], or master.key in the data directory)",
+            )?;
+            let summary = zigbee_export(&config.server.data_dir, &key, &instance, &path, force)?;
+            println!("{summary}");
+            Ok(())
+        }
+    }
+}
+
 /// Files written by a tool run as root (the import) go back to whoever
 /// owns the data directory: moli-os runs as that user and must still read
 /// its vault and its devices file.
@@ -694,6 +776,161 @@ fn keep_owner(data_dir: &std::path::Path, files: &[&std::path::Path]) {
             );
         }
     }
+}
+
+/// `moli-os zigbee export`: the network the driver runs, as an Open
+/// Coordinator Backup Zigbee2MQTT restores (to go back to it), written to
+/// `path` (private, never over a file without `force`). Its keys are read
+/// from the vault at that moment, never printed; nothing is written without
+/// both of them. Returns what to print.
+fn zigbee_export(
+    data_dir: &std::path::Path,
+    master: &MasterKey,
+    instance: &str,
+    path: &std::path::Path,
+    force: bool,
+) -> anyhow::Result<String> {
+    use moli_zigbee::{backup, network, store};
+    let store_path = store::path(data_dir, instance);
+    let state = store::Store::load(&store_path)?;
+    if state.import_pending {
+        bail!(
+            "an interrupted `moli-os zigbee import`: the vault and {} may not match; run that import again first",
+            store_path.display()
+        );
+    }
+    let Some(record) = state.network.as_ref() else {
+        bail!(
+            "{instance} records no network yet ({}): nothing to export",
+            store_path.display()
+        );
+    };
+    let secrets = data_dir.join("secrets.enc");
+    let key = |name: &str| -> anyhow::Result<network::Key> {
+        let entry = format!("{instance}/{name}");
+        let held = moli_runtime::get_secret(&secrets, master, &entry)
+            .with_context(|| format!("the vault ({}) cannot be read", secrets.display()))?
+            .with_context(|| format!("no {entry} in the vault: nothing is exported without it"))?;
+        network::Key::from_hex(&held)
+            .with_context(|| format!("the vault's {entry} is not a 128-bit key (32 hex digits)"))
+    };
+    let network_key = key(network::NETWORK_KEY)?;
+    let tc_link_key = key(network::TC_LINK_KEY)?;
+    let exported = backup::export(
+        &state,
+        &network_key,
+        &tc_link_key,
+        &format!("moli-os@{}", env!("CARGO_PKG_VERSION")),
+        &jiff::Timestamp::now().to_string(),
+        backup::unix_now(),
+    )?;
+    exported.write_private(path, force)?;
+    Ok(format!(
+        "{instance}: network PAN {:#06x}, channel {}, {} device(s) exported to {}\n\
+         frame counter {} (the last one recorded, {}, plus {}: Zigbee2MQTT restores from it as written)\n\
+         {}",
+        record.pan_id,
+        record.channel,
+        exported.devices.len(),
+        path.display(),
+        exported.network_key.frame_counter,
+        record.frame_counter.unwrap_or_default(),
+        backup::FRAME_COUNTER_MARGIN,
+        moli_i18n::tr!("pilotes.zigbee.export_avertissement", path = path.display()),
+    ))
+}
+
+/// `instance` is a zigbee driver of the configuration.
+fn zigbee_instance(config: &Config, instance: &str) -> anyhow::Result<()> {
+    if !config
+        .drivers
+        .iter()
+        .any(|d| d.id == instance && d.kind == "zigbee")
+    {
+        bail!(
+            "no [[driver]] with id = {instance:?} and kind = \"zigbee\" in the configuration: declare it first (integrations/zigbee/onboarding.md)"
+        );
+    }
+    Ok(())
+}
+
+/// `moli-os zigbee import`: a Zigbee2MQTT coordinator backup, its keys into
+/// the vault (`<instance>/network_key`, `<instance>/tc_link_key`), its
+/// network into the driver's store. Returns what to print (never a key).
+fn zigbee_import(
+    data_dir: &std::path::Path,
+    master: &MasterKey,
+    instance: &str,
+    file: &std::path::Path,
+    force: bool,
+) -> anyhow::Result<String> {
+    use moli_zigbee::{backup::OpenCoordinatorBackup, network, store};
+    let bytes = std::fs::read(file).with_context(|| format!("cannot read {}", file.display()))?;
+    let import = OpenCoordinatorBackup::parse(&bytes)
+        .and_then(|backup| backup.import())
+        .with_context(|| format!("{} cannot be imported", file.display()))?;
+    let store_path = store::path(data_dir, instance);
+    let mut state = store::Store::load(&store_path)?;
+    // Refused over another network before anything is written; its counter
+    // recorded now (a restore refuses it a day later).
+    import.apply(&mut state, force, moli_zigbee::backup::unix_now())?;
+    let (tc_link_key, tc_link_origin) = match &import.tc_link_key {
+        Some(key) => (key.clone(), "from the backup"),
+        None => (
+            network::Key::generate()?,
+            "a new random one: the backup has no stack_specific.ezsp.hashed_tclk",
+        ),
+    };
+    // Store, vault, store: the vault and the store cannot be written at
+    // once, so the store first says an import is under way. Interrupted
+    // anywhere, the driver waits (`import_pending`) instead of misreading
+    // a store and a vault that do not match, until this same import runs
+    // again (same network: no --force needed).
+    state.import_pending = true;
+    state.save(&store_path)?;
+    let secrets = data_dir.join("secrets.enc");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    for (name, key) in [
+        (network::NETWORK_KEY, &import.network_key),
+        (network::TC_LINK_KEY, &tc_link_key),
+    ] {
+        runtime.block_on(moli_runtime::set_secret(
+            &secrets,
+            master,
+            &format!("{instance}/{name}"),
+            &key.to_hex(),
+        ))
+        .with_context(|| {
+            format!(
+                "the import was interrupted while storing {instance}/{name}: run the same command again"
+            )
+        })?;
+    }
+    state.import_pending = false;
+    state.save(&store_path)?;
+    // Run as root, the vault and the store go back to moli-os's user.
+    keep_owner(data_dir, &[&store_path, &secrets]);
+    let record = &import.record;
+    Ok(format!(
+        "{instance}: network PAN {:#06x}, channel {}, {} imported into {}\n\
+         network key stored (encrypted) as {instance}/{}\n\
+         trust center link key stored (encrypted) as {instance}/{} ({tc_link_origin})\n\
+         frame counter {} (a restore starts {} above it)\n\
+         moli-os must stay stopped during an import (a running Moli would overwrite it); start it now: \
+         the driver takes this network over, restoring it on its own dongle if the dongle has none.\n\
+         {}",
+        record.pan_id,
+        record.channel,
+        import.devices_text(),
+        store_path.display(),
+        network::NETWORK_KEY,
+        network::TC_LINK_KEY,
+        record.frame_counter.unwrap_or_default(),
+        moli_zigbee::backup::FRAME_COUNTER_MARGIN,
+        moli_i18n::tr!("pilotes.zigbee.import_avertissement", path = file.display()),
+    ))
 }
 
 /// Elsewhere, files keep the owner the system gives them.
@@ -1082,6 +1319,7 @@ fn start_history(
 /// missing here is unknown, whatever `build_driver`'s match says.
 const KINDS: &[&str] = &[
     "z2m",
+    "zigbee",
     "zwave",
     "hue",
     "overkiz",
@@ -1256,6 +1494,10 @@ fn build_driver(
         "z2m" => Arc::new(moli_z2m::Z2m::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "zigbee" => Arc::new(moli_zigbee::Zigbee::new(
+            config.options.clone().try_into().with_context(context)?,
+            data_dir,
+        )),
         "zwave" => Arc::new(moli_zwave::Zwave::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1353,6 +1595,28 @@ fn build_driver(
     })
 }
 
+/// Explicit cloud configuration for the owner-only API (never inferred from cached devices).
+fn overkiz_cloud(
+    drivers: &[DriverConfig],
+) -> anyhow::Result<std::collections::BTreeMap<InstanceId, moli_overkiz::cloud::Config>> {
+    let mut enabled = std::collections::BTreeMap::new();
+    for driver in drivers
+        .iter()
+        .filter(|d| d.enabled != Some(false) && d.kind == "overkiz")
+    {
+        let options: moli_overkiz::Config = driver
+            .options
+            .clone()
+            .try_into()
+            .with_context(|| format!("driver {:?} options", driver.id))?;
+        moli_overkiz::Overkiz::new(options.clone())?;
+        if let Some(cloud) = options.cloud {
+            enabled.insert(InstanceId::from(driver.id.as_str()), cloud);
+        }
+    }
+    Ok(enabled)
+}
+
 /// Drivers with validated constructors share option decoding and error context.
 fn configured_driver<C, D>(
     config: &DriverConfig,
@@ -1413,6 +1677,25 @@ mod tests {
     }
 
     #[test]
+    fn cloud_api_registry_contains_only_enabled_valid_overkiz_observers() {
+        let mut cloud = driver("overkiz");
+        cloud.options = toml::from_str("[cloud]\npoll_secs = 600").unwrap();
+        let registry = overkiz_cloud(&[cloud]).unwrap();
+        assert_eq!(registry.get(&InstanceId::from("t")).unwrap().poll_secs, 600);
+        for kind in ["other", "overkiz"] {
+            let mut disabled = driver(kind);
+            disabled.enabled = Some(false);
+            assert!(overkiz_cloud(&[disabled]).unwrap().is_empty());
+        }
+        let mut local = driver("overkiz");
+        local.options = toml::from_str("host = '192.0.2.1'").unwrap();
+        assert!(overkiz_cloud(&[local]).unwrap().is_empty());
+        let mut invalid = driver("overkiz");
+        invalid.options = toml::from_str("[cloud]\npoll_secs = 1").unwrap();
+        assert!(overkiz_cloud(&[invalid]).is_err());
+    }
+
+    #[test]
     fn kinds_are_what_build_driver_builds() {
         let data = std::env::temp_dir();
         for kind in KINDS {
@@ -1426,6 +1709,334 @@ mod tests {
             panic!("an unknown kind is built");
         };
         assert!(e.to_string().contains("unknown driver kind"), "{e}");
+    }
+
+    /// A data directory of its own, removed when dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("moli-os-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn zigbee_fixture() -> PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integrations/zigbee/fixtures/coordinator_backup.json")
+    }
+
+    /// What the vault of `dir` holds for `zigbee/<name>`.
+    fn vault_secret(dir: &std::path::Path, master: &MasterKey, name: &str) -> Option<String> {
+        let hub = Hub::new(HubOptions {
+            secrets: Some((dir.join("secrets.enc"), master.clone())),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        hub.secret(&InstanceId::from("zigbee"), name)
+    }
+
+    #[test]
+    fn import_stores_key_in_vault_only() {
+        let data = Scratch::new("zigbee-import");
+        let master = MasterKey::generate().unwrap();
+        let started = moli_zigbee::backup::unix_now();
+        let summary = zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let ended = moli_zigbee::backup::unix_now();
+        // The keys: in the vault, never in the store nor in what is printed.
+        let key = "01030507090b0d0f00020406080a0c0d";
+        let tclk = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+        assert_eq!(
+            vault_secret(&data.0, &master, "network_key").as_deref(),
+            Some(key)
+        );
+        assert_eq!(
+            vault_secret(&data.0, &master, "tc_link_key").as_deref(),
+            Some(tclk)
+        );
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let file = std::fs::read_to_string(&store_path).unwrap().to_lowercase();
+        for secret in [key, tclk, "0103", "5a5a"] {
+            assert!(!file.contains(secret), "{file}");
+            assert!(!summary.to_lowercase().contains(secret), "{summary}");
+        }
+        let store = moli_zigbee::store::Store::load(&store_path).unwrap();
+        let network = store.network.unwrap();
+        assert_eq!(network.pan_id, 0x1a62);
+        assert_eq!(network.frame_counter, Some(123_456));
+        assert!(network.frame_counter_fresh);
+        // Recorded at the time of the import, whatever the backup's date.
+        let at = network.frame_counter_recorded_at.unwrap();
+        assert!((started..=ended).contains(&at), "{at}");
+        assert_eq!(store.devices.len(), 2);
+        assert!(summary.contains("0x1a62"), "{summary}");
+        assert!(summary.contains("channel 15"), "{summary}");
+        assert!(summary.contains("2 devices"), "{summary}");
+        assert!(summary.contains("zigbee/network_key"), "{summary}");
+        assert!(summary.contains("stay stopped"), "{summary}");
+        // The copy made for the import holds the key: deleted afterwards.
+        assert!(
+            summary.contains(&moli_i18n::tr!(
+                "pilotes.zigbee.import_avertissement",
+                path = zigbee_fixture().display()
+            )),
+            "{summary}"
+        );
+        assert!(!store.import_pending);
+    }
+
+    #[test]
+    fn import_without_trust_center_key_makes_one() {
+        let data = Scratch::new("zigbee-import-tclk");
+        let master = MasterKey::generate().unwrap();
+        let mut backup: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(zigbee_fixture()).unwrap()).unwrap();
+        backup["stack_specific"]["ezsp"] = serde_json::json!({});
+        let file = data.0.join("backup.json");
+        std::fs::write(&file, serde_json::to_vec(&backup).unwrap()).unwrap();
+        let summary = zigbee_import(&data.0, &master, "zigbee", &file, false).unwrap();
+        let tclk = vault_secret(&data.0, &master, "tc_link_key").expect("a new key");
+        assert_eq!(tclk.len(), 32);
+        assert_ne!(tclk, "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a");
+        assert!(summary.contains("new random"), "{summary}");
+    }
+
+    #[test]
+    fn an_interrupted_import_waits() {
+        let data = Scratch::new("zigbee-import-interrupted");
+        let master = MasterKey::generate().unwrap();
+        // The vault cannot be written: the import stops between its steps.
+        std::fs::create_dir_all(data.0.join("secrets.enc")).unwrap();
+        let error =
+            zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap_err();
+        let shown = format!("{error:#}");
+        assert!(shown.contains("run the same command again"), "{shown}");
+        // The store says so (the driver waits on it), the key went nowhere.
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let pending = moli_zigbee::store::Store::load(&store_path).unwrap();
+        assert!(pending.import_pending);
+        assert_eq!(pending.network.as_ref().unwrap().pan_id, 0x1a62);
+        // Run again (the vault writable now): completed, without --force.
+        std::fs::remove_dir(data.0.join("secrets.enc")).unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let done = moli_zigbee::store::Store::load(&store_path).unwrap();
+        assert!(!done.import_pending);
+        let network = done.network.unwrap();
+        assert_eq!(
+            network,
+            moli_zigbee::store::NetworkRecord {
+                frame_counter_recorded_at: network.frame_counter_recorded_at,
+                ..pending.network.unwrap()
+            }
+        );
+        assert_eq!(
+            vault_secret(&data.0, &master, "network_key").as_deref(),
+            Some("01030507090b0d0f00020406080a0c0d")
+        );
+        let text = std::fs::read_to_string(&store_path).unwrap();
+        assert!(!text.contains("import_pending"), "{text}");
+    }
+
+    #[test]
+    fn import_over_another_network_needs_force() {
+        let data = Scratch::new("zigbee-import-force");
+        let master = MasterKey::generate().unwrap();
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let other = moli_zigbee::store::Store {
+            network: Some(moli_zigbee::store::NetworkRecord {
+                pan_id: 0x1234,
+                extended_pan_id: [0xEE; 8],
+                channel: 11,
+                coordinator_ieee: "0x00124b0000000001".into(),
+                nwk_update_id: 0,
+                frame_counter: None,
+                frame_counter_fresh: false,
+                frame_counter_recorded_at: None,
+                key_sequence_number: None,
+            }),
+            ..moli_zigbee::store::Store::default()
+        };
+        other.save(&store_path).unwrap();
+        let error = zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("0x1234") && error.contains("--force"),
+            "{error}"
+        );
+        // Nothing touched: no vault written, the store as it was.
+        assert!(!data.0.join("secrets.enc").exists());
+        assert_eq!(moli_zigbee::store::Store::load(&store_path).unwrap(), other);
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), true).unwrap();
+        let store = moli_zigbee::store::Store::load(&store_path).unwrap();
+        assert_eq!(store.network.unwrap().pan_id, 0x1a62);
+        assert!(vault_secret(&data.0, &master, "network_key").is_some());
+    }
+
+    #[test]
+    fn export_round_trips() {
+        let data = Scratch::new("zigbee-export");
+        let master = MasterKey::generate().unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let out = data.0.join("coordinator_backup.json");
+        let summary = zigbee_export(&data.0, &master, "zigbee", &out, false).unwrap();
+        let key = vault_secret(&data.0, &master, "network_key").unwrap();
+        let tclk = vault_secret(&data.0, &master, "tc_link_key").unwrap();
+        // Never printed; the person is told what the file holds.
+        for secret in [key.as_str(), tclk.as_str(), "0103", "5a5a"] {
+            assert!(!summary.to_lowercase().contains(secret), "{summary}");
+        }
+        assert!(summary.contains("188992"), "{summary}");
+        assert!(
+            summary.contains(&moli_i18n::tr!(
+                "pilotes.zigbee.export_avertissement",
+                path = out.display()
+            )),
+            "{summary}"
+        );
+        // Read back: the store's network, the vault's keys, the counter
+        // plus the margin.
+        let bytes = std::fs::read(&out).unwrap();
+        let backup = moli_zigbee::backup::OpenCoordinatorBackup::parse(&bytes).unwrap();
+        assert_eq!(
+            moli_zigbee::backup::OpenCoordinatorBackup::parse(backup.to_json().as_bytes()).unwrap(),
+            backup
+        );
+        let written: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(zigbee_fixture()).unwrap()).unwrap();
+        for field in [
+            "coordinator_ieee",
+            "pan_id",
+            "extended_pan_id",
+            "nwk_update_id",
+            "channel",
+            "channel_mask",
+            "stack_specific",
+        ] {
+            assert_eq!(written[field], fixture[field], "{field}");
+        }
+        assert_eq!(written["network_key"]["key"], key.as_str());
+        assert_eq!(
+            written["stack_specific"]["ezsp"]["hashed_tclk"],
+            tclk.as_str()
+        );
+        assert_eq!(written["network_key"]["frame_counter"], 123_456 + 65_536);
+        assert!(
+            written["metadata"]["source"]
+                .as_str()
+                .unwrap()
+                .starts_with("moli-os@")
+        );
+        assert_eq!(written["devices"].as_array().unwrap().len(), 2);
+        // Imported into an empty instance: the same network and keys, its
+        // counter the exported one.
+        let other = Scratch::new("zigbee-export-import");
+        let other_master = MasterKey::generate().unwrap();
+        zigbee_import(&other.0, &other_master, "zigbee", &out, false).unwrap();
+        let load = |dir: &std::path::Path| {
+            moli_zigbee::store::Store::load(&moli_zigbee::store::path(dir, "zigbee")).unwrap()
+        };
+        let (before, after) = (load(&data.0), load(&other.0));
+        let network = after.network.unwrap();
+        assert_eq!(
+            network,
+            moli_zigbee::store::NetworkRecord {
+                frame_counter: Some(188_992),
+                frame_counter_recorded_at: network.frame_counter_recorded_at,
+                ..before.network.unwrap()
+            }
+        );
+        assert_eq!(after.devices, before.devices);
+        assert_eq!(
+            vault_secret(&other.0, &other_master, "network_key"),
+            Some(key)
+        );
+        assert_eq!(
+            vault_secret(&other.0, &other_master, "tc_link_key"),
+            Some(tclk)
+        );
+    }
+
+    #[test]
+    fn an_old_counter_is_not_exported() {
+        let data = Scratch::new("zigbee-export-old");
+        let master = MasterKey::generate().unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        // Moli stopped for more than a day after its last record.
+        let store_path = moli_zigbee::store::path(&data.0, "zigbee");
+        let mut store = moli_zigbee::store::Store::load(&store_path).unwrap();
+        let day = moli_zigbee::backup::COUNTER_MAX_AGE.as_secs();
+        store.network.as_mut().unwrap().frame_counter_recorded_at =
+            Some(moli_zigbee::backup::unix_now() - day - 60);
+        store.save(&store_path).unwrap();
+        let out = data.0.join("coordinator_backup.json");
+        let error = zigbee_export(&data.0, &master, "zigbee", &out, false)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            moli_i18n::tr!("pilotes.zigbee.export_compteur_ancien")
+        );
+        assert!(!out.exists(), "nothing written");
+    }
+
+    #[test]
+    fn export_needs_the_vault_keys() {
+        let data = Scratch::new("zigbee-export-no-key");
+        let master = MasterKey::generate().unwrap();
+        zigbee_import(&data.0, &master, "zigbee", &zigbee_fixture(), false).unwrap();
+        let out = data.0.join("coordinator_backup.json");
+        let secrets = data.0.join("secrets.enc");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        for name in ["network_key", "tc_link_key"] {
+            let held = vault_secret(&data.0, &master, name).unwrap();
+            let entry = format!("zigbee/{name}");
+            runtime
+                .block_on(moli_runtime::forget_secret(&secrets, &master, &entry))
+                .unwrap();
+            let error = zigbee_export(&data.0, &master, "zigbee", &out, false)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(&entry), "{error}");
+            assert!(!out.exists(), "never written without its key");
+            runtime
+                .block_on(moli_runtime::set_secret(&secrets, &master, &entry, &held))
+                .unwrap();
+        }
+        // Another master key: the vault cannot be read, nothing written.
+        let error = zigbee_export(
+            &data.0,
+            &MasterKey::generate().unwrap(),
+            "zigbee",
+            &out,
+            false,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("vault"), "{error:#}");
+        assert!(!out.exists());
+        // No network recorded for that instance: nothing written either.
+        let error = zigbee_export(&data.0, &master, "other", &out, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no network"), "{error}");
+        assert!(!out.exists());
+        let names: Vec<_> = std::fs::read_dir(&data.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert!(names.iter().all(|n| !n.contains(".tmp")), "{names:?}");
     }
 
     #[test]

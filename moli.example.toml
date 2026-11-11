@@ -13,6 +13,12 @@ allowed_hosts = ["192.168.0.10", "moli.local"]
 # quiet hours. Absent: the system's, named at start; in a container it is
 # usually UTC, so write it.
 timezone = "Europe/Paris"
+# A mirror of a house that runs elsewhere (rehearsing a move, comparing):
+# devices are read, history kept, automations run, but no order is sent;
+# each one is journaled, refused as « mirror ». Leave out of its drivers
+# those that hold a device's only connection (Tuya) or a bot's only
+# listener (Telegram).
+# mirror = true
 
 # Reached from the Internet through a Cloudflare tunnel behind Cloudflare
 # Access: Moli checks Access's signed assertion itself and recognizes the
@@ -94,6 +100,21 @@ base_topic = "zigbee2mqtt"
 # Relays wired as triggers (a gate, a garage door): shown as an « Impulsion »
 # button instead of an on/off state that falls back to off.
 # impulse_points = ["z2m:0x00124b0000aa0030/state_l1"]
+
+# Zigbee, natively: Moli talks EZSP to a Silicon Labs coordinator dongle
+# (EmberZNet 7.4+), without Zigbee2MQTT: its network (formed, kept, or
+# taken over with `moli-os zigbee import`) and pairing (`permit_join`);
+# device points come later (keep z2m for them meanwhile).
+# See integrations/zigbee/onboarding.md (device path, firmware update).
+# [[driver]]
+# id = "zigbee"
+# kind = "zigbee"
+#
+# [driver.options]
+# port = "/dev/ttyUSB0"   # or "tcp://192.168.1.x:6638"
+# baud = 115200
+# flow = "software"       # "hardware" or "none"
+# channel = 15            # a new network's channel, 11 to 26 (default 15)
 
 # Z-Wave, through an existing Z-Wave JS UI bridge (its MQTT gateway).
 # [[driver]]
