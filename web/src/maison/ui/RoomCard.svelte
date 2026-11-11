@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -7,9 +7,11 @@
   import ValveCard from './ValveCard.svelte';
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
+  import ShutterIcon from './ShutterIcon.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
+  import { coverCommands } from '../lib/cover-controls.js';
   import { climateMode } from '../lib/climate.js';
 
   /** One room, compact: its temperature and a switch for its lights in the
@@ -174,6 +176,7 @@
   function padIcon(d) {
     const kind = deviceKind(d);
     const name = (d.label?.name || d.native_name || '').toLowerCase();
+    if (kind === 'cover') return 'shutter';
     if (kind === 'tv') return 'tv';
     if (kind === 'speaker') return 'speaker';
     if (kind === 'plug') return /vmc|ventil|\bfan\b|exhaust/.test(name) ? 'fan' : 'socket';
@@ -200,16 +203,23 @@
     ? outlets.some((o) => canWrite(d, o.key))
     : canWrite(d, point ?? powerKey(d));
 
-  /** The pads: lights, then TV and speakers, then plugs. */
+  /** The pads: lights, then TV and speakers, then plugs, then covers. */
   const pads = $derived([
     ...room.lights.map((d) => ({ d, point: null })),
     ...room.media.map((d) => ({ d, point: deviceKind(d) === 'tv' ? 'power' : null, link: deviceKind(d) === 'speaker' ? '#/salon' : null })),
     ...room.plugs.flatMap(plugPads),
+    ...room.covers.map((d) => ({ d, point: null, isCover: true })),
   ]);
 
   let open = $state(null);
 
-  function stateOf(d, point, outlets) {
+  function stateOf(d, point, outlets, isCover) {
+    if (isCover) {
+      if (!reachable(d.id)) return t('commun.piece.injoignable');
+      const pct = coverPosition(d.id);
+      if (pct == null) return '';
+      return t('commun.volet.ouvert_a', { pct: num(Math.max(0, Math.min(100, Math.round(Number(pct))))) });
+    }
     if (unpowered(d.id) && !isFixture(d)) return t('commun.piece.coupee');
     if (!reachable(d.id)) return t('commun.piece.injoignable');
     if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
@@ -219,7 +229,16 @@
     return typeof b === 'number' && fine(d) ? t('commun.pourcent', { n: Math.round(b) }) : t('commun.piece.allumee');
   }
 
-  function tap(d, point, outlets, name) {
+  function tap(d, point, outlets, name, isCover) {
+    if (isCover) {
+      const pct = coverPosition(d.id);
+      const isOpen = pct != null && pct > 0;
+      const action = coverCommands(d).find((c) => c.command === (isOpen ? 'close' : 'open'));
+      if (!action?.value || !canWrite(d, action.key)) return;
+      const actionLabel = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
+      act(`${d.id}/${action.key}`, action.value, t('commun.action', { label: nameOf(d.id), action: actionLabel }));
+      return;
+    }
     if (!canTap(d, point, outlets)) return;
     if (unpowered(d.id) && !isFixture(d)) {
       note(t('commun.lampe.coupee_note', { label: nameOf(d.id) }));
@@ -244,10 +263,26 @@
 
 <section class="card room">
   <div class="head">
-    <span class="room-icon" class:lit={room.lit}><Icon name={room.icon} size={22} /></span>
+    <span class="room-icon" class:lit={room.lit || room.opened}><Icon name={room.icon} size={22} /></span>
     <div class="title">
       <h2>{room.name}{#if locked}<span class="lock" title={t('commun.piece.protegee_titre')}><Icon name="lock" size={13} /></span>{/if}</h2>
-      <span class="muted">{room.lit ? t('commun.piece.allumees', { count: room.lit }) : t('commun.piece.tout_eteint')}</span>
+      <span class="muted">
+        {#if room.lit && room.opened}
+          {t('commun.piece.allumees', { count: room.lit })} · {t('commun.piece.ouverts', { count: room.opened })}
+        {:else if room.lit}
+          {t('commun.piece.allumees', { count: room.lit })}
+        {:else if room.opened}
+          {t('commun.piece.ouverts', { count: room.opened })}
+        {:else if room.lights.length && room.covers.length}
+          {t('commun.piece.tout_eteint')}{#if !room.coversUnknown} · {t('commun.piece.tout_ferme')}{/if}
+        {:else if room.lights.length}
+          {t('commun.piece.tout_eteint')}
+        {:else if room.covers.length}
+          {#if room.coversUnknown}{t('commun.volet.position_inconnue')}{:else}{t('commun.piece.tout_ferme')}{/if}
+        {:else}
+          {t('commun.piece.tout_eteint')}
+        {/if}
+      </span>
     </div>
     {#if temp != null}
       <span class="temp {roomTemperature.unit === '°C' ? tone(temp) : ''}" title={t('commun.piece.temperature')}><b class="num">{num(temp, 1)}{roomTemperature.unit}</b>{#if roomTemperature.unit === '°C'}<i class="gauge"><i style="left:{gaugeAt(temp)}%"></i></i>{/if}</span>
@@ -268,21 +303,33 @@
 
   {#if pads.length}
     <div class="pads" class:icons>
-      {#each pads as { d, point, link, outlets, name } (`${d.id}/${point}`)}
-        {@const lit = link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
+      {#each pads as { d, point, link, outlets, name, isCover } (`${d.id}/${point}`)}
+        {@const lit = isCover ? (coverPosition(d.id) ?? 0) > 0 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
         {@const cut = unpowered(d.id) && !isFixture(d)}
-        {@const more = !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
+        {@const more = isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
         {@const label = name ?? nameOf(d.id)}
         <div class="pad-wrap">
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
-              <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
+              <span class="ico">
+                {#if isCover}
+                  <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
+                {:else}
+                  <Icon name={padIcon(d)} size={icons ? 22 : 18} />
+                {/if}
+              </span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets) })}>
-              <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
-              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets)}</small>{/if}
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!isCover && !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={label} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
+              <span class="ico">
+                {#if isCover}
+                  <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
+                {:else}
+                  <Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} />
+                {/if}
+              </span>
+              {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
             </button>
           {/if}
           {#if more}
@@ -294,13 +341,14 @@
       {/each}
     </div>
     {#if open && pads.some((p) => p.d.id === open)}
-      <LightTile id={open} dimmer />
+      {@const pad = pads.find((p) => p.d.id === open)}
+      {#if pad?.isCover}
+        <CoverTile id={open} />
+      {:else}
+        <LightTile id={open} dimmer />
+      {/if}
     {/if}
   {/if}
-
-  {#each room.covers as d (d.id)}
-    <CoverTile id={d.id} {icons} />
-  {/each}
 
   {#each room.impulses as d (d.id)}
     <ImpulseTile id={d.id} {icons} />
