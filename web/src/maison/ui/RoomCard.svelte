@@ -203,6 +203,15 @@
     ? outlets.some((o) => canWrite(d, o.key))
     : canWrite(d, point ?? powerKey(d));
 
+  /** A cover pad follows its tile's access rule: live, and the command it would
+   *  send is writable (any command when the position is unknown). */
+  const coverPadEnabled = (d) => {
+    if (!reachable(d.id) || hub.connected !== true) return false;
+    const pct = coverPosition(d.id);
+    return coverCommands(d).some(({ command, key, value }) => value && canWrite(d, key)
+      && (pct == null || command === (pct > 0 ? 'close' : 'open')));
+  };
+
   /** The pads: lights, then TV and speakers, then plugs, then covers. */
   const pads = $derived([
     ...room.lights.map((d) => ({ d, point: null })),
@@ -321,7 +330,7 @@
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={!isCover && !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico">
                 {#if isCover}
                   <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />

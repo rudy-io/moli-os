@@ -782,6 +782,19 @@ test('a room shows its trigger device and a lone control point stays a cover', (
   assert.doesNotMatch(room, /data-cover-command/);
 });
 
+test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
+  const cover = (extra = {}) => ({
+    id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {}, ...extra,
+  });
+  const pad = (html) => buttons(html).find((button) => /class="pad/.test(button));
+  assert.doesNotMatch(pad(showRoom([cover()])), /disabled/);
+  assert.match(pad(showRoom([cover({ online: false })])), /disabled/);
+  assert.match(pad(showRoom([cover({ points: [point('control', enumeration('open', 'close', 'stop'), false)] })])), /disabled/);
+  hub.connected = false;
+  assert.match(pad(showRoom([cover()])), /disabled/);
+  hub.connected = true;
+});
+
 test('a presence radar shows someone there, whatever the key of its presence point', () => {
   const presence = (key) => ({ ...point(key, { type: 'binary' }, false, 'occupancy') });
   const lux = { ...point('illuminance', number(0, 10000), false, 'illuminance'), unit: 'lx' };
