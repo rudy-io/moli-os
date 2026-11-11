@@ -66,6 +66,31 @@ timezone = "Europe/Paris"
 # price = 0.14           # optional: without it, the house's price chosen on the Energy page
 # reset = "never"        # an index; default "auto" handles daily counters
 
+# A supplier's price that changes (the `engie` driver's), plus what it leaves
+# out per kWh (network costs, excise, certificates, VAT included); `price`
+# serves while the point has no value, and prices imported history:
+# [[energy.meter]]
+# id = "p1-import-day"
+# name = "Day offtake"
+# point = "esphome:aabbccddeeff/cumulative_active_import_day"
+# role = "grid"
+# reset = "never"
+# price = 0.367
+# price_point = "engie:contract-000000000002/electricity_offtake_peak"
+# price_extra = 0.11692
+
+# Natural gas, counted and priced apart from the electricity: a P1 gas index
+# in m³ and the supplier's conversion factor (on the bill):
+# [[energy.meter]]
+# id = "gas"
+# name = "Gas"
+# point = "esphome:aabbccddeeff/gas_consumption"
+# role = "gas"
+# reset = "never"
+# kwh_per_unit = 11.3868
+# price_point = "engie:contract-000000000002/gas_offtake"
+# price_extra = 0.0375
+
 # Without a local reading of the meter, the `enedis` driver reports yesterday's
 # consumption hour by hour:
 # [[energy.meter]]

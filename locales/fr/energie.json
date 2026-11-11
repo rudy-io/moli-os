@@ -52,7 +52,7 @@
   "energie.solaire.note.water": "Le ballon garde la chaleur : chauffée à midi, l’eau reste chaude pour le soir.",
   "energie.solaire.note.pool": "La filtration fait le même travail en journée.",
   "energie.solaire.note.heat": "Seule une part se décale (préchauffer ou rafraîchir d’avance) : le confort passe d’abord.",
-  "energie.solaire.note.hypothetique": "Ballon hypothétique : aucun chauffe-eau n’est mesuré, on suppose 4 kWh par nuit pris dans «\u00a0le reste de la maison\u00a0».",
+  "energie.solaire.note.hypothetique": "Ballon hypothétique : aucun chauffe-eau n’est mesuré, on suppose 4 kWh par nuit pris dans « le reste de la maison ».",
   "energie.solaire.idee.charge_titre": "{verb} entre {from} h et {to} h",
   "energie.solaire.idee.habituel": "D’habitude entre {from} h et {to} h, au prix du réseau.",
   "energie.solaire.idee.charge_texte": "Moli s’en chargerait aux heures où les panneaux donnent plus que la maison ne consomme : {kwh} kWh par mois passeraient sur le soleil.",
@@ -181,7 +181,7 @@
   "energie.solaire.banner.debut": "Aucun panneau n’est installé ici : Moli imagine une installation de {kwc} kWc {orientation}{battery}, et la croise heure par heure avec la",
   "energie.solaire.banner.avec_batterie": "avec une batterie de {n} kWh",
   "energie.solaire.banner.vraie": "vraie consommation",
-  "energie.solaire.banner.fin": "de la maison{days}. Le soleil est calculé, les nuages tirés au sort. Ce qui est marqué «\u00a0hypothèse\u00a0» se règle en bas de page.",
+  "energie.solaire.banner.fin": "de la maison{days}. Le soleil est calculé, les nuages tirés au sort. Ce qui est marqué « hypothèse » se règle en bas de page.",
   "energie.solaire.banner.sur_jours": "sur les {n} derniers jours",
   "energie.solaire.orient_phrase.90": "à l’est",
   "energie.solaire.orient_phrase.135": "au sud-est",
@@ -354,5 +354,7 @@
   "energie.solaire.reglages.pas_de_temps_texte": "une heure : les pointes plus courtes (bouilloire, four) ne se voient pas, ce qui flatte un peu l’autoconsommation.",
   "energie.solaire.reglages.abonnement": "Abonnement",
   "energie.solaire.reglages.abonnement_texte": "inchangé : seules les consommations évitées et le surplus vendu comptent.",
-  "energie.solaire.reglages.reset": "Revenir aux réglages de départ"
+  "energie.solaire.reglages.reset": "Revenir aux réglages de départ",
+  "energie.gaz.titre": "Gaz ce mois",
+  "energie.gaz.detail": "{kwh} kWh · aujourd'hui {today}"
 }
