@@ -905,11 +905,14 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Protocole** : JSON sur TCP **9999**, chaque message chiffré par XOR à clé glissante (171),
   précédé de sa longueur (4 octets gros-boutiens) ; une connexion par requête. Aucun compte.
 - **Configuration** : `host`, `port` (9999), `poll_seconds` (10, de 2 à 3600).
-- **Points** : `state` (relais) et `led` (voyant) écrits par `set_relay_state` / `set_led_off`
-  (le code d'erreur de la prise est vérifié) ; avec mesure (`feature` contient `ENE`) : `power` W,
-  `voltage` V, `current` A, `energy` kWh (compteur à vie). Matériel 1 en W/V/A/kWh, matériel 2 en
-  mW/mV/mA/Wh : les deux sont lus.
-- **Identité** : la MAC de la prise.
+- **Points** : `on` (relais, la même clé que `tapo`, `shelly` et `melcloud`) et `led` (voyant)
+  écrits par `set_relay_state` / `set_led_off` (le code d'erreur de la prise est vérifié) ; avec
+  mesure (`feature` contient `ENE`) : `power` W, `voltage` V, `current` A, `energy` kWh (compteur
+  à vie). Matériel 1 en W/V/A/kWh (essayé sur une HS110 1.0) ; matériel 2 en mW/mV/mA/Wh, lu
+  d'après sa description, **non essayé**. Une mesure qui ne répond pas ne rend pas la prise
+  indisponible.
+- **Identité** : la MAC de la prise, réduite à ses 12 chiffres hexadécimaux (toute autre forme
+  est refusée).
 - **Tests** : `src/lib.rs` (chiffrement XOR aller-retour, `get_sysinfo`, les deux générations de
   mesure, période refusée), fixtures anonymisées de `integrations/kasa/fixtures/`.
 

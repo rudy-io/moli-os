@@ -129,6 +129,7 @@ async fn ask(config: &Config, request: &Json) -> anyhow::Result<Json> {
 /// What `get_sysinfo` says.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Info {
+    /// Twelve lowercase hexadecimal digits, without separators.
     pub mac: String,
     pub alias: String,
     pub model: String,
@@ -141,11 +142,11 @@ pub struct Info {
 #[must_use]
 pub fn info(json: &Json) -> Option<Info> {
     let s = &json["system"]["get_sysinfo"];
-    let text = |k: &str| s[k].as_str().unwrap_or_default().to_owned();
-    let mac = text("mac");
-    if mac.is_empty() {
+    if s["err_code"].as_i64().is_some_and(|e| e != 0) {
         return None;
     }
+    let text = |k: &str| s[k].as_str().unwrap_or_default().to_owned();
+    let mac = mac(&text("mac"))?;
     Some(Info {
         mac,
         alias: text("alias"),
@@ -154,6 +155,25 @@ pub fn info(json: &Json) -> Option<Info> {
         led: s["led_off"].as_u64() != Some(1),
         meter: text("feature").contains("ENE"),
     })
+}
+
+/// `AA:BB:CC:DD:EE:FF` or `aa-bb-cc-dd-ee-ff` → `aabbccddeeff`; anything
+/// but twelve hexadecimal digits (with `:` or `-` between) is refused.
+fn mac(raw: &str) -> Option<String> {
+    let digits: String = raw.chars().filter(|c| !matches!(c, ':' | '-')).collect();
+    (digits.len() == 12 && digits.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| digits.to_ascii_lowercase())
+}
+
+impl Info {
+    /// The same plug, described the same way: the relay and the LED change
+    /// without the device being declared again.
+    fn same_device(&self, other: &Self) -> bool {
+        self.mac == other.mac
+            && self.alias == other.alias
+            && self.model == other.model
+            && self.meter == other.meter
+    }
 }
 
 /// The meter now: power (W), voltage (V), current (A), energy (kWh).
@@ -209,7 +229,7 @@ fn number() -> Kind {
 fn device(ctx: &DriverCtx, id: &DeviceId, info: &Info) -> Device {
     let mut points = vec![
         point(
-            "state",
+            "on",
             &moli_i18n::tr!("pilotes.kasa.prise"),
             Kind::Binary,
             true,
@@ -301,7 +321,8 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         let pause = if failures == 0 {
             poll
         } else {
-            (poll * failures.min(6)).min(RETRY_MAX)
+            // Never slower than in good health, whatever the period.
+            (poll * failures.min(6)).min(RETRY_MAX.max(poll))
         };
         let deadline = tokio::time::Instant::now() + pause;
         loop {
@@ -329,9 +350,9 @@ async fn poll_once(
     let answer = ask(config, &json!({"system": {"get_sysinfo": {}}})).await?;
     let found = info(&answer).context("no sysinfo in the answer")?;
     let id = match known {
-        Some((id, old)) if *old == found => id.clone(),
+        Some((id, old)) if old.same_device(&found) => id.clone(),
         _ => {
-            let id = ctx.device_id(&found.mac.replace(':', "").to_lowercase());
+            let id = ctx.device_id(&found.mac);
             ctx.upsert_device(device(ctx, &id, &found));
             if known.is_none() {
                 tracing::info!(instance = %ctx.instance(), model = %found.model, "kasa plug connected");
@@ -341,10 +362,18 @@ async fn poll_once(
         }
     };
     ctx.set_availability(&id, true);
-    ctx.set_state(&id, "state", Value::Bool(found.on));
+    ctx.set_state(&id, "on", Value::Bool(found.on));
     ctx.set_state(&id, "led", Value::Bool(found.led));
     if found.meter {
-        let answer = ask(config, &json!({"emeter": {"get_realtime": {}}})).await?;
+        // The plug answered: a meter that does not is said, not counted as
+        // the plug gone (it would flicker between there and not).
+        let answer = match ask(config, &json!({"emeter": {"get_realtime": {}}})).await {
+            Ok(answer) => answer,
+            Err(e) => {
+                tracing::debug!(instance = %ctx.instance(), error = %format!("{e:#}"), "kasa meter unread");
+                return Ok(());
+            }
+        };
         if let Some(r) = reading(&answer) {
             for (key, v) in [
                 ("power", r.power),
@@ -364,7 +393,7 @@ async fn poll_once(
 /// The relay or the LED; the plug's `err_code` says whether it obeyed.
 async fn order(config: &Config, command: &CommandRequest) -> Result<(), String> {
     let request = match (&*command.key, &command.value) {
-        ("state", Value::Bool(on)) => {
+        ("on", Value::Bool(on)) => {
             json!({"system": {"set_relay_state": {"state": u8::from(*on)}}})
         }
         ("led", Value::Bool(on)) => json!({"system": {"set_led_off": {"off": u8::from(!*on)}}}),
@@ -409,12 +438,35 @@ mod tests {
     #[test]
     fn sysinfo_is_read() {
         let i = info(&fixture("sysinfo")).unwrap();
-        assert_eq!(i.mac, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(i.mac, "aabbccddeeff");
         assert_eq!(i.model, "HS110(EU)");
         assert!(!i.on);
         assert!(!i.led, "led_off = 1: the light is off");
         assert!(i.meter);
         assert_eq!(info(&json!({})), None);
+        let refused =
+            json!({"system": {"get_sysinfo": {"mac": "AA:BB:CC:DD:EE:FF", "err_code": -1}}});
+        assert_eq!(info(&refused), None);
+    }
+
+    #[test]
+    fn only_a_real_mac_names_the_plug() {
+        assert_eq!(mac("AA-BB-CC-DD-EE-0F").as_deref(), Some("aabbccddee0f"));
+        assert_eq!(mac("AA:BB:CC:DD:EE"), None);
+        assert_eq!(mac("AA:BB:CC:DD:EE:GG"), None);
+        assert_eq!(mac("../AA:BB:CC:DD:EE"), None);
+        assert_eq!(mac(""), None);
+    }
+
+    #[test]
+    fn the_relay_or_the_led_does_not_declare_the_plug_again() {
+        let a = info(&fixture("sysinfo")).unwrap();
+        let mut b = a.clone();
+        b.on = !a.on;
+        b.led = !a.led;
+        assert!(a.same_device(&b));
+        b.alias = "Autre".into();
+        assert!(!a.same_device(&b));
     }
 
     #[test]
@@ -438,7 +490,7 @@ mod tests {
     #[test]
     fn a_wrong_polling_period_is_refused() {
         let config = |poll_seconds| Config {
-            host: "192.168.1.2".into(),
+            host: "192.168.77.2".into(),
             port: 9999,
             poll_seconds,
         };
