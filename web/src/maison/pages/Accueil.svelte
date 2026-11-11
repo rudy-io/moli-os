@@ -341,6 +341,9 @@
 
   .side {
     grid-column: span 4;
+    display: grid;
+    gap: 20px;
+    align-content: start;
   }
 
   .robot-slot {
