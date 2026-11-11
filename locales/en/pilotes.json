@@ -661,5 +661,7 @@
   "pilotes.recycleapp.dans_jours": "{nom}: in (days)",
   "pilotes.recycleapp.code_postal": "RecycleApp does not know the postal code {code}",
   "pilotes.recycleapp.rue": "RecycleApp finds no street \"{rue}\" at this postal code: check its spelling (in Dutch or French)",
-  "pilotes.recycleapp.lecture_seule": "the collection calendar can only be read"
+  "pilotes.recycleapp.lecture_seule": "the collection calendar can only be read",
+  "pilotes.recycleapp.aucune_collecte": "RecycleApp knows the address but announces no collection there in the next 8 weeks: check the number, or the municipality on recycleapp.be",
+  "pilotes.recycleapp.perime": "The collection calendar could not be read again for a while: RecycleApp does not answer, the dates shown may be out of date"
 }

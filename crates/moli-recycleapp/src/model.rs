@@ -34,20 +34,23 @@ fn name(names: &Json, language: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// `GET zipcodes?q=`: the id of the zip code `code` (the API answers every
-/// code that starts with it).
+/// `GET zipcodes?q=`: the ids of the zip code `code` (the API answers every
+/// code that starts with it; several municipalities can share one code).
 #[must_use]
-pub fn zipcode(json: &Json, code: &str) -> Option<String> {
+pub fn zipcodes(json: &Json, code: &str) -> Vec<String> {
     json["items"]
-        .as_array()?
-        .iter()
-        .find(|i| i["code"].as_str() == Some(code))
-        .and_then(|i| i["id"].as_str())
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| i["code"].as_str() == Some(code))
+        .filter_map(|i| i["id"].as_str())
         .map(str::to_owned)
+        .collect()
 }
 
 /// `POST streets?q=&zipcodes=`: the id of the street, by its name in any
-/// language (case and spaces aside); a single answer is taken as it is.
+/// language (case and spaces aside); a street of another name, even alone,
+/// is not taken.
 #[must_use]
 pub fn street(json: &Json, wanted: &str) -> Option<String> {
     let items = json["items"].as_array()?;
@@ -63,7 +66,6 @@ pub fn street(json: &Json, wanted: &str) -> Option<String> {
     items
         .iter()
         .find(same)
-        .or_else(|| (items.len() == 1).then(|| &items[0]))
         .and_then(|i| i["id"].as_str())
         .map(str::to_owned)
 }
@@ -133,11 +135,13 @@ mod tests {
 
     #[test]
     fn the_address_is_found() {
-        assert_eq!(
-            zipcode(&fixture("zipcodes"), "1000").as_deref(),
-            Some("1000-00001")
-        );
-        assert_eq!(zipcode(&fixture("zipcodes"), "1001"), None);
+        assert_eq!(zipcodes(&fixture("zipcodes"), "1000"), ["1000-00001"]);
+        assert!(zipcodes(&fixture("zipcodes"), "1001").is_empty());
+        // One code, two municipalities: both are tried.
+        let shared = serde_json::json!({"items": [
+            {"id": "a", "code": "1000"}, {"id": "b", "code": "1000"}
+        ]});
+        assert_eq!(zipcodes(&shared, "1000"), ["a", "b"]);
         let streets = fixture("streets");
         assert_eq!(
             street(&streets, " rue exemple ").as_deref(),
@@ -152,6 +156,10 @@ mod tests {
             None,
             "two answers, none named so"
         );
+        let alone = serde_json::json!({"items": [
+            {"id": "x", "names": {"fr": "Autre rue"}}
+        ]});
+        assert_eq!(street(&alone, "Rue Exemple"), None, "alone, but not it");
     }
 
     #[test]

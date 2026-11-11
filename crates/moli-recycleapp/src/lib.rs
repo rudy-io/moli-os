@@ -32,6 +32,13 @@ const MAX_BODY: usize = 1024 * 1024;
 const READ_EVERY: Duration = Duration::from_secs(6 * 3600);
 const COUNT_EVERY: Duration = Duration::from_secs(15 * 60);
 const RETRY: Duration = Duration::from_secs(15 * 60);
+/// Failed reads in a row, or a calendar older than this: it is not shown
+/// as if it were current.
+const STALE_AFTER_FAILURES: u32 = 3;
+const STALE_AFTER: Duration = Duration::from_secs(24 * 3600);
+/// The only hosts the API may be on, whatever the settings file says.
+const API_DOMAINS: [&str; 2] = ["recycleapp.be", "fostplus.be"];
+const LANGUAGES: [&str; 4] = ["fr", "nl", "en", "de"];
 /// How far ahead the calendar is read.
 const AHEAD_DAYS: i32 = 56;
 /// Pages of 100 collections at most (8 weeks hold far fewer).
@@ -80,6 +87,9 @@ impl RecycleApp {
         if config.street.trim().is_empty() || config.house_number == 0 {
             anyhow::bail!("street and house_number are needed");
         }
+        if !LANGUAGES.contains(&config.language.as_str()) {
+            anyhow::bail!("language {:?}: one of fr, nl, en, de", config.language);
+        }
         Ok(Self { config })
     }
 }
@@ -108,14 +118,25 @@ impl Api {
             moli_net::WebUrl::parse(api)
         };
         let url = match from_settings.await {
-            Ok(url) if url.tls => url,
+            Ok(url) if trusted(&url) => url,
             Ok(_) | Err(_) => {
                 moli_net::WebUrl::parse(DEFAULT_API).expect("the default API address parses")
             }
         };
         Self { url }
     }
+}
 
+/// The address goes out only over TLS, and only to Fost Plus's own domains.
+fn trusted(url: &moli_net::WebUrl) -> bool {
+    let host = url.host.to_ascii_lowercase();
+    url.tls
+        && API_DOMAINS
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+impl Api {
     async fn get(&self, query: &str) -> anyhow::Result<Json> {
         self.call(http::Method::GET, query).await
     }
@@ -127,13 +148,16 @@ impl Api {
 }
 
 async fn call(url: &moli_net::WebUrl, method: http::Method, path: &str) -> anyhow::Result<Json> {
-    let request = http::Request::builder()
+    let mut request = http::Request::builder();
+    if method == http::Method::POST {
+        request = request.header(CONTENT_TYPE, "application/json");
+    }
+    let request = request
         .method(method)
         .uri(path)
         .header(HOST, url.host.as_str())
         .header(USER_AGENT, "moli-os")
         .header(ACCEPT, "application/json")
-        .header(CONTENT_TYPE, "application/json")
         .header("x-consumer", "recycleapp.be")
         .body(http_body_util::Full::new(moli_net::Body::new()))?;
     let (status, body) =
@@ -158,20 +182,30 @@ fn percent(text: &str) -> String {
     })
 }
 
-/// The address's ids: postal code, then street.
+/// The address's ids: postal code, then street. A postal code several
+/// municipalities share: the one where the street is.
 async fn address(api: &Api, config: &Config) -> anyhow::Result<(String, String)> {
     let zips = api.get(&format!("zipcodes?q={}", config.zipcode)).await?;
-    let zip = model::zipcode(&zips, &config.zipcode)
-        .with_context(|| moli_i18n::tr!("pilotes.recycleapp.code_postal", code = config.zipcode))?;
-    let query = format!(
-        "streets?q={}&zipcodes={}",
-        percent(config.street.trim()),
-        percent(&zip)
+    let zips = model::zipcodes(&zips, &config.zipcode);
+    anyhow::ensure!(
+        !zips.is_empty(),
+        moli_i18n::tr!("pilotes.recycleapp.code_postal", code = config.zipcode)
     );
-    let streets = api.call(http::Method::POST, &query).await?;
-    let street = model::street(&streets, &config.street)
-        .with_context(|| moli_i18n::tr!("pilotes.recycleapp.rue", rue = config.street))?;
-    Ok((zip, street))
+    for zip in zips {
+        let query = format!(
+            "streets?q={}&zipcodes={}",
+            percent(config.street.trim()),
+            percent(&zip)
+        );
+        let streets = api.call(http::Method::POST, &query).await?;
+        if let Some(street) = model::street(&streets, &config.street) {
+            return Ok((zip, street));
+        }
+    }
+    anyhow::bail!(moli_i18n::tr!(
+        "pilotes.recycleapp.rue",
+        rue = config.street
+    ))
 }
 
 /// Every waste type's dates from `today`, 8 weeks ahead.
@@ -291,13 +325,14 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let tz = TimeZone::get(&config.timezone)?;
     let today = || Timestamp::now().to_zoned(tz.clone()).date();
     let id = ctx.device_id("collections");
-    ctx.ready();
     let api = Api::found().await;
     let mut ids: Option<(String, String)> = None;
     let mut kinds: BTreeMap<&'static str, model::Kind> = BTreeMap::new();
     let mut known_keys: Vec<&'static str> = Vec::new();
     let mut last_error: Option<String> = None;
     let mut read_at: Option<tokio::time::Instant> = None;
+    let mut failures: u32 = 0;
+    let mut stale = false;
     loop {
         let due = read_at.is_none_or(|at| at.elapsed() >= READ_EVERY);
         if due {
@@ -313,14 +348,27 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     kinds = found;
                     read_at = Some(tokio::time::Instant::now());
                     last_error = None;
+                    failures = 0;
+                    if stale {
+                        stale = false;
+                        ctx.clear_warning();
+                    }
                     let keys: Vec<&'static str> = kinds.keys().copied().collect();
                     if keys != known_keys {
                         ctx.upsert_device(device(ctx, &id, &kinds));
                         known_keys = keys;
                     }
-                    ctx.set_availability(&id, true);
+                    if kinds.is_empty() {
+                        // The address is known, but no collection is: say so
+                        // rather than look as if all were well.
+                        ctx.wait_for(moli_i18n::tr!("pilotes.recycleapp.aucune_collecte"));
+                    } else {
+                        ctx.set_availability(&id, true);
+                        ctx.ready();
+                    }
                 }
                 Err(e) => {
+                    failures = failures.saturating_add(1);
                     let e = format!("{e:#}");
                     if last_error.as_deref() != Some(e.as_str()) {
                         tracing::warn!(instance = %ctx.instance(), error = %e, "recycleapp: calendar not read");
@@ -329,6 +377,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     if known_keys.is_empty() {
                         // Nothing to show yet: say why, try again later.
                         ctx.wait_for(last_error.clone().unwrap_or_default());
+                    } else if !stale
+                        && (failures >= STALE_AFTER_FAILURES
+                            || read_at.is_some_and(|at| at.elapsed() >= STALE_AFTER))
+                    {
+                        // The dates kept would go blank one by one: the
+                        // calendar is no longer current, and it is said.
+                        stale = true;
+                        ctx.set_availability(&id, false);
+                        ctx.warn(moli_i18n::tr!("pilotes.recycleapp.perime"));
                     }
                 }
             }
@@ -336,7 +393,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         if !known_keys.is_empty() {
             publish(ctx, &id, &kinds, today());
         }
-        let pause = if read_at.is_some() {
+        let pause = if read_at.is_some() && failures == 0 {
             COUNT_EVERY
         } else {
             RETRY
@@ -350,9 +407,6 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     return Ok(());
                 }
             }
-        }
-        if read_at.is_some() && last_error.is_none() {
-            ctx.ready();
         }
     }
 }
@@ -377,6 +431,27 @@ mod tests {
         assert!(RecycleApp::new(config("100", "Rue Exemple", 1)).is_err());
         assert!(RecycleApp::new(config("1000", " ", 1)).is_err());
         assert!(RecycleApp::new(config("1000", "Rue Exemple", 0)).is_err());
+    }
+
+    #[test]
+    fn the_api_is_only_fost_plus() {
+        let ok = |u: &str| trusted(&moli_net::WebUrl::parse(u).unwrap());
+        assert!(ok(DEFAULT_API));
+        assert!(ok("https://api.recycleapp.be/recyclecms"));
+        assert!(ok("https://recycleapp.be"));
+        assert!(!ok("http://api.fostplus.be/recyclecms"), "TLS only");
+        assert!(!ok("https://api.example.org/recyclecms"));
+        assert!(!ok("https://fostplus.be.example.org"));
+        assert!(!ok("https://evilfostplus.be"));
+    }
+
+    #[test]
+    fn the_language_is_checked() {
+        let mut c = config("1000", "Rue Exemple", 1);
+        c.language = "nl".into();
+        assert!(RecycleApp::new(c.clone()).is_ok());
+        c.language = "xx".into();
+        assert!(RecycleApp::new(c).is_err());
     }
 
     #[test]

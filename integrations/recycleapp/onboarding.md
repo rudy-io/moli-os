@@ -1,5 +1,8 @@
 # Onboarding : collectes de déchets (RecycleApp)
 
+0. Dire à la personne que son adresse (code postal, rue, numéro) sera envoyée à Fost Plus,
+   l'éditeur de RecycleApp, à chaque lecture du calendrier (toutes les 6 heures). Sans son
+   accord, ne pas installer ce pilote.
 1. Demander l'adresse : code postal, rue (comme elle s'écrit sur recycleapp.be, en néerlandais ou
    en français), numéro.
 2. Déclarer `kind = "recycleapp"` avec `zipcode`, `street`, `house_number` (et `language`, `fr`
