@@ -96,6 +96,7 @@ telles que les appareils les nomment).
 - `rooms[].floor` (facultatif) : l'étage de la pièce, dans les mots de la famille
   (`"en bas"`, `"à l'étage"`). L'inventaire de Moli l'écrit à côté de la pièce
   (« Salon (étage : en bas) ») : « allume en bas » allume chaque pièce de cet étage.
+- `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment ; relu toutes les 10 à 60 s selon la fenêtre.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
   « em06p » brute).
