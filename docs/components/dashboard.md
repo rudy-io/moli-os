@@ -142,7 +142,9 @@ telles que les appareils les nomment).
   pas de commande. Le mouvement reste affiché, même sans position mesurée.
 - `CoverTile.svelte` et `cover-controls.js` : les actions annoncées restent visibles
   avec icône et libellé, désactivées en lecture seule, hors ligne ou pendant une
-  déconnexion du flux Moli. `#/pieces/volets` les regroupe par pièce en grille ;
+  déconnexion du flux Moli. La puce « Volets » seule, dans Pièces, ou l'adresse
+  `#/pieces/volets` (favori, raccourci) les regroupe par pièce en grille, avec les
+  relais à impulsion (portail, garage) : ce sont des ouvrants, pas du climat (#171) ;
   le détail d'accès renvoie à Système. Une position mesurée à 0 % dit « Fermé »,
   à 100 % « Ouvert » ; une lecture périmée est explicitement la dernière position.
   Dans les pièces, le mode « icônes seules » place le nom et l'état dans l'infobulle ;

@@ -329,7 +329,8 @@ test('the shutter route bypasses a stored lights filter without replacing it or 
     const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
     assert.match(normal, /Fixture lamp/);
     assert.doesNotMatch(normal, /Twin shade/);
-    assert.match(normal, /href="#\/pieces\/volets"/);
+    // No link of its own any more: the « Volets » chip does it (#171).
+    assert.doesNotMatch(normal, /href="#\/pieces\/volets"/);
     assert.deepEqual(writes, []);
   } finally { delete globalThis.localStorage; }
 });
@@ -836,4 +837,55 @@ test('a plant sensor shows its soil, and its pot stays out of the room readings 
     assert.match(thirsty, /class="chip warm[^"]*" title="z2m:plant : terre à \d+ %, à arroser"/);
     assert.doesNotMatch(thirsty, /fuite/i);
   }
+});
+
+test('the « Volets » chip alone shows the shutters view; with others, the rooms (#171)', () => {
+  let saved = '["volets"]';
+  globalThis.localStorage = { getItem: () => saved, setItem: () => {} };
+  try {
+    const entries = [
+      { id: 'fixture:shade', model: 'Home Assistant cover', label: { name: 'Shade', room: 'Studio' }, online: true,
+        points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {} },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Lamp', room: 'Studio' }, online: true,
+        points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } },
+    ];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = {};
+    const alone = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    // The shutters' grid, under the page's own title and its filters.
+    assert.match(alone, /class="cover-grid/);
+    assert.match(alone, />Ouvrir</);
+    assert.doesNotMatch(alone, />Lamp</);
+    assert.match(alone, /<h1 class="page-title[^"]*">Pièces</);
+    assert.match(alone, /class="bar/);
+
+    saved = '{"v":2,"ids":["volets","lumieres"]}';
+    const mixed = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.doesNotMatch(mixed, /class="cover-grid/);
+    assert.match(mixed, />Lamp</);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('« Climat » and « Volets » are two chips; openers go with the shutters (#171)', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const ids = filters.CATEGORIES.map((c) => c.id);
+  assert.ok(ids.includes('climat') && ids.includes('volets'));
+  const kinds = (id) => filters.CATEGORIES.find((c) => c.id === id).kinds;
+  assert.deepEqual(kinds('climat'), ['climate']);
+  assert.ok(kinds('volets').includes('cover') && kinds('volets').includes('impulse'));
+});
+
+test('a filter saved as « climat » before #171 keeps its shutters, a new one does not', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const store = {};
+  globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+  try {
+    store.old = '["climat"]';
+    assert.deepEqual(filters.loadFilter('old'), ['climat', 'volets']);
+    filters.saveFilter('new', ['climat']);
+    assert.deepEqual(JSON.parse(store.new), { v: 2, ids: ['climat'] });
+    assert.deepEqual(filters.loadFilter('new'), ['climat']);
+    store.junk = '{"v":2}';
+    assert.deepEqual(filters.loadFilter('junk'), []);
+  } finally { delete globalThis.localStorage; }
 });
