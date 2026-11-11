@@ -109,6 +109,42 @@ telles que les appareils les nomment).
   `lib/icons.js` : seules celles-ci sont dans le paquet).
 - Jetons CSS sous `.maison` dans `maison.css` (l'Atelier garde son propre style).
 - Règle de style : **pas de bordure gauche colorée** sur les cartes.
+- **Profondeur et mouvement** (apparence seulement, `maison.css` et `Maison.svelte`) : fond de
+  trois nuages de couleur, fixe (il se pose une fois puis ne bouge plus : un fond animé sous du
+  verre dépoli occuperait une tablette murale toute la journée) ; cartes en verre dépoli qui
+  arrivent l'une après l'autre ; à la souris, la carte survolée s'incline vers le pointeur (3D,
+  4° au plus, moins pour une grande carte), jamais au toucher, ni pendant un glissement, ni si
+  le système demande moins d'animations. Une carte au repos ne garde aucune transformation : une
+  fenêtre plein écran ouverte depuis elle couvre toujours l'écran. Rail en verre, page active en
+  pastille ambre ; pied du rail (thème, Système, Atelier) en trois icônes ; écran bas : noms
+  plus petits. La bulle Moli est un rond, son texte s'ouvre au survol.
+- **Une couleur par page** (`LOOK` dans `Maison.svelte`) : `--accent` / `--accent-2` teintent la
+  pastille du rail, les icônes des titres de carte, le nuage principal du fond, et un **macaron**
+  (l'icône de la page dans une tuile brillante, qui arrive en tournant puis flotte) se place devant
+  chaque `.page-title`. Pas d'inclinaison sur une carte qui contient une carte géographique, le plan
+  ou un canevas (on y vise un point).
+- Petits graphiques : `ui/LitRing.svelte` (anneau « n sur total » : lumières allumées sur l'Accueil,
+  automatismes actifs, services du Parc en bon état), `ui/Gauge.svelte` (demi-jauge colorée : air et
+  UV dans Dehors) ; anneau de lumières allumées autour de l'icône de chaque pièce ; vignette
+  d'impression entourée de sa progression, barre rayée qui défile pendant l'impression.
+- Petites animations : halo qui ondule autour de l'orbe de Moli, ampoule qui rebondit à l'allumage,
+  icône météo qui se balance, image de caméra qui se rapproche au survol, carte du Parc en alerte
+  qui palpite. Toutes coupées si le système demande moins d'animations.
+- **Pièces, une à la fois** (`pages/Pieces.svelte`) : une rangée de boutons (une pièce chacun, son nombre de
+  lumières allumées ou sa température ; « Vue d'ensemble » rend l'ancienne grille, avec les filtres). La pièce
+  choisie s'affiche en grand avec toutes ses commandes et, pour chaque clim ou vanne, un **thermomètre**
+  (`ui/Thermometer.svelte`) : le mercure est la température de la pièce, la perle est la consigne qu'on glisse
+  au doigt (vers le haut ça chauffe, vers le bas ça refroidit ; flèches du clavier aussi). Un seul ordre au lever
+  du doigt, par `act` (la garde s'applique) ; une clim éteinte démarre sur la nouvelle consigne. Choix retenu
+  par appareil (`pieces-room`).
+- **Plan** : un étage en grand à l'arrivée (« Toute la maison » reste un onglet) ; jetons de 42 px, une couleur
+  et une forme par type (lumière ronde ambre, prise verte, clim bleue, volet turquoise, caméra violette, télé et
+  enceinte roses, capteur gris) ; allumé = rempli de sa couleur ; à la vue entière les capteurs calmes sont
+  masqués (zoom ou filtre « Capteurs » pour les voir ; une alerte ou une porte ouverte reste visible).
+- `ui/Donut.svelte` : anneau de parts vu en 3D (pièce de monnaie légèrement inclinée), qui se
+  dessine à l'affichage ; survoler ou toucher une part donne son nom, sa valeur et son
+  pourcentage au centre. Énergie : « Qui consomme maintenant » et « Où ça part » l'ont au-dessus
+  de leurs barres, une couleur par ligne partagée par la barre et la part.
 - Une lampe injoignable n'est jamais affichée allumée (sa dernière valeur est une supposition).
 - Les ordres retenus par la garde ouvrent la feuille « C'est moi » (code PIN), qui sert aussi
   à valider, lancer ou supprimer un automatisme.

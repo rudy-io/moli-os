@@ -299,5 +299,10 @@
   "commun.volet.vitesse_normale": "Normal",
   "commun.volet.vitesse_lente": "Slow",
   "commun.volet.reconnexion": "Connecting to Moli…",
-  "commun.volet.commandes_de": "Controls for {label}"
+  "commun.volet.commandes_de": "Controls for {label}",
+  "commun.thermo.chauffe": "Warming up",
+  "commun.thermo.refroidit": "Cooling down",
+  "commun.thermo.stable": "Just right",
+  "commun.thermo.mesure": "It is {temp}° in the room",
+  "commun.thermo.glisser": "{name} target: slide up to warm, down to cool"
 }

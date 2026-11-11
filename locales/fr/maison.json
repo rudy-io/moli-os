@@ -244,5 +244,9 @@
   "maison.robot.demarrer": "Démarrer",
   "maison.robot.arreter": "Arrêter",
   "maison.robot.base": "Retour à la base",
-  "maison.robot.sonner": "Faire sonner"
+  "maison.robot.sonner": "Faire sonner",
+  "maison.pieces.toutes_pieces": "Vue d'ensemble",
+  "maison.pieces.choisir": "Choisir une pièce",
+  "maison.pieces.confort": "Température",
+  "maison.dehors.uv": "UV · {word}"
 }

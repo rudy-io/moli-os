@@ -14,6 +14,7 @@
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
+  import LitRing from '../ui/LitRing.svelte';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
@@ -153,36 +154,36 @@
 </script>
 
 <div class="accueil">
-  <SkyHero />
+  <SkyHero>
+    {#if modes.length}
+      <div class="modes" role="radiogroup" aria-label={t('maison.accueil.mode_maison')}>
+        {#each modes as m (m)}
+          <button role="radio" aria-checked={m === mode} class:on={m === mode} disabled={pending(modeDevice.id, 'state')} onclick={() => setMode(m)}>
+            <Icon name={MODE_ICON[m] ?? 'home'} size={16} />{modeName(m)}
+          </button>
+        {/each}
+        {#if talkers.length}
+          <span class="sep" aria-hidden="true"></span>
+          <button class="hush" class:on={quiet} aria-pressed={quiet} onclick={toggleQuiet} title={quiet ? t('maison.accueil.sonos_reparle') : t('maison.accueil.sonos_coupe')}>
+            <Icon name={quiet ? 'volume-off' : 'speaker'} size={16} />{quiet && quietUntil ? t('maison.accueil.sonos_muette_jusqua', { time: new Date(quietUntil).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) }) : t('maison.accueil.sonos_muette')}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
-  {#if modes.length}
-    <div class="modes" role="radiogroup" aria-label={t('maison.accueil.mode_maison')}>
-      {#each modes as m (m)}
-        <button role="radio" aria-checked={m === mode} class:on={m === mode} disabled={pending(modeDevice.id, 'state')} onclick={() => setMode(m)}>
-          <Icon name={MODE_ICON[m] ?? 'home'} size={16} />{modeName(m)}
-        </button>
+    <section class="notices" aria-label={t('maison.accueil.a_savoir')}>
+      {#each notices as n (n.text)}
+        <a class="chip {n.tone}" href={n.href}><Icon name={n.icon} size={16} />{n.text}</a>
+      {:else}
+        <span class="chip good"><Icon name="leaf" size={16} />{t('maison.accueil.calme')}</span>
       {/each}
-      {#if talkers.length}
-        <span class="sep" aria-hidden="true"></span>
-        <button class="hush" class:on={quiet} aria-pressed={quiet} onclick={toggleQuiet} title={quiet ? t('maison.accueil.sonos_reparle') : t('maison.accueil.sonos_coupe')}>
-          <Icon name={quiet ? 'volume-off' : 'speaker'} size={16} />{quiet && quietUntil ? t('maison.accueil.sonos_muette_jusqua', { time: new Date(quietUntil).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) }) : t('maison.accueil.sonos_muette')}
-        </button>
-      {/if}
-    </div>
-  {/if}
-
-  <section class="notices" aria-label={t('maison.accueil.a_savoir')}>
-    {#each notices as n (n.text)}
-      <a class="chip {n.tone}" href={n.href}><Icon name={n.icon} size={16} />{n.text}</a>
-    {:else}
-      <span class="chip good"><Icon name="leaf" size={16} />{t('maison.accueil.calme')}</span>
-    {/each}
-  </section>
+    </section>
+  </SkyHero>
 
   <div class="grid">
     <section class="card lights">
       <div class="card-head">
-        <h2><Icon name="light" size={18} />{t('maison.accueil.lumieres')} <span class="count">{litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')}</span></h2>
+        <h2>{#if lights.length}<LitRing on={litCount} total={lights.length} label={litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')} />{:else}<Icon name="light" size={18} />{/if}{t('maison.accueil.lumieres')} <span class="count">{litCount ? t('maison.accueil.allumees', { count: litCount }) : t('maison.accueil.tout_eteint')}</span></h2>
         <a class="more" href="#/pieces" aria-label={t('maison.accueil.toutes_pieces')}><Icon name="arrow-top-right" size={18} /></a>
       </div>
       <div class="tiles">
@@ -327,7 +328,8 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 20px;
+    grid-auto-flow: row dense;
+    gap: 24px;
     align-items: start;
   }
 
@@ -337,6 +339,10 @@
 
   .side {
     grid-column: span 4;
+    grid-row: span 2;
+    display: grid;
+    gap: 24px;
+    align-content: start;
   }
 
   .robot-slot {
@@ -345,18 +351,14 @@
   }
 
   .climate {
-    grid-column: span 7;
+    grid-column: span 8;
   }
 
   .doorbell {
-    grid-column: span 5;
-    grid-row: span 2;
+    grid-column: span 4;
   }
 
-  .remote {
-    grid-column: span 3;
-  }
-
+  .remote,
   .outside {
     grid-column: span 4;
   }
@@ -421,8 +423,8 @@
 
   .tiles {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
   }
 
   .clims {
@@ -531,27 +533,6 @@
      two rows) and leaves empty space under the short ones. On a wide screen
      the cards then stack in columns, which leaves no hole whichever cards
      the house has. */
-  @media (min-width: 1181px) {
-    .grid:not(:has(.climate)) {
-      display: block;
-      columns: 420px 3;
-      column-gap: 20px;
-    }
-
-    .grid:not(:has(.climate)) > * {
-      width: 100%;
-      margin: 0 0 20px;
-      break-inside: avoid;
-    }
-
-    /* Out of a grid, a card that is a link turns inline again and loses its
-       background. Block it, with no specificity, so a card that declares its
-       own display (the remote) keeps it. */
-    :where(.grid:not(:has(.climate))) > :where(a) {
-      display: block;
-    }
-  }
-
   @media (max-width: 1180px) {
     .lights,
     .climate {
@@ -562,6 +543,11 @@
     .doorbell {
       grid-column: span 6;
       grid-row: auto;
+    }
+
+    .side {
+      grid-column: span 12;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     }
 
     .remote,
