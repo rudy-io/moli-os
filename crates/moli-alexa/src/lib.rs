@@ -10,6 +10,7 @@ mod api;
 mod auth;
 mod echo;
 mod encode;
+mod thermo;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -30,6 +31,8 @@ const POLL: Duration = Duration::from_secs(30);
 const VOLUMES: Duration = Duration::from_secs(120);
 /// The account's speakers (one added, renamed…).
 const DEVICES: Duration = Duration::from_secs(30 * 60);
+/// The room temperature of the speakers that measure it.
+const TEMPERATURES: Duration = Duration::from_secs(5 * 60);
 /// The site's cookies are good two weeks: renewed well before.
 const SESSION: Duration = Duration::from_secs(4 * 24 * 3600);
 const RETRY_MIN: Duration = Duration::from_secs(30);
@@ -245,6 +248,10 @@ struct Home {
     music: String,
     /// Speakers whose state could not be read, said once per session.
     unreadable: std::collections::HashSet<String>,
+    /// The speakers that measure the room, and their sensor's id at Amazon.
+    thermometers: HashMap<DeviceId, String>,
+    /// Why the temperatures could not be read, said once per session.
+    no_temperature: Option<String>,
 }
 
 impl Home {
@@ -275,6 +282,8 @@ async fn connected(
         speakers: HashMap::new(),
         music,
         unreadable: std::collections::HashSet::new(),
+        thermometers: HashMap::new(),
+        no_temperature: None,
     };
     discover(ctx, &mut home).await?;
     set_text(ctx, account, "status", "connected");
@@ -288,6 +297,7 @@ async fn connected(
     let mut poll = tokio::time::interval(POLL);
     let mut volumes = tokio::time::interval(VOLUMES);
     let mut devices = tokio::time::interval(DEVICES);
+    let mut temperatures = tokio::time::interval(TEMPERATURES);
     for timer in [&mut poll, &mut volumes, &mut devices] {
         timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         timer.reset();
@@ -313,6 +323,7 @@ async fn connected(
                 Err(e) => tracing::warn!(instance = %ctx.instance(), error = %e, "alexa volumes"),
             },
             _ = devices.tick() => discover(ctx, &mut home).await?,
+            _ = temperatures.tick() => temperature(ctx, &mut home).await,
             () = tokio::time::sleep_until(renew_at) => {
                 // New cookies: `connected` starts again.
                 anyhow::bail!("{RENEW}");
@@ -329,6 +340,8 @@ async fn discover(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     home.speakers.clear();
+    home.thermometers.clear();
+    let sensors = thermometers(ctx, home).await;
     for e in echo::speakers(&answer) {
         tracing::info!(
             instance = %ctx.instance(),
@@ -340,11 +353,73 @@ async fn discover(ctx: &DriverCtx, home: &mut Home) -> anyhow::Result<()> {
             "alexa speaker"
         );
         let id = ctx.device_id(&e.serial);
-        ctx.upsert_device(echo::device(ctx, &id, &e));
+        let sensor = sensors.iter().find(|(s, _)| *s == e.serial);
+        if let Some((_, sensor)) = sensor {
+            home.thermometers.insert(id.clone(), sensor.clone());
+        }
+        ctx.upsert_device(echo::device(ctx, &id, &e, sensor.is_some()));
         ctx.set_availability(&id, e.online);
         home.speakers.insert(id, e);
     }
     Ok(())
+}
+
+/// (speaker serial, sensor id) of the speakers that measure the room. Not
+/// knowing is no fault: the speakers work without it, and why is said once.
+async fn thermometers(ctx: &DriverCtx, home: &mut Home) -> Vec<(String, String)> {
+    let found = match home.session.endpoints().await {
+        Ok(answer) => {
+            if let Some(why) = thermo::errors(&answer) {
+                Err(why)
+            } else {
+                Ok(thermo::sensors(&answer))
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    };
+    match found {
+        Ok(sensors) => {
+            tracing::info!(instance = %ctx.instance(), sensors = sensors.len(), "alexa thermometers");
+            sensors
+        }
+        Err(why) => {
+            if home.no_temperature.as_deref() != Some(why.as_str()) {
+                tracing::warn!(instance = %ctx.instance(), error = %why, "alexa thermometers");
+                home.no_temperature = Some(why);
+            }
+            Vec::new()
+        }
+    }
+}
+
+/// The room temperature of each speaker that measures it.
+async fn temperature(ctx: &DriverCtx, home: &mut Home) {
+    if home.thermometers.is_empty() {
+        return;
+    }
+    let ids: Vec<&str> = home.thermometers.values().map(String::as_str).collect();
+    match home.session.sensor_states(&ids).await {
+        Ok(answer) => {
+            let read = thermo::temperatures(&answer);
+            for (id, sensor) in &home.thermometers {
+                if let Some((_, c)) = read.iter().find(|(s, _)| s == sensor) {
+                    ctx.set_state(id, "temperature", Value::Float(*c));
+                }
+            }
+            if read.is_empty() && home.no_temperature.is_none() {
+                let shape: String = answer.to_string().chars().take(300).collect();
+                tracing::warn!(instance = %ctx.instance(), answer = %shape, "alexa temperatures: none read");
+                home.no_temperature = Some("none read".into());
+            }
+        }
+        Err(e) => {
+            let why = e.to_string();
+            if home.no_temperature.as_deref() != Some(why.as_str()) {
+                tracing::warn!(instance = %ctx.instance(), error = %why, "alexa temperatures");
+                home.no_temperature = Some(why);
+            }
+        }
+    }
 }
 
 /// What each speaker plays (a session over: an error, `connected` starts again).
