@@ -5,6 +5,8 @@
 //! checked against Home Assistant reading the same inverter: 32-bit values
 //! are low word first in the map's order ([3005, 3004] = high, low).
 
+use std::time::Instant;
+
 use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic, Unit, Value};
 
 /// The first register read, and the two blocks (the logger answers at most
@@ -12,6 +14,13 @@ use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointSpec, Semantic,
 pub const FIRST: u16 = 3004;
 pub const BLOCKS: [(u16, u16); 2] = [(3004, 22), (3026, 18)];
 const LAST: u16 = 3043;
+
+/// Above what a single-phase S6-GR1P can make (6 kW at most): a counter
+/// moving faster than this since the last read is a misread.
+const MAX_KW: f64 = 10.0;
+/// What a counter may move between two close reads whatever the time: the
+/// lifetime count is in whole kWh.
+const STEP_MARGIN_KWH: f64 = 1.0;
 
 /// What the inverter is doing, from register 3043.
 pub const STATES: [&str; 4] = ["waiting", "starting", "generating", "fault"];
@@ -29,12 +38,29 @@ pub struct Counters {
     today: Option<f64>,
     /// The lifetime count when the day's counter started.
     base: Option<f64>,
+    /// When the last total was given.
+    at: Option<Instant>,
 }
 
 impl Counters {
     /// The total to the tenth, from the lifetime count (whole kWh) and the
-    /// day's (tenths); `None` when it would go back.
-    fn total(&mut self, lifetime: f64, today: f64) -> Option<f64> {
+    /// day's (tenths); `None` when it would go back, when a counter jumps
+    /// further than the inverter could make since the last read (one wrong
+    /// read would otherwise hold the total up for good), or when the
+    /// inverter reads all zero.
+    fn total(&mut self, lifetime: f64, today: f64, now: Instant) -> Option<f64> {
+        if lifetime <= 0.0 {
+            return None;
+        }
+        if let Some(at) = self.at {
+            let hours = now.saturating_duration_since(at).as_secs_f64() / 3600.0;
+            let step = STEP_MARGIN_KWH + MAX_KW * hours;
+            if self.today.is_some_and(|t| today > t + step)
+                || self.total.is_some_and(|t| lifetime > t + step)
+            {
+                return None;
+            }
+        }
         if self.today.is_some_and(|t| today < t) {
             self.base = None;
         }
@@ -53,6 +79,7 @@ impl Counters {
             return None;
         }
         self.total = Some(total);
+        self.at = Some(now);
         Some(total)
     }
 }
@@ -195,6 +222,22 @@ pub fn device(instance: &InstanceId, id: DeviceId) -> Device {
     }
 }
 
+/// What a point can plausibly read (a single-phase S6-GR1P, 6 kW at most).
+fn bounds(key: &str) -> (f64, f64) {
+    match key {
+        "power" | "pv_power" | "pv1_power" | "pv2_power" => (0.0, 12_000.0),
+        "energy_today" => (0.0, 100.0),
+        "energy_month" => (0.0, 3_000.0),
+        "energy_year" => (0.0, 30_000.0),
+        "pv1_voltage" | "pv2_voltage" => (0.0, 700.0),
+        "pv1_current" | "pv2_current" | "grid_current" => (0.0, 40.0),
+        "grid_voltage" => (0.0, 300.0),
+        "grid_frequency" => (0.0, 70.0),
+        "temperature" => (-40.0, 120.0),
+        _ => (f64::NEG_INFINITY, f64::INFINITY),
+    }
+}
+
 fn round(v: f64, decimals: i32) -> f64 {
     let f = 10f64.powi(decimals);
     (v * f).round() / f
@@ -202,21 +245,27 @@ fn round(v: f64, decimals: i32) -> f64 {
 
 /// The points' values from registers 3004..=3043 (`regs[0]` is 3004).
 #[must_use]
-pub fn readings(regs: &[u16], counters: &mut Counters) -> Vec<(String, Value)> {
+pub fn readings(regs: &[u16], counters: &mut Counters, now: Instant) -> Vec<(String, Value)> {
     if regs.len() < usize::from(LAST - FIRST + 1) {
         return Vec::new();
     }
     let r = |addr: u16| f64::from(regs[usize::from(addr - FIRST)]);
     let u32_at = |high: u16, low: u16| r(high) * 65_536.0 + r(low);
     let mut out: Vec<(String, Value)> = Vec::new();
-    let mut put = |key: &str, v: f64| out.push((key.to_owned(), Value::Float(v)));
+    // Values outside what the inverter can read are misreads: left out.
+    let mut put = |key: &str, v: f64| {
+        let (min, max) = bounds(key);
+        if v.is_finite() && (min..=max).contains(&v) {
+            out.push((key.to_owned(), Value::Float(v)));
+        }
+    };
     put("power", u32_at(3004, 3005));
     put("pv_power", u32_at(3006, 3007));
     let today = round(r(3014) / 10.0, 1);
     put("energy_today", today);
     put("energy_month", u32_at(3010, 3011));
     put("energy_year", u32_at(3016, 3017));
-    if let Some(total) = counters.total(u32_at(3008, 3009), today) {
+    if let Some(total) = counters.total(u32_at(3008, 3009), today, now) {
         put("energy", total);
     }
     let (v1, i1, v2, i2) = (
@@ -286,10 +335,36 @@ mod tests {
         regs
     }
 
+    fn t0() -> Instant {
+        use std::sync::OnceLock;
+        static T0: OnceLock<Instant> = OnceLock::new();
+        *T0.get_or_init(Instant::now)
+    }
+
+    #[test]
+    fn a_wrong_read_never_holds_the_total_up() {
+        use std::time::Duration;
+        let mut c = Counters::default();
+        let t = t0();
+        // All zero at start: nothing published.
+        assert_eq!(c.total(0.0, 0.0, t), None);
+        assert_eq!(c.total(4352.0, 0.1, t), Some(4352.0));
+        // 10 s later, a lifetime count 60 000 kWh up: a misread.
+        let t = t + Duration::from_secs(10);
+        assert_eq!(c.total(65_536.0 + 4352.0, 0.1, t), None);
+        // Nor a day counter far up.
+        assert_eq!(c.total(4352.0, 50.0, t), None);
+        // The next good read carries on from the right total.
+        assert_eq!(c.total(4352.0, 0.2, t), Some(4352.1));
+        // Two hours later, 5 kWh more is possible.
+        let t = t + Duration::from_secs(7200);
+        assert_eq!(c.total(4357.0, 5.2, t), Some(4357.1));
+    }
+
     #[test]
     fn readings_match_what_home_assistant_reads() {
         let mut counters = Counters::default();
-        let got = readings(&registers(), &mut counters);
+        let got = readings(&registers(), &mut counters, t0());
         let get = |k: &str| got.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
         assert_eq!(get("power"), Some(Value::Float(50.0)));
         assert_eq!(get("pv_power"), Some(Value::Float(102.0)));
@@ -309,11 +384,11 @@ mod tests {
     #[test]
     fn a_lifetime_counter_never_goes_back_and_a_fault_says_its_code() {
         let mut counters = Counters::default();
-        let _ = readings(&registers(), &mut counters);
+        let _ = readings(&registers(), &mut counters, t0());
         let mut back = registers();
         back[usize::from(3009 - FIRST)] = 4000;
         back[usize::from(3043 - FIRST)] = 0x1015;
-        let got = readings(&back, &mut counters);
+        let got = readings(&back, &mut counters, t0());
         assert!(
             got.iter()
                 .all(|(k, v)| k != "energy" || *v == Value::Float(4352.0)),
@@ -321,14 +396,14 @@ mod tests {
         );
         assert!(got.contains(&("state".into(), Value::Text("fault".into()))));
         assert!(got.contains(&("fault_code".into(), Value::Float(4117.0))));
-        assert!(readings(&[0; 3], &mut counters).is_empty());
+        assert!(readings(&[0; 3], &mut counters, t0()).is_empty());
     }
 
     #[test]
     fn the_total_counts_tenths_from_the_day_counter() {
         let mut counters = Counters::default();
         let energy = |regs: &[u16], counters: &mut Counters| {
-            readings(regs, counters)
+            readings(regs, counters, t0())
                 .into_iter()
                 .find(|(k, _)| k == "energy")
                 .map(|(_, v)| v)

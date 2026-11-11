@@ -199,7 +199,13 @@ pub fn tcp_request(tid: u16, slave: u8, function: u8, start: u16, count: u16) ->
 
 /// The Modbus TCP answer to transaction `tid`, `count` registers read with
 /// `function`.
-pub fn tcp_parse(buf: &[u8], tid: u16, function: u8, count: u16) -> anyhow::Result<Frame> {
+pub fn tcp_parse(
+    buf: &[u8],
+    tid: u16,
+    slave: u8,
+    function: u8,
+    count: u16,
+) -> anyhow::Result<Frame> {
     if buf.len() < 9 {
         return Ok(Frame::Partial);
     }
@@ -209,13 +215,14 @@ pub fn tcp_parse(buf: &[u8], tid: u16, function: u8, count: u16) -> anyhow::Resu
     if buf.len() < total {
         return Ok(Frame::Partial);
     }
-    if u16::from_be_bytes([buf[0], buf[1]]) != tid || buf[2..4] != [0, 0] {
+    if u16::from_be_bytes([buf[0], buf[1]]) != tid || buf[2..4] != [0, 0] || buf[6] != slave {
         return Ok(Frame::Other(total));
     }
     let pdu = &buf[7..total];
     if pdu[0] == function | 0x80 {
         return Err(NoData::Refused(pdu.get(1).copied().unwrap_or(0)).into());
     }
+    ensure!(pdu.len() >= 2, "short modbus answer");
     ensure!(
         pdu[0] == function,
         "unexpected modbus function {:#x}",
@@ -252,19 +259,27 @@ pub(crate) mod tests {
         assert_eq!(req, [0, 0x10, 0, 0, 0, 6, 1, 4, 0x0B, 0xBC, 0, 2]);
         let answer = [0, 0x10, 0, 0, 0, 7, 1, 4, 4, 0, 0, 0, 0x32];
         assert_eq!(
-            tcp_parse(&answer, 0x10, INPUT, 2).unwrap(),
+            tcp_parse(&answer, 0x10, 1, INPUT, 2).unwrap(),
             Frame::Registers(vec![0, 50], 13)
         );
         assert_eq!(
-            tcp_parse(&answer[..8], 0x10, INPUT, 2).unwrap(),
+            tcp_parse(&answer[..8], 0x10, 1, INPUT, 2).unwrap(),
             Frame::Partial
         );
         assert_eq!(
-            tcp_parse(&answer, 0x11, INPUT, 2).unwrap(),
+            tcp_parse(&answer, 0x11, 1, INPUT, 2).unwrap(),
+            Frame::Other(13)
+        );
+        // Another unit's answer is not ours.
+        assert_eq!(
+            tcp_parse(&answer, 0x10, 2, INPUT, 2).unwrap(),
             Frame::Other(13)
         );
         let refused = [0, 0x10, 0, 0, 0, 3, 1, 0x84, 2];
-        assert!(tcp_parse(&refused, 0x10, INPUT, 2).is_err());
+        assert!(tcp_parse(&refused, 0x10, 1, INPUT, 2).is_err());
+        // A length of 2: the function alone, no byte count. Refused, no panic.
+        let short = [0, 0x10, 0, 0, 0, 2, 1, 4, 0];
+        assert!(tcp_parse(&short, 0x10, 1, INPUT, 2).is_err());
     }
 
     #[test]

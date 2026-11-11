@@ -897,6 +897,29 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
   tient ; provisionnement borné par la MAC).
 
+## `solarman` : onduleurs derrière un enregistreur Solarman (`crates/moli-solarman`)
+
+- **Couvre** : les micro-onduleurs Deye (`model = "deye"`, par défaut) et les onduleurs string
+  Solis S6-GR1P (`model = "solis"`) derrière leur enregistreur Wi-Fi. **Lecture seule** : seules
+  les fonctions Modbus de lecture 0x03 (registres de maintien, Deye) et 0x04 (registres d'entrée,
+  Solis) sont envoyées.
+- **Transport** : TCP 8899, une connexion par lecture. `transport = "v5"` (par défaut) : trame
+  Modbus RTU dans l'enveloppe V5 de l'enregistreur, numéro de série obligatoire.
+  `transport = "modbus_tcp"` : Modbus TCP nu (en-tête MBAP), pour les clés qui ne parlent pas V5
+  (une clé Solis en est) ; ces clés ne servent qu'un client à la fois.
+- **Configuration** : `host`, `serial` (V5), `slave` (1), `model`, `transport`, `timezone`.
+- **Registres** : cartes de ha-solarman (MIT, voir `NOTICE`) : `deye_micro.yaml` et
+  `solis_s6-gr1p.yaml`. Solis : registres 3004 à 3043 en deux blocs.
+- **Compteurs** : la production totale (`energy`) ne recule jamais, et un compteur qui saute plus
+  loin que ce que l'onduleur a pu produire depuis la lecture précédente est écarté. Solis : le
+  total à vie de l'onduleur est en kWh entiers ; Moli le complète au dixième avec le compteur du
+  jour. Une lecture tout à zéro ne publie pas de total. Les valeurs hors de ce que l'onduleur
+  peut lire (puissance, tensions, courants, fréquence, température) sont écartées.
+- **La nuit** : l'onduleur dort et l'enregistreur avec lui : l'appareil passe hors ligne sans
+  avertissement.
+- **Tests** : `src/v5.rs` (trames V5 et Modbus TCP, trame courte refusée), `src/deye.rs`,
+  `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -951,6 +974,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say` | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
+| `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |

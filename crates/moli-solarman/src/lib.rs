@@ -170,7 +170,9 @@ impl Logger {
             loop {
                 let frame = match transport {
                     Transport::V5 => v5::parse(&buf, self.serial, sequence, function, count)?,
-                    Transport::ModbusTcp => v5::tcp_parse(&buf, sequence, function, count)?,
+                    Transport::ModbusTcp => {
+                        v5::tcp_parse(&buf, sequence, self.slave, function, count)?
+                    }
                 };
                 match frame {
                     Frame::Registers(registers, _) => return Ok(registers),
@@ -526,7 +528,8 @@ async fn run_solis(ctx: &mut DriverCtx, logger: &mut Logger, id: &DeviceId) -> a
                     shown = true;
                     tracing::info!(instance = %ctx.instance(), "solis inverter read");
                 }
-                for (key, value) in solis::readings(&regs, &mut counters) {
+                for (key, value) in solis::readings(&regs, &mut counters, std::time::Instant::now())
+                {
                     ctx.set_state(id, &key, value);
                 }
                 if online != Some(true) {

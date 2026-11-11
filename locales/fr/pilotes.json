@@ -656,5 +656,5 @@
   "pilotes.linky_tic.silence": "aucune trame valide du compteur depuis {secondes} s : le port est rouvert (vérifier le câble, le port et le mode standard ou historique)",
   "pilotes.solarman.puissance_panneaux": "Puissance des panneaux",
   "pilotes.solarman.production_mois": "Production du mois",
-  "pilotes.solarman.production_annee": "Production de l'année"
+  "pilotes.solarman.production_annee": "Production de l’année"
 }

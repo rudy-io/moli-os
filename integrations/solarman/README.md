@@ -1,7 +1,8 @@
 # Solarman / Deye micro-onduleurs
 
 Pilote natif `crates/moli-solarman`. Une instance = un enregistreur Wi-Fi Solarman (celui intégré
-aux micro-onduleurs Deye). **Lecture seule** : seule la fonction Modbus 0x03 est jamais envoyée.
+aux micro-onduleurs Deye) ou une clé Solis. **Lecture seule** : seules les fonctions Modbus de
+lecture sont envoyées, 0x03 (Deye) et 0x04 (Solis).
 
 - **Transport** : protocole V5 sur TCP 8899 (trame Modbus RTU dans l'enveloppe de l'enregistreur,
   numéro de série de l'enregistreur obligatoire), une connexion par lecture, toutes les 10 s.
