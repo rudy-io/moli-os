@@ -24,8 +24,9 @@ Depuis le tableau de bord (Système, carte ENGIE) : un bouton ouvre la vraie pag
 d'ENGIE (OAuth avec PKCE) ; on s'y connecte (e-mail, mot de passe, code reçu par SMS ou e-mail :
 tout se passe chez ENGIE, Moli ne voit jamais le mot de passe). La page finit en voulant ouvrir
 l'appli (`be.engie.smart://login-callback/…?code=…`) : le navigateur n'y arrive pas, c'est normal ;
-on copie cette adresse (console du navigateur, F12 ; Firefox la montre dans la barre d'adresse) et
-on la colle dans Moli. Moli l'échange contre un jeton de rafraîchissement, rangé chiffré dans son
+elle ne s'affiche nulle part : on la prend dans les outils du navigateur (F12, onglet Réseau ouvert
+avant la connexion, « Conserver les journaux » coché), en-tête `Location` de la dernière réponse
+302 de `/authorize/resume`, et on la colle dans Moli. Moli l'échange contre un jeton de rafraîchissement, rangé chiffré dans son
 coffre ; ENGIE le remplace à chaque usage, Moli range aussitôt le nouveau.
 
 ## Heure de départ
