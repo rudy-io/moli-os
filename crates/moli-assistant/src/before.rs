@@ -431,6 +431,7 @@ pub(crate) fn meters(s: &moli_energy::Summary) -> String {
             moli_energy::Role::Appliance => "un appareil (prise mesurée)",
             moli_energy::Role::Solar => "production des panneaux solaires, index à vie",
             moli_energy::Role::Export => "injection sur le réseau, index",
+            moli_energy::Role::Gas => "gaz naturel, index (pas de l'électricité)",
         };
         let _ = match &m.power {
             Some(power) => writeln!(out, "- {} ({role}) : puissance en W = {power}", m.name),

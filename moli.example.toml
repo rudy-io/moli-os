@@ -73,6 +73,18 @@ timezone = "Europe/Paris"
 # price_point = "engie:contract-000000000002/electricity_offtake_peak"
 # price_extra = 0.11692
 
+# Natural gas, counted and priced apart from the electricity: a P1 gas index
+# in m³ and the supplier's conversion factor (on the bill):
+# [[energy.meter]]
+# id = "gas"
+# name = "Gas"
+# point = "esphome:aabbccddeeff/gas_consumption"
+# role = "gas"
+# reset = "never"
+# kwh_per_unit = 11.3868
+# price_point = "engie:contract-000000000002/gas_offtake"
+# price_extra = 0.0375
+
 # Without a local reading of the meter, the `enedis` driver reports yesterday's
 # consumption hour by hour:
 # [[energy.meter]]

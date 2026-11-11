@@ -106,6 +106,10 @@ pub struct MeterConfig {
     /// leaves out (network costs, taxes, certificates), VAT included.
     #[serde(default)]
     pub price_extra: Option<f64>,
+    /// kWh per unit of `point` when it is not in Wh or kWh: a gas index in
+    /// m³ (the supplier's conversion factor, about 11.4 kWh/m³).
+    #[serde(default)]
+    pub kwh_per_unit: Option<f64>,
     /// Instantaneous power point (W), for the live view.
     #[serde(default)]
     pub power: Option<String>,
@@ -170,6 +174,10 @@ pub enum Role {
     /// What the home sends to the grid (the returned energy of a clamp on
     /// the main feed, a Linky injection index): `price` is what it earns.
     Export,
+    /// Natural gas (a P1 meter's gas index, in m³ with `kwh_per_unit`):
+    /// shown and priced on its own, never mixed with the electricity, and
+    /// priced only by its own `price` / `price_point`.
+    Gas,
 }
 
 impl Role {
@@ -177,7 +185,7 @@ impl Role {
     /// appliances), as opposed to what it makes or sends out.
     #[must_use]
     pub fn consumes(self) -> bool {
-        !matches!(self, Self::Solar | Self::Export)
+        !matches!(self, Self::Solar | Self::Export | Self::Gas)
     }
 }
 
@@ -334,6 +342,14 @@ fn check_meter_price(m: &MeterConfig) -> Result<(), String> {
         if m.role == Role::Solar {
             return Err(format!("meter {:?}: solar production has no price", m.id));
         }
+    }
+    if let Some(f) = m.kwh_per_unit
+        && (!(f.is_finite() && f > 0.0 && f < 100.0) || m.integrate)
+    {
+        return Err(format!(
+            "meter {:?}: kwh_per_unit {f} must be above 0 and below 100, without `integrate`",
+            m.id
+        ));
     }
     if let Some(extra) = m.price_extra {
         if m.price_point.is_none() {

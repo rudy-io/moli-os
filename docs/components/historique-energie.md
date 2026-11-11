@@ -68,6 +68,12 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
     Sans valeur au point (pilote pas encore connecté, ou une valeur au-dessus de 5), le `price`
     fixe du compteur sert, et c'est aussi lui qui chiffre l'historique importé. Pour un compteur
     d'injection (`export`), `price_point` seul : la revente n'a ni réseau ni taxes.
+  - **Gaz** (`role = "gas"`) : un index de gaz (celui d'un compteur P1, en m³) avec
+    `kwh_per_unit` = le facteur de conversion du fournisseur (environ 11,4 kWh/m³, sur la
+    facture). Compté et chiffré à part (`gas` dans chaque période, carte « Gaz ce mois ») :
+    jamais ajouté à l'électricité, jamais chiffré par la période tarifaire ni le prix de la
+    maison, seulement par son `price` ou son `price_point` (+ `price_extra`). `kwh_per_unit`
+    sert aussi à tout compteur dont le point n'est ni en Wh ni en kWh.
   - `monthly_fee` (optionnel) : l'abonnement par mois TTC (par exemple 20 €) : la facture
     estimée = kWh du mois au rythme actuel + abonnement, comme le « Projection facture fin de
     mois » de HA. `budget` (optionnel) : le point qui tient le budget mensuel (par exemple

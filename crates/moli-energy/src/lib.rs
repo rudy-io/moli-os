@@ -1050,6 +1050,11 @@ impl Recorder {
         if let Some(&f) = self.factors.get(&meter.id) {
             return f.is_finite().then_some(f);
         }
+        if let Some(f) = meter.kwh_per_unit {
+            // Said by the configuration (a gas index in m³): no unit to look up.
+            self.factors.insert(meter.id.clone(), f);
+            return Some(f);
+        }
         let point = PointId::from(meter.point.clone());
         let (device, key) = point.split()?;
         let view = self.hub.device(&device)?;
