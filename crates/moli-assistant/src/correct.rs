@@ -551,6 +551,7 @@ impl Assistant {
             id: None,
             // The corrected answer is a turn of the one who corrected: theirs to undo or correct again.
             asker: asker.map(str::to_owned),
+            meanwhile: None,
         };
         let reply = self.seal(reply, &turn, &turned.question);
         let note = if remember {

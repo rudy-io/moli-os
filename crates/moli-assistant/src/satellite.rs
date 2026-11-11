@@ -254,6 +254,7 @@ impl VoiceBrain for Assistant {
         &self,
         satellite: &moli_core::DeviceId,
         conversation: Vec<Said>,
+        meanwhile: moli_runtime::voice::Meanwhile,
     ) -> BoxFuture<'_, Result<Answer, String>> {
         let asker = format!("satellite:{satellite}");
         Box::pin(async move {
@@ -273,6 +274,7 @@ impl VoiceBrain for Assistant {
                 spoken: true,
                 id: None,
                 asker: Some(asker),
+                meanwhile: Some(meanwhile),
             };
             self.turn(turn)
                 .await
@@ -828,6 +830,7 @@ mod tests {
             &moli,
             &moli_core::DeviceId::from("esphome:aabbccddeeff"),
             asked("Quelle heure est-il ?"),
+            tokio::sync::mpsc::unbounded_channel().0,
         )
         .await
         .unwrap();
@@ -844,6 +847,7 @@ mod tests {
             &moli,
             &moli_core::DeviceId::from("esphome:aabbccddeeff"),
             asked("Allume la lampe"),
+            tokio::sync::mpsc::unbounded_channel().0,
         )
         .await
         .unwrap();

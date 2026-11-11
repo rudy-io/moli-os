@@ -392,6 +392,10 @@ pub struct Turn {
     /// back its own; and it is whose handed-over task « my request » means.
     #[serde(skip)]
     pub asker: Option<String>,
+    /// Where the words to say while the turn works go (a satellite's): set by
+    /// the server, never read from the request.
+    #[serde(skip)]
+    pub meanwhile: Option<moli_runtime::voice::Meanwhile>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -923,7 +927,7 @@ impl Assistant {
     /// One turn of the conversation: the model reads the house, may act and
     /// pick cards, then answers.
     /// One turn, kept in the history (question, answer, orders, time taken).
-    pub async fn turn(&self, turn: Turn) -> Result<Reply, AssistantError> {
+    pub async fn turn(&self, mut turn: Turn) -> Result<Reply, AssistantError> {
         let started = Instant::now();
         let question = turn
             .messages
@@ -934,6 +938,10 @@ impl Assistant {
         let spoken = turn.spoken;
         let asker = turn.asker.clone();
         let quiet = self.screen_plays_for(&turn).await;
+        if quiet {
+            // A screen plays: no words over it, not even while waiting.
+            turn.meanwhile = None;
+        }
         let stop = CancellationToken::new();
         let mut result = self.converse(turn, &stop).await;
         if quiet && let Ok(reply) = &mut result {
@@ -1236,6 +1244,8 @@ impl Assistant {
             // The agent's words, brought back by the conversation inside a
             // reply of Moli's: still not an order.
             heard_agent: self.relays_agent(&turn.messages),
+            spoken: turn.spoken,
+            meanwhile: turn.meanwhile.clone(),
             ..Run::default()
         };
         for step in 0..MAX_STEPS {
@@ -1258,9 +1268,11 @@ impl Assistant {
             if step + 1 == MAX_STEPS {
                 body["tool_choice"] = json!("none");
             }
+            let asked = Instant::now();
             let Some(answer) = self.ask_model(key.as_deref(), &body, stop).await? else {
                 return Ok(self.interrupted(run));
             };
+            run.took("model", asked);
             run.usage.steps = step + 1;
             run.usage.prompt_tokens += answer["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
             run.usage.completion_tokens +=
@@ -1334,7 +1346,25 @@ impl Assistant {
                 .as_str()
                 .and_then(|a| serde_json::from_str(a).ok())
                 .unwrap_or_else(|| json!({}));
+            if let Some(words) = waiting_words(name)
+                && let Some(meanwhile) = run.meanwhile.take()
+            {
+                let _ = meanwhile.send(words);
+            }
+            let called = Instant::now();
             let result = self.tool(name, &args, layout, run).await;
+            run.took(name, called);
+            // A spoken question the web answered: its words are the answer,
+            // one round trip of the model less (a second or two).
+            if run.spoken
+                && calls.len() == 1
+                && name == "web_search"
+                && let Some(found) = result["answer"].as_str().map(speakable)
+                && !found.is_empty()
+                && found.chars().count() <= MAX_SPOKEN_CHARS
+            {
+                return Some(found);
+            }
             if name == "set" {
                 carried_out &= result["status"] == "done";
             }
@@ -1415,6 +1445,7 @@ impl Assistant {
             actions = run.actions.len(),
             cards = run.cards.len(),
             tools = run.tools.join(","),
+            timeline = run.timeline.join(", "),
             "assistant turn"
         );
         Reply {
@@ -1489,6 +1520,7 @@ impl Assistant {
             &c.search_model,
             &c.timezone,
             query,
+            run.spoken,
         )
         .await
         {
@@ -2099,6 +2131,14 @@ struct Run {
     /// The outside agent's words were read in this turn, or came back in
     /// a reply that relayed them (`tools_for`).
     heard_agent: bool,
+    /// The answer will be heard (`Turn::spoken`).
+    spoken: bool,
+    /// Where the words to say while a tool works go, until they are said:
+    /// once a turn.
+    meanwhile: Option<moli_runtime::voice::Meanwhile>,
+    /// Each call of the model and each tool with its milliseconds, in order,
+    /// for the log: where a slow turn went.
+    timeline: Vec<String>,
 }
 
 impl Run {
@@ -2106,6 +2146,15 @@ impl Run {
     /// for a person is theirs (`Hub::command_from`).
     fn caller(&self) -> Option<&str> {
         Some(self.asker.as_str()).filter(|asker| !asker.is_empty())
+    }
+
+    /// Notes how long `what` took since `since`.
+    fn took(&mut self, what: &str, since: Instant) {
+        if self.timeline.len() < 24 {
+            let what: String = what.chars().take(32).collect();
+            self.timeline
+                .push(format!("{what} {}", since.elapsed().as_millis()));
+        }
     }
 }
 
@@ -2140,6 +2189,63 @@ fn valid_turn_id(id: &str) -> Result<(), AssistantError> {
         ));
     }
     Ok(())
+}
+
+/// The few words said while `tool` works, in the house's language: its own
+/// when it has some, « Je regarde. » otherwise. `None` for a tool whose result
+/// is itself the answer (an order, a card, the end of the conversation).
+fn waiting_words(tool: &str) -> Option<String> {
+    let key = match tool {
+        "show" | "set" | "ambiance" | "end_conversation" | "delegation_steer"
+        | "delegation_stop" => return None,
+        "web_search" => "assistant.voice.wait.web_search",
+        "forecast" => "assistant.voice.wait.forecast",
+        "energy" => "assistant.voice.wait.energy",
+        "history" => "assistant.voice.wait.history",
+        "automation" => "assistant.voice.wait.automation",
+        "delegate" | "delegation_status" => "assistant.voice.wait.delegate",
+        _ => "assistant.voice.wait.default",
+    };
+    let words = word_list(key);
+    // Not always the same ones: any of them, by the clock.
+    let pick =
+        usize::try_from(jiff::Timestamp::now().as_millisecond().unsigned_abs()).unwrap_or_default();
+    words.get(pick % words.len().max(1)).cloned()
+}
+
+/// A web answer as words to say: no link, no source in brackets, no
+/// formatting sign (the search model adds them whatever it is told).
+fn speakable(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let (before, after) = rest.split_at(open);
+        // `[label](address)`: a source, dropped with the brackets around it.
+        let link = after.find("](").and_then(|mid| {
+            let tail = &after[mid + 2..];
+            tail.find(')').map(|close| &tail[close + 1..])
+        });
+        if let Some(tail) = link {
+            out.push_str(before.trim_end().trim_end_matches('('));
+            rest = tail.strip_prefix(')').unwrap_or(tail);
+        } else {
+            out.push_str(before);
+            out.push('[');
+            rest = &after[1..];
+        }
+    }
+    out.push_str(rest);
+    let said = out
+        .split_whitespace()
+        .filter(|word| !word.starts_with("http://") && !word.starts_with("https://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(['*', '#', '`'], "");
+    said.replace(" .", ".")
+        .replace(" ,", ",")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn over_budget(tool: &str, max: usize) -> Json {
@@ -3946,6 +4052,69 @@ mod tests {
             pricing::think("gpt-4.1-mini", 300, 0, 20) + pricing::think("gpt-4.1", 1_000, 0, 10);
         let kept = &moli.exchanges(1)[0];
         assert!((kept.cost.think - think).abs() < 1e-12, "{:?}", kept.cost);
+    }
+
+    /// A spoken question the web answers: a few words are said while it
+    /// searches, and the web's answer is the reply, without asking the model
+    /// to say it again.
+    #[tokio::test]
+    async fn a_spoken_search_says_it_is_looking_and_answers_with_what_it_found() {
+        let (url, asked) = crate::llm::tests::fake_provider(vec![
+            json!({ "choices": [{ "message": { "role": "assistant", "content": null,
+                "tool_calls": [{ "id": "s1", "type": "function", "function": {
+                    "name": "web_search",
+                    "arguments": json!({ "query": "le match de ce soir" }).to_string() } }] } }],
+                "usage": { "prompt_tokens": 100, "completion_tokens": 10 } })
+            .to_string(),
+            json!({ "output": [{ "type": "message", "content": [{ "type": "output_text",
+                "text": "Le match commence à **21 h** ([lequipe.fr](https://www.lequipe.fr/x))." }] }],
+                "usage": { "input_tokens": 10, "output_tokens": 5 } })
+            .to_string(),
+        ])
+        .await;
+        let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let config: Config = serde_json::from_value(json!({ "base_url": url })).unwrap();
+        let moli = Assistant::new(hub, None, None, None, config).unwrap();
+        let (meanwhile, mut said) = tokio::sync::mpsc::unbounded_channel();
+        let mut turn = spoken("À quelle heure est le match ce soir ?");
+        turn.meanwhile = Some(meanwhile);
+        let reply = moli.turn(turn).await.unwrap();
+        assert_eq!(reply.reply, "Le match commence à 21 h.");
+        assert_eq!(reply.usage.steps, 1);
+        let words = said.try_recv().expect("words while it searches");
+        assert!(word_list("assistant.voice.wait.web_search").contains(&words));
+        assert!(said.try_recv().is_err(), "once a turn");
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2, "{asked:#?}");
+        assert!(asked[1].contains(&moli_i18n::tr("assistant.search.spoken")));
+    }
+
+    #[test]
+    fn each_tool_has_its_words_while_it_works() {
+        for tool in ["web_search", "forecast", "energy", "history", "get_device"] {
+            assert!(waiting_words(tool).is_some_and(|w| !w.is_empty()), "{tool}");
+        }
+        assert!(
+            word_list("assistant.voice.wait.default")
+                .contains(&waiting_words("get_device").unwrap())
+        );
+        // An order or the end of the conversation is its own answer.
+        for tool in ["set", "show", "ambiance", "end_conversation"] {
+            assert_eq!(waiting_words(tool), None, "{tool}");
+        }
+    }
+
+    #[test]
+    fn a_web_answer_is_said_without_its_sources() {
+        assert_eq!(
+            speakable("Le PSG joue à 21 h ([uefa.com](https://uefa.com/a?b=1)). Sur Canal+."),
+            "Le PSG joue à 21 h. Sur Canal+."
+        );
+        assert_eq!(
+            speakable("**Résultat** : 2 à 1 [source](https://example.com) https://example.com/x"),
+            "Résultat : 2 à 1"
+        );
+        assert_eq!(speakable("Il fait [très] beau."), "Il fait [très] beau.");
     }
 
     /// The key in the vault never goes to a model reached in plain http
