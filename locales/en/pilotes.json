@@ -705,5 +705,7 @@
   "pilotes.engie.deja_connecte": "the ENGIE account is already connected",
   "pilotes.engie.pas_de_session": "no charging session under way for this vehicle",
   "pilotes.engie.objectif_invalide": "the charge target goes from 0 to 100 %",
-  "pilotes.engie.lecture_seule": "{point} cannot be set"
+  "pilotes.engie.lecture_seule": "{point} cannot be set",
+  "pilotes.engie.solde": "Available reward balance",
+  "pilotes.engie.seuil_paiement": "Reward payout threshold"
 }

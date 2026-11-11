@@ -172,6 +172,20 @@ fn account_device(ctx: &DriverCtx, id: &DeviceId) -> Device {
                 true,
                 None,
             ),
+            point(
+                "reward_balance",
+                &moli_i18n::tr!("pilotes.engie.solde"),
+                number(),
+                false,
+                Some("€"),
+            ),
+            point(
+                "reward_payout_threshold",
+                &moli_i18n::tr!("pilotes.engie.seuil_paiement"),
+                number(),
+                false,
+                Some("€"),
+            ),
         ],
     }
 }
@@ -592,6 +606,17 @@ async fn slow(
         }
     }
 
+    if let Some(can) = known.can.clone() {
+        let path =
+            format!("/engie/ms/rewards/customer/v1/customer-accounts/{can}/reward-balance-details");
+        let r = api.get(ctx, &path, auth::APP_AGENT).await;
+        if let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() {
+            let (balance, threshold) = model::reward_balance(&json);
+            let account = ctx.device_id("account");
+            set_number(ctx, &account, "reward_balance", balance);
+            set_number(ctx, &account, "reward_payout_threshold", threshold);
+        }
+    }
     rewards(ctx, tz, api, known).await
 }
 

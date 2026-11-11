@@ -705,5 +705,7 @@
   "pilotes.engie.deja_connecte": "le compte ENGIE est déjà connecté",
   "pilotes.engie.pas_de_session": "pas de session de recharge en cours pour ce véhicule",
   "pilotes.engie.objectif_invalide": "l'objectif de charge va de 0 à 100 %",
-  "pilotes.engie.lecture_seule": "{point} ne se règle pas"
+  "pilotes.engie.lecture_seule": "{point} ne se règle pas",
+  "pilotes.engie.solde": "Solde de récompenses disponible",
+  "pilotes.engie.seuil_paiement": "Seuil de versement des récompenses"
 }

@@ -46,3 +46,6 @@ file = "fixtures/charge-settings.json"
 
 [[fixture]]
 file = "fixtures/sessions.json"
+
+[[fixture]]
+file = "fixtures/reward-balance.json"

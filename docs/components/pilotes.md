@@ -910,7 +910,8 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   (`Europe/Brussels` : jours et mois des pics, heures de départ), `vehicles` (les véhicules suivis,
   par nom ou numéro ; vide : tous ; les autres ne sont jamais lus et leur appareil est retiré).
 - **Secrets** : `refresh_token`, posé par la connexion, jamais tapé.
-- **Points** : compte : `status`, `sign_in_url`, `sign_in`. Contrat : un prix par énergie, sens et
+- **Points** : compte : `status`, `sign_in_url`, `sign_in`, `reward_balance` (solde de
+  récompenses disponible), `reward_payout_threshold`. Contrat : un prix par énergie, sens et
   plage de la période en cours (`electricity_offtake_peak`… €/kWh TVA comprise ; la plage mêlée
   `EN` est écartée, comme dans Home Assistant), `peak_month_kw`, `peak_month_at`,
   `peak_today_kw`, `peak_previous_month_kw`. Véhicule : `soc`, `range_km`, `charge_power_kw`,

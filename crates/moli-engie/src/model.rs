@@ -341,6 +341,17 @@ pub fn add_rewards(
     json["page"]["totalPages"].as_u64().unwrap_or(1)
 }
 
+/// `GET …/rewards/customer/v1/customer-accounts/{can}/reward-balance-details`:
+/// what the account's rewards add up to, not paid out yet, and from how much
+/// ENGIE pays them out.
+#[must_use]
+pub fn reward_balance(json: &Json) -> (Option<f64>, Option<f64>) {
+    (
+        number(&json["openAmount"]),
+        number(&json["payoutThreshold"]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +362,14 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         );
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn the_reward_balance() {
+        assert_eq!(
+            reward_balance(&fixture("reward-balance")),
+            (Some(4.24), Some(25.0))
+        );
     }
 
     #[test]
