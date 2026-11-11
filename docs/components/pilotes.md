@@ -907,7 +907,8 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   (`be.engie.smart://login-callback/…?code=…`) dans la carte du tableau de bord (point `sign_in`).
   Le jeton de rafraîchissement **tourne** à chaque usage : le nouveau est rangé aussitôt.
 - **Configuration** : rien d'obligatoire ; `language` (page de connexion, `fr`), `timezone`
-  (`Europe/Brussels` : jours et mois des pics, heures de départ).
+  (`Europe/Brussels` : jours et mois des pics, heures de départ), `vehicles` (les véhicules suivis,
+  par nom ou numéro ; vide : tous ; les autres ne sont jamais lus et leur appareil est retiré).
 - **Secrets** : `refresh_token`, posé par la connexion, jamais tapé.
 - **Points** : compte : `status`, `sign_in_url`, `sign_in`. Contrat : un prix par énergie, sens et
   plage de la période en cours (`electricity_offtake_peak`… €/kWh TVA comprise ; la plage mêlée

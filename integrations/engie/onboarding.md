@@ -3,7 +3,8 @@
 1. Prévenir la personne : interface non officielle (celle de l'appli ENGIE Smart) ; se connecter
    avec le même compte dans l'appli ou sur engie.be déconnecte Moli (un utilisateur dédié l'évite).
 2. Déclarer `kind = "engie"` (options facultatives : `language` de la page de connexion, `fr` par
-   défaut ; `timezone`, `Europe/Brussels` par défaut) ; `moli-os check-config`, redémarrer.
+   défaut ; `timezone`, `Europe/Brussels` par défaut ; `vehicles`, les véhicules à suivre par nom ou numéro
+   quand le compte en partage d'autres, tous par défaut) ; `moli-os check-config`, redémarrer.
 3. La personne connecte le compte depuis le tableau de bord (Système, carte ENGIE) : page ENGIE,
    connexion avec le code SMS ou e-mail, adresse `be.engie.smart://…` collée (en-tête `Location`
    de la dernière réponse 302 de `/authorize/resume`, dans l'onglet Réseau des outils du navigateur

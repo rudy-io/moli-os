@@ -63,6 +63,21 @@ pub struct Config {
     /// The zone of the account's days and months (peaks, departure times).
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    /// The vehicles Moli follows, by name or number (a shared account may
+    /// hold someone else's car); empty: all of them. The others are never
+    /// read, and their device goes.
+    #[serde(default)]
+    pub vehicles: Vec<String>,
+}
+
+impl Config {
+    fn follows(&self, v: &model::Vehicle) -> bool {
+        self.vehicles.is_empty()
+            || self.vehicles.iter().any(|w| {
+                let w = w.trim();
+                w.eq_ignore_ascii_case(&v.name) || w == v.id.to_string()
+            })
+    }
 }
 
 #[derive(Debug)]
@@ -199,7 +214,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             }
         };
         refused = false;
-        match connected(ctx, &tz, &account, tokens).await {
+        match connected(config, ctx, &tz, &account, tokens).await {
             Ok(()) => return Ok(()),
             Err(Failure::Refused) => {
                 tracing::warn!(instance = %ctx.instance(), "engie session refused: sign in again");
@@ -392,6 +407,7 @@ struct Known {
     vehicles: HashMap<u64, DeviceId>,
     last_error: Option<String>,
     told_no_vehicle: bool,
+    left_out: std::collections::HashSet<u64>,
 }
 
 /// A JSON answer's shape, for a log: keys and list lengths, never a value.
@@ -414,6 +430,7 @@ fn shape(json: &Json) -> String {
 }
 
 async fn connected(
+    config: &Config,
     ctx: &mut DriverCtx,
     tz: &TimeZone,
     account: &DeviceId,
@@ -449,7 +466,7 @@ async fn connected(
                 if turn.is_multiple_of(SLOW_EVERY) {
                     slow(ctx, tz, &mut api, &mut known).await?;
                 }
-                fast(ctx, tz, &mut api, &mut known).await?;
+                fast(config, ctx, tz, &mut api, &mut known).await?;
                 turn = turn.wrapping_add(1);
             }
             command = ctx.next_command() => {
@@ -800,6 +817,7 @@ fn vehicle_device(ctx: &DriverCtx, id: &DeviceId, v: &model::Vehicle) -> Device 
 
 /// The vehicles, their last session and its settings.
 async fn fast(
+    config: &Config,
     ctx: &DriverCtx,
     tz: &TimeZone,
     api: &mut Api,
@@ -817,6 +835,14 @@ async fn fast(
         .and_then(Option::as_ref)
         .map(model::vehicles)
         .unwrap_or_default();
+    let (found, others): (Vec<_>, Vec<_>) = found.into_iter().partition(|v| config.follows(v));
+    for v in others {
+        // Someone else's car: not followed, its device gone (once).
+        if known.left_out.insert(v.id) {
+            ctx.remove_device(&ctx.device_id(&format!("vehicle-{}", v.id)));
+            tracing::info!(instance = %ctx.instance(), "engie: a vehicle left out (option vehicles)");
+        }
+    }
     if found.is_empty() && !known.told_no_vehicle {
         // Once: what came back, by its shape only (no value of the account).
         let shape = match &answer {
@@ -1074,6 +1100,25 @@ mod tests {
     }
 
     #[test]
+    fn only_the_vehicles_asked_for_are_followed() {
+        let config = |v: &[&str]| Config {
+            language: "fr".into(),
+            timezone: "Europe/Brussels".into(),
+            vehicles: v.iter().map(|s| (*s).to_owned()).collect(),
+        };
+        let car = |id, name: &str| model::Vehicle {
+            id,
+            name: name.into(),
+            ..model::Vehicle::default()
+        };
+        assert!(config(&[]).follows(&car(1, "Ma voiture")));
+        let mine = config(&["ma voiture"]);
+        assert!(mine.follows(&car(1, "Ma voiture")));
+        assert!(!mine.follows(&car(2, "Model 3")));
+        assert!(config(&["2"]).follows(&car(2, "Model 3")));
+    }
+
+    #[test]
     fn a_shape_tells_no_value() {
         let json = serde_json::json!({"items": [{"vin": "SECRET"}], "page": {"n": 1}, "total": 7});
         let s = shape(&json);
@@ -1086,7 +1131,8 @@ mod tests {
         assert!(
             Engie::new(Config {
                 language: "fr".into(),
-                timezone: "Nowhere/Never".into()
+                timezone: "Nowhere/Never".into(),
+                vehicles: Vec::new(),
             })
             .is_err()
         );

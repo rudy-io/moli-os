@@ -20,7 +20,7 @@ ports = []
 # Given by the dashboard's sign-in, never typed into a file.
 secrets = ["refresh_token"]
 vars = []
-options = ["language", "timezone"]
+options = ["language", "timezone", "vehicles"]
 
 [origin]
 reused = "aucun code repris : adresses, client et champs lus dans aioengiebelgium (bibliothèque de l'intégration engie_be de Home Assistant) comme référence du protocole"
