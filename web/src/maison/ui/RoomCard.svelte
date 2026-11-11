@@ -232,7 +232,12 @@
   function tap(d, point, outlets, name, isCover) {
     if (isCover) {
       const pct = coverPosition(d.id);
-      const isOpen = pct != null && pct > 0;
+      // Without a measured position, the pad opens the tile: open, stop, close.
+      if (pct == null) {
+        open = d.id;
+        return;
+      }
+      const isOpen = pct > 0;
       const action = coverCommands(d).find((c) => c.command === (isOpen ? 'close' : 'open'));
       if (!action?.value || !canWrite(d, action.key)) return;
       const actionLabel = t(isOpen ? 'commun.volet.fermer' : 'commun.volet.ouvrir').toLowerCase();
@@ -297,11 +302,12 @@
   {#if pads.length}
     <div class="pads" class:icons>
       {#each pads as { d, point, link, outlets, name, isCover } (`${d.id}/${point}`)}
-        {@const lit = isCover ? (coverPosition(d.id) ?? 0) > 0 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
+        {@const coverPct = isCover ? coverPosition(d.id) : null}
+        {@const lit = isCover ? (coverPct ?? 0) > 0 : link ? value(d.id, 'playing') === true : outlets ? litCount(outlets, d.id) > 0 : isOn(d.id, point)}
         {@const cut = unpowered(d.id) && !isFixture(d)}
         {@const more = isCover ? true : !link && !point && !cut && (fine(d) || hasFan(d.id) || (isFixture(d) && d.members?.some(hasFan)))}
         {@const label = name ?? nameOf(d.id)}
-        {@const coverCommand = isCover ? coverCommands(d).find((c) => c.command === (lit ? 'close' : 'open'))?.command : undefined}
+        {@const coverCommand = coverPct != null ? coverCommands(d).find((c) => c.command === (lit ? 'close' : 'open'))?.command : undefined}
         <div class="pad-wrap">
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>

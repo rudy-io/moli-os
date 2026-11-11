@@ -304,6 +304,7 @@ test('the rooms icons preference reaches each cover without changing the dedicat
     point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
   const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
   assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  assert.match(room, /data-cover-command="close"/);
   const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
   assert.match(focused, />Fixture</);
   assert.match(focused, />Ouvrir</);
@@ -776,7 +777,9 @@ test('a room shows its trigger device and a lone control point stays a cover', (
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
   assert.match(room, /Impulsion · Relais 1/);
-  assert.match(room, /data-cover-command="open"/);
+  // No measured position: the pad opens the cover tile instead of sending open.
+  assert.match(room, /shutter-icon/);
+  assert.doesNotMatch(room, /data-cover-command/);
 });
 
 test('a presence radar shows someone there, whatever the key of its presence point', () => {
