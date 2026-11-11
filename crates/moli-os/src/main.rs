@@ -1427,6 +1427,21 @@ fn spawn_house_drivers(
             cancel.clone(),
         ));
     }
+    if !config.scenes.is_empty() || config.rhythm.is_some() {
+        // The rhythm follows the house's clock; an unknown zone falls back to UTC.
+        let zone = jiff::tz::TimeZone::get(&config.zone.name).unwrap_or(jiff::tz::TimeZone::UTC);
+        tasks.push(spawn_driver(
+            hub,
+            InstanceId::from(moli_scenes::INSTANCE),
+            Arc::new(moli_scenes::Scenes::new(
+                hub.clone(),
+                config.scenes.clone(),
+                config.rhythm.clone(),
+                zone,
+            )),
+            cancel.clone(),
+        ));
+    }
     if let Some(energy) = energy {
         tasks.push(spawn_driver(
             hub,

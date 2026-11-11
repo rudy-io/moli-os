@@ -1758,6 +1758,7 @@ dependencies = [
  "moli-profile",
  "moli-reolink",
  "moli-runtime",
+ "moli-scenes",
  "moli-shelly",
  "moli-solarman",
  "moli-sonos",
@@ -1926,6 +1927,22 @@ dependencies = [
  "toml",
  "tracing",
  "unicode-normalization",
+]
+
+[[package]]
+name = "moli-scenes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jiff",
+ "moli-ambiance",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "tokio",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

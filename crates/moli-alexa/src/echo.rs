@@ -83,8 +83,23 @@ fn point(key: &str, label: &str, kind: Kind, write: bool, unit: Option<Unit>) ->
     }
 }
 
-/// How `echo` shows in the house.
-pub(crate) fn device(ctx: &DriverCtx, id: &DeviceId, echo: &Echo) -> Device {
+/// The room's temperature, for a speaker that measures it.
+fn room_temperature() -> PointSpec {
+    point(
+        "temperature",
+        &moli_i18n::tr!("pilotes.alexa.temperature"),
+        Kind::Numeric {
+            min: None,
+            max: None,
+            step: None,
+        },
+        false,
+        Some(Unit::Celsius),
+    )
+}
+
+/// How `echo` shows in the house (`thermometer`: it measures the room).
+pub(crate) fn device(ctx: &DriverCtx, id: &DeviceId, echo: &Echo, thermometer: bool) -> Device {
     let mut points = vec![
         point(
             "playing",
@@ -159,6 +174,9 @@ pub(crate) fn device(ctx: &DriverCtx, id: &DeviceId, echo: &Echo) -> Device {
                 Some(Unit::Percent),
             ),
         );
+    }
+    if thermometer {
+        points.push(room_temperature());
     }
     Device {
         id: id.clone(),

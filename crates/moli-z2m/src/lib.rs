@@ -2,18 +2,22 @@
 //!
 //! Subscribes to `{base}/#`, maps `bridge/devices` to Moli devices, state
 //! messages to values and availability messages to online flags, and turns
-//! commands into `{friendly_name}/set` publications.
+//! commands into `{friendly_name}/set` publications. Colour lamps also get
+//! a flame the driver plays itself ([`flame`]).
 
 mod catalog;
+mod flame;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use moli_core::DeviceId;
+use flame::{FLAME, Flame, NO_EFFECT};
+use moli_core::{DeviceId, Value};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
 use serde::Deserialize;
+use tokio::time::Instant;
 
 pub use catalog::{Catalog, Entry};
 
@@ -105,6 +109,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     // queue, acknowledged, and be lost (or sent much later): refuse it.
     // Any poll error ends the run, so the flag never outlives a connection.
     let mut connected = false;
+    // The lamps playing the flame, and when each takes its next fade.
+    let mut flames: Flames = HashMap::new();
+    let mut flicker = tokio::time::interval(FLAME_TICK);
+    flicker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
@@ -116,9 +124,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     ctx.ready();
                 }
                 Event::Incoming(Packet::Publish(publish)) => {
-                    let reloaded = on_publish(ctx, config, base, &mut catalog, &publish);
+                    let reloaded = on_publish(ctx, config, base, &mut catalog, &mut flames, &publish);
                     if reloaded {
                         queue_reads(base, &catalog, &mut read_done, &mut reads);
+                        resume_flames(ctx, &catalog, &mut flames);
                     }
                 }
                 _ => {}
@@ -130,9 +139,12 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     reads.push_front((topic, payload));
                 }
             },
+            _ = flicker.tick(), if connected && !flames.is_empty() => {
+                play_flames(&client, base, &catalog, &mut flames);
+            },
             command = ctx.next_command() => match command {
                 Some(command) if !connected => command.reply(Err(UNREACHABLE.into())),
-                Some(command) => on_command(&client, base, &catalog, command),
+                Some(command) => on_command(ctx, &client, base, &catalog, &mut flames, command),
                 None => return Ok(()),
             },
         }
@@ -145,6 +157,7 @@ fn on_publish(
     config: &Config,
     base: &str,
     catalog: &mut Catalog,
+    flames: &mut Flames,
     publish: &Publish,
 ) -> bool {
     let Some(rest) = publish
@@ -175,7 +188,12 @@ fn on_publish(
     }
     if let Some(name) = rest.strip_suffix("/availability") {
         if let Some(entry) = catalog.by_name(name) {
-            ctx.set_availability(&entry.device.id, parse_online(&publish.payload));
+            let online = parse_online(&publish.payload);
+            ctx.set_availability(&entry.device.id, online);
+            // Cut at the wall: nothing left to animate.
+            if !online && flames.remove(&entry.device.id).is_some() {
+                ctx.set_state(&entry.device.id, "effect", Value::from(NO_EFFECT));
+            }
         }
         return false;
     }
@@ -183,8 +201,24 @@ fn on_publish(
         return false;
     };
     if let Ok(serde_json::Value::Object(payload)) = serde_json::from_slice(&publish.payload) {
+        let id = &entry.device.id;
+        let playing = flames.contains_key(id);
         for (key, value) in entry.decode(&payload) {
-            ctx.set_state(&entry.device.id, &key, value);
+            // The lamp knows nothing of the flame: what plays is ours to say.
+            if entry.flame && &*key == "effect" {
+                continue;
+            }
+            // The fades of the flame are not what the person chose: the level
+            // and the colour on record stay theirs.
+            if playing && is_look(&key) {
+                continue;
+            }
+            // Switched off some other way (its own button): the flame is over.
+            if playing && &*key == "state" && value == Value::Bool(false) {
+                flames.remove(id);
+                ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+            }
+            ctx.set_state(id, &key, value);
         }
     } else {
         tracing::debug!(topic = %publish.topic, "non-object state payload ignored");
@@ -251,12 +285,161 @@ fn apply_catalog(ctx: &DriverCtx, current: &mut Catalog, fresh: Catalog) {
     *current = fresh;
 }
 
-fn on_command(client: &AsyncClient, base: &str, catalog: &Catalog, command: CommandRequest) {
+/// The lamps playing the flame: the flame, and when its next fade is due.
+type Flames = HashMap<DeviceId, (Flame, Instant)>;
+
+/// How often due flames are looked for (a fade lasts one to two seconds).
+const FLAME_TICK: Duration = Duration::from_millis(250);
+
+/// The lamp's own colour loop (Zigbee), and the order that ends it.
+const COLORLOOP: &str = "colorloop";
+const STOP_COLORLOOP: &str = "stop_colorloop";
+
+/// The level a flame moves around when the lamp never said its own.
+const FLAME_BASE: f64 = 30.0;
+
+/// What a flame changes on a lamp: its level and its colour.
+fn is_look(key: &str) -> bool {
+    key == "brightness" || key == "color_temp" || key == "color" || key.starts_with("color.")
+}
+
+/// A seed that differs from one lamp and one start to the next.
+fn flame_seed(id: &DeviceId) -> u64 {
+    use std::hash::{BuildHasher as _, RandomState};
+    RandomState::new().hash_one(id)
+}
+
+/// Sends its next fade to every lamp whose time has come.
+fn play_flames(client: &AsyncClient, base: &str, catalog: &Catalog, flames: &mut Flames) {
+    let now = Instant::now();
+    flames.retain(|id, (flame, due)| {
+        let Some(entry) = catalog.by_id(id).filter(|e| e.flame) else {
+            return false;
+        };
+        if *due <= now {
+            let fade = flame.frame();
+            let topic = format!("{base}/{}/set", entry.friendly_name);
+            let payload = entry.flame_frame(&fade, false).to_string();
+            // A full channel: this fade is skipped, never queued behind orders.
+            let _ = client.try_publish(topic, QoS::AtMostOnce, false, payload);
+            *due = now + fade.period();
+        }
+        true
+    });
+}
+
+/// After a restart (or a new catalog), the lamps on record as playing the
+/// flame play it again; one that is off by now is on record as stopped.
+fn resume_flames(ctx: &DriverCtx, catalog: &Catalog, flames: &mut Flames) {
+    for entry in catalog.entries().filter(|e| e.flame) {
+        let id = &entry.device.id;
+        if flames.contains_key(id) || ctx.current(id, "effect") != Some(Value::from(FLAME)) {
+            continue;
+        }
+        if ctx.current(id, "state") == Some(Value::Bool(true)) {
+            let level = ctx.current(id, "brightness").and_then(|v| v.as_f64());
+            let flame = Flame::new(level.unwrap_or(FLAME_BASE), flame_seed(id));
+            flames.insert(id.clone(), (flame, Instant::now()));
+        } else {
+            ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+        }
+    }
+}
+
+/// An order to a lamp that can play the flame. Returns the payload to send
+/// to the lamp, or `None` when the order is fully handled here.
+fn flame_order(
+    ctx: &DriverCtx,
+    entry: &Entry,
+    flames: &mut Flames,
+    key: &str,
+    value: &Value,
+) -> Option<serde_json::Value> {
+    let id = &entry.device.id;
+    let text = match value {
+        Value::Text(t) => Some(&**t),
+        _ => None,
+    };
+    match (key, text) {
+        ("effect", Some(FLAME)) => {
+            if flames.contains_key(id) {
+                return None;
+            }
+            let level = ctx.current(id, "brightness").and_then(|v| v.as_f64());
+            let mut flame = Flame::new(level.unwrap_or(FLAME_BASE), flame_seed(id));
+            let first = flame.frame();
+            flames.insert(id.clone(), (flame, Instant::now() + first.period()));
+            ctx.set_state(id, "effect", Value::from(FLAME));
+            Some(entry.flame_frame(&first, true))
+        }
+        ("effect", Some(NO_EFFECT)) => {
+            let looping = ctx.current(id, "effect") == Some(Value::from(COLORLOOP));
+            ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+            if looping {
+                return Some(entry.encode("effect", &Value::from(STOP_COLORLOOP)));
+            }
+            flames
+                .remove(id)
+                .map(|(flame, _)| entry.flame_rest(flame.base()))
+        }
+        // The slider sets the level the flame moves around.
+        ("brightness", _) if flames.contains_key(id) => {
+            if let Some(((flame, due), level)) = flames.get_mut(id).zip(value.as_f64()) {
+                flame.set_base(level);
+                *due = Instant::now();
+            }
+            ctx.set_state(id, "brightness", value.clone());
+            None
+        }
+        _ => {
+            // Another look, another animation or switched off: the flame is over.
+            let off = key == "state" && *value == Value::Bool(false);
+            if (off || is_look(key) || key == "effect") && flames.remove(id).is_some() {
+                ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+            }
+            // The lamp's own colour loop goes on until told to stop, and the
+            // lamp never says it plays it: the driver keeps that on record,
+            // so that whoever sets a look next knows to stop it first.
+            match (key, text) {
+                ("effect", Some(COLORLOOP)) => {
+                    ctx.set_state(id, "effect", Value::from(COLORLOOP));
+                }
+                ("effect", Some(STOP_COLORLOOP)) => {
+                    ctx.set_state(id, "effect", Value::from(NO_EFFECT));
+                }
+                _ => {}
+            }
+            // A level is on record at once: a flame started right after it
+            // (a scene sets the level, then the flame) moves around it, not
+            // around the level before.
+            if key == "brightness" {
+                ctx.set_state(id, "brightness", value.clone());
+            }
+            Some(entry.encode(key, value))
+        }
+    }
+}
+
+fn on_command(
+    ctx: &DriverCtx,
+    client: &AsyncClient,
+    base: &str,
+    catalog: &Catalog,
+    flames: &mut Flames,
+    command: CommandRequest,
+) {
     let Some(entry) = catalog.by_id(&command.device.id) else {
         command.reply(Err("device no longer known to zigbee2mqtt".into()));
         return;
     };
-    let payload = entry.encode(&command.key, &command.value).to_string();
+    let payload = if entry.flame {
+        match flame_order(ctx, entry, flames, &command.key, &command.value) {
+            Some(payload) => payload.to_string(),
+            None => return command.reply(Ok(())),
+        }
+    } else {
+        entry.encode(&command.key, &command.value).to_string()
+    };
     let topic = format!("{base}/{}/set", entry.friendly_name);
     tracing::debug!(%topic, %payload, "publish command");
     let result = client

@@ -45,6 +45,7 @@ music = ""             # le service par défaut : vide = celui du compte (AMAZON
 | `say` ✎ | une phrase dite (250 caractères au plus ; un groupe : par chaque membre) |
 | `announce` ✎ | une annonce (son d'annonce, puis la phrase ; à activer sur l'Echo) |
 | `command` ✎ | une commande Alexa écrite, comme si on lui parlait |
+| `temperature` | température de la pièce en °C, seulement pour un Echo qui la mesure (Echo 4e génération, Dot 5e génération…), relue toutes les 5 min |
 
 ## Limites
 
@@ -52,3 +53,4 @@ music = ""             # le service par défaut : vide = celui du compte (AMAZON
   depuis un téléphone).
 - Un changement de mot de passe Amazon peut obliger à refaire la connexion.
 - L'état de lecture est relu toutes les 30 s.
+- La température vient du capteur qu'Amazon range parmi les appareils de la maison connectée, rattaché à l'Echo (requête GraphQL `/nexus/v1/graphql`, puis `/api/phoenix/state`). Si Amazon ne la donne pas, le point n'apparaît pas et la raison est écrite une fois dans le journal.

@@ -140,6 +140,21 @@ impl Session {
         self.get("/api/devices-v2/device?cached=false").await
     }
 
+    /// The account's smart-home endpoints (where a speaker's thermometer is).
+    pub(crate) async fn endpoints(&self) -> Result<Json, Failure> {
+        self.post(
+            "/nexus/v1/graphql",
+            &json!({ "query": crate::thermo::ENDPOINTS }),
+        )
+        .await
+    }
+
+    /// What these smart-home sensors read now.
+    pub(crate) async fn sensor_states(&self, ids: &[&str]) -> Result<Json, Failure> {
+        self.post("/api/phoenix/state", &crate::thermo::request(ids))
+            .await
+    }
+
     /// The account's music service by default (`AMAZON_MUSIC`, `SPOTIFY`…).
     pub(crate) async fn default_music(&self) -> Option<String> {
         let path = "/api/behaviors/entities?skillId=amzn1.ask.1p.music";

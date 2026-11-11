@@ -340,6 +340,25 @@ fn device(ctx: &DriverCtx, id: &DeviceId, name: &str, max_volume: f64, overlay: 
                 true,
                 Semantic::OnOff,
             ),
+            // What the Ambilight does: follows the picture, the sound, or
+            // holds one of the TV's own looks.
+            spec(
+                "ambilight_mode",
+                &moli_i18n::tr!("pilotes.philips.ambilight_mode"),
+                Kind::Enum {
+                    values: AMBILIGHT_MODES.iter().map(|m| m.0.into()).collect(),
+                },
+                true,
+                Semantic::Other,
+            ),
+            // One colour all around (« #rrggbb »).
+            spec(
+                "ambilight_color",
+                &moli_i18n::tr!("pilotes.philips.ambilight_couleur"),
+                Kind::Text,
+                true,
+                Semantic::Other,
+            ),
             // Written: the text of the field open on the TV (a search).
             PointSpec {
                 key: "text".into(),
@@ -698,6 +717,9 @@ async fn apply(
             )
             .await?;
         }
+        ("ambilight_mode" | "ambilight_color", Value::Text(look)) => {
+            ambilight_look(tv, &command.key, look).await?;
+        }
         ("mute", Value::Bool(muted)) => {
             let current = tv.request(Method::GET, "audio/volume", None).await?["current"]
                 .as_i64()
@@ -715,6 +737,146 @@ async fn apply(
         )),
     }
     Ok(())
+}
+
+/// The Ambilight's looks: the name Moli gives each, and the TV's own
+/// (`styleName`, `menuSetting` of `ambilight/currentconfiguration`).
+const AMBILIGHT_MODES: [(&str, &str, &str); 12] = [
+    ("standard", "FOLLOW_VIDEO", "STANDARD"),
+    ("natural", "FOLLOW_VIDEO", "NATURAL"),
+    ("vivid", "FOLLOW_VIDEO", "VIVID"),
+    ("game", "FOLLOW_VIDEO", "GAME"),
+    ("comfort", "FOLLOW_VIDEO", "COMFORT"),
+    ("relax", "FOLLOW_VIDEO", "RELAX"),
+    ("hot_lava", "FOLLOW_COLOR", "HOT_LAVA"),
+    ("deep_water", "FOLLOW_COLOR", "DEEP_WATER"),
+    ("fresh_nature", "FOLLOW_COLOR", "FRESH_NATURE"),
+    ("warm_white", "FOLLOW_COLOR", "ISF"),
+    ("music", "FOLLOW_AUDIO", "ENERGY_ADAPTIVE_COLORS"),
+    ("party", "FOLLOW_AUDIO", "PARTY"),
+];
+
+/// A look (`ambilight_mode`) or one colour all around (`ambilight_color`).
+async fn ambilight_look(tv: &Tv, key: &str, look: &str) -> anyhow::Result<()> {
+    if key == "ambilight_color" {
+        let Some((hue, saturation, brightness)) = hex_to_hsv(look) else {
+            bail!(moli_i18n::tr!("pilotes.philips.couleur_invalide"));
+        };
+        let held = json!({
+            "styleName": "FOLLOW_COLOR",
+            "isExpert": true,
+            "algorithm": "MANUAL_HUE",
+            "colorSettings": {
+                "color": {"hue": hue, "saturation": saturation, "brightness": brightness},
+                "colorDelta": {"hue": 0, "saturation": 0, "brightness": 0},
+                "speed": 255,
+            },
+        });
+        return ambilight(tv, &held).await;
+    }
+    let Some((_, style, menu)) = AMBILIGHT_MODES.iter().find(|m| m.0 == look) else {
+        bail!(moli_i18n::tr!(
+            "pilotes.philips.ne_se_regle_pas",
+            point = "ambilight_mode"
+        ));
+    };
+    ambilight(
+        tv,
+        &json!({"styleName": style, "isExpert": false, "menuSetting": menu}),
+    )
+    .await
+}
+
+/// Lights the Ambilight if it is off, then gives it this configuration.
+async fn ambilight(tv: &Tv, configuration: &Json) -> anyhow::Result<()> {
+    let power = tv.request(Method::GET, "ambilight/power", None).await;
+    if power.is_ok_and(|p| p["power"].as_str() != Some("On")) {
+        tv.request(
+            Method::POST,
+            "ambilight/power",
+            Some(&json!({"power": "On"})),
+        )
+        .await?;
+    }
+    tv.request(
+        Method::POST,
+        "ambilight/currentconfiguration",
+        Some(configuration),
+    )
+    .await?;
+    Ok(())
+}
+
+/// « #rrggbb » as the TV counts a colour: hue, saturation and brightness,
+/// each from 0 to 255.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn hex_to_hsv(hex: &str) -> Option<(u8, u8, u8)> {
+    let digits = hex.strip_prefix('#').filter(|d| d.len() == 6)?;
+    let part = |i: usize| u8::from_str_radix(digits.get(i..i + 2)?, 16).ok();
+    let (r, g, b) = (
+        f64::from(part(0)?),
+        f64::from(part(2)?),
+        f64::from(part(4)?),
+    );
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let delta = max - min;
+    let hue = if delta == 0.0 {
+        0.0
+    } else if (max - r).abs() < f64::EPSILON {
+        60.0 * ((g - b) / delta).rem_euclid(6.0)
+    } else if (max - g).abs() < f64::EPSILON {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let saturation = if max == 0.0 { 0.0 } else { delta / max };
+    Some((
+        (hue / 360.0 * 255.0).round() as u8,
+        (saturation * 255.0).round() as u8,
+        max.round() as u8,
+    ))
+}
+
+/// The TV's colour (hue, saturation, brightness from 0 to 255) as « #rrggbb ».
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(clippy::many_single_char_names)]
+fn hsv_to_hex(hue: f64, saturation: f64, brightness: f64) -> String {
+    let (h, s, v) = (hue / 255.0 * 6.0, saturation / 255.0, brightness);
+    let c = v * s;
+    let x = c * (1.0 - (h.rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match h as u8 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    let byte = |f: f64| (f + m).round().clamp(0.0, 255.0) as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(r), byte(g), byte(b))
+}
+
+/// What the Ambilight does now, in Moli's words: one of its looks, or the
+/// single colour it holds.
+fn ambilight_now(configuration: &Json) -> [(&'static str, Value); 2] {
+    let style = configuration["styleName"].as_str().unwrap_or_default();
+    let menu = configuration["menuSetting"].as_str().unwrap_or_default();
+    let mode = AMBILIGHT_MODES
+        .iter()
+        .find(|m| m.1 == style && m.2 == menu)
+        .map_or(Value::Null, |m| Value::from(m.0));
+    let color = &configuration["colorSettings"]["color"];
+    let held = style == "FOLLOW_COLOR" && configuration["algorithm"].as_str() == Some("MANUAL_HUE");
+    let color = match (
+        color["hue"].as_f64(),
+        color["saturation"].as_f64(),
+        color["brightness"].as_f64(),
+    ) {
+        (Some(h), Some(s), Some(v)) if held => Value::from(hsv_to_hex(h, s, v).as_str()),
+        _ => Value::Null,
+    };
+    [("ambilight_mode", mode), ("ambilight_color", color)]
 }
 
 async fn poll(tv: &Tv) -> anyhow::Result<(Vec<(&'static str, Value)>, f64)> {
@@ -736,6 +898,23 @@ async fn poll(tv: &Tv) -> anyhow::Result<(Vec<(&'static str, Value)>, f64)> {
             && let Some(power) = ambilight["power"].as_str()
         {
             values.push(("ambilight", Value::Bool(power == "On")));
+        }
+        if let Ok(configuration) = tv
+            .request(Method::GET, "ambilight/currentconfiguration", None)
+            .await
+        {
+            // Said once per look: the words of this TV, for whoever adds one.
+            static SEEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+            let said = configuration.to_string();
+            let mut seen = SEEN
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *seen != said {
+                tracing::info!(configuration = %said, "ambilight");
+                *seen = said;
+            }
+            drop(seen);
+            values.extend(ambilight_now(&configuration));
         }
         let current = tv.request(Method::GET, "activities/current", None).await?;
         let app = current["component"]["packageName"]
@@ -862,6 +1041,46 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_colour_goes_to_the_tv_and_comes_back() {
+        assert_eq!(hex_to_hsv("#ff0000"), Some((0, 255, 255)));
+        assert_eq!(hex_to_hsv("#00ff00"), Some((85, 255, 255)));
+        assert_eq!(hex_to_hsv("#0000ff"), Some((170, 255, 255)));
+        assert_eq!(hex_to_hsv("#ffffff"), Some((0, 0, 255)));
+        assert_eq!(hex_to_hsv("#000000"), Some((0, 0, 0)));
+        assert_eq!(hex_to_hsv("orange"), None);
+        assert_eq!(hex_to_hsv("#ff00"), None);
+        for hex in ["#ff0000", "#00ff00", "#0000ff", "#ffffff", "#000000"] {
+            let (h, s, v) = hex_to_hsv(hex).unwrap();
+            assert_eq!(hsv_to_hex(f64::from(h), f64::from(s), f64::from(v)), hex);
+        }
+    }
+
+    #[test]
+    fn the_ambilight_says_its_look_in_moli_s_words() {
+        let follows =
+            json!({"styleName": "FOLLOW_VIDEO", "isExpert": false, "menuSetting": "STANDARD"});
+        assert_eq!(
+            ambilight_now(&follows),
+            [
+                ("ambilight_mode", Value::from("standard")),
+                ("ambilight_color", Value::Null)
+            ]
+        );
+        let held = json!({"styleName": "FOLLOW_COLOR", "isExpert": true, "algorithm": "MANUAL_HUE",
+            "colorSettings": {"color": {"hue": 0, "saturation": 255, "brightness": 255}}});
+        assert_eq!(
+            ambilight_now(&held),
+            [
+                ("ambilight_mode", Value::Null),
+                ("ambilight_color", Value::from("#ff0000"))
+            ]
+        );
+        // A look Moli has no word for: nothing said, nothing invented.
+        let unknown = json!({"styleName": "FOLLOW_FLAG", "menuSetting": "FRANCE"});
+        assert_eq!(ambilight_now(&unknown)[0].1, Value::Null);
+    }
 
     #[test]
     fn digest_matches_rfc_2617_example() {
