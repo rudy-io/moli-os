@@ -320,13 +320,7 @@
         <div class="pad-wrap">
           {#if link}
             <a class="pad" class:on={lit} href={link} title={label} aria-label={t('commun.action', { label, action: stateOf(d, point) })}>
-              <span class="ico">
-                {#if isCover}
-                  <ShutterIcon id={d.id} size={icons ? 22 : 18} compact />
-                {:else}
-                  <Icon name={padIcon(d)} size={icons ? 22 : 18} />
-                {/if}
-              </span>
+              <span class="ico"><Icon name={padIcon(d)} size={icons ? 22 : 18} /></span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point)}</small>{/if}
             </a>
           {:else}
