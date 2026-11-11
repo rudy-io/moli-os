@@ -13,10 +13,16 @@ pub const PING_RESPONSE: u16 = 8;
 pub const DEVICE_INFO_REQUEST: u16 = 9;
 pub const DEVICE_INFO_RESPONSE: u16 = 10;
 pub const LIST_ENTITIES_REQUEST: u16 = 11;
+pub const LIST_BINARY_SENSOR: u16 = 12;
+pub const LIST_SENSOR: u16 = 16;
 pub const LIST_SWITCH: u16 = 17;
+pub const LIST_TEXT_SENSOR: u16 = 18;
 pub const LIST_ENTITIES_DONE: u16 = 19;
 pub const SUBSCRIBE_STATES: u16 = 20;
+pub const BINARY_SENSOR_STATE: u16 = 21;
+pub const SENSOR_STATE: u16 = 25;
 pub const SWITCH_STATE: u16 = 26;
+pub const TEXT_SENSOR_STATE: u16 = 27;
 pub const SUBSCRIBE_LOGS: u16 = 28;
 pub const LOG: u16 = 29;
 pub const SWITCH_COMMAND: u16 = 33;
@@ -122,6 +128,110 @@ pub fn entity(payload: &[u8]) -> Option<Entity> {
         key: m.fixed32(2)?,
         name: m.str(3).unwrap_or_default().to_owned(),
     })
+}
+
+/// `EntityCategory`: the device's own diagnostics (Wi-Fi signal, uptime,
+/// address…), not what it measures or drives.
+pub const CATEGORY_DIAGNOSTIC: u64 = 2;
+
+/// A sensor, binary sensor, text sensor or switch as the device lists it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Listed {
+    pub object_id: String,
+    pub key: u32,
+    pub name: String,
+    /// Sensors only: `kW`, `kWh`, `°C`…
+    pub unit: String,
+    /// Sensors only: decimals the device means (negative: none said).
+    pub decimals: i64,
+    pub device_class: String,
+    pub category: u64,
+    pub disabled_by_default: bool,
+}
+
+/// Field numbers of a `ListEntities…Response`: object_id 1, key 2 and name 3
+/// everywhere, the rest moves from one message to the next.
+struct Fields {
+    unit: Option<u32>,
+    decimals: Option<u32>,
+    device_class: u32,
+    disabled: u32,
+    category: u32,
+}
+
+/// The entity a `ListEntities…Response` of this `kind` describes (sensor,
+/// binary sensor, text sensor or switch; `None` for another kind).
+#[must_use]
+pub fn listed(kind: u16, payload: &[u8]) -> Option<Listed> {
+    let f = match kind {
+        LIST_SENSOR => Fields {
+            unit: Some(6),
+            decimals: Some(7),
+            device_class: 9,
+            disabled: 12,
+            category: 13,
+        },
+        LIST_BINARY_SENSOR => Fields {
+            unit: None,
+            decimals: None,
+            device_class: 5,
+            disabled: 7,
+            category: 9,
+        },
+        LIST_TEXT_SENSOR => Fields {
+            unit: None,
+            decimals: None,
+            device_class: 8,
+            disabled: 6,
+            category: 7,
+        },
+        LIST_SWITCH => Fields {
+            unit: None,
+            decimals: None,
+            device_class: 9,
+            disabled: 7,
+            category: 8,
+        },
+        _ => return None,
+    };
+    let m = parse(payload)?;
+    let text = |n| m.str(n).unwrap_or_default().to_owned();
+    Some(Listed {
+        object_id: text(1),
+        key: m.fixed32(2)?,
+        name: text(3),
+        unit: f.unit.map(text).unwrap_or_default(),
+        // int32: a negative number arrives as a 64-bit two's complement.
+        #[allow(clippy::cast_possible_wrap)]
+        decimals: f.decimals.map_or(-1, |n| m.uint(n).map_or(0, |d| d as i64)),
+        device_class: text(f.device_class),
+        category: m.uint(f.category).unwrap_or(0),
+        disabled_by_default: m.bool(f.disabled),
+    })
+}
+
+/// `SensorStateResponse`: which sensor, and its value (`None`: none yet).
+#[must_use]
+pub fn sensor_state(payload: &[u8]) -> Option<(u32, Option<f32>)> {
+    let m = parse(payload)?;
+    let value = m.float(2).unwrap_or(0.0);
+    let missing = m.bool(3) || !value.is_finite();
+    Some((m.fixed32(1)?, (!missing).then_some(value)))
+}
+
+/// `BinarySensorStateResponse`: which one, and its state (`None`: none yet).
+#[must_use]
+pub fn binary_state(payload: &[u8]) -> Option<(u32, Option<bool>)> {
+    let m = parse(payload)?;
+    Some((m.fixed32(1)?, (!m.bool(3)).then(|| m.bool(2))))
+}
+
+/// `TextSensorStateResponse`: which one, and its text (`None`: none yet).
+#[must_use]
+pub fn text_state(payload: &[u8]) -> Option<(u32, Option<String>)> {
+    let m = parse(payload)?;
+    let text = m.str(2).unwrap_or_default().to_owned();
+    Some((m.fixed32(1)?, (!m.bool(3)).then_some(text)))
 }
 
 /// The media player's state: 0 none, 1 idle, 2 playing, 3 paused, 4 announcing, 5 off, 6 on.
@@ -380,6 +490,58 @@ mod tests {
         let m = parse(&command).unwrap();
         assert_eq!((m.fixed32(1), m.bool(2)), (Some(7), true));
         assert!(!parse(&set_switch(7, false)).unwrap().bool(2));
+    }
+
+    #[test]
+    fn sensors_are_listed_and_read() {
+        // The P1 meter's import, as an ESPHome 2026 device lists it.
+        let sensor = Writer::new()
+            .str(1, "p1_momentary_active_import")
+            .fixed32(2, 42)
+            .str(3, "P1 Momentary Active Import")
+            .str(6, "kW")
+            .uint(7, 3)
+            .str(9, "power")
+            .finish();
+        let s = listed(LIST_SENSOR, &sensor).unwrap();
+        assert_eq!(s.object_id, "p1_momentary_active_import");
+        assert_eq!((s.key, s.unit.as_str(), s.decimals), (42, "kW", 3));
+        assert_eq!((s.category, s.disabled_by_default), (0, false));
+        // A diagnostic: the Wi-Fi signal (category 2, field 13).
+        let wifi = Writer::new()
+            .str(1, "signal")
+            .fixed32(2, 43)
+            .str(3, "Signal")
+            .uint(13, 2)
+            .finish();
+        assert_eq!(
+            listed(LIST_SENSOR, &wifi).unwrap().category,
+            CATEGORY_DIAGNOSTIC
+        );
+        // A switch's category is field 8, not 13.
+        let led = Writer::new()
+            .str(1, "led")
+            .fixed32(2, 5)
+            .uint(8, 2)
+            .finish();
+        let led = listed(LIST_SWITCH, &led).unwrap();
+        assert_eq!((led.category, led.decimals), (CATEGORY_DIAGNOSTIC, -1));
+        assert_eq!(listed(LIST_MEDIA_PLAYER, &led_bytes()), None);
+
+        let value = Writer::new().fixed32(1, 42).float(2, 0.16).finish();
+        assert_eq!(sensor_state(&value), Some((42, Some(0.16))));
+        let missing = Writer::new().fixed32(1, 42).bool(3, true).finish();
+        assert_eq!(sensor_state(&missing), Some((42, None)));
+        let nan = Writer::new().fixed32(1, 42).float(2, f32::NAN).finish();
+        assert_eq!(sensor_state(&nan), Some((42, None)));
+        let open = Writer::new().fixed32(1, 7).bool(2, true).finish();
+        assert_eq!(binary_state(&open), Some((7, Some(true))));
+        let text = Writer::new().fixed32(1, 9).str(2, "XYZ0000000").finish();
+        assert_eq!(text_state(&text), Some((9, Some("XYZ0000000".into()))));
+    }
+
+    fn led_bytes() -> Vec<u8> {
+        Writer::new().fixed32(2, 1).finish()
     }
 
     #[test]

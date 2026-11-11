@@ -874,10 +874,12 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Points** : `home` (binaire, sémantique occupation), lecture seule.
 - **Machines** : `[[driver.options.machine]]` avec `id`, `name`, `ip` (sur le réseau déclaré) : appareil « Machine » (`description` = son adresse), point `online` (allumée tant qu'elle répond, éteinte après deux relevés sans réponse). C'est l'équivalent de l'intégration `ping` de HA pour un ordinateur.
 
-## `esphome` : satellites vocaux (`crates/moli-esphome`)
+## `esphome` : satellites vocaux et appareils ESPHome (`crates/moli-esphome`)
 
-- **Couvre** : les appareils ESPHome, d'abord les satellites vocaux (Home Assistant Voice
-  Preview Edition, ou un ESP32-S3 monté à la main) : le mot de réveil, la conversation, la voix.
+- **Couvre** : les appareils ESPHome. Les satellites vocaux (Home Assistant Voice Preview
+  Edition, ou un ESP32-S3 monté à la main) : le mot de réveil, la conversation, la voix. Les
+  autres (prise mesurée, lecteur de compteur P1…) : leurs capteurs, capteurs binaires, capteurs
+  texte et interrupteurs.
 - **Protocole** : l'API native d'ESPHome, TCP **6053**, chiffrée par **Noise** — écrite depuis la
   spécification, **sans bibliothèque ESPHome** (`noise.rs`, `frame.rs`, `api.rs` ; identifiants et
   numéros de champs de `api.proto`, ESPHome 2026.3, version d'API 1.14). Une connexion tenue
@@ -888,14 +890,24 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   [satellite-vocal.md](satellite-vocal.md).
 - **Secrets** : `api_key` (base64 : la clé `api: encryption:` du firmware). Un appareil **sans**
   clé en reçoit une de Moli — si `mac` correspond, et seulement s'il n'en tient aucune déjà.
-- **Points** : `state` (`idle`, `listening`, `thinking`, `speaking`), `volume` et `muted` (le
-  `media_player` de l'appareil), `wake_word`, `say` (texte, 500 caractères).
+- **Points** : un satellite (l'appareil annonce une voix ou un `media_player`) : `state`
+  (`idle`, `listening`, `thinking`, `speaking`), `volume` et `muted` (le `media_player` de
+  l'appareil), `wake_word`, `say` (texte, 500 caractères). Tout autre appareil : un point par
+  entité, de clé l'`object_id` de l'entité (sinon son nom réduit en clé, accents repliés ; un
+  doublon prend `_2`) ; les interrupteurs s'écrivent (`OnOff`), le reste se lit. Les
+  diagnostics de l'appareil (catégorie `diagnostic` : Wi-Fi, uptime, adresse…) et les entités
+  cachées par défaut sont laissés de côté. Un capteur en `kW` devient des `W` (arrondi aux
+  décimales que l'appareil annonce, moins trois) ; une valeur absente (`missing_state`, `NaN`)
+  n'est pas publiée.
 - **Identité** : la MAC de l'appareil (`ctx.device_id(&hello.mac)`).
 - **Pièges** : ⚠️ l'assistant vocal d'ESPHome n'accepte **qu'un client**, et Home Assistant s'y
   abonne dès qu'il gère l'appareil : si les deux sont branchés, **HA gagne et Moli se tait sans
-  le dire**. Un seul `media_player` (le pilote retient le dernier annoncé).
+  le dire**. Un seul `media_player` (le pilote retient le dernier annoncé). Les états, eux, vont à
+  chaque client : une prise ou un P1 se lit dans Moli et dans Home Assistant à la fois, ce qui
+  permet une migration progressive.
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
-  tient ; provisionnement borné par la MAC).
+  tient ; provisionnement borné par la MAC ; un point par entité, kW → W, diagnostics écartés),
+  `src/api.rs` (numéros de champs des listes et des états).
 
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
@@ -948,7 +960,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `ipp` | `moli-ipp` | IPP 2.0 HTTP 631 | identifier, annuler, imprimer (tableau de bord) | Canon MG3600 |
 | `host` | `moli-host` | /proc, /sys ; WoL ; agent HTTP sortant | allumer, éteindre, veille, Claude et Codex pour le téléphone (PIN) | hôte Linux ; PC Windows avec l'agent |
 | `presence` | `moli-presence` | UDP + table ARP de l'hôte | non | téléphones sur le Wi-Fi |
-| `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say` | pas encore (cible : satellite ESP32-S3) |
+| `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say`, interrupteurs | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |

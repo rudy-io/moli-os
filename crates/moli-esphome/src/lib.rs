@@ -2,11 +2,14 @@
 //! without any ESPHome library: the transport is written from the Noise
 //! specification ([`noise`], [`frame`]), the messages by hand ([`api`]).
 //!
-//! First use: voice satellites such as the Home Assistant Voice Preview
-//! Edition. The driver keeps one connection open (the device restarts after
-//! 15 minutes without any client), answers its pings and pings it every 20
-//! s, and publishes the device: its volume and mute (its media player), and
-//! what its voice is doing.
+//! Two kinds of devices. Voice satellites such as the Home Assistant Voice
+//! Preview Edition: their volume and mute (their media player), and what
+//! their voice is doing. Any other device (a plug, a P1 meter reader…): its
+//! sensors, binary sensors, text sensors and switches, one point each, keyed
+//! by the entity's `object_id`; the device's own diagnostics (Wi-Fi signal,
+//! uptime, address) are left out. The driver keeps one connection open (the
+//! device restarts after 15 minutes without any client), answers its pings
+//! and pings it every 20 s.
 
 mod api;
 mod find;
@@ -141,6 +144,40 @@ fn device(
     hello: &frame::ServerHello,
     entities: &Entities,
 ) -> Device {
+    let points = if entities.satellite {
+        satellite_points(entities)
+    } else {
+        entities.extras.iter().map(Extra::spec).collect()
+    };
+    let name = [&info.friendly_name, &info.name, &hello.name]
+        .into_iter()
+        .find(|n| !n.is_empty())
+        .cloned()
+        .unwrap_or_default();
+    let model = if !info.model.is_empty() {
+        info.model.clone()
+    } else if entities.satellite {
+        moli_i18n::tr!("pilotes.esphome.satellite")
+    } else {
+        "ESPHome".to_owned()
+    };
+    Device {
+        id: id.clone(),
+        instance: ctx.instance().clone(),
+        native_name: name.into(),
+        manufacturer: Some(info.manufacturer.clone())
+            .filter(|m| !m.is_empty())
+            .map(Into::into),
+        model: Some(model.into()),
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points,
+    }
+}
+
+/// A voice satellite's points.
+fn satellite_points(entities: &Entities) -> Vec<PointSpec> {
     let mut points = vec![
         spec(
             "state",
@@ -202,31 +239,7 @@ fn device(
             None,
         ));
     }
-    let name = [&info.friendly_name, &info.name, &hello.name]
-        .into_iter()
-        .find(|n| !n.is_empty())
-        .cloned()
-        .unwrap_or_default();
-    Device {
-        id: id.clone(),
-        instance: ctx.instance().clone(),
-        native_name: name.into(),
-        manufacturer: Some(info.manufacturer.clone())
-            .filter(|m| !m.is_empty())
-            .map(Into::into),
-        model: Some(
-            if info.model.is_empty() {
-                moli_i18n::tr!("pilotes.esphome.satellite")
-            } else {
-                info.model.clone()
-            }
-            .into(),
-        ),
-        description: None,
-        native_room: None,
-        members: Vec::new(),
-        points,
-    }
+    points
 }
 
 /// Waits for a person: says why, then idles until Moli stops.
@@ -495,13 +508,175 @@ const BUTTONS_DISABLED: &str = "buttons_disabled";
 /// What the session learnt of the device's entities.
 #[derive(Debug, Default)]
 struct Entities {
+    /// A voice satellite (it has a voice or a media player): its own points,
+    /// no generic ones.
+    satellite: bool,
     media_player: Option<u32>,
     button: Option<u32>,
     mic_muted: Option<u32>,
     buttons_disabled: Option<u32>,
+    /// Any other device: its entities, one point each.
+    extras: Vec<Extra>,
+}
+
+/// How an entity's state becomes its point's value.
+#[derive(Clone, Debug, PartialEq)]
+enum Feed {
+    /// A number, times `scale` (kW → W), rounded to `decimals`.
+    Sensor {
+        scale: f64,
+        decimals: Option<i32>,
+    },
+    Binary,
+    Text,
+    Switch,
+}
+
+/// An entity of a device that is not a satellite, and the point it feeds.
+#[derive(Clone, Debug, PartialEq)]
+struct Extra {
+    key: u32,
+    point: String,
+    label: String,
+    feed: Feed,
+    unit: Option<Unit>,
+    device_class: String,
+}
+
+impl Extra {
+    /// The entities worth a point, keyed by `object_id` (else the name made
+    /// a key), each key once. Diagnostics and entities the firmware hides by
+    /// default are left out.
+    fn from_listed(listed: &[(u16, api::Listed)]) -> Vec<Self> {
+        let mut extras: Vec<Self> = Vec::new();
+        for (kind, l) in listed {
+            if l.category == api::CATEGORY_DIAGNOSTIC || l.disabled_by_default {
+                continue;
+            }
+            let base = point_key(if l.object_id.is_empty() {
+                &l.name
+            } else {
+                &l.object_id
+            });
+            if base.is_empty() {
+                continue;
+            }
+            let mut point = base.clone();
+            let mut n = 2;
+            while extras.iter().any(|e| e.point == point) {
+                point = format!("{base}_{n}");
+                n += 1;
+            }
+            let (feed, unit) = match *kind {
+                api::LIST_SENSOR => {
+                    let (unit, scale, shift) = match l.unit.trim() {
+                        "kW" => (Some(Unit::Watt), 1000.0, 3),
+                        other => (Unit::parse(other), 1.0, 0),
+                    };
+                    let decimals = (l.decimals >= 0).then(|| {
+                        i32::try_from(l.decimals)
+                            .unwrap_or(0)
+                            .saturating_sub(shift)
+                            .max(0)
+                    });
+                    (Feed::Sensor { scale, decimals }, unit)
+                }
+                api::LIST_BINARY_SENSOR => (Feed::Binary, None),
+                api::LIST_TEXT_SENSOR => (Feed::Text, None),
+                api::LIST_SWITCH => (Feed::Switch, None),
+                _ => continue,
+            };
+            extras.push(Self {
+                key: l.key,
+                label: if l.name.is_empty() {
+                    point.clone()
+                } else {
+                    l.name.clone()
+                },
+                point,
+                feed,
+                unit,
+                device_class: l.device_class.clone(),
+            });
+        }
+        extras
+    }
+
+    fn spec(&self) -> PointSpec {
+        let kind = match self.feed {
+            Feed::Sensor { .. } => Kind::Numeric {
+                min: None,
+                max: None,
+                step: None,
+            },
+            Feed::Binary | Feed::Switch => Kind::Binary,
+            Feed::Text => Kind::Text,
+        };
+        let write = self.feed == Feed::Switch;
+        let mut spec = spec(&self.point, &self.label, kind, write, self.unit.clone());
+        // What the device says it is beats a guess from the key.
+        let semantic = match (&self.feed, self.device_class.as_str()) {
+            (Feed::Switch, _) => Some(Semantic::OnOff),
+            (Feed::Sensor { .. }, "humidity") => Some(Semantic::Humidity),
+            (Feed::Sensor { .. }, "battery") => Some(Semantic::Battery),
+            (Feed::Sensor { .. }, "temperature") => Some(Semantic::Temperature),
+            (Feed::Binary, "motion" | "occupancy" | "presence") => Some(Semantic::Occupancy),
+            (Feed::Binary, "moisture") => Some(Semantic::WaterLeak),
+            (Feed::Binary, "smoke") => Some(Semantic::Smoke),
+            _ => None,
+        };
+        if let Some(semantic) = semantic {
+            spec.semantic = semantic;
+        }
+        spec
+    }
+
+    /// The point's value for a sensor's reading.
+    fn number(&self, raw: f32) -> Option<Value> {
+        let Feed::Sensor { scale, decimals } = self.feed else {
+            return None;
+        };
+        let v = f64::from(raw) * scale;
+        let v = match decimals {
+            Some(d) => {
+                let f = 10f64.powi(d.min(9));
+                (v * f).round() / f
+            }
+            None => v,
+        };
+        v.is_finite().then_some(Value::Float(v))
+    }
+}
+
+/// `LSC Plug 5 Prise` or `lsc_plug_5_prise` → `lsc_plug_5_prise`.
+fn point_key(raw: &str) -> String {
+    let mut key = String::with_capacity(raw.len());
+    for c in raw.chars().flat_map(char::to_lowercase) {
+        // A name in French keeps its letters: `Énergie` → `energie`.
+        let c = match c {
+            'à' | 'â' | 'ä' | 'á' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' | 'í' => 'i',
+            'ô' | 'ö' | 'ó' => 'o',
+            'ù' | 'û' | 'ü' | 'ú' => 'u',
+            'ç' => 'c',
+            'ÿ' => 'y',
+            other => other,
+        };
+        if c.is_ascii_alphanumeric() {
+            key.push(c);
+        } else if !key.ends_with('_') && !key.is_empty() {
+            key.push('_');
+        }
+    }
+    key.trim_end_matches('_').to_owned()
 }
 
 impl Entities {
+    fn extra(&self, key: u32) -> Option<&Extra> {
+        self.extras.iter().find(|e| e.key == key)
+    }
+
     /// A switch of the firmware, if it is one Moli shows (by its name in the
     /// Voice PE's configuration; other firmwares simply have no such points).
     fn note_switch(&mut self, switch: &api::Entity) {
@@ -571,19 +746,27 @@ async fn open(config: &Config, psk: &[u8; 32]) -> anyhow::Result<Opened> {
         .context("unreadable device info")?;
     tx.send(api::LIST_ENTITIES_REQUEST, &[]).await?;
     let mut entities = Entities::default();
+    let mut listed = Vec::new();
     loop {
         let (kind, payload) = next(&mut inbox, &mut tx).await?;
         match kind {
             api::LIST_ENTITIES_DONE => break,
             api::LIST_MEDIA_PLAYER => entities.media_player = api::entity(&payload).map(|e| e.key),
             api::LIST_EVENT => entities.button = api::entity(&payload).map(|e| e.key),
-            api::LIST_SWITCH => {
-                if let Some(switch) = api::entity(&payload) {
-                    entities.note_switch(&switch);
-                }
-            }
             _ => {}
         }
+        if kind == api::LIST_SWITCH
+            && let Some(switch) = api::entity(&payload)
+        {
+            entities.note_switch(&switch);
+        }
+        if let Some(entity) = api::listed(kind, &payload) {
+            listed.push((kind, entity));
+        }
+    }
+    entities.satellite = info.voice_flags != 0 || entities.media_player.is_some();
+    if !entities.satellite {
+        entities.extras = Extra::from_listed(&listed);
     }
     Ok(Opened {
         tx,
@@ -612,7 +795,9 @@ async fn session(
     } = open(config, psk).await?;
     let id = ctx.device_id(&hello.mac);
     ctx.upsert_device(device(&id, ctx, &info, &hello, &entities));
-    ctx.set_state(&id, "state", Value::Text("idle".into()));
+    if entities.satellite {
+        ctx.set_state(&id, "state", Value::Text("idle".into()));
+    }
     ctx.set_availability(&id, true);
     *known = Some(id.clone());
     tracing::info!(
@@ -620,6 +805,7 @@ async fn session(
         device = %info.friendly_name,
         esphome = %info.esphome_version,
         voice_flags = info.voice_flags,
+        points = entities.extras.len(),
         "esphome device connected"
     );
     tx.send(api::SUBSCRIBE_STATES, &[]).await?;
@@ -627,12 +813,14 @@ async fn session(
         tx.send(api::SUBSCRIBE_LOGS, &api::subscribe_logs(level))
             .await?;
     }
-    // Moli is the device's voice assistant (the first to subscribe keeps it).
-    tx.send(api::SUBSCRIBE_VOICE_ASSISTANT, &api::subscribe_voice())
-        .await?;
-    // What the firmware offers first: the configured words are set only once
-    // the device says it has them (see `wake_words`).
-    tx.send(api::VOICE_CONFIGURATION_REQUEST, &[]).await?;
+    if entities.satellite {
+        // Moli is the device's voice assistant (the first to subscribe keeps it).
+        tx.send(api::SUBSCRIBE_VOICE_ASSISTANT, &api::subscribe_voice())
+            .await?;
+        // What the firmware offers first: the configured words are set only once
+        // the device says it has them (see `wake_words`).
+        tx.send(api::VOICE_CONFIGURATION_REQUEST, &[]).await?;
+    }
     let mut words_set = false;
     let (mut voice, mut thoughts) = satellite::Voice::new(
         Duration::from_secs(config.window_s),
@@ -775,10 +963,34 @@ async fn on_message(
             }
         }
         api::SWITCH_STATE => {
-            if let Some((point, on)) = api::switch_state(payload)
-                .and_then(|(key, on)| Some((entities.point_of_switch(key)?, on)))
+            if let Some((key, on)) = api::switch_state(payload) {
+                if let Some(point) = entities.point_of_switch(key) {
+                    ctx.set_state(id, point, Value::Bool(on));
+                } else if let Some(extra) = entities.extra(key) {
+                    ctx.set_state(id, &extra.point, Value::Bool(on));
+                }
+            }
+        }
+        api::SENSOR_STATE => {
+            if let Some((extra, value)) = api::sensor_state(payload).and_then(|(key, raw)| {
+                let extra = entities.extra(key)?;
+                Some((extra, extra.number(raw?)?))
+            }) {
+                ctx.set_state(id, &extra.point, value);
+            }
+        }
+        api::BINARY_SENSOR_STATE => {
+            if let Some((extra, on)) =
+                api::binary_state(payload).and_then(|(key, on)| Some((entities.extra(key)?, on?)))
             {
-                ctx.set_state(id, point, Value::Bool(on));
+                ctx.set_state(id, &extra.point, Value::Bool(on));
+            }
+        }
+        api::TEXT_SENSOR_STATE => {
+            if let Some((extra, text)) =
+                api::text_state(payload).and_then(|(key, text)| Some((entities.extra(key)?, text?)))
+            {
+                ctx.set_state(id, &extra.point, Value::Text(text.into()));
             }
         }
         api::LOG => {
@@ -824,6 +1036,18 @@ async fn order(
     {
         return tx
             .send(api::SWITCH_COMMAND, &api::set_switch(switch, *on))
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
+    if let Some(extra) = entities.extras.iter().find(|e| *e.point == *command.key) {
+        let (Feed::Switch, Value::Bool(on)) = (&extra.feed, &command.value) else {
+            return Err(moli_i18n::tr!(
+                "pilotes.esphome.lecture_seule",
+                point = extra.point
+            ));
+        };
+        return tx
+            .send(api::SWITCH_COMMAND, &api::set_switch(extra.key, *on))
             .await
             .map_err(|e| format!("{e:#}"));
     }
@@ -1048,6 +1272,91 @@ mod tests {
         // A firmware without them has no such points to write.
         let bare = Entities::default();
         assert_eq!(bare.switch_of_point(MIC_MUTED), None);
+    }
+
+    fn sensor(object_id: &str, key: u32, unit: &str, decimals: i64) -> (u16, api::Listed) {
+        (
+            api::LIST_SENSOR,
+            api::Listed {
+                object_id: object_id.into(),
+                key,
+                name: object_id.to_uppercase(),
+                unit: unit.into(),
+                decimals,
+                ..api::Listed::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_plug_or_a_meter_gets_a_point_per_entity() {
+        let mut wifi = sensor("signal", 9, "dBm", 0);
+        wifi.1.category = api::CATEGORY_DIAGNOSTIC;
+        let mut hidden = sensor("debug", 10, "", -1);
+        hidden.1.disabled_by_default = true;
+        let listed = vec![
+            sensor("p1_momentary_active_import", 1, "kW", 3),
+            sensor("p1mini_cumulative_active_import_day", 2, "kWh", 3),
+            sensor("p1_gas_consumption", 3, "m³", 3),
+            (
+                api::LIST_SWITCH,
+                api::Listed {
+                    object_id: String::new(),
+                    key: 4,
+                    name: "LSC Plug 6 Prise".into(),
+                    ..api::Listed::default()
+                },
+            ),
+            (
+                api::LIST_TEXT_SENSOR,
+                api::Listed {
+                    object_id: "p1_meter_id".into(),
+                    key: 5,
+                    ..api::Listed::default()
+                },
+            ),
+            // The same object_id twice: the second gets a suffix.
+            sensor("p1_gas_consumption", 6, "m³", 3),
+            wifi,
+            hidden,
+        ];
+        let extras = Extra::from_listed(&listed);
+        let points: Vec<&str> = extras.iter().map(|e| e.point.as_str()).collect();
+        assert_eq!(
+            points,
+            [
+                "p1_momentary_active_import",
+                "p1mini_cumulative_active_import_day",
+                "p1_gas_consumption",
+                "lsc_plug_6_prise",
+                "p1_meter_id",
+                "p1_gas_consumption_2",
+            ]
+        );
+        // kW becomes W: the dashboard and the energy page speak watts.
+        let power = &extras[0];
+        assert_eq!(power.unit, Some(Unit::Watt));
+        assert_eq!(power.spec().semantic, Semantic::Power);
+        assert_eq!(power.number(0.16), Some(Value::Float(160.0)));
+        let energy = &extras[1];
+        assert_eq!(energy.spec().semantic, Semantic::Energy);
+        assert_eq!(energy.number(531.473), Some(Value::Float(531.473)));
+        let switch = &extras[3];
+        let spec = switch.spec();
+        assert_eq!((spec.semantic, spec.access.write), (Semantic::OnOff, true));
+        assert!(!extras[2].spec().access.write, "a sensor is read-only");
+        assert_eq!(extras[4].number(1.0), None, "a text has no number");
+    }
+
+    #[test]
+    fn point_keys_are_plain() {
+        assert_eq!(
+            point_key("LSC Plug 5 Énergie du jour"),
+            "lsc_plug_5_energie_du_jour"
+        );
+        assert_eq!(point_key("  Prise  "), "prise");
+        assert_eq!(point_key("p1_voltage_phase_1"), "p1_voltage_phase_1");
+        assert_eq!(point_key("…"), "");
     }
 
     #[test]
