@@ -126,7 +126,8 @@ export function pointName(point) {
   return spec && !generic ? `${name} · ${spec.label}` : name;
 }
 
-/** Every point a graph touches (steps and rules alike). */
+/** Every point a graph touches (steps and rules alike, and the points their
+ *  values are read from). */
 export function graphPoints(graph) {
   const found = new Set();
   const walk = (v) => {
@@ -134,6 +135,7 @@ export function graphPoints(graph) {
     else if (v && typeof v === 'object') {
       for (const [k, x] of Object.entries(v)) {
         if (k === 'point' && typeof x === 'string') found.add(x);
+        else if (k === 'value' && isFrom(x) && typeof x.from === 'string') found.add(x.from);
         else walk(x);
       }
     }
@@ -154,10 +156,23 @@ export function renamedIn(graph) {
 
 const POWER_KEYS = ['on', 'on_off', 'state', 'switch', 'switch_1', 'switch_2', 'power'];
 
-/** How a value reads for this point (« allumé », « ouverte », « 21 °C »). */
+/** A value read from another point when the step runs: `{ from, add? }`. */
+export function isFrom(v) {
+  return v != null && typeof v === 'object' && !Array.isArray(v) && 'from' in v;
+}
+
+/** How a value reads for this point (« allumé », « ouverte », « 21 °C »,
+ *  « Confort − 1 °C » when read from another point). */
 export function valueText(point, v) {
   const spec = pointSpec(point);
   const key = splitPoint(point)[1];
+  if (isFrom(v)) {
+    if (!v.from) return '…';
+    const add = Number(v.add) || 0;
+    if (!add) return pointName(v.from);
+    const size = Math.abs(add).toLocaleString(locale(), { useGrouping: false, maximumFractionDigits: 20 });
+    return `${pointName(v.from)} ${add > 0 ? '+' : '−'} ${size}${spec?.unit ? ` ${spec.unit}` : ''}`;
+  }
   const flag = v === true || v === 'ON' || v === 'on' ? true : v === false || v === 'OFF' || v === 'off' ? false : null;
   if (flag != null) {
     if (key === 'contact') return t(flag ? 'automatismes.valeur.fermee' : 'automatismes.valeur.ouverte');
@@ -215,7 +230,7 @@ export function nodeText(node) {
       );
     case 'set': {
       const key = splitPoint(node.point)[1];
-      if (key === 'key') return t('automatismes.texte.touche', { nom: pointName(node.point), valeur: node.value });
+      if (key === 'key') return t('automatismes.texte.touche', { nom: pointName(node.point), valeur: isFrom(node.value) ? valueText(node.point, node.value) : node.value });
       return `${pointName(node.point)} → ${valueText(node.point, node.value)}`;
     }
     case 'toggle':
