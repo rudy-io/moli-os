@@ -449,6 +449,16 @@ pub struct ImportReport {
     pub invalid: usize,
 }
 
+/// A meter's own price: its `price_point`'s value (`supplier`) plus
+/// `price_extra` when the point has one (a price above 5 per kWh is a
+/// misreading), else its fixed `price`.
+fn own_price(meter: &MeterConfig, supplier: Option<f64>) -> Option<f64> {
+    supplier
+        .filter(|v| v.is_finite() && (0.0..5.0).contains(v))
+        .map(|v| v + meter.price_extra.unwrap_or(0.0))
+        .or(meter.price)
+}
+
 /// Highest credible consumption of one meter in one hour.
 const MAX_KWH_PER_HOUR: f64 = 500.0;
 
@@ -852,6 +862,7 @@ impl Recorder {
         if meter.role.consumes()
             && self.config.tariff.is_some()
             && meter.price.is_none()
+            && meter.price_point.is_none()
             && self.periods.0.is_empty()
         {
             // No price yet: counters are cumulative, file it later.
@@ -974,8 +985,19 @@ impl Recorder {
         }
     }
 
+    /// A meter's own price now (see [`own_price`]).
+    fn own_price(&self, meter: &MeterConfig) -> Option<f64> {
+        let supplier = meter
+            .price_point
+            .as_ref()
+            .and_then(|p| self.hub.current_state(&PointId::from(p.clone())))
+            .and_then(|s| s.value.as_f64());
+        own_price(meter, supplier)
+    }
+
     /// Spreads `kwh` over `[from, to)` and prices each hour.
     fn slices(&self, meter: &MeterConfig, kwh: f64, from: u64, to: u64) -> Vec<HourRow> {
+        let own = self.own_price(meter);
         let pieces = match &meter.period {
             Some(period) => {
                 meter::spread_weighted(kwh, from, to, |a, b| self.periods.time_in(period, a, b))
@@ -987,7 +1009,7 @@ impl Recorder {
             .map(|(hour, kwh)| {
                 // The price in the middle of the slice's own time.
                 let middle = hour.max(from) / 2 + (hour + meter::HOUR_MS).min(to) / 2;
-                let price = meter.price.or_else(|| {
+                let price = own.or_else(|| {
                     meter.role.consumes().then_some(())?;
                     self.periods
                         .at(middle)
@@ -1212,6 +1234,32 @@ mod tests {
         let (priced, _) = price_rows(&config, &tz, &recorder.prices.all(), &rows);
         let priced: Vec<Option<f64>> = priced.iter().map(|r| r.cost).collect();
         assert_eq!(priced, vec![None, Some(0.2)]);
+    }
+
+    #[test]
+    fn a_supplier_price_plus_what_it_leaves_out() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"day\"\nname = \"Jour\"\npoint = \"p1:m/day\"\nrole = \"grid\"\n\
+             price = 0.3\nprice_point = \"engie:c/electricity_offtake_peak\"\nprice_extra = 0.11692\n\
+             [[meter]]\nid = \"out\"\nname = \"Injection\"\npoint = \"p1:m/out\"\nrole = \"export\"\n\
+             price_point = \"engie:c/electricity_injection_peak\"\n",
+        )
+        .unwrap();
+        config.check().unwrap();
+        let (day, out) = (&config.meters[0], &config.meters[1]);
+        let near = |p: Option<f64>, v: f64| (p.unwrap() - v).abs() < 1e-9;
+        assert!(near(own_price(day, Some(0.25009)), 0.36701));
+        // No value yet, or a misreading: the fixed price.
+        assert!(near(own_price(day, None), 0.3));
+        assert!(near(own_price(day, Some(25.0)), 0.3));
+        assert!(near(own_price(out, Some(0.04635)), 0.04635));
+        assert_eq!(own_price(out, None), None);
+        // `price_extra` needs a point to add to.
+        let bad: Config = toml::from_str(
+            "[[meter]]\nid = \"x\"\nname = \"x\"\npoint = \"a:b/c\"\nrole = \"grid\"\nprice_extra = 0.1\n",
+        )
+        .unwrap();
+        assert!(bad.check().is_err());
     }
 
     #[test]

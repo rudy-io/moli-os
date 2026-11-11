@@ -93,9 +93,19 @@ pub struct MeterConfig {
     /// kW) whose energy Moli adds up itself.
     pub point: String,
     pub role: Role,
-    /// Fixed price per kWh (a Linky « heures creuses » index).
+    /// Fixed price per kWh (a Linky « heures creuses » index). With
+    /// `price_point`: the price when that point has no value (and the one
+    /// imported history is priced with).
     #[serde(default)]
     pub price: Option<f64>,
+    /// Point holding the supplier's price per kWh now (a supplier's driver:
+    /// `engie:contract-…/electricity_offtake_peak`), followed as it changes.
+    #[serde(default)]
+    pub price_point: Option<String>,
+    /// Added to `price_point`'s value per kWh: what the supplier's price
+    /// leaves out (network costs, taxes, certificates), VAT included.
+    #[serde(default)]
+    pub price_extra: Option<f64>,
     /// Instantaneous power point (W), for the live view.
     #[serde(default)]
     pub power: Option<String>,
@@ -248,9 +258,7 @@ impl Config {
                     m.id
                 ));
             }
-            if let Some(price) = m.price {
-                check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
-            }
+            check_meter_price(m)?;
         }
         let mut load_ids = HashSet::new();
         for load in &self.loads {
@@ -314,6 +322,34 @@ fn check_point(point: &str) -> Result<(), String> {
         Some((device, key)) if device.contains(':') && !key.is_empty() => Ok(()),
         _ => Err(format!("{point:?} is not a point id (instance:device/key)")),
     }
+}
+
+/// A meter's price: fixed, or from a point plus what it leaves out.
+fn check_meter_price(m: &MeterConfig) -> Result<(), String> {
+    if let Some(price) = m.price {
+        check_price(price).map_err(|e| format!("meter {:?}: {e}", m.id))?;
+    }
+    if let Some(point) = &m.price_point {
+        check_point(point).map_err(|e| format!("meter {:?}: price_point: {e}", m.id))?;
+        if m.role == Role::Solar {
+            return Err(format!("meter {:?}: solar production has no price", m.id));
+        }
+    }
+    if let Some(extra) = m.price_extra {
+        if m.price_point.is_none() {
+            return Err(format!(
+                "meter {:?}: `price_extra` is added to `price_point`",
+                m.id
+            ));
+        }
+        if !(extra.is_finite() && (0.0..5.0).contains(&extra)) {
+            return Err(format!(
+                "meter {:?}: price_extra {extra} must be from 0 to 5 per kWh",
+                m.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn check_price(price: f64) -> Result<(), String> {
