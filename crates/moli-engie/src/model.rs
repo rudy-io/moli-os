@@ -309,7 +309,8 @@ pub fn settings_body(departure: Timestamp, target: u8, direct: bool) -> Json {
     })
 }
 
-/// What smart charging earned: this month, and over all the months asked.
+/// What smart charging earned for one vehicle: this month, and over all the
+/// sessions asked.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rewards {
     pub month: f64,
@@ -317,20 +318,27 @@ pub struct Rewards {
     pub sessions: u64,
 }
 
-/// `GET …/charging-sessions-summary?granularity=MONTHLY`; `month_start` is
-/// the start of the current month.
-#[must_use]
-pub fn rewards(json: &Json, month_start: Timestamp) -> Rewards {
-    let mut r = Rewards::default();
-    for entry in items(&json["items"]) {
-        let reward = number(&entry["reward"]).unwrap_or(0.0);
+/// One page of `GET …/customer-accounts/{can}/charging-sessions`: each
+/// session's rewards added to its vehicle's (by name, lowercase), and the
+/// number of pages.
+pub fn add_rewards(
+    json: &Json,
+    month_start: Timestamp,
+    by_vehicle: &mut std::collections::HashMap<String, Rewards>,
+) -> u64 {
+    for s in items(&json["items"]) {
+        let Some(name) = text(&s["vehicleName"]) else {
+            continue;
+        };
+        let r = by_vehicle.entry(name.to_lowercase()).or_default();
+        let reward = number(&s["reward"]).unwrap_or(0.0);
         r.total += reward;
-        r.sessions += entry["sessionCount"].as_u64().unwrap_or(0);
-        if time(&entry["start"]).is_some_and(|t| t >= month_start) {
+        r.sessions += 1;
+        if time(&s["start"]).is_some_and(|t| t >= month_start) {
             r.month += reward;
         }
     }
-    r
+    json["page"]["totalPages"].as_u64().unwrap_or(1)
 }
 
 #[cfg(test)]
@@ -437,11 +445,14 @@ mod tests {
     }
 
     #[test]
-    fn rewards_this_month_and_in_all() {
+    fn rewards_by_vehicle_this_month_and_in_all() {
         let month: Timestamp = "2026-10-31T23:00:00Z".parse().unwrap();
-        let r = rewards(&fixture("sessions-summary"), month);
-        assert!((r.total - 14.25).abs() < 1e-9);
-        assert!((r.month - 2.5).abs() < 1e-9);
-        assert_eq!(r.sessions, 31);
+        let mut by = std::collections::HashMap::new();
+        assert_eq!(add_rewards(&fixture("sessions"), month, &mut by), 2);
+        let mine = by["ma voiture"];
+        assert!((mine.total - 1.37).abs() < 1e-9);
+        assert!((mine.month - 0.87).abs() < 1e-9);
+        assert_eq!(mine.sessions, 2);
+        assert!((by["autre voiture"].total - 4.0).abs() < 1e-9, "kept apart");
     }
 }

@@ -408,6 +408,8 @@ struct Known {
     last_error: Option<String>,
     told_no_vehicle: bool,
     left_out: std::collections::HashSet<u64>,
+    /// Vehicle → its name, as sessions name it.
+    names: HashMap<u64, String>,
 }
 
 /// A JSON answer's shape, for a log: keys and list lengths, never a value.
@@ -511,7 +513,7 @@ async fn slow(
     api: &mut Api,
     known: &mut Known,
 ) -> Result<(), Failure> {
-    let Some((day, month, today)) = day_and_month(tz, Timestamp::now()) else {
+    let Some((day, _, today)) = day_and_month(tz, Timestamp::now()) else {
         return Ok(());
     };
     for agreement in known.agreements.clone() {
@@ -590,19 +592,53 @@ async fn slow(
         }
     }
 
-    if let Some(can) = known.can.clone() {
-        let from = jiff::civil::Date::new(today.year() - 2, today.month(), 1).unwrap_or(today);
+    rewards(ctx, tz, api, known).await
+}
+
+/// At most this many pages of sessions (20 each) are read for the rewards.
+const MAX_PAGES: u64 = 25;
+
+/// What smart charging earned for each followed vehicle, from its own
+/// sessions of the last two years (the account's summary would mix in the
+/// other cars of a shared account).
+async fn rewards(
+    ctx: &DriverCtx,
+    tz: &TimeZone,
+    api: &mut Api,
+    known: &mut Known,
+) -> Result<(), Failure> {
+    let (Some(can), Some((_, month, today))) =
+        (known.can.clone(), day_and_month(tz, Timestamp::now()))
+    else {
+        return Ok(());
+    };
+    if known.vehicles.is_empty() {
+        return Ok(());
+    }
+    let from = jiff::civil::Date::new(today.year() - 2, today.month(), 1).unwrap_or(today);
+    let mut by_vehicle = HashMap::new();
+    let mut page = 0;
+    loop {
         let path = format!(
-            "/engie/ms/ev/customer/v1/customer-accounts/{can}/charging-sessions-summary?granularity=MONTHLY&startDate={from}&endDate={today}"
+            "/engie/ms/ev/customer/v2/customer-accounts/{can}/charging-sessions?startDate={from}&endDate={today}&pageSize=20&pageNumber={page}"
         );
         let r = api.get(ctx, &path, auth::APP_AGENT).await;
-        if let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() {
-            let rewards = model::rewards(&json, month);
-            for id in known.vehicles.values() {
-                set_number(ctx, id, "reward_month", Some(rewards.month));
-                set_number(ctx, id, "reward_total", Some(rewards.total));
-            }
+        let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() else {
+            return Ok(()); // incomplete: the figures stay as they were
+        };
+        let pages = model::add_rewards(&json, month, &mut by_vehicle);
+        page += 1;
+        if page >= pages.min(MAX_PAGES) {
+            break;
         }
+    }
+    for (vehicle, id) in &known.vehicles {
+        let name = known.names.get(vehicle).map(|n| n.to_lowercase());
+        let r = name
+            .and_then(|n| by_vehicle.get(&n).copied())
+            .unwrap_or_default();
+        set_number(ctx, id, "reward_month", Some(r.month));
+        set_number(ctx, id, "reward_total", Some(r.total));
     }
     Ok(())
 }
@@ -859,6 +895,7 @@ async fn fast(
         if let std::collections::hash_map::Entry::Vacant(e) = known.vehicles.entry(v.id) {
             ctx.upsert_device(vehicle_device(ctx, &id, &v));
             e.insert(id.clone());
+            known.names.insert(v.id, v.name.clone());
             first_sight = true;
         }
         ctx.set_availability(&id, true);
@@ -896,21 +933,7 @@ async fn fast(
     }
     // The rewards of a vehicle seen for the first time: at once, not in an hour.
     if first_sight {
-        let today = Timestamp::now().to_zoned(tz.clone()).date();
-        if let Some((_, month, _)) = day_and_month(tz, Timestamp::now()) {
-            let from = jiff::civil::Date::new(today.year() - 2, today.month(), 1).unwrap_or(today);
-            let path = format!(
-                "/engie/ms/ev/customer/v1/customer-accounts/{can}/charging-sessions-summary?granularity=MONTHLY&startDate={from}&endDate={today}"
-            );
-            let r = api.get(ctx, &path, auth::APP_AGENT).await;
-            if let Some(json) = tolerate(ctx, &mut known.last_error, r)?.flatten() {
-                let rewards = model::rewards(&json, month);
-                for id in known.vehicles.values() {
-                    set_number(ctx, id, "reward_month", Some(rewards.month));
-                    set_number(ctx, id, "reward_total", Some(rewards.total));
-                }
-            }
-        }
+        rewards(ctx, tz, api, known).await?;
     }
     Ok(())
 }

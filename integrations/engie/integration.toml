@@ -45,4 +45,4 @@ file = "fixtures/latest-session.json"
 file = "fixtures/charge-settings.json"
 
 [[fixture]]
-file = "fixtures/sessions-summary.json"
+file = "fixtures/sessions.json"

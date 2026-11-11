@@ -10,7 +10,7 @@ Le compte client ENGIE Belgique, par l'interface de l'appli ENGIE Smart :
   branché ; la session en cours : `departure` (heure de départ), `target_level` (objectif, %) et
   `direct` (charger tout de suite), modifiables ; ce que la recharge intelligente a fait gagner :
   la dernière session (`session_reward`, avec son énergie, son coût et son résultat), ce mois-ci
-  (`reward_month`) et au total (`reward_total`, sur les 24 derniers mois). Relus toutes les 5 minutes.
+  (`reward_month`) et au total (`reward_total`, sur les 24 derniers mois), comptés session par session pour ce véhicule seul. Relus toutes les 5 minutes.
 
 **À savoir avant de l'installer.** ENGIE ne propose aucune interface officielle. Moli utilise
 celle de l'appli ENGIE Smart, comme l'intégration `engie_be` de Home Assistant : elle peut changer
