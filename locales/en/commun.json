@@ -304,5 +304,6 @@
   "commun.volet.vitesse_normale": "Normal",
   "commun.volet.vitesse_lente": "Slow",
   "commun.volet.reconnexion": "Connecting to Moli…",
-  "commun.volet.commandes_de": "Controls for {label}"
+  "commun.volet.commandes_de": "Controls for {label}",
+  "commun.nav.chauffage": "Heating"
 }

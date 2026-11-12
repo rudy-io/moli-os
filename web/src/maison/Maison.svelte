@@ -2,7 +2,7 @@
   import '@fontsource-variable/figtree';
   import './maison.css';
   import { onMount, untrack } from 'svelte';
-  import { home, hub, start, value, savePref, watches, hidden, reloadLayout } from './lib/home.svelte.js';
+  import { home, hub, start, value, savePref, watches, hidden, reloadLayout, deviceKind } from './lib/home.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
   import Icon from './ui/Icon.svelte';
   import PinSheet from './ui/PinSheet.svelte';
@@ -17,6 +17,7 @@
   import Energie from './pages/Energie.svelte';
   import Impression from './pages/Impression.svelte';
   import Dehors from './pages/Dehors.svelte';
+  import Chauffage from './pages/Chauffage.svelte';
   import Moli from './pages/Moli.svelte';
   import MoliSheet from './moli/MoliSheet.svelte';
   import Automatismes from './pages/Automatismes.svelte';
@@ -55,6 +56,7 @@
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating') },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
@@ -177,6 +179,8 @@
       <Impression />
     {:else if page === 'dehors'}
       <Dehors />
+    {:else if page === 'chauffage'}
+      <Chauffage />
     {:else if page === 'moli'}
       <Moli />
     {:else if page === 'automatismes'}

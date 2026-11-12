@@ -260,6 +260,7 @@ export function deviceKind(d) {
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
+  if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature'))) return 'heating';
   if (has(d, 'target_temperature') || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
