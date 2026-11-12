@@ -743,5 +743,15 @@
   "pilotes.kasa.courant": "Courant",
   "pilotes.kasa.energie": "Énergie totale",
   "pilotes.kasa.lecture_seule": "{point} ne se règle pas",
-  "pilotes.kasa.refus": "la prise a refusé l'ordre (code {code})"
+  "pilotes.kasa.refus": "la prise a refusé l'ordre (code {code})",
+  "pilotes.recycleapp.nom": "Collectes de déchets",
+  "pilotes.recycleapp.description": "Le calendrier des collectes de l'adresse, d'après RecycleApp (Fost Plus).",
+  "pilotes.recycleapp.aujourdhui": "Collecté aujourd'hui",
+  "pilotes.recycleapp.demain": "Collecté demain",
+  "pilotes.recycleapp.dans_jours": "{nom} : dans (jours)",
+  "pilotes.recycleapp.code_postal": "RecycleApp ne connaît pas le code postal {code}",
+  "pilotes.recycleapp.rue": "RecycleApp ne trouve pas la rue « {rue} » à ce code postal : vérifie son orthographe (en néerlandais ou en français)",
+  "pilotes.recycleapp.lecture_seule": "le calendrier des collectes se lit seulement",
+  "pilotes.recycleapp.aucune_collecte": "RecycleApp connaît l'adresse mais n'y annonce aucune collecte dans les 8 semaines : vérifie le numéro, ou la commune sur recycleapp.be",
+  "pilotes.recycleapp.perime": "Le calendrier des collectes n'a pas pu être relu depuis un moment : RecycleApp ne répond pas, les dates affichées peuvent être dépassées"
 }

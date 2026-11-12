@@ -1175,6 +1175,22 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   voyant, puissance, tension, courant, énergie), voyant allumé puis éteint, relais allumé (la
   charge mesurée à 2,2 kW) puis éteint, depuis Moli. Matériel 2 : pas encore.
 
+## `recycleapp` : collectes de déchets (`crates/moli-recycleapp`)
+
+- **Couvre** : le calendrier des collectes d'une adresse belge, d'après RecycleApp (Fost Plus).
+- **Protocole** : l'API web publique de recycleapp.be (`api.fostplus.be/recyclecms/public/v1`,
+  adresse lue dans `www.recycleapp.be/config/app.settings.json`, en-tête `x-consumer:
+  recycleapp.be`), sans compte. Code postal → `zipcodes?q=`, rue → `POST streets?q=&zipcodes=`,
+  puis `collections?zipcodeId=&streetId=&houseNumber=&fromDate=&untilDate=` (8 semaines).
+- **Configuration** : `zipcode` (4 chiffres), `street`, `house_number` ; `language` (`fr`),
+  `timezone` (`Europe/Brussels`).
+- **Points** : par type connu (identifiant du logo de la fraction), `<type>` = prochaine date
+  (`AAAA-MM-JJ`) et `<type>_days` = jours d'ici là ; `today`, `tomorrow` = ce qui est collecté
+  (noms, ou vide). Une collecte remplacée (`exception.replacedBy`) est écartée.
+- **Rythme** : calendrier toutes les 6 h, jours recomptés toutes les 15 min.
+- **Tests** : `src/model.rs` (adresse, prochaine collecte par type, collecte remplacée, type
+  inconnu, nom manquant dans la langue), `src/lib.rs` (adresse vérifiée, requêtes encodées).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).

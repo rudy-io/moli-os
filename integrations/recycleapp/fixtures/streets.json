@@ -1,0 +1,4 @@
+{"items": [
+  {"id": "https://data.vlaanderen.be/id/straatnaam-1", "names": {"nl": "Voorbeeldstraat", "fr": "Rue Exemple"}},
+  {"id": "https://data.vlaanderen.be/id/straatnaam-2", "names": {"nl": "Andere straat", "fr": "Autre rue"}}
+], "total": 2, "pages": 1}
