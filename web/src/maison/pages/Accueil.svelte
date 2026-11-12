@@ -10,6 +10,7 @@
   import ValveCard from '../ui/ValveCard.svelte';
   import VacuumCard from '../ui/VacuumCard.svelte';
   import EnergyCard from '../ui/EnergyCard.svelte';
+  import EnergyFlow from '../ui/EnergyFlow.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import ScenePicker from '../ui/ScenePicker.svelte';
@@ -209,6 +210,7 @@
 
     <div class="side">
       <EnergyCard />
+      <EnergyFlow home />
       <Routines />
     </div>
 
