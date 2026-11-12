@@ -10,3 +10,7 @@
    correspondre à l'application Solarman (ou à l'écran de l'onduleur). Rien n'est jamais écrit
    dans l'onduleur.
 5. Le soir, l'appareil passe hors ligne sans alerte : c'est normal.
+
+Pour un onduleur Solis : `model = "solis"`, et si l'enregistreur ne répond pas aux trames V5,
+`transport = "modbus_tcp"` (une clé Solis : essayer d'abord en lecture). La clé ne sert qu'un
+client : désactiver l'intégration Solarman de Home Assistant avant de tester.
