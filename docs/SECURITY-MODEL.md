@@ -56,6 +56,24 @@ qu'un intermédiaire lui passe en clair.
 | I9 | **Surface minimale** : Moli n'écoute jamais Internet directement ; garde `Host` sur toutes les routes. | Garde `Host` : `foreign_host_is_rejected_everywhere` ; écoute publique refusée : étape 2. |
 | I10 | **Révocable et limité dans le temps** : chaque session et chaque appareil, seul ou tous ensemble. | Sessions PIN de 30 jours (existant) ; par appareil : étape 3. |
 
+### TaHoma cloud : observation privée et déconnexion
+
+Les routes du complément cloud exigent un propriétaire authentifié ; elles restent classées
+`humain non` dans l'inventaire, avec une vérification propriétaire supplémentaire dans leur
+extracteur. La déconnexion est accessible même après retrait de la configuration cloud. Elle
+efface uniquement les données cloud de l'instance choisie, sans retirer les secrets du pilote
+local. Elle n'envoie aucune commande à un équipement ou à un scénario.
+
+Une déconnexion invalide la génération persistante avant de purger le catalogue ; une ancienne
+écriture encore en cours ne doit pas pouvoir le recréer. Les observations sont chiffrées dans
+un fichier séparé du coffre, et une observation identique ne réécrit pas ce fichier. La dernière
+lecture conservée après redémarrage ne prouve jamais la disponibilité actuelle du compte.
+
+Preuves : `crates/moli-api/tests/overkiz.rs` (propriétaire, refus des invités et déconnexion),
+les tests du stockage privé dans `crates/moli-runtime/src/` (génération, concurrence, écriture
+durable et chiffrement), `crates/moli-overkiz/src/cloud/runtime_tests.rs` (session, reprise et
+indépendance locale) et `crates/moli-os/src/backup.rs` (restauration sans cache plus récent).
+
 ### Airzone : autoriser et révoquer le pilotage
 
 Les routes d'installation Airzone exigent une personne authentifiée avant de lire le corps

@@ -298,7 +298,12 @@ fn check_node(
                 c.push(Level::Error, tr!("moteur.verif.seuil_manquant"));
             }
         }
-        Step::AtTime { at, days } => {
+        Step::AtTime {
+            at,
+            days,
+            weeks,
+            from,
+        } => {
             if minutes_of(at).is_none() {
                 c.push(
                     Level::Error,
@@ -306,6 +311,16 @@ fn check_node(
                 );
             }
             c.days(days);
+            if *weeks == 0 || *weeks > 8 {
+                c.push(Level::Error, tr!("moteur.verif.semaines"));
+            } else if *weeks > 1
+                && from
+                    .as_deref()
+                    .and_then(|f| f.parse::<jiff::civil::Date>().ok())
+                    .is_none()
+            {
+                c.push(Level::Error, tr!("moteur.verif.semaine_depart"));
+            }
         }
         Step::AtSun {
             offset_min, days, ..
@@ -708,11 +723,28 @@ fn trigger_words(step: &Step, hub: &Hub) -> String {
                 )
             }
         }
-        Step::AtTime { at, days } => tr!(
-            "moteur.decrit.heure",
-            jours = days_words(days),
-            heure = clock_words(at)
-        ),
+        Step::AtTime {
+            at,
+            days,
+            weeks,
+            from,
+        } => {
+            let base = tr!(
+                "moteur.decrit.heure",
+                jours = days_words(days),
+                heure = clock_words(at)
+            );
+            if *weeks > 1 {
+                tr!(
+                    "moteur.decrit.semaines",
+                    texte = base,
+                    n = weeks,
+                    depuis = from.as_deref().unwrap_or("?")
+                )
+            } else {
+                base
+            }
+        }
         Step::AtSun {
             event,
             offset_min,

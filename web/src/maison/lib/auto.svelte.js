@@ -193,8 +193,10 @@ export function nodeText(node) {
       const base = `${pointName(node.point)} ${what}`;
       return node.for_s ? t('automatismes.texte.pendant', { texte: base, duree: duration(node.for_s) }) : base;
     }
-    case 'at_time':
-      return `${node.at ?? '—'} · ${daysText(node.days)}`;
+    case 'at_time': {
+      const base = `${node.at ?? '—'} · ${daysText(node.days)}`;
+      return (node.weeks ?? 1) > 1 ? t('automatismes.texte.semaines', { texte: base, n: node.weeks }) : base;
+    }
     case 'at_sun': {
       const rise = node.event === 'rise';
       const off = Number(node.offset_min) || 0;

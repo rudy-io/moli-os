@@ -519,6 +519,23 @@ pub(crate) fn holds(autos: &Automations, rule: &Rule) -> bool {
     }
 }
 
+/// One week in `weeks`: the week (Monday to Sunday) of `from`, and every
+/// `weeks` after (and before). Without a rhythm, every week.
+pub(crate) fn week_ok(weeks: u8, from: Option<&str>, today: jiff::civil::Date) -> bool {
+    if weeks <= 1 {
+        return true;
+    }
+    let Some(from) = from.and_then(|f| f.parse::<jiff::civil::Date>().ok()) else {
+        return false; // refused by the check: never fires
+    };
+    let monday = |d: jiff::civil::Date| {
+        d.checked_sub(jiff::Span::new().days(i64::from(d.weekday().to_monday_zero_offset())))
+            .unwrap_or(d)
+    };
+    let days = (monday(today) - monday(from)).get_days();
+    (days / 7).rem_euclid(i32::from(weeks)) == 0
+}
+
 pub(crate) fn day_ok(days: &[u8], now: &jiff::Zoned) -> bool {
     let today = u8::try_from(now.weekday().to_monday_one_offset()).unwrap_or(1);
     days.is_empty() || days.contains(&today)
@@ -715,6 +732,25 @@ async fn notify(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_week_in_two_from_its_starting_week() {
+        let d = |s: &str| s.parse::<jiff::civil::Date>().unwrap();
+        let from = Some("2026-09-23"); // a Wednesday
+        assert!(week_ok(2, from, d("2026-09-23")));
+        assert!(!week_ok(2, from, d("2026-09-30")));
+        assert!(week_ok(2, from, d("2026-10-07")));
+        // Same week as the start, another day: in the rhythm.
+        assert!(week_ok(2, from, d("2026-09-21")));
+        // 11 November 2026 (Wednesday) is week 7 after: off; the 18th: on.
+        assert!(!week_ok(2, from, d("2026-11-11")));
+        assert!(week_ok(2, from, d("2026-11-18")));
+        // Before the start, the rhythm goes on backwards.
+        assert!(week_ok(2, from, d("2026-09-09")));
+        assert!(week_ok(1, None, d("2026-11-11")), "every week");
+        assert!(!week_ok(2, None, d("2026-11-11")), "no start: never");
+    }
+
     use super::*;
 
     #[test]

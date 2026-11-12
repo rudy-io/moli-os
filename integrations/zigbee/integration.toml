@@ -1,0 +1,34 @@
+[integration]
+id = "zigbee"
+name = "Zigbee (natif, clé EZSP)"
+# Any Zigbee device the coordinator can join: no list per brand.
+brands = []
+models = []
+transport = "native"
+driver = "zigbee"
+crate = "moli-zigbee"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+# The network and trust center link keys live in the vault, written by the driver.
+secrets = ["network_key", "tc_link_key"]
+vars = []
+options = ["port"]
+
+[origin]
+reused = "documentation Silicon Labs (UG100 EZSP, UG101 ASH, UG600 EmberZNet) ; tables du protocole reprises de zigbee-herdsman (MIT, voir NOTICE)"
+author = "agent"
+
+# Fictitious: an Open Coordinator Backup as Zigbee2MQTT (zigbee-herdsman, ember
+# adapter) writes it, read by `moli-os zigbee import`.
+[[fixture]]
+file = "fixtures/coordinator_backup.json"
+
+# Real: the frames of an Innr RB 287 C (firmware 1.9.64), its short address
+# replaced, replayed by the driver's tests.
+[[fixture]]
+file = "fixtures/innr_rb287c.json"

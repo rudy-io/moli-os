@@ -1,0 +1,9 @@
+[
+  {
+    "label": "Synthetic calculated occurrence",
+    "utcTime": 1793520000000,
+    "actionGroupOID": "00000000-0000-4000-8000-000000000001",
+    "executionType": "SYNTHETIC_UNKNOWN_EXECUTION_TYPE",
+    "executionSubType": "SYNTHETIC_UNKNOWN_EXECUTION_SUBTYPE"
+  }
+]

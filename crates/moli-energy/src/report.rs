@@ -178,6 +178,9 @@ pub struct Period {
     /// What went to the grid (`export` meters); its cost is what it earned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export: Option<Amount>,
+    /// Natural gas (`gas` meters), in kWh: never in `total`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas: Option<Amount>,
     #[serde(flatten)]
     pub solar: Option<SolarShare>,
 }
@@ -244,6 +247,7 @@ impl Period {
             of_role(Role::Circuit),
         );
         let (production, export) = (of_role(Role::Solar), of_role(Role::Export));
+        let gas = of_role(Role::Gas);
         // With panels, the whole-home clamp sees only what was bought: the
         // circuits also ran on what the home made and used.
         let made_here = production
@@ -281,6 +285,7 @@ impl Period {
             unmeasured: unmeasured.map(|a| a.rounded()),
             production: production.map(|a| a.rounded()),
             export: export.map(|a| a.rounded()),
+            gas: gas.map(|a| a.rounded()),
             solar,
         }
     }
@@ -314,6 +319,37 @@ mod tests {
     fn at(s: &str) -> u64 {
         let z: Zoned = s.parse().unwrap();
         millis(&z)
+    }
+
+    #[test]
+    fn gas_is_counted_apart_from_the_electricity() {
+        let config: Config = toml::from_str(
+            "[[meter]]\nid = \"day\"\nname = \"Jour\"\npoint = \"p:m/day\"\nrole = \"grid\"\n\
+             [[meter]]\nid = \"gas\"\nname = \"Gaz\"\npoint = \"p:m/gas\"\nrole = \"gas\"\nkwh_per_unit = 11.3868\n",
+        )
+        .unwrap();
+        config.check().unwrap();
+        let row = |meter: &str, kwh, cost| HourRow {
+            meter: meter.into(),
+            hour: 0,
+            kwh,
+            cost: Some(cost),
+        };
+        let p = Period::of(
+            &config,
+            &[row("day", 2.0, 0.6), row("gas", 11.0, 1.5)],
+            0,
+            HOUR_MS,
+        );
+        assert_eq!(p.total.kwh, 2.0, "the electricity alone");
+        let gas = p.gas.unwrap();
+        assert_eq!((gas.kwh, gas.cost), (11.0, Some(1.5)));
+        // A gas meter converts with its own factor only.
+        let bad: Config = toml::from_str(
+            "[[meter]]\nid = \"g\"\nname = \"g\"\npoint = \"a:b/c\"\nrole = \"gas\"\nkwh_per_unit = 0\n",
+        )
+        .unwrap();
+        assert!(bad.check().is_err());
     }
 
     #[test]

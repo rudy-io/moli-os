@@ -18,6 +18,7 @@ moli-airplay = { path = "crates/moli-airplay" }
 moli-airzone = { path = "crates/moli-airzone" }
 moli-voltalis = { path = "crates/moli-voltalis" }
 moli-z2m = { path = "crates/moli-z2m" }
+moli-zigbee = { path = "crates/moli-zigbee" }
 moli-zwave = { path = "crates/moli-zwave" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
@@ -51,6 +52,7 @@ moli-assistant = { path = "crates/moli-assistant" }
 moli-automation = { path = "crates/moli-automation" }
 moli-helpers = { path = "crates/moli-helpers" }
 moli-lights = { path = "crates/moli-lights" }
+moli-scenes = { path = "crates/moli-scenes" }
 moli-presence = { path = "crates/moli-presence" }
 moli-telegram = { path = "crates/moli-telegram" }
 moli-i18n = { path = "crates/moli-i18n" }
@@ -78,8 +80,12 @@ http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 md-5 = "0.11"
+libc = "0.2"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
+# Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
+num-bigint = "0.4"
+num-traits = "0.2"
 rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

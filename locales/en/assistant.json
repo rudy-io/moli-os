@@ -269,5 +269,6 @@
   "assistant.correct.room_lights_off": "All the lights of the room: turn off",
   "assistant.correct.room_colour": "The whole room in {colour}",
   "assistant.correct.room_covers_open": "All the shutters of the room: open",
-  "assistant.correct.room_covers_close": "All the shutters of the room: close"
+  "assistant.correct.room_covers_close": "All the shutters of the room: close",
+  "assistant.auto.role_gas": "natural gas (index, not electricity)"
 }

@@ -10,6 +10,7 @@
   import TariffPie from '../ui/TariffPie.svelte';
   import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
+  import EnergyFlow from '../ui/EnergyFlow.svelte';
 
   onMount(useEnergy);
 
@@ -306,7 +307,19 @@
         {/if}
       </section>
 
+      {#if s.month.gas}
+        <section class="card">
+          <span class="eyebrow">{t('energie.gaz.titre')}</span>
+          <strong class="big num">{euros(s.month.gas.cost, cur)}</strong>
+          <div class="row">
+            <span class="muted num small">{t('energie.gaz.detail', { kwh: kwh(s.month.gas.kwh), today: euros(s.today.gas?.cost, cur) })}</span>
+          </div>
+        </section>
+      {/if}
+
     </div>
+
+    <EnergyFlow />
 
     {#if tips.length}
       <section class="card tips">

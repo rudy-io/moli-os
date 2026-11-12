@@ -10,8 +10,10 @@
   import ValveCard from '../ui/ValveCard.svelte';
   import VacuumCard from '../ui/VacuumCard.svelte';
   import EnergyCard from '../ui/EnergyCard.svelte';
+  import EnergyFlow from '../ui/EnergyFlow.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
+  import ScenePicker from '../ui/ScenePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
 
@@ -190,6 +192,7 @@
           <LightTile id={l.id} name={l.name} icon={l.icon} also={l.also ?? []} />
         {/each}
       </div>
+      <ScenePicker />
       {#if mood}
         <div class="moods">
           <div class="moods-head">
@@ -207,6 +210,7 @@
 
     <div class="side">
       <EnergyCard />
+      <EnergyFlow home />
       <Routines />
     </div>
 

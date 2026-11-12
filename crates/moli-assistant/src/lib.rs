@@ -4291,6 +4291,7 @@ mod tests {
             unmeasured: None,
             production: None,
             export: None,
+            gas: None,
             solar: None,
         };
         let mut summary = moli_energy::Summary {

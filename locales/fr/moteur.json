@@ -36,24 +36,20 @@
   "moteur.verif.ecrit_vide": "Dis à Moli ce qu'il doit écrire.",
   "moteur.verif.moli_absent": "Moli n'est pas branché : ce nœud n'écrira rien.",
   "moteur.verif.position_inconnue": "Position de la maison inconnue ([automations] latitude/longitude) : le soleil se lira sur la météo.",
-
   "moteur.nombre.separateur": ",",
   "moteur.valeur.oui": "oui",
   "moteur.valeur.non": "non",
   "moteur.valeur.vrai": "oui",
   "moteur.valeur.faux": "non",
   "moteur.valeur.texte": "« {texte} »",
-
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes}",
   "moteur.duree.min": "{minutes} min",
   "moteur.duree.min_s": "{minutes} min {secondes} s",
   "moteur.duree.s": "{secondes} s",
-
   "moteur.heure.pile": "{heure} h",
   "moteur.heure.mn": "{heure} h {minute}",
   "moteur.heure.courte": "{heure}h{minute}",
-
   "moteur.jour.lundi": "lundi",
   "moteur.jour.mardi": "mardi",
   "moteur.jour.mercredi": "mercredi",
@@ -66,11 +62,9 @@
   "moteur.jour.weekend": "le week-end",
   "moteur.jour.liste": "le {jours}",
   "moteur.jour.fin": "{debut}, {fin}",
-
   "moteur.liste.et": "{debut} et {fin}",
   "moteur.liste.ou": "{debut} ou {fin}",
   "moteur.liste.point_virgule": "{debut} ; {fin}",
-
   "moteur.decrit.rien_declenche": "Rien ne la déclenche encore.",
   "moteur.decrit.alors": "{quand}, {corps}",
   "moteur.decrit.rien_pour_linstant": "{quand} : rien pour l'instant",
@@ -100,7 +94,6 @@
   "moteur.decrit.puis": "{debut}, puis {suite}",
   "moteur.decrit.sinon": "{debut} ; sinon, {suite}",
   "moteur.decrit.parallele": "{debut} ; et {fin}",
-
   "moteur.changement.ouvre": "s'ouvre",
   "moteur.changement.ferme": "se ferme",
   "moteur.changement.sonne": "sonne",
@@ -117,7 +110,6 @@
   "moteur.changement.eteint": "s'éteint",
   "moteur.changement.valeur": "· {libelle} passe à {valeur}",
   "moteur.changement.change": "· {libelle} change",
-
   "moteur.regle.allume": "{appareil} est allumé",
   "moteur.regle.eteint": "{appareil} est éteint",
   "moteur.regle.ferme": "{appareil} est fermé",
@@ -137,7 +129,6 @@
   "moteur.regle.jour": "il fait jour",
   "moteur.regle.nuit": "il fait nuit",
   "moteur.regle.perime": "{appareil} ({libelle}) n'a rien dit depuis {duree}",
-
   "moteur.action.allumer": "allumer {appareil}",
   "moteur.action.eteindre": "éteindre {appareil}",
   "moteur.action.appuyer": "appuyer sur {valeur} ({appareil})",
@@ -147,11 +138,9 @@
   "moteur.action.attendre_que": "attendre que {regle} (au plus {duree})",
   "moteur.action.prevenir": "prévenir {lieux} : « {message} »",
   "moteur.action.ecrire": "faire écrire un message par Moli",
-
   "moteur.lieu.maison": "la maison",
   "moteur.lieu.voix": "à voix haute",
   "moteur.lieu.telephone": "le téléphone",
-
   "moteur.etape.trop_etapes": "trop d'étapes",
   "moteur.etape.etat_inconnu": "état actuel inconnu",
   "moteur.etape.attendrait": "attendrait {secondes} s",
@@ -163,22 +152,18 @@
   "moteur.etape.moli_lent": "Moli n'a pas répondu à temps",
   "moteur.etape.declencheur_milieu": "déclencheur au milieu du graphe",
   "moteur.etape.retenu": "retenu par la garde : {raison}",
-
   "moteur.canal.annonce": "annonce",
   "moteur.canal.telephone": "téléphone",
   "moteur.canal.echec": "{canal} ({point}) : {erreur}",
-
   "moteur.pourquoi.essai": "Essai à blanc",
   "moteur.pourquoi.main": "Lancée à la main",
   "moteur.pourquoi.demarrage": "Moli vient de démarrer",
   "moteur.pourquoi.heure": "Il est {heure}",
   "moteur.pourquoi.interrompu": "{pourquoi} · interrompu par un redémarrage de Moli",
-
   "moteur.qui.personne": "une personne (code)",
   "moteur.qui.moli": "Moli",
   "moteur.qui.agent": "un agent",
   "moteur.qui.import": "l'import Home Assistant",
-
   "moteur.notice.perdu_titre": "« {nom} » modifié par {qui}",
   "moteur.notice.perdu": "Il a perdu sa validation et ne tourne plus. Tu peux revenir à la version validée.",
   "moteur.notice.coupe_titre": "« {nom} » coupé par {qui}",
@@ -186,6 +171,8 @@
   "moteur.notice.boucle_note": "Coupée toute seule : elle se lançait plus de {max} fois par minute.",
   "moteur.notice.boucle_titre": "Automatisme coupé",
   "moteur.notice.boucle": "« {nom} » se lançait en boucle : je l'ai arrêté. À vérifier dans Automatismes.",
-
-  "moteur.refus.nom_note": "Seule une personne (code de la maison) peut renommer un automatisme validé ou changer sa note."
+  "moteur.refus.nom_note": "Seule une personne (code de la maison) peut renommer un automatisme validé ou changer sa note.",
+  "moteur.verif.semaines": "Le rythme va de 1 à 8 semaines.",
+  "moteur.verif.semaine_depart": "Une semaine sur plusieurs a besoin de sa semaine de départ (une date, 2026-09-23).",
+  "moteur.decrit.semaines": "{texte}, une semaine sur {n} (à partir de la semaine du {depuis})"
 }

@@ -269,5 +269,6 @@
   "assistant.correct.room_lights_off": "Toutes les lumières de la pièce : éteindre",
   "assistant.correct.room_colour": "Toute la pièce en {colour}",
   "assistant.correct.room_covers_open": "Tous les volets de la pièce : ouvrir",
-  "assistant.correct.room_covers_close": "Tous les volets de la pièce : fermer"
+  "assistant.correct.room_covers_close": "Tous les volets de la pièce : fermer",
+  "assistant.auto.role_gas": "gaz naturel (index, pas de l'électricité)"
 }

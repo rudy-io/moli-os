@@ -22,8 +22,10 @@ const ANSWER: u16 = 0x1510;
 const HEADER: usize = 11;
 /// Answer payload before the Modbus frame.
 const ANSWER_PREFIX: usize = 14;
-/// Read holding registers: the only function this driver ever sends.
-const READ: u8 = 0x03;
+/// Read holding registers (Deye).
+pub const HOLDING: u8 = 0x03;
+/// Read input registers (Solis). Reads only: nothing else is ever sent.
+pub const INPUT: u8 = 0x04;
 
 /// Modbus CRC-16 (polynomial 0xA001, start 0xFFFF).
 #[must_use]
@@ -49,10 +51,18 @@ fn checksum(frame: &[u8]) -> u8 {
         .fold(0u8, |sum, b| sum.wrapping_add(*b))
 }
 
-/// A request reading `count` registers from `start` on Modbus slave `slave`.
+/// A request reading `count` registers from `start` on Modbus slave `slave`,
+/// with `function` ([`HOLDING`] or [`INPUT`]).
 #[must_use]
-pub fn read_request(serial: u32, sequence: u16, slave: u8, start: u16, count: u16) -> Vec<u8> {
-    let mut rtu = vec![slave, READ];
+pub fn read_request(
+    serial: u32,
+    sequence: u16,
+    slave: u8,
+    function: u8,
+    start: u16,
+    count: u16,
+) -> Vec<u8> {
+    let mut rtu = vec![slave, function];
     rtu.extend_from_slice(&start.to_be_bytes());
     rtu.extend_from_slice(&count.to_be_bytes());
     rtu.extend_from_slice(&crc16(&rtu).to_le_bytes());
@@ -106,8 +116,14 @@ impl std::fmt::Display for NoData {
 impl std::error::Error for NoData {}
 
 /// Reads the answer to a request from `serial` with `sequence`, `count`
-/// registers.
-pub fn parse(buf: &[u8], serial: u32, sequence: u16, count: u16) -> anyhow::Result<Frame> {
+/// registers read with `function`.
+pub fn parse(
+    buf: &[u8],
+    serial: u32,
+    sequence: u16,
+    function: u8,
+    count: u16,
+) -> anyhow::Result<Frame> {
     // Garbage before a frame: skip to the next start byte.
     let Some(at) = buf.iter().position(|&b| b == START) else {
         return Ok(if buf.is_empty() {
@@ -145,10 +161,14 @@ pub fn parse(buf: &[u8], serial: u32, sequence: u16, count: u16) -> anyhow::Resu
     let Some(rtu) = payload.get(ANSWER_PREFIX..).filter(|r| r.len() >= 5) else {
         return Err(NoData::Asleep.into());
     };
-    if rtu[1] == READ | 0x80 {
+    if rtu[1] == function | 0x80 {
         return Err(NoData::Refused(rtu[2]).into());
     }
-    ensure!(rtu[1] == READ, "unexpected modbus function {:#x}", rtu[1]);
+    ensure!(
+        rtu[1] == function,
+        "unexpected modbus function {:#x}",
+        rtu[1]
+    );
     let bytes = usize::from(rtu[2]);
     ensure!(rtu.len() >= 3 + bytes + 2, "short modbus answer");
     let crc = u16::from_le_bytes([rtu[3 + bytes], rtu[4 + bytes]]);
@@ -157,6 +177,63 @@ pub fn parse(buf: &[u8], serial: u32, sequence: u16, count: u16) -> anyhow::Resu
         bail!("asked {count} registers, got {bytes} bytes");
     }
     let registers = rtu[3..3 + bytes]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|w| u16::from_be_bytes(*w))
+        .collect();
+    Ok(Frame::Registers(registers, total))
+}
+
+/// Modbus TCP (some loggers, a Solis stick among them, speak it on the
+/// same port instead of V5): a request with transaction `tid`.
+#[must_use]
+pub fn tcp_request(tid: u16, slave: u8, function: u8, start: u16, count: u16) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(12);
+    frame.extend_from_slice(&tid.to_be_bytes());
+    frame.extend_from_slice(&[0, 0, 0, 6, slave, function]);
+    frame.extend_from_slice(&start.to_be_bytes());
+    frame.extend_from_slice(&count.to_be_bytes());
+    frame
+}
+
+/// The Modbus TCP answer to transaction `tid`, `count` registers read with
+/// `function`.
+pub fn tcp_parse(
+    buf: &[u8],
+    tid: u16,
+    slave: u8,
+    function: u8,
+    count: u16,
+) -> anyhow::Result<Frame> {
+    if buf.len() < 9 {
+        return Ok(Frame::Partial);
+    }
+    let length = usize::from(u16::from_be_bytes([buf[4], buf[5]]));
+    ensure!((2..=260).contains(&length), "bad modbus tcp length");
+    let total = 6 + length;
+    if buf.len() < total {
+        return Ok(Frame::Partial);
+    }
+    if u16::from_be_bytes([buf[0], buf[1]]) != tid || buf[2..4] != [0, 0] || buf[6] != slave {
+        return Ok(Frame::Other(total));
+    }
+    let pdu = &buf[7..total];
+    if pdu[0] == function | 0x80 {
+        return Err(NoData::Refused(pdu.get(1).copied().unwrap_or(0)).into());
+    }
+    ensure!(pdu.len() >= 2, "short modbus answer");
+    ensure!(
+        pdu[0] == function,
+        "unexpected modbus function {:#x}",
+        pdu[0]
+    );
+    let bytes = usize::from(pdu[1]);
+    ensure!(pdu.len() >= 2 + bytes, "short modbus answer");
+    if bytes != usize::from(count) * 2 {
+        bail!("asked {count} registers, got {bytes} bytes");
+    }
+    let registers = pdu[2..2 + bytes]
         .as_chunks::<2>()
         .0
         .iter()
@@ -177,6 +254,35 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn modbus_tcp_reads_registers() {
+        let req = tcp_request(0x10, 1, INPUT, 3004, 2);
+        assert_eq!(req, [0, 0x10, 0, 0, 0, 6, 1, 4, 0x0B, 0xBC, 0, 2]);
+        let answer = [0, 0x10, 0, 0, 0, 7, 1, 4, 4, 0, 0, 0, 0x32];
+        assert_eq!(
+            tcp_parse(&answer, 0x10, 1, INPUT, 2).unwrap(),
+            Frame::Registers(vec![0, 50], 13)
+        );
+        assert_eq!(
+            tcp_parse(&answer[..8], 0x10, 1, INPUT, 2).unwrap(),
+            Frame::Partial
+        );
+        assert_eq!(
+            tcp_parse(&answer, 0x11, 1, INPUT, 2).unwrap(),
+            Frame::Other(13)
+        );
+        // Another unit's answer is not ours.
+        assert_eq!(
+            tcp_parse(&answer, 0x10, 2, INPUT, 2).unwrap(),
+            Frame::Other(13)
+        );
+        let refused = [0, 0x10, 0, 0, 0, 3, 1, 0x84, 2];
+        assert!(tcp_parse(&refused, 0x10, 1, INPUT, 2).is_err());
+        // A length of 2: the function alone, no byte count. Refused, no panic.
+        let short = [0, 0x10, 0, 0, 0, 2, 1, 4, 0];
+        assert!(tcp_parse(&short, 0x10, 1, INPUT, 2).is_err());
+    }
+
+    #[test]
     fn modbus_crc_matches_the_reference() {
         // 01 03 00 00 00 0A → C5 CD (the classic example of the Modbus spec).
         assert_eq!(
@@ -187,7 +293,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_request_is_framed_like_pysolarmanv5() {
-        let frame = read_request(1_234_567_890, 1, 1, 0x003B, 0x3A);
+        let frame = read_request(1_234_567_890, 1, 1, HOLDING, 0x003B, 0x3A);
         assert_eq!(frame[0], START);
         assert_eq!(*frame.last().unwrap(), END);
         assert_eq!(u16::from_le_bytes([frame[1], frame[2]]), 23);
@@ -223,7 +329,7 @@ pub(crate) mod tests {
     fn a_real_answer_reads_as_registers() {
         for name in ["micro-2-inputs", "micro-4-inputs"] {
             for (_, count, sequence, bytes) in fixture(name) {
-                match parse(&bytes, 1_234_567_890, sequence, count).unwrap() {
+                match parse(&bytes, 1_234_567_890, sequence, HOLDING, count).unwrap() {
                     Frame::Registers(r, used) => {
                         assert_eq!(r.len(), usize::from(count));
                         assert_eq!(used, bytes.len());
@@ -237,19 +343,25 @@ pub(crate) mod tests {
     #[test]
     fn heartbeats_and_garbage_are_skipped_and_silence_is_sleep() {
         assert_eq!(
-            parse(&[0x00, 0x01, START], 1, 1, 1).unwrap(),
+            parse(&[0x00, 0x01, START], 1, 1, HOLDING, 1).unwrap(),
             Frame::Other(2)
         );
-        assert_eq!(parse(&[START, 0x10], 1, 1, 1).unwrap(), Frame::Partial);
+        assert_eq!(
+            parse(&[START, 0x10], 1, 1, HOLDING, 1).unwrap(),
+            Frame::Partial
+        );
         // An answer whose payload stops before the Modbus frame.
         let mut frame = vec![START, 2, 0, 0x10, 0x15, 1, 0];
         frame.extend_from_slice(&7u32.to_le_bytes());
         frame.extend_from_slice(&[0x02, 0x01]);
         let sum = checksum(&frame);
         frame.extend_from_slice(&[sum, END]);
-        let e = parse(&frame, 7, 1, 1).unwrap_err();
+        let e = parse(&frame, 7, 1, HOLDING, 1).unwrap_err();
         assert_eq!(e.downcast_ref::<NoData>(), Some(&NoData::Asleep));
         // The same from another logger: not ours.
-        assert_eq!(parse(&frame, 8, 1, 1).unwrap(), Frame::Other(frame.len()));
+        assert_eq!(
+            parse(&frame, 8, 1, HOLDING, 1).unwrap(),
+            Frame::Other(frame.len())
+        );
     }
 }

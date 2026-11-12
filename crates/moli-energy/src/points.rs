@@ -312,6 +312,7 @@ mod tests {
             unmeasured: None,
             production: None,
             export: None,
+            gas: None,
             solar: None,
         }
     }

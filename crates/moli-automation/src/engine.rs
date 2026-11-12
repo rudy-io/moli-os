@@ -9,7 +9,7 @@ use moli_i18n::tr;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::model::{Automation, Mode, Step, SunEvent, minutes_of};
-use crate::run::{day_ok, execute, same};
+use crate::run::{day_ok, execute, same, week_ok};
 use crate::{Automations, clock, decimal, lock, yes_no};
 
 /// Runs per minute beyond which an automation is switched off.
@@ -254,7 +254,16 @@ fn on_clock(autos: &Automations) {
     for a in live(autos).iter() {
         for t in a.graph.triggers() {
             let due = match &t.step {
-                Step::AtTime { at, days } => day_ok(days, &now) && minutes_of(at) == Some(minute),
+                Step::AtTime {
+                    at,
+                    days,
+                    weeks,
+                    from,
+                } => {
+                    day_ok(days, &now)
+                        && minutes_of(at) == Some(minute)
+                        && week_ok(*weeks, from.as_deref(), now.date())
+                }
                 Step::AtSun {
                     event,
                     offset_min,

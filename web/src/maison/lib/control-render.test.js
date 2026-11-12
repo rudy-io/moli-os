@@ -9,6 +9,7 @@ let vite;
 let hub;
 let home;
 let energy;
+let icons;
 let render;
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const components = {};
@@ -22,7 +23,8 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -304,6 +306,7 @@ test('the rooms icons preference reaches each cover without changing the dedicat
     point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
   const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
   assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  assert.match(room, /data-cover-command="close"/);
   const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
   assert.match(focused, />Fixture</);
   assert.match(focused, />Ouvrir</);
@@ -329,7 +332,8 @@ test('the shutter route bypasses a stored lights filter without replacing it or 
     const normal = render(components.Pieces, { props: { route: 'pieces' } }).body;
     assert.match(normal, /Fixture lamp/);
     assert.doesNotMatch(normal, /Twin shade/);
-    assert.match(normal, /href="#\/pieces\/volets"/);
+    // No link of its own any more: the « Volets » chip does it (#171).
+    assert.doesNotMatch(normal, /href="#\/pieces\/volets"/);
     assert.deepEqual(writes, []);
   } finally { delete globalThis.localStorage; }
 });
@@ -776,7 +780,32 @@ test('a room shows its trigger device and a lone control point stays a cover', (
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
   assert.match(room, /Impulsion · Relais 1/);
-  assert.match(room, /data-cover-command="open"/);
+  // No measured position: the pad opens the cover tile instead of sending open.
+  assert.match(room, /shutter-icon/);
+  assert.doesNotMatch(room, /data-cover-command/);
+});
+
+test('a partly open cover shows the open shutter, never the alert icon', () => {
+  const position = [point('opening', number(0, 100, 1), false, 'position')];
+  const opened = show('ShutterIcon', position, { opening: 42 });
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.ok(!opened.includes(icons['shutter-alert']));
+  const closed = show('ShutterIcon', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.ok(!closed.includes(icons['shutter-alert']));
+});
+
+test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
+  const cover = (extra = {}) => ({
+    id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {}, ...extra,
+  });
+  const pad = (html) => buttons(html).find((button) => /class="pad/.test(button));
+  assert.doesNotMatch(pad(showRoom([cover()])), /disabled/);
+  assert.match(pad(showRoom([cover({ online: false })])), /disabled/);
+  assert.match(pad(showRoom([cover({ points: [point('control', enumeration('open', 'close', 'stop'), false)] })])), /disabled/);
+  hub.connected = false;
+  assert.match(pad(showRoom([cover()])), /disabled/);
+  hub.connected = true;
 });
 
 test('a presence radar shows someone there, whatever the key of its presence point', () => {
@@ -836,4 +865,55 @@ test('a plant sensor shows its soil, and its pot stays out of the room readings 
     assert.match(thirsty, /class="chip warm[^"]*" title="z2m:plant : terre à \d+ %, à arroser"/);
     assert.doesNotMatch(thirsty, /fuite/i);
   }
+});
+
+test('the « Volets » chip alone shows the shutters view; with others, the rooms (#171)', () => {
+  let saved = '["volets"]';
+  globalThis.localStorage = { getItem: () => saved, setItem: () => {} };
+  try {
+    const entries = [
+      { id: 'fixture:shade', model: 'Home Assistant cover', label: { name: 'Shade', room: 'Studio' }, online: true,
+        points: [point('control', enumeration('open', 'close', 'stop'), false)], state: {} },
+      { id: 'fixture:lamp', model: 'Home Assistant light', label: { name: 'Lamp', room: 'Studio' }, online: true,
+        points: [point('on', { type: 'binary' }, false, 'on_off')], state: { on: { value: true } } },
+    ];
+    hub.devices = Object.fromEntries(entries.map((d) => [d.id, d]));
+    home.home.config = {};
+    const alone = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    // The shutters' grid, under the page's own title and its filters.
+    assert.match(alone, /class="cover-grid/);
+    assert.match(alone, />Ouvrir</);
+    assert.doesNotMatch(alone, />Lamp</);
+    assert.match(alone, /<h1 class="page-title[^"]*">Pièces</);
+    assert.match(alone, /class="bar/);
+
+    saved = '{"v":2,"ids":["volets","lumieres"]}';
+    const mixed = render(components.Pieces, { props: { route: 'pieces' } }).body;
+    assert.doesNotMatch(mixed, /class="cover-grid/);
+    assert.match(mixed, />Lamp</);
+  } finally { delete globalThis.localStorage; }
+});
+
+test('« Climat » and « Volets » are two chips; openers go with the shutters (#171)', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const ids = filters.CATEGORIES.map((c) => c.id);
+  assert.ok(ids.includes('climat') && ids.includes('volets'));
+  const kinds = (id) => filters.CATEGORIES.find((c) => c.id === id).kinds;
+  assert.deepEqual(kinds('climat'), ['climate']);
+  assert.ok(kinds('volets').includes('cover') && kinds('volets').includes('impulse'));
+});
+
+test('a filter saved as « climat » before #171 keeps its shutters, a new one does not', async () => {
+  const filters = await vite.ssrLoadModule('/src/maison/lib/filters.js');
+  const store = {};
+  globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+  try {
+    store.old = '["climat"]';
+    assert.deepEqual(filters.loadFilter('old'), ['climat', 'volets']);
+    filters.saveFilter('new', ['climat']);
+    assert.deepEqual(JSON.parse(store.new), { v: 2, ids: ['climat'] });
+    assert.deepEqual(filters.loadFilter('new'), ['climat']);
+    store.junk = '{"v":2}';
+    assert.deepEqual(filters.loadFilter('junk'), []);
+  } finally { delete globalThis.localStorage; }
 });

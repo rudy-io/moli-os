@@ -161,6 +161,53 @@ du firmware ne sont pas des opérations de la Local API.
 Configuration, garde des groupes, limites des réponses, commandes et restrictions :
 [guide Airzone](../../integrations/airzone/README.md).
 
+## Scènes et rythme de la journée (`crates/moli-scenes`)
+
+Pas un pilote à déclarer : dès que `moli.toml` a un `[[scene]]` ou un `[rhythm]`, Moli lance
+l'instance `scenes` et publie **un** appareil, `scenes:maison`.
+
+```toml
+[[scene]]
+id = "soiree"          # stable : c'est la valeur de scenes:maison/scene
+name = "Soirée"
+cycle = true           # fait partie de la ronde du bouton (toutes, si aucune ne le dit)
+lights = [
+  { id = "lumieres:suspensions", off = true },
+  { id = "z2m:0x…", color = "#ffb060", brightness = 22, effect = "flame" },
+  { id = "hue:…", white = 2400, brightness = 30 },
+]
+
+[rhythm]
+lights = ["lumieres:suspensions", "hue:…"]
+# curve = [{ at = "07:00", white = 2700, brightness = 60 }, …]   # facultatif
+```
+
+- **Points** : `scene` (énumération : `none` et les identifiants ; l'écrire met la scène),
+  `order` (`next` / `previous`, en écriture seule : la ronde depuis un bouton mural ou un
+  automatisme), `rhythm` (interrupteur, seulement avec un `[rhythm]`). Tout passe par le hub :
+  page, automatisme (`set`), agent, assistant.
+- **Une scène** dit, lumière par lumière : éteinte (`off`), ou une couleur (`color`, « #rrggbb »),
+  un blanc (`white`, kelvins : pris par les lampes sans couleur, ou quand aucune couleur n'est
+  donnée), une luminosité (`brightness`, %), une animation (`effect`, jouée là où la lampe l'a ;
+  pour un luminaire, par ses ampoules). Ce qui n'est pas dit reste tel quel ; une lumière que la
+  scène ne nomme pas n'est pas touchée. Un simple interrupteur est allumé ou éteint. Les ordres
+  partent l'un après l'autre, au nom de la maison (comme ceux d'un luminaire) ; choisir une autre
+  scène interrompt celle qui s'installe.
+- **Le reste de la maison** : `orders = [{ point = "tele:…/ambilight_mode", value = "relax" }]`,
+  des ordres simples (texte, nombre, vrai/faux) envoyés après les lumières : l'Ambilight d'une
+  télé, une prise. Un ordre refusé (télé éteinte) est noté au journal, la scène reste en place.
+  Une scène ne peut pas en commander une autre.
+- **Fin d'une scène** : `scene` revient à `none` quand toutes ses lumières allumées sont éteintes
+  (jamais dans les 30 premières secondes), ou quand on écrit `none` (les lumières ne bougent pas).
+- **Rythme de la journée** : une lumière de `lights` qu'on allume, sans scène en place, prend le
+  blanc et le niveau de l'heure (heure de la maison), puis les suit toutes les dix minutes. La
+  courbe par défaut : 05:00 2200 K 30 %, 07:00 2700 K 60 %, 09:00 4300 K 100 %, 16:00 4000 K 100 %,
+  19:00 3000 K 80 %, 21:30 2400 K 50 %, 23:30 2200 K 30 %, en glissant de l'une à l'autre. Une
+  lumière qu'une personne a réglée (niveau à plus de 4 points de celui donné, ou une couleur)
+  n'est plus suivie jusqu'à sa prochaine extinction. Le rythme n'allume jamais rien.
+- Les identifiants de scène `none`, `next` et `previous` sont réservés. `moli-os check-config`
+  refuse une scène mal écrite (lumière nommée deux fois, `off` avec un réglage, couleur invalide…).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.
@@ -182,7 +229,7 @@ base_topic = "zigbee2mqtt"  # défaut
 ```
 
 - **Secrets** : mot de passe MQTT éventuel dans la variable d'environnement nommée par `password_env`.
-- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`. **Relais à impulsion** (`impulse_points`) : un relais qui pilote un contact sec (portail, porte de garage, ZG-2002-RF en mode `inching`) ressemble à un interrupteur dont l'état retombe à éteint ; Z2M ne dit pas à quoi il est câblé, et le retour à `OFF` est aussi celui d'une minuterie, donc rien n'est déduit : le propriétaire liste les identifiants de points (`z2m:<IEEE>/state_l1`). Un point listé (interrupteur réglable seulement) devient une énumération à une seule valeur, `cycle`, de sens `control` (un agent demande toujours l'accord d'une personne), en écriture seule : l'ordre part en `state_lN: "ON"`, l'état renvoyé n'est jamais publié ni relu. Un identifiant inconnu ou non éligible est signalé dans les journaux. Le tableau de bord montre un bouton « Impulsion » par relais (« Relais 1 », « Relais 2 ») ; la fonction de chaque relais se dit par le nom de l'appareil. **Migration** : un relais déclaré cesse d'être un interrupteur (`on_off` → `control`) ; une règle, un favori ou un historique qui lisait son état est à reprendre. **Plantes** : `soil_moisture` a le sens `soil_moisture` (humidité de la terre, %) ; le `dry` d'un capteur de sol Tuya (COOLO CS-201Z…) prend le sens `soil_dry` (la plante a soif), seulement à côté d'une humidité du sol : un `dry` seul garde le sens `other`. Ce n'est jamais une alerte de sécurité. Le tableau de bord montre une pastille « plante » dans la pièce, et la température et l'humidité du pot ne comptent pas dans celles de la pièce ; l'assistant ne les lit pas non plus comme celles de la pièce. **Migration** : `soil_moisture` et `dry` passent de `other` à leur sens ; une automatisation qui lisait `dry` garde la même clé.
+- **Points** : construits depuis les `exposes` du message retenu `bridge/devices` (`src/catalog.rs`). Clé = propriété Z2M ; les composites sont aplatis (`color.x`). Écriture si le bit `set` de Z2M est présent, **sauf** membres d'un composite (Z2M refuse un membre seul). Une exposition de catégorie `config` a la sémantique `config`. Les énumérations numériques sont exposées en texte et reconverties en nombre à l'envoi. **Lumières** : la luminosité Zigbee (0–254, `value_max`) est exposée en % (0–100, unité `%`), comme les autres pilotes ; conversion arrondie à la lecture et à l'envoi, une ampoule allumée n'est jamais affichée à 0 %. La température de blanc reste en mired ; une ampoule en mode couleur (`color_mode` autre que `color_temp`) la publie vide (`null`), comme Hue, pour que les pages montrent la couleur. **Couleur** : un composite `color {x, y}` réglable donne en plus un point `color` réglable (texte « #rrggbb », sens `color`, comme Hue), envoyé en CIE xy (`moli_core::color`) et relu depuis `color.x` / `color.y` ; les membres restent en lecture seule pour l'historique. Le tableau de bord et les luminaires proposent alors couleurs et blancs. **Flamme** (`src/flame.rs`) : la plupart des lampes Zigbee n'ont pas d'animation à elles (l'`effect` Zigbee est un clignotement pour repérer la lampe). Une lampe qui prend une couleur et se règle en luminosité gagne donc deux valeurs dans son point `effect` (créé si elle n'en a pas, et rendu lisible) : `flame` et `no_effect`. `flame` est jouée par le pilote : toutes les 1,3 à 2,3 s, un fondu lent (`transition` de 1 à 2 s) vers un ambre un peu différent et un niveau entre 0,82 et 1,22 fois la luminosité choisie, avec un léger creux une fois sur dix. Volontairement doux, et un seul ordre à la fois par lampe (envoi sans file : un fondu qui ne passe pas est sauté) pour laisser le réseau Zigbee libre. Pendant la flamme, les retours de niveau et de couleur de la lampe ne sont pas publiés : la luminosité enregistrée reste celle que la personne a choisie, et l'historique ne se remplit pas. Le curseur de luminosité règle le niveau autour duquel la flamme bouge. Une couleur, un blanc, un autre effet ou l'extinction (par Moli ou au bouton de la lampe) arrêtent la flamme ; `no_effect` l'arrête et remet la luminosité choisie (la lampe reste ambre). Après un redémarrage, une lampe enregistrée en `flame` et encore allumée la reprend. La ronde des couleurs de la lampe elle-même (`colorloop`, Zigbee) tourne jusqu'à `stop_colorloop` et la lampe ne dit jamais qu'elle la joue : sur ces lampes, le pilote la tient en mémoire dans `effect` et traduit `no_effect` en `stop_colorloop`, pour qu'une ambiance ou une scène l'arrête avant de poser autre chose. **Migration** : au déploiement, l'historique `brightness` des ampoules Z2M passe de 0–254 à 0–100 (les anciennes valeurs restent sur 254 dans les graphiques) ; une automatisation écrite avec un seuil brut (`> 200`) est à reprendre. **Volets** (`cover`) : `position` a le sens `position` (0–100 %, 100 = ouvert), posé par le pilote pour un expose `cover` et jamais déduit du nom ; `state` (`OPEN` / `CLOSE` / `STOP`) est un ordre, de sens `other`, jamais un interrupteur ; `moving` (`UP` / `STOP` / `DOWN`) est lu tel quel. **Migration** : au déploiement, `state` d'un volet cesse d'être un interrupteur (`on_off` → `other`) et `position` passe de `other` à `position` ; l'historique et les automatisations qui lisaient `state` comme un interrupteur sont à reprendre. **Contacts** : `contact` est repris tel que Z2M le publie (`true` = fermée), alors que Z2M le déclare avec `value_on: false`. **Relais à impulsion** (`impulse_points`) : un relais qui pilote un contact sec (portail, porte de garage, ZG-2002-RF en mode `inching`) ressemble à un interrupteur dont l'état retombe à éteint ; Z2M ne dit pas à quoi il est câblé, et le retour à `OFF` est aussi celui d'une minuterie, donc rien n'est déduit : le propriétaire liste les identifiants de points (`z2m:<IEEE>/state_l1`). Un point listé (interrupteur réglable seulement) devient une énumération à une seule valeur, `cycle`, de sens `control` (un agent demande toujours l'accord d'une personne), en écriture seule : l'ordre part en `state_lN: "ON"`, l'état renvoyé n'est jamais publié ni relu. Un identifiant inconnu ou non éligible est signalé dans les journaux. Le tableau de bord montre un bouton « Impulsion » par relais (« Relais 1 », « Relais 2 ») ; la fonction de chaque relais se dit par le nom de l'appareil. **Migration** : un relais déclaré cesse d'être un interrupteur (`on_off` → `control`) ; une règle, un favori ou un historique qui lisait son état est à reprendre. **Plantes** : `soil_moisture` a le sens `soil_moisture` (humidité de la terre, %) ; le `dry` d'un capteur de sol Tuya (COOLO CS-201Z…) prend le sens `soil_dry` (la plante a soif), seulement à côté d'une humidité du sol : un `dry` seul garde le sens `other`. Ce n'est jamais une alerte de sécurité. Le tableau de bord montre une pastille « plante » dans la pièce, et la température et l'humidité du pot ne comptent pas dans celles de la pièce ; l'assistant ne les lit pas non plus comme celles de la pièce. **Migration** : `soil_moisture` et `dry` passent de `other` à leur sens ; une automatisation qui lisait `dry` garde la même clé.
 - **Identité** : adresse IEEE. Le `friendly_name` ne sert qu'au routage des sujets.
 - **Découverte** : chaque nouveau `bridge/devices` recharge le catalogue (appareils disparus retirés ; coordinateur et appareils désactivés exclus). Disponibilité via `<nom>/availability` (`{"state":"online"}` ou `online`).
 - **Pièges** : Z2M ne rejoue pas les états aux nouveaux abonnés. Les appareils sur secteur (routeurs) sont donc interrogés une fois par exécution via `/get`, un toutes les 500 ms pour ne pas saturer le réseau ; les appareils endormis restent couverts par le cache d'état du hub. Taille de paquet portée à 4 Mio (`bridge/devices` grossit avec le réseau). Les propres `/set` et `/get` de Moli reviennent par `#` : ignorés. Une commande reçue avant que le broker ait accepté la connexion (`ConnAck`) est **refusée** (`broker injoignable`) au lieu d'être acquittée puis perdue ; toute erreur de connexion termine l'exécution (le superviseur vide la file et reconnecte).
@@ -269,6 +316,170 @@ base_topic = "zwave"        # défaut
   `get_nodes_real.json` (capture réelle anonymisée) : découverte, typage, décodage,
   encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
   et de config.
+
+## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
+
+- **Couvre** (phases 1 à 3, essayées sur une clé ZBDongle-E et une ampoule Innr RB 287 C ;
+  capteurs et prises sur simulateur à ce jour) : la clé coordinateur et son réseau (formé s'il
+  n'existe pas, repris sinon, restauré depuis une sauvegarde importée), l'appairage ouvert depuis
+  Moli, l'import et l'export d'une sauvegarde Zigbee2MQTT, et les appareils (voir **Appareils**).
+  Pas encore : familles propriétaires (Tuya, Xiaomi, Lixee), actions des télécommandes, retrait
+  d'un appareil depuis Moli (phase 4) : d'ici là, `z2m` reste le pilote d'une maison.
+- **Appareils** (`src/fleet.rs`, `src/interview.rs`, `src/devices.rs`, `src/zcl.rs`) :
+  - **Interview** à l'arrivée, une à la fois, 2 s après l'annonce : descripteur de nœud, endpoints,
+    descripteurs simples (3 essais chacun : la 1re requête après un appairage se perd souvent),
+    `Basic` attribut par attribut, capacités de couleur, type de zone et inscription IAS (les deux
+    procédures de herdsman, puis vérification de `zoneState`), diviseurs de mesure. Un silence à
+    n'importe quelle étape l'arrête, ce qu'elle a appris gardé dans le `store` : `ctx.warn` le dit,
+    et la suivante repart de là, sans délai, au prochain message de l'appareil (1 min d'écart au
+    moins) ou toutes les 10 min. Une réponse sans l'attribut est une réponse. Après 3 échecs, seuls
+    les descripteurs et l'inscription IAS retiennent l'appareil : une lampe sans modèle vaut mieux
+    que pas de lampe. Un appareil du
+    `store` pas encore interrogé l'est au démarrage. Réussie, elle n'est refaite que si l'appareil
+    rejoint « de rien » (`STANDARD_SECURITY_UNSECURED_JOIN`) : il a été réinitialisé et a tout
+    oublié. Un appareil qui part sans avoir été interrogé est oublié.
+  - **Points** : génériques par cluster, mêmes clés et mêmes unités que `moli-z2m`
+    (`brightness` en %, `contact` vrai = fermé, `color` en `#rrggbb` avec `color.x`, `color.y`
+    en lecture). Un 2e endpoint porte son numéro (`state_2`). `color_temp` vaut `Null` tant que
+    la lampe est en couleur : elle continue d'en rapporter une, au bout de sa plage. Sa plage
+    est bornée à 150-600 mired : une lampe peut déclarer bien plus qu'elle ne fait.
+  - **Rapports** : bind vers l'endpoint 1 du coordinateur et configure reporting (valeurs de
+    `reporting.ts` de herdsman-converters ; pour une prise, 5 W, 5 V, 50 mA et 0,1 kWh, ramenés aux
+    diviseurs de l'appareil, comme `genericMeter`, et `power` lu sur Electrical s'il existe) ; un
+    refus est une réponse, un silence se retente (1 h d'écart). Un rapport qui demande une réponse
+    par défaut la reçoit, jamais un broadcast.
+  - **Ordres** : remis à la clé dans l'ordre reçu par la boucle, puis suivis à part : un appareil
+    muet ne retient ni la boucle ni les autres. Réponse par défaut en erreur = refus rapporté à
+    l'auteur ; accusé radio sans réponse = pris ; rien à 300 ms de l'échéance du hub = échec dit à
+    l'auteur. Un appareil dormant : « remis » dès que la clé l'a pris (il le recevra à son réveil,
+    bien après les 5 s du hub), et un avis à la maison s'il ne l'a finalement pas. Valeur optimiste affichée dès que l'appareil l'a, confirmée par son
+    rapport. Échec : ses valeurs sont relues.
+  - **Disponibilité** (valeurs de Z2M) : tout message = en ligne ; à l'écoute et muet 10 min → une
+    lecture (une par silence de 10 min, pas plus), sans réponse → hors ligne ; dormant muet 25 h →
+    hors ligne (sa lecture manquée ne compte pas : il dort) ; parti du réseau → hors ligne, gardé
+    dans le `store`. Silence noté toutes les heures et à l'arrêt : il continue à travers un
+    redémarrage, sans compter le temps où Moli était arrêté. Lectures cadencées à 500 ms, toutes refaites au retour du réseau.
+- **Protocole** : EZSP (UG100) dans des trames ASH (UG101), sur le port série de la clé (ou
+  `tcp://hôte:port` pour un adaptateur réseau). Le pilote réinitialise la clé (RST), négocie
+  EZSP **13 ou plus** (EmberZNet 7.4+), envoie la configuration d'un coordinateur
+  (`setConfigurationValue`, liste et valeurs du pilote `ember` de zigbee-herdsman, provenance
+  ligne par ligne dans `src/coordinator.rs` ; une valeur refusée par la clé est journalisée
+  et la sienne gardée), l'endpoint 1 du coordinateur (`addEndpoint` : profil Home Automation,
+  identifiant et clusters de `FIXED_ENDPOINTS` de herdsman ; refusé, le démarrage échoue),
+  les politiques du centre de confiance (`setPolicy`, comme `initTrustCenter` de herdsman),
+  puis `networkInit` :
+  - réseau gardé par la clé → attente de `stackStatusHandler` « réseau levé » (10 s), puis
+    `getNetworkParameters` + `getEui64` : le réseau n'est repris (et recopié dans le `store`,
+    canal et `nwk_update_id` compris) que si la clé en est le coordinateur et que c'est le
+    réseau du `store` (même PAN et PAN étendu), ou, `store` vide, si le coffre a déjà une
+    `network_key` (première formation interrompue). Sinon le pilote attend en le disant
+    (`pilotes.zigbee.pas_coordinateur`, `autre_reseau`, `reseau_inconnu`) **sans rien
+    changer** : ni le réseau de la clé (jamais quitté ni effacé), ni le `store` ;
+  - pas de réseau et `store` vide → **formation** (`src/network.rs`, séquence `formNetwork` de
+    herdsman) : clé réseau et clé de lien du centre de confiance aléatoires (`ring`), rangées
+    au coffre **avant** toute commande de sécurité (reprises si le coffre les a déjà, après un
+    essai interrompu), `setInitialSecurityState`, masque de sécurité étendu, table des clés
+    vidée, `formNetwork` (canal `channel` ou 15, PAN et PAN étendu aléatoires), attente du
+    réseau levé, puis paramètres écrits dans le `store` ;
+  - pas de réseau mais un réseau connu du `store` → **restauration** (`src/backup.rs`,
+    `formNetwork` « depuis une sauvegarde » de herdsman) avec les clés du coffre, sur la clé
+    d'origine seulement, depuis un compteur de trames frais seulement (+ 65 536), sinon le
+    pilote attend en le disant ; jamais de formation par-dessus. Un relevé de plus de 24 h
+    (ou sans date) n'est pas restauré non plus (`pilotes.zigbee.compteur_ancien`) : une clé
+    restée sous tension, Moli arrêté, a pu dépasser la marge.
+  - **compteur de trames** : dès que le réseau tourne (formé, restauré ou repris et reconnu),
+    puis toutes les heures tant qu'il est levé, le pilote lit le compteur de trames NWK sortant
+    de la clé (`getNetworkKeyInfo`, comme `backup()` de l'adaptateur ember de herdsman ; statut
+    `SlStatus` sur 32 bits en EZSP 13 comme 14) et l'écrit dans le `store`
+    (`frame_counter`, `frame_counter_fresh`, jamais à la baisse, daté en secondes unix dans
+    `frame_counter_recorded_at`, comme l'import, daté de son heure). À l'arrêt propre de Moli,
+    sur un réseau levé et vérifié, le pilote referme l'appairage s'il est ouvert et relève le
+    compteur une dernière fois (3 s au plus : le superviseur lui laisse 5 s), pour qu'un
+    export juste après parte de là. La lecture horaire laisse les
+    rappels de la clé être lus ; une lecture ratée est journalisée et retentée l'heure
+    suivante, sans effacer le relevé. Une restauration ou un export part de ce relevé
+    + 65 536 (`FRAME_COUNTER_MARGIN` : la clé émet en continu, le relevé peut dater d'une heure).
+    Un réimport d'une sauvegarde au compteur inférieur au relevé est refusé. Un réseau repris
+    qui reste « down » au démarrage n'est pas vérifié : le relevé du `store` cesse d'être
+    restaurable (valeur gardée, `frame_counter_fresh` à faux), sauf si la clé se lit comme un
+    autre réseau (ce relevé n'est alors pas le sien) ; quand il se lève, il est vérifié comme
+    au démarrage (même réseau, coordinateur ; sinon le pilote attend en le disant, rien n'est
+    adopté), puis son compteur est relevé aussitôt et toutes les heures. Tant que cette
+    vérification n'a pas pu lire la clé (nouvel essai à l'heure), l'appairage est refusé
+    (`pilotes.zigbee.reseau_non_verifie`) et aucune arrivée n'est notée dans le `store`.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "zigbee"
+kind = "zigbee"
+[driver.options]
+port = "/dev/ttyUSB0"   # ou "tcp://192.168.1.x:6638"
+# baud = 115200         # défaut
+# flow = "software"     # défaut (XON/XOFF, ZBDongle-E) ; "hardware" ou "none"
+# channel = 15          # canal d'un nouveau réseau (11 à 26, sinon Moli refuse de démarrer) ; 15 par défaut
+```
+
+- **Secrets** : `network_key` et `tc_link_key` (32 chiffres hexadécimaux), écrites dans le
+  coffre (jamais dans un fichier ni un journal, `Debug` masqué) par le pilote lui-même quand il
+  forme le réseau, ou par `moli-os zigbee import` (Moli arrêté) depuis une sauvegarde
+  Zigbee2MQTT ; il faut donc une clé maître. Sans coffre, aucun réseau n'est formé : le
+  pilote attend (`pilotes.zigbee.coffre_indisponible`).
+- **Fichier** : `<data_dir>/zigbee-<instance>.json` (le `store`) : version, paramètres du
+  réseau (PAN, PAN étendu, canal, IEEE du coordinateur, `nwk_update_id`, compteur de trames
+  et numéro de séquence de la clé, **sans clé**), appareils. Écrit dans `<fichier>.tmp` puis
+  renommé. Aucun fichier de sauvegarde avec la clé n'est tenu à jour : la clé ne vit qu'au
+  coffre.
+- **Retour à Zigbee2MQTT** : `moli-os zigbee export <fichier> [--instance <id>] [--force]`
+  (Moli arrêté) écrit une sauvegarde Open Coordinator Backup au format de l'adaptateur ember
+  de herdsman (`toUnifiedBackup`) : réseau et appareils du `store`, `network_key` et
+  `hashed_tclk` lus au coffre à ce moment, compteur = relevé + 65 536. Fichier privé (0600),
+  écrit atomiquement, jamais par-dessus un fichier existant sans `--force` ; rien n'est écrit
+  sans les deux clés au coffre ni sans compteur frais relevé depuis 24 h au plus
+  (`pilotes.zigbee.export_compteur_ancien`). La clé n'est jamais affichée ; un
+  avertissement (`pilotes.zigbee.export_avertissement`) rappelle de supprimer le fichier après
+  usage. `moli-os zigbee import` relit ce fichier.
+- **Points** : appareil `coordinator` : `firmware` (texte, `7.4.4.0`), `ezsp_version`
+  (entier), `network` (`up`, `down`, `none`, suit `stackStatusHandler`), en lecture seule ;
+  `permit_join` (booléen, **écrivable**) : vrai ouvre l'appairage 254 s comme le `permitJoin`
+  de herdsman (clé transitoire « ZigBeeAlliance09 », politique d'arrivée, `permitJoining`
+  sur la clé, puis `Mgmt_Permit_Joining_req` diffusé à `0xFFFC`), et retombe seul à faux au
+  bout de 254 s ; faux le referme tout de suite ; refusé si le réseau n'est pas levé
+  (`pilotes.zigbee.reseau_absent`) ou pas encore reconnu comme celui du `store`
+  (`pilotes.zigbee.reseau_non_verifie`) ; sémantique `control` : un agent qui le demande attend
+  l'accord d'un humain ; une ouverture qui échoue en route est refermée sur la clé (au mieux)
+  avant que l'erreur soit rendue ; `joining` (texte) : l'IEEE du dernier appareil arrivé
+  (`trustCenterJoinHandler` ou annonce ZDO), noté dans le `store` (`interviewed: false`) ;
+  un appareil qui part reste dans le `store` (v1).
+- **Pièges** : un firmware plus ancien qu'EZSP 13 met le pilote en `waiting` (message
+  `pilotes.zigbee.firmware_ancien` avec la version trouvée) **sans relance en boucle** : seul
+  un nouveau firmware y fait quelque chose. Une clé qui redémarre seule ou un lien perdu
+  termine l'exécution (le superviseur relance, tout recommence au RST). Un ordre reçu avant
+  que le coordinateur soit prêt est refusé (`pilotes.zigbee.pas_pret`). Les rappels de la clé
+  sont lus en continu (au-delà de 256 en attente, le client les jetterait). Un réseau repris
+  qui ne se lève pas en 10 s laisse le pilote prêt avec `network = down`, sans relance en
+  boucle : le `stackStatusHandler` suivant remet le point à jour (un « réseau tombé » pendant
+  l'attente est ignoré, comme herdsman). Une clé qui porte un autre réseau que celui du
+  `store`, un réseau inconnu sans clé au coffre ou un réseau dont elle n'est pas le
+  coordinateur n'est jamais adoptée : le `store` et le coffre restent ceux du même réseau. Le
+  port série est pris en exclusivité (`flock`, comme Zigbee2MQTT, puis `TIOCEXCL`, rendu à la
+  fermeture) : un port déjà tenu par un autre programme est refusé en le nommant
+  (`pilotes.zigbee.port_occupe`), le superviseur réessaie.
+- **Tests** : un NCP simulé (`src/sim.rs`) qui parle le vrai ASH ; le pilote complet tourne
+  sur un vrai hub (`src/lib.rs`) : prêt avec son coordinateur, firmware trop ancien, ordres
+  refusés avant d'être prêt, lien perdu, formation (clé au coffre avant la clé, canal 15,
+  `store` sans clé), clé du coffre reprise, sans coffre pas de réseau, réseau connu jamais
+  reformé, réseau repris, réseau repris qui reste tombé (horloge tokio en pause), réseau
+  levé tard vérifié puis relevé, autre réseau, réseau inconnu sans clé ou clé non coordinateur jamais
+  adoptés, formation interrompue reprise ; restauration d'un réseau importé (compteur inconnu,
+  usé, épuisé, de plus de 24 h, autre clé, import interrompu : rien n'est touché), import
+  (`moli-os zigbee import` : clés au coffre seulement, `--force`, sauvegarde plus ancienne
+  refusée), export (format de herdsman, fichier privé, compteur trop ancien refusé),
+  appairage (accord humain pour un agent, ouverture et fermeture, échec refermé, refusé sur
+  un réseau pas encore vérifié), arrivées notées, relevé horaire du compteur, arrêt propre
+  (appairage refermé, dernier relevé, jamais bloquant), port série exclusif (pty).
+- **Onboarding** : `integrations/zigbee/onboarding.md` (chemin `/dev/serial/by-id/…`,
+  `--device`, groupe du port, mise à jour du firmware).
 
 ## `hue` : Philips Hue (`crates/moli-hue`)
 
@@ -611,7 +822,7 @@ host = "192.168.1.x"
 
 ## `philips` : télé Philips Android (`crates/moli-philips`)
 
-- **Couvre** : alimentation, volume, sourdine, Ambilight, application en cours, touches de télécommande ; côté Android : **ouvrir une appli** et **ce qui se joue** (titre, image, lecture/pause).
+- **Couvre** : alimentation, volume, sourdine, Ambilight, application en cours, touches de télécommande (appuyées ou **maintenues**) ; côté Android : **ouvrir une appli** et **ce qui se joue** (titre, image, lecture/pause ; avec ADB, quelle que soit l'appli).
 - **Protocole** : API JointSpace en HTTPS local, port **1926**, authentification **digest** MD5 avec les identifiants d'appairage, certificat épinglé. Interrogation toutes les 5 s. Wake-on-LAN (UDP broadcast, port 9) pour allumer.
 - **Configuration** :
 
@@ -623,11 +834,16 @@ kind = "philips"
 host = "192.168.1.x"
 mac = "aa:bb:cc:dd:ee:ff"   # pour le Wake-on-LAN
 # api_version = 6           # défaut
+# adb = true                # ce que joue toute appli (débogage réseau de la télé allumé)
+# overlay = true            # notifications par-dessus l'image (appli TvOverlay sur la télé)
 ```
 
-- **Côté Android** (le cœur `moli_androidtv::tv`, réutilisable pour toute Google TV ; `src/android.rs` du pilote n'y ajoute que les touches JointSpace) : Android TV Remote v2 (TLS **6466**, certificat client, messages protobuf préfixés d'un varint ; la télé parle d'abord, ping toutes les 5 s, connexion morte après 16 s de silence) et Google Cast (TLS **8009**, enveloppe protobuf autour de JSON : état du récepteur puis canal média de l'appli). Deux connexions tenues par ce cœur, que le pilote fait tourner à côté de JointSpace, reprises de 5 s à 60 s (veille profonde = ports fermés). Un ordre donné pendant une coupure est refusé, jamais rejoué.
-- **Secrets** : `username`, `password` (identifiants d'appairage JointSpace, posés par l'humain), `cert` écrit par le pilote ; `atv_cert` / `atv_key` (PEM, l'appairage Android TV Remote **repris de HA**, `.storage/androidtv_remote_*.pem`, par tube) ; `atv_pin`, `cast_pin` écrits par le pilote. Le pilote ne fait **pas** l'appairage lui-même (provenance des identifiants : à vérifier, probablement repris de HA).
-- **Points** : `power`, `volume` (0 à max lu sur la télé, 60 par défaut), `mute`, `ambilight` **écrivables** ; `app` : l'appli au premier plan (paquet Android, dit par Android TV Remote : JointSpace ne la connaît pas sur une Google TV), **écrire** un paquet, un lien ou le nom d'une appli connue (Netflix, YouTube, Disney+, Prime Video, Jellyfin, Moonlight) l'ouvre : son lien web d'abord (une Google TV peut refuser `market://launch?id=…`, vu sur une Philips le 9 oct.), puis celui du Store (`moli_androidtv::remote::app_links`). L'ordre attend la réponse de la télé : l'appli à l'écran ou 1 s sans refus = ouverte ; tous les liens refusés = erreur « la télé a refusé d'ouvrir … », dite à qui a demandé ; `media_app`, `media_state` (`playing`, `paused`, `buffering`, `idle`), `media_title`, `media_subtitle`, `media_image` (URL), `media_duration`, `media_position` (s) en lecture (Cast) ; `media_control` (`play`, `pause`, `stop`) en écriture seule ; `key` en **écriture seule** (enum de 24 touches : curseurs, `Confirm`, `Back`, `Home`, lecture, volume, chaînes, `Source`, `WatchTV`…).
+- **Côté Android** (le cœur `moli_androidtv::tv`, réutilisable pour toute Google TV ; `src/android.rs` du pilote n'y ajoute que les touches JointSpace, appuyées ou maintenues) : Android TV Remote v2 (TLS **6466**, certificat client, messages protobuf préfixés d'un varint ; la télé parle d'abord, ping toutes les 5 s, connexion morte après 16 s de silence) et Google Cast (TLS **8009**, enveloppe protobuf autour de JSON : état du récepteur puis canal média de l'appli). Deux connexions tenues par ce cœur, que le pilote fait tourner à côté de JointSpace, reprises de 5 s à 60 s (veille profonde = ports fermés). Un ordre donné pendant une coupure est refusé, jamais rejoué.
+- **ADB** (`adb = true`, `moli_androidtv::adb`) : sur une Google TV, Cast ne dit rien de ce qu'une appli ouverte sur la télé joue (vu sur une Philips le 3 nov. : 10 jours de Netflix, YouTube, Disney+ sans un titre). Les sessions média d'Android le disent toutes : `dumpsys media_session` toutes les 3 s, par ADB sur TCP **5555** (« débogage réseau » dans les options pour les développeurs de la télé). Client ADB natif (en-têtes de 24 octets, `CNXN`/`AUTH`/`OPEN`/`WRTE`/`CLSE`) ; la clé RSA 2048 de Moli est créée au premier démarrage (secret `adb_key`), le jeton de la télé signé en PKCS #1 v1.5 comme le fait `adb`. Clé inconnue : envoyée au format Android, la télé demande sur son écran (avertissement sur le pilote : cocher « Toujours autoriser ») ; sans réponse, pas de nouvelle question avant 10 min. Titre, sous-titre (chaîne, série), état, position ramenée à l'heure de la télé (`/proc/uptime`) ; ni durée ni image (`dumpsys` ne les donne pas) : celles de Cast quand Cast voit le même titre. Une position n'est republiée que si elle saute (> 3 s d'écart avec la prévue : le tableau de bord la fait avancer seul). ADB sans TLS seulement (le débogage sans fil d'Android 11, appairé par code, n'est pas pris).
+- **Incrustations** (`overlay = true`, `moli_androidtv::overlay`) : l'appli **TvOverlay** (Play Store, gratuite) dessine des notifications par-dessus ce qui passe, dans un coin, quelques secondes : titre, message, image, ou **vidéo en direct** (RTSP, HLS). API REST en HTTP sur le port **5001**. Point `notify` en écriture : un texte (le message), ou un objet JSON de ses champs (`title`, `message`, `image`, `video`, `corner` = `bottom_end`…, `duration` en s, `smallIcon` = `mdi:…`) ; un champ inconnu est refusé tout de suite. Télé éteinte : refusé sans attendre. Envoi hors de la boucle du pilote. Installation : depuis le Play Store, puis par ADB `appops set com.tabdeveloper.tvoverlay SYSTEM_ALERT_WINDOW allow` (aucun menu de la télé ne le permet) et `dumpsys deviceidle whitelist +com.tabdeveloper.tvoverlay` ; son horloge à l'écran se cache par `POST /set/overlay {"clockOverlayVisibility": 0}`. Exemple vérifié le 3 nov. : la sonnette en direct, flux du go2rtc de Frigate en vidéo seule (`#media=video`, sinon son par-dessus le programme), `{"title": "Sonnette", "video": "rtsp://<nvr>:8554/sonnette", "corner": "bottom_end", "duration": 30}`.
+- **Secrets** : `username`, `password` (identifiants d'appairage JointSpace, posés par l'humain), `cert` écrit par le pilote ; `atv_cert` / `atv_key` (PEM, l'appairage Android TV Remote **repris de HA**, `.storage/androidtv_remote_*.pem`, par tube) ; `atv_pin`, `cast_pin`, `adb_key` écrits par le pilote. Le pilote ne fait **pas** l'appairage lui-même (provenance des identifiants : à vérifier, probablement repris de HA).
+- **Points** : `power`, `volume` (0 à max lu sur la télé, 60 par défaut), `mute`, `ambilight` **écrivables** ; `app` : l'appli au premier plan (paquet Android, dit par Android TV Remote : JointSpace ne la connaît pas sur une Google TV), **écrire** un paquet, un lien ou le nom d'une appli connue (Netflix, YouTube, Disney+, Prime Video, Jellyfin, Moonlight) l'ouvre : son lien web d'abord (une Google TV peut refuser `market://launch?id=…`, vu sur une Philips le 9 oct.), puis celui du Store (`moli_androidtv::remote::app_links`). L'ordre attend la réponse de la télé : l'appli à l'écran ou 1 s sans refus = ouverte ; tous les liens refusés = erreur « la télé a refusé d'ouvrir … », dite à qui a demandé ; `media_app`, `media_state` (`playing`, `paused`, `buffering`, `idle`), `media_title`, `media_subtitle`, `media_image` (URL), `media_duration`, `media_position` (s) en lecture (ADB d'abord quand il voit un titre, sinon Cast ; `media_app` vide pour ADB : le point `app` dit l'appli) ; `media_control` (`play`, `pause`, `stop`) en écriture seule : par Cast s'il voit ce qui joue, sinon touche média par la télécommande Android ; `key` en **écriture seule** (enum de 24 touches : curseurs, `Confirm`, `Back`, `Home`, lecture, volume, chaînes, `Source`, `WatchTV`…) ; `hold` en **écriture seule** : une flèche, `FastForward` ou `Rewind` **maintenue** (`RemoteDirection` `START_LONG` d'Android TV Remote) jusqu'à `release` (`END_LONG`), comme sur la vraie télécommande : dans YouTube, droite maintenue fait défiler la vidéo avec l'aperçu (vu le 3 nov. : 0:22 → 0:52 en 4 s). Une autre touche maintenue lâche la première ; lâchée d'office au bout de 20 s (téléphone parti) ou si la télécommande se coupe. La télécommande du tableau de bord maintient une flèche gardée 450 ms (bouton, ou glissé sur le pavé tactile sans lever le doigt).
+- **Ambilight** : `ambilight` (allumé / éteint), `ambilight_mode` (énumération, les mots de Moli pour `styleName` / `menuSetting` de `ambilight/currentconfiguration` : `standard`, `natural`, `vivid`, `game`, `comfort`, `relax` suivent l'image ; `hot_lava`, `deep_water`, `fresh_nature`, `warm_white` (ISF) sont les ambiances fixes de la télé ; `music` et `party` suivent le son) et `ambilight_color` (« #rrggbb » : une seule couleur tout autour, `FOLLOW_COLOR` / `MANUAL_HUE`, teinte, saturation et luminosité de 0 à 255). Écrire un mode ou une couleur allume l'Ambilight s'il est éteint. Lus à chaque tour : un réglage que Moli ne sait pas nommer laisse `ambilight_mode` vide ; la configuration brute est écrite une fois au journal du pilote (`ambilight`) à chaque changement, pour ajouter un mot. Une scène les règle par ses `orders`.
 - **Pièges** : la télé route sur l'en-tête `Host` **complet** : sans le port, elle répond 404 (d'où le `Host` avec port de `PinnedHttps`). Allumage : WoL puis 5 essais espacés de 2 s (l'API se réveille après). Extinction : `powerstate = Standby`, sinon touche `Standby` **seulement si** la télé est allumée (la touche bascule). Un appui de touche n'est jamais rejoué. En veille profonde l'API dort : appareil hors ligne et `power = false`.
 - **Identité** : ⚠️ l'id natif est **l'adresse `host`** (`ctx.device_id(&config.host)`), pas un identifiant de l'appareil : un changement d'IP créerait un nouvel appareil.
 - **Tests** : digest vérifié sur l'exemple de la RFC 2617.
@@ -874,10 +1090,12 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Points** : `home` (binaire, sémantique occupation), lecture seule.
 - **Machines** : `[[driver.options.machine]]` avec `id`, `name`, `ip` (sur le réseau déclaré) : appareil « Machine » (`description` = son adresse), point `online` (allumée tant qu'elle répond, éteinte après deux relevés sans réponse). C'est l'équivalent de l'intégration `ping` de HA pour un ordinateur.
 
-## `esphome` : satellites vocaux (`crates/moli-esphome`)
+## `esphome` : satellites vocaux et appareils ESPHome (`crates/moli-esphome`)
 
-- **Couvre** : les appareils ESPHome, d'abord les satellites vocaux (Home Assistant Voice
-  Preview Edition, ou un ESP32-S3 monté à la main) : le mot de réveil, la conversation, la voix.
+- **Couvre** : les appareils ESPHome. Les satellites vocaux (Home Assistant Voice Preview
+  Edition, ou un ESP32-S3 monté à la main) : le mot de réveil, la conversation, la voix. Les
+  autres (prise mesurée, lecteur de compteur P1…) : leurs capteurs, capteurs binaires, capteurs
+  texte et interrupteurs.
 - **Protocole** : l'API native d'ESPHome, TCP **6053**, chiffrée par **Noise** — écrite depuis la
   spécification, **sans bibliothèque ESPHome** (`noise.rs`, `frame.rs`, `api.rs` ; identifiants et
   numéros de champs de `api.proto`, ESPHome 2026.3, version d'API 1.14). Une connexion tenue
@@ -888,14 +1106,52 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   [satellite-vocal.md](satellite-vocal.md).
 - **Secrets** : `api_key` (base64 : la clé `api: encryption:` du firmware). Un appareil **sans**
   clé en reçoit une de Moli — si `mac` correspond, et seulement s'il n'en tient aucune déjà.
-- **Points** : `state` (`idle`, `listening`, `thinking`, `speaking`), `volume` et `muted` (le
-  `media_player` de l'appareil), `wake_word`, `say` (texte, 500 caractères).
+- **Points** : un satellite (l'appareil annonce une voix ou un `media_player`) : `state`
+  (`idle`, `listening`, `thinking`, `speaking`), `volume` et `muted` (le `media_player` de
+  l'appareil), `wake_word`, `say` (texte, 500 caractères). Tout autre appareil : un point par
+  entité, de clé l'`object_id` de l'entité (sinon son nom), réduit en clé : minuscules, accents
+  repliés, tout autre caractère (`-`, espace, `__`…) devient un seul `_`. Deux types qui
+  partagent une clé : le premier de capteur, capteur binaire, capteur texte, interrupteur la
+  garde, les autres prennent leur type en suffixe (`<clé>_switch`), quel que soit l'ordre de la
+  liste. Les interrupteurs s'écrivent (`OnOff`), le reste se lit. Les réglages de l'appareil
+  (catégorie `config` : `restart`, `safe_mode`, `factory_reset`…), ses diagnostics (catégorie
+  `diagnostic` : Wi-Fi, uptime, adresse…) et les entités cachées par défaut sont laissés de
+  côté ; au-delà de 500 entités, la connexion est refusée. Une valeur arrive telle quelle (les
+  décimales annoncées ne sont qu'une indication d'affichage), sauf un capteur en `kW`, qui
+  devient des `W` arrondis aux décimales annoncées moins trois ; une valeur absente
+  (`missing_state`, `NaN`) n'est pas publiée.
 - **Identité** : la MAC de l'appareil (`ctx.device_id(&hello.mac)`).
 - **Pièges** : ⚠️ l'assistant vocal d'ESPHome n'accepte **qu'un client**, et Home Assistant s'y
   abonne dès qu'il gère l'appareil : si les deux sont branchés, **HA gagne et Moli se tait sans
-  le dire**. Un seul `media_player` (le pilote retient le dernier annoncé).
+  le dire**. Un seul `media_player` (le pilote retient le dernier annoncé). Les états, eux, vont à
+  chaque client : une prise ou un P1 se lit dans Moli et dans Home Assistant à la fois, ce qui
+  permet une migration progressive.
 - **Tests** : `src/lib.rs` (un appareil qui parle en clair ne remplace jamais la clé que Moli
-  tient ; provisionnement borné par la MAC).
+  tient ; provisionnement borné par la MAC ; un point par entité, kW → W, diagnostics écartés),
+  `src/api.rs` (numéros de champs des listes et des états).
+
+## `solarman` : onduleurs derrière un enregistreur Solarman (`crates/moli-solarman`)
+
+- **Couvre** : les micro-onduleurs Deye (`model = "deye"`, par défaut) et les onduleurs string
+  Solis S6-GR1P (`model = "solis"`) derrière leur enregistreur Wi-Fi. **Lecture seule** : seules
+  les fonctions Modbus de lecture 0x03 (registres de maintien, Deye) et 0x04 (registres d'entrée,
+  Solis) sont envoyées.
+- **Transport** : TCP 8899, une connexion par lecture. `transport = "v5"` (par défaut) : trame
+  Modbus RTU dans l'enveloppe V5 de l'enregistreur, numéro de série obligatoire.
+  `transport = "modbus_tcp"` : Modbus TCP nu (en-tête MBAP), pour les clés qui ne parlent pas V5
+  (une clé Solis en est) ; ces clés ne servent qu'un client à la fois.
+- **Configuration** : `host`, `serial` (V5), `slave` (1), `model`, `transport`, `timezone`.
+- **Registres** : cartes de ha-solarman (MIT, voir `NOTICE`) : `deye_micro.yaml` et
+  `solis_s6-gr1p.yaml`. Solis : registres 3004 à 3043 en deux blocs.
+- **Compteurs** : la production totale (`energy`) ne recule jamais, et un compteur qui saute plus
+  loin que ce que l'onduleur a pu produire depuis la lecture précédente est écarté. Solis : le
+  total à vie de l'onduleur est en kWh entiers ; Moli le complète au dixième avec le compteur du
+  jour. Une lecture tout à zéro ne publie pas de total. Les valeurs hors de ce que l'onduleur
+  peut lire (puissance, tensions, courants, fréquence, température) sont écartées.
+- **La nuit** : l'onduleur dort et l'enregistreur avec lui : l'appareil passe hors ligne sans
+  avertissement.
+- **Tests** : `src/v5.rs` (trames V5 et Modbus TCP, trame courte refusée), `src/deye.rs`,
+  `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs).
 
 ## `kasa` : prises TP-Link Kasa, protocole local historique (`crates/moli-kasa`)
 
@@ -948,6 +1204,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | Pilote | Crate | Protocole | Écriture possible | Vérifié sur du vrai matériel |
 |---|---|---|---|---|
 | `z2m` | `moli-z2m` | MQTT local (Zigbee2MQTT) | oui, selon les `exposes` | Zigbee2MQTT (appareils variés) |
+| `zigbee` | `moli-zigbee` | EZSP sur ASH (série ou TCP), clé Silicon Labs | oui : `permit_join` du coordinateur (sémantique `control` : accord humain pour un agent), `state`, `brightness`, `color_temp`, `color`, thermostat | ZBDongle-E (EmberZNet 7.4.4.0) + Innr RB 287 C |
 | `zwave` | `moli-zwave` | MQTT local (zwave-js-ui) | on/off, niveau | zwave-js-ui (capture réelle anonymisée + on/off sur nœud neutre) |
 | `hue` | `moli-hue` | HTTPS CLIP v2 + SSE, local, épinglé | oui : lumières, pièces ; zones non | pont Philips Hue (CLIP v2) |
 | `melcloud` | `moli-melcloud` | HTTPS vers le MELCloud classique, clé de contexte | oui : marche, mode, consigne, ventilateur, ailettes | deux unités air-air (lecture) ; commandes sur l'une |
@@ -970,9 +1227,10 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `ipp` | `moli-ipp` | IPP 2.0 HTTP 631 | identifier, annuler, imprimer (tableau de bord) | Canon MG3600 |
 | `host` | `moli-host` | /proc, /sys ; WoL ; agent HTTP sortant | allumer, éteindre, veille, Claude et Codex pour le téléphone (PIN) | hôte Linux ; PC Windows avec l'agent |
 | `presence` | `moli-presence` | UDP + table ARP de l'hôte | non | téléphones sur le Wi-Fi |
-| `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say` | pas encore (cible : satellite ESP32-S3) |
+| `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say`, interrupteurs | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
+| `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |

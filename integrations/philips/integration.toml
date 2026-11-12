@@ -13,14 +13,16 @@ crate = "moli-philips"
 mdns = []
 ssdp = []
 # 1926 JointSpace ; 6466 Android TV Remote (open apps, app on screen) ;
-# 8009 Google Cast (what plays).
-ports = [1926, 6466, 8009]
+# 8009 Google Cast (what plays) ; 5555 ADB (option `adb`: what any app plays) ;
+# 5001 TvOverlay (option `overlay`: notifications over the picture).
+ports = [1926, 6466, 8009, 5555, 5001]
 
 [needs]
 # JointSpace pairing credentials; `cert`, `atv_pin`, `cast_pin` are written
 # by the driver itself. Optional: `atv_cert` / `atv_key` (PEM), an Android TV
 # Remote pairing (Home Assistant's `.storage/androidtv_remote_*.pem`), to
-# open apps and know the one on screen.
+# open apps and know the one on screen. `adb_key` is made by the driver
+# (option `adb`) and allowed once on the TV's screen.
 secrets = ["username", "password"]
 vars = []
 options = ["host"]
