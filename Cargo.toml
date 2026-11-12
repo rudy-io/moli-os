@@ -41,6 +41,7 @@ moli-frigate = { path = "crates/moli-frigate" }
 moli-philips = { path = "crates/moli-philips" }
 moli-melcloud = { path = "crates/moli-melcloud" }
 moli-kasa = { path = "crates/moli-kasa" }
+moli-recycleapp = { path = "crates/moli-recycleapp" }
 moli-tapo = { path = "crates/moli-tapo" }
 moli-lifx = { path = "crates/moli-lifx" }
 moli-shelly = { path = "crates/moli-shelly" }

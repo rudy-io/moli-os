@@ -1,0 +1,33 @@
+[integration]
+id = "recycleapp"
+name = "Collectes de déchets (RecycleApp, Belgique)"
+# The public web API of recycleapp.be (Fost Plus): no account, an address.
+brands = ["Fost Plus"]
+models = ["RecycleApp"]
+transport = "https"
+driver = "recycleapp"
+crate = "moli-recycleapp"
+
+[discovery]
+# A web service: nothing to find on the home network.
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+options = ["zipcode", "street", "house_number", "language", "timezone"]
+
+[origin]
+reused = "aucun code repris : adresses et champs lus dans le composant RecycleApp de Home Assistant (olibos/HomeAssistant-RecycleApp) et vérifiés sur l'API réelle"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/zipcodes.json"
+
+[[fixture]]
+file = "fixtures/streets.json"
+
+[[fixture]]
+file = "fixtures/collections.json"
