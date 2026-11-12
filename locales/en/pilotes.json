@@ -735,5 +735,13 @@
   "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)",
   "pilotes.solarman.puissance_panneaux": "Panels' power",
   "pilotes.solarman.production_mois": "This month's production",
-  "pilotes.solarman.production_annee": "This year's production"
+  "pilotes.solarman.production_annee": "This year's production",
+  "pilotes.kasa.prise": "Plug",
+  "pilotes.kasa.voyant": "Indicator light",
+  "pilotes.kasa.puissance": "Power",
+  "pilotes.kasa.tension": "Voltage",
+  "pilotes.kasa.courant": "Current",
+  "pilotes.kasa.energie": "Total energy",
+  "pilotes.kasa.lecture_seule": "{point} cannot be set",
+  "pilotes.kasa.refus": "the plug refused the order (code {code})"
 }

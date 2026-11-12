@@ -1153,6 +1153,28 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/v5.rs` (trames V5 et Modbus TCP, trame courte refusée), `src/deye.rs`,
   `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs).
 
+## `kasa` : prises TP-Link Kasa, protocole local historique (`crates/moli-kasa`)
+
+- **Couvre** : les prises Kasa qui parlent encore le protocole local d'origine (HS100, HS110…),
+  d'abord une HS110 matériel 1.0 (prise avec mesure). Les firmwares récents en KLAP (port 80)
+  relèvent de `tapo`.
+- **Protocole** : JSON sur TCP **9999**, chaque message chiffré par XOR à clé glissante (171),
+  précédé de sa longueur (4 octets gros-boutiens) ; une connexion par requête. Aucun compte.
+- **Configuration** : `host`, `port` (9999), `poll_seconds` (10, de 2 à 3600).
+- **Points** : `on` (relais, la même clé que `tapo`, `shelly` et `melcloud`) et `led` (voyant)
+  écrits par `set_relay_state` / `set_led_off` (le code d'erreur de la prise est vérifié) ; avec
+  mesure (`feature` contient `ENE`) : `power` W, `voltage` V, `current` A, `energy` kWh (compteur
+  à vie). Matériel 1 en W/V/A/kWh (essayé sur une HS110 1.0) ; matériel 2 en mW/mV/mA/Wh, lu
+  d'après sa description, **non essayé**. Une mesure qui ne répond pas ne rend pas la prise
+  indisponible.
+- **Identité** : la MAC de la prise, réduite à ses 12 chiffres hexadécimaux (toute autre forme
+  est refusée).
+- **Tests** : `src/lib.rs` (chiffrement XOR aller-retour, `get_sysinfo`, les deux générations de
+  mesure, période refusée), fixtures anonymisées de `integrations/kasa/fixtures/`.
+- **Vérifié sur du vrai matériel** : HS110(EU) matériel 1.0, firmware 1.2.6 : lecture (relais,
+  voyant, puissance, tension, courant, énergie), voyant allumé puis éteint, relais allumé (la
+  charge mesurée à 2,2 kW) puis éteint, depuis Moli. Matériel 2 : pas encore.
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -1209,6 +1231,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
+| `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |
