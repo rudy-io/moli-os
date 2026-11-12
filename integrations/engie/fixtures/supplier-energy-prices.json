@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "ean": "541400000000000001",
+      "prices": [
+        {
+          "from": "2026-10-01", "to": "2026-10-31", "vatTariff": 6,
+          "proportionalPriceConfigurations": {
+            "offtake": [{"timeOfUseSlotCode": "S_TOU1_OFFTAKE_HIGH_LOAD_HOURS", "priceValue": 0.99, "priceValueExclVAT": 0.93}],
+            "injection": []
+          }
+        },
+        {
+          "from": "2026-11-01", "to": "2026-11-30", "vatTariff": 6,
+          "proportionalPriceConfigurations": {
+            "offtake": [
+              {"timeOfUseSlotCode": "S_TOU1_OFFTAKE_HIGH_LOAD_HOURS", "priceValue": 14.52, "priceValueInEuroPerKWH": 0.1452, "priceValueExclVAT": 13.70},
+              {"timeOfUseSlotCode": "S_TOU1_OFFTAKE_LOW_LOAD_HOURS", "priceValue": 11.89, "priceValueInEuroPerKWH": 0.1189, "priceValueExclVAT": 11.22},
+              {"timeOfUseSlotCode": "EN", "priceValue": 13.10, "priceValueInEuroPerKWH": 0.131}
+            ],
+            "injection": [
+              {"timeOfUseSlotCode": "S_TOU1_INJECTION_HIGH_LOAD_HOURS", "priceValue": 2.51, "priceValueInEuroPerKWH": 0.0251},
+              {"timeOfUseSlotCode": "S_TOU1_INJECTION_LOW_LOAD_HOURS", "priceValue": 1.87, "priceValueInEuroPerKWH": 0.0187}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "ean": "541400000000000009",
+      "prices": [
+        {
+          "from": "2026-11-01", "vatTariff": 6,
+          "proportionalPriceConfigurations": {
+            "offtake": [{"timeOfUseSlotCode": "TOTAL_HOURS", "priceValue": 6.13, "priceValueInEuroPerKWH": 0.0613}]
+          }
+        }
+      ]
+    }
+  ]
+}

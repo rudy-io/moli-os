@@ -1191,6 +1191,40 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
 - **Tests** : `src/model.rs` (adresse, prochaine collecte par type, collecte remplacée, type
   inconnu, nom manquant dans la langue), `src/lib.rs` (adresse vérifiée, requêtes encodées).
 
+## `engie` : compte ENGIE Belgique (`crates/moli-engie`)
+
+- **Couvre** : un compte client ENGIE Belgique : prix du contrat, pics du tarif capacitaire,
+  véhicules de la recharge intelligente ENGIE.
+- **Protocole** : l'API de l'appli ENGIE Smart (`api.engie.be`, HTTPS, jeton Bearer), non
+  officielle. Connexion OAuth 2 + PKCE sur `account.engie.be` : la personne se connecte sur la vraie
+  page (mot de passe et code SMS/e-mail chez ENGIE) et colle l'adresse de fin
+  (`be.engie.smart://login-callback/…?code=…`) dans la carte du tableau de bord (point `sign_in`).
+  Le jeton de rafraîchissement **tourne** à chaque usage : le nouveau est rangé aussitôt.
+- **Configuration** : rien d'obligatoire ; `language` (page de connexion, `fr`), `timezone`
+  (`Europe/Brussels` : jours et mois des pics, heures de départ lues et écrites dans ce fuseau), `vehicles` (les véhicules suivis,
+  par nom ou numéro ; vide : tous ; les autres ne sont jamais lus et leur appareil est retiré).
+- **Secrets** : `refresh_token`, posé par la connexion, jamais tapé.
+- **Points** : compte : `status`, `sign_in_url`, `sign_in`, `reward_balance` (solde de
+  récompenses disponible), `reward_payout_threshold`. Contrat : un prix par énergie, sens et
+  plage de la période en cours (`electricity_offtake_peak`… €/kWh TVA comprise ; la plage mêlée
+  `EN` est écartée, comme dans Home Assistant), `peak_month_kw`, `peak_month_at`,
+  `peak_today_kw`, `peak_previous_month_kw`. Véhicule : `soc`, `range_km`, `charge_power_kw`,
+  `charge_status`, `plugged`, `reachable`, `departure`, `target_level`, `direct` (les trois
+  derniers s'écrivent), `session_kwh`, `session_cost`, `session_reward`, `session_outcome`,
+  `reward_month`, `reward_total`. Unités données telles quelles (`€/kWh`, `kW`, `€`) : jamais
+  confondues avec la puissance ou l'énergie de la maison.
+- **Rythme** : véhicules toutes les 5 min ; prix, pics et gains du mois toutes les heures ;
+  gains des mois d'avant une fois par jour. En panne, un essai après 1 min, puis deux fois plus
+  tard à chaque fois, jusqu'à 30 min. Le pilote attend une personne (`wait_for`) tant que le
+  compte n'est pas connecté. Un 403 laisse de côté la seule ressource refusée (dit une fois) ;
+  seul un 401 après renouvellement redemande une connexion.
+- **Pièges** : ⚠️ une connexion avec le même compte dans l'appli ou sur engie.be révoque la
+  session de Moli (`status = sign_in` à nouveau). Une écriture renvoie les trois réglages de la
+  session (départ, objectif, `direct`) : ENGIE les veut ensemble. Départ à 7 jours au plus.
+- **Tests** : `src/auth.rs` (page PKCE, adresse collée vérifiée par son `state`, réponses du jeton),
+  `src/model.rs` (fixtures fictives de `integrations/engie/fixtures/`), `src/lib.rs` (heures de
+  départ, jours et mois dans le fuseau du compte).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).

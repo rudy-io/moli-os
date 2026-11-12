@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "id": 101, "vin": "XXXXXXXXXXXXXXXXX", "active": true, "reachable": true,
+      "modelName": "Model 3", "displayName": "Ma voiture", "brandName": "Exemple", "brandId": 7, "year": 2022,
+      "chargeState": {"status": "PLUGGED_IN", "chargePower": 0.0, "batteryLevel": 62, "maxBatteryLevel": 80, "range": 280, "policyState": "SCHEDULE", "sessionType": "SMART_CHARGING", "sessionHasError": false}
+    },
+    {"id": 102, "active": false, "displayName": "Ancienne voiture"}
+  ]
+}

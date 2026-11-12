@@ -533,5 +533,19 @@
   "systeme.airzone.add": "Ajouter une passerelle",
   "systeme.journal.pilote_pause": "Pilote {kind} mis en pause",
   "systeme.journal.pilote_reconfigure_lecture_seule": "Pilote {kind} reconfiguré en lecture seule",
-  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré"
+  "systeme.journal.pilote_reconfigure": "Pilote {kind} reconfiguré",
+  "systeme.engie.titre": "ENGIE (prix, tarif capacitaire, recharge intelligente)",
+  "systeme.engie.connecte": "Compte ENGIE connecté : prix, pics et recharge intelligente suivis par Moli.",
+  "systeme.engie.a_connecter": "Connecte ton compte ENGIE pour que Moli suive tes prix, ton pic capacitaire et ta recharge intelligente.",
+  "systeme.engie.erreur": "ENGIE ne répond pas pour le moment : Moli réessaie tout seul.",
+  "systeme.engie.connexion": "Connexion à ENGIE…",
+  "systeme.engie.etape1": "Ouvre la page de connexion d'ENGIE, sur un ordinateur. Dans ce nouvel onglet, avant de te connecter, ouvre les outils du navigateur (F12), onglet Réseau, et coche « Conserver les journaux ».",
+  "systeme.engie.ouvrir": "Ouvrir la page ENGIE",
+  "systeme.engie.etape2": "Connecte-toi : adresse e-mail, mot de passe, puis le code qu'ENGIE t'envoie par SMS ou e-mail. Tout se passe chez ENGIE.",
+  "systeme.engie.etape3": "À la fin, le navigateur affiche une erreur (« adresse non reconnue ») : c'est normal, la page veut ouvrir l'appli ENGIE. Dans l'onglet Réseau, clique sur la dernière ligne « resume » (statut 302) et copie, dans les en-têtes de la réponse, la valeur de « Location » : elle commence par be.engie.smart://login-callback. Colle-la ci-dessous, dans les 5 minutes.",
+  "systeme.engie.coller": "Adresse de fin de connexion",
+  "systeme.engie.connecter": "Connecter",
+  "systeme.engie.verification": "Connexion…",
+  "systeme.engie.aide": "Moli ne voit jamais ton mot de passe : il garde seulement un jeton chiffré dans son coffre. Se connecter avec le même compte dans l'appli ou sur engie.be ferme la session de Moli : il te demandera alors de le reconnecter.",
+  "systeme.engie.officieux": "ENGIE ne propose pas d'interface officielle : Moli utilise celle de l'appli ENGIE Smart, qui peut changer sans prévenir."
 }

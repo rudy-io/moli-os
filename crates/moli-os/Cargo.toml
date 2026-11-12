@@ -40,6 +40,7 @@ moli-philips.workspace = true
 moli-melcloud.workspace = true
 moli-kasa.workspace = true
 moli-recycleapp.workspace = true
+moli-engie.workspace = true
 moli-tapo.workspace = true
 moli-lifx.workspace = true
 moli-shelly.workspace = true
