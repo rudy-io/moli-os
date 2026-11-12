@@ -732,6 +732,7 @@ async fn notify(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn one_week_in_two_from_its_starting_week() {
@@ -750,8 +751,6 @@ mod tests {
         assert!(week_ok(1, None, d("2026-11-11")), "every week");
         assert!(!week_ok(2, None, d("2026-11-11")), "no start: never");
     }
-
-    use super::*;
 
     #[test]
     fn windows_wrap_around_midnight() {
