@@ -1612,6 +1612,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-kasa"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "moli-lifx"
 version = "0.1.0"
 dependencies = [
@@ -1742,6 +1756,7 @@ dependencies = [
  "moli-igd",
  "moli-ipp",
  "moli-izypower",
+ "moli-kasa",
  "moli-lifx",
  "moli-lights",
  "moli-linky-tic",

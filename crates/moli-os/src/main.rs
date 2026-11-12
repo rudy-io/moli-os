@@ -1329,6 +1329,7 @@ const KINDS: &[&str] = &[
     "homeassistant",
     "igd",
     "melcloud",
+    "kasa",
     "tapo",
     "lifx",
     "voltalis",
@@ -1600,6 +1601,7 @@ fn build_driver(
             .1,
         ),
         "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
+        "kasa" => configured_driver(config, moli_kasa::Kasa::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
