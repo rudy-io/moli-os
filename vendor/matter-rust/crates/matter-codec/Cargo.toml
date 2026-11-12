@@ -23,11 +23,3 @@ proptest = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 criterion = { workspace = true }
-
-[[bench]]
-name = "decode"
-harness = false
-
-[[bench]]
-name = "encode"
-harness = false

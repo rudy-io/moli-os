@@ -17,10 +17,35 @@ Corrections on top of the base:
 ## Export
 
 Started with `git archive d80b1a3fd2204119ddf47406f4bb59916ba7576b | tar -x`.
-Retained all eleven library crates, integration-tests, crate READMEs, examples,
-benches, tests, all test-vectors, root README, LICENSE, Cargo.toml and Cargo.lock.
-The initial library source and fixtures were exported verbatim; Moli-local adaptations are listed below. Optional BLE, OTA/BDX and unstable
-provider functionality remain available. No .git, target or untracked data was exported. The upstream rustfmt configuration is retained.
+The initial library source and fixtures were exported verbatim; Moli-local
+adaptations are listed below. No .git, target or untracked data was exported. The
+upstream rustfmt configuration is retained.
+
+## Trimmed to what Moli builds and tests
+
+Only the crates in Moli's dependency graph are kept: `matter-codec`, `matter-cert`,
+`matter-crypto`, `matter-transport`, `matter-commissioning`, `matter-interaction`,
+`matter-clusters` and `matter-controller`. Removed from the export:
+
+- `crates/matter-ble`, `crates/matter-ota`, `crates/matter-bdx` and
+  `crates/integration-tests`, with their `[workspace] members` entries;
+- every `fuzz/`, `benches/` and `examples/` directory, i.e. the fuzzing corpora
+  under `matter-codec` and `matter-commissioning`;
+- the `ota` and `ble` features of `matter-controller` and their optional path
+  dependencies, and the test-only `matter-ble` dev-dependency of
+  `matter-commissioning` together with the two BLE transport tests it served
+  (`commission_ble_loopback.rs`, `pase_over_btp.rs`). Default features of the
+  nested workspace are now empty, which matches how Moli depends on it
+  (`default-features = false`);
+- the `xtask` workspace member, already pruned before this trim.
+
+`test-vectors/` is kept: the integration tests of the retained crates read it
+(certificate chains, cluster byte parity, TLV vectors), even though Moli's own
+check script runs only those crates' library targets.
+
+Upstream `README.md`, `LICENSE` and the upstream rustfmt configuration are kept
+verbatim. Nothing else was rewritten: the retained sources are the exported ones
+plus the corrections listed above.
 
 Pruned only these root entries (not needed to build or run the retained tests):
 
@@ -45,9 +70,8 @@ uses direct path dependencies into it.
 
 ## Validation
 
-Run from this directory: `cargo test --workspace --locked`.
-BLE compilation additionally requires the Linux D-Bus development library:
-`cargo check -p matter-controller --all-features --locked`.
+Run from this directory: `cargo test --workspace --locked`. There is no BLE
+target left to build, so no system D-Bus library is required.
 Hardware-dependent integration tests keep their upstream ignored/opt-in behavior.
 The fixtures include public synthetic/test credentials; they are required for
 cryptographic and protocol regression tests and must not be replaced by real data.

@@ -26,11 +26,3 @@ proptest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 criterion = { workspace = true }
-
-[[bench]]
-name = "report_parse"
-harness = false
-
-[[bench]]
-name = "write_chunks"
-harness = false

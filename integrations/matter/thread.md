@@ -7,19 +7,12 @@ Provide a working border router/radio and IPv6 route first. Follow the
 On Proxmox, radio passthrough, multicast and IPv6 routing must be checked outside
 Moli. No host network settings are modified by this integration.
 
-The default scratch image remains IP-only. For initial onboarding without a
-manufacturer's controller, build a Linux native binary with Bluetooth support:
+The contribution ships no Bluetooth path: the vendored stack keeps only the crates
+Moli builds and tests, and the `matter-ble` feature is not part of it. A Thread device
+therefore has to be commissioned once with its manufacturer's app or another
+controller; Moli then reaches it over IP through the border router above.
 
-```sh
-cargo build --release -p moli-os --features matter-ble
-```
-
-This opt-in feature uses btleplug/BlueZ and needs the system D-Bus development
-library plus pkg-config at build time, and access to BlueZ/system D-Bus and a
-Bluetooth adapter at runtime. It is not the standard scratch deployment and it
-has not been validated on physical hardware by this contribution.
-
-Set `ble_thread = true` under `[driver.options]` for the instance to commission.
+`ble_thread = true` under `[driver.options]` is refused with an explicit message in this build.
 Store the **complete active operational dataset** exported by your own OTBR in
 the existing encrypted vault as `thread_dataset`. Transfer it directly through
 stdin to `moli-os secrets set <instance> thread_dataset`; do not print it, put it
@@ -38,12 +31,12 @@ be retried automatically on every supervised restart. Inspect device fabric
 membership before explicitly supplying another pairing code. The dataset remains
 in the encrypted vault for subsequent devices; replace it if the network changes.
 
-Without `matter-ble`, requesting Bluetooth commissioning reports a translated
-error and sends no Bluetooth request. Once commissioned, ongoing reads, commands
-and subscriptions use the common IP path; BLE is not the ongoing control channel.
+Requesting Bluetooth commissioning reports a translated error and sends no radio
+request. Once commissioned elsewhere, ongoing reads, commands and subscriptions use
+the common IP path; Bluetooth is not the ongoing control channel.
 
-FR : compiler explicitement avec `matter-ble`, fournir un adaptateur Bluetooth et
-un routeur Thread opérationnel, puis ranger le dataset et le code d'appairage dans
-le coffre via l'entrée standard. Aucun réseau Thread n'est créé automatiquement.
-Les tests logiciels valident le décodage et la compilation ; portée radio, sommeil,
-autonomie et interopérabilité IKEA restent à tester avec du matériel réel.
+FR : cette contribution ne compile aucun chemin Bluetooth. L'appareil Thread se
+commissionne une fois avec l'application du fabricant ou un autre contrôleur, puis
+Moli le joint en IP via le routeur de bordure. Aucun réseau Thread n'est créé
+automatiquement, et portée radio, sommeil, autonomie et interopérabilité IKEA
+restent à valider avec du matériel réel.

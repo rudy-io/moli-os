@@ -57,24 +57,9 @@ pub(super) async fn pair(
     // partial commission followed by supervisor restart must never retry by
     // itself and fill the device's fabric table or repeat an uncertain action.
     if ble_thread {
-        #[cfg(not(feature = "ble"))]
+        // The vendored stack ships no BLE/BTP commissioning, so a Thread
+        // pairing request fails here instead of pretending to try.
         anyhow::bail!(moli_i18n::tr!("pilotes.matter.ble_unavailable"));
-        #[cfg(feature = "ble")]
-        {
-            let dataset = dataset(&ctx.secret("thread_dataset").ok_or_else(invalid)?)?;
-            ctx.forget_secret("pairing_code")
-                .await
-                .map_err(|_| invalid())?;
-            controller
-                .commission_ble(
-                    code.trim(),
-                    matter_controller::NetworkCredentials::Thread(dataset),
-                    None,
-                )
-                .await
-                .map_err(|error| failed(&error))?;
-            return Ok(());
-        }
     }
     ctx.forget_secret("pairing_code")
         .await
@@ -86,7 +71,7 @@ pub(super) async fn pair(
     Ok(())
 }
 
-#[cfg(any(feature = "ble", test))]
+#[cfg(test)]
 fn dataset(hex: &str) -> anyhow::Result<matter_controller::ThreadDataset> {
     let hex = hex.trim();
     anyhow::ensure!(hex.len() <= 508 && hex.len().is_multiple_of(2), invalid());

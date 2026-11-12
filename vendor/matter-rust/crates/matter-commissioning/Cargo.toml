@@ -81,11 +81,6 @@ serde_json = { workspace = true, optional = true }
 # generated cluster codecs. Kept out of the main dependency graph so
 # matter-clusters' own crate independence is preserved.
 matter-clusters = { path = "../matter-clusters", version = "0.6.0" }
-# Test-only: the `pase_over_btp` floor test drives PASE through two real
-# `BtpSession`s to prove reassembly + MRP-off end to end. Dev-dep ONLY —
-# matter-ble must never enter the runtime graph (and a dep on matter-controller
-# would be a cycle, so the BtpSession→AsyncDatagram shim is test-local).
-matter-ble = { path = "../matter-ble", version = "0.3.4" }
 hex = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }
@@ -106,15 +101,3 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 const-oid = "0.9"
 spki = "0.7"
 x509-cert = "0.2"
-
-[[test]]
-name = "state_machine_network"
-required-features = ["__test_shortcuts"]
-
-[[example]]
-name = "commission_ip"
-required-features = ["driver"]
-
-[[example]]
-name = "control_onoff"
-required-features = ["driver"]

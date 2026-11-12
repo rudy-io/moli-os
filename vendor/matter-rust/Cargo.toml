@@ -9,10 +9,6 @@ members = [
     "crates/matter-commissioning",
     "crates/matter-clusters",
     "crates/matter-controller",
-    "crates/matter-ota",
-    "crates/matter-bdx",
-    "crates/matter-ble",
-    "crates/integration-tests",
 ]
 
 # Shared metadata picked up by each crate via `field.workspace = true`.

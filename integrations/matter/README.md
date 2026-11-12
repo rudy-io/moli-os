@@ -5,8 +5,9 @@
 **Matter IP testé sur pont Hue / Hue IP validation: [hardware report](HARDWARE.md).** Native Rust controller; no Matter Server
 or Python service. The standard build has no BlueZ/BLE dependency and supports devices
 already on an IP network, including Thread devices reachable through an existing border
-router. Optional `matter-ble` builds can provision a Thread device over Bluetooth using
-an existing border router's operational dataset; see [thread.md](thread.md).
+router. Bluetooth commissioning is not part of this contribution: the vendored stack is
+trimmed to what Moli builds and tests, so a Thread device is onboarded with its own app or
+another controller first and then driven over IP; see [thread.md](thread.md).
 The default release image exceeds the project's 25 MB budget. An optional compact
 build is measured below that budget, at the cost of symbolized local backtraces; see
 `docs/components/exploitation.md` and `docs/PERFORMANCE.md`.
@@ -81,9 +82,9 @@ No new HTTP endpoint is introduced.
 
 FR : configurer explicitement les racines d'attestation de production, ouvrir le partage
 Matter depuis le contrôleur existant, saisir le code via l'entrée standard de `secrets set`,
-puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel sur pont Hue est documenté dans `HARDWARE.md` ; les radios Thread/BLE
-restent non validées. La compilation standard ne contient pas Bluetooth ; le mode optionnel
-`matter-ble` peut transmettre un dataset existant, sans créer ni administrer le routeur Thread.
+puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel sur pont Hue est documenté dans `HARDWARE.md` ; les radios Thread/BLE restent non validées. Cette contribution ne contient aucun
+chemin Bluetooth : le commissionnement se fait avec l'application du fabricant ou un autre
+contrôleur, puis Moli pilote l'appareil en IP à travers le routeur de bordure existant.
 
 ### Bridges and bounded subscriptions
 

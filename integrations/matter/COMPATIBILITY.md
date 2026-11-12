@@ -43,7 +43,7 @@ leur catégorie Matter n'est pas conservée pour les distinguer dans l'interface
 Les variations de conformité ou d'ACL peuvent rendre un endpoint partiellement accessible.
 
 Matter sur IP : Ethernet/Wi-Fi, ou Thread via un routeur de bordure externe et une
-route IPv6/mDNS. Le commissionnement BLE/Thread optionnel reste expérimental ;
+route IPv6/mDNS. Le commissionnement Bluetooth n'est pas livré dans cette contribution ;
 Moli ne crée ni ne gère un réseau Thread. Les nouveaux types sont validés sur un
 accessoire virtuel indépendant ; cela ne remplace pas les essais physiques absents.
 Voir [résultats](../../tools/matter-e2e/RESULTS.md), [Hue](HARDWARE.md), [Thread](thread.md).
@@ -63,8 +63,8 @@ models, and exact-path acknowledgements. Lock control is always timed and guarde
 PIN-required or unknown-policy locks remain read only. No optimistic state updates.
 
 The limitations above remain unsupported. Standard IP commissioning and ongoing
-operation support Ethernet/Wi-Fi or routed Thread; optional BLE provisioning is not
-hardware validated. See the independent virtual-device and real Hue evidence separately.
+operation support Ethernet/Wi-Fi or routed Thread; Bluetooth provisioning is not shipped
+in this contribution and is not hardware validated. See the independent virtual-device and real Hue evidence separately.
 
 Primary definitions: [CHIP data model](https://github.com/project-chip/connectedhomeip/tree/v1.4.2.0/src/app/zap-templates/zcl/data-model/chip),
 [device type registry](https://github.com/project-chip/connectedhomeip/blob/master/src/app/zap-templates/zcl/data-model/chip/matter-devices.xml).

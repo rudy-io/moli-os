@@ -51,7 +51,3 @@ matter-crypto = { path = ".", features = ["test-support"] }
 # `matter_cert::test_support::build_unsigned`.
 matter-cert = { path = "../matter-cert", version = "0.3.0", features = ["test-support"] }
 criterion = { workspace = true }
-
-[[bench]]
-name = "case"
-harness = false
