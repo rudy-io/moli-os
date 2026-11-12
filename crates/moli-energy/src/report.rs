@@ -322,6 +322,8 @@ mod tests {
     }
 
     #[test]
+    // Sums of exact inputs (2.0, 11.0): equal to the bit, as in the other tests.
+    #[allow(clippy::float_cmp)]
     fn gas_is_counted_apart_from_the_electricity() {
         let config: Config = toml::from_str(
             "[[meter]]\nid = \"day\"\nname = \"Jour\"\npoint = \"p:m/day\"\nrole = \"grid\"\n\
