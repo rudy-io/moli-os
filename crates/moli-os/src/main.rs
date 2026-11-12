@@ -1331,6 +1331,7 @@ const KINDS: &[&str] = &[
     "melcloud",
     "kasa",
     "recycleapp",
+    "engie",
     "tapo",
     "lifx",
     "voltalis",
@@ -1604,6 +1605,7 @@ fn build_driver(
         "telegram" => configured_driver(config, moli_telegram::Telegram::new)?,
         "kasa" => configured_driver(config, moli_kasa::Kasa::new)?,
         "recycleapp" => configured_driver(config, moli_recycleapp::RecycleApp::new)?,
+        "engie" => configured_driver(config, moli_engie::Engie::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
