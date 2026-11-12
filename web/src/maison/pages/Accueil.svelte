@@ -11,6 +11,7 @@
   import VacuumCard from '../ui/VacuumCard.svelte';
   import EnergyCard from '../ui/EnergyCard.svelte';
   import EnergyFlow from '../ui/EnergyFlow.svelte';
+  import HistoryChart from '../ui/HistoryChart.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
   import AmbiancePicker from '../ui/AmbiancePicker.svelte';
   import ScenePicker from '../ui/ScenePicker.svelte';
@@ -211,6 +212,9 @@
     <div class="side">
       <EnergyCard />
       <EnergyFlow home />
+      {#each cfg.charts ?? [] as c, i (i)}
+        <HistoryChart title={c.title} minutes={c.minutes ?? 60} points={c.points ?? []} />
+      {/each}
       <Routines />
     </div>
 
