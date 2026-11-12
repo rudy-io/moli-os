@@ -356,5 +356,12 @@
   "energie.solaire.reglages.abonnement_texte": "unchanged: only the consumption avoided and the surplus sold count.",
   "energie.solaire.reglages.reset": "Back to the starting settings",
   "energie.gaz.titre": "Gas this month",
-  "energie.gaz.detail": "{kwh} kWh · today {today}"
+  "energie.gaz.detail": "{kwh} kWh · today {today}",
+  "energie.flux.titre": "Live energy flow",
+  "energie.flux.solaire": "Solar",
+  "energie.flux.gaz": "Gas",
+  "energie.flux.reseau": "Grid",
+  "energie.flux.maison": "Home",
+  "energie.flux.aujourdhui": "Today: {achete} kWh bought, {injecte} kWh sent out",
+  "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels"
 }

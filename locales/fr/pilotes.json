@@ -732,5 +732,8 @@
   "pilotes.linky_tic.ouverture": "ouverture de {port} impossible : {cause}",
   "pilotes.linky_tic.lecture": "lecture du port série impossible : {cause}",
   "pilotes.linky_tic.port_ferme": "le port série s’est fermé (module débranché ?)",
-  "pilotes.linky_tic.silence": "aucune trame valide du compteur depuis {secondes} s : le port est rouvert (vérifier le câble, le port et le mode standard ou historique)"
+  "pilotes.linky_tic.silence": "aucune trame valide du compteur depuis {secondes} s : le port est rouvert (vérifier le câble, le port et le mode standard ou historique)",
+  "pilotes.solarman.puissance_panneaux": "Puissance des panneaux",
+  "pilotes.solarman.production_mois": "Production du mois",
+  "pilotes.solarman.production_annee": "Production de l’année"
 }

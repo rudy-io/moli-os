@@ -16,7 +16,8 @@ Licensed under the MIT License; see licenses/zigbee-herdsman-MIT.txt.
 
 This product includes data derived from ha-solarman
 (https://github.com/davidrapan/ha-solarman): the Deye micro-inverter
-register map in crates/moli-solarman/src/deye.rs.
+register map in crates/moli-solarman/src/deye.rs, and the Solis S6-GR1P
+register map (solis_s6-gr1p.yaml) in crates/moli-solarman/src/solis.rs.
 Copyright (c) 2024 David Rapan and Contributors. Licensed under the MIT
 License; see licenses/ha-solarman-MIT.txt.
 

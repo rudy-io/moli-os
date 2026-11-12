@@ -156,6 +156,8 @@ import {
   mdiSmokeDetectorVariant,
   mdiWalk,
   mdiWaterAlert,
+  mdiWindowShutterOpen,
+  mdiWindowShutterAlert,
 } from '@mdi/js';
 
 /** Names used by the layout (home.json) and the pages. */
@@ -307,6 +309,8 @@ export const icons = {
   sun: mdiWhiteBalanceSunny,
   palm: mdiPalmTree,
   shutter: mdiWindowShutter,
+  'shutter-open': mdiWindowShutterOpen,
+  'shutter-alert': mdiWindowShutterAlert,
 };
 
 export const icon = (name) => icons[name] ?? mdiLightbulbOutline;

@@ -732,5 +732,8 @@
   "pilotes.linky_tic.ouverture": "cannot open {port}: {cause}",
   "pilotes.linky_tic.lecture": "cannot read the serial port: {cause}",
   "pilotes.linky_tic.port_ferme": "the serial port closed (module unplugged?)",
-  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)"
+  "pilotes.linky_tic.silence": "no valid frame from the meter for {secondes} s: the port is reopened (check the cable, the port and the standard or historic mode)",
+  "pilotes.solarman.puissance_panneaux": "Panels' power",
+  "pilotes.solarman.production_mois": "This month's production",
+  "pilotes.solarman.production_annee": "This year's production"
 }

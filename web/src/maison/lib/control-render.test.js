@@ -9,6 +9,7 @@ let vite;
 let hub;
 let home;
 let energy;
+let icons;
 let render;
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const components = {};
@@ -22,7 +23,8 @@ before(async () => {
   ({ hub } = await vite.ssrLoadModule('/src/lib/hub.svelte.js'));
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
+  ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -304,6 +306,7 @@ test('the rooms icons preference reaches each cover without changing the dedicat
     point('opening', number(0, 100, 1), false, 'position')], { opening: 42 }, { label: { room: 'Workshop' } });
   const room = render(components.RoomCard, { props: { room: home.roomList()[0], icons: true } }).body;
   assert.match(room, /title="Fixture · Ouvert à 42 %"/);
+  assert.match(room, /data-cover-command="close"/);
   const focused = render(components.Pieces, { props: { route: 'pieces/volets' } }).body;
   assert.match(focused, />Fixture</);
   assert.match(focused, />Ouvrir</);
@@ -777,7 +780,32 @@ test('a room shows its trigger device and a lone control point stays a cover', (
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
   assert.match(room, /Impulsion · Relais 1/);
-  assert.match(room, /data-cover-command="open"/);
+  // No measured position: the pad opens the cover tile instead of sending open.
+  assert.match(room, /shutter-icon/);
+  assert.doesNotMatch(room, /data-cover-command/);
+});
+
+test('a partly open cover shows the open shutter, never the alert icon', () => {
+  const position = [point('opening', number(0, 100, 1), false, 'position')];
+  const opened = show('ShutterIcon', position, { opening: 42 });
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.ok(!opened.includes(icons['shutter-alert']));
+  const closed = show('ShutterIcon', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.ok(!closed.includes(icons['shutter-alert']));
+});
+
+test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
+  const cover = (extra = {}) => ({
+    id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {}, ...extra,
+  });
+  const pad = (html) => buttons(html).find((button) => /class="pad/.test(button));
+  assert.doesNotMatch(pad(showRoom([cover()])), /disabled/);
+  assert.match(pad(showRoom([cover({ online: false })])), /disabled/);
+  assert.match(pad(showRoom([cover({ points: [point('control', enumeration('open', 'close', 'stop'), false)] })])), /disabled/);
+  hub.connected = false;
+  assert.match(pad(showRoom([cover()])), /disabled/);
+  hub.connected = true;
 });
 
 test('a presence radar shows someone there, whatever the key of its presence point', () => {

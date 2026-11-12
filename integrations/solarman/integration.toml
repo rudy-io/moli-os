@@ -1,10 +1,11 @@
 [integration]
 id = "solarman"
-name = "Solarman (enregistreurs Wi-Fi) et micro-onduleurs Deye"
-brands = ["Deye", "Solarman"]
+name = "Solarman (enregistreurs Wi-Fi) : micro-onduleurs Deye, onduleurs Solis"
+brands = ["Deye", "Solarman", "Solis"]
 # Seen so far (in the reference installation): Deye micro-inverters with
 # 2 and 4 inputs and their built-in logger.
-models = ["micro-onduleur 2 entrées (1 kW)", "micro-onduleur 4 entrées (2 kW)"]
+# And a Solis S6-GR1P string inverter behind a stick speaking Modbus TCP.
+models = ["micro-onduleur 2 entrées (1 kW)", "micro-onduleur 4 entrées (2 kW)", "Solis S6-GR1P"]
 transport = "tcp"
 driver = "solarman"
 crate = "moli-solarman"
@@ -18,10 +19,10 @@ ports = [8899]
 [needs]
 secrets = []
 vars = []
-options = ["host"]
+options = ["host", "serial", "model", "transport", "timezone"]
 
 [origin]
-reused = "carte de registres de ha-solarman (deye_micro.yaml, licence MIT, voir NOTICE) ; protocole V5 écrit d'après sa description publique (pysolarmanv5, MIT) ; valeurs vérifiées une à une contre Home Assistant au même instant"
+reused = "cartes de registres de ha-solarman (deye_micro.yaml, solis_s6-gr1p.yaml, licence MIT, voir NOTICE) ; protocole V5 écrit d'après sa description publique (pysolarmanv5, MIT) ; valeurs vérifiées une à une contre Home Assistant au même instant"
 author = "agent"
 
 # Replayed by the crate's tests (crates/moli-solarman/src/v5.rs, deye.rs).
