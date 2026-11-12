@@ -4,8 +4,9 @@
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
 import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
+import { coverPositionTarget } from './cover-controls.js';
 
-export { hub, positionPoint, coverOrder };
+export { hub };
 
 export const home = $state({
   /** @type {any} layout from /api/home ({} = automatic) */
@@ -174,6 +175,20 @@ export function pending(id, point = null) {
   return key ? `${id}/${key}` in hub.pending : false;
 }
 
+/** A cover's position: the point whose semantic says so, or the legacy Tuya
+ *  reading (display only), never a point chosen by its name alone. */
+export function coverPosition(id) {
+  const point = positionPoint(device(id), true);
+  const reported = point ? value(id, point.key) : null;
+  return point?.kind?.type === 'numeric' && Number.isFinite(reported) && reported >= 0 && reported <= 100
+    ? reported : null;
+}
+
+/** The point a cover's position can be written to, if any (bounded by its range). */
+export function coverPositionKey(id) {
+  return coverPositionTarget(device(id))?.point?.key ?? null;
+}
+
 // ---- rooms ---------------------------------------------------------------------
 
 const norm = (s) =>
@@ -293,6 +308,11 @@ export function roomList() {
         media: by('tv', 'speaker'),
         sensors: [...by('sensor', 'plant', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
+        opened: by('cover').filter((d) => {
+          const pct = coverPosition(d.id);
+          return pct != null && pct > 0;
+        }).length,
+        coversUnknown: by('cover').filter((d) => coverPosition(d.id) == null).length,
       };
     });
 }
