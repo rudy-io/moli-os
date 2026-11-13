@@ -46,11 +46,11 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 
 ## Validation logicielle
 
-- `sh scripts/check.sh` passe : **1 326 tests Moli** et **919 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants.
+- `sh scripts/check.sh` passe : **2 042 tests Moli** et **922 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants. Les deux comptes se reproduisent avec `cargo test --workspace --locked -q` (somme des lignes `test result`) côté Moli, et avec l'invocation `--no-default-features -p matter-controller -p matter-interaction -p matter-commissioning --lib -q` côté pile.
 - Le contrôle standard rejoue maintenant les tests des trois bibliothèques localement modifiées : controller, interaction et commissioning. Les bibliothèques BLE système ne sont pas requises pour ce contrôle.
 - Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passaient au jalon précédent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
-- **24 tests** du pilote passent sans l'option BLE, retirée avec le tri du vendoring ; aucun essai radio n'est revendiqué.
-- **191 tests frontend**, build et contrôle FR/EN (3 623 clés) passent.
+- **29 tests** du pilote (`cargo test -p moli-matter --lib`) passent sans l'option BLE, retirée avec le tri du vendoring ; aucun essai radio n'est revendiqué.
+- **377 tests frontend** (`npm test` dans `web`), build et contrôle FR/EN (**4 374 clés**, aucune ligne en dur) passent.
 - `cargo check --locked -p moli-os` passe sous **Rust 1.89.0**, avec uniquement la source Moli et le cache registry, sans cache Git.
 - `cargo-audit` 0.22.2 passe après actualisation RustSec ; les cinq exceptions TLS préexistantes restent contrôlées par le garde d'audit et ses 15 tests. Avertissement connu : `rustls-pemfile` 2.2.0 non maintenu ; aucun nouvel ignore.
 - Le binaire de production **standard** passe l'interopérabilité indépendante étendue : toutes les familles ci-dessus, validation des consignes, contrôle de serrure approuvé, refus sans transmission, changement de politique PIN, reprise, état corrompu et mauvaise clé. [Résultats, reproduction et hash](../../tools/matter-e2e/RESULTS.md).
