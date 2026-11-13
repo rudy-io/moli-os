@@ -307,7 +307,9 @@
       "values": [
        "open",
        "stop",
-       "close"
+       "close",
+       "open_slow",
+       "close_slow"
       ]
      },
      "access": {
@@ -327,6 +329,22 @@
      },
      "access": {
       "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control_slow",
+     "label": "Ouverture lente",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": false,
       "write": true
      },
      "unit": "%",
