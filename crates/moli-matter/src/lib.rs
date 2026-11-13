@@ -119,6 +119,16 @@ impl Endpoint {
         {
             return None;
         }
+        // Brightness zero means off: clamping the level would otherwise leave the
+        // lamp at its declared minimum instead of dark.
+        if key == "brightness" && value.as_f64() == Some(0.0) && self.clusters.contains(&6) {
+            return Some(features::Plan::Invoke {
+                cluster: 6,
+                command: 0,
+                fields: Tlv::Structure(vec![]),
+                timed: false,
+            });
+        }
         on_command(key, value, true, &self.clusters, false)
             .map(|command| features::Plan::Invoke {
                 cluster: 6,
@@ -360,14 +370,28 @@ fn rediscover(
 }
 async fn watch(node: Node, tx: mpsc::Sender<Update>) {
     let id = node.node_id();
+    let mut failures = 0;
     loop {
         let result = watch_once(&node, &tx).await;
         if tx.send(Update::Online(id, false)).await.is_err() {
             return;
         }
-        // Bound retries even if a peer repeatedly changes its descriptor.
-        tokio::time::sleep(Duration::from_secs(if result.is_err() { 10 } else { 1 })).await;
+        // Bound retries even if a peer repeatedly changes its descriptor. A node
+        // with nothing we serve fails every cycle, so the delay grows instead of
+        // waking a battery device every 10 s; it resets as soon as one succeeds.
+        let wait = if result.is_err() {
+            let wait = retry_delay(failures);
+            failures += 1;
+            wait
+        } else {
+            failures = 0;
+            Duration::from_secs(1)
+        };
+        tokio::time::sleep(wait).await;
     }
+}
+fn retry_delay(failures: u32) -> Duration {
+    Duration::from_secs(10 << failures.min(4))
 }
 fn subscription_paths(
     report: &[(AttributePath, Tlv)],
@@ -1035,6 +1059,60 @@ mod tests {
                 None
             );
         }
+    }
+    #[test]
+    fn retries_back_off_up_to_a_cap() {
+        assert_eq!(retry_delay(0), Duration::from_secs(10));
+        assert_eq!(retry_delay(1), Duration::from_secs(20));
+        assert_eq!(retry_delay(4), Duration::from_secs(160));
+        assert_eq!(retry_delay(9), Duration::from_secs(160));
+        assert_eq!(retry_delay(u32::MAX), Duration::from_secs(160));
+    }
+    #[test]
+    fn brightness_zero_switches_off_instead_of_dimming_to_the_floor() {
+        let report = vec![
+            (path(1, 8, 0xfffc), Tlv::Uint(2)),
+            (path(1, 8, 0xfffd), Tlv::Uint(7)),
+            (
+                path(1, 8, 0xfffb),
+                Tlv::Array(vec![Tlv::Uint(0), Tlv::Uint(2), Tlv::Uint(3)]),
+            ),
+            (path(1, 8, 0xfff9), Tlv::Array(vec![Tlv::Uint(0)])),
+            (path(1, 8, 2), Tlv::Uint(1)),
+            (path(1, 8, 3), Tlv::Uint(254)),
+        ];
+        let meta = Endpoint {
+            clusters: vec![6, 8],
+            family_clusters: vec![],
+            label: None,
+            boolean: None,
+            bridged: false,
+            reachable: true,
+            connected: true,
+            extra: features::Expanded::discover(1, &report),
+            discovered_extra: features::Expanded::discover(1, &report),
+            extra_keys: BTreeSet::new(),
+        };
+        // Zero is Off on cluster 6; the level cluster may not accept level 0.
+        for zero in [Value::Int(0), Value::Float(0.0)] {
+            assert!(matches!(
+                meta.plan("brightness", &zero, false),
+                Some(features::Plan::Invoke {
+                    cluster: 6,
+                    command: 0,
+                    ..
+                })
+            ));
+        }
+        // Any other value stays a MoveToLevel on the level cluster.
+        assert!(matches!(
+            meta.plan("brightness", &Value::Float(1.0), false),
+            Some(features::Plan::Invoke {
+                cluster: 8,
+                command: 0,
+                ..
+            })
+        ));
     }
     #[test]
     fn discovery_bounds_and_missing_types() {

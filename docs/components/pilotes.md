@@ -1289,7 +1289,8 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 ## Matter natif
 
 `moli-matter` contrôle les appareils Matter sur le réseau IP, directement ou derrière
-un pont. Les capacités annoncées activent OnOff, variation/couleur, stores de levage,
+un pont. Les capacités annoncées activent OnOff, variation/couleur (une luminosité à 0 %
+éteint la lampe au lieu de la ramener à son niveau minimal), stores de levage,
 thermostats et serrures sous garde ; température, humidité, occupation, contact et
 fuite restent en lecture seule. Reachable conditionne les endpoints pontés.
 Le tissu utilise le coffre chiffré et des racines d'attestation explicites.
