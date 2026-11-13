@@ -283,6 +283,17 @@ la phrase). L'appareil affiche qu'il répond, attend que l'enceinte ait fini (so
 joue un dixième de seconde de silence et se remet à écouter : il n'entend jamais la réponse. Si l'enceinte
 est en silence (`quiet`), refuse, ou ne commence pas dans les 5 s, l'appareil dit la réponse lui-même.
 
+**Les mots d'attente** : quand la réponse demande d'aller chercher quelque chose (le web, la météo,
+l'historique, la consommation…), l'enceinte dit quelques mots pendant ce temps, propres à ce qui est fait
+(« Je cherche sur internet. », « Je regarde la météo. », « Je regarde. » par défaut), une fois par tour. La
+réponse suit dans la file de l'enceinte. Ces mots ne sont pas dits quand l'appareil répond lui-même (sans
+`speaker`), ni tant qu'un écran joue (`quiet_during_tv`), et ils n'entrent pas dans la conversation. Les
+listes sont dans `locales/*/assistant.json` (`assistant.voice.wait.*`).
+
+**Une question au web** : sa réponse est demandée courte et faite pour l'oreille, puis dite telle quelle,
+sans repasser par le modèle de conversation (une à deux secondes de moins). Au-delà de 300 caractères, le
+modèle la résume comme avant.
+
 **La clé chiffrée** vit dans le coffre, jamais dans `moli.toml` :
 
 ```sh
@@ -441,7 +452,7 @@ Vérification, côté appareil : le journal ESPHome doit **cesser** d'afficher
 | `GET /api/devices` | un appareil `salon:<mac>`, en ligne, avec les cinq points |
 | Dire le mot de réveil | `state` passe à `listening`, puis `thinking`, puis `speaking` |
 | Écrire sur `say` | l'appareil dit la phrase en annonce ; `state` suit la conversation, pas cette commande |
-| Journal de Moli | `esphome device connected`, puis `satellite listened` avec les niveaux, puis `satellite turn` avec les durées |
+| Journal de Moli | `esphome device connected`, puis `satellite listened` avec les niveaux, puis `assistant turn` avec `timeline` (chaque appel du modèle et chaque outil, en millisecondes) et `satellite turn` avec les durées |
 
 ## Ce que Moli ne fait pas (encore)
 

@@ -28,6 +28,7 @@ impl VoiceBrain for Brain {
         &self,
         _: &moli_core::DeviceId,
         _: Vec<Said>,
+        _: moli_runtime::voice::Meanwhile,
     ) -> BoxFuture<'_, Result<Answer, String>> {
         Box::pin(async { panic!("the answer is already known") })
     }
