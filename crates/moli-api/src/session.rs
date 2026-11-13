@@ -648,6 +648,7 @@ mod tests {
     /// A device of the home network.
     fn lan(ip: &str) -> Caller {
         Caller {
+            remote: false,
             via: Via::Lan,
             key: ip.to_owned(),
             person: None,
@@ -657,6 +658,7 @@ mod tests {
     /// Someone on the Internet: a password, an invitation.
     fn internet(key: &str) -> Caller {
         Caller {
+            remote: false,
             via: Via::Outside,
             key: key.to_owned(),
             person: None,
@@ -771,6 +773,7 @@ mod tests {
             Err(LoginError::Locked)
         );
         let person = Caller {
+            remote: false,
             via: Via::Person,
             ..internet("person:sam")
         };
