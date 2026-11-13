@@ -1,0 +1,88 @@
+From 5b1d0e69de37677a0ddedc1350c8f8acfddae6a4 Mon Sep 17 00:00:00 2001
+From: series <series@local>
+Date: Fri, 13 Nov 2026 12:49:09 +0100
+Subject: [PATCH] fix(controller): reject a suppressed response that promises
+ more chunks
+
+A steady-state report with `SuppressResponse` and `MoreChunkedMessages`
+set asked for no answer while keeping the exchange open for more chunks, so
+nothing ever answered or closed it. Reject it with `InvalidAction` and close
+the exchange.
+---
+ .../crates/matter-controller/src/actor.rs     | 53 ++++++++++++++++++-
+ 1 file changed, 52 insertions(+), 1 deletion(-)
+
+diff --git a/crates/matter-controller/src/actor.rs b/crates/matter-controller/src/actor.rs
+index 49f04aa..78e1249 100644
+--- a/crates/matter-controller/src/actor.rs
++++ b/crates/matter-controller/src/actor.rs
+@@ -6996,7 +6996,27 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
+             let _ = self
+                 .send_status_ack(session_id, exchange_id, is_local_initiator, peer)
+                 .await;
+-        } else if !more_chunked_messages {
++        } else if more_chunked_messages {
++            // Contradictory: the device suppressed the application reply but
++            // promised more chunks on this same exchange. Nothing would ever
++            // answer or close it, so the device would wait for a reply that
++            // cannot come and the exchange would leak. Reject the report and
++            // close the exchange; only the faulty device's session suffers.
++            self.answer_stray_report(
++                session_id,
++                exchange_id,
++                is_local_initiator,
++                from,
++                StrayReport {
++                    subscription_id: Some(wire_sub_id),
++                    reason: "suppressed response with more chunks to come",
++                    status: IM_STATUS_INVALID_ACTION,
++                },
++            )
++            .await;
++            self.finish_exchange_as(session_id, exchange_id, is_local_initiator, peer)
++                .await;
++        } else {
+             // No application reply will piggyback the ACK. Close only a final
+             // steady-state report; chunks still share this exchange.
+             self.finish_exchange_as(session_id, exchange_id, is_local_initiator, peer)
+@@ -25355,6 +25375,37 @@ mod tests {
+         assert_eq!(w.next_frame(NOTHING_QUEUED_WITHIN).await, None);
+     }
+ 
++    /// `SuppressResponse` with `MoreChunkedMessages` asks for no answer while
++    /// keeping the exchange open for more chunks: nothing would ever answer or
++    /// close it, and the device would wait for a reply that cannot come. The
++    /// report is rejected with `InvalidAction` instead of being left hanging.
++    #[tokio::test]
++    async fn a_suppressed_chunked_report_is_rejected_instead_of_left_open() {
++        let mut w = wired_actor();
++        let _reply = seed_initial_subscribe(&mut w.actor, (w.sid, 0x66), 1, 0x42, far_future());
++        w.actor.pending.get_mut(&(w.sid, 0x66)).unwrap().peer = w.dev.local_addr();
++        let (exchange, counter) = w
++            .deliver_counted(
++                Some(0x66),
++                ProtocolId::INTERACTION_MODEL,
++                OP_SUBSCRIBE_RESPONSE,
++                &build_subscribe_response(0x1234_5678, 30),
++            )
++            .await;
++        w.expect_ack(exchange, counter).await;
++        let mut report =
++            build_report_data_chunk(1, 0x06, 0x0000, &matter_codec::Value::Bool(true), true);
++        // Append SuppressResponse (context tag 4) inside ReportData.
++        report.pop();
++        report.extend_from_slice(&[0x29, 0x04, 0x18]);
++        let parsed = matter_interaction::parse_report_data(&report).unwrap();
++        assert!(parsed.suppress_response && parsed.more_chunked_messages);
++        let (exchange, _) = w
++            .deliver_counted(None, ProtocolId::INTERACTION_MODEL, OP_REPORT_DATA, &report)
++            .await;
++        assert_eq!(w.next_status(SENT_WITHIN).await, Some((exchange, 0x80)));
++    }
++
+     impl Wired {
+         /// Encode a reliable device message on `exchange` and hand it to the
+         /// actor's session table directly, bypassing its inbound handler: the
+-- 
+2.56.0
+

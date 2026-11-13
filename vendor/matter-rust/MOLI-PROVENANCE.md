@@ -89,6 +89,9 @@ occurrence and must never bypass the private denylist or exempt this directory.
 - Controller and interaction-model tests cover these additional APIs and validation.
 
 These adaptations are maintained inside Moli, not fetched from a personal fork.
+The three corrections below that only make sense on top of them are also kept as
+a three-commit series in [`MOLI-PATCHES/`](MOLI-PATCHES/README.md), ready to be
+sent upstream in order.
 
 - Guarded attribute writes additionally use a strict write-response parser, rejecting duplicate or mismatched acknowledgements.
 - Deadline-bounded writes and invokes distinguish "never queued" from "queued,
