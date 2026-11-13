@@ -15,18 +15,16 @@ Assistant.
 
 ### Build actuel — pile locale et familles étendues, 6 novembre 2026
 
-Les variantes de production construites depuis le dépôt Moli seul mesurent :
+L'image de production construite depuis le dépôt Moli seul mesure :
 
 | Variante x86_64 musl | Image non compressée | Binaire |
 |---|---:|---:|
 | Standard avec symboles | 30 289 328 octets | 30 284 856 octets |
-| Compacte explicite | **24 970 672 octets** | 24 966 512 octets |
 
-La compacte respecte 25 Mo avec 29 328 octets de marge. Le standard reste au-dessus
-pour conserver les symboles. Les nouvelles fonctions et la source de la pile sont
-dans Moli ; la copie des sources n'ajoute pas de service ni de dépendance Git.
-Les deux binaires passent les essais protocolaires étendus. Diagnostics correspond
-au binaire standard. Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
+Le standard reste au-dessus du budget de 25 Mo. Les nouvelles fonctions et la source
+de la pile sont dans Moli ; la copie des sources n'ajoute pas de service ni de
+dépendance Git. Le binaire passe les essais protocolaires étendus.
+Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
 
 Sur 29,79 s au repos avec les familles virtuelles : 17 280 Kio RSS, 3 544 Kio anonymes,
 0,067 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
@@ -60,35 +58,19 @@ ni BLE ni OTBR. Pas de comparaison à Home Assistant, de p95 API, de mesure radi
 ou de test de charge multi-appareils. Reproduction et hash du binaire :
 `tools/matter-e2e/RESULTS.md` (`E2E_MEASURE=1`).
 
-### Variante compacte facultative et compatibilité minimale — 6 novembre 2026
+### Compatibilité minimale — 6 novembre 2026
 
-Les deux variantes ci-dessous utilisent les mêmes sources/fonctionnalités, après
-les corrections de compatibilité Rust 1.89 ; seule l'option de symboles diffère :
-
-| Variante x86_64 musl | Image non compressée | Binaire |
-|---|---:|---:|
-| Standard, symboles conservés (défaut inchangé) | 30 113 712 octets | 30 109 520 octets |
-| Compacte, table de symboles retirée | **24 827 312 octets** | 24 822 928 octets |
-
-La variante compacte respecte 25 Mo avec une marge mesurée de 172 688 octets.
-Elle conserve tous les pilotes et le mécanisme de déroulement/interception des panics,
-mais les backtraces locales perdent les noms de fonctions. Les sections de code,
-données constantes et métadonnées d'exception/unwind sont identiques octet pour octet.
-Le target `diagnostics` exporte le binaire avec symboles : son SHA-256 correspond
-exactement à celui du build standard. Il n'est pas inclus dans l'image compacte.
-Le choix du profil par défaut reste un arbitrage de diagnostic/exploitation.
 L'application complète passe `cargo check --locked -p moli-os` avec Rust 1.89.0,
 fonctionnalités par défaut. Deux match guards trop récents ont été remplacés par
 des expressions équivalentes ; le contrôle de pièce de l'assistant reste avant
 l'envoi d'une commande. Les tests existants et une revue ciblée couvrent ce point.
-
-Le binaire compact a passé le même test indépendant matter.js : commissioning avec
-attestation, Descriptor, OnOff confirmé par l'accessoire, abonnements, reprise après
-redémarrage et refus des états corrompus/mauvaise clé. Mesure indicative de processus
-avec une lampe virtuelle sur 29,78 s : 17 340 Kio RSS, 3 476 Kio anonymes, CPU 0,000 %
-à la résolution des ticks. Ce n'est pas une certification du budget cgroup ni radio.
-Commandes de build/export : `docs/components/exploitation.md` ; hash et résultat :
-`tools/matter-e2e/RESULTS.md`.
+Image standard : 30 113 712 octets, binaire 30 109 520 octets. Le binaire standard
+a passé le test indépendant matter.js : commissioning avec attestation, Descriptor,
+OnOff confirmé par l'accessoire, abonnements, reprise après redémarrage et refus des
+états corrompus/mauvaise clé. Mesure indicative de processus avec une lampe virtuelle
+sur 29,78 s : 17 340 Kio RSS, 3 476 Kio anonymes, CPU 0,000 % à la résolution des
+ticks. Ce n'est pas une certification du budget cgroup ni radio.
+Hash et résultat : `tools/matter-e2e/RESULTS.md`.
 
 ### Objectifs du projet
 

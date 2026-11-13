@@ -7,10 +7,10 @@ crates.io restent verrouillées. [Provenance et adaptations locales](../../vendo
 
 ## Suite à la revue des mainteneurs
 
-Le coffre est extrait dans la [PR #148](https://github.com/rudy-io/moli-os/pull/148) :
-verrou de transaction borné à trois secondes et échec explicite si le système de
-fichiers ne fournit pas les verrous. Le diff Matter conserve provisoirement ce
-préalable jusqu’à son intégration. La redécouverte conserve les endpoints survivants
+Le coffre de la [PR #148](https://github.com/rudy-io/moli-os/pull/148) est désormais
+fusionné dans `main` : verrou de transaction borné à trois secondes et échec explicite
+si le système de fichiers ne fournit pas les verrous. Ce diff s’appuie dessus sans le
+redéfinir. La redécouverte conserve les endpoints survivants
 et leurs lectures compatibles ; seuls les endpoints disparus sont supprimés.
 La documentation BLE/matériel a été harmonisée. Le blocage Hue ultérieur est
 maintenant localisé et corrigé : requête d’abonnement trop grande, puis pare-feu
@@ -29,10 +29,10 @@ mesure de l’image de cette révision.
 
 1. [Coffre durable](../../crates/moli-runtime/src/secrets.rs) et [adaptateur](../../crates/moli-matter/src/store.rs) : fsync/rename, verrou de transaction partagé, lease exclusive et relecture au changement de propriétaire.
 2. [Pilote](../../crates/moli-matter/src/lib.rs) et [familles](../../crates/moli-matter/src/features.rs) : découverte bornée, capacités annoncées, Reachable, politiques dynamiques, commandes annulables et acquittements stricts.
-3. [Appairage](../../crates/moli-matter/src/pairing.rs) : attestation explicite, coffre, code à usage unique consommé avant réseau. [Thread/BLE](thread.md) reste optionnel.
+3. [Appairage](../../crates/moli-matter/src/pairing.rs) : attestation explicite, coffre, code à usage unique consommé avant réseau. Un appareil [Thread](thread.md) se commissionne avec un autre contrôleur puis se joint en IP ; aucun chemin Bluetooth n’est compilé.
 4. [Contrôleur livré](../../vendor/matter-rust/crates/matter-controller/src/node.rs) : échéances absolues pour invoke, invoke temporisé et write ; abandon des envois et retransmissions après annulation. Les parseurs stricts vérifient les chemins et refusent les doublons ambigus.
 5. [Dashboard thermostat](../../web/src/maison/ui/ClimateCard.svelte) : cibles chauffage/refroidissement distinctes ; une commande différée garde sa clé même si le mode change.
-6. [Images](../../docs/components/exploitation.md) : standard avec symboles par défaut, compacte explicite et export de l'artefact diagnostics correspondant.
+6. [Images](../../docs/components/exploitation.md) : image standard avec symboles par défaut. L’option de strip et l’étage `diagnostics` viennent de `main` (#202), pas de ce diff.
 
 La compatibilité est indépendante de la marque et décrite **par fonctions**, pas
 comme une garantie de toutes les fonctions de tous les appareils certifiés :
@@ -49,14 +49,13 @@ Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas d
 - **191 tests frontend**, build et contrôle FR/EN (3 623 clés) passent.
 - `cargo check --locked -p moli-os` passe sous **Rust 1.89.0**, avec uniquement la source Moli et le cache registry, sans cache Git.
 - `cargo-audit` 0.22.2 passe après actualisation RustSec ; les cinq exceptions TLS préexistantes restent contrôlées par le garde d'audit et ses 15 tests. Avertissement connu : `rustls-pemfile` 2.2.0 non maintenu ; aucun nouvel ignore.
-- Les binaires de production **standard et compact** passent l'interopérabilité indépendante étendue : toutes les familles ci-dessus, validation des consignes, contrôle de serrure approuvé, refus sans transmission, changement de politique PIN, reprise, état corrompu et mauvaise clé. [Résultats, reproduction et hash](../../tools/matter-e2e/RESULTS.md).
+- Le binaire de production **standard** passe l'interopérabilité indépendante étendue : toutes les familles ci-dessus, validation des consignes, contrôle de serrure approuvé, refus sans transmission, changement de politique PIN, reprise, état corrompu et mauvaise clé. [Résultats, reproduction et hash](../../tools/matter-e2e/RESULTS.md).
 
 ## Taille et arbitrages
 
-Image compacte mesurée : **24 970 672 octets**, sous 25 Mo (marge 29 328 octets).
-Image standard : **30 289 328 octets**. Le choix par défaut conserve les symboles ;
-la variante compacte retire les noms des backtraces locales, sans retirer de pilote.
-L'artefact diagnostics est identique au binaire standard. [Mesures et limites](../../docs/PERFORMANCE.md).
+Image standard mesurée : **30 289 328 octets**, au-dessus du budget de 25 Mo. Le
+retrait optionnel des symboles et l’étage `diagnostics` sont dans `main` (#202) ; ils
+ne font pas partie de ce diff. [Mesures et limites](../../docs/PERFORMANCE.md).
 Le minimum Rust 1.89 est nécessaire aux verrous de fichiers et validé ; les deux
 adaptations de syntaxe de l'application préservent le contrôle de pièce avant envoi.
 

@@ -14,6 +14,10 @@ Les deux nouvelles régressions unitaires (contention du coffre et redécouverte
 passent dans le contrôle complet : 2 241 tests Rust au total.
 Aucune action matérielle n'a été réalisée pour ces corrections.
 
+> Les variantes `Compacte` et `Diagnostics` des tableaux ci-dessous ont été mesurées
+> sur une tête antérieure à la réduction du vendoring. L'option de strip et l'étage
+> `diagnostics` du Dockerfile vivent maintenant dans `main` (#202), pas dans ce diff.
+
 # Poids finaux — fixes Hue inclus, 2026-11-07
 
 Artefacts de production reconstruits depuis le commit propre `0445ca8`
