@@ -59,7 +59,7 @@
   .chip {
     padding: 4px 12px;
     border-radius: 999px;
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     background: var(--card);
     font-size: 13px;
     font-weight: 700;
@@ -78,13 +78,13 @@
   input {
     width: 90px;
     padding: 4px 8px;
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     background: var(--bg);
   }
   form button {
     padding: 4px 10px;
-    border: var(--stroke) solid var(--ink);
+    border: var(--stroke) solid var(--edge, var(--ink));
     border-radius: var(--radius);
     background: var(--sun);
     color: #161512;

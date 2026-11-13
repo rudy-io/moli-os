@@ -11,16 +11,18 @@
   );
 </script>
 
-<header>
-  <div class="brand">
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <circle cx="16" cy="16" r="15" fill="var(--sun)" />
-      <circle cx="16" cy="16" r="8.5" fill="none" stroke="#161512" stroke-width="4.3" />
-    </svg>
-    <span>moli <b>os</b></span>
-    <span class="live" class:on={hub.connected} title={hub.connected ? t('systeme.entete.flux_connecte') : t('systeme.entete.reconnexion')}></span>
+<header class="head">
+  <div>
+    <h1 class="page-title">
+      {t('commun.nav.atelier')}
+      <span class="live" class:on={hub.connected} title={hub.connected ? t('systeme.entete.flux_connecte') : t('systeme.entete.reconnexion')}></span>
+    </h1>
+    <p class="page-sub">{t('commun.atelier.sous_titre')}</p>
   </div>
+  <HumanSession />
+</header>
 
+<section class="card overview">
   <dl class="stats">
     <div>
       <dt>{t('systeme.entete.memoire')}</dt>
@@ -49,8 +51,6 @@
     </span>
   {/if}
 
-  <HumanSession />
-
   <ul class="drivers" aria-label={t('systeme.entete.pilotes')}>
     {#each hub.drivers as d (d.instance)}
       <li class={d.status.state} title={d.status.error ?? d.status.state}>
@@ -58,61 +58,57 @@
       </li>
     {/each}
   </ul>
-</header>
+</section>
 
 <style>
-  header {
+  .head {
     display: flex;
-    align-items: center;
-    gap: 32px;
+    justify-content: space-between;
+    align-items: flex-end;
     flex-wrap: wrap;
-    padding: 14px 28px;
-    border-bottom: var(--stroke) solid var(--ink);
-    background: var(--card);
+    gap: 12px 20px;
+    margin-bottom: 18px;
   }
-  .brand {
+  .page-title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-  }
-  .brand svg {
-    width: 28px;
-    height: 28px;
-  }
-  .brand b {
-    color: var(--copper);
-    font-weight: 800;
+    gap: 12px;
   }
   .live {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background: var(--ink-3);
   }
   .live.on {
     background: var(--ok);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent);
+  }
+  .overview {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px 32px;
+    padding: 18px 22px;
+    margin-bottom: 28px;
   }
   .stats {
     display: flex;
-    gap: 28px;
+    flex-wrap: wrap;
+    gap: 16px 32px;
     margin: 0;
   }
   .stats div {
     display: grid;
+    gap: 2px;
   }
   dt {
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 13px;
     color: var(--ink-3);
   }
   dd {
     margin: 0;
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 700;
     display: flex;
     align-items: baseline;
@@ -120,35 +116,36 @@
   }
   .vs {
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    padding: 2px 6px;
+    padding: 3px 9px;
     border: 0;
-    border-radius: 3px;
-    background: var(--sun);
-    color: #161512;
+    border-radius: 999px;
+    background: var(--sun-soft);
+    color: var(--copper);
     cursor: pointer;
   }
   .drivers {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    margin: 0 0 0 auto;
+    margin: 0;
     padding: 0;
     list-style: none;
   }
   .drivers li {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border: var(--stroke) solid var(--line);
+    gap: 7px;
+    padding: 6px 12px;
     border-radius: 999px;
-    font-size: 13px;
+    background: var(--surface-2, var(--card));
+    font-size: 13.5px;
     font-weight: 600;
   }
   .dot {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: var(--ink-3);
   }
@@ -162,24 +159,11 @@
     background: var(--sun);
   }
   .quiet {
-    padding: 4px 10px;
+    padding: 6px 12px;
     border-radius: 999px;
-    background: var(--ink);
-    color: var(--bg);
-    font-size: 13px;
+    background: var(--cool-soft, var(--ink));
+    color: var(--cool, var(--bg));
+    font-size: 13.5px;
     font-weight: 600;
-  }
-  @media (max-width: 700px) {
-    header {
-      padding: 12px 16px;
-      gap: 16px;
-    }
-    .stats {
-      gap: 18px;
-      flex-wrap: wrap;
-    }
-    .drivers {
-      margin-left: 0;
-    }
   }
 </style>

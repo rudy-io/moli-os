@@ -126,7 +126,9 @@
   <h2>{mode === 'enter' ? (home.held?.label ?? t('commun.code.cette_action')) : mode === 'current' ? t('commun.code.actuel') : t('commun.code.nouveau')}</h2>
   <p class="why">{reason}</p>
   <div class="dots" aria-label={t('commun.code.saisis', { count: pin.length })}>
-    {#each Array(Math.max(mode === 'enter' || mode === 'current' ? 6 : 4, pin.length)) as _, i (i)}
+    <!-- Typing a known code: one dot per digit and one for the next, never a
+         length the code may not have. Choosing one: the shortest allowed. -->
+    {#each Array(Math.min(8, Math.max(mode === 'enter' || mode === 'current' ? pin.length + 1 : min, pin.length))) as _, i (i)}
       <i class:filled={i < pin.length}></i>
     {/each}
   </div>
