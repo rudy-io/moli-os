@@ -243,9 +243,10 @@ fn numeric(command: &Json, param: &str) -> Option<Kind> {
         return None;
     }
     let limits = &parameter["constraints"];
+    // Limits the cloud does not give are never supposed.
     Some(Kind::Numeric {
-        min: limits["min"].as_f64(),
-        max: limits["max"].as_f64(),
+        min: Some(limits["min"].as_f64()?),
+        max: Some(limits["max"].as_f64()?),
         step: limits["stepping"].as_f64(),
     })
 }
@@ -308,6 +309,9 @@ impl Points<'_> {
     fn control(&mut self, def: Def, order: Order) {
         if let Some(kind) = self.kind_of(&def, &order) {
             self.list.push(Self::point(def, kind, Some(order)));
+        } else {
+            // No command, or one without limits: the value stays readable.
+            self.read(def);
         }
     }
 
@@ -356,15 +360,19 @@ impl Layout {
         Self { groups }
     }
 
-    /// Which points exist, to know when the devices must be published again.
+    /// Which points exist, with their limits and whether they take orders, to
+    /// know when the devices must be published again.
     #[must_use]
     pub fn signature(&self) -> Vec<String> {
         self.groups
             .iter()
             .flat_map(|g| {
-                g.points
-                    .iter()
-                    .map(|p| format!("{}/{}", g.native, p.spec.key))
+                g.points.iter().map(|p| {
+                    format!(
+                        "{}/{}/{:?}/{}",
+                        g.native, p.spec.key, p.spec.kind, p.spec.access.write
+                    )
+                })
             })
             .collect()
     }
@@ -780,8 +788,44 @@ mod tests {
         let devices = devices_of(&layout);
         assert_eq!(devices[1].native_name.as_ref(), "Circuit radiateur");
         assert_eq!(devices[0].model.as_deref(), Some("CU401B_S"));
-        // A sensor that is not connected gives no point.
-        assert!(devices[0].point("boiler_temperature").is_none());
+    }
+
+    /// The fixture's features, as the cloud answers, with `edit` applied to
+    /// the one named `feature`.
+    fn edited(feature: &str, edit: impl Fn(&mut Json)) -> Features {
+        let mut answer = fixture("features-heating.json");
+        let list = answer["data"].as_array_mut().unwrap();
+        let found = list.iter_mut().find(|f| f["feature"] == feature).unwrap();
+        edit(found);
+        Features::read(&answer)
+    }
+
+    #[test]
+    fn a_sensor_that_is_not_connected_gives_no_point() {
+        let sensor = "heating.sensors.temperature.return";
+        let (_, whole) = layout();
+        assert!(devices_of(&whole)[0].point("return_temperature").is_some());
+        let features = edited(sensor, |f| {
+            f["properties"] = json!({ "status": { "type": "string", "value": "notConnected" } });
+        });
+        let layout = Layout::from(&features, None);
+        assert!(devices_of(&layout)[0].point("return_temperature").is_none());
+    }
+
+    #[test]
+    fn a_command_without_limits_leaves_the_point_read_only() {
+        let target = "heating.dhw.temperature.main";
+        let (_, whole) = layout();
+        let features = edited(target, |f| {
+            f["commands"]["setTargetTemperature"]["params"]["temperature"]["constraints"] =
+                json!({});
+        });
+        let bare = Layout::from(&features, Some("CU401B_S"));
+        let point = devices_of(&bare)[0].point("dhw_target").cloned().unwrap();
+        assert!(!point.access.write);
+        // The limits are part of what is published: a change of them (or of
+        // the right to order) publishes the devices again.
+        assert_ne!(bare.signature(), whole.signature());
     }
 
     #[test]

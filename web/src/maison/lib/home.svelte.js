@@ -260,7 +260,8 @@ export function deviceKind(d) {
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
-  if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature'))) return 'heating';
+  // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
+  if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
   if (has(d, 'target_temperature') || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
@@ -288,6 +289,8 @@ export function roomList() {
   const inFixture = new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? []));
   for (const d of Object.values(hub.devices)) {
     if (hidden(d.id) || inFixture.has(d.id)) continue;
+    // A heat pump and its circuits live on the Chauffage page, not on a room's card.
+    if (deviceKind(d) === 'heating') continue;
     const room = roomOf(d);
     if (!room) continue;
     if (!map.has(room)) map.set(room, []);

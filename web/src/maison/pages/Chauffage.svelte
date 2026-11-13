@@ -286,8 +286,8 @@
     font-size: 13px;
   }
   .modes button.active {
-    background: var(--warm);
-    color: #fff;
+    background: var(--warm-soft);
+    color: var(--warm-ink);
   }
   .pill {
     display: inline-flex;
@@ -303,8 +303,8 @@
     cursor: pointer;
   }
   .pill[aria-pressed='true'] {
-    background: var(--warm);
-    color: #fff;
+    background: var(--warm-soft);
+    color: var(--warm-ink);
   }
   .pill:disabled {
     opacity: 0.6;

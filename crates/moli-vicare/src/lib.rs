@@ -41,8 +41,9 @@ const POLL: Duration = Duration::from_secs(150);
 const AFTER_ORDER: Duration = Duration::from_secs(20);
 const LIMIT: Duration = Duration::from_secs(30);
 const MAX_BODY: usize = 4 * 1024 * 1024;
-/// Credentials refused: the next try waits this long (no storm of logins).
-const REFUSED_WAIT: Duration = Duration::from_secs(30 * 60);
+/// What the cloud may say an access token lasts, in seconds: it is trusted
+/// only within these bounds.
+const TOKEN_LIFE: std::ops::RangeInclusive<i64> = 120..=86_400;
 /// Quota refused without a reset time: the next try waits this long.
 const QUOTA_WAIT: Duration = Duration::from_secs(15 * 60);
 
@@ -193,10 +194,18 @@ impl Cloud {
             }
             bail!(moli_i18n::tr!("pilotes.vicare.reponse", status = status));
         };
-        let lasts = answer["expires_in"].as_i64().unwrap_or(3600);
+        let lasts = answer["expires_in"]
+            .as_i64()
+            .unwrap_or(3600)
+            .clamp(*TOKEN_LIFE.start(), *TOKEN_LIFE.end());
+        // An answer without a new refresh token leaves the old one valid.
+        let refresh = answer["refresh_token"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.tokens.take().and_then(|t| t.refresh));
         self.tokens = Some(Tokens {
             access: access.to_owned(),
-            refresh: answer["refresh_token"].as_str().map(str::to_owned),
+            refresh,
             until: now() + lasts - 60,
         });
         Ok(access.to_owned())
@@ -250,9 +259,10 @@ impl Cloud {
     }
 
     /// A new access token: from the refresh token when there is one, signing
-    /// in again when it is refused (or gone).
+    /// in again only when the cloud refuses it (or it is gone). A network
+    /// failure keeps the refresh token for the next try.
     async fn renew(&mut self) -> anyhow::Result<String> {
-        let refresh = self.tokens.take().and_then(|t| t.refresh);
+        let refresh = self.tokens.as_ref().and_then(|t| t.refresh.clone());
         if let Some(refresh) = refresh {
             let client_id = self.client_id.clone();
             let pairs = [
@@ -260,10 +270,13 @@ impl Cloud {
                 ("client_id", client_id.as_str()),
                 ("refresh_token", refresh.as_str()),
             ];
-            if let Ok(access) = self.token_call(&pairs).await {
-                return Ok(access);
+            match self.token_call(&pairs).await {
+                Ok(access) => return Ok(access),
+                Err(e) if e.downcast_ref::<Refused>().is_some() => {}
+                Err(e) => return Err(e),
             }
         }
+        self.tokens = None;
         self.login().await
     }
 
@@ -333,9 +346,13 @@ struct Session {
     published: Vec<String>,
     ids: Vec<moli_core::DeviceId>,
     failures: u32,
-    /// Until then the cloud has refused us (credentials, quota): orders are
-    /// refused at once instead of spending calls.
+    /// Until then the cloud has refused us (quota): orders are refused at
+    /// once instead of spending calls.
     quiet_until: Instant,
+    /// The cloud refused the credentials: nothing more is asked of it until
+    /// they are corrected and Moli restarted (a wrong password retried would
+    /// get the account locked).
+    refused: bool,
 }
 
 impl Session {
@@ -366,6 +383,16 @@ impl Session {
         Ok(features)
     }
 
+    /// Stops asking the cloud, and says why.
+    fn refuse(&mut self, ctx: &DriverCtx, error: &anyhow::Error) {
+        ctx.wait_for(moli_i18n::tr!(
+            "pilotes.vicare.identifiants_refuses",
+            instance = ctx.instance(),
+            error = format!("{error:#}")
+        ));
+        self.refused = true;
+    }
+
     /// One read, published; what to wait before the next.
     async fn poll(&mut self, ctx: &DriverCtx) -> Duration {
         match self.read().await {
@@ -373,7 +400,8 @@ impl Session {
                 self.failures = 0;
                 let model = self.site.as_ref().and_then(|s| s.model.clone());
                 let fresh = Layout::from(&features, model.as_deref());
-                if fresh.signature() != self.published {
+                let changed = fresh.signature() != self.published;
+                if changed {
                     let devices = fresh.devices(ctx.instance(), |n| ctx.device_id(n));
                     self.ids = devices.iter().map(|d| d.id.clone()).collect();
                     for device in devices {
@@ -381,8 +409,8 @@ impl Session {
                     }
                     self.published = fresh.signature();
                     self.layout = fresh;
-                    ctx.ready();
                 }
+                ctx.ready();
                 for id in &self.ids {
                     ctx.set_availability(id, true);
                 }
@@ -392,13 +420,8 @@ impl Session {
                 POLL
             }
             Err(e) if e.downcast_ref::<Refused>().is_some() => {
-                ctx.wait_for(moli_i18n::tr!(
-                    "pilotes.vicare.identifiants_refuses",
-                    instance = ctx.instance(),
-                    error = format!("{e:#}")
-                ));
-                self.quiet_until = Instant::now() + REFUSED_WAIT;
-                REFUSED_WAIT
+                self.refuse(ctx, &e);
+                POLL
             }
             Err(e) if e.downcast_ref::<Quota>().is_some() => {
                 tracing::warn!(instance = %ctx.instance(), error = %format!("{e:#}"), "viessmann quota spent");
@@ -433,7 +456,7 @@ impl Session {
         let Some(site) = self
             .site
             .as_ref()
-            .filter(|_| Instant::now() >= self.quiet_until)
+            .filter(|_| !self.refused && Instant::now() >= self.quiet_until)
         else {
             return Err(moli_i18n::tr!("pilotes.vicare.suspendu"));
         };
@@ -447,11 +470,21 @@ impl Session {
             .request(native, &command.key, &command.value)
             .ok_or_else(|| moli_i18n::tr!("pilotes.vicare.commande_inconnue"))?;
         let path = site.command_path(&request);
-        let answer = self
+        let answer = match self
             .cloud
             .api(Method::POST, &path, Some(&request.body))
             .await
-            .map_err(|e| format!("{e:#}"))?;
+        {
+            Ok(answer) => answer,
+            Err(e) => {
+                if let Some(quota) = e.downcast_ref::<Quota>() {
+                    self.quiet_until = Instant::now() + quota.0;
+                } else if e.downcast_ref::<Refused>().is_some() {
+                    self.refuse(ctx, &e);
+                }
+                return Err(format!("{e:#}"));
+            }
+        };
         if answer["data"]["success"] == false {
             let why = answer["data"]["reason"].as_str().unwrap_or("");
             return Err(moli_i18n::tr!("pilotes.vicare.commande_refusee", why = why));
@@ -496,6 +529,7 @@ async fn run(driver: &Vicare, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         ids: Vec::new(),
         failures: 0,
         quiet_until: Instant::now(),
+        refused: false,
     };
     let mut next = Instant::now();
     loop {
@@ -513,7 +547,15 @@ async fn run(driver: &Vicare, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 next = Instant::now() + wait;
             }
         }
+        if session.refused {
+            break;
+        }
     }
+    // Credentials refused: orders are answered, the cloud is left alone.
+    while let Some(command) = ctx.next_command().await {
+        command.reply(Err(moli_i18n::tr!("pilotes.vicare.suspendu")));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
