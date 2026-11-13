@@ -588,13 +588,15 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
 - `kind` : `{"type":"binary"}`, `{"type":"numeric","min"?,"max"?,"step"?}`,
   `{"type":"enum","values":[…]}`, `{"type":"text"}`.
 - `unit` : symbole (`W`, `kWh`, `Wh`, `VA`, `V`, `mV`, `A`, `°C`, `%`, `lx`, `hPa`, `dB`,
-  `ppm`, `s`, `min`, `h`, ou tout autre texte).
+  `ppm`, `s`, `min`, `h`, `km/h`, `mm`, `mm/h`, `°`, ou tout autre texte).
 - `semantic` : `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`,
   `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`,
   `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`,
   `soil_moisture` (humidité du sol, %), `soil_dry` (binaire, `true` = la plante a soif ; jamais
   une alerte de sécurité), `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose
-  ne va pas), `other`.
+  ne va pas), la météo avec une seule unité chacun : `wind_speed` et `wind_gust` (km/h),
+  `wind_direction` (°, d'où vient le vent, 0 = nord), `rain_rate` (mm/h), `rain_today` (mm,
+  remis à zéro chaque jour par la source), `uv_index` (sans unité), et `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
   numérique → nombre, énumération → texte exact.
 
