@@ -1,0 +1,10 @@
+{
+  "cluster": "BasicInformation",
+  "cluster_id": 40,
+  "attribute": "CapabilityMinima",
+  "attribute_id": 19,
+  "type": "CapabilityMinimaStruct",
+  "writable": false,
+  "note": "struct attribute: { CaseSessionsPerFabric(0)=3, SubscriptionsPerFabric(1)=4 }",
+  "value_tlv_b64": "FSQAAyQBBBg="
+}

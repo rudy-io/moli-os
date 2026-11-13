@@ -1,0 +1,30 @@
+{
+  "cluster": "LevelControl",
+  "cluster_id": 8,
+  "command": "MoveToLevel",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "Level",
+      "id": 0,
+      "value": 128
+    },
+    {
+      "name": "TransitionTime",
+      "id": 1,
+      "value": 10
+    },
+    {
+      "name": "OptionsMask",
+      "id": 2,
+      "value": 0
+    },
+    {
+      "name": "OptionsOverride",
+      "id": 3,
+      "value": 0
+    }
+  ],
+  "note": "command with a nullable uint16 field (TransitionTime present)",
+  "payload_tlv_b64": "FSQAgCQBCiQCACQDABg="
+}

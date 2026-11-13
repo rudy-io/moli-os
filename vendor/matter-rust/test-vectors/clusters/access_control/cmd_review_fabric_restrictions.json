@@ -1,0 +1,8 @@
+{
+  "cluster": "AccessControl",
+  "cluster_id": 31,
+  "command": "ReviewFabricRestrictions",
+  "command_id": 0,
+  "note": "recursive list-of-struct-with-nested-list command request field",
+  "payload_tlv_b64": "FTYAFSQAASQBBjYCFSQAACUBNBIYGBgYGA=="
+}

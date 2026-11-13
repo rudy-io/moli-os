@@ -1,0 +1,17 @@
+{
+  "intent": "largest valid passcode (spec max, 99_999_998)",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 512,
+    "passcode": 99999998
+  },
+  "expected": {
+    "qr": "MT:Y.K90AFN00A1Q36B420"
+  }
+}

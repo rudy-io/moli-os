@@ -13,6 +13,67 @@ Assistant.
 
 ## Budget
 
+### Build actuel — pile locale et familles étendues, 6 novembre 2026
+
+L'image de production construite depuis le dépôt Moli seul mesure :
+
+| Variante x86_64 musl | Image non compressée | Binaire |
+|---|---:|---:|
+| Standard avec symboles | 30 289 328 octets | 30 284 856 octets |
+
+Le standard reste au-dessus du budget de 25 Mo. Les nouvelles fonctions et la source
+de la pile sont dans Moli ; la copie des sources n'ajoute pas de service ni de
+dépendance Git. Le binaire passe les essais protocolaires étendus.
+Hash et reproduction : `tools/matter-e2e/RESULTS.md`.
+
+Sur 29,79 s au repos avec les familles virtuelles : 17 280 Kio RSS, 3 544 Kio anonymes,
+0,067 % CPU d'un cœur à la résolution des ticks. Il s'agit du processus, pas du
+budget cgroup, d'un essai de charge, d'une mesure radio ou d'une comparaison HA.
+Les mesures historiques ci-dessous restent rattachées à leurs versions précédentes.
+
+### Contribution Matter expérimentale — 6 novembre 2026
+
+Image de production construite avec le Dockerfile du dépôt, Rust 1.99.1 musl
+x86_64, dashboard embarqué et contrôleur Matter épinglé : **30 113 713 octets**
+non compressés ; binaire : **30 109 368 octets**. Cela **dépasse le budget de
+25 Mo**. Comparaison construite séparément avec le Dockerfile inchangé de la
+base `9ce5868c7832f1e97010f84ffb7e33d7295840f4`, même architecture et toolchain :
+**27 737 521 octets** sans Matter (binaire **27 733 136 octets**). L'ajout de la
+contribution représente donc **2 376 192 octets (+8,57 %)** pour l'image.
+La base dépasse déjà 25 Mo ; la contribution accroît ce dépassement. Le budget
+reste non résolu : réduction/découpage ou arbitrage explicite avant livraison stable.
+SHA-256 du binaire de référence :
+`a435b60f0b76b50cff5a4383ac1976abe90015f777032b716b9ebdbc3e9743ae`.
+Build final de la contribution : `d6add50616518a84cdb139ba01a58e6871f7ccaf`,
+avec le correctif d’attestation et les noms bridgés. Hash du binaire et reproduction :
+`tools/matter-e2e/RESULTS.md`.
+
+Le binaire extrait de cette image a passé l'interopérabilité avec une lampe
+virtuelle matter.js, puis une fenêtre au repos de 29,78 s après redémarrage :
+RSS maximal échantillonné 17 324 Kio, mémoire anonyme du processus 3 460 Kio,
+CPU 0,000 % d'un cœur à la résolution des ticks Linux. Ce sont des mesures
+**du processus**, pas du cgroup : elles ne certifient pas les budgets ci-dessous.
+Aucun dashboard connecté pendant cette fenêtre ; un seul appareil virtuel,
+ni BLE ni OTBR. Pas de comparaison à Home Assistant, de p95 API, de mesure radio
+ou de test de charge multi-appareils. Reproduction et hash du binaire :
+`tools/matter-e2e/RESULTS.md` (`E2E_MEASURE=1`).
+
+### Compatibilité minimale — 6 novembre 2026
+
+L'application complète passe `cargo check --locked -p moli-os` avec Rust 1.89.0,
+fonctionnalités par défaut. Deux match guards trop récents ont été remplacés par
+des expressions équivalentes ; le contrôle de pièce de l'assistant reste avant
+l'envoi d'une commande. Les tests existants et une revue ciblée couvrent ce point.
+Image standard : 30 113 712 octets, binaire 30 109 520 octets. Le binaire standard
+a passé le test indépendant matter.js : commissioning avec attestation, Descriptor,
+OnOff confirmé par l'accessoire, abonnements, reprise après redémarrage et refus des
+états corrompus/mauvaise clé. Mesure indicative de processus avec une lampe virtuelle
+sur 29,78 s : 17 340 Kio RSS, 3 476 Kio anonymes, CPU 0,000 % à la résolution des
+ticks. Ce n'est pas une certification du budget cgroup ni radio.
+Hash et résultat : `tools/matter-e2e/RESULTS.md`.
+
+### Objectifs du projet
+
 | Mesure | Budget | Pourquoi |
 |---|---|---|
 | Mémoire (mémoire **anonyme** du cgroup : tas et piles, aucun cache de fichiers ; **la même définition pour Moli et HA** ; le RSS de Moli est noté à côté) | ≤ 32 Mio (plafond conteneur 128) | HA : ~2,1 Gio. Rester sous 1/50. |

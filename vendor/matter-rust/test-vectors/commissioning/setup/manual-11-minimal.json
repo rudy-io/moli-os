@@ -1,0 +1,15 @@
+{
+  "intent": "11-digit form, mid-range short discriminator, test passcode",
+  "input": {
+    "version": 0,
+    "vendor_id": null,
+    "product_id": null,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [],
+    "discriminator": 1280,
+    "passcode": 20202021
+  },
+  "expected": {
+    "manual": "11693312331"
+  }
+}

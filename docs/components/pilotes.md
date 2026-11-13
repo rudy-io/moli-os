@@ -1285,3 +1285,18 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |
+
+## Matter natif
+
+`moli-matter` contrôle les appareils Matter sur le réseau IP, directement ou derrière
+un pont. Les capacités annoncées activent OnOff, variation/couleur (une luminosité à 0 %
+éteint la lampe au lieu de la ramener à son niveau minimal), stores de levage,
+thermostats et serrures sous garde ; température, humidité, occupation, contact et
+fuite restent en lecture seule. Reachable conditionne les endpoints pontés.
+Le tissu utilise le coffre chiffré et des racines d'attestation explicites.
+L'appairage humain passe par la CLI, sur le réseau IP (multi-admin) ; aucun
+provisionnement BLE/Thread n'est compilé, et un appareil Thread se commissionne
+avec un autre contrôleur puis se joint via un routeur Thread externe. Un essai physique historique Hue
+valide OnOff ; les familles étendues sont testées sur serveurs virtuels indépendants.
+La radio BLE/Thread reste non validée sur matériel.
+Installation et limites : [Matter](../../integrations/matter/README.md).

@@ -1,0 +1,15 @@
+{
+  "paths": [
+    {
+      "endpoint": 0,
+      "cluster": 40,
+      "attribute": 1
+    },
+    {
+      "endpoint": 0,
+      "cluster": 40,
+      "attribute": 3
+    }
+  ],
+  "expected_message_b64": "FTYAFyQCACQDKCQEARgXJAIAJAMoJAQDGBgoAyT/Cxg="
+}

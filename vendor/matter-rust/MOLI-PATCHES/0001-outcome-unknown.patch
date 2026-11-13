@@ -1,0 +1,305 @@
+From 0c332883250fb447af72e1c4c4316df6f55bdb6c Mon Sep 17 00:00:00 2001
+From: series <series@local>
+Date: Fri, 13 Nov 2026 12:49:09 +0100
+Subject: [PATCH] fix(controller): report an unknown outcome when the deadline
+ fires after queueing
+
+`write_before`/`invoke_before` returned a plain `Operational` error both
+when the request never reached the queue and when it was queued but answered
+too late. The second case is not a failure: the device may have carried the
+order out (a lock, a cover). Add `Error::OutcomeUnknown` and keep
+`Operational` for the request that was never sent.
+---
+ .../crates/matter-controller/src/actor.rs     |   8 +-
+ .../crates/matter-controller/src/error.rs     |  18 ++
+ .../crates/matter-controller/src/node.rs      | 176 ++++++++++++------
+ 3 files changed, 146 insertions(+), 56 deletions(-)
+
+diff --git a/crates/matter-controller/src/actor.rs b/crates/matter-controller/src/actor.rs
+index 4debaf6..49f04aa 100644
+--- a/crates/matter-controller/src/actor.rs
++++ b/crates/matter-controller/src/actor.rs
+@@ -23610,7 +23610,13 @@ mod tests {
+                     task.abort();
+                     assert!(task.await.unwrap_err().is_cancelled());
+                 } else {
+-                    assert!(matches!(task.await.unwrap(), Err(Error::Operational(_))));
++                    // The command reached the queue before the deadline, so the
++                    // outcome is unknown rather than a plain failure: the actor
++                    // may already have transmitted it.
++                    assert!(matches!(
++                        task.await.unwrap(),
++                        Err(Error::OutcomeUnknown { node_id: 0x42 })
++                    ));
+                 }
+                 let mut w = wired_actor();
+                 w.actor.dispatch(cmd).await;
+diff --git a/crates/matter-controller/src/error.rs b/crates/matter-controller/src/error.rs
+index 179a43b..9507ced 100644
+--- a/crates/matter-controller/src/error.rs
++++ b/crates/matter-controller/src/error.rs
+@@ -83,6 +83,24 @@ pub enum Error {
+         after: std::time::Duration,
+     },
+ 
++    /// A caller-supplied deadline elapsed after the request had been handed to
++    /// the controller task, so it may or may not have reached the device. For a
++    /// non-idempotent command (a lock, a cover) the result is unknown, not
++    /// failed: the device may have carried it out and answered too late.
++    ///
++    /// Never retried automatically, for the same reason as
++    /// [`Self::ResponseTimeout`]. Distinct from it on purpose: that one means
++    /// MRP confirmed delivery, this one means we cannot say whether anything
++    /// was transmitted at all (the request may still have been queued).
++    #[error(
++        "node {node_id:016X}: deadline elapsed after the request was queued — it may have \
++         been sent and carried out, and its outcome is unknown"
++    )]
++    OutcomeUnknown {
++        /// The node the request targeted.
++        node_id: u64,
++    },
++
+     /// The device rejected a subscribe request with an Interaction Model status
+     /// code (e.g. 0x89 `ResourceExhausted` when its subscription resources are
+     /// full, 0xC8 `PathsExhausted` when a path quota is exceeded, 0x80
+diff --git a/crates/matter-controller/src/node.rs b/crates/matter-controller/src/node.rs
+index 1d28961..30b9e00 100644
+--- a/crates/matter-controller/src/node.rs
++++ b/crates/matter-controller/src/node.rs
+@@ -649,12 +649,41 @@ impl Node {
+         Ok(parse_write_response(&resp)?)
+     }
+ 
++    /// Queue an action and wait for its reply within an absolute deadline.
++    ///
++    /// Splits the two cases a bare `timeout` hides: a request that never
++    /// reached the queue (`Error::Operational`, nothing was sent) and one that
++    /// was queued before the deadline but answered after it
++    /// ([`Error::OutcomeUnknown`] — the device may have carried it out).
++    async fn action_before(
++        &self,
++        command: Command,
++        rx: oneshot::Receiver<Result<Vec<u8>, Error>>,
++        deadline: std::time::Instant,
++    ) -> Result<Vec<u8>, Error> {
++        let deadline = tokio::time::Instant::from_std(deadline);
++        tokio::time::timeout_at(deadline, self.tx.send(command))
++            .await
++            .map_err(|_| {
++                Error::Operational("action deadline elapsed before the request was queued".into())
++            })?
++            .map_err(|_| Error::ControllerStopped)?;
++        tokio::time::timeout_at(deadline, rx)
++            .await
++            .map_err(|_| Error::OutcomeUnknown {
++                node_id: self.node_id,
++            })?
++            .map_err(|_| Error::ControllerStopped)?
++    }
++
+     /// Write before an absolute deadline, including queueing and timed fallback.
+     /// Dropping the future abandons further sends; sent packets cannot be recalled.
+     /// Replies must unambiguously cover every requested path exactly once.
+     ///
+     /// # Errors
+-    /// As [`Self::write`]; deadline expiry returns [`Error::Operational`].
++    /// As [`Self::write`]; a deadline that elapses before the request is queued
++    /// returns [`Error::Operational`], one that elapses afterwards returns
++    /// [`Error::OutcomeUnknown`] — the write may have been carried out.
+     pub async fn write_before(
+         &self,
+         writes: &[(AttributePath, Value)],
+@@ -668,27 +697,19 @@ impl Node {
+             });
+         }
+         let (reply, rx) = oneshot::channel();
+-        let operation = async {
+-            self.tx
+-                .send(Command::Action {
+-                    node_id: self.node_id,
+-                    opcode: OP_WRITE_REQUEST,
+-                    plain_payload: build_write_request(&reqs),
+-                    timed_payload: Box::new(move || build_write_request_timed(&reqs)),
+-                    keys: writes
+-                        .iter()
+-                        .map(|(p, _)| (p.cluster, p.attribute))
+-                        .collect(),
+-                    timeout_ms: TIMED_DEFAULT_MS,
+-                    reply: crate::actor::ActionReply::before(reply, deadline),
+-                })
+-                .await
+-                .map_err(|_| Error::ControllerStopped)?;
+-            rx.await.map_err(|_| Error::ControllerStopped)?
++        let command = Command::Action {
++            node_id: self.node_id,
++            opcode: OP_WRITE_REQUEST,
++            plain_payload: build_write_request(&reqs),
++            timed_payload: Box::new(move || build_write_request_timed(&reqs)),
++            keys: writes
++                .iter()
++                .map(|(p, _)| (p.cluster, p.attribute))
++                .collect(),
++            timeout_ms: TIMED_DEFAULT_MS,
++            reply: crate::actor::ActionReply::before(reply, deadline),
+         };
+-        let resp = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), operation)
+-            .await
+-            .map_err(|_| Error::Operational("action deadline elapsed".into()))??;
++        let resp = self.action_before(command, rx, deadline).await?;
+         Ok(parse_write_response_checked(
+             &resp,
+             &writes.iter().map(|(path, _)| *path).collect::<Vec<_>>(),
+@@ -747,7 +768,9 @@ impl Node {
+     /// the full request; command-data paths must match its endpoint and cluster.
+     ///
+     /// # Errors
+-    /// As [`Self::invoke`]; deadline expiry returns [`Error::Operational`].
++    /// As [`Self::invoke`]; a deadline that elapses before the request is queued
++    /// returns [`Error::Operational`], one that elapses afterwards returns
++    /// [`Error::OutcomeUnknown`] — the command may have been carried out.
+     pub async fn invoke_before(
+         &self,
+         path: CommandPath,
+@@ -756,24 +779,16 @@ impl Node {
+     ) -> Result<InvokeResult, Error> {
+         let fields_tlv = value_to_tlv(&fields)?;
+         let (reply, rx) = oneshot::channel();
+-        let operation = async {
+-            self.tx
+-                .send(Command::Action {
+-                    node_id: self.node_id,
+-                    opcode: OP_INVOKE_REQUEST,
+-                    plain_payload: build_invoke_request(path, &fields_tlv),
+-                    timed_payload: Box::new(move || build_invoke_request_timed(path, &fields_tlv)),
+-                    keys: vec![(path.cluster, path.command)],
+-                    timeout_ms: TIMED_DEFAULT_MS,
+-                    reply: crate::actor::ActionReply::before(reply, deadline),
+-                })
+-                .await
+-                .map_err(|_| Error::ControllerStopped)?;
+-            rx.await.map_err(|_| Error::ControllerStopped)?
++        let command = Command::Action {
++            node_id: self.node_id,
++            opcode: OP_INVOKE_REQUEST,
++            plain_payload: build_invoke_request(path, &fields_tlv),
++            timed_payload: Box::new(move || build_invoke_request_timed(path, &fields_tlv)),
++            keys: vec![(path.cluster, path.command)],
++            timeout_ms: TIMED_DEFAULT_MS,
++            reply: crate::actor::ActionReply::before(reply, deadline),
+         };
+-        let resp = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), operation)
+-            .await
+-            .map_err(|_| Error::Operational("action deadline elapsed".into()))??;
++        let resp = self.action_before(command, rx, deadline).await?;
+         match parse_invoke_response_checked(&resp, path)? {
+             InvokeResponse::Status(s) => Ok(InvokeResult::Status(s)),
+             InvokeResponse::Command { path, fields_tlv } => Ok(InvokeResult::Data {
+@@ -847,7 +862,9 @@ impl Node {
+     /// the full request; command-data paths must match its endpoint and cluster.
+     ///
+     /// # Errors
+-    /// As [`Self::invoke_timed`]; deadline expiry returns [`Error::Operational`].
++    /// As [`Self::invoke_timed`]; a deadline that elapses before the request is
++    /// queued returns [`Error::Operational`], one that elapses afterwards
++    /// returns [`Error::OutcomeUnknown`] — the command may have been carried out.
+     pub async fn invoke_timed_before(
+         &self,
+         path: CommandPath,
+@@ -857,22 +874,14 @@ impl Node {
+     ) -> Result<InvokeResult, Error> {
+         let payload = build_invoke_request_timed(path, &value_to_tlv(&fields)?);
+         let (reply, rx) = oneshot::channel();
+-        let operation = async {
+-            self.tx
+-                .send(Command::TimedRoundTrip {
+-                    node_id: self.node_id,
+-                    timeout_ms: timeout_ms.unwrap_or(TIMED_DEFAULT_MS),
+-                    action_opcode: OP_INVOKE_REQUEST,
+-                    action_payload: payload,
+-                    reply: crate::actor::ActionReply::before(reply, deadline),
+-                })
+-                .await
+-                .map_err(|_| Error::ControllerStopped)?;
+-            rx.await.map_err(|_| Error::ControllerStopped)?
++        let command = Command::TimedRoundTrip {
++            node_id: self.node_id,
++            timeout_ms: timeout_ms.unwrap_or(TIMED_DEFAULT_MS),
++            action_opcode: OP_INVOKE_REQUEST,
++            action_payload: payload,
++            reply: crate::actor::ActionReply::before(reply, deadline),
+         };
+-        let resp = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), operation)
+-            .await
+-            .map_err(|_| Error::Operational("action deadline elapsed".into()))??;
++        let resp = self.action_before(command, rx, deadline).await?;
+         match parse_invoke_response_checked(&resp, path)? {
+             InvokeResponse::Status(s) => Ok(InvokeResult::Status(s)),
+             InvokeResponse::Command { path, fields_tlv } => Ok(InvokeResult::Data {
+@@ -1941,6 +1950,63 @@ mod tests {
+         }
+     }
+ 
++    #[tokio::test]
++    async fn a_queued_request_never_answered_reports_an_unknown_outcome() {
++        use super::{Command, Error, Node, OP_WRITE_REQUEST};
++        use std::time::{Duration, Instant};
++        // The actor side is not running: the send succeeds, the reply never comes.
++        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
++        let node = Node { tx, node_id: 7 };
++        let deadline = Instant::now() + Duration::from_millis(20);
++        let result = node
++            .write_before(
++                &[(
++                    matter_interaction::AttributePath {
++                        endpoint: 1,
++                        cluster: 8,
++                        attribute: 0,
++                    },
++                    Value::Uint(1),
++                )],
++                deadline,
++            )
++            .await;
++        // Not a plain failure: the write may have been carried out.
++        assert!(matches!(result, Err(Error::OutcomeUnknown { node_id: 7 })));
++        assert!(matches!(
++            rx.recv().await,
++            Some(Command::Action {
++                opcode: OP_WRITE_REQUEST,
++                ..
++            })
++        ));
++    }
++
++    #[tokio::test]
++    async fn a_duplicate_write_path_is_refused_before_sending() {
++        use super::{Error, Node};
++        use std::time::{Duration, Instant};
++        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
++        let node = Node { tx, node_id: 7 };
++        let path = matter_interaction::AttributePath {
++            endpoint: 1,
++            cluster: 8,
++            attribute: 0,
++        };
++        let writes = [(path, Value::Uint(1)), (path, Value::Uint(2))];
++        let deadline = Instant::now() + Duration::from_secs(5);
++        assert!(matches!(
++            node.write_before(&writes, deadline).await,
++            Err(Error::InteractionModel(_))
++        ));
++        assert!(matches!(
++            node.write(&writes).await,
++            Err(Error::InteractionModel(_))
++        ));
++        // Nothing reached the actor for either call.
++        assert!(rx.try_recv().is_err());
++    }
++
+     /// The whole point of [`Node::invoke_tlv`]: a generated
+     /// `matter_clusters::gen::*::encode_*()` output can be fed straight in, and
+     /// the resulting wire `InvokeRequest` is byte-identical to encoding the
+-- 
+2.56.0
+

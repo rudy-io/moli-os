@@ -1,0 +1,8 @@
+{
+  "kind": "wrong-challenge",
+  "nocsr_elements_b64": "FTABvjCBuzBiAgEAMAAwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARLoFuRd4ApBTZcEv20LjozSmh81Ys/jK8JzRqyQrxJeFCbBEB9XYrliKwzmn/MTL6eW+47jAyaq7pxwWnkIgq3oAAwCgYIKoZIzj0EAwIDSQAwRgIhAOpGEgn8qhyZXv+e0vRxkHQqUXM0t/7Aio/resN6og3iAiEA1XPiY2aZe/wyunhGSMuAP/ryz8ZwXpeK9rZeh6f5gE0wAiAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMxg=",
+  "attestation_signature_b64": "PmaGUOsQpbl8whCyPGpzdFQFEHO2gCEKGpzfsI87sZiSglWrcJFdVLHlixqjCHSqLrh0kpEaxyBe5yA9jP1NYA==",
+  "expected_csr_nonce_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "attestation_challenge_hex": "00000000000000000000000000000000",
+  "dac_public_key_b64": "BO+L/poBxleXlshs/TfHNHJU2AwlVHb9EC7vuffbhTsekDC1Uq6FLihW6B/E7JOLuw1C8zFDauCZYBplKKzYwKk="
+}

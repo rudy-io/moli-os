@@ -1,0 +1,10 @@
+{
+  "cluster": "ColorControl",
+  "cluster_id": 768,
+  "attribute": "ColorCapabilities",
+  "attribute_id": 16394,
+  "type": "map16",
+  "writable": false,
+  "note": "bitmap (map16) raw value 0b10101 = 21",
+  "value_tlv_b64": "BBU="
+}

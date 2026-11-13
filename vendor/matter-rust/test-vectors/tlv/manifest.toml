@@ -1,0 +1,368 @@
+[[vector]]
+id = "0001-bool-true-anonymous"
+description = "Boolean true, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Boolean true)"
+file = "0001-bool-true-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "bool"
+value = true
+
+[[vector]]
+id = "0002-bool-false-anonymous"
+description = "Boolean false, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Boolean false)"
+file = "0002-bool-false-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "bool"
+value = false
+
+[[vector]]
+id = "0003-uint8-42-anonymous"
+description = "Unsigned 8-bit integer 42, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Unsigned 1-byte 42)"
+file = "0003-uint8-42-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "uint"
+width = 1
+value = 42
+
+[[vector]]
+id = "0004-uint8-max-anonymous"
+description = "Unsigned 8-bit integer 255 (max), anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0004-uint8-max-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "uint"
+width = 1
+value = 255
+
+[[vector]]
+id = "0005-uint16-0x1234-anonymous"
+description = "Unsigned 16-bit integer 0x1234, anonymous tag (little-endian payload)"
+source = "derived from spec §A.2 encoding rules"
+file = "0005-uint16-0x1234-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "uint"
+width = 2
+value = 4_660
+
+[[vector]]
+id = "0006-uint32-0xcafebabe-anonymous"
+description = "Unsigned 32-bit integer 0xCAFEBABE, anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0006-uint32-0xcafebabe-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "uint"
+width = 4
+value = 3_405_691_582
+
+[[vector]]
+id = "0007-uint64-0x0123456789abcdef-anonymous"
+description = "Unsigned 64-bit integer 0x0123456789ABCDEF, anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0007-uint64-0x0123456789abcdef-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "uint"
+width = 8
+value = "0x0123456789abcdef"
+
+[[vector]]
+id = "0008-int8-neg17-anonymous"
+description = "Signed 8-bit integer -17, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Signed 1-byte -17)"
+file = "0008-int8-neg17-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "int"
+width = 1
+value = -17
+
+[[vector]]
+id = "0009-int8-min-anonymous"
+description = "Signed 8-bit integer -128 (min), anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0009-int8-min-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "int"
+width = 1
+value = -128
+
+[[vector]]
+id = "0010-int16-neg129-anonymous"
+description = "Signed 16-bit integer -129, anonymous tag (forces 2-byte encoding; -1 fits in 1 byte and matter.js minimises)"
+source = "derived from spec §A.2 encoding rules"
+file = "0010-int16-neg129-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "int"
+width = 2
+value = -129
+
+[[vector]]
+id = "0011-int32-min-anonymous"
+description = "Signed 32-bit integer -2147483648 (min), anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0011-int32-min-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "int"
+width = 4
+value = -2_147_483_648
+
+[[vector]]
+id = "0012-int64-min-anonymous"
+description = "Signed 64-bit integer -9223372036854775808 (min i64), anonymous tag (forces 8-byte encoding; -1 fits in 1 byte and matter.js minimises)"
+source = "derived from spec §A.2 encoding rules"
+file = "0012-int64-min-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "int"
+width = 8
+value = "-9223372036854775808"
+
+[[vector]]
+id = "0013-float32-0-anonymous"
+description = "Single-precision float 0.0, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Single-precision 0.0)"
+file = "0013-float32-0-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "float"
+width = 4
+value = "0.0"
+
+[[vector]]
+id = "0014-float64-0-anonymous"
+description = "Double-precision float 0.0, anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0014-float64-0-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "float"
+width = 8
+value = "0.0"
+
+[[vector]]
+id = "0015-utf8-hello-anonymous"
+description = 'UTF-8 string "Hello!", 1-byte length, anonymous tag'
+source = 'Matter Core 1.4 §A.2 (UTF-8 1-byte length "Hello!")'
+file = "0015-utf8-hello-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "utf8"
+value = "Hello!"
+
+[[vector]]
+id = "0016-utf8-empty-anonymous"
+description = "Empty UTF-8 string, 1-byte length, anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0016-utf8-empty-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "utf8"
+value = ""
+
+[[vector]]
+id = "0017-bytes-five-bytes-anonymous"
+description = "Octet string [00 01 02 03 04], 1-byte length, anonymous tag"
+source = "Matter Core 1.4 §A.2 (Octet string 1-byte length)"
+file = "0017-bytes-five-bytes-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "bytes"
+value = "0001020304"
+
+[[vector]]
+id = "0018-bytes-empty-anonymous"
+description = "Empty octet string, 1-byte length, anonymous tag"
+source = "derived from spec §A.2 encoding rules"
+file = "0018-bytes-empty-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "bytes"
+value = ""
+
+[[vector]]
+id = "0019-structure-empty-anonymous"
+description = "Empty structure, anonymous tag"
+source = "matter.js capture"
+file = "0019-structure-empty-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "structure"
+members = [ ]
+
+[[vector]]
+id = "0020-array-empty-anonymous"
+description = "Empty array, anonymous tag"
+source = "matter.js capture"
+file = "0020-array-empty-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "array"
+elements = [ ]
+
+[[vector]]
+id = "0021-structure-uint8-at-context-0"
+description = "Structure containing a single uint8=42 at context tag 0"
+source = "matter.js capture"
+file = "0021-structure-uint8-at-context-0.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "structure"
+
+  [[vector.encode.value.members]]
+[vector.encode.value.members.tag]
+kind = "context"
+number = 0
+
+[vector.encode.value.members.value]
+kind = "uint"
+width = 1
+value = 42
+
+[[vector]]
+id = "0022-array-of-three-uint8-anonymous"
+description = "Array of three uint8 values [1, 2, 3], anonymous tag"
+source = "matter.js capture"
+file = "0022-array-of-three-uint8-anonymous.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "array"
+
+  [[vector.encode.value.elements]]
+[vector.encode.value.elements.tag]
+kind = "anonymous"
+
+[vector.encode.value.elements.value]
+kind = "uint"
+width = 1
+value = 1
+
+  [[vector.encode.value.elements]]
+[vector.encode.value.elements.tag]
+kind = "anonymous"
+
+[vector.encode.value.elements.value]
+kind = "uint"
+width = 1
+value = 2
+
+  [[vector.encode.value.elements]]
+[vector.encode.value.elements.tag]
+kind = "anonymous"
+
+[vector.encode.value.elements.value]
+kind = "uint"
+width = 1
+value = 3
+
+[[vector]]
+id = "0023-structure-bool-at-context-7"
+description = "Structure containing a single bool=true at context tag 7"
+source = "matter.js capture"
+file = "0023-structure-bool-at-context-7.bin"
+
+[vector.encode.tag]
+kind = "anonymous"
+
+[vector.encode.value]
+kind = "structure"
+
+  [[vector.encode.value.members]]
+[vector.encode.value.members.tag]
+kind = "context"
+number = 7
+
+[vector.encode.value.members.value]
+kind = "bool"
+value = true
+
+[[vector]]
+id = "0024-uint8-42-context-5"
+description = "Unsigned 8-bit integer 42 with context tag 5"
+source = "derived from spec §A.2 encoding rules (context-tag form 0b001, uint 1-byte = 0x04)"
+file = "0024-uint8-42-context-5.bin"
+
+[vector.encode.tag]
+kind = "context"
+number = 5
+
+[vector.encode.value]
+kind = "uint"
+width = 1
+value = 42

@@ -37,6 +37,10 @@ EOF
 # and the authors' addresses in the third-party licences we must keep (licenses/).
 allowed='sk-(proj-)?abcdefghij|aa[:-]?bb[:-]?cc[:-]?dd[:-]?ee[:-]?[0-9a-f]{2}|00([:-]00){5}|ff([:-]ff){5}|02([:-]00){4}[:-][0-9a-f]{2}|@(example|exemple)\.(com|org|net|fr)|@localhost|@test([^a-z.]|$)|noreply@anthropic\.com|git@github\.com|testrealm@host\.com|david@rapan\.cz'
 
+# Exact public upstream synthetic Extended PAN ID comment; no generic vendor bypass.
+# Private denylist hits are appended independently below and remain blocking.
+allowed="$allowed|vendor/matter-rust/crates/matter-commissioning/src/thread_dataset\.rs:225:78:96:21:7f:78:7f$"
+
 denylist=${MOLI_DENYLIST:-../moli-maison/leak-denylist.txt}
 : >"$tmp/private"
 if [ -f "$denylist" ]; then
@@ -74,7 +78,7 @@ scan() {
         # No usable git (a worktree seen from a container, an image without git):
         # the tree, minus what .gitignore keeps out. POSIX find + grep (BusyBox too).
         find . \( -name .git -o -name target -o -name data -o -name node_modules \
-            -o -name dist \) -prune -o -type f ! -name '*.bak-*' ! -name house.json \
+            -o -name dist -o -name .run \) -prune -o -type f ! -name '*.bak-*' ! -name house.json \
             ! -name leak-check.sh -print0 |
             xargs -0 grep -H -n -o -E ${case_flag:+-i} -f "$patterns" 2>"$tmp/err" || true
         if [ -s "$tmp/err" ]; then

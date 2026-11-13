@@ -196,10 +196,10 @@ impl WebSocket {
             .map_err(|_| anyhow::anyhow!("no randomness"))?;
         let mut frame = vec![0x80 | opcode];
         match payload.len() {
-            n if n < 126 => frame.push(0x80 | u8::try_from(n)?),
-            n if let Ok(short) = u16::try_from(n) => {
+            n @ 0..=125 => frame.push(0x80 | u8::try_from(n)?),
+            n @ 126..=65535 => {
                 frame.push(0x80 | 0x7e);
-                frame.extend_from_slice(&short.to_be_bytes());
+                frame.extend_from_slice(&u16::try_from(n)?.to_be_bytes());
             }
             n => {
                 frame.push(0x80 | 0x7f);

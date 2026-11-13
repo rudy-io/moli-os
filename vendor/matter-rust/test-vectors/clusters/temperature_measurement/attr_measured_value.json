@@ -1,0 +1,10 @@
+{
+  "cluster": "TemperatureMeasurement",
+  "cluster_id": 1026,
+  "attribute": "MeasuredValue",
+  "attribute_id": 0,
+  "type": "int16",
+  "writable": false,
+  "note": "nullable signed int16 (temperature), present negative",
+  "value_tlv_b64": "AS77"
+}

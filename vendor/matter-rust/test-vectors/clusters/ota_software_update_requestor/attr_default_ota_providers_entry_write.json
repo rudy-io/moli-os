@@ -1,0 +1,10 @@
+{
+  "cluster": "OtaSoftwareUpdateRequestor",
+  "cluster_id": 42,
+  "attribute": "DefaultOtaProviders",
+  "attribute_id": 0,
+  "type": "ProviderLocation (list entry, write form)",
+  "writable": true,
+  "note": "ProviderLocation { ProviderNodeId 0x01020304, Endpoint 0 } with no FabricIndex (matter.js OtaSoftwareUpdateRequestor.TlvProviderLocation, forWriteInteraction)",
+  "value_tlv_b64": "FSYBBAMCASQCABg="
+}
