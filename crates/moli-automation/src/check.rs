@@ -10,7 +10,9 @@ use moli_runtime::Hub;
 use serde::Serialize;
 use serde_json::Value as Json;
 
-use crate::model::{Channel, DayNight, Graph, Node, Op, Rule, Step, SunEvent, minutes_of};
+use crate::model::{
+    Channel, DayNight, FromPoint, Graph, Node, Op, Rule, Step, SunEvent, minutes_of,
+};
 use crate::{decimal, fold, join_last};
 
 pub const MAX_NODES: usize = 60;
@@ -223,12 +225,87 @@ impl Ctx<'_> {
         Some(spec)
     }
 
+    /// A value read from another point (`{"from": …}`): that point exists and
+    /// holds what `kind` takes (a number when `add` is there). Written into
+    /// `into`, it must not let whoever writes the source choose what a guard
+    /// keeps for people (see [`Checker::guarded`]). Whether `value` is such a
+    /// reference.
+    fn source(&mut self, value: &Json, kind: Option<&Kind>, into: Option<&str>) -> bool {
+        if FromPoint::malformed(value) {
+            self.push(Level::Error, tr!("moteur.verif.source_illisible"));
+            return true;
+        }
+        let Some(from) = FromPoint::of(value) else {
+            return false;
+        };
+        if let Some(spec) = self.need(from.point, false) {
+            let number = matches!(spec.kind, Kind::Numeric { .. });
+            if (from.add.is_some() || matches!(kind, Some(Kind::Numeric { .. }))) && !number {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_pas_nombre", nom = spec.label),
+                );
+            } else if let Some(kind) = kind
+                && !fits(kind, &spec.kind)
+            {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_incompatible", nom = spec.label),
+                );
+            }
+        }
+        if let Some(into) = into {
+            self.guarded(into, from.point);
+        }
+        true
+    }
+
+    /// An approved automation acts past the guard: a value it reads elsewhere
+    /// would let whoever writes that point (an agent, a person without the
+    /// code) choose it. So never into what opens (a lock, a gate) or stops a
+    /// machine, and into a protected room only from a point as protected.
+    fn guarded(&mut self, into: &str, source: &str) {
+        let pid = PointId::from(into);
+        let Some((device, key)) = pid.split() else {
+            return;
+        };
+        let Some((found, label)) = self.hub.describe(&device) else {
+            return;
+        };
+        let names: Vec<&str> = std::iter::once(&*found.native_name)
+            .chain(label.name.as_deref())
+            .collect();
+        let control = found
+            .points
+            .iter()
+            .any(|p| *p.key == *key && p.semantic == moli_core::Semantic::Control);
+        if control || moli_runtime::opener(&names, &found.points) != moli_runtime::Opener::None {
+            self.push(Level::Error, tr!("moteur.verif.source_garde"));
+            return;
+        }
+        if let Some(room) = self.hub.protected_room(&device) {
+            let shielded = PointId::from(source)
+                .split()
+                .is_some_and(|(d, _)| self.hub.protected_room(&d).is_some());
+            if !shielded {
+                self.push(
+                    Level::Error,
+                    tr!("moteur.verif.source_protegee", piece = room),
+                );
+            }
+        }
+    }
+
     fn rule(&mut self, rule: &Rule) {
         match rule {
             Rule::State { point, op, value } => {
-                if let Some(spec) = self.need(point, false)
-                    && matches!(op, Op::Gt | Op::Ge | Op::Lt | Op::Le)
-                    && (!matches!(spec.kind, Kind::Numeric { .. }) || value.as_f64().is_none())
+                let ordered = matches!(op, Op::Gt | Op::Ge | Op::Lt | Op::Le);
+                let spec = self.need(point, false);
+                let reference = self.source(value, spec.as_ref().map(|s| &s.kind), None);
+                if let Some(spec) = spec
+                    && ordered
+                    && (!matches!(spec.kind, Kind::Numeric { .. })
+                        || (!reference && value.as_f64().is_none()))
                 {
                     self.push(Level::Error, tr!("moteur.verif.comparaison_nombres"));
                 }
@@ -345,7 +422,10 @@ fn check_node(
             }
         }
         Step::Set { point, value } => {
-            if let Some(spec) = c.need(point, true)
+            let spec = c.need(point, true);
+            // A value read from another point is validated when it runs.
+            if !c.source(value, spec.as_ref().map(|s| &s.kind), Some(point))
+                && let Some(spec) = spec
                 && let Err(e) = moli_core::validate(&spec.kind, &Value::from_json(value))
             {
                 c.push(
@@ -501,6 +581,14 @@ fn is_soil_dry(spec: Option<&PointSpec>) -> bool {
     spec.is_some_and(|s| s.semantic == moli_core::Semantic::SoilDry)
 }
 
+/// Whether what a point of kind `source` holds can go where `target` is expected
+/// (words fit words, whatever their list: the value is checked when it runs).
+fn fits(target: &Kind, source: &Kind) -> bool {
+    let words = |k: &Kind| matches!(k, Kind::Enum { .. } | Kind::Text);
+    std::mem::discriminant(target) == std::mem::discriminant(source)
+        || (words(target) && words(source))
+}
+
 fn is_power(spec: Option<&PointSpec>) -> bool {
     spec.is_some_and(|s| {
         toggles(s)
@@ -532,6 +620,53 @@ fn value_words(spec: Option<&PointSpec>, v: &Json) -> String {
         Json::Number(n) => format!("{}{unit}", decimal(&n.to_string())),
         Json::String(s) => tr!("moteur.valeur.texte", texte = s),
         other => other.to_string(),
+    }
+}
+
+/// A value an action or a rule wants: the constant, or « the Comfort of
+/// Settings + 0.5 °C » when it is read from another point.
+fn wanted_words(hub: &Hub, spec: Option<&PointSpec>, v: &Json) -> String {
+    let Some(from) = FromPoint::of(v) else {
+        return value_words(spec, v);
+    };
+    let s = said(hub, from.point);
+    let label = s.spec.as_ref().map_or_else(
+        || from.point.rsplit('/').next().unwrap_or_default().to_owned(),
+        |p| p.label.to_string(),
+    );
+    // A household setting is named once (« Comfort »), not « Comfort » of Comfort.
+    let alone = s.device == label;
+    match from.add {
+        Some(add) if add.abs() > f64::EPSILON => {
+            let sign = if add > 0.0 { "+" } else { "−" };
+            let n = add.abs();
+            let number = if n.fract().abs() < f64::EPSILON {
+                format!("{n:.0}")
+            } else {
+                n.to_string()
+            };
+            let unit = spec
+                .and_then(|s| s.unit.as_ref())
+                .map(|u| format!(" {}", u.symbol()))
+                .unwrap_or_default();
+            let ecart = format!("{sign} {}{unit}", decimal(&number));
+            if alone {
+                tr!(
+                    "moteur.valeur.reglage_ecart",
+                    libelle = label,
+                    ecart = ecart
+                )
+            } else {
+                tr!(
+                    "moteur.valeur.depuis_ecart",
+                    libelle = label,
+                    appareil = s.device,
+                    ecart = ecart
+                )
+            }
+        }
+        _ if alone => tr!("moteur.valeur.reglage", libelle = label),
+        _ => tr!("moteur.valeur.depuis", libelle = label, appareil = s.device),
     }
 }
 
@@ -806,7 +941,7 @@ pub(crate) fn rule_words(rule: &Rule, hub: &Hub) -> String {
                 phrase,
                 libelle = label,
                 appareil = s.device,
-                valeur = value_words(s.spec.as_ref(), value)
+                valeur = wanted_words(hub, s.spec.as_ref(), value)
             )
         }
         Rule::Time {
@@ -871,7 +1006,7 @@ fn action_words(step: &Step, hub: &Hub) -> String {
             if key == "key" {
                 return tr!(
                     "moteur.action.appuyer",
-                    valeur = value_words(None, value),
+                    valeur = wanted_words(hub, None, value),
                     appareil = s.device
                 );
             }
@@ -883,7 +1018,7 @@ fn action_words(step: &Step, hub: &Hub) -> String {
                 "moteur.action.regler",
                 libelle = label,
                 appareil = s.device,
-                valeur = value_words(s.spec.as_ref(), value)
+                valeur = wanted_words(hub, s.spec.as_ref(), value)
             )
         }
         Step::Toggle { point } => {

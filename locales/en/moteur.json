@@ -36,6 +36,12 @@
   "moteur.verif.ecrit_vide": "Tell Moli what to write.",
   "moteur.verif.moli_absent": "Moli isn’t connected: this node won’t write anything.",
   "moteur.verif.position_inconnue": "The house’s location is unknown ([automations] latitude/longitude): sunrise and sunset will come from the weather.",
+  "moteur.verif.source_illisible": "Unreadable value from another point: it needs “from” (device/key) and, optionally, “add” (a number).",
+  "moteur.verif.source_pas_nombre": "“{nom}” is not a number: it cannot be used here.",
+  "moteur.verif.source_incompatible": "“{nom}” does not hold the kind of value expected here.",
+  "moteur.verif.source_garde": "A lock, a gate or stopping a machine takes a fixed value, never one read elsewhere.",
+  "moteur.verif.source_protegee": "In a protected room ({piece}), a value read elsewhere must come from a point that is protected too.",
+  "moteur.verif.source_privee": "This value stays private: it cannot be copied elsewhere.",
 
   "moteur.nombre.separateur": ".",
   "moteur.valeur.oui": "yes",
@@ -43,6 +49,10 @@
   "moteur.valeur.vrai": "yes",
   "moteur.valeur.faux": "no",
   "moteur.valeur.texte": "“{texte}”",
+  "moteur.valeur.depuis": "the “{libelle}” of {appareil}",
+  "moteur.valeur.depuis_ecart": "the “{libelle}” of {appareil} {ecart}",
+  "moteur.valeur.reglage": "“{libelle}”",
+  "moteur.valeur.reglage_ecart": "“{libelle}” {ecart}",
 
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes} min",
@@ -163,6 +173,9 @@
   "moteur.etape.moli_lent": "Moli did not answer in time",
   "moteur.etape.declencheur_milieu": "trigger in the middle of the graph",
   "moteur.etape.retenu": "held back by the guard: {raison}",
+  "moteur.etape.source_vide": "no value to read in {point}",
+  "moteur.etape.source_pas_nombre": "{point} does not hold a number",
+  "moteur.etape.source_hors_ligne": "{point} stopped answering: its last value cannot be trusted",
 
   "moteur.canal.annonce": "announcement",
   "moteur.canal.telephone": "phone",

@@ -162,6 +162,9 @@
   "automatismes.champ.minutes": "minutes",
   "automatismes.champ.heures": "hours",
   "automatismes.champ.heure": "Time",
+  "automatismes.champ.fixe": "Fixed value",
+  "automatismes.champ.lue": "Read from a setting",
+  "automatismes.champ.ecart": "Offset",
 
   "automatismes.graphe.aria": "Automation graph",
   "automatismes.graphe.lien": "Link",
