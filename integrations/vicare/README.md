@@ -23,6 +23,9 @@ Pilote natif `crates/moli-vicare`, **lecture et commandes**.
   commandes du cloud, jamais supposées. Un point sans commande acceptée, ou dont la commande
   n'a pas de bornes, reste en lecture seule. Un mode, une phase ou un programme inconnu s'affiche
   avec son identifiant brut.
+- **Essai réel** : le 2026-11-13, sur une PAC (régulation CU401B_S), après les corrections de la
+  revue : une consigne d'eau chaude changée depuis la page Chauffage, vue dans l'appli ViCare,
+  puis remise comme avant.
 - **Origine** : voir `integration.toml`. Réponses réelles capturées puis anonymisées (`fixtures/`).
 - **Pas encore** : plannings (chauffage, ECS), courbe de chauffe, vacances, ventilation,
   refroidissement, appareils autres que la PAC (thermostat d'ambiance, gestion de la demande),
