@@ -1293,8 +1293,9 @@ un pont. Les capacités annoncées activent OnOff, variation/couleur, stores de 
 thermostats et serrures sous garde ; température, humidité, occupation, contact et
 fuite restent en lecture seule. Reachable conditionne les endpoints pontés.
 Le tissu utilise le coffre chiffré et des racines d'attestation explicites.
-L'appairage humain passe par la CLI ; le provisionnement BLE/Thread est optionnel
-via BlueZ et nécessite un routeur Thread externe. Un essai physique historique Hue
+L'appairage humain passe par la CLI, sur le réseau IP (multi-admin) ; aucun
+provisionnement BLE/Thread n'est compilé, et un appareil Thread se commissionne
+avec un autre contrôleur puis se joint via un routeur Thread externe. Un essai physique historique Hue
 valide OnOff ; les familles étendues sont testées sur serveurs virtuels indépendants.
 La radio BLE/Thread reste non validée sur matériel.
 Installation et limites : [Matter](../../integrations/matter/README.md).

@@ -44,11 +44,7 @@ fn invalid() -> anyhow::Error {
     anyhow::anyhow!(moli_i18n::tr!("pilotes.matter.pairing_failed"))
 }
 
-pub(super) async fn pair(
-    controller: &MatterController,
-    ctx: &DriverCtx,
-    ble_thread: bool,
-) -> anyhow::Result<()> {
+pub(super) async fn pair(controller: &MatterController, ctx: &DriverCtx) -> anyhow::Result<()> {
     let Some(code) = ctx.secret("pairing_code").filter(|s| !s.trim().is_empty()) else {
         return Ok(());
     };
@@ -56,11 +52,6 @@ pub(super) async fn pair(
     // Consume the operator's one-shot request BEFORE any network action. A
     // partial commission followed by supervisor restart must never retry by
     // itself and fill the device's fabric table or repeat an uncertain action.
-    if ble_thread {
-        // The vendored stack ships no BLE/BTP commissioning, so a Thread
-        // pairing request fails here instead of pretending to try.
-        anyhow::bail!(moli_i18n::tr!("pilotes.matter.ble_unavailable"));
-    }
     ctx.forget_secret("pairing_code")
         .await
         .map_err(|_| invalid())?;
@@ -69,28 +60,6 @@ pub(super) async fn pair(
         .await
         .map_err(|error| failed(&error))?;
     Ok(())
-}
-
-#[cfg(test)]
-fn dataset(hex: &str) -> anyhow::Result<matter_controller::ThreadDataset> {
-    let hex = hex.trim();
-    anyhow::ensure!(hex.len() <= 508 && hex.len().is_multiple_of(2), invalid());
-    let bytes = hex
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            let digit = |b: u8| match b {
-                b'0'..=b'9' => Some(b - b'0'),
-                b'a'..=b'f' => Some(b - b'a' + 10),
-                b'A'..=b'F' => Some(b - b'A' + 10),
-                _ => None,
-            };
-            Ok(digit(pair[0]).ok_or_else(invalid)? * 16 + digit(pair[1]).ok_or_else(invalid)?)
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    matter_controller::ThreadDataset::new(bytes).map_err(|_| invalid())
 }
 
 #[cfg(test)]
@@ -112,18 +81,5 @@ mod tests {
             assert!(!kinds.contains("private"));
             assert!(!kinds.chars().any(|c| c.is_ascii_digit()));
         }
-    }
-
-    #[test]
-    fn thread_input_is_bounded_and_errors_never_echo_credentials() {
-        // Synthetic structural TLV: Extended PAN ID, not a real active dataset.
-        assert!(dataset("02080000000000000001").is_ok());
-        for value in ["", "secret-key-value", "éé", "020800", "0"] {
-            let error = dataset(value).unwrap_err().to_string();
-            if !value.is_empty() {
-                assert!(!error.contains(value));
-            }
-        }
-        assert!(dataset(&"00".repeat(255)).is_err());
     }
 }

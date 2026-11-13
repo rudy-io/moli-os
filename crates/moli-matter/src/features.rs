@@ -217,7 +217,10 @@ pub(crate) fn color_refresh_paths(
 }
 
 /// Bounded queries for new families; absent metadata never grants capabilities.
-pub(crate) fn discovery_paths(report: &Report) -> Vec<matter_controller::ReadPath> {
+// None means the node is past the endpoint or path bound: the metadata read
+// cannot be complete, and subscribing on a partial report would make the
+// subscription's first reports look like descriptor changes.
+pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::ReadPath>> {
     let mut paths = BTreeSet::new();
     let mut endpoints = BTreeSet::new();
     for (path, value) in report {
@@ -234,7 +237,7 @@ pub(crate) fn discovery_paths(report: &Report) -> Vec<matter_controller::ReadPat
         }
         endpoints.insert(path.endpoint);
         if endpoints.len() > 128 {
-            return vec![];
+            return None;
         }
         for cluster in servers
             .iter()
@@ -258,14 +261,16 @@ pub(crate) fn discovery_paths(report: &Report) -> Vec<matter_controller::ReadPat
                 }
             }
             if paths.len() > 4096 {
-                return vec![];
+                return None;
             }
         }
     }
-    paths
-        .into_iter()
-        .map(|(ep, c, a)| matter_controller::ReadPath::concrete(ep, c, a))
-        .collect()
+    Some(
+        paths
+            .into_iter()
+            .map(|(ep, c, a)| matter_controller::ReadPath::concrete(ep, c, a))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

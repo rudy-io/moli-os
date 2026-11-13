@@ -233,7 +233,7 @@ base_topic = "zigbee2mqtt"
 # # audit = "…"         # tâches lourdes sans donnée de la maison (utilisé plus tard)
 
 # Native Matter: production attestation roots, pairing code only in encrypted vault.
-# See integrations/matter/README.md (IP / multi-admin; optional BlueZ BLE provisioning).
+# See integrations/matter/README.md (IP / multi-admin; no Bluetooth commissioning).
 # Optional driver.options.udp_port = 5541 for a fixed UDP listener and scoped host firewall rule.
 # [[driver]]
 # id = "matter"

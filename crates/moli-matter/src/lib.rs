@@ -26,10 +26,6 @@ pub struct Config {
     /// Stable listening port for hosts with an inbound firewall; zero is ephemeral.
     #[serde(default)]
     pub udp_port: u16,
-    /// Opt-in initial Thread provisioning over BLE. The standard image keeps
-    /// the Bluetooth/D-Bus dependency disabled.
-    #[serde(default)]
-    pub ble_thread: bool,
 }
 #[derive(Debug)]
 pub struct Matter {
@@ -408,6 +404,22 @@ fn compact_subscription_paths(paths: &mut Vec<ReadPath>) {
     paths.sort_unstable_by_key(|p| (p.cluster, p.attribute));
     paths.dedup_by_key(|p| (p.cluster, p.attribute));
 }
+// A discovery batch that fails or times out is fatal for this cycle. Skipping it
+// would leave those attributes out of `report`, the subscription returns them at
+// startup, `descriptor_changed` reads that as a change, and discovery restarts
+// every second while the node's devices blink offline.
+fn absorb_batch(
+    outcome: Option<anyhow::Result<Vec<(AttributePath, Tlv)>>>,
+    report: &mut Vec<(AttributePath, Tlv)>,
+) -> anyhow::Result<()> {
+    match outcome {
+        Some(Ok(values)) => {
+            report.extend(values);
+            Ok(())
+        }
+        Some(Err(_)) | None => Err(failure()),
+    }
+}
 async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()> {
     tracing::debug!("Matter descriptor read started");
     let mut report = tokio::time::timeout(
@@ -422,14 +434,16 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
     .map_err(|_| failure())?
     .map_err(|_| failure())?;
     tracing::debug!(reports = report.len(), "Matter descriptor read complete");
+    let Some(discovery) = features::discovery_paths(&report) else {
+        return Err(failure());
+    };
     let metadata_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    for paths in features::discovery_paths(&report).chunks(32) {
-        if let Ok(Ok(values)) = tokio::time::timeout_at(metadata_deadline, node.read(paths)).await {
-            report.extend(values);
-        }
-        if tokio::time::Instant::now() >= metadata_deadline {
-            break;
-        }
+    for paths in discovery.chunks(32) {
+        let outcome = tokio::time::timeout_at(metadata_deadline, node.read(paths))
+            .await
+            .ok()
+            .map(|read| read.map_err(|_| failure()));
+        absorb_batch(outcome, &mut report)?;
     }
     tracing::debug!(reports = report.len(), "Matter capability read complete");
     let endpoints = endpoints(&report);
@@ -557,7 +571,7 @@ impl Matter {
             .await
             .map_err(|_| failure())?;
         ensure_fabric(&controller).await?;
-        pairing::pair(&controller, ctx, self.config.ble_thread).await?;
+        pairing::pair(&controller, ctx).await?;
         let nodes = controller.nodes().await.map_err(|_| failure())?;
         anyhow::ensure!(nodes.len() <= 64, moli_i18n::tr!("pilotes.matter.failed"));
         let (tx, mut rx) = mpsc::channel(128);
@@ -1040,5 +1054,23 @@ mod tests {
             })
             .collect();
         assert_eq!(endpoints(&report).len(), 128);
+        // Past the bound the metadata read cannot be complete: refuse the cycle
+        // instead of subscribing on a partial report.
+        assert!(features::discovery_paths(&report).is_none());
+    }
+
+    #[test]
+    fn failed_discovery_batch_aborts_instead_of_looping() {
+        let mut report = vec![(path(1, 0x1d, 1), Tlv::Array(vec![Tlv::Uint(6)]))];
+        let before = report.clone();
+        // A timed-out or failed batch must stop this cycle: skipping it leaves the
+        // attributes out of `report`, so the subscription's first reports look like
+        // descriptor changes and discovery restarts every second.
+        assert!(absorb_batch(None, &mut report).is_err());
+        assert!(absorb_batch(Some(Err(failure())), &mut report).is_err());
+        assert_eq!(report, before);
+        let batch = vec![(path(1, 0x2a, 0), Tlv::Uint(1))];
+        assert!(absorb_batch(Some(Ok(batch.clone())), &mut report).is_ok());
+        assert_eq!(report, [before, batch].concat());
     }
 }

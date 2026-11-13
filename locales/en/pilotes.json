@@ -820,7 +820,6 @@
   "pilotes.matter.leak": "Water leak",
   "pilotes.matter.occupancy": "Occupancy",
   "pilotes.matter.pairing_failed": "Matter pairing failed. The one-shot pairing request may have been consumed; inspect device fabric membership before retrying.",
-  "pilotes.matter.ble_unavailable": "Thread commissioning over Bluetooth requires a build with the matter-ble feature.",
   "pilotes.matter.brightness": "Brightness",
   "pilotes.matter.color_temp": "Color temperature",
   "pilotes.matter.color": "Color",
