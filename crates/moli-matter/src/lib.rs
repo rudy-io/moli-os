@@ -373,7 +373,11 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
     let mut failures = 0;
     loop {
         let result = watch_once(&node, &tx).await;
-        if tx.send(Update::Online(id, false)).await.is_err() {
+        // Only a failed cycle takes the devices offline. A clean return means the
+        // descriptor changed and discovery restarts in a second; marking the node
+        // offline there would also clear `Reachable` on bridged endpoints and keep
+        // them unavailable until their next report, up to a full max interval.
+        if result.is_err() && tx.send(Update::Online(id, false)).await.is_err() {
             return;
         }
         // Bound retries even if a peer repeatedly changes its descriptor. A node
@@ -381,7 +385,7 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
         // waking a battery device every 10 s; it resets as soon as one succeeds.
         let wait = if result.is_err() {
             let wait = retry_delay(failures);
-            failures += 1;
+            failures = failures.saturating_add(1);
             wait
         } else {
             failures = 0;
@@ -711,9 +715,12 @@ async fn execute_plan(
 fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), String> {
     match result {
         Ok(true) => Ok(()),
-        Err(matter_controller::Error::OutcomeUnknown { .. }) => {
-            Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
-        }
+        // Both mean the device may have carried the order out: queued before the
+        // deadline, or acknowledged at the transport layer and never answered.
+        Err(
+            matter_controller::Error::OutcomeUnknown { .. }
+            | matter_controller::Error::ResponseTimeout { .. },
+        ) => Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string()),
         Ok(false) | Err(_) => Err(failure().to_string()),
     }
 }
@@ -1071,12 +1078,19 @@ mod tests {
     }
     #[test]
     fn an_unanswered_order_reports_an_unknown_state() {
-        assert_eq!(
-            order_outcome(&Err(matter_controller::Error::OutcomeUnknown {
-                node_id: 1
-            })),
-            Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
-        );
+        for unknown in [
+            matter_controller::Error::OutcomeUnknown { node_id: 1 },
+            // Acknowledged then unanswered: same unknown state for the caller.
+            matter_controller::Error::ResponseTimeout {
+                node_id: 1,
+                after: Duration::from_secs(5),
+            },
+        ] {
+            assert_eq!(
+                order_outcome(&Err(unknown)),
+                Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
+            );
+        }
         assert_eq!(order_outcome(&Ok(false)), Err(failure().to_string()));
         assert!(order_outcome(&Ok(true)).is_ok());
     }
