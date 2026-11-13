@@ -117,5 +117,19 @@
   "temperature_calibration": 0,
   "temperature_sampling": 30,
   "temperature_unit": "celsius"
+ },
+ "0x00124b000000000c": {
+  "action": "single",
+  "battery": 100,
+  "device_temperature": 26,
+  "linkquality": 156,
+  "power_outage_count": 12,
+  "voltage": 3045
+ },
+ "0x00124b000000000d": {
+  "action": "single",
+  "battery": 100,
+  "linkquality": 124,
+  "operation_mode": "event"
  }
 }
