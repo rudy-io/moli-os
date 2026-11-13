@@ -91,6 +91,14 @@ occurrence and must never bypass the private denylist or exempt this directory.
 These adaptations are maintained inside Moli, not fetched from a personal fork.
 
 - Guarded attribute writes additionally use a strict write-response parser, rejecting duplicate or mismatched acknowledgements.
+- Deadline-bounded writes and invokes distinguish "never queued" from "queued,
+  answer lost": the latter is `Error::OutcomeUnknown`, so a caller can report an
+  unknown lock/cover state instead of a failure. A write list naming the same
+  attribute twice is refused before any bytes are sent. A steady-state report
+  that sets `SuppressResponse` together with `MoreChunkedMessages` is rejected
+  (`InvalidAction`) and its exchange closed, instead of leaving the device
+  waiting on an exchange nothing would ever answer. Moli surfaces the unknown
+  outcome through `pilotes.matter.outcome_unknown`.
 - Subscription priming and steady-state reports honor parsed `SuppressResponse`:
   Success remains reliable when requested; suppressed final steady-state reports
   flush their standalone MRP ACK and close, while priming/chunks retain their

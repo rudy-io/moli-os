@@ -812,6 +812,7 @@
 
   "pilotes.matter.storage": "Cannot read or save the Matter vault.",
   "pilotes.matter.failed": "Matter operation refused or unavailable.",
+  "pilotes.matter.outcome_unknown": "State unknown: the deadline passed before any answer and the order may have been carried out.",
   "pilotes.matter.waiting": "Matter is waiting for a device: use secrets set for pairing_code and restart this instance.",
   "pilotes.matter.on": "On",
   "pilotes.matter.temperature": "Temperature",

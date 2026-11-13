@@ -12,6 +12,10 @@ fusionné dans `main` : verrou de transaction borné à trois secondes et échec
 si le système de fichiers ne fournit pas les verrous. Ce diff s’appuie dessus sans le
 redéfinir. La redécouverte conserve les endpoints survivants
 et leurs lectures compatibles ; seuls les endpoints disparus sont supprimés.
+Deux points de la liste non bloquante sont traités au passage : une luminosité
+à 0 % part en ordre Off au lieu de laisser la lampe à son niveau minimal, et un
+nœud sans endpoint pris en charge voit ses relances reculer jusqu'à 160 s au
+lieu d'être relu toutes les 10 s.
 La documentation BLE/matériel a été harmonisée. Le blocage Hue ultérieur est
 maintenant localisé et corrigé : requête d’abonnement trop grande, puis pare-feu
 hôte bloquant les rapports vers le port éphémère. Les filtres wildcard compactent

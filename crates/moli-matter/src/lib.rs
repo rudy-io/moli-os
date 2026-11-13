@@ -664,7 +664,7 @@ async fn execute_plan(
     plan: features::Plan,
     deadline: std::time::Instant,
 ) -> Result<(), String> {
-    let success = match plan {
+    match plan {
         features::Plan::Invoke {
             cluster,
             command,
@@ -681,7 +681,7 @@ async fn execute_plan(
             } else {
                 node.invoke_before(path, fields, deadline).await
             };
-            matches!(result, Ok(InvokeResult::Status(ImStatus::Success)))
+            order_outcome(&result.map(|r| matches!(r, InvokeResult::Status(ImStatus::Success))))
         }
         features::Plan::Write {
             cluster,
@@ -693,19 +693,28 @@ async fn execute_plan(
                 cluster,
                 attribute,
             };
-            node.write_before(&[(path, value)], deadline)
-                .await
-                .is_ok_and(|statuses| {
-                    statuses.len() == 1
-                        && statuses[0].0 == path
-                        && statuses[0].1 == ImStatus::Success
-                })
+            order_outcome(
+                &node
+                    .write_before(&[(path, value)], deadline)
+                    .await
+                    .map(|statuses| {
+                        statuses.len() == 1
+                            && statuses[0].0 == path
+                            && statuses[0].1 == ImStatus::Success
+                    }),
+            )
         }
-    };
-    if success {
-        Ok(())
-    } else {
-        Err(failure().to_string())
+    }
+}
+// A refused or unanswered order is a failure; one whose deadline elapsed after it
+// was queued is unknown — the device may have carried it out (a lock, a cover).
+fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), String> {
+    match result {
+        Ok(true) => Ok(()),
+        Err(matter_controller::Error::OutcomeUnknown { .. }) => {
+            Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
+        }
+        Ok(false) | Err(_) => Err(failure().to_string()),
     }
 }
 #[cfg(test)]
@@ -1059,6 +1068,17 @@ mod tests {
                 None
             );
         }
+    }
+    #[test]
+    fn an_unanswered_order_reports_an_unknown_state() {
+        assert_eq!(
+            order_outcome(&Err(matter_controller::Error::OutcomeUnknown {
+                node_id: 1
+            })),
+            Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
+        );
+        assert_eq!(order_outcome(&Ok(false)), Err(failure().to_string()));
+        assert!(order_outcome(&Ok(true)).is_ok());
     }
     #[test]
     fn retries_back_off_up_to_a_cap() {

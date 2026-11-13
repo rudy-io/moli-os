@@ -812,6 +812,7 @@
 
   "pilotes.matter.storage": "Impossible de lire ou sauvegarder le coffre Matter.",
   "pilotes.matter.failed": "Opération Matter refusée ou indisponible.",
+  "pilotes.matter.outcome_unknown": "État inconnu : l’échéance a passé avant tout retour et l’ordre a pu être exécuté.",
   "pilotes.matter.waiting": "Matter attend un appareil : utilisez secrets set pour pairing_code puis redémarrez cette instance.",
   "pilotes.matter.on": "Allumé",
   "pilotes.matter.temperature": "Température",

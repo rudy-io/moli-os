@@ -83,6 +83,24 @@ pub enum Error {
         after: std::time::Duration,
     },
 
+    /// A caller-supplied deadline elapsed after the request had been handed to
+    /// the controller task, so it may or may not have reached the device. For a
+    /// non-idempotent command (a lock, a cover) the result is unknown, not
+    /// failed: the device may have carried it out and answered too late.
+    ///
+    /// Never retried automatically, for the same reason as
+    /// [`Self::ResponseTimeout`]. Distinct from it on purpose: that one means
+    /// MRP confirmed delivery, this one means we cannot say whether anything
+    /// was transmitted at all (the request may still have been queued).
+    #[error(
+        "node {node_id:016X}: deadline elapsed after the request was queued — it may have \
+         been sent and carried out, and its outcome is unknown"
+    )]
+    OutcomeUnknown {
+        /// The node the request targeted.
+        node_id: u64,
+    },
+
     /// The device rejected a subscribe request with an Interaction Model status
     /// code (e.g. 0x89 `ResourceExhausted` when its subscription resources are
     /// full, 0xC8 `PathsExhausted` when a path quota is exceeded, 0x80
