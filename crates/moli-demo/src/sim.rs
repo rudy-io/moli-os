@@ -119,6 +119,9 @@ enum Behaviour {
     Progress,
     Remaining,
     Layer,
+    /// A cover (shutter, blind, curtain) moving toward its target position.
+    /// Opens at 10% per second, so a full 0→100 takes ~10 seconds.
+    Cover,
 }
 
 #[derive(Debug)]
@@ -129,6 +132,8 @@ struct Point {
     pulse_left: f64,
     /// What a meter gained but cannot show yet (below its resolution).
     carry: f64,
+    /// Target position for a cover (0–100), or NaN when stopped.
+    cover_target: f64,
 }
 
 #[derive(Debug)]
@@ -194,9 +199,13 @@ fn readable_number(spec: &PointSpec) -> bool {
 }
 
 /// The behaviour of one point, guessed from what it means.
-fn behaviour(spec: &PointSpec, start: Option<&Value>, has_switch: bool) -> Behaviour {
+fn behaviour(spec: &PointSpec, start: Option<&Value>, has_switch: bool, has_control: bool) -> Behaviour {
     let key = spec.key.to_ascii_lowercase();
     let start_num = start.and_then(Value::as_f64);
+    // A cover's position (percent_control paired with a control enum).
+    if (key == "percent_control" || key == "percent_control_slow") && has_control {
+        return Behaviour::Cover;
+    }
     if spec.access.write {
         return Behaviour::Still;
     }
@@ -322,15 +331,26 @@ impl World {
         let mut index = HashMap::new();
         for (p, id) in played.iter().zip(ids) {
             let has_switch = p.device.points.iter().any(is_switch);
+            let has_control = p.device.points.iter().any(|s| &*s.key == "control");
             let points = p
                 .device
                 .points
                 .iter()
-                .map(|spec| Point {
-                    key: spec.key.to_string(),
-                    behaviour: behaviour(spec, p.state.get(&*spec.key), has_switch),
-                    pulse_left: 0.0,
-                    carry: 0.0,
+                .map(|spec| {
+                    let beh = behaviour(spec, p.state.get(&*spec.key), has_switch, has_control);
+                    // Cover starts at its initial position (target = current).
+                    let cover_target = if matches!(beh, Behaviour::Cover) {
+                        p.state.get(&*spec.key).and_then(Value::as_f64).unwrap_or(f64::NAN)
+                    } else {
+                        f64::NAN
+                    };
+                    Point {
+                        key: spec.key.to_string(),
+                        behaviour: beh,
+                        pulse_left: 0.0,
+                        carry: 0.0,
+                        cover_target,
+                    }
                 })
                 .collect();
             let values = p
@@ -399,15 +419,21 @@ impl World {
         let Some(spec) = live.specs.iter().find(|s| &*s.key == key).cloned() else {
             return;
         };
+
         // A pure order (a remote's key, an announcement): nothing to keep.
-        if spec.access.read {
+        // For covers (percent_control/percent_control_slow), we only set the target,
+        // not the value itself — let the simulation evolve it.
+        let is_cover_position = key == "percent_control" || key == "percent_control_slow";
+        if spec.access.read && !is_cover_position {
             Self::set(ctx, live, key, value.clone());
         }
+
         let on_key = live
             .specs
             .iter()
             .find(|s| is_switch(s) && &*s.key != "playing")
             .map(|s| s.key.to_string());
+
         match (key, value) {
             ("brightness" | "color" | "color_temp", v) if v.as_f64().is_none_or(|b| b > 0.0) => {
                 if let Some(k) = on_key {
@@ -418,9 +444,38 @@ impl World {
                 let state = if *b { "playing" } else { "paused" };
                 Self::set(ctx, live, "state", Value::Text(state.into()));
             }
+            ("percent_control" | "percent_control_slow", Value::Float(target)) => {
+                // Direct position command for covers.
+                for p in &mut live.points {
+                    if matches!(p.behaviour, Behaviour::Cover) {
+                        p.cover_target = *target;
+                    }
+                }
+            }
             ("control", Value::Text(t)) => {
                 let t = t.to_ascii_lowercase();
-                if t.contains("pause") {
+                // Covers (shutters, blinds, curtains).
+                if t.contains("open") {
+                    for p in &mut live.points {
+                        if matches!(p.behaviour, Behaviour::Cover) {
+                            p.cover_target = 100.0;
+                        }
+                    }
+                } else if t.contains("close") {
+                    for p in &mut live.points {
+                        if matches!(p.behaviour, Behaviour::Cover) {
+                            p.cover_target = 0.0;
+                        }
+                    }
+                } else if t.contains("stop") {
+                    for p in &mut live.points {
+                        if matches!(p.behaviour, Behaviour::Cover) {
+                            p.cover_target = f64::NAN;
+                        }
+                    }
+                }
+                // Printers.
+                else if t.contains("pause") {
                     Self::set(ctx, live, "printing", Value::Bool(false));
                     if live.has("state") {
                         Self::set(ctx, live, "state", Value::Text("paused".into()));
@@ -430,7 +485,7 @@ impl World {
                     if live.has("state") {
                         Self::set(ctx, live, "state", Value::Text("printing".into()));
                     }
-                } else if t.contains("stop") || t.contains("cancel") || t.contains("annul") {
+                } else if t.contains("cancel") || t.contains("annul") {
                     Self::set(ctx, live, "printing", Value::Bool(false));
                     if live.has("state") {
                         Self::set(ctx, live, "state", Value::Text("idle".into()));
@@ -446,6 +501,7 @@ impl World {
         let clock = Clock::now(&self.tz);
         let live = &mut self.devices[i];
         let running = live.running();
+        let percent_control = live.num("percent_control");
         let updates: Vec<(String, Value)> = live
             .points
             .iter()
@@ -468,6 +524,13 @@ impl World {
             .collect();
         for (k, v) in updates {
             Self::set(ctx, live, &k, v);
+        }
+        // A cover's opening state (open/closed) follows its position.
+        if let Some(pos) = percent_control
+            && live.has("opening")
+        {
+            let opening = if pos > 50.0 { "open" } else { "closed" };
+            Self::set(ctx, live, "opening", Value::Text(opening.into()));
         }
     }
 
@@ -528,6 +591,29 @@ impl World {
                 | Behaviour::Current
                 | Behaviour::Layer
                 | Behaviour::Remaining => None,
+                Behaviour::Cover => {
+                    if p.cover_target.is_nan() {
+                        // Stopped.
+                        None
+                    } else {
+                        let v = now.unwrap_or(50.0);
+                        // 5% per second normal, 3%/s slow.
+                        let speed = if p.key == "percent_control_slow" { 3.0 } else { 5.0 };
+                        let step = speed * dt;
+                        let next = if v < p.cover_target {
+                            (v + step).min(p.cover_target)
+                        } else if v > p.cover_target {
+                            (v - step).max(p.cover_target)
+                        } else {
+                            v
+                        };
+                        if (next - v).abs() > 0.1 {
+                            Some(rounded(next, spec))
+                        } else {
+                            None
+                        }
+                    }
+                }
                 Behaviour::Drift { center, span, step } => {
                     let v = now.unwrap_or(center);
                     // Pulled back toward the centre, pushed a little at random.

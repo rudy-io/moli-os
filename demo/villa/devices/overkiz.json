@@ -1,0 +1,144 @@
+{
+ "imitates": "profile",
+ "devices": [
+  {
+   "id": "overkiz:volet-salon-ouest",
+   "instance": "overkiz",
+   "native_name": "Volet salon ouest",
+   "manufacturer": "Somfy",
+   "model": "PositionableRollerShutter",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "close",
+       "stop",
+       "open_slow",
+       "close_slow"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control",
+     "label": "Position",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "percent_control_slow",
+     "label": "Position vitesse lente",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "%",
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Salon",
+   "state": {
+    "percent_control": 0.0,
+    "control": "stop"
+   }
+  },
+  {
+   "id": "overkiz:volet-battant-pool-house",
+   "instance": "overkiz",
+   "native_name": "Volet battant pool house",
+   "manufacturer": "Somfy",
+   "model": "SwingingShutter",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "close"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "opening",
+     "label": "État",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "closed"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Pool house",
+   "state": {
+    "opening": "closed",
+    "control": "close"
+   }
+  },
+  {
+   "id": "overkiz:volet-rts-chambre-hugo",
+   "instance": "overkiz",
+   "native_name": "Volet RTS chambre Hugo",
+   "manufacturer": "Somfy",
+   "model": "RollerShutter RTS",
+   "points": [
+    {
+     "key": "control",
+     "label": "Commande",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "open",
+       "close",
+       "stop"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Chambre de Hugo",
+   "state": {}
+  }
+ ]
+}

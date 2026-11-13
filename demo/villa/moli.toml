@@ -12,8 +12,8 @@ worker_threads = 2
 # The names the demo is reached by, besides localhost (set at deployment).
 allowed_hosts = []
 history_days = 7
-demo_seed = "seed"
-demo = true
+# demo_seed = "seed"
+# demo = false
 # The house's one time zone: automations, energy, quiet hours and Moli follow it.
 timezone = "Europe/Paris"
 
@@ -150,6 +150,12 @@ id = "z2m"
 kind = "demo"
 [driver.options]
 fixture = "devices/z2m.json"
+
+[[driver]]
+id = "overkiz"
+kind = "demo"
+[driver.options]
+fixture = "devices/overkiz.json"
 
 [[driver]]
 id = "maison"

@@ -1340,6 +1340,11 @@
      "y": 1408.0
     },
     {
+     "id": "overkiz:volet-salon-ouest",
+     "x": 2050.0,
+     "y": 1408.0
+    },
+    {
      "id": "daikin:suite-amis",
      "x": 3000.0,
      "y": 725.0
@@ -1538,6 +1543,11 @@
      "id": "z2m:prise-pool-house",
      "x": 3125.0,
      "y": 1975.0
+    },
+    {
+     "id": "overkiz:volet-battant-pool-house",
+     "x": 3125.0,
+     "y": 2100.0
     }
    ]
   },
@@ -2136,11 +2146,6 @@
      "y": 275.0
     },
     {
-     "id": "tuya:volet-suite",
-     "x": 233.0,
-     "y": 458.0
-    },
-    {
      "id": "tuya:air-suite",
      "x": 467.0,
      "y": 458.0
@@ -2166,11 +2171,6 @@
      "y": 125.0
     },
     {
-     "id": "tuya:volet-lea",
-     "x": 1225.0,
-     "y": 375.0
-    },
-    {
      "id": "hue:lampe-hugo",
      "x": 1562.0,
      "y": 125.0
@@ -2181,9 +2181,9 @@
      "y": 125.0
     },
     {
-     "id": "tuya:volet-hugo",
-     "x": 1675.0,
-     "y": 375.0
+     "id": "overkiz:volet-rts-chambre-hugo",
+     "x": 1788.0,
+     "y": 250.0
     },
     {
      "id": "hue:spots-sdb",
