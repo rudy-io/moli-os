@@ -83,6 +83,19 @@ export function since(id, key) {
   return hub.devices[id]?.state?.[key]?.ts ?? null;
 }
 
+/** A button's or a remote's last press (#198): its `action` (an enum it only
+ *  tells), with when. `null`: no button; `{ action: null }`: no press seen yet. */
+export function lastPress(d) {
+  const point = d?.points.find((p) => p.key === 'action' && p.kind?.type === 'enum' && !p.access?.write);
+  if (!point) return null;
+  const action = value(d.id, 'action');
+  return { action: typeof action === 'string' && action ? action : null, ts: since(d.id, 'action') };
+}
+
+const PRESSES = { single: 'commun.appui.simple', double: 'commun.appui.double', triple: 'commun.appui.triple', hold: 'commun.appui.maintenu', long: 'commun.appui.maintenu', release: 'commun.appui.relache' };
+/** A press in words (« simple », « double », « maintenu »); any other, as told. */
+export const pressWord = (action) => (PRESSES[action] ? t(PRESSES[action]) : action);
+
 // What a sensor says, whatever its brand: Zigbee (`contact` true when
 // closed, `water_leak`), Tuya (`doorcontact_state` true when open,
 // `watersensor_state` « alarm », `pir` « pir », `battery_state` « low »).
