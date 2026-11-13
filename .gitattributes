@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+integrations/airzone/api-contract.json linguist-generated=true

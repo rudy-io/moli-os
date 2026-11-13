@@ -88,5 +88,7 @@
   "airzone_ui.alert_count_one": "{count} alert to review",
   "airzone_ui.alert_count_other": "{count} alerts to review",
   "airzone_ui.observation_view": "Observation view",
-  "airzone_ui.observation_help": "This view shows equipment status. Control permission is configured separately for each gateway in Installation."
+  "airzone_ui.observation_help": "This view shows equipment status. Control permission is configured separately for each gateway in Installation.",
+  "airzone_ui.control_view": "Status and controls",
+  "airzone_ui.control_view_help": "Controls follow each gateway’s capabilities and permissions."
 }

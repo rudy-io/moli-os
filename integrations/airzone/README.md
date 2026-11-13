@@ -1,11 +1,22 @@
 # Airzone Local API
 
 Native local integration of the documented Airzone Local API 1.78. One instance
-per controller, no Home Assistant or cloud dependency. The reviewed contract is
-in [coverage.json](coverage.json): 12 operations, 118 parameter schemas, 31
-explicitly writable parameters and 17 energy leaves. Descriptors also cover the
-known example/prose fields; these do not acquire write permission without a
-write contract. Coverage is conditional on what a controller actually reports.
+per controller, no Home Assistant or cloud dependency. The runtime field registry
+in [coverage.json](coverage.json) models 118 parameter schemas, 31 explicitly
+writable parameters and 17 energy leaves. Descriptors also cover known
+example/prose fields; these do not acquire write permission without a write
+contract. Coverage is conditional on what a controller actually reports.
+
+The [coverage audit](coverage.md) and [operation matrix](coverage-matrix.json)
+separately track the 12 Local API operations, unsupported variants, UI evidence,
+hardware validation and the documented Open/Web/MQTT/WebSocket extensions.
+Registry completeness alone does not establish 100% API or end-to-end coverage.
+
+[Continuous synchronization](synchronization.md) describes receipt freshness,
+command confirmation and deterministic regression evidence. An optional
+[Cloud Web API reader](../../crates/moli-airzone/src/cloud/README.md) is available
+in Installation for a normal Airzone account. It is separate, read-only and does
+not provide the Open API schedule operations.
 
 ## Configuration and migration
 
@@ -28,27 +39,35 @@ mac = "aa:bb:cc:dd:ee:ff" # optional identity pin
 **TOML instances retain their historical command scope**: an omitted `read_only`
 defaults to `false`, preserving existing automations. An omitted `write` defaults
 to `"legacy"`: only `on`, `target_temperature`, `mode` and `fan_speed` remain
-writable when advertised. These map to the Local API `on`, `setpoint`, `mode`
-and `speed` parameters on an addressed zone, including the historical master-zone
-controls. Reading additional fields never enables additional commands.
+writable when advertised. They map to the Local API `on`, `setpoint`, `mode` and
+`speed` parameters on an addressed zone, including historical master-zone controls.
+Reading additional fields never enables additional commands.
 
 Set `write = "extended"` explicitly to enable the newly covered commands:
 whole-system modes, hot water, renaming, installer stages/Q-Adapt, grille/slat,
-ventilation/IAQ and integration label settings. Advertised capabilities, current
-scope and guards still apply. Set `read_only = true` for an observation-only trial:
-it overrides either write mode and blocks every command. Both restrictions apply
-to published capabilities, the executor and transport, including integration
-configuration. They are not merely disabled UI buttons.
-Gateways added, edited or reactivated from the dashboard explicitly use
-`read_only = true`. New managed gateways retain `write = "legacy"`; authorizing
-control with the Moli PIN does not opt in to extended commands. Static instances
-keep their explicitly configured write scope when connection overrides are applied.
-The per-gateway read-only choice is stored in registry v3, survives restart and
-leaves hand-written TOML untouched. Enabling verifies the pinned identity;
-revocation also works offline or while paused. Changing mode sends no physical
-command. Authorized commands still use Moli's guards; revoking does not stop
-heating already running. Older v1/v2 entries declaring writable mode remain invalid.
+ventilation/IAQ, integration label and the combined setpoint + turn-on action.
+Current capabilities, scope and guards still apply. `read_only = true` overrides
+both write modes at publication, execution and transport boundaries.
 
+Set `read_only = true` for an observation-only trial. Gateways added, edited or reactivated from the dashboard explicitly
+use `read_only = true`. In Installation, an owner can then authorize control
+with a fresh server-verified Moli PIN; returning to read-only uses the existing
+human session. Reactivating a withdrawn gateway also uses that session without
+a new PIN, but only resumes reading: previous control permission is never restored.
+An owner must authorize control again with a fresh PIN.
+Explicit TOML `enabled = false` and `read_only = true` always take
+precedence, and the card explains these locks. The per-gateway choice is stored
+in registry v3 and leaves hand-written TOML untouched. If persistence fails,
+revocation still blocks commands in memory; the card explains that it may be
+lost after restart and offers an explicit retry. A durable save is required
+before the UI confirms persistence or permits control again.
+This button does not select `write = "extended"`; newly managed gateways retain
+the historical command scope. A pre-existing explicit TOML opt-in is preserved.
+Enabling verifies the pinned identity; revocation also works offline or while
+paused. Changing mode sends no physical command. Authorized commands still use
+Moli's existing guards; revoking does not stop the heating already running.
+Older v1/v2 entries declaring writable mode remain invalid. The restriction applies to published capabilities, the executor and transport,
+including integration configuration. It is not merely a disabled UI button.
 No startup or diagnostic operation writes `/integration`.
 An empty `driver` label is a valid unset value: the integration endpoint remains
 available, and Moli does not register itself automatically to fill that label.
@@ -112,7 +131,9 @@ The metadata `driver` has a 120-character write bound (readings are retained up 
 | GET / | Controller thermostat-page availability/size; no HTML execution or embedding |
 
 Paths except `/` are relative to `/api/v1/`. Moli deliberately sends one addressed
-parameter per hub command. Manufacturer multi-parameter and broadcast write
+parameter per hub command, except the targeted `target_temperature_on` action
+which sends and validates the documented addressed `on + setpoint` pair.
+Other manufacturer multi-parameter and broadcast write
 payloads are not exposed as a raw proxy; each documented writable parameter is
 covered individually. The special DHW `{systemID:0}` is an addressed resource,
 not a zone broadcast.
@@ -214,7 +235,7 @@ state independently.
 
 Older driver binaries reject unknown TOML options. Before rolling back, restore
 a configuration compatible with that version: `read_only`, `write`,
-`tls_fingerprint` and `dhw_units` are not accepted by the original driver. Removing
-`read_only` does not make an older driver read-only; keep the instance disabled if observation-only
+`tls_fingerprint` and `dhw_units` are not accepted by the original driver. Removing `read_only` does not
+make an older driver read-only; keep the instance disabled if observation-only
 operation is required. Restore a matching managed-gateway registry/backup too.
 Keep the current configuration, registry and encrypted store backed up first.

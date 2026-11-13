@@ -26,13 +26,16 @@ impl WriteMode {
             || (historical_resource && LEGACY.iter().any(|(point, _)| *point == key))
     }
 
-    /// Called after structural validation of a single addressed parameter.
+    /// Called after structural validation of an addressed operation. A legacy
+    /// write has exactly two selectors and one historical parameter; even the
+    /// reviewed setpoint + turn-on operation requires the extended opt-in.
     /// Historical shared controls addressed the master zone, never a whole
     /// system without zoneID. System metadata is an opt-in resource.
     pub(crate) fn allows_wire(self, path: &str, body: &Json) -> bool {
         self == Self::Extended
             || (path == "hvac"
                 && body.get("zoneID").is_some()
+                && body.as_object().is_some_and(|object| object.len() == 3)
                 && LEGACY.iter().any(|(_, wire)| body.get(wire).is_some()))
     }
 }

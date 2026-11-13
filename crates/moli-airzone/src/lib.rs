@@ -1,4 +1,5 @@
 mod api;
+pub mod cloud;
 mod diagnostic;
 pub use diagnostic::{DiagnosticRequest, inspect};
 mod fields;
@@ -6,6 +7,7 @@ mod model;
 mod onboarding;
 pub use onboarding::{GatewayProbe, probe_read_only};
 mod resources;
+mod synchronization;
 mod write_policy;
 #[cfg(test)]
 mod write_policy_tests;
@@ -62,6 +64,8 @@ pub struct Airzone {
     config: Config,
     identity: Mutex<Option<String>>,
     known_zones: Mutex<model::ZoneIds>,
+    synchronization: Mutex<synchronization::Progress>,
+    read_plan: Mutex<resources::ReadPlan>,
 }
 impl Airzone {
     pub fn new(mut config: Config) -> anyhow::Result<Self> {
@@ -106,6 +110,11 @@ impl Airzone {
         Ok(Self {
             identity: Mutex::new(config.mac.clone()),
             known_zones: Mutex::default(),
+            read_plan: Mutex::default(),
+            synchronization: Mutex::new(synchronization::Progress {
+                poll_interval: config.poll_secs,
+                ..synchronization::Progress::default()
+            }),
             config,
         })
     }
@@ -120,8 +129,15 @@ impl Driver for Airzone {
 }
 enum Next {
     Command(Option<CommandRequest>),
-    Refresh(anyhow::Result<Box<LiveSnapshot>>),
+    Core(anyhow::Result<CoreSnapshot>),
+    Resources(Box<resources::ResourceSnapshot>),
     Tick,
+}
+struct CoreSnapshot {
+    mac: String,
+    info: serde_json::Value,
+    zones: Snapshot,
+    end: Instant,
 }
 #[derive(Debug)]
 struct LiveSnapshot {
@@ -167,14 +183,36 @@ impl LiveSnapshot {
             .encode(instance, mac, &self.zones, device, key, value)
     }
 }
-fn publish(ctx: &DriverCtx, snapshot: &LiveSnapshot, mac: &str, config: &Config) {
-    publish_entities(
-        ctx,
-        snapshot.entities(ctx.instance(), mac, config),
-        &ctx.devices(),
-    );
+fn publish_resources(
+    ctx: &DriverCtx,
+    resources: &resources::ResourceSnapshot,
+    zones: &Snapshot,
+    mac: &str,
+    config: &Config,
+    progress: &synchronization::Progress,
+) {
+    let prefix = format!("{}:{mac}_s", ctx.instance());
+    let managed = ctx
+        .devices()
+        .into_iter()
+        .filter(|id| {
+            !id.as_str()
+                .strip_prefix(&prefix)
+                .is_some_and(|tail| tail.contains("_z"))
+        })
+        .filter(|id| resources.attempted_device(id, mac))
+        .collect::<Vec<_>>();
+    let mut entities = resources.entities(ctx.instance(), mac, zones, config.read_only);
+    config.restrict_writes(&mut entities, false);
+    publish_entities(ctx, entities, &managed, progress);
 }
-fn publish_core(ctx: &DriverCtx, snapshot: &Snapshot, mac: &str, config: &Config) {
+fn publish_core(
+    ctx: &DriverCtx,
+    snapshot: &Snapshot,
+    mac: &str,
+    config: &Config,
+    progress: &synchronization::Progress,
+) {
     let prefix = format!("{}:{mac}_s", ctx.instance());
     let managed = ctx
         .devices()
@@ -187,9 +225,18 @@ fn publish_core(ctx: &DriverCtx, snapshot: &Snapshot, mac: &str, config: &Config
         .collect::<Vec<_>>();
     let mut entities = snapshot.entities(ctx.instance(), mac);
     config.restrict_writes(&mut entities, true);
-    publish_entities(ctx, entities, &managed);
+    publish_entities(ctx, entities, &managed, progress);
 }
-fn publish_entities(ctx: &DriverCtx, entities: Vec<model::Entity>, managed: &[DeviceId]) {
+fn publish_entities(
+    ctx: &DriverCtx,
+    mut entities: Vec<model::Entity>,
+    managed: &[DeviceId],
+    progress: &synchronization::Progress,
+) {
+    for entity in &mut entities {
+        let gateway = entity.0.id.as_str().ends_with("_gateway");
+        progress.append(entity, ctx, gateway, true);
+    }
     let present = entities
         .iter()
         .map(|(d, _)| d.id.clone())
@@ -209,6 +256,39 @@ fn publish_entities(ctx: &DriverCtx, entities: Vec<model::Entity>, managed: &[De
     }
 }
 impl Airzone {
+    fn progress(&self) -> synchronization::Progress {
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn track(&self, ctx: &DriverCtx, update: impl FnOnce(&mut synchronization::Progress)) {
+        update(
+            &mut self
+                .synchronization
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        let mac = self
+            .identity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .or_else(|| ctx.known_address().and_then(|address| address.mac));
+        let Some(mac) = mac else { return };
+        let id = ctx.device_id(&format!("{mac}_gateway"));
+        let Some(device) = ctx.device(&id) else {
+            return;
+        };
+        let mut entity = ((*device).clone(), Vec::new());
+        self.progress().append(&mut entity, ctx, true, false);
+        ctx.upsert_device(entity.0);
+        for (key, value) in entity.1 {
+            ctx.set_state(&id, &key, value);
+        }
+    }
+
     async fn reported_controller(
         &self,
         end: Instant,
@@ -221,10 +301,14 @@ impl Airzone {
             remaining(end)?,
         )
         .await?;
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .received();
         let mac = info["mac"]
             .as_str()
             .and_then(moli_net::lan::mac_hex)
-            .context(invalid_identity())?;
+            .context(api::Failure::Identity)?;
         Ok((mac, info))
     }
     async fn zones(
@@ -242,6 +326,10 @@ impl Airzone {
             remaining(end)?,
         )
         .await?;
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .received();
         let mut snapshot = Snapshot::parse(&value)?;
         snapshot.retain_known_scope(
             instance,
@@ -254,30 +342,25 @@ impl Airzone {
         );
         Ok(snapshot)
     }
-    async fn snapshot(
+    async fn read_core(
         &self,
         instance: &InstanceId,
         known: &[DeviceId],
-        mac: &str,
-        info: &serde_json::Value,
+        expected: Option<&str>,
         end: Instant,
-    ) -> anyhow::Result<LiveSnapshot> {
-        let zones = self.zones(instance, known, mac, end).await?;
-        let mut resources =
-            resources::ResourceSnapshot::read(&self.config, &zones, info, end).await;
-        resources.retain_known_scope(instance, mac, &zones, known);
-        Ok(LiveSnapshot { zones, resources })
-    }
-    async fn refresh(
-        &self,
-        instance: &InstanceId,
-        known: &[DeviceId],
-        mac: &str,
-        end: Instant,
-    ) -> anyhow::Result<LiveSnapshot> {
-        let (reported, info) = self.reported_controller(end).await?;
-        ensure!(reported == mac, invalid_identity());
-        self.snapshot(instance, known, mac, &info, end).await
+    ) -> anyhow::Result<CoreSnapshot> {
+        let (mac, info) = self.reported_controller(end).await?;
+        ensure!(
+            expected.is_none_or(|expected| expected == mac),
+            api::Failure::Identity
+        );
+        let zones = self.zones(instance, known, &mac, end).await?;
+        Ok(CoreSnapshot {
+            mac,
+            info,
+            zones,
+            end,
+        })
     }
     async fn execute(
         &self,
@@ -297,7 +380,12 @@ impl Airzone {
         let zones = self
             .zones(ctx.instance(), &ctx.known_devices(), mac, end)
             .await?;
-        publish_core(ctx, &zones, mac, &self.config);
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .core();
+        publish_core(ctx, &zones, mac, &self.config, &self.progress());
+        self.track(ctx, |_| {});
         let historical_resource = zones
             .entities(ctx.instance(), mac)
             .iter()
@@ -365,63 +453,152 @@ impl Airzone {
         // No awaited work occurs between this check and starting the one PUT.
         ensure!(!command.abandoned(), moli_i18n::tr!("airzone.expired"));
         let value = api::exchange(&self.config, "PUT", path, &body, remaining(end)?).await?;
-        api::acknowledge(&value, &body)
+        api::acknowledge(&value, &body)?;
+        ctx.set_state(
+            &command.device.id,
+            "sync_last_command_generation",
+            moli_core::Value::Int(i64::try_from(self.progress().generation).unwrap_or(i64::MAX)),
+        );
+        Ok(())
     }
     async fn run_inner(&self, ctx: &mut DriverCtx) -> anyhow::Result<()> {
-        let end = Instant::now() + POLL_LIMIT;
-        let (mac, info) = self.reported_controller(end).await?;
-        let expected = self
-            .identity
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .or_else(|| ctx.known_address().and_then(|a| a.mac));
-        ensure!(
-            expected.as_ref().is_none_or(|expected| expected == &mac),
-            invalid_identity()
-        );
-        let snapshot = self
-            .snapshot(ctx.instance(), &ctx.known_devices(), &mac, &info, end)
-            .await?;
-        *self.identity.lock().unwrap_or_else(PoisonError::into_inner) = Some(mac.clone());
-        ctx.remember_address(KnownAddress {
-            configured: self.config.host.clone(),
-            host: self.config.host.clone(),
-            mac: Some(mac.clone()),
-            identity: Some(mac.clone()),
-        })
-        .await;
-        publish(ctx, &snapshot, &mac, &self.config);
-        ctx.ready();
+        // A driver object may be recreated while cached telemetry survives.
+        // Never reuse an earlier generation after a restart or mode change.
+        let previous = ctx
+            .devices()
+            .iter()
+            .filter_map(|id| match ctx.current(id, "sync_generation") {
+                Some(moli_core::Value::Int(value)) => u64::try_from(value).ok(),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        {
+            let mut progress = self
+                .synchronization
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            progress.generation = progress.generation.max(previous);
+        }
         let period = Duration::from_secs(self.config.poll_secs);
         let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut refresh_pending = false;
+        let mut core: Option<CoreSnapshot> = None;
+        let mut refresh_pending = true;
+        let mut end = Instant::now() + POLL_LIMIT;
+        self.track(ctx, synchronization::Progress::begin);
         loop {
             let instance = ctx.instance().clone();
             let known = ctx.known_devices();
-            // Read requests are safe to cancel. A queued command interrupts a
-            // slow optional poll; writes themselves are never replayed.
+            let expected = self
+                .identity
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+                .or_else(|| ctx.known_address().and_then(|address| address.mac));
+            // Required observations are published before optional metadata.
+            // Only one read phase runs; a command cancels it and starts a new
+            // post-command generation, so an old phase cannot overwrite it.
             let next = tokio::select! {
                 biased;
                 command=ctx.next_command()=>Next::Command(command),
-                result=self.refresh(&instance,&known,&mac,Instant::now()+POLL_LIMIT), if refresh_pending=>Next::Refresh(result.map(Box::new)),
-                _=interval.tick(), if !refresh_pending=>Next::Tick,
+                result=self.read_core(&instance,&known,expected.as_deref(),end), if refresh_pending=>Next::Core(result),
+                resources=async {
+                    let core = core.as_ref().expect("optional phase has a core snapshot");
+                    let mut plan = self.read_plan.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                    let snapshot = resources::ResourceSnapshot::read_planned(&self.config, &core.zones, &core.info, core.end.min(Instant::now() + period), usize::try_from(self.progress().generation.saturating_sub(1)).unwrap_or(0), &mut plan).await;
+                    self.synchronization.lock().unwrap_or_else(PoisonError::into_inner).iaq_systems = plan.iaq_system_count();
+                    *self.read_plan.lock().unwrap_or_else(PoisonError::into_inner) = plan;
+                    snapshot
+                }, if core.is_some()=>Next::Resources(Box::new(resources)),
+                _=interval.tick(), if !refresh_pending && core.is_none()=>Next::Tick,
             };
             match next {
                 Next::Command(Some(command)) => {
-                    let result = self.execute(ctx, &mac, &command).await;
+                    core = None;
+                    self.track(ctx, |progress| progress.active = false);
+                    let result = match expected {
+                        Some(mac) => self.execute(ctx, &mac, &command).await,
+                        None => Err(api::Failure::Identity.into()),
+                    };
                     command.reply(result.as_ref().copied().map_err(ToString::to_string));
                     refresh_pending = true;
+                    end = Instant::now() + POLL_LIMIT;
+                    self.track(ctx, synchronization::Progress::begin);
                 }
                 Next::Command(None) => return Ok(()),
-                Next::Refresh(result) => {
-                    publish(ctx, result?.as_ref(), &mac, &self.config);
+                Next::Core(result) => {
+                    let value = match result {
+                        Ok(value) => value,
+                        Err(error) => {
+                            self.track(ctx, |progress| progress.failed(&error));
+                            return Err(error);
+                        }
+                    };
+                    self.accept_core(ctx, &value).await;
+                    core = Some(value);
                     refresh_pending = false;
                 }
-                Next::Tick => refresh_pending = true,
+                Next::Resources(mut resources) => {
+                    let core = core.take().expect("optional phase has a core snapshot");
+                    resources.retain_known_scope(ctx.instance(), &core.mac, &core.zones, &known);
+                    self.synchronization
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .complete();
+                    publish_resources(
+                        ctx,
+                        &resources,
+                        &core.zones,
+                        &core.mac,
+                        &self.config,
+                        &self.progress(),
+                    );
+                }
+                Next::Tick => {
+                    refresh_pending = true;
+                    end = Instant::now() + POLL_LIMIT;
+                    self.track(ctx, synchronization::Progress::begin);
+                }
             }
         }
+    }
+
+    async fn accept_core(&self, ctx: &DriverCtx, core: &CoreSnapshot) {
+        *self.identity.lock().unwrap_or_else(PoisonError::into_inner) = Some(core.mac.clone());
+        ctx.remember_address(KnownAddress {
+            configured: self.config.host.clone(),
+            host: self.config.host.clone(),
+            mac: Some(core.mac.clone()),
+            identity: Some(core.mac.clone()),
+        })
+        .await;
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .core();
+        self.synchronization
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .optional_systems = u64::try_from(core.zones.system_ids().len()).unwrap_or(32);
+        let progress = self.progress();
+        publish_core(ctx, &core.zones, &core.mac, &self.config, &progress);
+        let gateway = ctx.device_id(&format!("{}_gateway", core.mac));
+        if ctx.device(&gateway).is_none() {
+            let initial = resources::ResourceSnapshot::from_webserver(&self.config, &core.info)
+                .gateway(
+                    ctx.instance(),
+                    &core.mac,
+                    &core.zones,
+                    self.config.read_only,
+                );
+            let mut entities = vec![initial];
+            self.config.restrict_writes(&mut entities, false);
+            publish_entities(ctx, entities, &[], &progress);
+        } else {
+            self.track(ctx, |_| {});
+        }
+        ctx.ready();
     }
 }
 #[cfg(test)]
@@ -470,7 +647,7 @@ mod tests {
             poll_secs: 30,
             mac: Some("aa:bb:cc:dd:ee:ff".into()),
             read_only: true,
-            write: crate::WriteMode::Legacy,
+            write: WriteMode::Legacy,
             dhw_units: None,
             tls_fingerprint: None,
         };
@@ -517,15 +694,19 @@ mod lifecycle_tests {
         time::{Duration, Instant},
     };
     use tokio_util::sync::CancellationToken;
+    mod synchronization_tests;
     #[derive(Clone)]
     struct Sim {
         zones: Arc<Mutex<Json>>,
         mac: Arc<Mutex<String>>,
+        webserver_extra: Arc<Mutex<Json>>,
         writes: Arc<Mutex<Vec<Json>>>,
         reject: Arc<Mutex<bool>>,
         delay: Arc<Mutex<u64>>,
         optional_delay: Arc<Mutex<u64>>,
         optional_started: Arc<AtomicUsize>,
+        optional_notified: Arc<tokio::sync::Notify>,
+        response_status: Arc<AtomicUsize>,
         reads: Arc<AtomicUsize>,
     }
     async fn start() -> (Hub, CancellationToken, Sim, tokio::task::JoinHandle<()>) {
@@ -557,11 +738,14 @@ mod lifecycle_tests {
         let sim = Sim {
             zones: Arc::new(Mutex::new(zones)),
             mac: Arc::new(Mutex::new("aa:bb:cc:dd:ee:ff".into())),
+            webserver_extra: Arc::new(Mutex::new(json!({"cloud_connected":true}))),
             writes: Arc::default(),
             reject: Arc::default(),
             delay: Arc::default(),
             optional_delay: Arc::default(),
             optional_started: Arc::default(),
+            optional_notified: Arc::default(),
+            response_status: Arc::new(AtomicUsize::new(200)),
             reads: Arc::default(),
         };
         let app = Router::new()
@@ -570,6 +754,7 @@ mod lifecycle_tests {
                 any(|State(s): State<Sim>| async move {
                     let delay = *s.optional_delay.lock().unwrap();
                     s.optional_started.fetch_add(1, Ordering::SeqCst);
+                    s.optional_notified.notify_one();
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                     Reply(json!({"version":"1.78"}))
                 }),
@@ -580,7 +765,15 @@ mod lifecycle_tests {
                     assert_eq!(method, Method::POST);
                     let delay = *s.delay.lock().unwrap();
                     tokio::time::sleep(Duration::from_millis(delay)).await;
-                    Reply(json!({"mac":*s.mac.lock().unwrap()}))
+                    let mut info = s.webserver_extra.lock().unwrap().clone();
+                    info["mac"] = json!(*s.mac.lock().unwrap());
+                    (
+                        axum::http::StatusCode::from_u16(
+                            u16::try_from(s.response_status.load(Ordering::SeqCst)).unwrap(),
+                        )
+                        .unwrap(),
+                        Reply(info),
+                    )
                 }),
             )
             .route(
@@ -644,9 +837,22 @@ mod lifecycle_tests {
     fn point(device: &str, key: &str) -> PointId {
         PointId::new(&DeviceId::from(device), key)
     }
+    async fn wait_for_optional_read(sim: &Sim, after: usize) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while sim.optional_started.load(Ordering::SeqCst) <= after {
+                sim.optional_notified.notified().await;
+            }
+        })
+        .await
+        .expect("optional read started");
+    }
     #[tokio::test]
     async fn slow_optional_metadata_does_not_delay_a_zone_command() {
         let (hub, cancel, sim, server) = start().await;
+        // Startup publishes the core before the optional phase. Observe that
+        // first request explicitly instead of assuming it preceded ready().
+        wait_for_optional_read(&sim, 0).await;
+        let optional_before = sim.optional_started.load(Ordering::SeqCst);
         *sim.optional_delay.lock().unwrap() = 6000;
         let started = Instant::now();
         hub.command(
@@ -659,16 +865,7 @@ mod lifecycle_tests {
         .unwrap();
         assert!(started.elapsed() < Duration::from_millis(1500));
         assert_eq!(sim.writes.lock().unwrap().len(), 1);
-        for _ in 0..100 {
-            if sim.optional_started.load(Ordering::SeqCst) > 1 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            sim.optional_started.load(Ordering::SeqCst) > 1,
-            "confirmation poll started"
-        );
+        wait_for_optional_read(&sim, optional_before).await;
         let started = Instant::now();
         hub.command(
             &point("az:aabbccddeeff_s1_z2", "on"),

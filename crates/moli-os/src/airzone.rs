@@ -48,11 +48,11 @@ impl Inspect {
                 sensor: self.sensor,
                 get: self.get,
             },
-            Operation::Version => DiagnosticRequest::Version,
-            Operation::Webserver => DiagnosticRequest::Webserver,
-            Operation::Integration => DiagnosticRequest::Integration,
-            Operation::Demo => DiagnosticRequest::Demo,
-            Operation::Thermostat => DiagnosticRequest::Thermostat,
+            Operation::Version => DiagnosticRequest::Version {},
+            Operation::Webserver => DiagnosticRequest::Webserver {},
+            Operation::Integration => DiagnosticRequest::Integration {},
+            Operation::Demo => DiagnosticRequest::Demo {},
+            Operation::Thermostat => DiagnosticRequest::Thermostat {},
         }
     }
 }

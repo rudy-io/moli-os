@@ -9,6 +9,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+mod cloud;
+mod diagnostics;
 mod modes;
 
 #[tokio::test]

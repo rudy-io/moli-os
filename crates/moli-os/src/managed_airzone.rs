@@ -23,6 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, DriverConfig};
 
+mod cloud;
+mod diagnostics;
 mod discovery;
 mod persistence;
 
@@ -703,6 +705,9 @@ impl State {
     }
 }
 struct Inner {
+    cloud: moli_airzone::cloud::CloudClient,
+    cloud_operations: tokio::sync::Semaphore,
+    cloud_cancel: CancellationToken,
     hub: Hub,
     path: PathBuf,
     sync_directory: fn(&Path) -> std::io::Result<()>,
@@ -714,6 +719,7 @@ struct Inner {
     drivers: Mutex<HashMap<String, Running>>,
     operations: Mutex<Vec<JoinHandle<()>>>,
     discovery: discovery::Gate,
+    diagnostics: tokio::sync::Semaphore,
     discovery_cancel: CancellationToken,
     discovery_connections: Vec<(InstanceId, Ipv4Addr)>,
 }
@@ -780,6 +786,9 @@ impl Manager {
             ..
         } = registry;
         Ok(Self(Arc::new(Inner {
+            cloud: moli_airzone::cloud::CloudClient::with_vault(hub.clone()),
+            cloud_operations: tokio::sync::Semaphore::new(1),
+            cloud_cancel: cancel.child_token(),
             hub,
             path,
             sync_directory: persistence::sync_directory,
@@ -798,6 +807,7 @@ impl Manager {
             drivers: Mutex::default(),
             operations: Mutex::default(),
             discovery: discovery::Gate::default(),
+            diagnostics: tokio::sync::Semaphore::new(1),
             discovery_connections: config
                 .drivers
                 .iter()
@@ -1582,6 +1592,7 @@ impl Manager {
     /// Stop admitting operations, finish any owned commit, and await its drivers.
     pub async fn shutdown(&self) {
         self.0.accepting.store(false, Ordering::Release);
+        self.0.cloud_cancel.cancel();
         self.0.discovery_cancel.cancel();
         let operations = std::mem::take(
             &mut *self
@@ -1619,6 +1630,35 @@ fn installed(instance: &str, already_installed: bool, read_only: bool) -> Gatewa
 }
 
 impl AirzoneSetup for Manager {
+    fn cloud_status(
+        &self,
+    ) -> BoxFuture<'_, Result<serde_json::Value, moli_api::airzone_cloud::CloudError>> {
+        Box::pin(self.cloud_report())
+    }
+    fn cloud_login(
+        &self,
+        request: moli_api::airzone_cloud::LoginRequest,
+    ) -> BoxFuture<'_, Result<serde_json::Value, moli_api::airzone_cloud::CloudError>> {
+        Box::pin(self.connect_cloud(request))
+    }
+    fn cloud_read(
+        &self,
+        request: moli_api::airzone_cloud::ReadRequest,
+    ) -> BoxFuture<'_, Result<serde_json::Value, moli_api::airzone_cloud::CloudError>> {
+        Box::pin(self.read_cloud(request))
+    }
+    fn cloud_disconnect(
+        &self,
+    ) -> BoxFuture<'_, Result<serde_json::Value, moli_api::airzone_cloud::CloudError>> {
+        Box::pin(self.disconnect_cloud())
+    }
+    fn diagnostic(
+        &self,
+        instance: String,
+        request: moli_api::airzone_setup::GatewayDiagnosticRequest,
+    ) -> BoxFuture<'_, Result<moli_api::airzone_setup::GatewayDiagnosticReport, SetupError>> {
+        Box::pin(self.inspect_gateway(instance, request))
+    }
     fn discover(
         &self,
     ) -> BoxFuture<'_, Result<moli_api::airzone_setup::GatewayDiscovery, SetupError>> {

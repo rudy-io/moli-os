@@ -53,6 +53,24 @@ fn codes(v: &Json, min: u64, max: u64) -> anyhow::Result<Vec<u64>> {
     );
     Ok(values)
 }
+fn add_target_on(points: &mut Vec<PointSpec>) {
+    // A typed action, not a second reported temperature. Both original
+    // points must permit writes; the normal zone guard still applies.
+    if points
+        .iter()
+        .any(|point| point.key.as_ref() == "on" && point.access.write)
+        && let Some(target) = points
+            .iter()
+            .find(|point| point.key.as_ref() == "target_temperature" && point.access.write)
+    {
+        let mut action = target.clone();
+        action.key = "target_temperature_on".into();
+        action.label = moli_i18n::tr!("airzone.target_temperature_on").into();
+        action.semantic = Semantic::Other;
+        action.access.read = false;
+        points.push(action);
+    }
+}
 impl Zone {
     fn parse(raw: &Json, system: u64, id: u64) -> anyhow::Result<Self> {
         let raw = fields::project(raw)?;
@@ -130,6 +148,7 @@ impl Zone {
             })
             .unzip();
         if !control {
+            add_target_on(&mut points);
             let errors = self.raw["errors"].as_array();
             points.push(PointSpec {
                 key: "problem".into(),
@@ -415,14 +434,19 @@ impl Snapshot {
             .iter()
             .find(|z| DeviceId::new(instance, &z.native(mac, control)) == *device)
             .context(invalid())?;
+        let compound = key == "target_temperature_on";
         let (param, wire) = fields::encode(
             if control { Scope::System } else { Scope::Zone },
             &zone.raw,
-            key,
+            if compound { "target_temperature" } else { key },
             value,
         )?;
         let mut body = json!({"systemID":zone.system,"zoneID":zone.id});
         body[param] = wire;
+        if compound {
+            let (param, wire) = fields::encode(Scope::Zone, &zone.raw, "on", &Value::Bool(true))?;
+            body[param] = wire;
+        }
         Ok(body)
     }
 }
@@ -436,6 +460,56 @@ mod tests {
         ))
         .unwrap()
     }
+    #[test]
+    fn composed_action_preserves_target_units_bounds_and_zone_scope() {
+        let snapshot = Snapshot::parse(&fixture()).unwrap();
+        let instance: InstanceId = "az".into();
+        let entities = snapshot.entities(&instance, "aabbccddeeff");
+        for (device, states) in entities {
+            if !device.members.is_empty() {
+                assert!(device.point("target_temperature_on").is_none());
+                continue;
+            }
+            let target = device.point("target_temperature").unwrap();
+            let action = device.point("target_temperature_on").unwrap();
+            assert_eq!(action.kind, target.kind);
+            assert_eq!(action.unit, target.unit);
+            assert_eq!(
+                action.access,
+                Access {
+                    read: false,
+                    write: true
+                }
+            );
+            assert!(!states.iter().any(|(key, _)| key == "target_temperature_on"));
+        }
+        assert_eq!(
+            snapshot
+                .encode(
+                    &instance,
+                    "aabbccddeeff",
+                    &DeviceId::from("az:aabbccddeeff_s2_z8"),
+                    "target_temperature_on",
+                    &Value::Float(73.)
+                )
+                .unwrap(),
+            json!({"systemID":2,"zoneID":8,"setpoint":73.,"on":1})
+        );
+        for value in [59., 86., 72.5] {
+            assert!(
+                snapshot
+                    .encode(
+                        &instance,
+                        "aabbccddeeff",
+                        &DeviceId::from("az:aabbccddeeff_s2_z8"),
+                        "target_temperature_on",
+                        &Value::Float(value)
+                    )
+                    .is_err()
+            );
+        }
+    }
+
     #[test]
     fn flat_broadcast_covers_multiple_systems_but_nested_parent_ids_must_match() {
         let flat =

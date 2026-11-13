@@ -2069,6 +2069,11 @@ async fn airzone_lifecycle_endpoints_never_expose_connections_or_accept_an_unaut
             "/api/integrations/airzone/existing/mode",
             Some(json!({"read_only":false,"expected_read_only":true,"pin":"482915"})),
         ),
+        (
+            "POST",
+            "/api/integrations/airzone/existing/diagnostic",
+            Some(json!({"operation":"webserver"})),
+        ),
     ] {
         let (status, _) =
             request_with(&addr, method, path, body.as_ref(), "x-moli-origin: ui\r\n").await;
@@ -2179,6 +2184,45 @@ async fn airzone_discovery_refuses_browser_selected_targets_and_oversized_input(
 }
 
 impl moli_api::airzone_setup::AirzoneSetup for CountedAirzoneSetup {
+    fn cloud_login(
+        &self,
+        _request: moli_api::airzone_cloud::LoginRequest,
+    ) -> BoxFuture<'_, Result<Json, moli_api::airzone_cloud::CloudError>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async { Ok(json!({"state":"connected","read_only":true})) })
+    }
+    fn cloud_read(
+        &self,
+        request: moli_api::airzone_cloud::ReadRequest,
+    ) -> BoxFuture<'_, Result<Json, moli_api::airzone_cloud::CloudError>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async move { Ok(json!({"read_only":true,"request":request,"data":[]})) })
+    }
+    fn diagnostic(
+        &self,
+        _instance: String,
+        request: moli_api::airzone_setup::GatewayDiagnosticRequest,
+    ) -> BoxFuture<
+        '_,
+        Result<
+            moli_api::airzone_setup::GatewayDiagnosticReport,
+            moli_api::airzone_setup::SetupError,
+        >,
+    > {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(moli_api::airzone_setup::GatewayDiagnosticReport {
+                read_only: true,
+                synthetic: matches!(
+                    request,
+                    moli_api::airzone_setup::GatewayDiagnosticRequest::Demo {}
+                ),
+                response: Some(json!({"data":[]})),
+                interface_available: None,
+                response_bytes: None,
+            })
+        })
+    }
     fn set_mode(
         &self,
         instance: String,
@@ -2560,6 +2604,7 @@ async fn airzone_onboarding_is_never_available_to_a_guest_even_with_the_house_co
         ("PUT", "/api/integrations/airzone/existing"),
         ("POST", "/api/integrations/airzone/existing/withdraw"),
         ("POST", "/api/integrations/airzone/existing/mode"),
+        ("POST", "/api/integrations/airzone/existing/diagnostic"),
     ] {
         assert_eq!(
             request_with(
@@ -2809,6 +2854,191 @@ async fn airzone_mode_revocation_and_stale_mode_errors_are_explicit() {
         "mode_conflict"
     );
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+}
+
+#[tokio::test]
+async fn airzone_diagnostics_are_closed_bounded_and_share_the_read_budget() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let session = pin_session(&addr, "482915").await;
+    let human = format!("{session}x-moli-origin: ui\r\n");
+    let route = "/api/integrations/airzone/existing/diagnostic";
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"operation":"demo"})),
+            &session
+        )
+        .await
+        .0,
+        403
+    );
+    for body in [
+        json!({"operation":"put","path":"hvac"}),
+        json!({"operation":"webserver","host":"127.0.0.1"}),
+        json!({"operation":"hvac","system":256}),
+    ] {
+        assert_eq!(
+            request_with(&addr, "POST", route, Some(&body), &human)
+                .await
+                .0,
+            422
+        );
+    }
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"operation":"demo","padding":"x".repeat(2048)})),
+            &human
+        )
+        .await
+        .0,
+        413
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        route,
+        Some(&json!({"operation":"demo"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap(),
+        json!({"read_only":true,"synthetic":true,"response":{"data":[]}})
+    );
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"operation":"version"})),
+            &human
+        )
+        .await
+        .0,
+        429
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn airzone_cloud_surface_never_accepts_writes_urls_or_an_unauthorized_login() {
+    let hub = lamp_hub().await;
+    let setup = Arc::new(CountedAirzoneSetup::default());
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    for (path, body) in [
+        (
+            "login",
+            json!({"email":"user@example.com","password":"fixture-password"}),
+        ),
+        ("read", json!({"operation":"installations"})),
+        ("disconnect", json!({})),
+    ] {
+        assert_eq!(
+            request_with(
+                &addr,
+                "POST",
+                &format!("/api/integrations/airzone/cloud/{path}"),
+                Some(&body),
+                "x-moli-origin: ui\r\n"
+            )
+            .await
+            .0,
+            403
+        );
+    }
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let route = "/api/integrations/airzone/cloud/read";
+    for body in [
+        json!({"operation":"write","device_id":"demo","value":20}),
+        json!({"operation":"installations","host":"example.com"}),
+        json!({"operation":"device_status","device_id":"demo"}),
+    ] {
+        assert_eq!(
+            request_with(&addr, "POST", route, Some(&body), &human)
+                .await
+                .0,
+            422
+        );
+    }
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    // Rejected requests consume the same six-request budget; the product must
+    // not weaken it to make a positive test pass.
+    assert_eq!(
+        request_with(
+            &addr,
+            "POST",
+            route,
+            Some(&json!({"operation":"installations"})),
+            &human
+        )
+        .await
+        .0,
+        429
+    );
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let addr = serve(
+        &hub,
+        &moli_api::Options {
+            ui_pin: Some(moli_api::UiPin::new("482915")),
+            airzone_setup: Some(setup.clone()),
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let human = format!(
+        "{}x-moli-origin: ui\r\n",
+        pin_session(&addr, "482915").await
+    );
+    let (status, body) = request_with(
+        &addr,
+        "POST",
+        route,
+        Some(&json!({"operation":"installations"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["read_only"],
+        true
+    );
+    assert!(!body.contains("fixture-password"));
+    assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+    let credentials = moli_api::airzone_cloud::LoginRequest {
+        email: "user@example.com".into(),
+        password: "fixture-password".into(),
+    };
+    assert!(!format!("{credentials:?}").contains("fixture-password"));
+    assert!(!format!("{credentials:?}").contains("user@example.com"));
 }
 
 /// A camera with live video only: it answers an offer with an echo of it.

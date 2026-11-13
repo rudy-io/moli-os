@@ -211,7 +211,7 @@
     {/if}
     {#if modeResult?.stored}
       <div class="message" role="status"><strong>{t(modeResult.read_only ? 'airzone_gateways.read_only_saved' : 'airzone_gateways.control_saved',{instance:modeResult.instance})}</strong>
-        {#if !modeResult.read_only}<p>{t('airzone_gateways.controls_location')}</p><a href="#/pieces">{t('airzone_gateways.open_controls')}<Icon name="chevron-right" size={18} /></a>{/if}
+        {#if !modeResult.read_only}<p>{t('airzone_gateways.controls_location')}</p><a href="#/airzone">{t('airzone_gateways.open_controls')}<Icon name="chevron-right" size={18} /></a>{/if}
       </div>
     {/if}
     {#if replacement}

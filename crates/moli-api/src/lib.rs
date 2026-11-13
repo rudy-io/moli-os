@@ -31,6 +31,7 @@ mod people_api;
 mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
+pub mod airzone_cloud;
 pub mod airzone_setup;
 mod phones;
 mod plan;
@@ -331,6 +332,22 @@ fn assistant_routes() -> Router<Hub> {
 fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Router<Hub> {
     Router::new()
         .route(
+            "/api/integrations/airzone/cloud/status",
+            get(airzone_cloud::status),
+        )
+        .route(
+            "/api/integrations/airzone/cloud/login",
+            upload(post(airzone_cloud::login), 4096, humans),
+        )
+        .route(
+            "/api/integrations/airzone/cloud/read",
+            upload(post(airzone_cloud::read), 2048, humans),
+        )
+        .route(
+            "/api/integrations/airzone/cloud/disconnect",
+            upload(post(airzone_cloud::disconnect), 1024, humans),
+        )
+        .route(
             "/api/integrations/airzone/discover",
             upload(post(airzone_setup::discover), 1024, humans),
         )
@@ -353,6 +370,10 @@ fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Rou
         .route(
             "/api/integrations/airzone/{instance}/withdraw",
             upload(post(airzone_setup::withdraw), 1024, humans),
+        )
+        .route(
+            "/api/integrations/airzone/{instance}/diagnostic",
+            upload(post(airzone_setup::diagnostic), 1024, humans),
         )
         .route(
             "/api/integrations/airzone/{instance}/mode",

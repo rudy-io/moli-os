@@ -368,8 +368,12 @@ Légende « Accès » : **libre** = aucune condition au-delà de la garde `Host`
 La gestion Airzone conserve le fichier TOML. Le registre borné `airzone-gateways.json`
 lit les versions 1 et 2 et écrit la version 3 : connexions gérées, surcharges ciblées des
 entrées TOML et retraits réversibles. Une modification conserve les options natives
-non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`. Une entrée
-TOML jamais modifiée conserve son mode d’origine. Les restrictions explicites
+non concernées (`poll_secs`, `dhw_units`), mais un ajout, une édition ou une réactivation impose `read_only=true`.
+Réactiver une passerelle retirée utilise la session humaine existante, sans nouveau
+code Moli : cela reprend uniquement la lecture et ne restaure jamais son ancienne
+autorisation de pilotage. Pour commander à nouveau, un propriétaire doit ensuite
+fournir un code frais via le changement de mode. Une entrée TOML jamais modifiée
+conserve son mode d’origine. Les restrictions explicites
 `enabled = false` et `read_only = true` du TOML restent prioritaires sur le registre
 et sur les changements demandés dans Moli. Le champ `configuration_lock` de la
 liste vaut `disabled`, `read_only` ou `null` ; il explique ce verrou dans
@@ -403,6 +407,35 @@ jamais en autorisation. Les commandes deviennent accessibles par les chemins
 habituels de Moli, avec leurs gardes et autorisations existantes. Le retour en
 lecture seule bloque les commandes suivantes ; il n'arrête pas le chauffage et
 n'annule pas une commande déjà exécutée.
+
+### Diagnostics et complément cloud Airzone
+
+Toutes ces routes exigent une session humaine, l'origine `ui` et refusent les
+invités. Aucun appel ne permet une URL, méthode ou corps constructeur arbitraire.
+
+| Méthode | Chemin | Saisie et résultat |
+|---|---|---|
+| POST | `/api/integrations/airzone/{instance}/diagnostic` | 1 Kio ; enum `operation` : `hvac` (`system`, `zone?`, `get?`), `iaq` (`system`, `sensor`, `get?`), `version`, `webserver`, `integration`, `demo`, `thermostat`. Retour `{read_only:true,synthetic,response?}` ou disponibilité/taille HTML sans le HTML. |
+| GET | `/api/integrations/airzone/cloud/status` | `{state,expires_at?,read_only:true,persistence_available}`. Exception explicite : `expires_at` est en **secondes** Unix comme le JWT constructeur. |
+| POST | `/api/integrations/airzone/cloud/login` | 4 Kio ; `{email,password}`. Mot de passe utilisé uniquement pour cette connexion ; jetons dans le coffre chiffré, jamais dans la réponse. Retour du statut. |
+| POST | `/api/integrations/airzone/cloud/read` | 2 Kio ; enum fermé détaillé ci-dessous. Retour `{read_only:true,received_at,data}` avec `received_at` en millisecondes. |
+| POST | `/api/integrations/airzone/cloud/disconnect` | `{}` ; oublie la session Moli et les jetons du coffre. Ne revendique pas une révocation côté fournisseur. |
+
+Les lectures cloud sont `installations`, `installation` avec `installation_id`,
+`device_status` et `device_config` avec `installation_id`/`device_id` (configuration :
+`section=all|user|advanced`), `gateway_status` avec `installation_id`/`gateway_id` et
+`include_devices?`, `location` avec `location_id`, et `profile`. Le compte et le
+matériel déterminent les permissions. Aucun PUT/PATCH constructeur n'est exposé.
+
+Une lecture native manuelle vérifie l'identité puis effectue uniquement l'opération
+de lecture demandée. Elle n'alimente pas le Hub ; la démo reste synthétique. Une
+seule inspection manuelle et une seule opération cloud peuvent être en cours,
+indépendamment de la supervision locale. L'arrêt du manager annule les opérations
+cloud. Les états expirés, interdits, indisponibles et incomplets restent explicites.
+
+La Web API du compte classique ne publie pas de route de programmation ; ces routes
+appartiennent à l'Open API et nécessitent une application OAuth approuvée. Matrice
+complète : [couverture Airzone](../../integrations/airzone/coverage.md).
 
 
 La saisie de connexion accepte uniquement une IPv4 privée en production : les

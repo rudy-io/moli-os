@@ -131,6 +131,43 @@ pub struct GatewayModeChanged {
     pub running: bool,
 }
 
+/// Read-only operations against an already configured gateway. No URL, raw
+/// request body, write verb or HTML execution is accepted by this surface.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GatewayDiagnosticRequest {
+    Hvac {
+        system: u8,
+        zone: Option<u8>,
+        #[serde(default)]
+        get: bool,
+    },
+    Iaq {
+        system: u8,
+        sensor: u8,
+        #[serde(default)]
+        get: bool,
+    },
+    Version {},
+    Webserver {},
+    Integration {},
+    Demo {},
+    Thermostat {},
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayDiagnosticReport {
+    pub read_only: bool,
+    pub synthetic: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_bytes: Option<usize>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Withdrawal {}
@@ -185,6 +222,35 @@ impl IntoResponse for SetupError {
 }
 
 pub trait AirzoneSetup: Send + Sync + Debug {
+    fn cloud_status(
+        &self,
+    ) -> BoxFuture<'_, Result<serde_json::Value, crate::airzone_cloud::CloudError>> {
+        Box::pin(async { Err(crate::airzone_cloud::CloudError::new("unavailable")) })
+    }
+    fn cloud_login(
+        &self,
+        _request: crate::airzone_cloud::LoginRequest,
+    ) -> BoxFuture<'_, Result<serde_json::Value, crate::airzone_cloud::CloudError>> {
+        Box::pin(async { Err(crate::airzone_cloud::CloudError::new("unavailable")) })
+    }
+    fn cloud_read(
+        &self,
+        _request: crate::airzone_cloud::ReadRequest,
+    ) -> BoxFuture<'_, Result<serde_json::Value, crate::airzone_cloud::CloudError>> {
+        Box::pin(async { Err(crate::airzone_cloud::CloudError::new("unavailable")) })
+    }
+    fn cloud_disconnect(
+        &self,
+    ) -> BoxFuture<'_, Result<serde_json::Value, crate::airzone_cloud::CloudError>> {
+        Box::pin(async { Err(crate::airzone_cloud::CloudError::new("unavailable")) })
+    }
+    fn diagnostic(
+        &self,
+        _instance: String,
+        _request: GatewayDiagnosticRequest,
+    ) -> BoxFuture<'_, Result<GatewayDiagnosticReport, SetupError>> {
+        Box::pin(async { Err(SetupError::new("unavailable")) })
+    }
     fn set_mode(
         &self,
         _instance: String,
@@ -231,6 +297,27 @@ pub trait AirzoneSetup: Send + Sync + Debug {
 
 #[derive(Clone)]
 pub(crate) struct Setup(pub Option<Arc<dyn AirzoneSetup>>);
+
+pub(crate) async fn diagnostic(
+    State(hub): State<Hub>,
+    Extension(humans): Extension<Arc<Sessions>>,
+    Extension(Setup(setup)): Extension<Setup>,
+    Path(instance): Path<String>,
+    caller: Caller,
+    headers: HeaderMap,
+    Json(request): Json<GatewayDiagnosticRequest>,
+) -> Response {
+    if origin(&hub, &headers, &humans, &caller) != Origin::Ui {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(setup) = setup else {
+        return SetupError::new("unavailable").into_response();
+    };
+    match setup.diagnostic(instance, request).await {
+        Ok(report) => Json(report).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
 
 // The code is request-scoped: never Debug, journal or persist it with gateway options.
 #[derive(Deserialize)]

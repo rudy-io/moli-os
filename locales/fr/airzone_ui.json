@@ -88,5 +88,7 @@
   "airzone_ui.alert_count_one": "{count} alerte à consulter",
   "airzone_ui.alert_count_other": "{count} alertes à consulter",
   "airzone_ui.observation_view": "Vue de consultation",
-  "airzone_ui.observation_help": "Cette vue présente l’état des équipements. Le mode de pilotage se règle séparément pour chaque passerelle dans Installation."
+  "airzone_ui.observation_help": "Cette vue présente l’état des équipements. Le mode de pilotage se règle séparément pour chaque passerelle dans Installation.",
+  "airzone_ui.control_view": "Suivi et réglages",
+  "airzone_ui.control_view_help": "Les réglages suivent les capacités et les autorisations de chaque passerelle."
 }

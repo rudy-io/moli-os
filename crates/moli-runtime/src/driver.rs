@@ -264,6 +264,16 @@ impl DriverCtx {
         self.hub.device_ids_of(&self.instance)
     }
 
+    /// Current definition of one of this driver's devices. Airzone uses this
+    /// read-only view to add synchronization telemetry without replacing cached
+    /// equipment capabilities while the controller is unreachable.
+    #[must_use]
+    pub fn device(&self, id: &DeviceId) -> Option<Arc<Device>> {
+        self.owns(id)
+            .then(|| self.hub.device(id).map(|view| view.device))
+            .flatten()
+    }
+
     /// Ids of the devices this instance published, now or before a restart
     /// (who to look for before the device answered once in this run).
     #[must_use]
@@ -375,5 +385,41 @@ impl MediaPublisher {
             from: Some(from.to_owned()),
             ts: moli_core::now_ms(),
         });
+    }
+}
+
+#[cfg(test)]
+mod device_definition_tests {
+    use super::*;
+    use crate::HubOptions;
+
+    #[test]
+    fn definition_lookup_is_scoped_to_the_driver_instance() {
+        let hub = Hub::new(HubOptions::default()).unwrap();
+        let (_, commands) = mpsc::channel(1);
+        let ctx = DriverCtx::new(
+            hub.clone(),
+            "airzone".into(),
+            commands,
+            CancellationToken::new(),
+        );
+        for instance in ["airzone", "other"] {
+            let id = DeviceId::new(&InstanceId::from(instance), "gateway");
+            hub.upsert_device(Device {
+                id,
+                instance: instance.into(),
+                native_name: "Gateway".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: vec![],
+                points: vec![],
+            });
+        }
+        assert!(ctx.device(&DeviceId::from("airzone:gateway")).is_some());
+        assert!(hub.device(&DeviceId::from("other:gateway")).is_some());
+        assert!(ctx.device(&DeviceId::from("other:gateway")).is_none());
+        assert!(ctx.device(&DeviceId::from("airzone:missing")).is_none());
     }
 }
