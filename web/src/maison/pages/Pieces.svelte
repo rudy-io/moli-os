@@ -49,13 +49,13 @@
   const all = $derived(roomList());
   const coverCount = $derived(all.reduce((count, room) => count + room.covers.length + room.impulses.length, 0));
   const devices = $derived(
-    all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.impulses, ...r.climates, ...r.media, ...r.sensors].filter(Boolean)),
+    all.flatMap((r) => [r.group, ...r.lights, ...r.plugs, ...r.covers, ...r.impulses, ...r.climates, ...r.media, ...r.alarms, ...r.sensors].filter(Boolean)),
   );
 
   /** A room with only what the filter keeps; null when nothing is left. */
   function only(r) {
     // Shutters and openers only (the page keeps no saved choice of its own).
-    if (coversOnly) return r.covers.length || r.impulses.length ? { ...r, group: null, lights: [], plugs: [], climates: [], media: [], sensors: [], lit: 0 } : null;
+    if (coversOnly) return r.covers.length || r.impulses.length ? { ...r, group: null, lights: [], plugs: [], climates: [], media: [], alarms: [], sensors: [], lit: 0 } : null;
     if (!filter.length) return r;
     const on = (id) => filter.includes(id);
     const f = {
@@ -67,9 +67,10 @@
       impulses: on('volets') ? r.impulses : [],
       climates: on('climat') ? r.climates : [],
       media: on('medias') ? r.media : [],
+      alarms: on('alarme') ? r.alarms : [],
       sensors: r.sensors.filter((d) => on(categoryOf(d))),
     };
-    const any = f.group || f.lights.length || f.plugs.length || f.covers.length || f.impulses.length || f.climates.length || f.media.length || f.sensors.length;
+    const any = f.group || f.lights.length || f.plugs.length || f.covers.length || f.impulses.length || f.climates.length || f.media.length || f.alarms.length || f.sensors.length;
     return any ? f : null;
   }
 

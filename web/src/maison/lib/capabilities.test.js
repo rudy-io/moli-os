@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice, isValve, climateKeys } from './capabilities.js';
+import { pointOf, canWrite, numericRange, quantize, writableChoices, powerPoint, knownDeviceKind, positionPoint, coverOrder, enumChoice, isValve, climateKeys, alarmPoint } from './capabilities.js';
 
 const point = (key, kind, write = true, semantic = 'other') => ({ key, kind, access: { read: true, write }, semantic });
 const device = (...points) => ({ online: true, points });
@@ -144,4 +144,15 @@ test('a Zigbee thermostatic valve is recognised by its points, never by name or 
   assert.equal(isValve(device(setpoint)), false);
   assert.equal(isValve(device(mode)), false);
   assert.equal(isValve(null), false);
+});
+
+test('a security panel is recognised by its arm mode, never by a power switch', () => {
+  const standard = device(point('system_arm_type', { type: 'enum', values: ['disarmed', 'armed', 'home'] }));
+  assert.equal(alarmPoint(standard)?.key, 'system_arm_type');
+  // Another bridge may name it differently: the words make it a panel.
+  assert.equal(alarmPoint(device(point('mode', { type: 'enum', values: ['disarmed', 'armed'] })))?.key, 'mode');
+  assert.equal(alarmPoint(device(point('system_arm_type', { type: 'enum', values: ['on', 'off'] }))), null);
+  assert.equal(alarmPoint(device(point('switch_1', { type: 'binary' }))), null);
+  assert.equal(alarmPoint(device(point('system_arm_type', { type: 'text' }))), null);
+  assert.equal(alarmPoint(null), null);
 });

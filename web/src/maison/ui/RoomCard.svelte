@@ -11,6 +11,7 @@
   import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
   import { watts } from '../lib/energy-live.svelte.js';
+  import AlarmCard from './AlarmCard.svelte';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys, impulsePoints } from '../lib/capabilities.js';
   import { coverCommands } from '../lib/cover-controls.js';
@@ -408,6 +409,10 @@
       {/if}
     {/if}
   {/if}
+
+  {#each room.alarms as d (d.id)}
+    <AlarmCard id={d.id} compact />
+  {/each}
 
   {#each pulseTiles as d (d.id)}
     <ImpulseTile id={d.id} {icons} />
