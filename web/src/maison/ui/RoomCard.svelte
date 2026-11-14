@@ -1,5 +1,5 @@
 <script>
-  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition } from '../lib/home.svelte.js';
+  import { hub, value, act, toggle, isOn, powerKey, protectedRoom, num, nameOf, deviceKind, lampsOf, doorOpen, leak, motion, lowBattery, unpowered, isFixture, note, reachable, quiet, outletsOf, plantNeeds, coverPosition, lastPress, pressWord, relative, home } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import LightTile from './LightTile.svelte';
@@ -73,6 +73,9 @@
     return { tone, icon: kind, text, title: word ? `${label} : ${text} · ${t(word)}` : `${label} : ${text}` };
   };
 
+  /** How long a press stays on show outside the « Capteurs » view. */
+  const PRESS_FRESH_MS = 10 * 60_000;
+
   function chips(d) {
     // An appliance that is no button: what it draws, nothing when unplugged.
     if (quiet(d.id)) {
@@ -116,6 +119,16 @@
     const lx = v('illuminance') ?? v('illuminance_lux');
     if (typeof lx === 'number') out.push({ tone: '', icon: 'sun', text: `${num(lx)} lx`, title: t('commun.piece.eclairement') });
     if (motion(d.id)) out.push({ tone: 'warm', icon: 'walk', text: '', title: t('commun.piece.presence') });
+    // A button says its last press: shown while fresh, always among the sensors.
+    const press = lastPress(d);
+    if (press?.action) {
+      const fresh = press.ts != null && home.now - press.ts < PRESS_FRESH_MS;
+      if (fresh || every) {
+        const word = pressWord(press.action);
+        const when = relative(press.ts, home.now);
+        out.push({ tone: fresh ? 'warm' : '', icon: 'hand', text: when ? `${word} · ${when}` : word, title: t('commun.piece.dernier_appui', { name: nameOf(d.id), action: word, when }) });
+      }
+    }
     if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });
     if (deviceKind(d) === 'camera') out.push({ tone: 'cool', icon: 'cctv', text: nameOf(d.id), href: '#/cameras' });
     if (deviceKind(d) === 'printer') {

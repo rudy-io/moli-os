@@ -233,6 +233,11 @@ impl Entry {
                     return None;
                 }
                 let json = lookup(payload, &point.key)?;
+                // Z2M clears a press right after it (`action: ""`): no press,
+                // and the last one stays on show (#198).
+                if is_press(point) && json.as_str().is_none_or(str::is_empty) {
+                    return None;
+                }
                 if codec.is_some_and(|c| c.xy_hex) {
                     let axis = |a: &str| json.get(a).and_then(Json::as_f64);
                     let hex = axis("x")
@@ -603,6 +608,12 @@ fn mark_impulses(
     }
 }
 
+/// A button's or a remote's `action` (`single`, `double`, `hold`…): a press, an
+/// occurrence, never a state: the same value twice is two presses (#198).
+pub fn is_press(point: &PointSpec) -> bool {
+    &*point.key == "action" && matches!(point.kind, Kind::Enum { .. }) && !point.access.write
+}
+
 /// A plant sensor's `dry` (Tuya soil sensors): its alarm is the plant's thirst.
 /// Only beside a soil moisture reading: elsewhere a bare `dry` says nothing.
 fn mark_soil(points: &mut [PointSpec]) {
@@ -793,10 +804,33 @@ mod tests {
         assert_eq!(values["soil_warning"].as_f64(), Some(50.0));
     }
 
+    /// Real frames of an Aqara WXKG06LM and a Tuya ZG-101ZL (TS004F): their
+    /// `action` is a press (#198); the button's `operation_mode` is a setting.
+    #[test]
+    fn a_buttons_action_is_a_press() {
+        let catalog = catalog();
+        for ieee in ["0x00124b000000000c", "0x00124b000000000d"] {
+            let entry = catalog.by_name(ieee).unwrap();
+            assert!(is_press(entry.device.point("action").unwrap()), "{ieee}");
+            let values: HashMap<_, _> = entry.decode(&state(ieee)).into_iter().collect();
+            assert_eq!(values["action"], Value::from("single"), "{ieee}");
+        }
+        let button = catalog.by_name("0x00124b000000000d").unwrap();
+        assert!(!is_press(button.device.point("operation_mode").unwrap()));
+        // Z2M clears a press right after it: nothing to tell, nothing to show.
+        let cleared = serde_json::json!({ "action": "", "battery": 100 });
+        let values: HashMap<_, _> = button
+            .decode(cleared.as_object().unwrap())
+            .into_iter()
+            .collect();
+        assert!(!values.contains_key("action"));
+        assert!(values.contains_key("battery"));
+    }
+
     #[test]
     fn real_bridge_is_fully_mapped() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 10, "coordinator excluded, 10 real devices");
+        assert_eq!(catalog.len(), 12, "coordinator excluded, 12 real devices");
         for entry in catalog.entries() {
             assert!(
                 !entry.device.points.is_empty(),

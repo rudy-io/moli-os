@@ -428,6 +428,8 @@ mod tests {
     }
 
     #[test]
+    // Read from the fixture's JSON as written: the same decimal, the same f64.
+    #[allow(clippy::float_cmp)]
     fn the_months_peak_and_todays() {
         let today: Timestamp = "2026-11-10T23:00:00Z".parse().unwrap();
         let p = peaks(&fixture("peaks"), today);
