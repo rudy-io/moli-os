@@ -76,3 +76,14 @@ test('a camera outside is a tile, not a chip, and never twice', () => {
   assert.deepEqual(v.cams, [{ id: 'reolink:jardin' }]);
   assert.deepEqual(v.rooms[0].sensors.map((d) => d.id), ['z2m:t']);
 });
+
+test('a device another card shows is not repeated', () => {
+  const probe = dev('z2m:sonde', 'temperature', 'humidity');
+  const v = outdoorView({
+    rooms: [room('Extérieur', { sensors: [probe], lights: [dev('z2m:a', 'state')] })],
+    layoutRooms: layout,
+    shown: ['z2m:sonde'],
+  });
+  assert.deepEqual(v.rooms[0].sensors, []);
+  assert.equal(v.rooms[0].lights.length, 1);
+});

@@ -23,6 +23,8 @@
       garden: out.garden_lights ?? [],
       cams: outsideCams,
       on: isOn,
+      // A station shows on « Données réelles » (#210): not again in its room.
+      shown: idsOf(value(OUTSIDE, 'stations')),
     }),
   );
   const pool = $derived(view.pool);
