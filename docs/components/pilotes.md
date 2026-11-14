@@ -879,9 +879,12 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   doit être enregistrée dans la région (`POST /api/1/partner_accounts` avec un jeton
   `client_credentials` : idempotent, le pilote le fait à chaque connexion). La lecture
   complète (`vehicle_data`) n'est demandée que pendant la recharge effective
-  (`poll_charging_s`, 60 s) ; une voiture branchée sans charge est au repos
-  (`poll_idle_s`, 180 s) et endormie (`poll_asleep_s`, 900 s) : seules les sondes bon
-  marché `/vehicles` (état réveil/sommeil) continuent à ces périodes. Un 408 par
+  (`poll_charging_s`, 5 min) ; une voiture branchée sans charge est au repos
+  (`poll_idle_s`, 10 min) et endormie (`poll_asleep_s`, 1 h) : seules les sondes bon
+  marché `/vehicles` (état réveil/sommeil) continuent à ces périodes. Les défauts
+  sont dimensionnés pour tenir dans le crédit mensuel de 10 $ de la Fleet API à
+  usage personnel (≈ 80 requêtes de données/jour, bien en dessous du plafond
+  qui déclenche `EXCEEDED_LIMIT`). Un 408 par
   véhicule ne casse pas la session : la voiture est marquée endormie, les autres sont
   servies. Les hôtes `api_host`/`auth_host` sont une liste fermée (adresses officielles
   Tesla), refusée au chargement : un fichier copié ne peut pas rediriger le secret du

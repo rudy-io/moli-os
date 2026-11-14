@@ -178,9 +178,9 @@ base_topic = "zigbee2mqtt"
 # auth_host = "auth.tesla.com"                     # la connexion et le point de jeton
 # redirect_uri = "https://example.com/moli-tesla"  # l'URI enregistrée sur l'application (obligatoire, identique)
 # partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
-# poll_charging_s = 60                             # lecture complète pendant la recharge
-# poll_idle_s = 180                                # éveillée et au repos (branchée sans charge y compris)
-# poll_asleep_s = 900                              # endormie
+# poll_charging_s = 300                            # lecture complète pendant la recharge
+# poll_idle_s = 600                                # éveillée et au repos (branchée sans charge y compris)
+# poll_asleep_s = 3600                             # endormie
 
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
