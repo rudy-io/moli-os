@@ -1225,6 +1225,35 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   `src/model.rs` (fixtures fictives de `integrations/engie/fixtures/`), `src/lib.rs` (heures de
   départ, jours et mois dans le fuseau du compte).
 
+## `vicare` : pompes à chaleur et chaudières Viessmann (`crates/moli-vicare`)
+
+- **Couvre** : un appareil Viessmann relié par sa passerelle Wi-Fi (Vitoconnect) : la PAC
+  (températures, compresseur, COP, eau chaude) et un appareil par circuit de chauffage (mode,
+  programme, consignes, pompe). Une page **Chauffage** apparaît dans le tableau de bord dès qu'un
+  tel appareil existe ; ces appareils n'ont **pas** de carte dans une pièce, ils vivent sur cette page.
+- **Protocole** : le cloud Viessmann (`api.` et `iam.viessmann-climatesolutions.com`, deux hôtes
+  écrits en dur, HTTPS seulement). L'API est celle que Viessmann documente ; la connexion **sans
+  navigateur** (e-mail et mot de passe en Basic sur `/authorize`, puis code PKCE) est celle de
+  l'appli ViCare et **n'est pas le parcours documenté** par Viessmann : elle peut changer sans
+  préavis. Pas de double authentification, pas de compte Google ou Apple.
+- **Configuration** : `installation` (numéro, seulement s'il y en a plusieurs), `redirect_uri`
+  (seulement pour une clé d'API qui en déclare une autre).
+- **Secrets** : `client_id` (clé d'API du portail développeur, client public), `username`,
+  `password`. Voir `integrations/vicare/onboarding.md`.
+- **Rythme** : une lecture toutes les 2 min 30 (le cloud limite à environ 1 450 appels par jour et
+  120 par 10 minutes). Un refus pour quota, en lecture comme sur un ordre, suspend les appels
+  jusqu'à l'heure de reprise donnée par le cloud.
+- **Identifiants refusés** : le pilote attend une personne (`wait_for`) et **ne réessaie pas** :
+  corriger le secret puis redémarrer Moli (retenter un mauvais mot de passe ferait bloquer le
+  compte). Une coupure réseau, elle, ne refait jamais une connexion par mot de passe : le jeton
+  de rafraîchissement est gardé pour l'essai suivant.
+- **Commandes** : mode du circuit, consignes confort / normale / réduite, consignes d'eau chaude,
+  charge unique. Les bornes viennent des commandes du cloud ; sans bornes, le point reste en
+  lecture seule. Un mode, une phase ou un programme que Moli ne connaît pas s'affiche avec son
+  identifiant brut.
+- **Tests** : `src/model.rs` (fixtures anonymisées de `integrations/vicare/fixtures/`), `src/lib.rs`
+  (PKCE, attente du quota).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -1281,6 +1310,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
+| `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |

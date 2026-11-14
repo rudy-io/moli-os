@@ -201,6 +201,16 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 
+# Viessmann heat pump or boiler, through the ViCare cloud. Needs the master key and three
+# secrets (client_id, username, password); see integrations/vicare/onboarding.md.
+# [[driver]]
+# id = "pac"
+# kind = "vicare"
+#
+# [driver.options]
+# installation = 1234567                    # only when the account has several installations
+# redirect_uri = "vicare://oauth-callback/everest"   # only if the API key declares another
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"

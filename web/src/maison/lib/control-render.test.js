@@ -947,3 +947,17 @@ test('a button shows its last press while fresh, and always among the sensors (#
   hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, access: { read: true, write: true } }] } };
   assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
 });
+
+test('a heat pump and its circuit are heating and stay off the room cards; a thermostat stays climate', () => {
+  const pump = { id: 'vicare:pac', native_name: 'PAC', model: null, label: { room: 'Workshop' }, online: true, members: [], points: [point('compressor_active', { type: 'binary' }, false)], state: {} };
+  const circuit = { ...pump, id: 'vicare:circuit0', native_name: 'Circuit', points: [point('mode', enumeration('heating', 'standby')), point('comfort_temperature', number(4, 37, 1)), point('reduced_temperature', number(4, 37, 1))] };
+  const thermostat = { ...pump, id: 'other:thermostat', native_name: 'Thermostat', points: [point('mode', enumeration('heat', 'off')), point('comfort_temperature', number(5, 30, 0.5)), point('target_temperature', number(5, 30, 0.5))] };
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit, [thermostat.id]: thermostat };
+  assert.equal(home.deviceKind(pump), 'heating');
+  assert.equal(home.deviceKind(circuit), 'heating');
+  assert.equal(home.deviceKind(thermostat), 'climate');
+  const [room] = home.roomList();
+  assert.deepEqual(room.climates.map((d) => d.id), [thermostat.id]);
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit };
+  assert.deepEqual(home.roomList(), []);
+});
