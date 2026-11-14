@@ -118,6 +118,13 @@
   "maison.dehors.station_inconnue": "{id} : appareil inconnu de Moli pour l’instant.",
   "maison.dehors.credit_previsions": "Prévisions :",
   "maison.dehors.credit_mesures": "Mesures : {names}",
+  "maison.dehors.sens_temperature": "Température",
+  "maison.dehors.sens_pression": "Pression",
+  "maison.dehors.sens_luminosite": "Luminosité",
+  "maison.dehors.sens_batterie": "Batterie",
+  "maison.dehors.sens_rafales": "Rafales",
+  "maison.dehors.sens_direction": "Direction du vent",
+  "maison.dehors.sens_intensite": "Intensité de la pluie",
 
   "maison.pieces.titre": "Pièces",
   "maison.pieces.sous_titre": "Chaque pièce, ses lumières et ce qu’elle sent.",

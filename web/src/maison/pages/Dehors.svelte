@@ -43,6 +43,23 @@
   }
 
   const windFrom = $derived(compass(val('wind_direction', w)));
+  /** A station's point by its meaning, in the house's language (Zigbee2MQTT
+   *  labels are English); its own label otherwise. */
+  const measureName = (p) =>
+    ({
+      temperature: t('maison.dehors.sens_temperature'),
+      humidity: t('maison.dehors.humidite'),
+      pressure: t('maison.dehors.sens_pression'),
+      illuminance: t('maison.dehors.sens_luminosite'),
+      battery: t('maison.dehors.sens_batterie'),
+      wind_speed: t('maison.dehors.vent'),
+      wind_gust: t('maison.dehors.sens_rafales'),
+      wind_direction: t('maison.dehors.sens_direction'),
+      rain_rate: t('maison.dehors.sens_intensite'),
+      rain_today: t('maison.dehors.pluie_jour'),
+      uv_index: 'UV',
+    })[p.semantic] ?? p.label;
+
   const show = (id, p) => {
     const x = v(id, p.key);
     if (x == null) return '—';
@@ -129,8 +146,8 @@
     <div class="facts">
       <div><Icon name="humidity" size={20} /><small>{t('maison.dehors.humidite')} {@render badge('humidity')}</small><b class="num">{num(val('humidity', w))} %</b></div>
       <div>
-        <Icon name="wind" size={20} /><small>{t('maison.dehors.vent')} {@render badge('wind_speed')}</small><b class="num">{num(val('wind_speed', w))} km/h{#if windFrom != null}<span class="muted cap"> {t('maison.dehors.cap').split(',')[windFrom]}</span>{/if}</b>
-        <em class="muted num">{t('maison.dehors.rafales', { speed: num(val('wind_gust', w, 'wind_gusts')) })}</em>
+        <Icon name="wind" size={20} /><small>{t('maison.dehors.vent')} {@render badge('wind_speed')}</small><b class="num">{num(val('wind_speed', w))} km/h</b>
+        <em class="muted num">{t('maison.dehors.rafales', { speed: num(val('wind_gust', w, 'wind_gusts')) })}{#if windFrom != null}{' · '}{t('maison.dehors.cap').split(',')[windFrom]}{/if}</em>
       </div>
       <div><Icon name="water" size={20} /><small>{t('maison.dehors.pluie_jour')} {@render badge('rain_today')}</small><b class="num">{num(val('rain_today', w, 'today_rain'), 1)} mm</b><em class="muted num">{t('maison.dehors.risque', { pct: num(v(w, 'today_rain_chance')) })}</em></div>
       <div><Icon name="sun-angle" size={20} /><small>{t('maison.dehors.soleil')}</small><b class="num">{hhmm(v(w, 'sunrise'))} → {hhmm(v(w, 'sunset'))}</b></div>
@@ -164,7 +181,7 @@
             {#if d}
               <div class="pairs">
                 {#each measures(d) as p (p.key)}
-                  <div><small>{p.label}</small><b class="num">{show(id, p)}</b><em class="muted">{relative(since(id, p.key), home.now)}</em></div>
+                  <div><small>{measureName(p)}</small><b class="num">{show(id, p)}</b><em class="muted">{relative(since(id, p.key), home.now)}</em></div>
                 {/each}
               </div>
             {:else}
@@ -228,7 +245,7 @@
     <!-- CC BY 4.0: the weather and air data credit their source. -->
     <p class="credit">
       {#if stations.length}
-        {#if w || air || forecasts.length}{t('maison.dehors.credit_previsions')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> · {/if}{t('maison.dehors.credit_mesures', { names: stations.map((id) => nameOf(id)).join(', ') })}
+        {#if w || air || forecasts.length}{t('maison.dehors.credit_previsions')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>{' · '}{/if}{t('maison.dehors.credit_mesures', { names: stations.map((id) => nameOf(id)).join(', ') })}
       {:else}
         {t('maison.dehors.credit')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>
       {/if}
@@ -407,11 +424,6 @@
   .why {
     display: block;
     font-size: 12px;
-  }
-
-  .cap {
-    font-size: 13px;
-    font-weight: 500;
   }
 
   .station + .station {

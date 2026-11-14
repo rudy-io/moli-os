@@ -118,6 +118,13 @@
   "maison.dehors.station_inconnue": "{id}: a device Moli does not know yet.",
   "maison.dehors.credit_previsions": "Forecast:",
   "maison.dehors.credit_mesures": "Measures: {names}",
+  "maison.dehors.sens_temperature": "Temperature",
+  "maison.dehors.sens_pression": "Pressure",
+  "maison.dehors.sens_luminosite": "Illuminance",
+  "maison.dehors.sens_batterie": "Battery",
+  "maison.dehors.sens_rafales": "Gusts",
+  "maison.dehors.sens_direction": "Wind direction",
+  "maison.dehors.sens_intensite": "Rain rate",
 
   "maison.pieces.titre": "Rooms",
   "maison.pieces.sous_titre": "Every room, its lights and what it senses.",
