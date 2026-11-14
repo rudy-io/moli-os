@@ -22,8 +22,8 @@
   const speed = $derived(speedChoice?.id === id ? speedChoice.speed : 'normal');
   const hasSlow = $derived(hasSlowCoverControl(d));
   const speedSegments = $derived([
-    { value: 'normal', label: icons ? '' : t('commun.volet.vitesse_normale'), icon: icons ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiSpeedometerMedium}"/></svg>` : null },
-    { value: 'slow', label: icons ? '' : t('commun.volet.vitesse_lente'), icon: icons ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiSpeedometerSlow}"/></svg>` : null, disabled: !hasSlow },
+    { value: 'normal', label: t('commun.volet.vitesse_normale'), icon: icons ? mdiSpeedometerMedium : null },
+    { value: 'slow', label: t('commun.volet.vitesse_lente'), icon: icons ? mdiSpeedometerSlow : null, disabled: !hasSlow },
   ]);
   const label = $derived(nameOf(id, name));
   const posPoint = $derived(positionPoint(d, true));
@@ -173,11 +173,6 @@
     background: var(--surface-2);
     border-radius: var(--r-md);
     color: var(--ink-2);
-    transition: background 0.35s ease, box-shadow 0.35s ease;
-  }
-  .cover.open {
-    background: linear-gradient(155deg, var(--warm-soft) 0%, var(--surface) 70%);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 25%, transparent);
   }
   .cover.standalone.open {
     border-color: color-mix(in srgb, var(--warm) 40%, var(--line));
@@ -192,12 +187,11 @@
     border-radius: 50%;
     background: var(--surface-3);
     color: var(--ink-2);
-    transition: all 0.35s ease;
+    transition: background-color 0.35s ease, color 0.35s ease;
   }
   .device-icon.open {
-    background: var(--warm);
-    color: #fff;
-    box-shadow: 0 0 0 6px var(--warm-glow), 0 6px 22px var(--warm-glow);
+    background: var(--warm-soft);
+    color: var(--warm-ink);
   }
   .device-icon.moving { animation: moving 1.6s ease-in-out infinite alternate; }
   .name {
@@ -262,6 +256,7 @@
   @media (prefers-reduced-motion: reduce) {
     button { transition: none; }
     button:not(:disabled):active { transform: none; }
+    .device-icon { transition: none; }
     .device-icon.moving { animation: none; }
   }
 </style>

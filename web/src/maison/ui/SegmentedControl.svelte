@@ -1,28 +1,42 @@
 <script>
-  import { spring } from 'svelte/motion';
+  import Icon from './Icon.svelte';
 
   /**
    * Segmented control with animated sliding indicator.
+   * The label always names the segment: compact shows the icon alone and keeps
+   * the text as its accessible name and tooltip.
    * @template T
    * @typedef {Object} Segment
    * @property {T} value - Value when selected
-   * @property {string} label - Display label
+   * @property {string} label - Display label (accessible name when compact)
    * @property {boolean} [disabled] - Disable this segment
-   * @property {string} [icon] - Optional icon component/path
+   * @property {string} [icon] - Optional icon path (MDI), drawn by Icon
    */
 
   /** @type {{ segments: Segment<any>[], value?: any, onchange?: (value: any) => void, label?: string, compact?: boolean }} */
   let { segments, value = $bindable(undefined), onchange, label, compact = false } = $props();
 
   let buttons = $state([]);
-  let indicator = spring({ left: 0, width: 0 }, { stiffness: 0.2, damping: 0.3 });
+  let group = $state();
+  let indicator = $state({ left: 0, width: 0, ready: false });
 
+  function measure() {
+    const selected = buttons[segments.findIndex((segment) => segment.value === value)];
+    if (!selected) return;
+    indicator = { left: selected.offsetLeft, width: selected.offsetWidth, ready: true };
+  }
+
+  // The pill follows the selected label, including after the text is re-laid
+  // out: language, viewport or the compact icons switch.
   $effect(() => {
-    const selectedIndex = segments.findIndex(s => s.value === value);
-    if (selectedIndex >= 0 && buttons[selectedIndex]) {
-      const btn = buttons[selectedIndex];
-      indicator.set({ left: btn.offsetLeft, width: btn.offsetWidth });
-    }
+    void compact;
+    measure();
+  });
+  $effect(() => {
+    if (!group) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    return () => observer.disconnect();
   });
 
   function select(segment) {
@@ -32,22 +46,29 @@
   }
 </script>
 
-<div class="segmented-control" class:compact role="group" aria-label={label}>
-  <div class="segments">
-    <span class="indicator" style:left="{$indicator.left}px" style:width="{$indicator.width}px"></span>
+<div class="segmented-control" class:compact role="group" aria-label={label} bind:this={group}>
+  <div class="segments" class:ready={indicator.ready}>
+    <span
+      class="indicator"
+      style:left="{indicator.left}px"
+      style:width="{indicator.width}px"></span>
     {#each segments as segment, i (segment.value)}
       <button
         bind:this={buttons[i]}
         type="button"
         class="segment"
         aria-pressed={value === segment.value}
+        aria-label={compact ? segment.label : undefined}
+        title={compact ? segment.label : undefined}
         disabled={segment.disabled}
         onclick={() => select(segment)}
       >
         {#if segment.icon}
-          {@html segment.icon}
+          <Icon path={segment.icon} size={20} />
         {/if}
-        <span>{segment.label}</span>
+        {#if !compact}
+          <span>{segment.label}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -79,7 +100,12 @@
     border-radius: 999px;
     box-shadow: 0 1px 3px rgb(0 0 0 / 12%), 0 2px 8px color-mix(in srgb, var(--warm) 30%, transparent);
     pointer-events: none;
-    transition: opacity 200ms ease;
+    opacity: 0;
+    transition: left 200ms cubic-bezier(0.2, 0.8, 0.2, 1), width 200ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 150ms ease;
+  }
+
+  .segments.ready .indicator {
+    opacity: 1;
   }
 
   .segment {
@@ -104,8 +130,14 @@
     transition: color 200ms ease;
   }
 
+  /* Readable even before the pill is measured (or if it never is). */
   .segment[aria-pressed="true"] {
     color: #fff;
+    background: var(--warm);
+  }
+
+  .segments.ready .segment[aria-pressed="true"] {
+    background: transparent;
   }
 
   .segment:disabled {
@@ -135,6 +167,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .indicator,
+    .segment {
+      transition: none;
+    }
+
     .segment:not(:disabled):active {
       transform: none;
     }

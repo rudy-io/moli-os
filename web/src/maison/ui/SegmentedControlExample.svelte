@@ -23,17 +23,17 @@
     {
       value: 'light',
       label: 'Jour',
-      icon: `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiWeatherSunny}"/></svg>`,
+      icon: mdiWeatherSunny,
     },
     {
       value: 'auto',
       label: 'Auto',
-      icon: `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiWeatherCloudy}"/></svg>`,
+      icon: mdiWeatherCloudy,
     },
     {
       value: 'dark',
       label: 'Nuit',
-      icon: `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiWeatherNight}"/></svg>`,
+      icon: mdiWeatherNight,
     },
   ];
 </script>
