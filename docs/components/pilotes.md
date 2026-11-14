@@ -1076,6 +1076,63 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   reviennent, 15 s au plus), sinon les ampoules (allumées puis réglées) ; aucune ampoule
   joignable sans relais → refus « coupée à l'interrupteur ».
 
+## `dehors` : la météo dehors, mesurée ou prévue (`crates/moli-outdoor`, #210)
+
+Pilote interne, lancé par Moli dès que `moli.toml` déclare `[outdoor]` (pas de `[[driver]]`,
+l'id `dehors` est réservé). Sans cette section, rien ne change : la page Dehors lit
+`outdoor.weather` de `home.json` comme avant.
+
+```toml
+[outdoor]
+forecast = ["meteo:api.open-meteo.com:443", "air:air-quality-api.open-meteo.com:443"]  # un id ou une liste
+forecast_stale_after = "1h"   # facultatif : 30 min par défaut
+
+[[outdoor.station]]           # les stations, par ordre de préférence
+device = "z2m:0x…"
+stale_after = "15m"           # facultatif : 30 min par défaut
+
+[[outdoor.station]]
+device = "infoclimat:…"       # une station lente écrit sa propre durée
+stale_after = "2h"
+```
+
+Il publie **un** appareil, `dehors:meteo`, en lecture seule (il n'accepte aucun ordre et n'en
+transmet aucun). Ses `members` sont les sources.
+
+- **Les sens** : `temperature`, `humidity`, `pressure`, `illuminance`, `wind_speed`,
+  `wind_gust`, `wind_direction`, `rain_rate`, `rain_today`, `uv_index`, chacun sous la clé de
+  son nom, s'il a au moins une source. Dans une source, le point retenu pour un sens est celui
+  qui porte ce sens **et** le nom du sens (`temperature`), sinon le seul qui porte ce sens
+  (`wind_gusts` d'Open-Meteo pour `wind_gust`). Plusieurs sans le bon nom (une température,
+  une ressentie, un point de rosée) : la source ne donne pas ce sens, et le journal le dit.
+- **Une unité par sens** : celle du sens (`Semantic::fixed_unit`), sinon celle de la première
+  source qui le donne. Rien n'est converti : une source dans une autre unité est écartée pour
+  ce sens, et le démarrage le dit. Les pilotes convertissent chez eux.
+- **Le choix**, sens par sens : la mesure **fraîche** de la première station qui l'a, sinon
+  la prévision fraîche, sinon la dernière valeur connue, quelle que soit sa source. Il y a donc
+  une valeur dès qu'une source a parlé une fois. Frais = relevé depuis moins de `stale_after`.
+- **L'âge** : la valeur garde l'heure du relevé de sa source, pas celle de la recopie ; la règle
+  `stale` des automatismes marche telle quelle. Quand une source relit la même valeur, l'heure
+  avance aussi (dans la minute).
+- **La source** : `<clé>_source` (texte, lecture seule, sens `config`) porte l'identifiant de
+  l'appareil source. `stations` et `forecast` (texte, sens `config`) listent les sources
+  (ids séparés par des virgules) : la page Dehors s'en sert pour « mesuré » ou « prévu ».
+- **Joignable** tant qu'une de ses sources l'est.
+- **Rien à relire en boucle** : le pilote suit les changements de ses sources ; une horloge
+  par minute fait seulement passer une source de fraîche à ancienne.
+
+**Le repli vers la prévision est un choix, pas une sécurité.** Une prévision peut annoncer
+20 km/h pendant une rafale à 70. Un automatisme qui protège quelque chose exige la mesure :
+
+```json
+{ "type": "if", "all": true, "rules": [
+  { "kind": "state", "point": "dehors:meteo/wind_speed", "op": "gt", "value": 40 },
+  { "kind": "state", "point": "dehors:meteo/wind_speed_source", "op": "eq", "value": "z2m:0x…" }
+] }
+```
+
+Sans la seconde règle, la prévision suffit à relever le store ; avec, seule la station le fait.
+
 ## `presence` : qui est à la maison (`crates/moli-presence`)
 
 - **Couvre** : la présence de chaque personne d'après le Wi-Fi de son téléphone, en local

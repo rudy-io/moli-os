@@ -2540,17 +2540,31 @@ impl Hub {
     /// Records a value. Unknown devices/points are ignored (the model only
     /// holds what drivers declared). Only actual changes are broadcast.
     pub(crate) fn set_state(&self, device: &DeviceId, key: &str, value: Value) {
-        self.record_state(device, key, value, false);
+        self.record_state(device, key, value, false, None);
+    }
+
+    /// Like `set_state`, but the value keeps the time it was read at, not
+    /// the time it is recorded: a value copied from another device (the
+    /// « Dehors » weather) is as old as its source's reading.
+    pub(crate) fn set_state_at(&self, device: &DeviceId, key: &str, value: Value, ts: u64) {
+        self.record_state(device, key, value, false, Some(ts));
     }
 
     /// Like `set_state`, but always broadcast: for points that are
     /// occurrences (button presses), where the same value twice is two events.
     pub(crate) fn pulse_state(&self, device: &DeviceId, key: &str, value: Value) {
-        self.record_state(device, key, value, true);
+        self.record_state(device, key, value, true, None);
     }
 
-    fn record_state(&self, device: &DeviceId, key: &str, value: Value, always: bool) {
-        let ts = now_ms();
+    fn record_state(
+        &self,
+        device: &DeviceId,
+        key: &str,
+        value: Value,
+        always: bool,
+        at: Option<u64>,
+    ) {
+        let ts = at.unwrap_or_else(now_ms);
         let event = {
             let mut model = self.write();
             let Some(spec) = model.devices.get(device).and_then(|d| d.point(key)) else {
@@ -2563,7 +2577,13 @@ impl Hub {
                 .get_mut(device)
                 .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
-            let changed = always || first_live || states.get(&key).is_none_or(|s| s.value != value);
+            // A copied value also tells when its reading got newer: its age is
+            // what it says.
+            let changed = always
+                || first_live
+                || states
+                    .get(&key)
+                    .is_none_or(|s| s.value != value || (at.is_some() && s.ts != ts));
             states.insert(
                 key.clone(),
                 Sample {
