@@ -5,6 +5,8 @@
   import { t } from '../../lib/i18n.svelte.js';
   import { hub } from '../../lib/hub.svelte.js';
   import Icon from './Icon.svelte';
+  import Slider from './Slider.svelte';
+  import SegmentedControl from './SegmentedControl.svelte';
   import { canWrite, quantize, positionPoint } from '../lib/capabilities.js';
   import { coverCommands, coverPositionTarget, hasSlowCoverControl } from '../lib/cover-controls.js';
   import { completionGuard } from '../lib/completion-guard.js';
@@ -19,6 +21,10 @@
   let speedChoice = $state(null);
   const speed = $derived(speedChoice?.id === id ? speedChoice.speed : 'normal');
   const hasSlow = $derived(hasSlowCoverControl(d));
+  const speedSegments = $derived([
+    { value: 'normal', label: icons ? '' : t('commun.volet.vitesse_normale'), icon: icons ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiSpeedometerMedium}"/></svg>` : null },
+    { value: 'slow', label: icons ? '' : t('commun.volet.vitesse_lente'), icon: icons ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="${mdiSpeedometerSlow}"/></svg>` : null, disabled: !hasSlow },
+  ]);
   const label = $derived(nameOf(id, name));
   const posPoint = $derived(positionPoint(d, true));
   const reported = $derived(posPoint ? value(id, posPoint.key) : null);
@@ -60,14 +66,14 @@
   function selectSpeed(next) {
     if (next === 'normal' || next === 'slow' && hasSlow) speedChoice = { id, speed: next };
   }
-  function previewPosition(event) {
-    if (positionWritable && pos != null) dragging = { id, key: positionTarget.point.key, speed, value: quantize(Number(event.currentTarget.value), range) };
+  function previewPosition(v) {
+    if (positionWritable && pos != null) dragging = { id, key: positionTarget.point.key, speed, value: quantize(v, range) };
   }
-  function setPosition(event) {
+  function setPosition(v) {
     const validTarget = !dragging || sameTarget;
     dragging = null;
     if (!validTarget || !positionWritable || pos == null) return;
-    const next = quantize(Number(event.currentTarget.value), range);
+    const next = quantize(v, range);
     if (next != null && next !== pos) return submit(positionTarget.point.key, next, label);
   }
   function sendOrder(command, key) {
@@ -95,7 +101,7 @@
   };
 </script>
 
-<div class="cover" class:standalone class:icons title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
+<div class="cover" class:standalone class:icons class:open={live && pos > 0} title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
   <div class="heading">
     <span class="device-icon" class:open={live && pos > 0} class:moving={live && !!going}>
       <Icon name={live ? 'shutter' : 'offline'} size={24} />
@@ -126,25 +132,30 @@
     </div>
   {/if}
   {#if hasSlow || speed === 'slow'}
-    <div class="speed" role="group" aria-label={t('commun.volet.vitesse_prochaine')}>
-      {#if !icons}<span>{t('commun.volet.vitesse')}</span>{/if}
-      <div class="segments">
-        <button type="button" aria-pressed={speed === 'normal'} onclick={() => selectSpeed('normal')}
-          title={icons ? t('commun.volet.vitesse_normale') : undefined} aria-label={icons ? t('commun.volet.vitesse_normale') : undefined}>
-          {#if icons}<Icon path={mdiSpeedometerMedium} size={20} />{:else}{t('commun.volet.vitesse_normale')}{/if}
-        </button>
-        <button type="button" aria-pressed={speed === 'slow'} disabled={!hasSlow} onclick={() => selectSpeed('slow')}
-          title={icons ? t('commun.volet.vitesse_lente') : undefined} aria-label={icons ? t('commun.volet.vitesse_lente') : undefined}>
-          {#if icons}<Icon path={mdiSpeedometerSlow} size={20} />{:else}{t('commun.volet.vitesse_lente')}{/if}
-        </button>
-      </div>
+    <div class="speed-wrapper">
+      {#if !icons}<span class="speed-label">{t('commun.volet.vitesse')}</span>{/if}
+      <SegmentedControl
+        segments={speedSegments}
+        value={speed}
+        onchange={(value) => selectSpeed(value)}
+        label={t('commun.volet.vitesse_prochaine')}
+        compact={icons}
+      />
     </div>
   {/if}
-  {#if positionWritable}
-    <label class="position">
+  {#if positionWritable && pos != null}
+    <div class="position">
       {#if !icons}<span>{t('commun.volet.position')}</span>{/if}
-      <input type="range" min={range.first} max={range.last} step={range.step} value={shown ?? range.first} disabled={pos == null} oninput={previewPosition} onchange={setPosition} aria-label={t('commun.volet.ouverture', { label })} />
-    </label>
+      <Slider
+        min={range.first}
+        max={range.last}
+        step={range.step}
+        value={shown ?? range.first}
+        label={t('commun.volet.ouverture', { label })}
+        onlive={previewPosition}
+        oncommit={setPosition}
+      />
+    </div>
   {/if}
   {#if feedback}
     <p class="feedback" role="status" title={icons ? t(`commun.volet.feedback.${feedback}`) : undefined} aria-label={icons ? t(`commun.volet.feedback.${feedback}`) : undefined}>
@@ -162,10 +173,32 @@
     background: var(--surface-2);
     border-radius: var(--r-md);
     color: var(--ink-2);
+    transition: background 0.35s ease, box-shadow 0.35s ease;
+  }
+  .cover.open {
+    background: linear-gradient(155deg, var(--warm-soft) 0%, var(--surface) 70%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 25%, transparent);
+  }
+  .cover.standalone.open {
+    border-color: color-mix(in srgb, var(--warm) 40%, var(--line));
   }
   .heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .device-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: var(--r-sm); background: var(--surface-3); color: var(--ink-2); }
-  .device-icon.open { background: var(--warm-soft); color: var(--warm-ink); }
+  .device-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--ink-2);
+    transition: all 0.35s ease;
+  }
+  .device-icon.open {
+    background: var(--warm);
+    color: #fff;
+    box-shadow: 0 0 0 6px var(--warm-glow), 0 6px 22px var(--warm-glow);
+  }
   .device-icon.moving { animation: moving 1.6s ease-in-out infinite alternate; }
   .name {
     flex: 1;
@@ -184,6 +217,9 @@
     font-weight: 500;
     color: var(--ink-2);
     font-size: 13px;
+  }
+  .cover.open small {
+    color: var(--warm-ink);
   }
 
   .access { font-size: 13px; max-width: 100%; }
@@ -212,12 +248,8 @@
   @media (hover: hover) { button:not(:disabled):hover { background: var(--surface-3); } }
 
   .position { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-  .position input { flex: 1; min-width: 0; min-height: 44px; accent-color: var(--cool); }
-  .speed { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-  .speed > span { font-size: 12px; color: var(--ink-2); }
-  .segments { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-sm); background: var(--surface-3); }
-  .segments button { min-height: 44px; min-width: 60px; border-color: transparent; background: transparent; }
-  .segments button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+  .speed-wrapper { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .speed-label { font-size: 12px; color: var(--ink-2); }
   /* Room preference: compact icons without shrinking the touch targets. */
   .icons { display: flex; flex-wrap: wrap; align-items: center; padding: 8px 10px; gap: 8px; }
   .icons .actions { flex-wrap: wrap; }
