@@ -15,6 +15,7 @@
   --line: #e1e5ec;
   --warm: #f0a53a;
   --warm-ink: #8a4b06;
+  --warm-deep: #3a2a10; /* ink on solid --warm */
   --warm-soft: #fff2dc;
   --warm-glow: rgb(240 165 58 / 38%);
   --sun: #e8b931;
@@ -55,6 +56,7 @@
   --line: #252b37;
   --warm: #f5ae4c;
   --warm-ink: #ffd49a;
+  --warm-deep: #3a2a10; /* ink on solid --warm */
   --warm-soft: #33270f;
   --warm-glow: rgb(245 174 76 / 30%);
   --cool: #7e9dff;

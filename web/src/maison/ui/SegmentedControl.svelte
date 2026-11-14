@@ -132,7 +132,7 @@
 
   /* Readable even before the pill is measured (or if it never is). */
   .segment[aria-pressed="true"] {
-    color: #fff;
+    color: var(--warm-deep);
     background: var(--warm);
   }
 
