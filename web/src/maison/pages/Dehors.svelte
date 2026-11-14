@@ -1,16 +1,31 @@
 <script>
-  import { home, value, num, isOn, reachable, device, since, nameOf, relative } from '../lib/home.svelte.js';
+  import { home, value, num, isOn, reachable, device, since, nameOf, relative, roomList } from '../lib/home.svelte.js';
   import { OUTSIDE, idsOf, pick, originOf, measures, compass } from '../lib/outside.js';
+  import { outdoorView } from '../lib/outdoor.js';
   import { weatherOf } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import LightTile from '../ui/LightTile.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
+  import RoomCard from '../ui/RoomCard.svelte';
 
   const out = $derived(home.config?.outdoor ?? {});
   const w = $derived(out.weather);
   const air = $derived(out.air);
-  const pool = $derived(out.pool);
+  const outsideCams = $derived((home.config?.favorites?.cameras ?? []).filter((c) => !/sonnette|doorbell/i.test(c.name)));
+  // The rooms outside, as `/api/home` says (#217): what they hold shows here too.
+  const view = $derived(
+    outdoorView({
+      rooms: roomList(),
+      layoutRooms: home.config?.rooms,
+      pool: out.pool ?? null,
+      pump: out.pool_pump ?? null,
+      garden: out.garden_lights ?? [],
+      cams: outsideCams,
+      on: isOn,
+    }),
+  );
+  const pool = $derived(view.pool);
   const v = (id, key) => value(id, key);
 
   // « Dehors » (#210): with `[outdoor]`, Moli builds `dehors:meteo`, fed by the
@@ -103,8 +118,6 @@
   );
   const pumpId = $derived(out.pool_pump);
   const pumpKnown = $derived(pumpId && reachable(pumpId) && v(pumpId, 'switch_1') != null);
-
-  const outsideCams = $derived((home.config?.favorites?.cameras ?? []).filter((c) => !/sonnette|doorbell/i.test(c.name)));
 
   const sunPos = $derived.by(() => {
     const rise = Date.parse(v(w, 'sunrise'));
@@ -220,13 +233,13 @@
       </section>
     {/if}
 
-    {#if out.garden_lights?.length}
+    {#if view.garden.length}
       <section class="card">
         <div class="card-head"><h2><Icon name="flower-outline" size={18} />{t('maison.dehors.jardin')}</h2>
-          <span class="muted">{out.garden_lights.filter((l) => isOn(l.id)).length ? t('maison.dehors.eclaire') : t('maison.dehors.noir')}</span>
+          <span class="muted">{view.garden.filter((l) => isOn(l.id)).length ? t('maison.dehors.eclaire') : t('maison.dehors.noir')}</span>
         </div>
         <div class="lights">
-          {#each out.garden_lights as l (l.id)}
+          {#each view.garden as l (l.id)}
             <LightTile id={l.id} name={l.name} icon="light" compact />
           {/each}
         </div>
@@ -234,10 +247,21 @@
     {/if}
   </div>
 
-  {#if outsideCams.length}
+  {#if view.rooms.length}
+    <section class="rooms" aria-label={t('maison.dehors.pieces')}>
+      {#each view.rooms as room (room.name)}
+        <div class="slot"><RoomCard {room} /></div>
+      {/each}
+    </section>
+  {/if}
+
+  {#if outsideCams.length || view.cams.length}
     <section class="cams">
       {#each outsideCams as cam (cam.id)}
         <CameraTile id={cam.id} name={cam.name} refresh={cam.refresh} battery={cam.battery} onopen={() => (location.hash = '#/cameras')} />
+      {/each}
+      {#each view.cams as cam (cam.id)}
+        <CameraTile id={cam.id} name={nameOf(cam.id)} onopen={() => (location.hash = '#/cameras')} />
       {/each}
     </section>
   {/if}
@@ -453,6 +477,17 @@
   .lights {
     display: grid;
     gap: 10px;
+  }
+
+  .rooms {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+    gap: 20px;
+    align-items: start;
+  }
+
+  .slot {
+    min-width: 0;
   }
 
   .cams {

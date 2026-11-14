@@ -92,9 +92,15 @@ function applyEvent(e) {
     case 'availability':
       if (hub.devices[e.device]) hub.devices[e.device].online = e.online;
       break;
-    case 'label_changed':
-      if (hub.devices[e.device]) hub.devices[e.device].label = e.label;
+    case 'label_changed': {
+      const d = hub.devices[e.device];
+      if (!d) break;
+      const moved = (d.label?.room ?? null) !== (e.label?.room ?? null);
+      d.label = e.label;
+      // A new room may be outside: `/api/home` says which (#217).
+      if (moved) hub.layoutRevision += 1;
       break;
+    }
     case 'driver_registered':
       applyDriverRegistration(hub.drivers, e);
       hub.driverRevision += 1;
