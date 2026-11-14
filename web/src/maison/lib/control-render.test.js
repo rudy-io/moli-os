@@ -24,7 +24,7 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon', 'AlarmCard']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
@@ -960,4 +960,51 @@ test('a heat pump and its circuit are heating and stay off the room cards; a the
   assert.deepEqual(room.climates.map((d) => d.id), [thermostat.id]);
   hub.devices = { [pump.id]: pump, [circuit.id]: circuit };
   assert.deepEqual(home.roomList(), []);
+});
+
+test('an alarm panel shows its arm mode, health and a switch per setting', () => {
+  const html = show('AlarmCard', [
+    point('system_arm_type', enumeration('disarmed', 'armed', 'home')),
+    point('bat_status', number(0, 100, 1), false),
+    point('gsm_status', enumeration('Normal'), false),
+    point('dc_status', enumeration('normal'), false),
+    point('inside_siren_en', { type: 'binary' }),
+    point('arm_delay', number(0, 300, 1)),
+    point('inside_siren_sound', enumeration('ON', 'OFF')),
+  ], {
+    system_arm_type: 'disarmed',
+    bat_status: 92,
+    gsm_status: 'Normal',
+    dc_status: 'normal',
+    inside_siren_en: true,
+    arm_delay: 30,
+    inside_siren_sound: 'ON',
+  });
+  // The three arm modes, the current one pressed.
+  assert.match(html, /role="group"/);
+  assert.match(html, /aria-pressed="true"/);
+  assert.match(html, />Désarmée</);
+  assert.match(html, />Armée</);
+  assert.match(html, />Maison</);
+  // Health and the settings the panel takes, in the house's words.
+  assert.match(html, /92 %/);
+  assert.match(html, /GSM OK/);
+  assert.match(html, /Armement dans 30 s/);
+  assert.match(html, /Réglages/);
+  assert.match(html, /Délai d'armement/);
+  assert.equal(buttons(html).filter((tag) => /role="switch"/.test(tag)).length, 2);
+});
+
+test('an alarm panel reaches the house and its room, not the sensors', () => {
+  const panel = {
+    id: 'fixture:panel', native_name: 'Panel', model: null, label: { room: 'Hall' }, online: true, members: [],
+    points: [point('system_arm_type', enumeration('disarmed', 'armed', 'home'))],
+    state: { system_arm_type: { value: 'disarmed' } },
+  };
+  hub.devices = { [panel.id]: panel };
+  assert.equal(home.deviceKind(panel), 'alarm');
+  assert.deepEqual(home.alarmDevices().map((d) => d.id), [panel.id]);
+  const room = home.roomList()[0];
+  assert.deepEqual(room.alarms.map((d) => d.id), [panel.id]);
+  assert.equal(room.sensors.length, 0);
 });

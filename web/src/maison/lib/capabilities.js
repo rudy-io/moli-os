@@ -74,6 +74,19 @@ export function impulsePoints(device) {
     && point.kind.values[0] === 'cycle') ?? [];
 }
 
+/** A security panel's arm mode. Tuya's standard `system_arm_type` says it;
+ *  any other enum that names both `disarmed` and `armed` is taken as one too.
+ *  The value is the panel's own word (`disarmed`, `armed`, `home`). */
+export function alarmPoint(device) {
+  const points = device?.points ?? [];
+  const panel = (point) =>
+    point?.kind?.type === 'enum' &&
+    Array.isArray(point.kind.values) &&
+    point.kind.values.includes('disarmed') &&
+    point.kind.values.includes('armed');
+  return points.find((point) => point.key === 'system_arm_type' && panel(point)) ?? points.find(panel) ?? null;
+}
+
 /** Reading power and commanding it are separate capabilities. */
 export function powerPoint(device, writable = true) {
   // A shutter's state is a motor order, never an on/off switch.

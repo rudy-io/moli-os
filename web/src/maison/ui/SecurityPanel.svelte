@@ -1,8 +1,9 @@
 <script>
   import { untrack } from 'svelte';
-  import { hub, home, device, value, since, nameOf, roomOf, hidden, doorOpen, isOn, clock, relative } from '../lib/home.svelte.js';
+  import { hub, home, device, value, since, nameOf, roomOf, hidden, doorOpen, alarmDevices, clock, relative } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import AlarmCard from './AlarmCard.svelte';
 
   /** The house's safety at a glance: the doors, what moves, the alarm. A
    *  sensor gone silent says so: a dead battery, an unknown state or a
@@ -110,20 +111,14 @@
       .sort((a, b) => Number(a.outside) - Number(b.outside) || Number(b.moving) - Number(a.moving)),
   );
 
-  // The alarm's switches (the « Sécurité » room of the layout); offline: unknown.
-  const alarm = $derived(
-    Object.values(hub.devices)
-      .filter((d) => !hidden(d.id) && roomOf(d) === 'Sécurité')
-      .map((d) => ({ id: d.id, name: nameOf(d.id), on: d.online === false ? null : isOn(d.id), ringing: /en cours/i.test(nameOf(d.id)) })),
-  );
+  // The house's security panels, wherever they are.
+  const alarms = $derived(alarmDevices().map((d) => ({ id: d.id, name: nameOf(d.id) })));
 
   const summary = $derived.by(() => {
     const open = doors.filter((d) => d.open === true);
     const unknown = doors.filter((d) => d.silent);
-    const ringing = alarm.find((a) => a.on === true && a.ringing);
     const inside = sensors.filter((s) => s.moving && !s.outside);
     const muteSensors = sensors.filter((s) => s.silent).length;
-    if (ringing) return { tone: 'alert', icon: 'alert', text: t('salon.securite.alarme', { nom: ringing.name }) };
     if (open.length) return { tone: 'warm', icon: 'door-open', text: t('salon.securite.ouvertes', { count: open.length, nom: open[0].name }) };
     if (unknown.length)
       return { tone: 'warm', icon: 'warning', text: t('salon.securite.inconnues', { count: unknown.length, nom: unknown[0].name }) };
@@ -180,15 +175,9 @@
     </ul>
   {/if}
 
-  {#if alarm.length}
-    <div class="alarm">
-      {#each alarm as a (a.id)}
-        <span class="chip" class:alert={a.on === true && a.ringing} class:good={a.on === true && !a.ringing}>
-          <Icon name={a.ringing ? 'alert' : 'lock'} size={14} />{a.name} : {a.on == null ? '?' : a.on ? t('salon.oui') : t('salon.non')}
-        </span>
-      {/each}
-    </div>
-  {/if}
+  {#each alarms as a (a.id)}
+    <AlarmCard id={a.id} name={a.name} compact />
+  {/each}
 </section>
 
 <style>
@@ -313,11 +302,5 @@
   .moves li.silent .state {
     color: var(--ink-3);
     font-style: italic;
-  }
-
-  .alarm {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
   }
 </style>
