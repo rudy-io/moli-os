@@ -71,7 +71,7 @@
   "maison.air.mauvais": "Mauvais",
 
   "maison.dehors.titre": "Dehors",
-  "maison.dehors.sous_titre": "Le temps qu’il fait, l’air, la piscine et le jardin.",
+  "maison.dehors.sous_titre": "Le temps qu’il fait, l’air et tout ce qui est dehors.",
   "maison.dehors.ressenti": "Ressenti {feels}° · max {max}° · min {min}°",
   "maison.dehors.humidite": "Humidité",
   "maison.dehors.vent": "Vent",
@@ -103,7 +103,6 @@
   "maison.dehors.orp_faible": "Désinfection faible",
   "maison.dehors.orp_forte": "Désinfection forte",
   "maison.dehors.orp_saine": "Eau saine",
-  "maison.dehors.pieces": "Les pièces du dehors",
   "maison.dehors.jardin": "Jardin",
   "maison.dehors.eclaire": "Éclairé",
   "maison.dehors.noir": "Dans le noir",

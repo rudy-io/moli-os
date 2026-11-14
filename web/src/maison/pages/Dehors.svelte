@@ -247,15 +247,12 @@
         </div>
       </section>
     {/if}
-  </div>
 
-  {#if view.rooms.length}
-    <section class="rooms" aria-label={t('maison.dehors.pieces')}>
-      {#each view.rooms as room (room.name)}
-        <div class="slot"><RoomCard {room} /></div>
-      {/each}
-    </section>
-  {/if}
+    <!-- The rooms outside (#217), among the other cards. -->
+    {#each view.rooms as room (room.name)}
+      <div class="slot"><RoomCard {room} /></div>
+    {/each}
+  </div>
 
   {#if outsideCams.length || view.cams.length}
     <section class="cams">
@@ -479,13 +476,6 @@
   .lights {
     display: grid;
     gap: 10px;
-  }
-
-  .rooms {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
-    gap: 20px;
-    align-items: start;
   }
 
   .slot {
