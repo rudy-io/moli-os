@@ -138,8 +138,9 @@
     <div class="now">
       <svg class="sky-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={sky.icon} /></svg>
       <div>
-        <strong class="temp num">{num(val('temperature', w), 0)}°</strong>
-        <span class="label">{sky.label} {@render badge('temperature')}</span>
+        <!-- The badge sits by the temperature it qualifies, not by the sky (a forecast). -->
+        <span class="temp-line"><strong class="temp num">{num(val('temperature', w), 0)}°</strong>{@render badge('temperature')}</span>
+        <span class="label">{sky.label}</span>
         <span class="muted">{t('maison.dehors.ressenti', { feels: num(v(w, 'feels_like'), 0), max: num(v(w, 'today_max'), 0), min: num(v(w, 'today_min'), 0) })}</span>
       </div>
     </div>
@@ -310,6 +311,17 @@
     font-weight: 250;
     letter-spacing: -0.04em;
     line-height: 0.95;
+  }
+
+  .temp-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 4px;
+  }
+
+  .temp-line .why {
+    flex-basis: 100%;
   }
 
   .label {
