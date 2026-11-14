@@ -80,6 +80,19 @@ impl Driver for FakePlug {
                         true,
                         Semantic::Control,
                     ),
+                    // A credential point: not readable nor writable through the
+                    // normal surfaces; only the redacted command path reaches it.
+                    PointSpec {
+                        key: "secret_code".into(),
+                        label: "secret_code".into(),
+                        kind: Kind::Text,
+                        access: Access {
+                            read: false,
+                            write: false,
+                        },
+                        unit: None,
+                        semantic: Semantic::Config,
+                    },
                 ],
             });
             ctx.set_state(&id, "state", Value::Bool(false));
@@ -204,6 +217,103 @@ async fn invalid_writes_are_refused_and_journaled() {
     let journal = hub.journal(10);
     assert_eq!(journal.len(), 3);
     assert!(journal.iter().all(|e| matches!(e.outcome, Outcome::Err(_))));
+}
+
+#[tokio::test]
+async fn redacted_command_reaches_driver_but_journal_keeps_null() {
+    let (hub, _cancel) = start(false).await;
+
+    // Normal writes to a read-only point are refused.
+    let refused = hub
+        .command(
+            &point("secret_code"),
+            Value::from("abc123"),
+            Origin::Ui,
+            Some("test".into()),
+        )
+        .await;
+    assert_eq!(refused, Err(CommandError::ReadOnly));
+
+    // The redacted path bypasses the access refusal and reaches the driver.
+    hub.command_redacted(
+        &point("secret_code"),
+        Value::from("abc123"),
+        Origin::Ui,
+        Some("test".into()),
+    )
+    .await
+    .unwrap();
+
+    // The driver got the real value (it stores it as a normal state update)…
+    assert_eq!(
+        hub.state(&point("secret_code")).unwrap().value,
+        Value::from("abc123")
+    );
+    // …but the redacted journal entry carries no trace of the value.
+    // (journal() is newest-first: entry 0 is the redacted command.)
+    let journal = hub.journal(10);
+    assert_eq!(journal.len(), 2);
+    let Action::Command { value, .. } = &journal[0].action else {
+        panic!("expected a command action in the redacted journal entry");
+    };
+    assert_eq!(
+        *value,
+        Value::Null,
+        "redacted value must not reach the journal"
+    );
+}
+
+#[tokio::test]
+async fn redacted_command_refuses_points_that_are_not_internal_credentials() {
+    let (hub, _cancel) = start(false).await;
+
+    // A live writable point (Binary, OnOff) is not a credential point: the
+    // redacted path refuses it exactly like the normal read-only check.
+    let live = hub
+        .command_redacted(
+            &point("state"),
+            Value::Bool(true),
+            Origin::Ui,
+            Some("test".into()),
+        )
+        .await;
+    assert_eq!(live, Err(CommandError::ReadOnly));
+
+    // Nor a read-only point of another kind (Numeric, Power): the accepted
+    // shape is exactly Text + Config + read:false + write:false.
+    let numeric = hub
+        .command_redacted(
+            &point("power"),
+            Value::Int(5),
+            Origin::Ui,
+            Some("test".into()),
+        )
+        .await;
+    assert_eq!(numeric, Err(CommandError::ReadOnly));
+
+    // The internal credential point keeps working: the redacted value
+    // reaches the driver, and the journal entry stays null.
+    hub.command_redacted(
+        &point("secret_code"),
+        Value::from("def456"),
+        Origin::Ui,
+        Some("test".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        hub.state(&point("secret_code")).unwrap().value,
+        Value::from("def456")
+    );
+    let journal = hub.journal(1);
+    let Action::Command { value, .. } = &journal[0].action else {
+        panic!("expected a command action in the redacted journal entry");
+    };
+    assert_eq!(
+        *value,
+        Value::Null,
+        "redacted value must not reach the journal"
+    );
 }
 
 #[tokio::test]

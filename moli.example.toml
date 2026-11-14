@@ -211,6 +211,33 @@ base_topic = "zigbee2mqtt"
 # installation = 1234567                    # only when the account has several installations
 # redirect_uri = "vicare://oauth-callback/everest"   # only if the API key declares another
 
+# La voiture (son API officielle) : batterie, autonomie, recharge, puissance,
+# portes, mode vigie et les six commandes (charge, verrou, vigie). Le compte
+# se connecte une fois depuis le tableau de bord, réservé au propriétaire
+# (formulaire Tesla, code de la maison requis : l'adresse affichée s'y colle) ;
+# le jeton de rafraîchissement vit au coffre chiffré, jamais dans un fichier ;
+# la déconnexion l'efface du coffre.
+#
+# Le client public partagé de Tesla n'existe plus (2026) : une application
+# personnelle est requise. Crée-la sur developer.tesla.com (permissions
+# openid, offline_access, user_data, vehicle_device_data, vehicle_cmds),
+# enregistre-y une URI de redirection (par ex. https://example.com/moli-tesla —
+# la page n'a pas besoin d'exister : c'est l'adresse qui porte le code), puis
+# dépose ses identifiants au coffre : moli-os secrets set tesla client_id et
+# moli-os secrets set tesla client_secret (valeurs par un tube).
+# [[driver]]
+# id = "tesla"
+# kind = "tesla"
+#
+# [driver.options]
+# api_host = "fleet-api.prd.eu.vn.cloud.tesla.com" # l'API (Europe) ; Amérique du Nord / Asie : fleet-api.prd.na.vn.cloud.tesla.com, Chine : api.tesla.cn
+# auth_host = "auth.tesla.com"                     # la connexion et le point de jeton
+# redirect_uri = "https://example.com/moli-tesla"  # l'URI enregistrée sur l'application (obligatoire, identique)
+# partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
+# poll_charging_s = 300                            # lecture complète pendant la recharge
+# poll_idle_s = 600                                # éveillée et au repos (branchée sans charge y compris)
+# poll_asleep_s = 3600                             # endormie
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"
