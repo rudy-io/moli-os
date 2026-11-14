@@ -1783,6 +1783,7 @@ dependencies = [
  "moli-melcloud",
  "moli-moonraker",
  "moli-net",
+ "moli-outdoor",
  "moli-overkiz",
  "moli-philips",
  "moli-phones",
@@ -1812,6 +1813,20 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "moli-outdoor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "tokio",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

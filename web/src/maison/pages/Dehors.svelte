@@ -1,5 +1,6 @@
 <script>
-  import { home, value, num, isOn, reachable } from '../lib/home.svelte.js';
+  import { home, value, num, isOn, reachable, device, since, nameOf, relative } from '../lib/home.svelte.js';
+  import { OUTSIDE, idsOf, pick, originOf, measures, compass } from '../lib/outside.js';
   import { weatherOf } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
@@ -11,6 +12,44 @@
   const air = $derived(out.air);
   const pool = $derived(out.pool);
   const v = (id, key) => value(id, key);
+
+  // « Dehors » (#210): with `[outdoor]`, Moli builds `dehors:meteo`, fed by the
+  // stations' measures while they are fresh, else by the forecast. Without it,
+  // the page reads the forecast as before.
+  const fused = $derived(device(OUTSIDE) != null);
+  const stations = $derived(idsOf(v(OUTSIDE, 'stations')));
+  const forecasts = $derived(idsOf(v(OUTSIDE, 'forecast')));
+  /** The outside device's value for a meaning, else the forecast's own point. */
+  const val = (key, dev, devKey = key) => (fused && v(OUTSIDE, key) != null ? v(OUTSIDE, key) : v(dev, devKey));
+  let open = $state(null);
+
+  /** Where a value comes from, how old it is, and whether the fallback plays:
+   *  a station has the meaning but the forecast gave it. */
+  function origin(key) {
+    const source = v(OUTSIDE, `${key}_source`);
+    const kind = originOf(source, stations);
+    let quiet = null;
+    if (kind === 'forecast') {
+      const semantic = device(OUTSIDE)?.points.find((p) => p.key === key)?.semantic;
+      for (const id of stations) {
+        const p = pick(device(id)?.points, semantic, key);
+        if (!p) continue;
+        const ts = since(id, p.key);
+        quiet = ts ? t('maison.dehors.station_muette', { age: relative(ts, home.now) }) : t('maison.dehors.station_sans_mesure');
+        break;
+      }
+    }
+    return { kind, name: source ? nameOf(source) : '', age: relative(since(OUTSIDE, key), home.now), quiet };
+  }
+
+  const windFrom = $derived(compass(val('wind_direction', w)));
+  const show = (id, p) => {
+    const x = v(id, p.key);
+    if (x == null) return '—';
+    if (p.kind?.type === 'binary') return x ? t('commun.oui') : t('commun.non');
+    const n = Number(x);
+    return `${num(n, Number.isInteger(n) ? 0 : 1)}${p.unit ? ` ${p.unit}` : ''}`;
+  };
 
   const day = $derived(v(w, 'daylight') !== false);
   const sky = $derived(weatherOf(v(w, 'weather_code'), day));
@@ -31,7 +70,7 @@
               : t('maison.air.mauvais'),
   );
   const aqiTone = $derived(aqi == null ? '' : aqi <= 40 ? 'good' : aqi <= 60 ? 'warm' : 'alert');
-  const uv = $derived(v(air, 'uv_index'));
+  const uv = $derived(val('uv_index', air));
   const uvWord = $derived(
     uv == null ? '' : uv < 3 ? t('maison.dehors.uv_faible') : uv < 6 ? t('maison.dehors.uv_modere') : uv < 8 ? t('maison.dehors.uv_eleve') : t('maison.dehors.uv_tres_eleve'),
   );
@@ -58,6 +97,20 @@
   });
 </script>
 
+{#snippet badge(key)}
+  {#if fused && v(OUTSIDE, key) != null}
+    {@const o = origin(key)}
+    {#if o.kind}
+      <button type="button" class="src {o.kind}" aria-expanded={open === key} onclick={() => (open = open === key ? null : key)}>
+        {o.kind === 'measured' ? t('maison.dehors.mesure') : o.quiet ? t('maison.dehors.prevu_repli') : t('maison.dehors.prevu')}
+      </button>
+      {#if open === key}
+        <em class="muted why">{o.name} · {o.age}{#if o.quiet} · {o.quiet}{/if}</em>
+      {/if}
+    {/if}
+  {/if}
+{/snippet}
+
 <div class="dehors">
   <header>
     <h1 class="page-title">{t('maison.dehors.titre')}</h1>
@@ -68,15 +121,18 @@
     <div class="now">
       <svg class="sky-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={sky.icon} /></svg>
       <div>
-        <strong class="temp num">{num(v(w, 'temperature'), 0)}°</strong>
-        <span class="label">{sky.label}</span>
+        <strong class="temp num">{num(val('temperature', w), 0)}°</strong>
+        <span class="label">{sky.label} {@render badge('temperature')}</span>
         <span class="muted">{t('maison.dehors.ressenti', { feels: num(v(w, 'feels_like'), 0), max: num(v(w, 'today_max'), 0), min: num(v(w, 'today_min'), 0) })}</span>
       </div>
     </div>
     <div class="facts">
-      <div><Icon name="humidity" size={20} /><small>{t('maison.dehors.humidite')}</small><b class="num">{num(v(w, 'humidity'))} %</b></div>
-      <div><Icon name="wind" size={20} /><small>{t('maison.dehors.vent')}</small><b class="num">{num(v(w, 'wind_speed'))} km/h</b><em class="muted num">{t('maison.dehors.rafales', { speed: num(v(w, 'wind_gusts')) })}</em></div>
-      <div><Icon name="water" size={20} /><small>{t('maison.dehors.pluie_jour')}</small><b class="num">{num(v(w, 'today_rain'), 1)} mm</b><em class="muted num">{t('maison.dehors.risque', { pct: num(v(w, 'today_rain_chance')) })}</em></div>
+      <div><Icon name="humidity" size={20} /><small>{t('maison.dehors.humidite')} {@render badge('humidity')}</small><b class="num">{num(val('humidity', w))} %</b></div>
+      <div>
+        <Icon name="wind" size={20} /><small>{t('maison.dehors.vent')} {@render badge('wind_speed')}</small><b class="num">{num(val('wind_speed', w))} km/h{#if windFrom != null}<span class="muted cap"> {t('maison.dehors.cap').split(',')[windFrom]}</span>{/if}</b>
+        <em class="muted num">{t('maison.dehors.rafales', { speed: num(val('wind_gust', w, 'wind_gusts')) })}</em>
+      </div>
+      <div><Icon name="water" size={20} /><small>{t('maison.dehors.pluie_jour')} {@render badge('rain_today')}</small><b class="num">{num(val('rain_today', w, 'today_rain'), 1)} mm</b><em class="muted num">{t('maison.dehors.risque', { pct: num(v(w, 'today_rain_chance')) })}</em></div>
       <div><Icon name="sun-angle" size={20} /><small>{t('maison.dehors.soleil')}</small><b class="num">{hhmm(v(w, 'sunrise'))} → {hhmm(v(w, 'sunset'))}</b></div>
     </div>
     {#if sunPos != null}
@@ -89,11 +145,35 @@
       <div class="card-head"><h2><Icon name="leaf" size={18} />{t('maison.dehors.air')}</h2><span class="chip {aqiTone}">{aqiWord}</span></div>
       <div class="pairs">
         <div><small>{t('maison.dehors.indice')}</small><b class="num">{num(aqi)}</b></div>
-        <div><small>UV</small><b class="num">{num(uv, 0)}</b><em class="muted">{uvWord}</em></div>
+        <div><small>UV {@render badge('uv_index')}</small><b class="num">{num(uv, 0)}</b><em class="muted">{uvWord}</em></div>
         <div><small>{t('maison.dehors.particules')}</small><b class="num">{num(v(air, 'pm2_5'), 1)} µg/m³</b></div>
         <div><small>{t('maison.dehors.ozone')}</small><b class="num">{num(v(air, 'ozone'))} µg/m³</b></div>
       </div>
     </section>
+
+    {#if stations.length}
+      <section class="card">
+        <div class="card-head"><h2><Icon name="thermometer" size={18} />{t('maison.dehors.donnees_reelles')}</h2></div>
+        {#each stations as id (id)}
+          {@const d = device(id)}
+          <div class="station">
+            <div class="station-head">
+              <b>{nameOf(id)}</b>
+              {#if d && !reachable(id)}<span class="chip alert">{t('maison.dehors.injoignable')}</span>{/if}
+            </div>
+            {#if d}
+              <div class="pairs">
+                {#each measures(d) as p (p.key)}
+                  <div><small>{p.label}</small><b class="num">{show(id, p)}</b><em class="muted">{relative(since(id, p.key), home.now)}</em></div>
+                {/each}
+              </div>
+            {:else}
+              <p class="muted small">{t('maison.dehors.station_inconnue', { id })}</p>
+            {/if}
+          </div>
+        {/each}
+      </section>
+    {/if}
 
     {#if pool}
       <section class="card">
@@ -144,9 +224,15 @@
     </section>
   {/if}
 
-  {#if w || air}
+  {#if w || air || forecasts.length || stations.length}
     <!-- CC BY 4.0: the weather and air data credit their source. -->
-    <p class="credit">{t('maison.dehors.credit')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a></p>
+    <p class="credit">
+      {#if stations.length}
+        {#if w || air || forecasts.length}{t('maison.dehors.credit_previsions')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> · {/if}{t('maison.dehors.credit_mesures', { names: stations.map((id) => nameOf(id)).join(', ') })}
+      {:else}
+        {t('maison.dehors.credit')} <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>
+      {/if}
+    </p>
   {/if}
 </div>
 
@@ -291,6 +377,53 @@
 
   .pump {
     margin-top: 16px;
+  }
+
+  /* Where a value comes from: seen without hovering (tablets have none). */
+  .src {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border: 0;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 650;
+    vertical-align: middle;
+    cursor: pointer;
+  }
+
+  .src.measured {
+    color: var(--good);
+    background: color-mix(in srgb, var(--good) 14%, transparent);
+  }
+
+  .src.forecast {
+    color: var(--ink-3);
+    background: var(--surface-3);
+  }
+
+  .why {
+    display: block;
+    font-size: 12px;
+  }
+
+  .cap {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .station + .station {
+    margin-top: 16px;
+  }
+
+  .station-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
   }
 
   .lights {

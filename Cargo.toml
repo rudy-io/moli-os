@@ -55,6 +55,7 @@ moli-assistant = { path = "crates/moli-assistant" }
 moli-automation = { path = "crates/moli-automation" }
 moli-helpers = { path = "crates/moli-helpers" }
 moli-lights = { path = "crates/moli-lights" }
+moli-outdoor = { path = "crates/moli-outdoor" }
 moli-scenes = { path = "crates/moli-scenes" }
 moli-presence = { path = "crates/moli-presence" }
 moli-telegram = { path = "crates/moli-telegram" }
