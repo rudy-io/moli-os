@@ -9,6 +9,7 @@
   import ImpulseTile from './ImpulseTile.svelte';
   import ShutterIcon from './ShutterIcon.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
+  import AlarmCard from './AlarmCard.svelte';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys } from '../lib/capabilities.js';
   import { coverCommands } from '../lib/cover-controls.js';
@@ -365,6 +366,10 @@
       {/if}
     {/if}
   {/if}
+
+  {#each room.alarms as d (d.id)}
+    <AlarmCard id={d.id} compact />
+  {/each}
 
   {#each room.impulses as d (d.id)}
     <ImpulseTile id={d.id} {icons} />

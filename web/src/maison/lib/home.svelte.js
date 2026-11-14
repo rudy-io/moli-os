@@ -3,7 +3,7 @@
 
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
-import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
+import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints, alarmPoint } from './capabilities.js';
 import { coverPositionTarget } from './cover-controls.js';
 
 export { hub };
@@ -237,6 +237,10 @@ export const protectedRoom = (name) =>
  *  whether it is well (the « Parc » page). */
 export const watches = (d) => (d?.points ?? []).some((p) => p.semantic === 'alert');
 
+/** The security panels of the house, wherever they are (the dashboard, the
+ *  cameras' safety panel, their room). Hidden devices stay hidden. */
+export const alarmDevices = () => Object.values(hub.devices).filter((d) => !hidden(d.id) && deviceKind(d) === 'alarm');
+
 export function hidden(id) {
   return (home.config?.hidden ?? []).includes(id);
 }
@@ -272,6 +276,7 @@ export function deviceKind(d) {
   if (d.camera) return 'camera';
   const known = knownDeviceKind(d);
   if (known) return known;
+  if (alarmPoint(d)) return 'alarm';
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
   // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
   if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
@@ -323,6 +328,7 @@ export function roomList() {
         impulses: by('impulse'),
         climates: by('climate'),
         media: by('tv', 'speaker'),
+        alarms: by('alarm'),
         sensors: [...by('sensor', 'plant', 'camera', 'printer'), ...by('plug').filter((d) => quiet(d.id))],
         lit: by('light').filter((d) => isOn(d.id)).length,
         opened: by('cover').filter((d) => {

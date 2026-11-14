@@ -10,6 +10,7 @@ export const CATEGORIES = [
   // Shutters and what opens like them (a gate, a garage door on an impulse relay).
   { id: 'volets', label: 'commun.filtre.volets', icon: 'shutter', kinds: ['cover', 'impulse'] },
   { id: 'capteurs', label: 'commun.filtre.capteurs', icon: 'thermometer', kinds: ['sensor', 'plant'] },
+  { id: 'alarme', label: 'commun.filtre.alarme', icon: 'shield', kinds: ['alarm'] },
   { id: 'cameras', label: 'commun.filtre.cameras', icon: 'cctv', kinds: ['camera'] },
   { id: 'medias', label: 'commun.filtre.medias', icon: 'tv', kinds: ['tv', 'speaker'] },
 ];

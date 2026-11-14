@@ -140,3 +140,19 @@
   été vu quand le robot s'est arrêté hors de sa base ; il a disparu une fois remis en charge, sens inconnu.
 - Tableau de bord : une carte sur l'accueil, avec seulement les ordres possibles dans l'état du robot. Rendu vérifié ; boutons Démarrer, Faire sonner et aspiration cliqués sur la vraie page, ordres interceptés, et ces mêmes ordres envoyés au robot par l'API.
 - Reste : carte et zones, langues, programmation, Serie 75 S et 95 S.
+
+## Centrales d'alarme : Daewoo SA501
+
+- Catégorie Tuya `mal`, protocole 3.3, **en local** une fois la clé obtenue. Le mode
+  d'armement est `system_arm_type` (`disarmed`, `armed`, `home`) ; la batterie
+  (`bat_status`), le secteur (`dc_status`) et le GSM (`gsm_status`) sont lus, les délais,
+  sirènes, SMS et tonalités sont réglables.
+- **Vérifié sur du vrai matériel** : lecture et écriture locales du mode, des délais et des
+  sirènes. Le mot de passe, les numéros de téléphone, l'IMEI et les codes bruts ne sont pas
+  repris dans `tuya.json`.
+- Tableau de bord : une carte « Alarme » sur l'accueil, la même commande compacte dans le
+  panneau Sécurité des caméras et dans la pièce ; un filtre « Alarme » dans Pièces. Armer
+  demande une confirmation ; désarmer part en un geste.
+- Limites : aucun point ne dit qu'une sirène sonne ni quelle zone a déclenché. L'appairage
+  des zones, la SIM et les numéros d'appel restent dans l'application du fabricant.
+- Ajout, configuration et sécurité : [docs/components/alarme.md](../../docs/components/alarme.md).
