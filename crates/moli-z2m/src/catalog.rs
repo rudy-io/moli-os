@@ -669,6 +669,14 @@ pub fn is_press(point: &PointSpec) -> bool {
     &*point.key == "action" && matches!(point.kind, Kind::Enum { .. }) && !point.access.write
 }
 
+/// What a button sends in `command` mode (`on`, `off`, `brightness_*`,
+/// `color_temperature_*`): in `event` mode, no press of its own (#214).
+pub fn is_command_action(action: &str) -> bool {
+    matches!(action, "on" | "off")
+        || action.starts_with("brightness_")
+        || action.starts_with("color_temperature_")
+}
+
 /// A plant sensor's `dry` (Tuya soil sensors): its alarm is the plant's thirst.
 /// Only beside a soil moisture reading: elsewhere a bare `dry` says nothing.
 fn mark_soil(points: &mut [PointSpec]) {

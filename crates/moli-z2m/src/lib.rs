@@ -203,6 +203,15 @@ fn on_publish(
     if let Ok(serde_json::Value::Object(payload)) = serde_json::from_slice(&publish.payload) {
         let id = &entry.device.id;
         let playing = flames.contains_key(id);
+        // The mode a button says it is in: this message's, else the last one
+        // known. Unknown: nothing is held back (#214).
+        let event_mode = match payload
+            .get("operation_mode")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(mode) => mode == "event",
+            None => ctx.current(id, "operation_mode") == Some(Value::from("event")),
+        };
         for (key, value) in entry.decode(&payload) {
             // The lamp knows nothing of the flame: what plays is ours to say.
             if entry.flame && &*key == "effect" {
@@ -222,6 +231,13 @@ fn on_publish(
             // Not a retained one, replayed by the broker when Moli connects:
             // an old press would set off an automation (as with Hue).
             if entry.device.point(&key).is_some_and(catalog::is_press) {
+                // Some Tuya buttons in `event` mode follow a press with the
+                // command they would send in `command` mode (`double` then
+                // `on`, `hold` then `off`): no press, nothing to show (#214).
+                if event_mode && matches!(&value, Value::Text(a) if catalog::is_command_action(a)) {
+                    tracing::debug!(device = %id, action = ?value, "command-mode action from a button in event mode ignored");
+                    continue;
+                }
                 if !publish.retain {
                     ctx.pulse_state(id, &key, value);
                 }
@@ -532,6 +548,11 @@ mod tests {
 
     /// The presses the hub hands on for the switch's `action`, after `messages`.
     async fn presses(messages: Vec<Publish>) -> Vec<String> {
+        presses_of(SWITCH, messages).await
+    }
+
+    /// The presses the hub hands on for `device`'s `action`, after `messages`.
+    async fn presses_of(device: &str, messages: Vec<Publish>) -> Vec<String> {
         let hub = moli_runtime::Hub::new(moli_runtime::HubOptions::default()).unwrap();
         let mut events = hub.subscribe();
         let mut all = vec![message(
@@ -548,7 +569,7 @@ mod tests {
             cancel.clone(),
         );
         let mut out = Vec::new();
-        let point = moli_core::PointId::new(&DeviceId::new(&"z2m".into(), SWITCH), "action");
+        let point = moli_core::PointId::new(&DeviceId::new(&"z2m".into(), device), "action");
         while let Ok(Ok(event)) =
             tokio::time::timeout(Duration::from_millis(300), events.recv()).await
         {
@@ -603,5 +624,73 @@ mod tests {
         ])
         .await;
         assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// A Tuya ZG-101ZL (TS004F) in the fixture: it exposes `operation_mode`.
+    const BUTTON: &str = "0x00124b000000000d";
+
+    /// Real frames of a Moes ERS-10TZBVB-AA (HOBEIAN ZG-101ZL) in `event` mode:
+    /// each press is followed ~250 ms later by its `command`-mode action (#214).
+    fn tuya(action: Option<&str>, mode: Option<&str>) -> Publish {
+        let mut frame = serde_json::json!({ "battery": 100, "linkquality": 184, "voltage": 2800 });
+        if let Some(action) = action {
+            frame["action"] = action.into();
+        }
+        if let Some(mode) = mode {
+            frame["operation_mode"] = mode.into();
+        }
+        message(BUTTON, &frame.to_string(), false)
+    }
+
+    #[tokio::test]
+    async fn in_event_mode_the_command_actions_that_follow_a_press_are_no_press() {
+        let event = Some("event");
+        let got = presses_of(
+            BUTTON,
+            vec![
+                tuya(Some("single"), event),
+                tuya(None, event),
+                tuya(Some("double"), event),
+                tuya(Some("on"), event),
+                tuya(Some("hold"), event),
+                tuya(Some("off"), event),
+                tuya(Some("brightness_step_up"), event),
+            ],
+        )
+        .await;
+        assert_eq!(got, ["single", "double", "hold"]);
+    }
+
+    /// The mode known from an earlier message holds for one that does not say it.
+    #[tokio::test]
+    async fn the_last_known_mode_holds() {
+        let got = presses_of(
+            BUTTON,
+            vec![
+                tuya(None, Some("event")),
+                tuya(Some("double"), None),
+                tuya(Some("on"), None),
+            ],
+        )
+        .await;
+        assert_eq!(got, ["double"]);
+    }
+
+    /// Mode unknown, or `command`: nothing is held back.
+    #[tokio::test]
+    async fn without_event_mode_every_action_is_a_press() {
+        let unknown = presses_of(
+            BUTTON,
+            vec![tuya(Some("double"), None), tuya(Some("on"), None)],
+        )
+        .await;
+        assert_eq!(unknown, ["double", "on"]);
+        let command = Some("command");
+        let got = presses_of(
+            BUTTON,
+            vec![tuya(Some("on"), command), tuya(Some("off"), command)],
+        )
+        .await;
+        assert_eq!(got, ["on", "off"]);
     }
 }
