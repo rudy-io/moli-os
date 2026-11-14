@@ -140,9 +140,10 @@ Les températures suivent les réglages de la voiture (les °F sont convertis en
   (réveil/sommeil) est interrogée. Une voiture branchée mais qui ne charge pas
   est donc au repos. L'API compte les requêtes, Moli ne dépasse pas 60 par
   minute. Les périodes par défaut (5 min / 10 min / 1 h) sont dimensionnées
-  pour rester dans le crédit mensuel de 10 $ de la Fleet API à usage personnel
-  (≈ 80 requêtes de données par jour, soit ≈ 6 $/mois avec quelques commandes) ;
-  les réduire rapproche les mises à jour mais fait dépasser le crédit. Si une
+  pour rester dans le crédit mensuel de 10 dollars de la Fleet API à usage
+  personnel (≈ 80 requêtes de données par jour, soit ≈ 6 dollars/mois avec
+  quelques commandes) ; les réduire rapproche les mises à jour mais fait
+  dépasser le crédit. Si une
   voiture s'endort en cours de lecture (408), Moli la marque endormie sans rien
   changer à la session ni aux autres voitures. Si Tesla
   demande un temps d'attente (429, `Retry-After`), Moli le respecte tout entier
