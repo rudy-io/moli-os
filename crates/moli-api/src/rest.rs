@@ -13,6 +13,7 @@ use serde_json::json;
 
 use crate::caller::{Caller, Via};
 use crate::people::People;
+use crate::plan::PlanDir;
 use crate::session::{ClaimError, LoginError, Sessions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -646,27 +647,52 @@ pub(crate) fn window_ms(hours: f64) -> u64 {
 #[derive(Clone)]
 pub(crate) struct HomeFile(pub(crate) Option<std::path::PathBuf>);
 
-/// The dashboard layout; `{}` (automatic layout) when there is none.
-pub(crate) async fn home(Extension(HomeFile(path)): Extension<HomeFile>) -> Response {
-    let Some(path) = path else {
-        return Json(json!({})).into_response();
-    };
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
-            // The house's position is not the dashboard's business (a guest reads this too).
-            Ok(mut layout) => {
-                if let Some(root) = layout.as_object_mut() {
-                    root.remove("location");
+/// The dashboard layout; `{}` (automatic layout) when there is none. Each
+/// room says whether it is outside (`rooms[].outside`, see `outside.rs`).
+pub(crate) async fn home(
+    State(hub): State<Hub>,
+    caller: Caller,
+    Extension(HomeFile(path)): Extension<HomeFile>,
+    Extension(PlanDir(dir)): Extension<PlanDir>,
+) -> Response {
+    let mut layout = match &path {
+        None => serde_json::Map::new(),
+        Some(path) => match tokio::fs::read(path).await {
+            Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(serde_json::Value::Object(layout)) => layout,
+                // Not an object: served as it is, nothing to say about rooms.
+                Ok(other) => return Json(other).into_response(),
+                Err(e) => {
+                    return error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!("home.json: {e}"),
+                    );
                 }
-                Json(layout).into_response()
-            }
-            Err(e) => error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("home.json: {e}"),
-            ),
+            },
+            Err(_) => serde_json::Map::new(),
         },
-        Err(_) => Json(json!({})).into_response(),
-    }
+    };
+    // The house's position is not the dashboard's business (a guest reads this too).
+    layout.remove("location");
+
+    let plan = match &dir {
+        Some(dir) => tokio::fs::read(dir.join("plan.json"))
+            .await
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok()),
+        None => None,
+    };
+    // A guest learns no room beyond the devices it sees.
+    let devices = match caller.person.as_ref().filter(|p| p.is_guest()) {
+        Some(guest) => guest.guest_view(&hub).0.devices,
+        None => hub.snapshot().devices,
+    };
+    let rooms: Vec<&str> = devices
+        .iter()
+        .filter_map(|d| d.label.room.as_deref().or(d.device.native_room.as_deref()))
+        .collect();
+    crate::outside::resolve(&mut layout, plan.as_ref(), rooms);
+    Json(serde_json::Value::Object(layout)).into_response()
 }
 
 // ---- published media ----------------------------------------------------------
@@ -1050,7 +1076,18 @@ mod home_tests {
             r#"{"title":"Chez nous","location":{"place":"Lyon","latitude":45.76,"longitude":4.84}}"#,
         )
         .unwrap();
-        let response = home(Extension(HomeFile(Some(path.clone())))).await;
+        let hub = Hub::new(moli_runtime::HubOptions::default()).unwrap();
+        let response = home(
+            State(hub),
+            Caller {
+                via: crate::caller::Via::Lan,
+                key: "192.168.1.20".into(),
+                person: None,
+            },
+            Extension(HomeFile(Some(path.clone()))),
+            Extension(PlanDir(None)),
+        )
+        .await;
         let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
             .await
             .unwrap();
