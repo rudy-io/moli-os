@@ -78,16 +78,20 @@ fn default_auth_host() -> String {
     "auth.tesla.com".into()
 }
 
+/// The default poll periods — 5 min while charging or plugged in, 10 min
+/// while awake, 1 h while asleep — sized to stay inside the Fleet API's
+/// $10 a month credit for personal use: 500 data requests a dollar, at most
+/// one per poll (two while a car is awake), a handful of commands and wakes.
 fn default_poll_charging() -> u64 {
-    60
+    300
 }
 
 fn default_poll_idle() -> u64 {
-    180
+    600
 }
 
 fn default_poll_asleep() -> u64 {
-    900
+    3600
 }
 
 /// `[driver.options]`: the hosts (region) and the poll periods.
@@ -923,7 +927,7 @@ mod tests {
                 parsed.poll_idle_s,
                 parsed.poll_asleep_s
             ),
-            (60, 180, 900)
+            (300, 600, 3600)
         );
         assert!(
             serde_json::from_value::<Config>(serde_json::json!({ "nope": 1 })).is_err(),

@@ -86,9 +86,9 @@ api_host = "fleet-api.prd.eu.vn.cloud.tesla.com" # l'API, défaut Europe ; Amér
 auth_host = "auth.tesla.com"                     # la connexion et le point de jeton (défaut) ; Chine : auth.tesla.cn
 redirect_uri = "https://example.com/moli-tesla"  # OBLIGATOIRE : l'URI de redirection enregistrée sur l'application
 partner_domain = "example.com"                   # domaine public des origines autorisées, hébergeant la clé publique Tesla (défaut : l'hôte de redirect_uri)
-poll_charging_s = 60                             # lecture complète pendant la recharge
-poll_idle_s = 180                                # éveillée et au repos
-poll_asleep_s = 900                              # endormie
+poll_charging_s = 300                            # lecture complète pendant la recharge
+poll_idle_s = 600                                # éveillée et au repos
+poll_asleep_s = 3600                             # endormie
 ```
 
 Les hôtes sont une **liste fermée** : tout `api_host` ou `auth_host` qui n'est pas
@@ -135,12 +135,16 @@ Les températures suivent les réglages de la voiture (les °F sont convertis en
   exigent des commandes signées par l'appli officielle pour certains actes) : le refus
   arrive dans le journal, la maison ne réessaie pas seule.
 - L'état est relu avec les périodes ci-dessus : la lecture complète
-  (`vehicle_data`) n'est demandée que **pendant la recharge** (60 s) ; au repos
-  (3 min) ou endormie (15 min), seule la sonde bon marché `/vehicles`
+  (`vehicle_data`) n'est demandée que **pendant la recharge** (5 min) ; au repos
+  (10 min) ou endormie (1 h), seule la sonde bon marché `/vehicles`
   (réveil/sommeil) est interrogée. Une voiture branchée mais qui ne charge pas
   est donc au repos. L'API compte les requêtes, Moli ne dépasse pas 60 par
-  minute. Si une voiture s'endort en cours de lecture (408), Moli la marque
-  endormie sans rien changer à la session ni aux autres voitures. Si Tesla
+  minute. Les périodes par défaut (5 min / 10 min / 1 h) sont dimensionnées
+  pour rester dans le crédit mensuel de 10 $ de la Fleet API à usage personnel
+  (≈ 80 requêtes de données par jour, soit ≈ 6 $/mois avec quelques commandes) ;
+  les réduire rapproche les mises à jour mais fait dépasser le crédit. Si une
+  voiture s'endort en cours de lecture (408), Moli la marque endormie sans rien
+  changer à la session ni aux autres voitures. Si Tesla
   demande un temps d'attente (429, `Retry-After`), Moli le respecte tout entier
   avant de reprendre.
 - **Vérifié sur du vrai matériel** (Model Y, depuis octobre 2026) : connexion du
