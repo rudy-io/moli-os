@@ -106,16 +106,24 @@ le code de la maison doit aussi figurer dans la demande, avec le même compteur
 d'essais que la connexion. L'adresse collée porte un `state` que le pilote doit
 reconnaître : un code d'une page plus ancienne ou d'un autre navigateur est
 refusé. Le code ne parvient ni au journal ni à la file d'approbation (la commande
-est masquée, valeur journalisée en `null`), et les points `sign_in_url` /
-`sign_in` / `sign_out` sont internes : ni la maison ni les agents ne peuvent lire
-l'URL ni compléter la connexion. La déconnexion efface le jeton de rafraîchissement
-du coffre chiffré, et les hôtes `api_host` / `auth_host` sont bornés à la liste
-fermée des adresses officielles Tesla, refusée au chargement (I5) : un fichier
-copié ne peut pas rediriger le secret du client vers un tiers.
+est masquée, valeur journalisée en `null`). Les points `sign_in_url` /
+`sign_in` / `sign_out` sont internes : toute écriture normale est refusée, et
+seule la route de setup (owner + code de la maison frais + `state`
+correspondant) peut compléter ou annuler la connexion. Précision : le hub
+n'applique pas encore le `read: false` de ces points, si bien que la valeur de
+`sign_in_url` — l'adresse de la page de connexion, un lien à ouvrir et non un
+secret — reste visible dans l'API des appareils ; la protection porte sur
+l'écriture, le journal et le `state`. La déconnexion efface le jeton de
+rafraîchissement du coffre chiffré, et les hôtes `api_host` / `auth_host` sont
+bornés à la liste fermée des adresses officielles Tesla, refusée au chargement
+(I5) : un fichier copié ne peut pas rediriger le secret du client vers un tiers.
 
 Preuves : les tests `tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_session`
 et `tesla_setup_denies_non_owners_even_with_the_code` dans `crates/moli-api/tests/http.rs` ;
-`an_unknown_host_is_refused_at_load` dans `crates/moli-tesla/src/lib.rs`.
+`an_unknown_host_is_refused_at_load` dans `crates/moli-tesla/src/lib.rs` ;
+`redacted_command_refuses_points_that_are_not_internal_credentials` dans
+`crates/moli-runtime/tests/hub.rs` (la borne de la commande masquée : seul un
+point texte, config, non lisible et non inscriptible est accepté).
 
 ## 5. Règles de conception
 

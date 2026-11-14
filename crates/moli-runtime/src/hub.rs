@@ -839,6 +839,10 @@ impl Hub {
 
     /// [`prepare`] without the read-only refusal (the surface verified the
     /// caller) and never followed: a one-shot credential must not be resent.
+    /// Redacted commands only target internal credential points — text kind,
+    /// config semantic, and neither readable nor writable through the normal
+    /// surfaces. Anything else is refused, so a redacted order can never
+    /// write a live point of a driver the caller is not talking to.
     fn prepare_redacted(&self, point: &PointId, value: &Value) -> Result<Prepared, CommandError> {
         let (device_id, key) = point.split().ok_or(CommandError::UnknownPoint)?;
         let (device, key, kind, commands) = {
@@ -848,6 +852,13 @@ impl Hub {
                 .get(&device_id)
                 .ok_or(CommandError::UnknownPoint)?;
             let spec = device.point(key).ok_or(CommandError::UnknownPoint)?;
+            if !matches!(spec.kind, Kind::Text)
+                || !matches!(spec.semantic, Semantic::Config)
+                || spec.access.read
+                || spec.access.write
+            {
+                return Err(CommandError::ReadOnly);
+            }
             let slot = model
                 .drivers
                 .get(&device.instance)

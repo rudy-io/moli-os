@@ -50,6 +50,7 @@ impl IntoResponse for TeslaSetupError {
             "pin_rate_limited" | "driver_busy" => StatusCode::TOO_MANY_REQUESTS,
             "driver_not_running" => StatusCode::SERVICE_UNAVAILABLE,
             "timeout" => StatusCode::REQUEST_TIMEOUT,
+            "mirror_house" => StatusCode::CONFLICT,
             "driver_refused" => StatusCode::BAD_GATEWAY,
             "invalid" => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -98,6 +99,35 @@ fn account_point(instance: &str, key: &str) -> PointId {
     PointId::new(&DeviceId::new(&InstanceId::from(instance), ACCOUNT), key)
 }
 
+/// The running driver instances of kind `tesla`, from the hub's driver
+/// registry: a redacted sign-in / sign-out command must only ever reach a
+/// point of a Tesla driver, never of any other integration.
+fn tesla_instances(hub: &Hub) -> Vec<InstanceId> {
+    hub.snapshot()
+        .drivers
+        .iter()
+        .filter(|d| d.kind == "tesla")
+        .map(|d| d.instance.clone())
+        .collect()
+}
+
+/// `None`: the instance names a running Tesla driver — the request may go on.
+/// `Some(response)`: the route must stop here (503 `driver_not_running`),
+/// before any credential is touched or journaled.
+fn tesla_instance_gate(hub: &Hub, instance: &str) -> Option<Response> {
+    if tesla_instances(hub).contains(&InstanceId::from(instance)) {
+        None
+    } else {
+        Some(
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(TeslaSetupError::new("driver_not_running")),
+            )
+                .into_response(),
+        )
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn command_error_response(error: CommandError) -> Response {
     let code = match &error {
@@ -105,6 +135,7 @@ fn command_error_response(error: CommandError) -> Response {
         CommandError::Busy => "driver_busy",
         CommandError::Timeout => "timeout",
         CommandError::Driver(_) => "driver_refused",
+        CommandError::Mirror => "mirror_house",
         CommandError::Invalid(_) | CommandError::ReadOnly | CommandError::NeedsApproval { .. } => {
             "invalid"
         }
@@ -180,6 +211,11 @@ pub(crate) async fn sign_in(
     if let Err(response) = gate(&hub, &headers, &humans, &persons, &caller) {
         return response;
     }
+    // {instance} must name a running Tesla driver: the redacted command must
+    // not be able to target a point of any other integration.
+    if let Some(response) = tesla_instance_gate(&hub, &instance) {
+        return response;
+    }
     if request.code.trim().is_empty() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -231,6 +267,11 @@ pub(crate) async fn sign_out(
     Json(request): Json<SignOutRequest>,
 ) -> Response {
     if let Err(response) = gate(&hub, &headers, &humans, &persons, &caller) {
+        return response;
+    }
+    // {instance} must name a running Tesla driver: the redacted command must
+    // not be able to target a point of any other integration.
+    if let Some(response) = tesla_instance_gate(&hub, &instance) {
         return response;
     }
     let Some(pin) = request.pin.as_deref() else {

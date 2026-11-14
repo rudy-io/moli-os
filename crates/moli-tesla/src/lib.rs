@@ -44,6 +44,14 @@ const RENEW: &str = "the Tesla session is renewed";
 /// The owner signed the account out from the dashboard: a normal, expected
 /// transition back to the waiting state (not an error, no backoff).
 const SIGNED_OUT: &str = "the Tesla account was signed out by the owner";
+/// The rotated refresh token could not be kept in the vault: the account's
+/// status already says `token_not_kept`, so the run loop must not cover it
+/// with a plain `error` (and must erase the now-spent token in the vault).
+const TOKEN_NOT_KEPT: &str = "the rotated Tesla refresh token was not kept";
+/// A parked car (awake, already read, not charging) keeps its last readings
+/// this long: older than that, `vehicle_data` is pulled again so the values
+/// are not frozen for a whole session.
+const PARKED_REFRESH: Duration = Duration::from_secs(30 * 60);
 const RETRY_MIN: Duration = Duration::from_secs(30);
 const RETRY_MAX: Duration = Duration::from_secs(15 * 60);
 /// The account's vehicles, looked at this often (a car sold, a name changed).
@@ -78,10 +86,11 @@ fn default_auth_host() -> String {
     "auth.tesla.com".into()
 }
 
-/// The default poll periods — 5 min while charging or plugged in, 10 min
-/// while awake, 1 h while asleep — sized to stay inside the Fleet API's
-/// $10 a month credit for personal use: 500 data requests a dollar, at most
-/// one per poll (two while a car is awake), a handful of commands and wakes.
+/// The default poll periods — 5 min while charging, 10 min while awake,
+/// 1 h while asleep — sized to stay inside the Fleet API's $10 a month credit
+/// for personal use: 500 data requests a dollar, a handful of commands and
+/// wakes. A parked car gets a full `vehicle_data` read at most every
+/// PARKED_REFRESH; between reads only the cheap `/vehicles` probe goes out.
 fn default_poll_charging() -> u64 {
     300
 }
@@ -333,6 +342,27 @@ struct Car {
     /// already-read, not-charging car is parked — it only costs the cheap
     /// `/vehicles` state probe until it charges again or wakes from sleep.
     read: bool,
+    /// When `vehicle_data` was last read: a parked car's readings are
+    /// refreshed once this timestamp grows older than `PARKED_REFRESH`.
+    read_at: Option<Instant>,
+}
+
+impl Car {
+    /// Whether the next poll must pull `vehicle_data` for this car: asleep
+    /// cars report nothing; an unread or a charging car is always read; a
+    /// parked car (awake, read, not charging) only once its last read is
+    /// older than `PARKED_REFRESH`, so its values do not stay frozen for a
+    /// whole session.
+    #[must_use]
+    fn needs_vehicle_data(&self, now: Instant) -> bool {
+        if !self.awake {
+            return false;
+        }
+        if !self.read || self.charging {
+            return true;
+        }
+        matches!(self.read_at, Some(at) if now.duration_since(at) >= PARKED_REFRESH)
+    }
 }
 
 fn car_device(ctx: &DriverCtx, id: &DeviceId, v: &Vehicle) -> Device {
@@ -370,17 +400,20 @@ async fn discover(
             ctx.set_state(&id, "charge_power", Value::Float(0.0));
             ctx.set_state(&id, "charging", Value::Bool(false));
         }
-        // A car that was awake, already read, and is still awake stays idle:
-        // the cheap `/vehicles` probe alone tracks its sleep state. It is
-        // read again when it wakes from sleep or when seen for the first time.
-        let read = previous.get(&id).is_some_and(|p| p.awake && p.read);
+        // A car that was awake and is still awake keeps its charging flag,
+        // its read flag and its last-read time: the cheap `/vehicles` probe
+        // alone tracks its sleep state, a charging car must keep being read,
+        // and the parking clock must not restart on every discover. A car
+        // that was asleep (or seen for the first time) is read again.
+        let carried = previous.get(&id).filter(|p| p.awake && v.awake);
         cars.insert(
             id,
             Car {
                 id: v.id.to_string(),
                 awake: v.awake,
-                charging: false,
-                read,
+                charging: carried.is_some_and(|p| p.charging),
+                read: carried.is_some_and(|p| p.read),
+                read_at: carried.and_then(|p| p.read_at),
             },
         );
     }
@@ -401,13 +434,10 @@ async fn refresh_cars(
     cars: &mut HashMap<DeviceId, Car>,
 ) -> anyhow::Result<()> {
     for (id, car) in cars.iter_mut() {
-        if !car.awake {
-            continue; // Asleep: its last word stays.
-        }
-        // A parked, already-read car costs nothing more: only the `/vehicles`
-        // probe keeps tracking its state. `vehicle_data` is pulled again once
-        // the car starts charging.
-        if car.read && !car.charging {
+        // Asleep cars report nothing; an unread or a charging car is always
+        // read; a parked one (awake, read, not charging) only once its last
+        // read has grown older than PARKED_REFRESH.
+        if !car.needs_vehicle_data(Instant::now()) {
             continue;
         }
         let answer = match api::vehicle_data(config.api_host.as_str(), token, &car.id).await {
@@ -430,6 +460,7 @@ async fn refresh_cars(
             Err(e) => return Err(e),
         };
         car.read = true;
+        car.read_at = Some(Instant::now());
         let r = model::readings_of(&answer);
         if let Some(v) = r.soc {
             ctx.set_state(id, "soc", Value::Float(v));
@@ -488,11 +519,75 @@ fn rate_limited_secs(error: &anyhow::Error) -> Option<u64> {
     error.downcast_ref::<api::RateLimited>().map(|r| r.secs)
 }
 
-/// A poll until it goes through: a 429 asks a pause (`Retry-After`, sometimes
-/// hours), which is taken in full before the next try — the API's own clock.
+/// What a sign-out does, wherever it comes from (live session or paused
+/// driver): erase the vault's tokens, take the cars offline (their last word
+/// must not look live) and put the account back to the waiting state.
+async fn perform_sign_out(ctx: &mut DriverCtx, account: &DeviceId) -> std::io::Result<()> {
+    ctx.forget_secret(REFRESH).await?;
+    let _ = ctx.forget_secret(VERIFIER).await;
+    let _ = ctx.forget_secret(STATE).await;
+    for device in ctx.devices() {
+        if device != *account {
+            ctx.set_availability(&device, false);
+        }
+    }
+    set_text(ctx, account, "status", "sign_in");
+    Ok(())
+}
+
+/// How a run-loop pause ended.
+enum PauseEnd {
+    /// The pause ran its course.
+    Elapsed,
+    /// Moli stopped (`next_command` saw the cancel token).
+    Stopped,
+    /// The owner signed the account out while the driver was paused.
+    SignedOut,
+}
+
+/// Waits `pause`, but keeps listening for the owner's orders: a sign-out must
+/// work in every state — during an error backoff, a 429 wait, the 6 h billing
+/// retry or a renewal pause. A `sign_out` is honoured in place (see
+/// [`perform_sign_out`]); any other order is refused (no live session).
+async fn pause_listening(ctx: &mut DriverCtx, account: &DeviceId, pause: Duration) -> PauseEnd {
+    let until = tokio::time::Instant::now() + pause;
+    loop {
+        tokio::select! {
+            () = tokio::time::sleep_until(until) => return PauseEnd::Elapsed,
+            command = ctx.next_command() => {
+                let Some(command) = command else {
+                    return PauseEnd::Stopped;
+                };
+                if command.device.id == *account && &*command.key == "sign_out" {
+                    match perform_sign_out(ctx, account).await {
+                        Ok(()) => {
+                            command.reply(Ok(()));
+                            return PauseEnd::SignedOut;
+                        }
+                        Err(e) => {
+                            // The vault write failed: surface it so the owner
+                            // can retry; the pause goes on.
+                            command.reply(Err(moli_i18n::tr!(
+                                "pilotes.tesla.coffre",
+                                why = e
+                            )));
+                        }
+                    }
+                } else {
+                    command.reply(Err(moli_i18n::tr!("pilotes.tesla.pas_connecte")));
+                }
+            }
+        }
+    }
+}
+
+/// A poll until it goes through: a 429 asks a pause (`Retry-After`, clamped
+/// to 60 s–6 h), taken in full before the next try — the API's own clock.
+/// The driver keeps listening for the owner's orders during the pause.
 async fn poll_with_patience(
     config: &Config,
-    ctx: &DriverCtx,
+    ctx: &mut DriverCtx,
+    account: &DeviceId,
     token: &Token,
     cars: &mut HashMap<DeviceId, Car>,
 ) -> anyhow::Result<()> {
@@ -511,7 +606,11 @@ async fn poll_with_patience(
                     secs,
                     "tesla rate limited: waiting the requested pause"
                 );
-                tokio::time::sleep(Duration::from_secs(secs)).await;
+                match pause_listening(ctx, account, Duration::from_secs(secs)).await {
+                    PauseEnd::Elapsed => {}
+                    PauseEnd::Stopped => return Ok(()),
+                    PauseEnd::SignedOut => anyhow::bail!("{SIGNED_OUT}"),
+                }
             }
         }
     }
@@ -555,6 +654,26 @@ async fn start_page(
         &authorize_url(config, credentials, &v, &s),
     );
     Ok(())
+}
+
+/// `Some(key)`: the pasted text must not be exchanged for a token — an
+/// address (it carries a `code=` parameter) must carry the `state` this
+/// sign-in page was opened with, and a mismatch or a missing `state` on an
+/// address is refused. A bare code is accepted without a `state`: PKCE
+/// covers it.
+fn state_mismatch(pasted: &str, expected_state: Option<&str>) -> Option<&'static str> {
+    let pasted_state = model::state_of(pasted);
+    let ok = match (expected_state, pasted_state.as_deref()) {
+        (Some(expected), Some(pasted_state)) => expected == pasted_state,
+        _ => !model::is_address(pasted),
+    };
+    if ok {
+        None
+    } else if pasted_state.is_none() {
+        Some("pilotes.tesla.adresse_sans_state")
+    } else {
+        Some("pilotes.tesla.state_invalide")
+    }
 }
 
 /// Waits for the person to sign in from the dashboard. `false`: stopped.
@@ -617,16 +736,13 @@ async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> an
             command.reply(Err(moli_i18n::tr!("pilotes.tesla.adresse_sans_code")));
             continue;
         };
-        // The `state` parameter binds the pasted address to this sign-in: a
-        // stale or foreign page must not be exchanged for a token. A bare
-        // code (no `state`) is still accepted — PKCE covers it.
+        // The pasted address must bind to this sign-in: a stale or foreign
+        // page must not be exchanged for a token (a bare code is fine —
+        // PKCE covers it).
         let expected_state = ctx.secret(STATE);
-        if let (Some(expected), Some(pasted_state)) =
-            (expected_state.as_deref(), model::state_of(pasted))
-            && expected != pasted_state
-        {
+        if let Some(key) = state_mismatch(pasted, expected_state.as_deref()) {
             start_page(config, ctx, account, &creds).await?;
-            command.reply(Err(moli_i18n::tr!("pilotes.tesla.state_invalide")));
+            command.reply(Err(moli_i18n::tr!(key)));
             continue;
         }
         let stored = ctx.secret(VERIFIER).unwrap_or_default();
@@ -672,42 +788,62 @@ async fn sign_in(config: &Config, ctx: &mut DriverCtx, account: &DeviceId) -> an
 }
 
 /// Connected: the cars, their orders, then their state, until stopped.
+/// `registered` carries the app-activation across renewals within one run:
+/// the registration is one-time per region, not re-sent at every renewal.
 async fn connected(
     config: &Config,
     ctx: &mut DriverCtx,
     account: &DeviceId,
     refresh: String,
+    registered: &mut bool,
 ) -> anyhow::Result<()> {
     let credentials = credentials(ctx)?;
-    // App activation is one-time per region but idempotent: re-registering
-    // after a restart or token renewal is safe.
-    match api::partner_register(
-        config.auth_host.as_str(),
-        config.api_host.as_str(),
-        &credentials,
-        &config.partner_domain,
-    )
-    .await
-    {
-        // A billing-disabled account refuses even registration: bail before
-        // burning the token exchange and the first poll against a closed door.
-        Err(e) if e.to_string().contains(api::ACCOUNT_DISABLED) => return Err(e),
-        Err(e) => {
-            tracing::warn!(
-                instance = %ctx.instance(),
-                domain = %config.partner_domain,
-                error = %format!("{e:#}"),
-                "tesla partner registration failed: the car may stay unreachable"
-            );
-        }
-        Ok(()) => {}
-    }
-    let token = api::refresh(config.auth_host.as_str(), &credentials, &refresh).await?;
-    ctx.store_secret(REFRESH, &token.refresh)
+    if !*registered {
+        // App activation is one-time per region but idempotent: only the
+        // first attempt of the run registers; a failed non-billing attempt
+        // still counts (a warning is logged, and a driver restart begins
+        // fresh).
+        match api::partner_register(
+            config.auth_host.as_str(),
+            config.api_host.as_str(),
+            &credentials,
+            &config.partner_domain,
+        )
         .await
-        .map_err(|e| anyhow::anyhow!(moli_i18n::tr!("pilotes.tesla.coffre", why = e)))?;
+        {
+            // A billing-disabled account refuses even registration: bail
+            // before burning the token exchange and the first poll against a
+            // closed door (the flag stays unset: the retry registers first).
+            Err(e) if e.to_string().contains(api::ACCOUNT_DISABLED) => return Err(e),
+            other => {
+                *registered = true;
+                if let Err(e) = other {
+                    tracing::warn!(
+                        instance = %ctx.instance(),
+                        domain = %config.partner_domain,
+                        error = %format!("{e:#}"),
+                        "tesla partner registration failed: the car may stay unreachable"
+                    );
+                }
+            }
+        }
+    }
+    let mut token = api::refresh(config.auth_host.as_str(), &credentials, &refresh).await?;
+    if let Err(e) = ctx.store_secret(REFRESH, &token.refresh).await {
+        // The rotated token is lost: the next renewal will be refused and the
+        // account must sign in again. The account status says so until then
+        // (a later successful renewal clears it); the run loop must not cover
+        // it with a plain `error`.
+        tracing::warn!(
+            instance = %ctx.instance(),
+            error = %e,
+            "tesla rotated refresh token not kept"
+        );
+        set_text(ctx, account, "status", "token_not_kept");
+        anyhow::bail!("{TOKEN_NOT_KEPT}");
+    }
     let mut cars: HashMap<DeviceId, Car> = HashMap::new();
-    poll_with_patience(config, ctx, &token, &mut cars).await?;
+    poll_with_patience(config, ctx, account, &token, &mut cars).await?;
     set_text(ctx, account, "status", "connected");
     ctx.ready();
     tracing::info!(
@@ -718,9 +854,11 @@ async fn connected(
     let mut devices = tokio::time::interval(DEVICES);
     devices.set_missed_tick_behavior(MissedTickBehavior::Delay);
     devices.reset();
-    let renew_at = tokio::time::Instant::from_std(token.expires_at);
     loop {
         let period = period_of(&cars, config);
+        // Recomputed on every iteration: an order may have renewed the access
+        // token while it ran, and the deadline follows the fresh token.
+        let renew_at = tokio::time::Instant::from_std(token.expires_at);
         tokio::select! {
             command = ctx.next_command() => {
                 let Some(command) = command else {
@@ -728,13 +866,11 @@ async fn connected(
                 };
                 if command.device.id == *account && &*command.key == "sign_out" {
                     // The owner signed out from the dashboard: erase the
-                    // refresh token (and the pending sign-in tokens) and let
-                    // `run` take the driver back to the waiting state.
-                    match ctx.forget_secret(REFRESH).await {
-                        Ok(_) => {
-                            let _ = ctx.forget_secret(VERIFIER).await;
-                            let _ = ctx.forget_secret(STATE).await;
-                            set_text(ctx, account, "status", "sign_in");
+                    // refresh token (and the pending sign-in tokens), take the
+                    // cars offline, and let `run` take the driver back to the
+                    // waiting state.
+                    match perform_sign_out(ctx, account).await {
+                        Ok(()) => {
                             command.reply(Ok(()));
                             anyhow::bail!("{SIGNED_OUT}");
                         }
@@ -746,16 +882,17 @@ async fn connected(
                         }
                     }
                 }
-                let result = order(config, ctx, &credentials, &token, &cars, account, &command).await;
+                let result =
+                    order(config, ctx, &credentials, &mut token, &cars, account, &command).await;
                 command.reply(result.map_err(|why| {
                     moli_i18n::tr!("pilotes.tesla.echec", why = why)
                 }));
             }
             () = tokio::time::sleep(period) => {
-                poll_with_patience(config, ctx, &token, &mut cars).await?;
+                poll_with_patience(config, ctx, account, &token, &mut cars).await?;
             }
             _ = devices.tick() => {
-                poll_with_patience(config, ctx, &token, &mut cars).await?;
+                poll_with_patience(config, ctx, account, &token, &mut cars).await?;
             }
             () = tokio::time::sleep_until(renew_at) => {
                 // A fresh token: `connected` starts again.
@@ -766,11 +903,14 @@ async fn connected(
 }
 
 /// One order; an expired access token is renewed once and the order retried.
+/// The renewed token replaces the caller's (`token` is `&mut`) so the session
+/// stays current; the rotated refresh token is kept in the vault BEFORE the
+/// order's deadline is checked, so a late refusal can never lose it.
 async fn order(
     config: &Config,
     ctx: &mut DriverCtx,
     credentials: &Credentials,
-    token: &Token,
+    token: &mut Token,
     cars: &HashMap<DeviceId, Car>,
     account: &DeviceId,
     command: &CommandRequest,
@@ -796,12 +936,10 @@ async fn order(
                     Ok(fresh) => fresh,
                     Err(e) => return Err(format!("{e:#}")),
                 };
-            // The token dance can take up to ten seconds: the hub's command
-            // deadline (five) may have passed while it ran. A finished order
-            // no one waits for must not reach the car.
-            if command.abandoned() {
-                return Err(moli_i18n::tr!("pilotes.tesla.trop_tard"));
-            }
+            // Keep the rotated token in the vault BEFORE anything else: a
+            // late refusal (deadline passed) or a refused retry must not lose
+            // it — the next renewal would be refused and the account would
+            // have to sign in again.
             if let Err(e) = ctx.store_secret(REFRESH, &fresh.refresh).await {
                 // The rotated token is lost: the next renewal will be refused
                 // and the account must sign in again. The account status says
@@ -813,7 +951,15 @@ async fn order(
                 );
                 set_text(ctx, account, "status", "token_not_kept");
             }
-            match api::command(config.api_host.as_str(), &fresh, &car.id, cmd, body).await {
+            // The token dance can take up to ten seconds: the hub's command
+            // deadline (five) may have passed while it ran. Keep the renewed
+            // token either way; a finished order no one waits for must not
+            // reach the car.
+            *token = fresh;
+            if command.abandoned() {
+                return Err(moli_i18n::tr!("pilotes.tesla.trop_tard"));
+            }
+            match api::command(config.api_host.as_str(), token, &car.id, cmd, body).await {
                 Ok(result) => result,
                 Err(e) => Err(format!("{e:#}")),
             }
@@ -828,6 +974,9 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     ctx.upsert_device(account_device(ctx, &account));
     ctx.set_availability(&account, true);
     let mut pause = RETRY_MIN;
+    // App activation is one-time per region: registered once per run, never
+    // re-sent at every renewal.
+    let mut registered = false;
     loop {
         let Some(refresh) = ctx.secret(REFRESH) else {
             if !sign_in(config, ctx, &account).await? {
@@ -837,7 +986,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         };
         set_text(ctx, &account, "status", "connecting");
         let started = Instant::now();
-        match connected(config, ctx, &account, refresh).await {
+        match connected(config, ctx, &account, refresh, &mut registered).await {
             Ok(()) => return Ok(()),
             Err(e) if format!("{e:#}").contains(RENEW) => {
                 // A session that dies before RENEW_OK_MIN was refused right
@@ -851,9 +1000,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 } else {
                     pause = RETRY_MIN;
                 }
-                tokio::select! {
-                    () = tokio::time::sleep(pause) => {}
-                    () = ctx.cancelled() => return Ok(()),
+                match pause_listening(ctx, &account, pause).await {
+                    PauseEnd::Stopped => return Ok(()),
+                    PauseEnd::SignedOut => {
+                        tracing::info!(
+                            instance = %ctx.instance(),
+                            "tesla signed out by the owner: back to sign-in"
+                        );
+                    }
+                    PauseEnd::Elapsed => {}
                 }
             }
             Err(e) if format!("{e:#}").contains(SIGNED_OUT) => {
@@ -863,6 +1018,18 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     instance = %ctx.instance(),
                     "tesla signed out by the owner: back to sign-in"
                 );
+            }
+            // The rotated refresh token could not be kept in the vault: the
+            // account status already says `token_not_kept`, so this arm must
+            // not cover it with a plain `error`. The refresh token left in
+            // the vault is spent (rotated by Tesla): erase it and go back to
+            // the sign-in.
+            Err(e) if format!("{e:#}").contains(TOKEN_NOT_KEPT) => {
+                tracing::warn!(
+                    instance = %ctx.instance(),
+                    "tesla rotated token not kept: the vault's refresh token is spent, sign in again"
+                );
+                ctx.forget_secret(REFRESH).await?;
             }
             Err(e) if format!("{e:#}").contains(api::REFRESH_INVALID) => {
                 tracing::warn!(
@@ -882,9 +1049,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 );
                 set_text(ctx, &account, "status", "billing_limit");
                 pause = RETRY_MIN;
-                tokio::select! {
-                    () = tokio::time::sleep(BILLING_RETRY) => {}
-                    () = ctx.cancelled() => return Ok(()),
+                match pause_listening(ctx, &account, BILLING_RETRY).await {
+                    PauseEnd::Stopped => return Ok(()),
+                    PauseEnd::SignedOut => {
+                        tracing::info!(
+                            instance = %ctx.instance(),
+                            "tesla signed out by the owner: back to sign-in"
+                        );
+                    }
+                    PauseEnd::Elapsed => {}
                 }
             }
             Err(e) => {
@@ -897,9 +1070,15 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 if started.elapsed() > RETRY_MAX {
                     pause = RETRY_MIN;
                 }
-                tokio::select! {
-                    () = tokio::time::sleep(pause) => {}
-                    () = ctx.cancelled() => return Ok(()),
+                match pause_listening(ctx, &account, pause).await {
+                    PauseEnd::Stopped => return Ok(()),
+                    PauseEnd::SignedOut => {
+                        tracing::info!(
+                            instance = %ctx.instance(),
+                            "tesla signed out by the owner: back to sign-in"
+                        );
+                    }
+                    PauseEnd::Elapsed => {}
                 }
                 pause = (pause * 2).min(RETRY_MAX);
             }
@@ -999,6 +1178,7 @@ mod tests {
                 awake: true,
                 charging: false,
                 read: true,
+                read_at: Some(Instant::now()),
             },
         )]);
         assert_eq!(
@@ -1012,9 +1192,41 @@ mod tests {
                 awake: true,
                 charging: true,
                 read: true,
+                read_at: Some(Instant::now()),
             },
         )]);
         assert_eq!(period_of(&charging, &config), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_parked_car_is_re_read_once_its_last_read_grows_old() {
+        let now = Instant::now();
+        let mut car = Car {
+            id: "1".into(),
+            awake: true,
+            charging: false,
+            read: true,
+            read_at: Some(now),
+        };
+        // Asleep: never read, even with a stale timestamp.
+        car.awake = false;
+        assert!(!car.needs_vehicle_data(now + Duration::from_secs(7 * 3600)));
+        // Awake again, never read in this session: read it.
+        car.awake = true;
+        car.read = false;
+        car.read_at = None;
+        assert!(car.needs_vehicle_data(now));
+        // Charging: always read, whatever the last read.
+        car.read = true;
+        car.read_at = Some(now);
+        car.charging = true;
+        assert!(car.needs_vehicle_data(now));
+        // Parked, read a minute ago: the cheap `/vehicles` probe alone.
+        car.charging = false;
+        assert!(!car.needs_vehicle_data(now + Duration::from_secs(60)));
+        // Parked, read long ago (older than PARKED_REFRESH): values are stale,
+        // pull them again.
+        assert!(car.needs_vehicle_data(now + PARKED_REFRESH + Duration::from_secs(1)));
     }
 
     #[test]
@@ -1036,6 +1248,7 @@ mod tests {
                 awake: true,
                 charging: true,
                 read: false,
+                read_at: None,
             },
         )]);
         assert_eq!(

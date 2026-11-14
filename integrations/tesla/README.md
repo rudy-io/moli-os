@@ -19,15 +19,21 @@ coût selon les conditions de Tesla : à vérifier avant de créer l'application
 - Pas de démarrage à distance : les commandes portent sur la recharge, le verrou,
   la vigie — pas sur la marche du véhicule.
 - La connexion du compte est un geste du propriétaire, depuis le tableau de bord :
-  l'adresse de la page de connexion n'est servie que par la route réservée au
+  l'adresse de la page de connexion est servie par la route réservée au
   propriétaire (session + code de la maison), et la valeur collée ne passe jamais
-  par le journal ni la file d'approbation. L'assistant ne peut ni lire l'adresse
-  ni la transmettre : les points `sign_in_url` et `sign_in` sont internes.
+  par le journal ni la file d'approbation (commande masquée). Les points internes
+  (`sign_in_url`, `sign_in`, `sign_out`) sont déclarés non lisibles et
+  non inscriptibles : l'écriture est effectivement refusée par le hub, mais la
+  lecture n'y est pas encore appliquée, si bien que la valeur de `sign_in_url`
+  reste visible dans l'API des appareils — or c'est une adresse de page de
+  connexion (un lien à ouvrir), pas un secret. La protection réelle porte sur
+  l'écriture (refusée), le journal (valeur nulle) et le `state` qui lie le code
+  collé à la page ouverte.
 - Le jeton de rafraîchissement ne vit qu'au coffre chiffré : jamais dans un fichier,
   un point ou le journal.
 - Le pilote ne réveille jamais la voiture lui-même : il lit quand elle répond, aux
-  périodes ci-dessus, et les périodes de repos demandées par Tesla (429) sont
-  respectées tout entières.
+  périodes ci-dessus, et respecte les temps de pause demandés par Tesla (429,
+  bornés entre 60 s et 6 h).
 
 ## Connexion
 
@@ -41,7 +47,11 @@ copie cette dernière adresse et on la colle dans le formulaire Tesla du
 tableau de bord. L'adresse porte aussi un paramètre `state` qui la lie à la
 page affichée : un code d'une page plus ancienne ou d'un autre navigateur est
 refusé. Tout se passe chez Tesla, Moli ne voit jamais le mot de passe, et le
-code collé ne passe jamais par le journal ni la file d'approbation.
+code collé ne passe jamais par le journal ni la file d'approbation. Le
+formulaire du tableau de bord arrive avec la tuile Tesla (PR #168) ; les routes
+REST (`GET /api/integrations/tesla/{instance}`, `POST …/sign-in`,
+`POST …/sign-out`, owner + code de la maison requis) existent dès ce pilote et
+font la même chose.
 
 En échange, Tesla donne un jeton de rafraîchissement qui vit au coffre chiffré
 (`refresh_token`) : il est à usage unique et tourne à chaque échange — Moli en garde
@@ -134,24 +144,29 @@ Les températures suivent les réglages de la voiture (les °F sont convertis en
 - Tesla refuse parfois une commande sans autre explication (les voitures récentes
   exigent des commandes signées par l'appli officielle pour certains actes) : le refus
   arrive dans le journal, la maison ne réessaie pas seule.
-- L'état est relu avec les périodes ci-dessus : la lecture complète
-  (`vehicle_data`) n'est demandée que **pendant la recharge** (5 min) ; au repos
-  (10 min) ou endormie (1 h), seule la sonde bon marché `/vehicles`
-  (réveil/sommeil) est interrogée. Une voiture branchée mais qui ne charge pas
-  est donc au repos. L'API compte les requêtes, Moli ne dépasse pas 60 par
-  minute. Les périodes par défaut (5 min / 10 min / 1 h) sont dimensionnées
-  pour rester dans le crédit mensuel de 10 dollars de la Fleet API à usage
-  personnel (≈ 80 requêtes de données par jour, soit ≈ 6 dollars/mois avec
-  quelques commandes) ; les réduire rapproche les mises à jour mais fait
-  dépasser le crédit. Si une
+- L'état est relu avec les périodes ci-dessus : en recharge, chaque cycle
+  (5 min) sonde `/vehicles` puis lit la voiture en entier (`vehicle_data`) ; au
+  repos, une lecture complète est demandée au plus une fois toutes les 30 min,
+  entre deux seulement la sonde bon marché `/vehicles` (10 min) ; endormie,
+  seule la sonde `/vehicles` (1 h) est interrogée. Pour une voiture, en
+  périodes par défaut : ≈ 24 requêtes/jour endormie, ≈ 144 sondes + 48 lectures
+  complètes/jour éveillée au repos, jusqu'à ≈ 576/jour en recharge continue.
+  Les périodes par défaut (5 min / 10 min / 1 h) sont dimensionnées pour rester
+  dans le crédit mensuel de 10 dollars de la Fleet API à usage personnel ; les
+  réduire rapproche les mises à jour mais augmente la consommation. Ces
+  chiffres sont l'arithmétique des périodes par défaut : la consommation réelle
+  (endormissement effectif, requêtes/jour mesurées) sera vérifiée à la reprise
+  des tests en décembre 2026. Si une
   voiture s'endort en cours de lecture (408), Moli la marque endormie sans rien
   changer à la session ni aux autres voitures. Si Tesla
-  demande un temps d'attente (429, `Retry-After`), Moli le respecte tout entier
-  avant de reprendre.
-- **Vérifié sur du vrai matériel** (Model Y, depuis octobre 2026) : connexion du
+  demande un temps d'attente (429, `Retry-After`), Moli l'attend, borné entre
+  60 s et 6 h (pendant la pause il continue d'écouter les ordres du
+  propriétaire, dont la déconnexion), avant de reprendre.
+- **Vérifié sur du vrai matériel** (Model Y 2025, depuis octobre 2026) : connexion du
   compte depuis le tableau de bord, suivi batterie/autonomie/recharge/portes/
   vigie/températures, et les commandes démarrer la charge, stopper la charge et
-  verrouiller.
+  verrouiller — exécutées avec le proxy de commandes signées (Tesla exige des
+  commandes signées pour certains actes des voitures récentes).
 - **Exposées mais pas vérifiées sur la voiture** : déverrouiller et le mode
   vigie on/off. Ces commandes sont exposées et envoyées à Tesla comme les
   autres, mais leur effet sur le véhicule n'a pas été confirmé (les voitures

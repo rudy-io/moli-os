@@ -264,6 +264,59 @@ async fn redacted_command_reaches_driver_but_journal_keeps_null() {
 }
 
 #[tokio::test]
+async fn redacted_command_refuses_points_that_are_not_internal_credentials() {
+    let (hub, _cancel) = start(false).await;
+
+    // A live writable point (Binary, OnOff) is not a credential point: the
+    // redacted path refuses it exactly like the normal read-only check.
+    let live = hub
+        .command_redacted(
+            &point("state"),
+            Value::Bool(true),
+            Origin::Ui,
+            Some("test".into()),
+        )
+        .await;
+    assert_eq!(live, Err(CommandError::ReadOnly));
+
+    // Nor a read-only point of another kind (Numeric, Power): the accepted
+    // shape is exactly Text + Config + read:false + write:false.
+    let numeric = hub
+        .command_redacted(
+            &point("power"),
+            Value::Int(5),
+            Origin::Ui,
+            Some("test".into()),
+        )
+        .await;
+    assert_eq!(numeric, Err(CommandError::ReadOnly));
+
+    // The internal credential point keeps working: the redacted value
+    // reaches the driver, and the journal entry stays null.
+    hub.command_redacted(
+        &point("secret_code"),
+        Value::from("def456"),
+        Origin::Ui,
+        Some("test".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        hub.state(&point("secret_code")).unwrap().value,
+        Value::from("def456")
+    );
+    let journal = hub.journal(1);
+    let Action::Command { value, .. } = &journal[0].action else {
+        panic!("expected a command action in the redacted journal entry");
+    };
+    assert_eq!(
+        *value,
+        Value::Null,
+        "redacted value must not reach the journal"
+    );
+}
+
+#[tokio::test]
 async fn unknown_keys_from_drivers_are_ignored() {
     let (hub, _cancel) = start(false).await;
     let view = hub.snapshot().devices.pop().unwrap();

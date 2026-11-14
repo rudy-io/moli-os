@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use moli_core::{Access, Device, InstanceId, Kind, PointSpec, Semantic, Value};
+use moli_core::{Access, Device, DeviceId, InstanceId, Kind, PointId, PointSpec, Semantic, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub, HubOptions, spawn_driver};
 use serde_json::{Value as Json, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -51,6 +51,73 @@ impl Driver for Lamp {
     }
 }
 
+/// A stand-in Tesla driver: it publishes the account device with its internal
+/// credential points (text, config, neither readable nor writable) and
+/// answers the redacted sign-in / sign-out commands, without touching Tesla.
+struct TeslaFake;
+
+impl Driver for TeslaFake {
+    fn kind(&self) -> &'static str {
+        "tesla"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("account");
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "account".into(),
+                manufacturer: Some("Tesla".into()),
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    PointSpec {
+                        key: "status".into(),
+                        label: "Status".into(),
+                        kind: Kind::Text,
+                        access: Access {
+                            read: true,
+                            write: false,
+                        },
+                        unit: None,
+                        semantic: Semantic::Config,
+                    },
+                    internal_point("sign_in_url"),
+                    internal_point("sign_in"),
+                    internal_point("sign_out"),
+                ],
+            });
+            ctx.set_availability(&id, true);
+            ctx.set_state(&id, "status", Value::Text("sign_in".into()));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                ctx.set_state(&cmd.device.id, &cmd.key, cmd.value.clone());
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+/// The internal credential-point shape the redacted path accepts: text,
+/// config, neither readable nor writable through the normal surfaces.
+fn internal_point(key: &str) -> PointSpec {
+    PointSpec {
+        key: key.into(),
+        label: key.into(),
+        kind: Kind::Text,
+        access: Access {
+            read: false,
+            write: false,
+        },
+        unit: None,
+        semantic: Semantic::Config,
+    }
+}
+
 async fn server() -> (String, Hub) {
     let hub = lamp_hub().await;
     let addr = serve(&hub, &moli_api::Options::default()).await;
@@ -69,6 +136,28 @@ async fn lamp_hub() -> Hub {
     for _ in 0..200 {
         if hub.stats().drivers_running == 1 {
             break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    hub
+}
+
+/// The lamp hub plus a fake tesla-kind driver (instance `t1`) publishing the
+/// account device: the redacted sign-in / sign-out commands have a live
+/// target, so the tests can prove the value reaches the driver while the
+/// journal stays null.
+async fn tesla_hub() -> Hub {
+    let hub = lamp_hub().await;
+    spawn_driver(
+        &hub,
+        InstanceId::from("t1"),
+        Arc::new(TeslaFake),
+        CancellationToken::new(),
+    );
+    let status = PointId::new(&DeviceId::new(&InstanceId::from("t1"), "account"), "status");
+    for _ in 0..400 {
+        if hub.state(&status).is_some() {
+            return hub;
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -3060,7 +3149,7 @@ async fn airzone_fresh_code_attempts_share_the_session_lockout() {
 #[allow(clippy::too_many_lines)] // one block per gate, PIN and redaction assertion
 #[tokio::test]
 async fn tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_session() {
-    let hub = lamp_hub().await;
+    let hub = tesla_hub().await;
     let addr = serve(
         &hub,
         &moli_api::Options {
@@ -3107,14 +3196,45 @@ async fn tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_s
     let session = pin_session(&addr, "482915").await;
     let human = format!("{session}x-moli-origin: ui\r\n");
 
-    // Owner session, read-only: goes through the gate. The test hub has no
-    // tesla driver, so the account device is absent: driver_not_running.
+    // Owner session, read-only: the tesla driver is running, so the status
+    // route answers 200 with the account's status point (waiting for a
+    // sign-in) and the (empty) sign-in URL.
     let (status, body) = request_with(&addr, "GET", base, None, &human).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Json>(&body).unwrap()["status"],
+        "sign_in"
+    );
+
+    // A non-tesla instance (the lamp driver's): the status route has no
+    // account device to read, and the two write routes must refuse at the
+    // kind gate — before any PIN budget is spent — because the redacted
+    // command may only ever reach a tesla-kind driver.
+    let (status, body) =
+        request_with(&addr, "GET", "/api/integrations/tesla/fake", None, &human).await;
     assert_eq!(status, 503, "{body}");
     assert_eq!(
         serde_json::from_str::<Json>(&body).unwrap()["error"],
         "driver_not_running"
     );
+    for (path, payload) in [
+        (
+            "/api/integrations/tesla/fake/sign-in",
+            json!({"code":"abc","pin":"482915"}),
+        ),
+        (
+            "/api/integrations/tesla/fake/sign-out",
+            json!({"pin":"482915"}),
+        ),
+    ] {
+        let (status, body) = request_with(&addr, "POST", path, Some(&payload), &human).await;
+        assert_eq!(status, 503, "{path}: {body}");
+        assert_eq!(
+            serde_json::from_str::<Json>(&body).unwrap()["error"],
+            "driver_not_running",
+            "{path}: the kind gate must fire before any PIN budget is spent"
+        );
+    }
 
     // Write without a fresh PIN in the body: refused before touching the
     // driver.
@@ -3158,23 +3278,31 @@ async fn tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_s
     .await;
     assert_eq!(status, 422, "{body}");
 
-    // Owner + fresh PIN: the pasted address reaches the driver redacted.
-    // UnknownPoint here (no tesla driver in the test hub) -> 503, and the
-    // journal entry must carry a null value, never the pasted code.
+    // Owner + fresh PIN: the pasted address reaches the driver redacted —
+    // the 200 proves the command completed on the live driver, the driver
+    // echo proves the real value arrived, and the journal entry must carry
+    // a null value, never the pasted code.
+    let pasted = "https://auth.tesla.com/authorize?code=SECRET-PASTED-CODE&state=xyz";
     let (status, body) = request_with(
-		&addr,
-		"POST",
-		&format!("{base}/sign-in"),
-		Some(
-			&json!({"code":"https://auth.tesla.com/authorize?code=SECRET-PASTED-CODE&state=xyz","pin":"482915"}),
-		),
-		&human,
-	)
-	.await;
-    assert_eq!(status, 503, "{body}");
+        &addr,
+        "POST",
+        &format!("{base}/sign-in"),
+        Some(&json!({"code": pasted, "pin": "482915"})),
+        &human,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
     assert!(
         !body.contains("SECRET-PASTED-CODE"),
         "the pasted code must never leak in the response: {body}"
+    );
+    // The driver really received the address: the fake driver echoes the
+    // command value into the state of the `sign_in` point.
+    let account = DeviceId::new(&InstanceId::from("t1"), "account");
+    let sign_in_point = PointId::new(&account, "sign_in");
+    assert_eq!(
+        hub.state(&sign_in_point).unwrap().value,
+        Value::Text(pasted.into())
     );
     let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
     assert_eq!(entry["action"]["kind"], "command");
@@ -3216,7 +3344,13 @@ async fn tesla_setup_requires_owner_and_a_fresh_code_in_the_request_not_only_a_s
         &human,
     )
     .await;
-    assert_eq!(status, 503, "{body}");
+    // The driver accepts the sign-out: the command reaches the driver and
+    // the journal entry for it stays null.
+    assert_eq!(status, 200, "{body}");
+    let entry = serde_json::to_value(&hub.journal(1)[0]).unwrap();
+    assert_eq!(entry["action"]["kind"], "command");
+    assert_eq!(entry["action"]["value"], Json::Null);
+    assert_eq!(entry["origin"], "ui");
 }
 
 #[tokio::test]

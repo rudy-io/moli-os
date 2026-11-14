@@ -13,7 +13,8 @@ pub struct Vehicle {
     pub name: String,
     /// `"model3"`, `"modely"`, … (the badge, when the API knows it).
     pub car_type: Option<String>,
-    /// `false` when the car is asleep: its readings then stay at their last ones.
+    /// `false` unless the API reports the car `online` (asleep, offline, …):
+    /// its readings then stay at their last ones.
     pub awake: bool,
 }
 
@@ -56,7 +57,7 @@ pub fn vehicles_of(answer: &Json) -> Vec<Vehicle> {
                     .get("vehicle_state")
                     .or_else(|| v.get("state"))
                     .and_then(Json::as_str)
-                    .is_some_and(|s| s != "asleep"),
+                    .is_some_and(|s| s == "online"),
             })
         })
         .collect()
@@ -212,19 +213,27 @@ pub fn api_command(order: Order) -> (&'static str, Option<&'static str>) {
 }
 
 /// One query parameter of a pasted address, percent-decoded. The parameter
-/// must start after `?` or `&`, so `xcode=` is not read as `code=`.
+/// must start after `?` or `&`, so `xcode=` is not read as `code=`; a
+/// candidate with a bad boundary or an empty value is skipped and the
+/// search continues after it (`?xstate=a&state=b` still finds `b`).
 fn param_of(pasted: &str, name: &str) -> Option<String> {
     let pasted = pasted.trim();
     let key = format!("{name}=");
-    let pos = pasted.find(&key)?;
-    let boundary_ok =
-        pos == 0 || pasted.as_bytes()[pos - 1] == b'?' || pasted.as_bytes()[pos - 1] == b'&';
-    if !boundary_ok {
-        return None;
+    let mut from = 0;
+    while let Some(rel) = pasted[from..].find(&key) {
+        let pos = from + rel;
+        let boundary_ok =
+            pos == 0 || pasted.as_bytes()[pos - 1] == b'?' || pasted.as_bytes()[pos - 1] == b'&';
+        if boundary_ok {
+            let tail = &pasted[pos + key.len()..];
+            let value = tail.split(['&', '#']).next().unwrap_or(tail).trim();
+            if !value.is_empty() {
+                return Some(percent_decode(value));
+            }
+        }
+        from = pos + 1;
     }
-    let tail = &pasted[pos + key.len()..];
-    let value = tail.split(['&', '#']).next().unwrap_or(tail).trim();
-    (!value.is_empty()).then(|| percent_decode(value))
+    None
 }
 
 /// The sign-in's `state` parameter: a pasted callback address must carry the
@@ -233,6 +242,14 @@ fn param_of(pasted: &str, name: &str) -> Option<String> {
 #[must_use]
 pub fn state_of(pasted: &str) -> Option<String> {
     param_of(pasted, "state")
+}
+
+/// Whether the pasted text is a sign-in callback ADDRESS (it carries a
+/// `code=` query parameter), as opposed to a bare code copied from the page:
+/// an address must carry the `state` of the sign-in that produced it.
+#[must_use]
+pub fn is_address(pasted: &str) -> bool {
+    param_of(pasted, "code").is_some()
 }
 
 /// What the dashboard pasted back: the sign-in's last address (the app's
@@ -446,6 +463,22 @@ mod tests {
     fn an_unknown_car_type_has_no_badge() {
         let answer: Json = json!({"response": [{"id": 1, "car_type": "modelq"}]});
         assert_eq!(vehicles_of(&answer)[0].badge(), None);
+    }
+
+    #[test]
+    fn only_online_means_awake() {
+        // Any state other than `online` (asleep, offline, unknown) must read
+        // as not awake: polling `vehicle_data` on such a car wastes calls.
+        for state in ["asleep", "offline", "garage", "unknown_state"] {
+            let answer: Json = json!({
+                "response": [{ "id": 1, "vehicle_state": state }]
+            });
+            assert!(!vehicles_of(&answer)[0].awake, "{state}");
+        }
+        let answer: Json = json!({
+            "response": [{ "id": 1, "vehicle_state": "online" }]
+        });
+        assert!(vehicles_of(&answer)[0].awake);
     }
 
     const DATA: &str = r#"{
@@ -683,6 +716,33 @@ mod tests {
             state_of("https://auth.tesla.com/redirect?xstate=ST123"),
             None
         );
+    }
+
+    #[test]
+    fn a_parameter_after_a_lookalike_is_still_found() {
+        // The first `state=` / `code=` candidate has a bad boundary (it is
+        // part of `xstate=` / `xcode=`): the search must continue and find
+        // the real parameter after it.
+        let url = "https://auth.tesla.com/redirect?xstate=abc&state=def";
+        assert_eq!(state_of(url), Some("def".to_owned()));
+        let url = "https://auth.tesla.com/redirect?xcode=short&code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789";
+        assert_eq!(
+            code_of(url),
+            Some("AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789".to_owned())
+        );
+        // A bare `state=` with an empty value is skipped too.
+        let url = "https://auth.tesla.com/redirect?state=&state=def";
+        assert_eq!(state_of(url), Some("def".to_owned()));
+    }
+
+    #[test]
+    fn an_address_is_told_from_a_bare_code() {
+        assert!(is_address(
+            "https://auth.tesla.com/redirect?code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789"
+        ));
+        assert!(is_address("code=AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789"));
+        assert!(!is_address("AQAbCdefGHIJKLMNOPQRSTUVWXYZ-0123456789"));
+        assert!(!is_address("https://auth.tesla.com/authorize"));
     }
 
     #[test]

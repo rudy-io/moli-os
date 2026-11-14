@@ -861,6 +861,7 @@
   "pilotes.tesla.pas_connecte": "le compte Tesla n'est pas connecté",
   "pilotes.tesla.adresse_fausse": "ce n'est pas l'adresse de fin de connexion (elle porte un code=)",
   "pilotes.tesla.adresse_sans_code": "cette adresse ne porte pas de code : la connexion a peut-être échoué, recommence depuis la nouvelle page",
+  "pilotes.tesla.adresse_sans_state": "l'adresse collée ne porte pas le paramètre state de la page de connexion ouverte : ouvre la nouvelle adresse affichée sur le pilote « Compte Tesla » et recommence",
   "pilotes.tesla.coffre": "connecté, mais le coffre ne peut pas garder le jeton : {why}",
   "pilotes.tesla.refuse": "Tesla a refusé la connexion ({why}) : recommence depuis la nouvelle page",
   "pilotes.tesla.injoignable": "Tesla est injoignable ({cause})",

@@ -330,13 +330,19 @@ pub async fn partner_register(
 }
 
 /// The pause a 429 asked for, in seconds (`Retry-After`, with a fallback).
+/// Clamped to `[60 s, 6 h]`: `Retry-After: 0` must not spin the loop at
+/// network speed, and an unreasonably large value must not park the driver
+/// for days (the run loop's own retry cycle will resume).
 fn retry_after(headers: &http::HeaderMap) -> u64 {
+    const MIN_SECS: u64 = 60;
+    const MAX_SECS: u64 = 6 * 3600;
     const FALLBACK_SECS: u64 = 15 * 60;
     headers
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.trim().parse::<u64>().ok())
         .unwrap_or(FALLBACK_SECS)
+        .clamp(MIN_SECS, MAX_SECS)
 }
 
 /// A 403 whose body carries `EXCEEDED_LIMIT`: the account is disabled by its
@@ -525,6 +531,28 @@ mod tests {
         ));
         // EXCEEDED_LIMIT elsewhere in the body, without the 403, does not count.
         assert!(!billing_limit(StatusCode::OK, body));
+    }
+
+    #[test]
+    fn the_retry_after_pause_is_clamped() {
+        const MIN: u64 = 60;
+        const MAX: u64 = 6 * 3600;
+        let mut headers = http::HeaderMap::new();
+        // A zero pause must not spin the loop: clamped to the minimum.
+        headers.insert("retry-after", "0".parse().unwrap());
+        assert_eq!(retry_after(&headers), MIN);
+        // A pause asking days is clamped to the maximum.
+        headers.insert("retry-after", "999999".parse().unwrap());
+        assert_eq!(retry_after(&headers), MAX);
+        // A sane value passes through untouched.
+        headers.insert("retry-after", "300".parse().unwrap());
+        assert_eq!(retry_after(&headers), 300);
+        // No header: the fallback.
+        let empty = http::HeaderMap::new();
+        assert_eq!(retry_after(&empty), 15 * 60);
+        // A non-numeric `Retry-After` (the HTTP-date form) falls back too.
+        headers.insert("retry-after", "soon".parse().unwrap());
+        assert_eq!(retry_after(&headers), 15 * 60);
     }
 
     #[test]

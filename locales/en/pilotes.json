@@ -861,6 +861,7 @@
   "pilotes.tesla.pas_connecte": "the Tesla account is not connected",
   "pilotes.tesla.adresse_fausse": "this is not the sign-in's last address (it carries a code=)",
   "pilotes.tesla.adresse_sans_code": "this address carries no code: the sign-in may have failed, start again from the new page",
+  "pilotes.tesla.adresse_sans_state": "the pasted address does not carry the state parameter of the open sign-in page: open the new address shown on the « Tesla account » driver and start again",
   "pilotes.tesla.coffre": "connected, but the secret store cannot keep the token: {why}",
   "pilotes.tesla.refuse": "Tesla refused the sign-in ({why}): start again from the new page",
   "pilotes.tesla.injoignable": "Tesla is unreachable ({cause})",
