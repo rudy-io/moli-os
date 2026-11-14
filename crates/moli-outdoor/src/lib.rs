@@ -45,6 +45,10 @@ use tokio::sync::broadcast::error::RecvError;
 pub const INSTANCE: &str = "dehors";
 /// The device, inside the instance.
 pub const NATIVE: &str = "meteo";
+/// When only a reading's time moved (a station repeating 0 mm), the value is
+/// published again at most this often: its age stays right within five
+/// minutes, and the history does not take a line per repetition.
+pub const AGE_EVERY: Duration = Duration::from_secs(5 * 60);
 /// A source with no `stale_after` is fresh for half an hour.
 pub const DEFAULT_FRESH: Duration = Duration::from_secs(30 * 60);
 /// Freshness is the only thing that changes without a source speaking.
@@ -136,6 +140,11 @@ pub fn check(config: &Config) -> Result<(), String> {
     for id in ids {
         if !id.contains(':') || id.contains('/') {
             return Err(format!("{id:?} is not a device id"));
+        }
+        if id.split(':').next() == Some(INSTANCE) {
+            return Err(format!(
+                "{id:?} is the outdoor weather itself: it cannot be its own source"
+            ));
         }
         if !seen.insert(id) {
             return Err(format!("{id:?} is given twice"));
@@ -305,6 +314,36 @@ pub fn choose(candidates: &[Candidate], now: u64) -> Option<&Candidate> {
         .or_else(|| candidates.iter().max_by_key(|c| c.ts))
 }
 
+/// What to publish for a meaning, against what was published last (and
+/// when, by the clock).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Publish {
+    /// The value, with its reading's time.
+    pub value: bool,
+    /// `<key>_source`: only when the source changes, so its time says since
+    /// when that source is the one.
+    pub source: bool,
+}
+
+/// A new value or a new source is published at once; a newer reading of the
+/// same value only once `AGE_EVERY` has passed since the last publication.
+#[must_use]
+pub fn publish(last: Option<&(Candidate, u64)>, chosen: &Candidate, now: u64) -> Publish {
+    let Some((shown, at)) = last else {
+        return Publish {
+            value: true,
+            source: true,
+        };
+    };
+    let source = shown.source != chosen.source;
+    let older = chosen.ts > shown.ts
+        && now.saturating_sub(*at) >= u64::try_from(AGE_EVERY.as_millis()).unwrap_or(u64::MAX);
+    Publish {
+        value: source || shown.value != chosen.value || older,
+        source,
+    }
+}
+
 // ---- the device -----------------------------------------------------------------------
 
 fn label(semantic: Semantic) -> String {
@@ -437,7 +476,8 @@ impl Outdoor {
 #[derive(Default)]
 struct Published {
     device: Option<Device>,
-    values: HashMap<&'static str, Candidate>,
+    /// Per meaning: what was published, and when by the clock.
+    values: HashMap<&'static str, (Candidate, u64)>,
     online: Option<bool>,
     /// Notes already logged: each once.
     noted: HashSet<String>,
@@ -496,15 +536,17 @@ impl Outdoor {
             let Some(chosen) = choose(&candidates, now) else {
                 continue;
             };
-            if published.values.get(slot.key) != Some(chosen) {
-                ctx.set_state_at(&id, slot.key, chosen.value.clone(), chosen.ts);
-                ctx.set_state_at(
+            let what = publish(published.values.get(slot.key), chosen, now);
+            if what.source {
+                ctx.set_state(
                     &id,
                     &source_key(slot.key),
                     Value::from(chosen.source.as_str()),
-                    chosen.ts,
                 );
-                published.values.insert(slot.key, chosen.clone());
+            }
+            if what.value {
+                ctx.set_state_at(&id, slot.key, chosen.value.clone(), chosen.ts);
+                published.values.insert(slot.key, (chosen.clone(), now));
             }
         }
         // Reachable while one of its sources is.
@@ -628,6 +670,9 @@ mod tests {
 
         assert!(check(&config("")).is_err());
         assert!(check(&config("forecast = \"meteo:api/temperature\"\n")).is_err());
+        // Never its own source.
+        assert!(check(&config("[[station]]\ndevice = \"dehors:meteo\"\n")).is_err());
+        assert!(check(&config("forecast = \"dehors:meteo\"\n")).is_err());
         assert!(
             check(&config(
                 "forecast = \"meteo:api\"\n[[station]]\ndevice = \"meteo:api\"\n"
@@ -779,6 +824,67 @@ mod tests {
             now - 5 * min
         );
         assert_eq!(choose(&[], now), None);
+    }
+
+    /// A station repeating the same value does not write a line per
+    /// repetition: a new value or source at once, a newer reading of the
+    /// same value every five minutes at most.
+    #[test]
+    fn a_repeated_reading_is_published_every_five_minutes_at_most() {
+        let min = 60_000;
+        let now = 1_000 * min;
+        let first = candidate("z2m:0x1", 0.0, now - min, 15);
+        assert_eq!(
+            publish(None, &first, now),
+            Publish {
+                value: true,
+                source: true
+            }
+        );
+        let last = (first.clone(), now);
+        // The same reading again: nothing.
+        assert_eq!(
+            publish(Some(&last), &first, now + min),
+            Publish {
+                value: false,
+                source: false
+            }
+        );
+        // Read again a minute later, same value: not yet.
+        let again = candidate("z2m:0x1", 0.0, now, 15);
+        assert_eq!(
+            publish(Some(&last), &again, now + min),
+            Publish {
+                value: false,
+                source: false
+            }
+        );
+        // Five minutes after the last publication: its age is refreshed.
+        assert_eq!(
+            publish(Some(&last), &again, now + 5 * min),
+            Publish {
+                value: true,
+                source: false
+            }
+        );
+        // A new value: at once.
+        let wetter = candidate("z2m:0x1", 0.2, now, 15);
+        assert_eq!(
+            publish(Some(&last), &wetter, now + min),
+            Publish {
+                value: true,
+                source: false
+            }
+        );
+        // Another source: at once, and its source too.
+        let forecast = candidate("meteo:api", 0.0, now, 30);
+        assert_eq!(
+            publish(Some(&last), &forecast, now + min),
+            Publish {
+                value: true,
+                source: true
+            }
+        );
     }
 
     fn forecast_of(ts: u64) -> Candidate {

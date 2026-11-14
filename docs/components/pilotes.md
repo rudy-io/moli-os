@@ -1096,6 +1096,8 @@ device = "infoclimat:…"       # une station lente écrit sa propre durée
 stale_after = "2h"
 ```
 
+`[outdoor]` ne se cite jamais lui-même : un identifiant de l'instance `dehors` est refusé.
+
 Il publie **un** appareil, `dehors:meteo`, en lecture seule (il n'accepte aucun ordre et n'en
 transmet aucun). Ses `members` sont les sources.
 
@@ -1112,10 +1114,12 @@ transmet aucun). Ses `members` sont les sources.
   la prévision fraîche, sinon la dernière valeur connue, quelle que soit sa source. Il y a donc
   une valeur dès qu'une source a parlé une fois. Frais = relevé depuis moins de `stale_after`.
 - **L'âge** : la valeur garde l'heure du relevé de sa source, pas celle de la recopie ; la règle
-  `stale` des automatismes marche telle quelle. Quand une source relit la même valeur, l'heure
-  avance aussi (dans la minute).
+  `stale` des automatismes marche telle quelle. Quand une source relit seulement la même valeur,
+  l'heure avance au plus toutes les 5 minutes : l'âge reste juste à 5 minutes près, et
+  l'historique ne prend pas une ligne par répétition.
 - **La source** : `<clé>_source` (texte, lecture seule, sens `config`) porte l'identifiant de
-  l'appareil source. `stations` et `forecast` (texte, sens `config`) listent les sources
+  l'appareil source. Il ne change que quand la source change : son heure dit depuis quand cette
+  source est retenue. `stations` et `forecast` (texte, sens `config`) listent les sources
   (ids séparés par des virgules) : la page Dehors s'en sert pour « mesuré » ou « prévu ».
 - **Joignable** tant qu'une de ses sources l'est.
 - **Rien à relire en boucle** : le pilote suit les changements de ses sources ; une horloge
