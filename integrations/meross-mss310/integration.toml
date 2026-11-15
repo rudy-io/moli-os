@@ -1,0 +1,34 @@
+[integration]
+id = "meross-mss310"
+name = "Prise connectée Meross avec mesure (MSS310)"
+brands = ["Meross"]
+models = ["MSS310"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the plug's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = ["key"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "meross_lan et merossiot (communauté, licence MIT) : protocole, signature, espaces de noms et unités ; aucun code copié"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/all.json"
+request = "all"
+
+[[fixture]]
+file = "fixtures/electricity.json"
+request = "e"
+
+[[fixture]]
+file = "fixtures/consumption.json"
+request = "c"

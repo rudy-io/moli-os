@@ -1244,7 +1244,15 @@ fn print_profile(compiled: &moli_profile::Compiled, file: Option<&moli_profile::
     }
     println!("  writes (each one is a command: guard and journal apply):");
     for w in &compiled.writes {
-        println!("  write   {:<20} GET {}", w.key, w.path);
+        match &w.call {
+            moli_profile::WriteCall::Get => {
+                println!("  write   {:<20} GET {}", w.key, w.path);
+            }
+            moli_profile::WriteCall::Meross { namespace, payload } => println!(
+                "  write   {:<20} POST (meross SET {namespace}) {}  payload {payload}",
+                w.key, w.path
+            ),
+        }
         if let Some(i) = w.refresh {
             println!("          then reads {}", compiled.requests[i].id);
         }

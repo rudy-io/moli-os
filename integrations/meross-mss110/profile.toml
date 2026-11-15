@@ -1,0 +1,43 @@
+# Meross MSS110 / MSS210 smart plug: local signed API (no cloud at run time).
+# The device key comes from the Meross account the plug was set up with;
+# store it once:
+#   moli-os secrets set <instance> key        (value on standard input)
+# Protocol knowledge from the community (meross_lan, merossiot); no code
+# copied. One relay, no metering.
+# Never tried on a real device: written from those descriptions.
+
+[profile]
+id = "meross-mss110"
+name = "Prise connectée Meross (MSS110, MSS210)"
+manufacturer = "Meross"
+model = "MSS110"
+secret = "key"
+identity = "all.payload.all.system.hardware.uuid"
+mac = "all.payload.all.system.hardware.macAddress"
+name_from = "all.payload.all.system.hardware.type"
+
+# Identity and the relay state (digest), in one message.
+[[request]]
+id = "all"
+path = "/config"
+format = "json"
+every = "15s"
+transport = "meross"
+namespace = "Appliance.System.All"
+payload = "{}"
+
+[[point]]
+key = "on"
+label = "Prise"
+from = "all.payload.all.digest.togglex.[channel=0].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[write]]
+point = "on"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 0, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"

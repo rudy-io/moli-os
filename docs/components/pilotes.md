@@ -1428,7 +1428,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
-| `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
+| `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin, relais des prises Meross) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO ; prises Meross MSS110, MSS210, MSS310 et multiprises : **pas essayées** (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
 | `lumieres` (interne) | `moli-lights` | aucun (lit et commande d'autres appareils via le hub) | oui | ampoules Hue derrière un relais |
 

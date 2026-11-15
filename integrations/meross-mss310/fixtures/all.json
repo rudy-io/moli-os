@@ -1,0 +1,52 @@
+{
+  "header": {
+    "messageId": "00000000000000000000000000000000",
+    "namespace": "Appliance.System.All",
+    "method": "GETACK",
+    "payloadVersion": 1,
+    "from": "/appliance/00000000000000000000000000000001/publish",
+    "timestamp": 1767355200,
+    "timestampMs": 0,
+    "sign": "00000000000000000000000000000000"
+  },
+  "payload": {
+    "all": {
+      "system": {
+        "hardware": {
+          "type": "mss310",
+          "subType": "eu",
+          "version": "1.0.0",
+          "chipType": "fictional",
+          "uuid": "00000000000000000000000000000001",
+          "macAddress": "02:00:00:00:00:01"
+        },
+        "firmware": {
+          "version": "1.0.0",
+          "compileTime": "2026/01/01 00:00:00 GMT +00:00",
+          "wifiMac": "02:00:00:00:00:02",
+          "innerIp": "192.168.1.x",
+          "server": "",
+          "port": 0,
+          "userId": 0
+        },
+        "time": {
+          "timestamp": 1767355200,
+          "timezone": "",
+          "timeRule": []
+        },
+        "online": {
+          "status": 1
+        }
+      },
+      "digest": {
+        "togglex": [
+          {
+            "channel": 0,
+            "onoff": 1,
+            "lmTime": 1767355200
+          }
+        ]
+      }
+    }
+  }
+}

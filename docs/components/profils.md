@@ -94,9 +94,11 @@ l'API parle une autre unité convertit avec `scale` (m/s → km/h : `scale = 3.6
 - Segments séparés par des points : `q.result.status.extruder.temperature`.
 - Dans un tableau : un nombre choisit par position (`daily.temperature_2m_max.0`) ;
   `[champ=valeur]` choisit l'élément dont le champ vaut cette valeur
-  (`electricity.[channel=1].power`), insensible à l'ordre. `1` correspond à `1` et à `"1"`.
+  (`electricity.[channel=1].power`), insensible à l'ordre. `1` correspond à `1` et à `"1"` ;
+  `[>champ]` choisit l'élément dont le champ est le plus grand nombre (la dernière entrée d'un
+  historique : `consumptionx.[>time].value`) ; un élément sans ce champ numérique ne compte pas.
 - Réponse `kv` : un seul niveau (`control.pow`).
-- Pas de segment vide, sélecteur mal formé refusé (`[channel]`, `[=1]`).
+- Pas de segment vide, sélecteur mal formé refusé (`[channel]`, `[=1]`, `[>]`).
 
 ### Lecture d'une valeur
 
@@ -136,7 +138,8 @@ kind = "text"
 
 ### `[[write]]`
 
-Rend un point écrivable. Une commande sur ce point devient un `GET` vers `path`.
+Rend un point écrivable. Une commande sur ce point devient un `GET` vers `path`, ou, avec
+`transport = "meross"`, un message `SET` signé (voir « Écrire par le transport `meross` »).
 
 ```toml
 [[write]]
@@ -155,6 +158,9 @@ refresh = "control"
 | `decimals` | non | numérique seulement : `22` part en `22.0` avec `decimals = 1`. Par défaut, la forme la plus courte (`22`, `21.5`) |
 | `expect` | non | texte que la réponse doit contenir pour que l'écriture compte comme faite (Daikin répond 200 même quand il refuse : `ret=PARAM NG`) |
 | `refresh` | non | requête relue juste après l'écriture : le tableau de bord montre ce que l'appareil a fait, pas ce qu'on a demandé |
+| `transport` | non (`get`) | `meross` : l'écriture part en message `SET` signé, posté sur `path` |
+| `namespace` | `meross` | espace de noms du message (`Appliance.Control.ToggleX`) ; lettres, chiffres, points |
+| `payload` | `meross` | objet JSON en texte ; la chaîne `"{value}"` y marque la place de la valeur |
 
 Dans `path` :
 
@@ -171,6 +177,39 @@ Validé à la compilation : point connu, `{value}` présent, chaque requête cit
 bien formés (un seul niveau dans une réponse `kv`), `refresh` connue, `map` cohérent avec le
 point, `decimals` sur un numérique.
 
+#### Écrire par le transport `meross`
+
+```toml
+[[write]]
+point = "on"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 0, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+```
+
+- Le message part comme ceux des lectures (même cible, même signature
+  `md5(messageId ‖ clé ‖ horodatage)`, la clé ne voyage pas), avec la méthode `SET`. C'est le
+  **seul** endroit d'où un `SET` peut partir : une `[[request]]` n'a aucun moyen de nommer une
+  méthode, son message est toujours un `GET`.
+- `path` est l'endroit où le message est posté, envoyé tel quel : aucun `{…}` dedans.
+- `payload` est du JSON valide, lu à la compilation. Chaque chaîne exactement égale à
+  `"{value}"` (au moins une) est remplacée par la valeur commandée, passée par `map` et
+  `decimals` : un nombre ou un booléen JSON quand le texte en est un (`1`, `21.5`, `true`), une
+  chaîne sinon ; la valeur d'un point `text` reste toujours une chaîne. Le message est construit
+  en JSON, jamais par collage de texte : une valeur ne peut pas ajouter un champ. Toute autre
+  chaîne ou clé contenant `{` ou `}` est refusée (`"{secret}"` partirait tel quel).
+- Fait seulement si l'appareil répond `SETACK`. Toute autre réponse (`ERROR` d'une clé fausse
+  ou d'un canal absent, page d'erreur) : « refusé par l'appareil : `<espace de noms>` :
+  `<méthode>` `<code>` `<détail>` » (80 caractères au plus de ce que l'appareil a dit, jamais
+  ce qui a été envoyé). `expect` ne s'applique donc pas, et est refusé.
+- Pas de `{requête.chemin}` : le message ne reprend rien des réponses, rien n'est relu avant.
+- Un profil fichier peut écrire ainsi, aux conditions de tout profil à secret : son propre
+  `host`, et l'approbation d'un humain, à qui `profile trust` montre l'espace de noms et le
+  `payload` de chaque écriture.
+
 ### Les lectures ne changent rien
 
 Une `[[request]]` est relue toutes les quelques secondes, hors garde : elle ne doit jamais
@@ -181,7 +220,9 @@ pouvoir écrire. D'où, à la compilation :
   inertes (lettres, chiffres, `_ . , -`, `{var}`). Un `GET /aircon/set_control_info?pow=1`,
   `/relay/0?turn=on` ou `/cm?cmnd=Power%20On` déguisé en lecture est refusé ;
 - aucun en-tête de changement de méthode (`X-HTTP-Method-Override`…) ;
-- le transport `meross` n'envoie que des messages `GET`.
+- une `[[request]]` au transport `meross` n'envoie que des messages `GET` : elle n'a pas de
+  champ pour nommer une méthode (clé inconnue refusée), et le moteur écrit `GET` lui-même. Un
+  `SET` ne part que d'un `[[write]]` déclaré, donc d'une commande passée par le hub.
 
 Liste blanche actuelle (de quoi garder les profils fournis valides, rien de plus) :
 
@@ -210,7 +251,8 @@ lecture seule. Une clé d'API passée en query (`?appid={secret}`) demande aussi
   refuse de se construire (`check-config` échoue).
 - Dans `path`, les valeurs sont encodées en `%XX` ; dans les en-têtes, elles sont brutes.
 - Transport `meross` : la clé ne voyage pas. Le message est signé
-  `md5(messageId ‖ clé ‖ horodatage)`, envoyé en HTTP local, et la réponse doit être un `GETACK`.
+  `md5(messageId ‖ clé ‖ horodatage)`, envoyé en HTTP local, et la réponse doit être un `GETACK`
+  (un `SETACK` pour une écriture).
 
 ## Exécution
 
@@ -294,10 +336,14 @@ box redémarrée). Le pilote le suit, sans rien demander à personne :
 3. `path` est rempli ; une référence absente de la réponse : refus (jamais d'ordre partiel).
 4. `GET` sur la même cible que les lectures (mêmes en-têtes `Host`, `Accept`). Réponse 2xx
    (et `expect` présent si déclaré) : `Ok` ; sinon l'erreur (statut HTTP, ou
-   « refusé par l'appareil : … » avec le début de la réponse).
+   « refusé par l'appareil : … » avec le début de la réponse). Écriture `meross` : le message
+   `SET` signé est posté sur cette cible, `Ok` seulement sur `SETACK`.
 5. Tout cela tient dans l'échéance de la commande (5 s, celle du hub) : au-delà, la commande
    est abandonnée et rien de plus ne part vers l'appareil.
 6. `refresh` est relue après la réponse au hub.
+
+Un ordre n'est jamais gardé pour plus tard : si l'appareil ne répond pas (injoignable, muet),
+la commande échoue tout de suite et rien ne repart quand il revient.
 
 Les erreurs citent le **modèle** de chemin, jamais le chemin rempli.
 
@@ -344,8 +390,9 @@ qu'approuvé (`moli-os profile trust <chemin>`, voir « Confiance »).
 - `moli-os profile check <id|chemin>` : sans configuration, n'importe où. Valide le profil et
   affiche ce qu'il déclare : fichier et SHA-256, hôte, secret, `needs vars`, chaque requête
   (rythme, format, méthode, chemin, en-têtes), chaque point (clé, sémantique, unité, kind,
-  bornes), puis la section **writes** (chaque écriture avec son chemin complet, la requête
-  relue après, le texte attendu ; `writes: none (read-only)` sinon). C'est le passage obligé
+  bornes), puis la section **writes** (chaque écriture avec son chemin complet, ou pour
+  `meross` son espace de noms et son `payload`, la requête relue après, le texte attendu ;
+  `writes: none (read-only)` sinon). C'est le passage obligé
   de tout profil écrit par un agent. Il ne vérifie ni l'hôte ni les `vars` d'une instance :
   c'est le rôle de `moli-os check-config`.
 - `moli-os profile trust <chemin>` : la même chose, puis l'empreinte dans
@@ -365,7 +412,7 @@ décidée dans [ARCHITECTURE.md](../ARCHITECTURE.md#le-paquet-dintégration)) :
 | `onboarding.md` | questions à poser, appuis physiques, où trouver les identifiants, comment tester |
 
 18 paquets : 11 pilotes natifs (`z2m`, `hue`, `tuya`, `reolink`, `sonos`, `philips`,
-`frigate`, `bambu`, `tapo`, `igd`, `helpers`) et les 7 profils ci-dessous.
+`frigate`, `bambu`, `tapo`, `igd`, `helpers`) et les profils ci-dessous.
 
 ### `integration.toml`
 
@@ -452,13 +499,17 @@ dossier dans les deux sens.
 | `daikin-brp069` | climatiseur Daikin, adaptateur Wi-Fi BRP069 | HTTP local, sans auth, `kv` | `basic` 1 h, `sensor` 60 s, `control` 30 s | aucun | oui, en lecture (écritures d'après le protocole documenté par pydaikin) |
 | `meross-em06` | compteur d'énergie Meross EM06/EM06P, 6 circuits | HTTP local signé (`meross`) | `all` 1 h, `e` 15 s | `key` | oui (EM06P) |
 | `jackery-meter` | compteur Jackery Smart Meter (pince des batteries HomePower / SolarVault) | HTTP local, sans auth | `m` 10 s | aucun | oui, en lecture (Smart Meter 1P) |
+| `meross-mss110` | prise connectée Meross MSS110, MSS210 (un relais) | HTTP local signé (`meross`) | `all` 15 s | `key` | **non** (aucune prise essayée ; fixture construite d'après le protocole décrit par meross_lan et merossiot) |
+| `meross-mss310` | prise connectée Meross MSS310 (relais et mesure) | HTTP local signé (`meross`) | `all` 15 s, `e` 15 s, `c` 5 min | `key` | **non** (idem) |
+| `meross-multiprise` | multiprises et prises doubles Meross MSS425, MSS620 | HTTP local signé (`meross`) | `all` 15 s | `key` | **non** (idem) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
 | `tempo` | couleur EDF Tempo du jour et du lendemain | HTTPS `www.api-couleur-tempo.fr` | `today` 1 h, `tomorrow` 30 min | aucun | oui (sans fixture) |
 | `iopool` | sonde de piscine iopool EcO | HTTPS cloud `api.iopool.com`, en-tête `x-api-key` | `pools` 15 min | `api_key` | oui (sans fixture) |
 
-Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
+`daikin-brp069` écrit (4 points, par `GET`), et les trois profils de prises Meross (leurs
+relais, par message `SET` signé) ; les autres sont en lecture seule.
 
 #### `daikin-brp069`
 
@@ -504,6 +555,36 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
   la liaison de la batterie. `power` et `energy` alimentent le compteur `total` de
   `[energy]`, `energy_returned` un compteur `export`. Monophasé seulement (le 3P n'a pas
   été vu).
+#### `meross-mss110`, `meross-mss310`, `meross-multiprise`
+
+**Aucun de ces trois profils n'a été essayé sur un vrai appareil** : ils sont écrits d'après
+le protocole que décrivent meross_lan et merossiot (licence MIT, aucun code repris), et leurs
+fixtures sont construites, pas capturées.
+
+- Identité : `uuid` matériel ; MAC : `macAddress` (la prise est retrouvée si la box lui donne
+  une autre adresse) ; nom : type matériel. Tout passe par `POST /config`.
+- Relais : lu dans `Appliance.System.All` (`digest.togglex`, canal choisi par `[channel=N]`),
+  toutes les 15 s ; écrit par un `SET` `Appliance.Control.ToggleX`
+  (`{"togglex": {"channel": N, "onoff": 0|1}}`), fait seulement sur `SETACK`, puis `all` est
+  relue. Sémantique `on_off`, clé `on` comme `kasa`, `shelly` et `tapo`.
+- `meross-mss110` (MSS110, MSS210) : `on` (canal 0).
+- `meross-mss310` : `on`, et la mesure : `power` (W), `voltage` (V), `current` (A) lus dans
+  `Appliance.Control.Electricity` toutes les 15 s (sur le fil : mW, **dixièmes de volt**, mA ;
+  l'EM06, lui, donne des mV) ; `energy_today` (Wh) lu dans `Appliance.Control.ConsumptionX`
+  toutes les 5 min. Mêmes clés que `kasa` pour la mesure instantanée ; `power` et
+  `energy_today` peuvent alimenter `[energy]`.
+- `energy_today` : `ConsumptionX` donne une entrée par jour (`date`, `time`, `value` en Wh),
+  un mois environ, sans ordre. Le profil lit la plus récente (`[>time]`). La prise ne crée
+  l'entrée du jour qu'à son premier Wh : **entre minuit et ce moment, la valeur est encore le
+  total de la veille**. Pour `[energy]`, c'est un compteur qui retombe une fois par jour, ce
+  qu'il sait compter ; pour un affichage, c'est à savoir. Le moteur de profils ne connaît pas
+  l'heure de la maison : il ne peut pas écarter l'entrée de la veille.
+- `meross-multiprise` (MSS425, MSS620) : `on` (canal 0 : toutes les sorties) et `on_1` à
+  `on_5` (chaque sortie, les ports USB en dernier). Une sortie que l'appareil n'a pas reste
+  sans valeur ; un ordre dessus est refusé par l'appareil.
+- Non géré : les très anciens matériels qui n'ont pas `ToggleX` (`Appliance.Control.Toggle`).
+- Clé de l'appareil (celle du compte Meross qui l'a installé) :
+  `moli-os secrets set <instance> key`.
 
 #### `moonraker`
 
@@ -595,8 +676,8 @@ lit `null`).
 
 ## Tests
 
-`crates/moli-profile/src/profile.rs` : tous les profils intégrés compilent et seuls les 4
-points Daikin déclarés sont écrivables ; `BUILTIN` = les `profile.toml` du catalogue, dans les
+`crates/moli-profile/src/profile.rs` : tous les profils intégrés compilent et seuls les
+points déclarés sont écrivables (4 pour Daikin, les relais des prises Meross) ; `BUILTIN` = les `profile.toml` du catalogue, dans les
 deux sens ; décodage sur des réponses réelles (fixtures des paquets Daikin, Moonraker, Meross
 EM06, y compris canaux réordonnés) ; profils cassés expliqués (rythme,
 référence, kind, clé en double, champ inconnu, arrondi, échelle, bornes, chemin d'URI, unité,
@@ -606,7 +687,14 @@ trop profond en `kv`, `refresh` inconnue, imbrication autre que `{value}`, `{sec
 HTTP, `map` incomplète ou étrangère, `decimals` hors numérique, doublon) ; découpage des
 modèles d'écriture et encodage d'une valeur texte ; lectures qui cacheraient une écriture
 (query hors liste, paramètre non listé, `;`, en-tête de changement de méthode) ; profil
-fichier avec secret sans `host`. `src/lib.rs` : signature Meross (la clé ne voyage jamais,
+fichier avec secret sans `host` ; écritures `meross` (le `SET` de chaque relais avec sa valeur
+en nombre, une requête qui voudrait nommer une méthode, `payload` sans `"{value}"` ou avec un
+autre `{…}`, `{value}` dans `path`, `expect`, profil fichier sans `host`, valeur texte qui ne
+peut pas ajouter un champ) ; sélecteur `[>champ]` ; décodage des fixtures **construites** des
+prises Meross (unités, dernière journée, sortie absente). `src/lib.rs` : une fausse prise
+(écrite d'après le protocole décrit) reçoit un `SET` signé, répond `SETACK`, l'état est relu ;
+un `ERROR` ou une prise débranchée donnent un refus immédiat qui ne cite jamais la clé ;
+signature Meross (la clé ne voyage jamais,
 identifiants jamais répétés), en-têtes `Host`, chemins d'écriture Daikin rendus depuis une
 réponse fixée (dont changement de mode et repli), refus sans réponse, profil fichier non
 approuvé qui reste en `waiting` sans rien publier, paquet annoncé (`integration`) : l'id
