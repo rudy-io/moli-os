@@ -986,7 +986,9 @@ mod dispatch_tests {
             443,
             true,
             request(),
-            Duration::from_secs(2),
+            // Longer than a failed lookup: musl waits out its 5 s resolver
+            // timeout even when the server refuses at once.
+            Duration::from_secs(30),
             1024,
         )
         .await
