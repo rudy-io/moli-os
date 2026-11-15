@@ -1,0 +1,79 @@
+{
+ "success": true,
+ "data": {
+  "volumes": [
+   {
+    "id": "volume_1",
+    "status": "normal",
+    "fs_type": "btrfs",
+    "raidType": "single",
+    "size": {
+     "total": "19184757235712",
+     "used": "15097662705664"
+    }
+   }
+  ],
+  "disks": [
+   {
+    "id": "sda",
+    "name": "Drive 1",
+    "model": "ST4000VN008-2DR166",
+    "temp": 32,
+    "status": "normal",
+    "smart_status": "normal",
+    "below_remain_life_thr": false,
+    "overview_status": "normal",
+    "isSsd": false,
+    "diskType": "SATA"
+   },
+   {
+    "id": "sdb",
+    "name": "Drive 2",
+    "model": "ST8000VN004-2M2101",
+    "temp": 42,
+    "status": "normal",
+    "smart_status": "normal",
+    "below_remain_life_thr": false,
+    "overview_status": "normal",
+    "isSsd": false,
+    "diskType": "SATA"
+   },
+   {
+    "id": "sdc",
+    "name": "Drive 3",
+    "model": "ST8000VN004-2M2101",
+    "temp": 42,
+    "status": "normal",
+    "smart_status": "normal",
+    "below_remain_life_thr": false,
+    "overview_status": "normal",
+    "isSsd": false,
+    "diskType": "SATA"
+   },
+   {
+    "id": "sdd",
+    "name": "Drive 4",
+    "model": "ST4000VN008-2DR166",
+    "temp": 33,
+    "status": "normal",
+    "smart_status": "normal",
+    "below_remain_life_thr": false,
+    "overview_status": "normal",
+    "isSsd": false,
+    "diskType": "SATA"
+   },
+   {
+    "id": "sde",
+    "name": "Drive 5",
+    "model": "ST4000VN008-2DR166",
+    "temp": 32,
+    "status": "normal",
+    "smart_status": "normal",
+    "below_remain_life_thr": false,
+    "overview_status": "normal",
+    "isSsd": false,
+    "diskType": "SATA"
+   }
+  ]
+ }
+}

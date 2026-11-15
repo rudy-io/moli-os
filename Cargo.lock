@@ -2267,6 +2267,7 @@ dependencies = [
  "moli-shelly",
  "moli-solarman",
  "moli-sonos",
+ "moli-synology",
  "moli-tapo",
  "moli-telegram",
  "moli-tuya",
@@ -2510,6 +2511,27 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-synology"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "moli-core",
+ "moli-i18n",
+ "moli-net",
+ "moli-runtime",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
  "tracing",
 ]
 

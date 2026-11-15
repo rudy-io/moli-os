@@ -50,6 +50,7 @@ moli-izypower.workspace = true
 moli-solarman.workspace = true
 moli-jackery.workspace = true
 moli-vicare.workspace = true
+moli-synology.workspace = true
 moli-igd.workspace = true
 moli-ipp.workspace = true
 moli-helpers.workspace = true

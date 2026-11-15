@@ -1,0 +1,4 @@
+{"success":true,"data":{"task_list":[
+ {"task_id":1,"name":"Backup A","state":"none","last_bkp_result":"done","last_bkp_time":"2026-11-14 02:00"},
+ {"task_id":2,"name":"Backup B","state":"backupable","last_bkp_result":"failed","last_bkp_time":"2026-11-14 03:00"}
+]}}

@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, helpers, profile
+kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -1387,6 +1387,35 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
 - **Tests** : `src/model.rs` (fixtures anonymisées de `integrations/vicare/fixtures/`), `src/lib.rs`
   (PKCE, attente du quota).
 
+## `synology` : NAS Synology, DSM (`crates/moli-synology`)
+
+- **Couvre** : l'état d'un NAS (température, processeur, mémoire, durée d'allumage), un appareil par
+  volume (occupation, espace libre), par disque (température, état, SMART, secteurs, usure), l'onduleur
+  branché au NAS (s'il est activé) et une tâche Hyper Backup chacune (dernier résultat). Chaque partie qui peut aller mal
+  porte `problem` (binaire, sens `alert`) et `detail` (texte). Ordres du NAS : `wake`, `shutdown`, `reboot`.
+- **Protocole** : l'API web de DSM, **HTTPS seulement** (5001), certificat **épinglé au premier contact**
+  (`PinnedHttps`, empreinte sous `cert`, avant l'envoi du mot de passe). POST de formulaire pour tout : ni mot
+  de passe ni jeton de session dans une adresse. Une session ; perdue (106, 107, 119), elle est rouverte et l'appel renvoyé **une fois**
+  (DSM n'a alors rien exécuté).
+- **Configuration** : `host`, `port` (5001), `poll_secs` (60, de 5 à 3600), `mac` (pour `wake` ; apprise dans la
+  table de voisins si `host` est une IPv4 locale).
+- **Secrets** : `username`, `password` (compte DSM dédié, sans double authentification ; administrateur si l'on
+  veut `shutdown` et `reboot`). Voir `integrations/synology/onboarding.md`.
+- **Dashboard** : chaque partie qui a `problem` apparaît seule dans **Parc**. La page **Infra** montre une carte « NAS » (`web/src/maison/ui/infra/NasCard.svelte`, parts regroupées par instance dans `lib/nas.js`) : charge, mémoire, température, volumes, disques, onduleur, sauvegardes ; ses problèmes entrent dans le bandeau « à voir ». Elle ne porte aucun bouton : `control` passe par l'API et les automatismes.
+- **Un NAS qui dort est normal** : l'appareil `nas` est publié dès le démarrage et ne disparaît pas ; l'échec d'une
+  lecture est une **valeur** (`up` faux, mesures inconnues, autres appareils hors ligne), pas un échec du pilote,
+  qui viderait la file d'ordres et emporterait `wake`. Un compte sans droit sur une partie (code 105) perd cette partie.
+- **Ordres** (sens `control`) : `wake` (paquet Wake-on-LAN, `moli_net::wol`, seulement proposé si la MAC est connue),
+  `shutdown` et `reboot` (`SYNO.Core.System`, `force=false`, **exécutés au plus une fois** : renvoyés seulement
+  si DSM répond « session perdue »).
+- **Identifiants refusés** ou certificat changé : attente d'une personne (`wait_for`), **sans insister** (DSM
+  bloque l'adresse après quelques échecs). Un certificat Let's Encrypt renouvelé change l'empreinte épinglée :
+  `moli-os secrets forget <instance> cert` à chaque renouvellement.
+- **État** : lecture éprouvée sur un DS1019+ (DSM 7.4), fixtures = réponses réelles anonymisées ; **ordres, onduleur
+  activé et pannes non éprouvés** (fixtures `*-faulty` reconstituées). Détail : `integrations/synology/README.md`.
+- **Tests** : `src/model.rs` (fixtures de `integrations/synology/fixtures/`) ; `src/tests.rs` (faux DSM en TLS :
+  publication, ordre d'arrêt, session perdue, identifiants refusés, certificat changé, NAS éteint qui garde ses ordres).
+
 ## `profile` : profils déclaratifs (`crates/moli-profile`)
 
 Un seul pilote générique pour tout appareil HTTP décrit en TOML. Voir [profils.md](profils.md).
@@ -1446,6 +1475,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) ; **pas encore** : TSUN TITAN et GEN4, ZCS Azzurro 1PH TL-V3 et HYD-ZSS-HP |
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
+| `synology` | `moli-synology` | HTTPS (5001), certificat épinglé, API web DSM | oui : réveil, arrêt, redémarrage | DS1019+ (DSM 7.4), lecture seule |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin, relais des prises Meross) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO ; prises Meross MSS110, MSS210, MSS310 et multiprises : **pas essayées** (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |

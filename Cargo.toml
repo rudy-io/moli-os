@@ -53,6 +53,7 @@ moli-izypower = { path = "crates/moli-izypower" }
 moli-solarman = { path = "crates/moli-solarman" }
 moli-jackery = { path = "crates/moli-jackery" }
 moli-vicare = { path = "crates/moli-vicare" }
+moli-synology = { path = "crates/moli-synology" }
 moli-igd = { path = "crates/moli-igd" }
 moli-ipp = { path = "crates/moli-ipp" }
 moli-assistant = { path = "crates/moli-assistant" }
