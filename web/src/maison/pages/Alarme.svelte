@@ -95,47 +95,43 @@
   {#if !alarm}
     <p class="muted">{t('alarme.aucune')}</p>
   {:else}
-    <section class="hero tone-{tone}" aria-live="polite">
-      <span class="badge"><Icon name={tone === 'off' ? 'shield' : tone === 'alert' ? 'alert' : 'lock'} size={30} /></span>
-      <div class="what">
-        <h2>{title}</h2>
-        {#if detail}<p>{detail}</p>{/if}
+    <!-- One block: where the alarm stands, and the choice of its mode. -->
+    <section class="panel tone-{tone}">
+      <div class="status" aria-live="polite">
+        <span class="badge"><Icon name={tone === 'off' ? 'shield' : tone === 'alert' ? 'alert' : 'lock'} size={30} /></span>
+        <div class="what">
+          <h2>{title}</h2>
+          {#if detail}<p>{detail}</p>{/if}
+        </div>
+        {#if left !== null && (state === 'arming' || state === 'pending')}
+          <span class="count" aria-hidden="true">{left}</span>
+        {/if}
       </div>
-      {#if left !== null && (state === 'arming' || state === 'pending')}
-        <span class="count" aria-hidden="true">{left}</span>
-      {/if}
-      {#if state !== 'disarmed'}
-        <button class="disarm" onclick={() => set('off')} disabled={busy !== null}>
-          <Icon name="shield" size={18} />{t('alarme.desarmer')}
-        </button>
-      {/if}
-    </section>
 
-    <section class="modes" aria-label={t('alarme.modes')}>
-      {#each modes as m (m)}
-        {@const d = setup.modes[m]}
-        {@const open = blocking(setup, m, valueOf)}
-        {@const watched = setup.sensors.filter((s) => s.modes.includes(m)).length}
-        {@const on = current === m}
-        <button class="mode" class:on class:blocked={open.length && !on} disabled={busy !== null || on || open.length > 0} onclick={() => set(m)} aria-pressed={on}>
-          <span class="mode-head">
-            <span class="mode-icon"><Icon name={ICONS[m]} size={22} /></span>
-            <b>{modeName(m)}</b>
-            {#if on}<span class="chip">{t('alarme.en_cours')}</span>{/if}
-          </span>
-          <span class="facts">
-            <span>{t('alarme.sortie')} <b>{words(d.exit)}</b></span>
-            <span>{t('alarme.entree')} <b>{words(d.entry)}</b></span>
-            <span>{t('alarme.sirene')} <b>{d.trigger ? words(d.trigger) : t('alarme.jusqu_a_desarmer')}</b></span>
-          </span>
-          <span class="watch">
-            {t('alarme.capteurs_surveilles', { n: watched })}
-            {#if !on && !open.length}<span class="go">{t('alarme.armer')}<Icon name="chevron-right" size={16} /></span>{/if}
-          </span>
-          {#if open.length && !on}
-            <span class="why"><Icon name="warning" size={15} />{t('alarme.impossible', { capteurs: open.join(', ') })}</span>
-          {/if}
+      <div class="switch" role="group" aria-label={t('alarme.modes')} style:--n={modes.length + 1}>
+        <button class="opt" class:on={current === 'off'} aria-pressed={current === 'off'} disabled={busy !== null || current === 'off'} onclick={() => set('off')}>
+          <span class="opt-head"><Icon name="shield" size={20} /><b>{t('alarme.etat.desarmee')}</b></span>
+          <small>{t('alarme.rien_surveille')}</small>
         </button>
+        {#each modes as m (m)}
+          {@const d = setup.modes[m]}
+          {@const open = blocking(setup, m, valueOf)}
+          {@const watched = setup.sensors.filter((s) => s.modes.includes(m)).length}
+          {@const on = current === m}
+          <button class="opt" class:on class:blocked={open.length > 0 && !on} aria-pressed={on} disabled={busy !== null || on || open.length > 0} onclick={() => set(m)}>
+            <span class="opt-head">
+              <Icon name={open.length && !on ? 'warning' : ICONS[m]} size={20} /><b>{modeName(m)}</b>
+            </span>
+            <small>
+              {t('alarme.sortie')} {words(d.exit)} · {t('alarme.entree')} {words(d.entry)} · {t('alarme.sirene')}
+              {d.trigger ? words(d.trigger) : t('alarme.jusqu_a_desarmer')} · {t('alarme.capteurs_surveilles', { n: watched })}
+            </small>
+          </button>
+        {/each}
+      </div>
+
+      {#each modes.filter((m) => current !== m && blocking(setup, m, valueOf).length) as m (m)}
+        <p class="why"><Icon name="warning" size={15} />{t('alarme.impossible_mode', { mode: modeName(m), capteurs: blocking(setup, m, valueOf).join(', ') })}</p>
       {/each}
     </section>
 
@@ -189,10 +185,8 @@
     gap: 20px;
   }
 
-  .hero {
+  .panel {
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
-    align-items: center;
     gap: 18px;
     padding: 22px 24px;
     border-radius: var(--r-lg);
@@ -202,18 +196,18 @@
     --tone-soft: var(--good-soft);
   }
 
-  .hero.tone-armed {
+  .panel.tone-armed {
     --tone: var(--cool);
     --tone-soft: var(--cool-soft);
   }
 
-  .hero.tone-arming,
-  .hero.tone-warn {
+  .panel.tone-arming,
+  .panel.tone-warn {
     --tone: var(--warm);
     --tone-soft: var(--warm-soft);
   }
 
-  .hero.tone-alert {
+  .panel.tone-alert {
     --tone: var(--alert);
     --tone-soft: var(--alert-soft);
     animation: pulse 1.6s ease-in-out infinite;
@@ -223,6 +217,13 @@
     50% {
       box-shadow: 0 0 0 6px var(--alert-soft);
     }
+  }
+
+  .status {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 18px;
   }
 
   .badge {
@@ -256,129 +257,78 @@
     text-align: right;
   }
 
-  .disarm {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 20px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--ink);
-    color: var(--surface);
-    font: inherit;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .modes {
+  /* The mode, chosen in one place: a single control, the current one lit. */
+  .switch {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-    gap: 16px;
-  }
-
-  .mode {
-    display: grid;
-    gap: 10px;
-    align-content: start;
-    padding: 18px;
-    border: 2px solid transparent;
+    grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px;
     border-radius: var(--r-md);
-    background: var(--surface);
-    box-shadow: var(--shadow);
+    background: var(--surface-2);
+  }
+
+  .opt {
+    display: grid;
+    gap: 4px;
+    align-content: start;
+    padding: 12px 14px;
+    border: 0;
+    border-radius: calc(var(--r-md) - 4px);
+    background: transparent;
     color: var(--ink);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
+    transition: background 0.15s var(--ease);
   }
 
-  .mode:not(:disabled):hover {
-    transform: translateY(-2px);
-    border-color: var(--cool);
+  .opt:not(:disabled):hover {
+    background: var(--surface);
   }
 
-  .mode:disabled {
+  .opt:disabled {
     cursor: default;
   }
 
-  .mode.on {
-    border-color: var(--cool);
-    background: var(--cool-soft);
+  .opt.on {
+    background: var(--tone);
+    color: var(--surface);
+    box-shadow: var(--shadow);
   }
 
-  .mode.blocked {
+  .opt.on small {
+    color: inherit;
     opacity: 0.85;
   }
 
-  .mode:focus-visible {
+  .opt.blocked {
+    color: var(--ink-3);
+  }
+
+  .opt:focus-visible {
     outline: 2px solid var(--cool);
     outline-offset: 2px;
   }
 
-  .mode-head {
+  .opt-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
-  }
-
-  .mode-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    display: grid;
-    place-items: center;
-    background: var(--surface-2);
-    color: var(--cool);
-  }
-
-  .chip {
-    margin-left: auto;
-    padding: 3px 10px;
-    border-radius: 999px;
-    background: var(--cool);
-    color: var(--surface);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 14px;
-    font-size: 13px;
-    color: var(--ink-3);
-  }
-
-  .facts b {
-    color: var(--ink-2);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .watch {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 8px;
-    font-size: 13px;
-    color: var(--ink-3);
+    font-size: 16px;
   }
 
-  .go {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 5px 8px 5px 12px;
-    border-radius: 999px;
-    background: var(--cool);
-    color: var(--surface);
-    font-weight: 700;
+  .opt small {
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
   }
 
   .why {
     display: flex;
     align-items: center;
     gap: 6px;
+    margin: -6px 0 0;
     padding: 8px 10px;
     border-radius: var(--r-sm);
     background: var(--warm-soft);
@@ -514,22 +464,17 @@
   }
 
   @media (max-width: 640px) {
-    .hero {
-      grid-template-columns: auto 1fr auto;
-    }
-
-    .disarm {
-      grid-column: 1 / -1;
-      justify-content: center;
+    .switch {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .hero.tone-alert {
+    .panel.tone-alert {
       animation: none;
     }
 
-    .mode {
+    .opt {
       transition: none;
     }
   }

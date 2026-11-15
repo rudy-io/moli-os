@@ -17,7 +17,6 @@
   "alarme.desarmer": "Désarmer",
   "alarme.armer_en": "Armer en {mode}",
   "alarme.modes": "Modes de l’alarme",
-  "alarme.en_cours": "En cours",
   "alarme.sortie": "Sortie",
   "alarme.entree": "Entrée",
   "alarme.sirene": "Sirène",
@@ -26,7 +25,6 @@
   "alarme.secondes": "{n} s",
   "alarme.minutes": "{n} min",
   "alarme.capteurs_surveilles": "{n} capteur(s) surveillé(s)",
-  "alarme.impossible": "Impossible d’armer : {capteurs}",
   "alarme.capteurs": "Capteurs",
   "alarme.capteur.inconnu": "pas encore de mesure",
   "alarme.capteur.ouverte": "Ouverte",
@@ -43,6 +41,7 @@
   "alarme.evenement.pending": "Entrée détectée",
   "alarme.evenement.triggered": "Déclenchée",
   "alarme.evenement.disarmed": "Désarmée",
-  "alarme.armer": "Armer",
-  "alarme.capteur.rien_vu": "Rien vu depuis le démarrage"
+  "alarme.capteur.rien_vu": "Rien vu depuis le démarrage",
+  "alarme.rien_surveille": "Rien n’est surveillé",
+  "alarme.impossible_mode": "{mode} impossible : {capteurs}"
 }

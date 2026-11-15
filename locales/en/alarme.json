@@ -17,7 +17,6 @@
   "alarme.desarmer": "Disarm",
   "alarme.armer_en": "Arm {mode}",
   "alarme.modes": "Alarm modes",
-  "alarme.en_cours": "On",
   "alarme.sortie": "Exit",
   "alarme.entree": "Entry",
   "alarme.sirene": "Siren",
@@ -26,7 +25,6 @@
   "alarme.secondes": "{n} s",
   "alarme.minutes": "{n} min",
   "alarme.capteurs_surveilles": "{n} sensor(s) watched",
-  "alarme.impossible": "Cannot arm: {capteurs}",
   "alarme.capteurs": "Sensors",
   "alarme.capteur.inconnu": "no reading yet",
   "alarme.capteur.ouverte": "Open",
@@ -43,6 +41,7 @@
   "alarme.evenement.pending": "Entry detected",
   "alarme.evenement.triggered": "Triggered",
   "alarme.evenement.disarmed": "Disarmed",
-  "alarme.armer": "Arm",
-  "alarme.capteur.rien_vu": "Nothing seen since start"
+  "alarme.capteur.rien_vu": "Nothing seen since start",
+  "alarme.rien_surveille": "Nothing is watched",
+  "alarme.impossible_mode": "{mode} not possible: {capteurs}"
 }
