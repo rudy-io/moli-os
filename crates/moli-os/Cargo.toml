@@ -44,6 +44,7 @@ moli-recycleapp.workspace = true
 moli-engie.workspace = true
 moli-tapo.workspace = true
 moli-lifx.workspace = true
+moli-govee.workspace = true
 moli-shelly.workspace = true
 moli-izypower.workspace = true
 moli-solarman.workspace = true

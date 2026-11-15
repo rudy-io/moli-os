@@ -906,5 +906,21 @@
   "pilotes.jackery.lecture_seule": "seule la réserve de la batterie Jackery se règle depuis Moli",
   "pilotes.jackery.hors_bornes": "la réserve de la batterie Jackery se règle entre 5 et 49 %",
   "pilotes.jackery.injoignable": "la batterie Jackery ne répond pas en ce moment : rien n'a été envoyé",
-  "pilotes.jackery.jeton_manquant": "il manque le jeton de la batterie Jackery (affiché dans l'appli Jackery, avec les réglages MQTT) : le ranger avec \"moli-os secrets set {instance} {name}\", puis redémarrer Moli"
+  "pilotes.jackery.jeton_manquant": "il manque le jeton de la batterie Jackery (affiché dans l'appli Jackery, avec les réglages MQTT) : le ranger avec \"moli-os secrets set {instance} {name}\", puis redémarrer Moli",
+  "pilotes.govee.adresse_invalide": "adresse IPv4 invalide dans hosts : {host}",
+  "pilotes.govee.rien_a_chercher": "aucune adresse dans hosts et la découverte est désactivée : rien à chercher",
+  "pilotes.govee.poll_secs": "poll_secs doit être compris entre 1 et 3600",
+  "pilotes.govee.port_occupe": "le port UDP {port} est déjà pris sur cette machine : les lumières Govee ne répondent qu'à ce port (une seule instance govee, et aucun autre programme qui l'écoute)",
+  "pilotes.govee.aucune": "aucune lumière Govee n'a répondu ; nouvelle recherche chaque minute (l'API locale s'active lumière par lumière dans l'appli Govee)",
+  "pilotes.govee.lumiere": "Lumière Govee ({end})",
+  "pilotes.govee.lumiere_modele": "Govee {sku} ({end})",
+  "pilotes.govee.allumee": "Allumée",
+  "pilotes.govee.luminosite": "Luminosité",
+  "pilotes.govee.temperature_couleur": "Température de couleur",
+  "pilotes.govee.couleur": "Couleur",
+  "pilotes.govee.pas_de_reponse": "la lumière n'a pas répondu",
+  "pilotes.govee.ne_se_regle_pas": "« {point} » ne se règle pas sur cette lumière",
+  "pilotes.govee.couleur_invalide": "couleur attendue au format #rrggbb",
+  "pilotes.govee.injoignable": "lumière inconnue ou injoignable",
+  "pilotes.govee.trop": "{max} lumières au plus par instance : les suivantes sont ignorées"
 }

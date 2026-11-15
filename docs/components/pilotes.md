@@ -74,7 +74,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, shelly, igd, helpers, profile
+kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -986,6 +986,37 @@ hosts = ["192.168.1.x"]   # adresses interrogées directement
 - **Pièges** : une ampoule LIFX manque souvent un relevé : elle ne passe hors ligne qu'après **3 relevés manqués de suite** (comme HA). Hors ligne (coupée au mur), elle n'est plus interrogée qu'un relevé sur six pour ne pas retarder les autres et les ordres. Chaque ampoule envoie parfois deux fois sa réponse à `GetService` : le double est ignoré.
 - **Tests** : trames et lecture des messages (`src/proto.rs`, dont l'exemple `SetColor` de la documentation LIFX à l'octet), conversions, table des produits, ordres selon le modèle ; et le pilote entier à travers le hub face à de fausses ampoules sur `127.0.0.1`, un port chacune (`src/tests.rs`) : publication seulement après accusé, accusé venu d'ailleurs refusé, réponses d'ailleurs ignorées sans découverte, un seul `LightGet` par relevé, dix ampoules muettes sans bloquer les ordres, groupe obtenu malgré une réponse perdue, ampoule qui répond non détournée (même après un relevé perdu), modèle gardé quand le micrologiciel arrive tard, ampoule muette suivie sans qu'une autre prenne sa place, déluge de numéros sans bloquer les ordres, plafond, modèle redemandé, ampoule éteinte, micrologiciel ancien, aucun relevé pendant un fondu, et les deux captures réelles rejouées. Numéros de série factices (`02:00:00:00:00:0x`).
 
+## `govee` : lumières Wi-Fi Govee, API locale (`crates/moli-govee`)
+
+**Jamais essayé sur une vraie lumière** : écrit d'après le manuel public de l'API locale de Govee, aucun appareil disponible. Ce qui suit décrit ce que le pilote fait.
+
+- **Couvre** : marche/arrêt, luminosité, couleur, température de blanc. Une instance pilote **toutes** les lumières qu'elle trouve (100 au plus). L'API locale s'active **lumière par lumière dans l'appli Govee** (« LAN Control ») et tous les modèles ne l'ont pas.
+- **Protocole** : 100 % local, API locale officielle de Govee (« LAN API »), sans cloud, sans compte, sans clé. Un datagramme UDP = un objet JSON `{"msg":{"cmd":…,"data":{…}}}`. Recherche `scan` vers le groupe de multidiffusion 239.255.255.250:**4001** ; les lumières répondent au port **4002** de Moli ; relevés `devStatus` et ordres `turn`, `brightness`, `colorwc` vers le port **4003** de la lumière.
+- **Configuration** (tout est facultatif) :
+
+```toml
+[[driver]]
+id = "govee"
+kind = "govee"
+[driver.options]
+hosts = ["192.168.1.x"]   # adresses interrogées directement
+# discovery = true        # scan en multidiffusion sur le réseau local
+# poll_secs = 5           # 1 à 3600
+```
+
+  Sans `hosts` et avec `discovery = false`, la configuration est refusée.
+- **Secrets** : aucun.
+- **Le port 4002** : les lumières ne répondent qu'à lui, le pilote l'ouvre donc tel quel. Une seule instance `govee` par machine et aucun autre programme à l'écoute de ce port ; sinon le pilote échoue avec un message qui le dit et le superviseur réessaie. En conteneur : réseau de l'hôte.
+- **Ce que le pilote croit** : l'API n'a aucune authentification (tout appareil du réseau peut piloter les lumières), ses réponses n'ont pas de numéro de requête et `devStatus` ne porte pas l'identifiant de la lumière. Une réponse est donc rattachée à une lumière par **l'adresse d'où vient le datagramme** (jamais celle écrite dans le `scan`). Avec `discovery = false`, seules les réponses des adresses de `hosts` comptent à la recherche. Une lumière qui répond n'est jamais déplacée par un `scan` portant son identifiant, et une adresse n'est donnée à une autre lumière que si celle qui la tenait est muette (elle reste alors sans adresse jusqu'à ce qu'on l'entende ailleurs).
+- **Recherche** : au démarrage (une seconde d'écoute, deux fois si rien ne répond, avant de dire prêt ou en attente), puis chaque minute tant qu'une lumière manque (aucune connue, publiée avant, hors ligne, sans adresse, adresse de `hosts` muette), sinon toutes les 5 min. Une lumière nouvelle est publiée hors ligne, interrogée aussitôt, et passe en ligne à son premier état.
+- **Relevés** : un `devStatus` par lumière et par relevé (5 s), envoyé sans attendre : les réponses arrivent dans la boucle, une lumière muette ne retarde ni les autres ni les ordres. **Hors ligne après 3 relevés sans réponse**, dernières valeurs gardées ; elle reste interrogée et revient à sa première réponse.
+- **Identité** : l'identifiant donné au `scan`, réduit à ses chiffres hexadécimaux. L'API ne donne ni nom ni pièce : `native_name` = « Govee <modèle> (<4 derniers chiffres>) ».
+- **Points**, tous écrivables, mêmes clés et sémantiques que `lifx` et `tapo` : `on`, `brightness` (1-100 %), `color_temp` (2000-9000 K, la plage du manuel), `color` (`#rrggbb`). L'API ne dit pas ce qu'un modèle sait faire et le pilote n'a pas de table de modèles : les quatre sont proposés à toutes. Une température de 0 dans `devStatus` (la lumière affiche une couleur) n'est pas publiée : `color_temp` garde le dernier blanc.
+- **Ordres** : l'API n'a pas d'accusé de réception. Un ordre ne part que vers une lumière en ligne qui a répondu depuis moins de 3 relevés + 1 s ; sinon il est **refusé**, jamais gardé. Envoi, 0,3 s laissée à la lumière, `devStatus`, réponse attendue 0,7 s ; si elle ne montre pas l'ordre, il est renvoyé une fois puis relu deux fois (2,7 s au plus, sous les 5 s du hub). L'ordre réussit dès que la lumière a répondu après lui, et c'est **ce qu'elle répond** qui est publié, que ce soit ou non ce qui était demandé ; sans aucune réponse, il échoue. La couleur part avec une température de 0, le blanc avec une couleur nulle, comme le manuel.
+- **Découpage** : `src/wire.rs` (messages, lecture tolérante des réponses, aucune prise réseau), `src/lights.rs` (la table des lumières et ses décisions, rendues sous forme d'événements, aucune prise réseau), `src/lib.rs` (options, points, la boucle UDP qui exécute les événements).
+- **Tests** : aucun ne touche le réseau. Messages comparés à ceux du manuel, les deux fixtures (construites d'après le manuel, **pas des captures**), réponses incomplètes ou farfelues, identifiants ; table des lumières : publication, 3 relevés manqués, retour, ordre refusé à une lumière muette ou trop ancienne, lumière qui répond non déplacée, lumière muette suivie, adresse reprise, `discovery = false`, plafond ; options, ordres bornés, valeurs publiées. **La boucle UDP elle-même (`run`, `Session`) n'est couverte par aucun test.**
+- **Pièges attendus, à confirmer sur du matériel** : multidiffusion filtrée par certains Wi-Fi (donner `hosts`) ; machine à plusieurs interfaces (le `scan` part par la route par défaut) ; `devStatus` peut-être en retard sur un ordre.
+- **Sources** : manuel de l'API locale de Govee ; lus pour comprendre, sans rien copier : `govee-local-api` et l'intégration `govee_light_local` de Home Assistant (Apache-2.0 toutes deux). Aucune donnée reprise, donc rien dans `NOTICE`.
 ## `igd` : box internet (`crates/moli-igd`)
 
 - **Couvre** : toute passerelle UPnP IGD (Livebox, Freebox…) : connexion, IP publique, durée, débit de ligne. **Lecture seule.**
@@ -1384,6 +1415,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `moonraker` | `moli-moonraker` | HTTP local 7125 | lumière, `control` (humain pour un agent) | Snapmaker U1, Creality K2 Combo |
 | `tapo` | `moli-tapo` | HTTP 80 + KLAP v2 | oui : tout | pas encore (cible : Tapo L530) |
 | `lifx` | `moli-lifx` | UDP 56700 (protocole LAN), diffusion | oui : marche, luminosité, température, couleur (selon le modèle) | LIFX White et Mini W (micrologiciel 3.90) : lecture et ordres ; couleur et température non testées |
+| `govee` | `moli-govee` | UDP 4001/4002/4003 (API locale Govee), multidiffusion | oui : marche, luminosité, couleur, température | pas encore (aucune lumière Govee disponible) |
 | `shelly` | `moli-shelly` | WebSocket local 80 (JSON-RPC Gen2), notifications poussées, digest SHA-256 | oui : sorties (`on`) | Pro 4PM, Pro 3EM (une phase câblée) : lecture identique à HA au Wh près ; ordre sur une sortie : pas encore |
 | `igd` | `moli-igd` | UPnP IGD (SSDP + SOAP) | non | Livebox |
 | `ipp` | `moli-ipp` | IPP 2.0 HTTP 631 | identifier, annuler, imprimer (tableau de bord) | Canon MG3600 |

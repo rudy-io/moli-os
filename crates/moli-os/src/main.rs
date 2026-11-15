@@ -1334,6 +1334,7 @@ const KINDS: &[&str] = &[
     "engie",
     "tapo",
     "lifx",
+    "govee",
     "matter",
     "voltalis",
     "shelly",
@@ -1559,6 +1560,7 @@ fn build_driver(
         "lifx" => Arc::new(moli_lifx::Lifx::new(
             config.options.clone().try_into().with_context(context)?,
         )?),
+        "govee" => configured_driver(config, moli_govee::Govee::new)?,
         "voltalis" => Arc::new(moli_voltalis::Voltalis::new(
             config.options.clone().try_into().with_context(context)?,
         )),
