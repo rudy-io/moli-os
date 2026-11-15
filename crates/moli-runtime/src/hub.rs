@@ -82,8 +82,12 @@ pub enum CommandError {
     Busy,
     #[error("driver did not answer in time")]
     Timeout,
+    #[error("command outcome unknown; the device may have carried it out")]
+    OutcomeUnknown,
     #[error("driver error: {0}")]
     Driver(String),
+    #[error("driver refused the command: {0}")]
+    DriverRefused(String),
     /// Held by the guard: a human must approve request `id`.
     #[error("awaiting human approval #{id}: {reason}")]
     NeedsApproval { id: u64, reason: String },
@@ -172,10 +176,7 @@ impl Watch {
 fn transient(e: &CommandError) -> bool {
     matches!(
         e,
-        CommandError::DriverUnavailable
-            | CommandError::Busy
-            | CommandError::Timeout
-            | CommandError::Driver(_)
+        CommandError::DriverUnavailable | CommandError::Busy | CommandError::Driver(_)
     )
 }
 
@@ -1729,9 +1730,21 @@ impl Hub {
                 mpsc::error::TrySendError::Closed(_) => CommandError::DriverUnavailable,
             })?;
         match tokio::time::timeout(self.0.opts.command_timeout, answer).await {
-            Err(_) => Err(CommandError::Timeout),
-            Ok(Err(_)) => Err(CommandError::Driver("command dropped".into())),
-            Ok(Ok(result)) => result.map_err(CommandError::Driver),
+            // The driver accepted this request but did not answer before the
+            // hub deadline. The action may have reached the device already;
+            // never label it a definite failure or automatically retry it.
+            // A deadline or closed reply channel after queueing cannot establish
+            // whether the device acted. Never label it a definite failure.
+            Err(_) | Ok(Err(_)) => Err(CommandError::OutcomeUnknown),
+            Ok(Ok(crate::driver::CommandReply::OutcomeUnknown)) => {
+                Err(CommandError::OutcomeUnknown)
+            }
+            Ok(Ok(crate::driver::CommandReply::Refused(reason))) => {
+                Err(CommandError::DriverRefused(reason))
+            }
+            Ok(Ok(crate::driver::CommandReply::Finished(result))) => {
+                result.map_err(CommandError::Driver)
+            }
         }
     }
 
@@ -2832,6 +2845,15 @@ pub(crate) fn opening(
 mod opening_tests {
     use super::*;
     use moli_core::{Access, Kind, Semantic};
+
+    #[test]
+    fn uncertain_commands_are_not_automatically_retried() {
+        assert!(!transient(&CommandError::OutcomeUnknown));
+        assert!(!transient(&CommandError::Timeout));
+        assert!(!transient(&CommandError::DriverRefused(
+            "status failure".into()
+        )));
+    }
 
     fn point(key: &str, semantic: Semantic, kind: Kind) -> PointSpec {
         PointSpec {

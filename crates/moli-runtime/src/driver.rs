@@ -41,7 +41,14 @@ pub struct CommandRequest {
     /// When the hub stopped waiting: an order past it must never run (a
     /// lamp switched on hours after « failed » is worse than a refusal).
     pub deadline: Instant,
-    pub(crate) reply: oneshot::Sender<Result<(), String>>,
+    pub(crate) reply: oneshot::Sender<CommandReply>,
+}
+
+#[derive(Debug)]
+pub(crate) enum CommandReply {
+    Finished(Result<(), String>),
+    Refused(String),
+    OutcomeUnknown,
 }
 
 impl CommandRequest {
@@ -59,7 +66,18 @@ impl CommandRequest {
     /// Reports the outcome. Dropping the request without replying is
     /// reported to the caller as a driver failure.
     pub fn reply(self, result: Result<(), String>) {
-        let _ = self.reply.send(result);
+        let _ = self.reply.send(CommandReply::Finished(result));
+    }
+
+    /// Reports that the command may have reached the device, but its result
+    /// could not be confirmed. The hub must not automatically resend it.
+    pub fn reply_outcome_unknown(self) {
+        let _ = self.reply.send(CommandReply::OutcomeUnknown);
+    }
+
+    /// Reports a definite refusal or a non-retryable driver failure.
+    pub fn reply_refused(self, reason: String) {
+        let _ = self.reply.send(CommandReply::Refused(reason));
     }
 }
 

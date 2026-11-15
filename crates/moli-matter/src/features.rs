@@ -76,6 +76,7 @@ pub(crate) enum Plan {
         attribute: u32,
         value: Tlv,
     },
+    Sequence(Vec<Plan>),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -150,14 +151,15 @@ impl Expanded {
 }
 
 pub(crate) fn supported_cluster(cluster: u32) -> bool {
-    [
-        lighting::CLUSTERS,
-        covering::CLUSTERS,
-        thermostat::CLUSTERS,
-        lock::CLUSTERS,
-    ]
-    .iter()
-    .any(|clusters| clusters.contains(&cluster))
+    cluster == 6
+        || [
+            lighting::CLUSTERS,
+            covering::CLUSTERS,
+            thermostat::CLUSTERS,
+            lock::CLUSTERS,
+        ]
+        .iter()
+        .any(|clusters| clusters.contains(&cluster))
 }
 
 pub(crate) fn metadata_attribute(path: AttributePath) -> bool {
@@ -231,9 +233,19 @@ pub(crate) fn discovery_paths(report: &Report) -> Option<Vec<matter_controller::
         {
             continue;
         }
-        let Tlv::Array(servers) = value else { continue };
+        let Tlv::Array(servers) = value else {
+            return None;
+        };
         if servers.len() > 128 {
-            continue;
+            return None;
+        }
+        // ServerList is required to be a list of ClusterIDs. Do not publish a
+        // partial endpoint after silently dropping malformed entries.
+        if servers
+            .iter()
+            .any(|server| uint(server).and_then(|n| u32::try_from(n).ok()).is_none())
+        {
+            return None;
         }
         endpoints.insert(path.endpoint);
         if endpoints.len() > 128 {
@@ -299,6 +311,19 @@ mod tests {
         assert!(metadata_attribute(path(0x201, 0x19)));
         assert!(!metadata_attribute(path(0x101, 0)));
         assert!(policy_paths(2, &report).is_empty());
+    }
+
+    #[test]
+    fn invalid_server_list_rejects_entire_discovery() {
+        let server_path = path(0x1d, 1);
+        for servers in [
+            Tlv::Null,
+            Tlv::Array(vec![Tlv::Uint(6), Tlv::Utf8("bad cluster id".into())]),
+            Tlv::Array((0..129).map(Tlv::Uint).collect()),
+        ] {
+            assert!(discovery_paths(&[(server_path, servers)]).is_none());
+        }
+        assert!(discovery_paths(&[(server_path, Tlv::Array(vec![Tlv::Uint(6)]))]).is_some());
     }
     #[test]
     fn mode_refresh_reads_only_advertised_color_samples() {

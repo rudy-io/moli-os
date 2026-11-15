@@ -15,6 +15,13 @@ fonctions et des attributs/commandes annoncés par chaque endpoint.
 | Température / `0402`, humidité / `0405`, présence / `0406` | Mesures en lecture seule, valeurs nulles/inconnues explicites |
 | Contact/fuite / `0045` | Lecture typée selon DeviceType contact `0015` ou fuite `0043` ; type absent ou ambigu non exposé |
 
+Pour `brightness = 0`, le pilote utilise `Off` seulement si OnOff annonce la
+commande. Sinon il utilise `MoveToLevelWithOnOff` si annoncé; il ne rabat pas
+silencieusement zéro sur `MinLevel`. Une valeur positive privilégie
+`MoveToLevelWithOnOff`; si seul `MoveToLevel` est disponible, le pilote envoie
+d'abord `On` uniquement quand OnOff l'annonce aussi. Sans chemin compatible,
+le point reste non inscriptible ou la demande est refusée.
+
 Les nouvelles familles exigent des métadonnées valides et bornées : FeatureMap,
 AttributeList, AcceptedCommandList et ClusterRevision. Une fonction optionnelle ou
 une commande absente n'est pas inventée. Les politiques de sécurité et limites sont
@@ -32,6 +39,10 @@ n'est pas connue. Les PIN ne passent pas dans les points ni les journaux. Le con
 est un point Semantic::Control : une demande d'agent doit être approuvée. Un code
 succès d'un autre chemin ou une réponse ambiguë n'est pas accepté comme acquittement.
 L'état affiché vient des lectures/abonnements, jamais d'une anticipation de commande.
+Après admission dans la file, un timeout, un arrêt du contrôleur ou une réponse
+inexploitable est signalé comme issue inconnue et n'est pas réessayé. Un statut
+Matter explicitement refusé est définitif et le hub ne le relance pas. Vérifier
+l'état observé avant de soumettre un nouvel ordre.
 
 ## Limites
 
@@ -61,6 +72,11 @@ Lighting uses percent, kelvin and RGB with mode-aware subscriptions. Covers use
 use absolute writes with advertised limits/deadband, fixed heat/cool keys on dual
 models, and exact-path acknowledgements. Lock control is always timed and guarded;
 PIN-required or unknown-policy locks remain read only. No optimistic state updates.
+Brightness zero requires an advertised Off or MoveToLevelWithOnOff command; a
+positive value uses the on/off-aware command when available, or an advertised On
+followed by MoveToLevel. After queue acceptance, a timeout, controller shutdown,
+or unusable response is outcome-unknown and is never retried automatically. An
+explicit Matter status refusal is final and does not trigger hub follow-up.
 
 The limitations above remain unsupported. Standard IP commissioning and ongoing
 operation support Ethernet/Wi-Fi or routed Thread; Bluetooth provisioning is not shipped

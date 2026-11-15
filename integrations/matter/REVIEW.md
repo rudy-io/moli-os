@@ -1,4 +1,10 @@
-# Remise aux mainteneurs — Matter générique, 6 novembre 2026
+# Remise aux mainteneurs — stabilisation Matter, 15 novembre 2026
+
+La contribution principale (#144) est fusionnée dans `main` depuis le commit
+`dce85bb33029172417ca88ee54ceb2ef5ddef230`. Cette révision de stabilisation
+prépare les corrections et la transmission décrites ci-dessous ; elle ne prétend
+pas remplacer la décision des mainteneurs ni apporter de validation matérielle
+supplémentaire.
 
 La pile corrigée est livrée dans `vendor/matter-rust` avec sa licence Apache-2.0.
 Les dépendances Matter utilisent des chemins internes : aucun fork personnel,
@@ -25,9 +31,10 @@ au repos sans coupure sont documentés dans HARDWARE.md. SuppressResponse est au
 respecté dans la pile, avec une régression de transport. Les très grands ponts
 hétérogènes restent bornés par le transport et les tampons, sans promesse universelle.
 
-Les tailles et hash ci-dessous concernent le jalon de production identifié dans
-RESULTS.md, avant ces corrections de revue. Ils ne constituent pas une nouvelle
-mesure de l’image de cette révision.
+Les mesures de cette révision sont indiquées dans
+[RESULTS.md](../../tools/matter-e2e/RESULTS.md) et
+[PERFORMANCE.md](../../docs/PERFORMANCE.md). Les valeurs des paragraphes historiques
+ci-dessous restent rattachées à leurs anciens commits.
 
 ## Parcours de revue
 
@@ -44,16 +51,33 @@ comme une garantie de toutes les fonctions de tous les appareils certifiés :
 stores de levage, thermostat, contrôle de serrure autorisé et les capteurs indiqués.
 Les fonctions optionnelles absentes ou les politiques inconnues ne donnent pas de droits d'écriture.
 
-## Validation logicielle
+## Validation logicielle de cette révision
 
-- `sh scripts/check.sh` passe : **2 042 tests Moli** et **922 tests ciblés de la pile livrée** sans fonctionnalités par défaut, fmt, clippy, catalogue, cinq régressions de l'exception anti-fuite et garde anti-fuite. Six avertissements de profils préexistants. Les deux comptes se reproduisent avec `cargo test --workspace --locked -q` (somme des lignes `test result`) côté Moli, et avec l'invocation `--no-default-features -p matter-controller -p matter-interaction -p matter-commissioning --lib -q` côté pile.
-- Le contrôle standard rejoue maintenant les tests des trois bibliothèques localement modifiées : controller, interaction et commissioning. Les bibliothèques BLE système ne sont pas requises pour ce contrôle.
-- Ensemble indépendant `vendor/matter-rust`: **1 724 tests unitaires passaient au jalon précédent**, un ignoré ; les tests nécessitant du matériel restent optionnels/ignorés.
-- **29 tests** du pilote (`cargo test -p moli-matter --lib`) passent sans l'option BLE, retirée avec le tri du vendoring ; aucun essai radio n'est revendiqué.
-- **377 tests frontend** (`npm test` dans `web`), build et contrôle FR/EN (**4 374 clés**, aucune ligne en dur) passent.
-- `cargo check --locked -p moli-os` passe sous **Rust 1.89.0**, avec uniquement la source Moli et le cache registry, sans cache Git.
-- `cargo-audit` 0.22.2 passe après actualisation RustSec ; les cinq exceptions TLS préexistantes restent contrôlées par le garde d'audit et ses 15 tests. Avertissement connu : `rustls-pemfile` 2.2.0 non maintenu ; aucun nouvel ignore.
-- Le binaire de production **standard** passe l'interopérabilité indépendante étendue : toutes les familles ci-dessus, validation des consignes, contrôle de serrure approuvé, refus sans transmission, changement de politique PIN, reprise, état corrompu et mauvaise clé. [Résultats, reproduction et hash](../../tools/matter-e2e/RESULTS.md).
+- `sh scripts/check.sh` passe sur les corrections : formatage, Clippy strict,
+  tests workspace et bibliothèques Matter vendoriées, catalogue, garde anti-fuite
+  et scan des secrets. Il reste six avertissements de profils préexistants et un
+  avertissement de compatibilité du nom d'une lint avec le toolchain installé.
+- `cargo test -p moli-matter` : **33 tests passent**. `cargo test --workspace
+  --locked -q` et `sh scripts/check.sh` comprennent la régression A1, les
+  commandes On/Off/brightness et la classification d'issue incertaine.
+- Tests unitaires vendoriés ciblés : **421 controller**, **421 interaction** et
+  **83 commissioning** passent ; un test Matter préexistant est ignoré.
+- Clippy ciblé sur `moli-matter`, `moli-runtime` et `moli-api` passe avec
+  `-D warnings -A unknown-lints`.
+- Les E2E Matter.js en namespace réseau isolé passent sur les binaires logiciels :
+  commissioning, découverte, On/Off, abonnements, redémarrage, états corrompus
+  et clé erronée ; la suite étendue couvre variation/couleur, stores,
+  thermostat, politiques de serrure et refus sans transmission. Ce ne sont pas
+  des essais radio ni matériels.
+- Audit de dépendances précédemment exécuté sans nouvel avis ; avertissement
+  connu `rustls-pemfile` non maintenu. Aucun changement de dépendances dans cette
+  révision. Reproductibilité et limites sont décrites dans
+  [RESULTS.md](../../tools/matter-e2e/RESULTS.md).
+
+Les mesures d'images de production sont rapportées par révision dans
+[RESULTS.md](../../tools/matter-e2e/RESULTS.md) et
+[PERFORMANCE.md](../../docs/PERFORMANCE.md) ; ne pas réutiliser les chiffres des
+jalons historiques comme résultats de cette stabilisation.
 
 ## Taille et arbitrages
 
@@ -74,3 +98,5 @@ et coupures électriques n'est pas disponible chez le contributeur. Ces essais r
 Aucun nouveau code, appairage ou essai physique n'est attendu de l'utilisateur.
 Aucune comparaison HA, charge multi-appareils ou certification cgroup/p95 n'est revendiquée.
 Les rapports ne contiennent aucune donnée de sa maison.
+La procédure, les précautions par famille et le modèle de rapport communautaire
+sont dans [COMMUNITY-TESTS.md](COMMUNITY-TESTS.md).

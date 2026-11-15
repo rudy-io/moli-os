@@ -878,6 +878,140 @@ struct Sluggish {
     executed: Arc<AtomicU32>,
 }
 
+struct DropsAcceptedCommand {
+    received: Arc<AtomicU32>,
+}
+
+struct RefusesCommand {
+    received: Arc<AtomicU32>,
+}
+
+impl Driver for RefusesCommand {
+    fn kind(&self) -> &'static str {
+        "refusal"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("lamp");
+            ctx.upsert_device(Device {
+                id,
+                instance: ctx.instance().clone(),
+                native_name: "Lampe".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![spec("state", Kind::Binary, true, Semantic::OnOff)],
+            });
+            ctx.ready();
+            while let Some(command) = ctx.next_command().await {
+                self.received.fetch_add(1, Ordering::SeqCst);
+                command.reply_refused("explicit Matter status failure".into());
+            }
+            Ok(())
+        })
+    }
+}
+
+impl Driver for DropsAcceptedCommand {
+    fn kind(&self) -> &'static str {
+        "drop-reply"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("lamp");
+            ctx.upsert_device(Device {
+                id,
+                instance: ctx.instance().clone(),
+                native_name: "Lampe".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![spec("state", Kind::Binary, true, Semantic::OnOff)],
+            });
+            ctx.ready();
+            while let Some(command) = ctx.next_command().await {
+                self.received.fetch_add(1, Ordering::SeqCst);
+                drop(command);
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_dropped_driver_reply_is_unknown_and_not_retried() {
+    let hub = Hub::new(HubOptions {
+        command_timeout: Duration::from_millis(200),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let received = Arc::new(AtomicU32::new(0));
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("drop-reply"),
+        Arc::new(DropsAcceptedCommand {
+            received: Arc::clone(&received),
+        }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    assert_eq!(
+        hub.command(
+            &PointId::from("drop-reply:lamp/state".to_owned()),
+            Value::Bool(true),
+            Origin::Ui,
+            None,
+        )
+        .await,
+        Err(CommandError::OutcomeUnknown)
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(received.load(Ordering::SeqCst), 1);
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn a_definite_driver_refusal_is_not_retried() {
+    let hub = Hub::new(HubOptions {
+        command_timeout: Duration::from_millis(200),
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let received = Arc::new(AtomicU32::new(0));
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("refusal"),
+        Arc::new(RefusesCommand {
+            received: Arc::clone(&received),
+        }),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    assert_eq!(
+        hub.command(
+            &PointId::from("refusal:lamp/state".to_owned()),
+            Value::Bool(true),
+            Origin::Ui,
+            None,
+        )
+        .await,
+        Err(CommandError::DriverRefused(
+            "explicit Matter status failure".into()
+        ))
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(received.load(Ordering::SeqCst), 1);
+    cancel.cancel();
+}
+
 impl Driver for Sluggish {
     fn kind(&self) -> &'static str {
         "sluggish"
@@ -940,7 +1074,7 @@ async fn stale_orders_never_run() {
     let late = hub
         .command(&lamp(), Value::Bool(true), Origin::Ui, None)
         .await;
-    assert_eq!(late, Err(CommandError::Timeout));
+    assert_eq!(late, Err(CommandError::OutcomeUnknown));
     // The driver wakes up after the hub gave up: the order must not run.
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(

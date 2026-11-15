@@ -119,16 +119,6 @@ impl Endpoint {
         {
             return None;
         }
-        // Brightness zero means off: clamping the level would otherwise leave the
-        // lamp at its declared minimum instead of dark.
-        if key == "brightness" && value.as_f64() == Some(0.0) && self.clusters.contains(&6) {
-            return Some(features::Plan::Invoke {
-                cluster: 6,
-                command: 0,
-                fields: Tlv::Structure(vec![]),
-                timed: false,
-            });
-        }
         on_command(key, value, true, &self.clusters, false)
             .map(|command| features::Plan::Invoke {
                 cluster: 6,
@@ -644,9 +634,14 @@ impl Matter {
                                 () = command.cancelled() => continue,
                                 result = execute_plan(&node,*ep,plan,deadline) => result,
                             }
-                        } else { Err(failure().to_string()) }
-                    } else { Err(failure().to_string()) };
-                    command.reply(result);
+                        } else { Err(OrderError::Refused(failure().to_string())) }
+                    } else { Err(OrderError::Refused(failure().to_string())) };
+                    match result {
+                        Ok(()) => command.reply(Ok(())),
+                        Err(OrderError::OutcomeUnknown) => command.reply_outcome_unknown(),
+                        Err(OrderError::Refused(error)) => command.reply_refused(error),
+                        Err(OrderError::Failed(error)) => command.reply(Err(error)),
+                    }
                 },
                 Some(update) = rx.recv() => match update {
                     Update::Discovered(node,endpoints) => {
@@ -676,31 +671,51 @@ impl Matter {
         }
     }
 }
+#[derive(Debug, PartialEq)]
+enum OrderError {
+    /// A controller/transport error that can be retried without assuming it
+    /// reached the device.
+    Failed(String),
+    /// The endpoint or its explicit Matter status rejected the command.
+    Refused(String),
+    /// It may have executed, so neither report a definite failure nor retry.
+    OutcomeUnknown,
+}
+
 async fn execute_plan(
     node: &Node,
     endpoint: u16,
     plan: features::Plan,
     deadline: std::time::Instant,
-) -> Result<(), String> {
+) -> Result<(), OrderError> {
     match plan {
+        features::Plan::Sequence(plans) => {
+            let mut completed = false;
+            for plan in plans {
+                let features::Plan::Invoke {
+                    cluster,
+                    command,
+                    fields,
+                    timed,
+                } = plan
+                else {
+                    return Err(OrderError::Refused(failure().to_string()));
+                };
+                match execute_invoke(node, endpoint, cluster, command, fields, timed, deadline)
+                    .await
+                {
+                    Ok(()) => completed = true,
+                    Err(error) => return Err(sequence_error(completed, error)),
+                }
+            }
+            Ok(())
+        }
         features::Plan::Invoke {
             cluster,
             command,
             fields,
             timed,
-        } => {
-            let path = CommandPath {
-                endpoint,
-                cluster,
-                command,
-            };
-            let result = if timed {
-                node.invoke_timed_before(path, fields, None, deadline).await
-            } else {
-                node.invoke_before(path, fields, deadline).await
-            };
-            order_outcome(&result.map(|r| matches!(r, InvokeResult::Status(ImStatus::Success))))
-        }
+        } => execute_invoke(node, endpoint, cluster, command, fields, timed, deadline).await,
         features::Plan::Write {
             cluster,
             attribute,
@@ -724,9 +739,47 @@ async fn execute_plan(
         }
     }
 }
-// A refused or unanswered order is a failure; one whose deadline elapsed after it
-// was queued is unknown — the device may have carried it out (a lock, a cover).
-fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), String> {
+fn sequence_error(completed: bool, error: OrderError) -> OrderError {
+    if completed {
+        OrderError::OutcomeUnknown
+    } else {
+        error
+    }
+}
+async fn execute_invoke(
+    node: &Node,
+    endpoint: u16,
+    cluster: u32,
+    command: u32,
+    fields: Tlv,
+    timed: bool,
+    deadline: std::time::Instant,
+) -> Result<(), OrderError> {
+    let path = CommandPath {
+        endpoint,
+        cluster,
+        command,
+    };
+    let result = if timed {
+        node.invoke_timed_before(path, fields, None, deadline).await
+    } else {
+        node.invoke_before(path, fields, deadline).await
+    };
+    invoke_outcome(result)
+}
+fn invoke_outcome(
+    result: Result<InvokeResult, matter_controller::Error>,
+) -> Result<(), OrderError> {
+    match result {
+        Ok(InvokeResult::Status(status)) => order_outcome(&Ok(status == ImStatus::Success)),
+        // A data reply proves the device answered, but does not tell us that
+        // this command was rejected; future response kinds are equally unclear.
+        Ok(_) => Err(OrderError::OutcomeUnknown),
+        Err(error) => order_outcome(&Err(error)),
+    }
+}
+// Only a well-formed, explicit non-success status proves the device refused it.
+fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), OrderError> {
     match result {
         Ok(true) => Ok(()),
         // Both mean the device may have carried the order out: queued before the
@@ -734,8 +787,9 @@ fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), 
         Err(
             matter_controller::Error::OutcomeUnknown { .. }
             | matter_controller::Error::ResponseTimeout { .. },
-        ) => Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string()),
-        Ok(false) | Err(_) => Err(failure().to_string()),
+        ) => Err(OrderError::OutcomeUnknown),
+        Ok(false) => Err(OrderError::Refused(failure().to_string())),
+        Err(_) => Err(OrderError::Failed(failure().to_string())),
     }
 }
 #[cfg(test)]
@@ -1102,11 +1156,43 @@ mod tests {
         ] {
             assert_eq!(
                 order_outcome(&Err(unknown)),
-                Err(moli_i18n::tr!("pilotes.matter.outcome_unknown").to_string())
+                Err(OrderError::OutcomeUnknown)
             );
         }
-        assert_eq!(order_outcome(&Ok(false)), Err(failure().to_string()));
+        assert_eq!(
+            order_outcome(&Ok(false)),
+            Err(OrderError::Refused(failure().to_string()))
+        );
         assert!(order_outcome(&Ok(true)).is_ok());
+    }
+    #[test]
+    fn command_data_invoke_reply_is_not_a_definite_refusal() {
+        assert_eq!(
+            invoke_outcome(Ok(InvokeResult::Data {
+                path: CommandPath {
+                    endpoint: 1,
+                    cluster: 6,
+                    command: 1,
+                },
+                fields: Tlv::Structure(vec![]),
+            })),
+            Err(OrderError::OutcomeUnknown)
+        );
+        assert_eq!(
+            invoke_outcome(Ok(InvokeResult::Status(ImStatus::Failure(1)))),
+            Err(OrderError::Refused(failure().to_string()))
+        );
+    }
+    #[test]
+    fn failed_later_lighting_step_is_unknown_after_on_was_sent() {
+        assert_eq!(
+            sequence_error(true, OrderError::Refused("level refused".into())),
+            OrderError::OutcomeUnknown
+        );
+        assert_eq!(
+            sequence_error(false, OrderError::Refused("on refused".into())),
+            OrderError::Refused("on refused".into())
+        );
     }
     #[test]
     fn retries_back_off_up_to_a_cap() {
@@ -1134,6 +1220,10 @@ mod tests {
             (path(1, 8, 0xfff9), Tlv::Array(vec![Tlv::Uint(0)])),
             (path(1, 8, 2), Tlv::Uint(1)),
             (path(1, 8, 3), Tlv::Uint(254)),
+            (path(1, 6, 0xfffc), Tlv::Uint(0)),
+            (path(1, 6, 0xfffd), Tlv::Uint(1)),
+            (path(1, 6, 0xfffb), Tlv::Array(vec![Tlv::Uint(0)])),
+            (path(1, 6, 0xfff9), Tlv::Array(vec![Tlv::Uint(0)])),
         ];
         let meta = Endpoint {
             clusters: vec![6, 8],
