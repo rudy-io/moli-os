@@ -1340,6 +1340,7 @@ const KINDS: &[&str] = &[
     "airzone",
     "izypower",
     "solarman",
+    "vicare",
     "philips",
     "frigate",
     "bambu",
@@ -1557,6 +1558,9 @@ fn build_driver(
         )),
         "airzone" => configured_driver(config, moli_airzone::Airzone::new)?,
         "izypower" => Arc::new(moli_izypower::Izypower::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "vicare" => Arc::new(moli_vicare::Vicare::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "solarman" => Arc::new(moli_solarman::Solarman::new(

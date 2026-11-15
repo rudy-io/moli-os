@@ -64,14 +64,30 @@ Il n'y a pas de transport « https » séparé : HTTP ou HTTPS dépend de `[prof
 | `values` | valeurs de l'enum (obligatoires pour `enum`, distinctes, non vides) |
 | `map` | valeur brute (en texte) → sens, appliqué **avant** tout le reste ; chaque valeur doit coller au `kind` |
 | `unit` | unité (voir ci-dessous) |
-| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`, `soil_moisture`, `soil_dry`, `smoke`, `tamper`, `config`, `alert`, `other`. Par défaut : déduite de la clé et de l'unité ; `alert` et `position` ne sont jamais déduites, elles se déclarent (`alert` : voir « Ce que la maison surveille ») |
+| `semantic` | `on_off`, `brightness`, `color_temp`, `color`, `power`, `apparent_power`, `energy`, `voltage`, `current`, `temperature`, `humidity`, `pressure`, `illuminance`, `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`, `soil_moisture`, `soil_dry`, `smoke`, `tamper`, `config`, `alert`, `wind_speed`, `wind_gust`, `wind_direction`, `rain_rate`, `rain_today`, `uv_index`, `other`. Par défaut : déduite de la clé et de l'unité ; `alert`, `position` et les sens météo ne sont jamais déduites, elles se déclarent (`alert` : voir « Ce que la maison surveille » ; météo : voir « La météo, une unité par sens ») |
 | `scale` | multiplicateur (numérique seulement ; fini, non nul, \|s\| ≤ 1e9) |
 | `round` | décimales gardées après `scale` (numérique seulement, 6 au plus) |
 | `min`, `max` | bornes d'une commande (numérique seulement, finies, `min < max`) : le hub refuse un ordre hors bornes. Les lectures ne sont pas bornées |
 | `step` | pas proposé aux humains (numérique seulement, > 0) |
 
-**Unités acceptées** : celles du cœur (`W kWh Wh VA V mV A °C % lx hPa dB ppm s min h`) et
-`mired lqi dBm Hz L m³ µg/m³ ppb rpm km/h mm ° UV`. Une faute de frappe (`°c`, `mn`) est refusée.
+**Unités acceptées** : celles du cœur (`W kWh Wh VA V mV A °C % lx hPa dB ppm s min h km/h mm mm/h °`) et
+`mired lqi dBm Hz L m³ µg/m³ ppb rpm UV`. Une faute de frappe (`°c`, `mn`) est refusée.
+
+### La météo, une unité par sens
+
+Les sens météo se déclarent (`semantic = "wind_speed"`), jamais déduits de la clé : un
+ventilateur a aussi un `wind_speed`. Chacun a **une seule unité**, vérifiée à la compilation,
+pour que l'appareil composé « Dehors » recopie les valeurs sans les convertir. Un profil dont
+l'API parle une autre unité convertit avec `scale` (m/s → km/h : `scale = 3.6`).
+
+| Sens | Ce que c'est | Unité |
+|---|---|---|
+| `wind_speed` | vent moyen | `km/h` |
+| `wind_gust` | rafales | `km/h` |
+| `wind_direction` | d'où vient le vent (0 = nord, sens horaire) | `°` |
+| `rain_rate` | intensité de la pluie | `mm/h` |
+| `rain_today` | pluie tombée aujourd'hui, **remise à zéro par la source** chaque jour (un compteur sans fin n'en est pas) | `mm` |
+| `uv_index` | indice UV | aucune |
 
 ### Chemins dans les réponses
 
@@ -488,13 +504,15 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
 #### `open-meteo`
 
 - Points : `temperature`, `feels_like`, `humidity`, `precipitation`, `cloud_cover`,
-  `wind_speed`, `wind_gusts`, `weather_code` (WMO), `daylight`, `today_max`, `today_min`,
-  `today_rain`, `today_rain_chance`, `sunrise`, `sunset` (texte). Remplace le `sun` de HA.
+  `wind_speed` (sens `wind_speed`), `wind_direction` (`wind_direction`, °), `wind_gusts`
+  (`wind_gust`), `weather_code` (WMO), `daylight`, `today_max`, `today_min`, `today_rain`
+  (`rain_today`), `today_rain_chance`, `sunrise`, `sunset` (texte). Remplace le `sun` de HA.
 - Pas d'`identity` : l'appareil est `<instance>:<hôte de l'API>:443` (`host:port`).
 
 #### `open-meteo-air`
 
-- Points : `aqi` (indice européen), `pm2_5`, `pm10`, `no2`, `ozone` (µg/m³), `uv_index`.
+- Points : `aqi` (indice européen), `pm2_5`, `pm10`, `no2`, `ozone` (µg/m³), `uv_index` (sens
+  `uv_index`, sans unité).
 
 #### `tempo`
 

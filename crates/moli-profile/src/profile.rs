@@ -185,7 +185,7 @@ const MAX_ROUND: u32 = 6;
 
 /// Units accepted beyond those the core knows by name.
 const EXTRA_UNITS: &[&str] = &[
-    "mired", "lqi", "dBm", "Hz", "L", "m³", "µg/m³", "ppb", "rpm", "km/h", "mm", "°", "UV",
+    "mired", "lqi", "dBm", "Hz", "L", "m³", "µg/m³", "ppb", "rpm", "UV",
 ];
 
 /// Raw values that mean « no reading ».
@@ -750,7 +750,7 @@ fn compile_point(
         && !EXTRA_UNITS.contains(&&**symbol)
     {
         return Err(format!(
-            "unknown unit {symbol:?} (known: W kWh Wh VA V mV A °C % lx hPa dB ppm s min h, or {})",
+            "unknown unit {symbol:?} (known: W kWh Wh VA V mV A °C % lx hPa dB ppm s min h km/h mm mm/h °, or {})",
             EXTRA_UNITS.join(" ")
         ));
     }
@@ -759,6 +759,22 @@ fn compile_point(
         .unwrap_or_else(|| Semantic::infer(&p.key, unit.as_ref()));
     if semantic == Semantic::Alert && kind != Kind::Binary {
         return Err("semantic alert is a binary point (true: something is wrong)".into());
+    }
+    // A weather meaning has one unit: the composed « Dehors » device copies
+    // values without converting them, so the profile converts (`scale`).
+    if let Some(want) = semantic.fixed_unit() {
+        let name = serde_json::to_value(semantic).unwrap_or_default();
+        let name = name.as_str().unwrap_or_default();
+        if !matches!(kind, Kind::Numeric { .. }) {
+            return Err(format!("semantic {name} is a numeric point"));
+        }
+        if unit != want {
+            return Err(format!(
+                "semantic {name} is in {}, not {}",
+                want.as_ref().map_or("no unit", Unit::symbol),
+                unit.as_ref().map_or("no unit", Unit::symbol),
+            ));
+        }
     }
     Ok(CompiledPoint {
         spec: PointSpec {
@@ -1255,6 +1271,33 @@ snapshot = \"{path}\""
         assert_eq!(compiled.points[0].spec.semantic, Semantic::Alert);
         let err = try_compile(&with("numeric")).unwrap_err();
         assert!(err.message.contains("alert"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_weather_meaning_has_its_unit() {
+        let with = |unit: &str, semantic: &str| {
+            format!(
+                "[profile]\nid = \"station\"\nname = \"Station\"\n\
+                 [[request]]\nid = \"s\"\npath = \"/mesures\"\nformat = \"json\"\nevery = \"5m\"\n\
+                 [[point]]\nkey = \"vent\"\nlabel = \"Vent\"\nfrom = \"s.vent\"\nkind = \"numeric\"\n{unit}semantic = \"{semantic}\"\n"
+            )
+        };
+        let compiled = try_compile(&with("unit = \"km/h\"\n", "wind_speed")).unwrap();
+        assert_eq!(compiled.points[0].spec.semantic, Semantic::WindSpeed);
+        assert_eq!(compiled.points[0].spec.unit, Some(Unit::KilometrePerHour));
+        // Another unit is refused: the profile converts with `scale`.
+        let err = try_compile(&with("unit = \"m/s\"\n", "wind_speed")).unwrap_err();
+        assert!(err.message.contains("unit"), "{}", err.message);
+        let err = try_compile(&with("unit = \"mm\"\n", "wind_gust")).unwrap_err();
+        assert!(
+            err.message.contains("wind_gust is in km/h"),
+            "{}",
+            err.message
+        );
+        // The UV index has no unit.
+        assert!(try_compile(&with("", "uv_index")).is_ok());
+        let err = try_compile(&with("unit = \"UV\"\n", "uv_index")).unwrap_err();
+        assert!(err.message.contains("no unit"), "{}", err.message);
     }
 
     #[test]

@@ -83,6 +83,19 @@ export function since(id, key) {
   return hub.devices[id]?.state?.[key]?.ts ?? null;
 }
 
+/** A button's or a remote's last press (#198): its `action` (an enum it only
+ *  tells), with when. `null`: no button; `{ action: null }`: no press seen yet. */
+export function lastPress(d) {
+  const point = d?.points.find((p) => p.key === 'action' && p.kind?.type === 'enum' && !p.access?.write);
+  if (!point) return null;
+  const action = value(d.id, 'action');
+  return { action: typeof action === 'string' && action ? action : null, ts: since(d.id, 'action') };
+}
+
+const PRESSES = { single: 'commun.appui.simple', double: 'commun.appui.double', triple: 'commun.appui.triple', hold: 'commun.appui.maintenu', long: 'commun.appui.maintenu', release: 'commun.appui.relache' };
+/** A press in words (« simple », « double », « maintenu »); any other, as told. */
+export const pressWord = (action) => (PRESSES[action] ? t(PRESSES[action]) : action);
+
 // What a sensor says, whatever its brand: Zigbee (`contact` true when
 // closed, `water_leak`), Tuya (`doorcontact_state` true when open,
 // `watersensor_state` « alarm », `pir` « pir », `battery_state` « low »).
@@ -260,6 +273,8 @@ export function deviceKind(d) {
   const known = knownDeviceKind(d);
   if (known) return known;
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
+  // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
+  if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
   if (has(d, 'target_temperature') || (has(d, 'heat_setpoint') && has(d, 'cool_setpoint')) || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
@@ -287,6 +302,8 @@ export function roomList() {
   const inFixture = new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? []));
   for (const d of Object.values(hub.devices)) {
     if (hidden(d.id) || inFixture.has(d.id)) continue;
+    // A heat pump and its circuits live on the Chauffage page, not on a room's card.
+    if (deviceKind(d) === 'heating') continue;
     const room = roomOf(d);
     if (!room) continue;
     if (!map.has(room)) map.set(room, []);

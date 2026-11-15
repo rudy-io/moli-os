@@ -934,4 +934,46 @@ test('dual setpoints classify without a brand and render independent numeric con
   assert.equal(buttons(html).filter(tag => /disabled/.test(tag)).length, 3);
   const offline = show('ClimateCard', points, { heat_setpoint: 20 }, { online: false });
   assert.ok(inputs(offline).every(tag => /disabled/.test(tag)));
+test('a button shows its last press while fresh, and always among the sensors (#198)', () => {
+  const action = point('action', enumeration('single', 'double', 'hold'), false);
+  const button = (state) => [{ id: 'z2m:button', native_name: 'Bouton', model: 'ZG-101ZL', label: { room: 'Workshop' }, online: true,
+    points: [action, { ...point('battery', number(0, 100), false, 'battery'), unit: '%' }], members: [], state }];
+  const card = (state, every = false) => {
+    hub.devices = Object.fromEntries(button(state).map((d) => [d.id, d]));
+    return render(components.RoomCard, { props: { room: home.roomList()[0], every } }).body;
+  };
+  const now = Date.now();
+  home.home.now = now;
+  const pressed = (value, minutes) => ({ action: { value, ts: now - minutes * 60_000 }, battery: { value: 100, ts: now } });
+
+  // Fresh: shown, warm, in words.
+  const fresh = card(pressed('double', 3));
+  assert.match(fresh, /class="chip warm[^"]*" title="Bouton : dernier appui double, il y a 3 min"/);
+  assert.match(fresh, />double · il y a 3 min</);
+  assert.match(card(pressed('hold', 1)), />maintenu · il y a 1 min</);
+
+  // Old: gone from the room's line, still there among the sensors (not warm).
+  const old = pressed('single', 45);
+  assert.doesNotMatch(card(old), /dernier appui/);
+  assert.match(card(old, true), /class="chip [^w"][^"]*" title="Bouton : dernier appui simple, il y a 45 min"/);
+
+  // No press seen yet (a retained one is never shown): nothing to say.
+  assert.doesNotMatch(card({ battery: { value: 100, ts: now } }, true), /dernier appui/);
+  // A settable `action` is no press.
+  hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, access: { read: true, write: true } }] } };
+  assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
+});
+
+test('a heat pump and its circuit are heating and stay off the room cards; a thermostat stays climate', () => {
+  const pump = { id: 'vicare:pac', native_name: 'PAC', model: null, label: { room: 'Workshop' }, online: true, members: [], points: [point('compressor_active', { type: 'binary' }, false)], state: {} };
+  const circuit = { ...pump, id: 'vicare:circuit0', native_name: 'Circuit', points: [point('mode', enumeration('heating', 'standby')), point('comfort_temperature', number(4, 37, 1)), point('reduced_temperature', number(4, 37, 1))] };
+  const thermostat = { ...pump, id: 'other:thermostat', native_name: 'Thermostat', points: [point('mode', enumeration('heat', 'off')), point('comfort_temperature', number(5, 30, 0.5)), point('target_temperature', number(5, 30, 0.5))] };
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit, [thermostat.id]: thermostat };
+  assert.equal(home.deviceKind(pump), 'heating');
+  assert.equal(home.deviceKind(circuit), 'heating');
+  assert.equal(home.deviceKind(thermostat), 'climate');
+  const [room] = home.roomList();
+  assert.deepEqual(room.climates.map((d) => d.id), [thermostat.id]);
+  hub.devices = { [pump.id]: pump, [circuit.id]: circuit };
+  assert.deepEqual(home.roomList(), []);
 });
