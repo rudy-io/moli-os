@@ -1226,3 +1226,27 @@ test('an alarm panel reaches the house and its room, not the sensors', () => {
   assert.deepEqual(room.alarms.map((d) => d.id), [panel.id]);
   assert.equal(room.sensors.length, 0);
 });
+
+test('the villa demo shows its alarm panel in the cameras safety panel', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../../../demo/villa/devices/tuya.json', import.meta.url), 'utf8')).devices;
+  const panel = fixture.find((d) => d.points.some((p) => p.key === 'system_arm_type'));
+  assert.ok(panel, 'the villa has an alarm panel');
+  hub.devices = {
+    [panel.id]: {
+      ...panel,
+      label: {},
+      online: true,
+      members: [],
+      state: Object.fromEntries(Object.entries(panel.state).map(([key, value]) => [key, { value }])),
+    },
+  };
+  assert.equal(home.deviceKind(hub.devices[panel.id]), 'alarm');
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  // Its arm mode, health and the settings it takes, inside the safety panel.
+  assert.match(html, /Centrale d'alarme/);
+  assert.match(html, />Armée</);
+  assert.match(html, />Maison</);
+  assert.match(html, /96 %/);
+  assert.match(html, /Secteur OK/);
+});
+

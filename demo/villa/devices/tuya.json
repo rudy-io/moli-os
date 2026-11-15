@@ -3862,6 +3862,344 @@
     "work_state": "auto",
     "weather_delay": "cancel"
    }
+  },
+  {
+   "id": "tuya:centrale",
+   "instance": "tuya",
+   "native_name": "Centrale d'alarme",
+   "manufacturer": "Daewoo",
+   "model": "Daewoo SA501",
+   "points": [
+    {
+     "key": "system_arm_type",
+     "label": "System arm type",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "disarmed",
+       "armed",
+       "home"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "gsm_status",
+     "label": "Gsm status",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "NoSimCard",
+       "NoNetWork",
+       "Normal",
+       "GsmOff"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "language",
+     "label": "Language",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "English",
+       "French",
+       "Italian",
+       "German",
+       "Spanish",
+       "Danish",
+       "Dutch",
+       "Portuguese"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "dc_status",
+     "label": "Dc status",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "low",
+       "normal",
+       "high",
+       "off"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "bat_status",
+     "label": "Bat status",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "%",
+     "semantic": "other"
+    },
+    {
+     "key": "arm_delay",
+     "label": "Arm delay",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 300.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "alarm_delay",
+     "label": "Alarm delay",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 300.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "s",
+     "semantic": "other"
+    },
+    {
+     "key": "alarm_sound_duration",
+     "label": "Alarm sound duration",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 9.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "unit": "min",
+     "semantic": "other"
+    },
+    {
+     "key": "ring_times",
+     "label": "Ring times",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 9.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tel_alarm_cycle",
+     "label": "Tel alarm cycle",
+     "kind": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 9.0,
+      "step": 1.0
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "inside_siren_sound",
+     "label": "Inside siren sound",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "ON",
+       "OFF"
+      ]
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "gsm_en",
+     "label": "Gsm en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "tel_ctrl_en",
+     "label": "Tel ctrl en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "arm_sms_en",
+     "label": "Arm sms en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "disarm_sms_en",
+     "label": "Disarm sms en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "keyboard_tone_en",
+     "label": "Keyboard tone en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "arm_delay_tone_en",
+     "label": "Arm delay tone en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "alarm_delay_tone_en",
+     "label": "Alarm delay tone en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "arm_disarm_tone_en",
+     "label": "Arm disarm tone en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "inside_siren_en",
+     "label": "Inside siren en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    },
+    {
+     "key": "wireless_siren_en",
+     "label": "Wireless siren en",
+     "kind": {
+      "type": "binary"
+     },
+     "access": {
+      "read": true,
+      "write": true
+     },
+     "semantic": "other"
+    }
+   ],
+   "native_room": "Entrée",
+   "state": {
+    "system_arm_type": "disarmed",
+    "gsm_status": "Normal",
+    "language": "French",
+    "dc_status": "normal",
+    "bat_status": 96,
+    "arm_delay": 30,
+    "alarm_delay": 0,
+    "alarm_sound_duration": 5,
+    "ring_times": 3,
+    "tel_alarm_cycle": 2,
+    "inside_siren_sound": "ON",
+    "gsm_en": true,
+    "tel_ctrl_en": false,
+    "arm_sms_en": true,
+    "disarm_sms_en": true,
+    "keyboard_tone_en": true,
+    "arm_delay_tone_en": true,
+    "alarm_delay_tone_en": true,
+    "arm_disarm_tone_en": true,
+    "inside_siren_en": true,
+    "wireless_siren_en": true
+   }
   }
  ]
 }

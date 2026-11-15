@@ -1,10 +1,10 @@
 # La villa de démonstration
 
 Une maison complète, **sans aucun appareil** : 118 appareils simulés (lumières Hue,
-prises et volets Tuya, capteurs Zigbee, clims, Sonos, télé, caméras, imprimantes 3D,
-piscine, Linky et tableau électrique), un plan 2D/3D, des automatismes et une année de
-consommation. Chaque appareil reprend la forme exacte d'un vrai appareil, tel que son pilote
-le publie : le tableau de bord ne voit pas la différence.
+prises et volets Tuya, capteurs Zigbee, clims, Sonos, télé, centrale d'alarme, caméras,
+imprimantes 3D, piscine, Linky et tableau électrique), un plan 2D/3D, des automatismes et
+une année de consommation. Chaque appareil reprend la forme exacte d'un vrai appareil, tel
+que son pilote le publie : le tableau de bord ne voit pas la différence.
 
 ```bash
 docker compose -f demo/villa/compose.yaml up --build
