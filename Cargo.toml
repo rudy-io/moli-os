@@ -84,6 +84,7 @@ symphonia-codec-aac = "0.6"
 symphonia-core = "0.6"
 clap = { version = "4", features = ["derive", "env"] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+bytes = "1"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }

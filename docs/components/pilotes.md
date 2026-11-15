@@ -891,6 +891,7 @@ kind = "frigate"
 # api = "http://127.0.0.1:5000"
 # go2rtc = "http://nvr.example:1984"      # images ET direct par go2rtc, au lieu de l'API
 # streams = { jardin = "camera-jardin" }  # caméra Frigate → flux go2rtc, si les noms diffèrent
+# review = { host = "nvr.example", port = 8971, user = "moli" }  # le passé (frise, événements, clips, zones)
 ```
 
 - **go2rtc** (facultatif) : un go2rtc qui lit les mêmes caméras (celui de Frigate quand son port
@@ -907,7 +908,17 @@ kind = "frigate"
   montre les adresses des caméras, identifiants compris : à garder sur le réseau local, jamais
   exposée. Quand Frigate aura son accès authentifié dans Moli (port 8971), images et direct
   passeront par lui, sans go2rtc.
-- **Secrets** : aucun. ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
+- **Passé** (facultatif, `review`) : l'API authentifiée de Frigate (port **8971**, HTTPS, compte
+  au rôle *viewer*). Frise par caméra (`/api/review` et les segments de `/api/<caméra>/recordings`,
+  réunis en plages continues), zones (`/api/config`, coordonnées relatives 0–1), image, vignette
+  et clip d'un événement, enregistrement entre deux instants (une heure au plus). Le certificat
+  auto-signé est épinglé au premier contact (secret `certificate`), **avant** l'envoi du mot de
+  passe ; session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
+  mémoire), `Range` transmis (le navigateur peut avancer dans le clip). Routes
+  `/api/devices/{id}/review/…` : jamais pour un invité ; caméra d'une pièce protégée, personne
+  connectée avec le code de la maison seulement. Appareil `review: true`.
+- **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
+  (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
 - **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : elles sont ignorées). Disponibilité globale via `frigate/available`.
 - **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate).

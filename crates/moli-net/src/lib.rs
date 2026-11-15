@@ -562,6 +562,39 @@ impl PinnedHttps {
 
     /// A long-lived response (event stream) on a dedicated connection. Its
     /// length has no end by design: the caller bounds what it buffers.
+    /// One request on a connection of its own, the whole answer: status,
+    /// headers (a session cookie) and body (at most [`MAX_BODY`]).
+    pub async fn exchange_full(
+        &self,
+        request: Request<Full<Bytes>>,
+        wait: Duration,
+    ) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
+        let mut sender = self.connect().await?;
+        let response = tokio::time::timeout(wait, sender.send_request(request))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))??;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = tokio::time::timeout(wait, read_body(response.into_body(), MAX_BODY))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))??;
+        Ok((status, headers, body))
+    }
+
+    /// A long answer (a video) on a connection of its own, whatever its
+    /// status: its head within `wait`, its body streamed as it comes.
+    pub async fn stream_response(
+        &self,
+        request: Request<Full<Bytes>>,
+        wait: Duration,
+    ) -> anyhow::Result<http::Response<Incoming>> {
+        let mut sender = self.connect().await?;
+        tokio::time::timeout(wait, sender.send_request(request))
+            .await
+            .with_context(|| format!("{} did not answer in time", self.host))?
+            .map_err(Into::into)
+    }
+
     pub async fn stream(&self, request: Request<Full<Bytes>>) -> anyhow::Result<Incoming> {
         let mut sender = self.connect().await?;
         let response = tokio::time::timeout(TIMEOUT, sender.send_request(request))

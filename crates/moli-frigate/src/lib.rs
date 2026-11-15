@@ -5,6 +5,7 @@
 //! HTTP, no credentials: the same broker Zigbee2MQTT uses.
 
 mod go2rtc;
+mod review;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -53,6 +54,64 @@ pub struct Config {
     /// Frigate camera → its stream on that go2rtc, when the names differ.
     #[serde(default)]
     pub streams: BTreeMap<String, String>,
+    /// Frigate's authenticated API, for the cameras' past (events,
+    /// recordings, zones): a « viewer » account, its password in the vault
+    /// (`password`), Frigate's certificate pinned on first contact.
+    #[serde(default)]
+    pub review: Option<ReviewConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewConfig {
+    pub host: String,
+    #[serde(default = "default_review_port")]
+    pub port: u16,
+    #[serde(default = "default_review_user")]
+    pub user: String,
+}
+
+fn default_review_port() -> u16 {
+    8971
+}
+
+fn default_review_user() -> String {
+    "moli".into()
+}
+
+/// The vault's names for the review API.
+const PASSWORD: &str = "password";
+const CERTIFICATE: &str = "certificate";
+
+/// Frigate's API for the past, when configured and its password stored.
+async fn review_api(config: &Config, ctx: &DriverCtx) -> Option<std::sync::Arc<review::Api>> {
+    let r = config.review.as_ref()?;
+    let Some(password) = ctx.secret(PASSWORD) else {
+        tracing::warn!(instance = %ctx.instance(), "frigate review: no password in the vault (moli-os secrets set <instance> password)");
+        return None;
+    };
+    let pin = if let Some(pin) = ctx.secret(CERTIFICATE) {
+        pin
+    } else {
+        // First contact: pin the certificate before any password is sent.
+        let probe = moli_net::PinnedHttps::new(&r.host, r.port, None).ok()?;
+        if let Err(e) = probe.handshake().await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: Frigate unreachable");
+            return None;
+        }
+        let seen = probe.seen_fingerprint()?;
+        if let Err(e) = ctx.store_secret(CERTIFICATE, &seen).await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: cannot pin the certificate");
+            return None;
+        }
+        seen
+    };
+    let https = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin)).ok()?;
+    Some(std::sync::Arc::new(review::Api::new(
+        https,
+        r.user.clone(),
+        password,
+    )))
 }
 
 fn default_api() -> String {
@@ -406,6 +465,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         .go2rtc
         .as_deref()
         .and_then(moli_net::upnp::Location::parse);
+    let review = review_api(config, ctx).await;
     let mut cameras: BTreeSet<String> = BTreeSet::new();
     let mut available = true;
     let mut server = false;
@@ -467,7 +527,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         }
                         cameras.insert(camera.to_owned());
                         ctx.upsert_device(camera_device(ctx, camera));
-                        provide_media(ctx, config, camera, api.as_ref(), go2rtc.as_ref());
+                        provide_media(ctx, config, camera, api.as_ref(), go2rtc.as_ref(), review.as_ref());
                         ctx.set_availability(&ctx.device_id(camera), available);
                     }
                     ctx.set_state(&ctx.device_id(camera), key, value);
@@ -487,14 +547,24 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 }
 
 /// Where a camera's images (and live video) come from: the go2rtc when one
-/// is set, else Frigate's API.
+/// is set, else Frigate's API; and its past, from Frigate's API when set.
 fn provide_media(
     ctx: &DriverCtx,
     config: &Config,
     camera: &str,
     api: Option<&moli_net::upnp::Location>,
     go2rtc: Option<&moli_net::upnp::Location>,
+    review: Option<&std::sync::Arc<review::Api>>,
 ) {
+    if let Some(api) = review {
+        ctx.provide_review(
+            &ctx.device_id(camera),
+            std::sync::Arc::new(review::Camera {
+                api: std::sync::Arc::clone(api),
+                name: camera.to_owned(),
+            }),
+        );
+    }
     if let Some(g) = go2rtc {
         let stream = std::sync::Arc::new(go2rtc::Stream {
             host: g.host.clone(),

@@ -250,6 +250,14 @@ impl DriverCtx {
         }
     }
 
+    /// Declares that `device` (one of ours) has a past to review (events,
+    /// recordings, zones), from its NVR.
+    pub fn provide_review(&self, device: &DeviceId, source: Arc<dyn crate::media::ReviewSource>) {
+        if self.owns(device) {
+            self.hub.provide_review(device, source);
+        }
+    }
+
     /// Declares that `device` (one of ours) prints documents.
     pub fn provide_printing(&self, device: &DeviceId, sink: Arc<dyn crate::media::PrintSink>) {
         if self.owns(device) {

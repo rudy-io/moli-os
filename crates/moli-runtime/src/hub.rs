@@ -336,6 +336,8 @@ impl LabelPatch {
 }
 
 /// Everything known about one device, as served to the surfaces.
+// One flag per capability a surface asks about (images, printing, live, past).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Serialize)]
 pub struct DeviceView {
     #[serde(flatten)]
@@ -352,6 +354,9 @@ pub struct DeviceView {
     /// Live video the browser plays (`/api/devices/{id}/live`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live: bool,
+    /// A past to review (`/api/devices/{id}/review/…`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub review: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -468,6 +473,7 @@ struct Model {
     snapshots: HashMap<DeviceId, Arc<dyn crate::media::SnapshotSource>>,
     printers: HashMap<DeviceId, Arc<dyn crate::media::PrintSink>>,
     lives: HashMap<DeviceId, Arc<dyn crate::media::LiveSource>>,
+    reviews: HashMap<DeviceId, Arc<dyn crate::media::ReviewSource>>,
 }
 
 #[derive(Debug)]
@@ -2435,6 +2441,7 @@ impl Hub {
             model.snapshots.remove(id);
             model.printers.remove(id);
             model.lives.remove(id);
+            model.reviews.remove(id);
             let removed = model.devices.remove(id).is_some();
             if states_removed || restored_removed || cached_removed || removed {
                 self.0.state_dirty.store(true, Ordering::Release);
@@ -2460,6 +2467,20 @@ impl Hub {
         source: Arc<dyn crate::media::SnapshotSource>,
     ) {
         self.write().snapshots.insert(device.clone(), source);
+    }
+
+    pub(crate) fn provide_review(
+        &self,
+        device: &DeviceId,
+        source: Arc<dyn crate::media::ReviewSource>,
+    ) {
+        self.write().reviews.insert(device.clone(), source);
+    }
+
+    /// The device's past, from its NVR (called without the model lock).
+    #[must_use]
+    pub fn review_source(&self, device: &DeviceId) -> Option<Arc<dyn crate::media::ReviewSource>> {
+        self.read().reviews.get(device).cloned()
     }
 
     pub(crate) fn provide_live(
@@ -2802,6 +2823,7 @@ impl Model {
             camera: self.snapshots.contains_key(&device.id),
             printer: self.printers.contains_key(&device.id),
             live: self.lives.contains_key(&device.id),
+            review: self.reviews.contains_key(&device.id),
         }
     }
 }

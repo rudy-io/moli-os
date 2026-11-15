@@ -19,6 +19,10 @@ GET    /api/devices                        foyer   oui
 GET    /api/devices/{id}                   foyer   oui
 GET    /api/devices/{id}/snapshot          foyer   oui
 POST   /api/devices/{id}/live              foyer   oui   # same rules as the snapshot, checked after the body
+GET    /api/devices/{id}/review            foyer   oui   # same rules as the snapshot
+GET    /api/devices/{id}/review/zones      foyer   oui   # same rules as the snapshot
+GET    /api/devices/{id}/review/events/{event}/{what}  foyer   oui   # same rules as the snapshot
+GET    /api/devices/{id}/review/recording  foyer   oui   # same rules as the snapshot
 POST   /api/devices/{id}/print             humain  oui
 PUT    /api/devices/{id}/visibility        foyer   oui   # origin ui (a person) checked after the body
 GET    /api/infra                          foyer   non

@@ -625,6 +625,7 @@ mod tests {
             camera: false,
             printer: false,
             live: false,
+            review: false,
         }
     }
 
