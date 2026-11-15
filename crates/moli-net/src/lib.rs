@@ -630,6 +630,28 @@ pub async fn plain_with_headers(
     port: u16,
     request: Request<Full<Bytes>>,
 ) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
+    plain_waiting(host, port, request, TIMEOUT).await
+}
+
+/// One plain-HTTP request that may take longer than [`TIMEOUT`] to answer
+/// (a WebRTC peer gathering its addresses before it answers an offer).
+pub async fn plain_within(
+    host: &str,
+    port: u16,
+    request: Request<Full<Bytes>>,
+    wait: Duration,
+) -> anyhow::Result<(StatusCode, Bytes)> {
+    plain_waiting(host, port, request, wait)
+        .await
+        .map(|(status, _, body)| (status, body))
+}
+
+async fn plain_waiting(
+    host: &str,
+    port: u16,
+    request: Request<Full<Bytes>>,
+    wait: Duration,
+) -> anyhow::Result<(StatusCode, http::HeaderMap, Bytes)> {
     let exchange = async {
         let tcp = TcpStream::connect((host, port))
             .await
@@ -650,7 +672,7 @@ pub async fn plain_with_headers(
         let body = read_body(response.into_body(), MAX_BODY).await?;
         anyhow::Ok((status, headers, body))
     };
-    tokio::time::timeout(TIMEOUT, exchange)
+    tokio::time::timeout(wait, exchange)
         .await
         .with_context(|| format!("{host} did not answer in time"))?
 }

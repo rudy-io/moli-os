@@ -13,6 +13,9 @@ use http::{Method, Request};
 use moli_runtime::BoxFuture;
 use moli_runtime::media::{Image, LiveSource, SnapshotSource};
 
+/// How long go2rtc may take to answer an offer.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(9);
+
 /// One camera's stream on a go2rtc.
 #[derive(Clone, Debug)]
 pub struct Stream {
@@ -62,7 +65,10 @@ impl LiveSource for Stream {
                 .header("host", format!("{}:{}", self.host, self.port));
             let request =
                 moli_net::text_body(request, "application/sdp", for_go2rtc(&offer, viewer))?;
-            let (status, reply) = moli_net::plain(&self.host, self.port, request).await?;
+            // go2rtc answers once it knows its addresses (STUN included):
+            // up to 5 s, within the hub's 10.
+            let (status, reply) =
+                moli_net::plain_within(&self.host, self.port, request, ANSWER_WAIT).await?;
             if !status.is_success() {
                 bail!("go2rtc: HTTP {} for stream {}", status.as_u16(), self.name);
             }
