@@ -1081,7 +1081,7 @@ mod home_tests {
             State(hub),
             Caller {
                 via: crate::caller::Via::Lan,
-                key: "192.168.1.20".into(),
+                key: "192.168.0.20".into(),
                 person: None,
             },
             Extension(HomeFile(Some(path.clone()))),
