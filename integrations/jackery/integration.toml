@@ -1,0 +1,36 @@
+[integration]
+id = "jackery"
+name = "Batterie Jackery (HomePower, SolarVault)"
+brands = ["Jackery"]
+models = ["HomePower", "SolarVault"]
+transport = "mqtt"
+driver = "jackery"
+crate = "moli-jackery"
+
+[discovery]
+# No discovery: the battery connects to the home's MQTT broker by itself.
+mdns = []
+ssdp = []
+# The MQTT broker.
+ports = [1883]
+
+[needs]
+# `token`: shown in Jackery's app with the MQTT settings. `password`: the
+# broker's, only when `username` is set.
+secrets = ["token"]
+vars = []
+options = ["serial"]
+
+[origin]
+reused = "protocole MQTT local lu dans l'intégration Home Assistant officielle de Jackery (MIT, voir NOTICE) : noms des champs et forme des messages, aucun code copié"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-jackery/src/wire.rs).
+[[fixture]]
+file = "fixtures/system.json"
+
+[[fixture]]
+file = "fixtures/status.json"
+
+[[fixture]]
+file = "fixtures/meters.json"
