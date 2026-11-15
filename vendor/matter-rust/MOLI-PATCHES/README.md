@@ -7,7 +7,7 @@ fixes already in `MOLI-PROVENANCE.md` (`9c8c323`, `130d07a`, `429350c`,
 They are provided as separate commits so they can be sent upstream one by one.
 
 ```
-0001-outcome-unknown.patch           fix(controller): report an unknown outcome when the deadline fires after queueing
+0001-outcome-unknown.patch           fix(controller): report an unknown outcome when the deadline fires after queueing, including an Operational reply delivered after expiry
 0002-duplicate-writes.patch          fix(controller): refuse duplicate write paths before sending
 0003-suppressed-chunked-report.patch fix(controller): reject a suppressed response that promises more chunks
 ```

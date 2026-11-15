@@ -48,13 +48,13 @@ pub(super) async fn pair(controller: &MatterController, ctx: &DriverCtx) -> anyh
     let Some(code) = ctx.secret("pairing_code").filter(|s| !s.trim().is_empty()) else {
         return Ok(());
     };
-    anyhow::ensure!(code.len() <= 512, invalid());
     // Consume the operator's one-shot request BEFORE any network action. A
     // partial commission followed by supervisor restart must never retry by
     // itself and fill the device's fabric table or repeat an uncertain action.
     ctx.forget_secret("pairing_code")
         .await
         .map_err(|_| invalid())?;
+    anyhow::ensure!(code.len() <= 512, invalid());
     controller
         .commission(code.trim(), None)
         .await

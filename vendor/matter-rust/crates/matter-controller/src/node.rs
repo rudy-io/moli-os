@@ -676,19 +676,34 @@ impl Node {
         rx: oneshot::Receiver<Result<Vec<u8>, Error>>,
         deadline: std::time::Instant,
     ) -> Result<Vec<u8>, Error> {
-        let deadline = tokio::time::Instant::from_std(deadline);
+        let std_deadline = deadline;
+        let deadline = tokio::time::Instant::from_std(std_deadline);
         tokio::time::timeout_at(deadline, self.tx.send(command))
             .await
             .map_err(|_| {
                 Error::Operational("action deadline elapsed before the request was queued".into())
             })?
             .map_err(|_| Error::ControllerStopped)?;
-        tokio::time::timeout_at(deadline, rx)
-            .await
-            .map_err(|_| Error::OutcomeUnknown {
+        match tokio::time::timeout_at(deadline, rx).await {
+            Err(_) => Err(Error::OutcomeUnknown {
                 node_id: self.node_id,
-            })?
-            .map_err(|_| Error::ControllerStopped)?
+            }),
+            Ok(Err(_)) => Err(Error::ControllerStopped),
+            Ok(Ok(result)) => Self::classify_action_reply(result, self.node_id, std_deadline),
+        }
+    }
+
+    fn classify_action_reply(
+        result: Result<Vec<u8>, Error>,
+        node_id: u64,
+        deadline: std::time::Instant,
+    ) -> Result<Vec<u8>, Error> {
+        match result {
+            Err(Error::Operational(_)) if std::time::Instant::now() >= deadline => {
+                Err(Error::OutcomeUnknown { node_id })
+            }
+            result => result,
+        }
     }
 
     /// Write before an absolute deadline, including queueing and timed fallback.
@@ -1996,6 +2011,30 @@ mod tests {
                 opcode: OP_WRITE_REQUEST,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn an_actor_deadline_error_after_queueing_is_an_unknown_outcome() {
+        use super::{Error, Node};
+        use std::time::{Duration, Instant};
+
+        let deadline = Instant::now() - Duration::from_millis(1);
+        assert!(matches!(
+            Node::classify_action_reply(
+                Err(Error::Operational("action deadline elapsed".into())),
+                7,
+                deadline,
+            ),
+            Err(Error::OutcomeUnknown { node_id: 7 })
+        ));
+        assert!(matches!(
+            Node::classify_action_reply(
+                Err(Error::Operational("still before deadline".into())),
+                7,
+                Instant::now() + Duration::from_secs(1),
+            ),
+            Err(Error::Operational(_))
         ));
     }
 

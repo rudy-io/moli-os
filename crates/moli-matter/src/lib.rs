@@ -372,7 +372,8 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
     let id = node.node_id();
     let mut failures = 0;
     loop {
-        let result = watch_once(&node, &tx).await;
+        let mut established = false;
+        let result = watch_once(&node, &tx, &mut established).await;
         // Only a failed cycle takes the devices offline. A clean return means the
         // descriptor changed and discovery restarts in a second; marking the node
         // offline there would also clear `Reachable` on bridged endpoints and keep
@@ -384,8 +385,8 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
         // with nothing we serve fails every cycle, so the delay grows instead of
         // waking a battery device every 10 s; it resets as soon as one succeeds.
         let wait = if result.is_err() {
-            let wait = retry_delay(failures);
-            failures = failures.saturating_add(1);
+            let (wait, next_failures) = retry_after(failures, established);
+            failures = next_failures;
             wait
         } else {
             failures = 0;
@@ -396,6 +397,14 @@ async fn watch(node: Node, tx: mpsc::Sender<Update>) {
 }
 fn retry_delay(failures: u32) -> Duration {
     Duration::from_secs(10 << failures.min(4))
+}
+fn retry_after(failures: u32, subscription_established: bool) -> (Duration, u32) {
+    let failures = if subscription_established {
+        0
+    } else {
+        failures
+    };
+    (retry_delay(failures), failures.saturating_add(1))
 }
 fn subscription_paths(
     report: &[(AttributePath, Tlv)],
@@ -448,7 +457,11 @@ fn absorb_batch(
         Some(Err(_)) | None => Err(failure()),
     }
 }
-async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()> {
+async fn watch_once(
+    node: &Node,
+    tx: &mpsc::Sender<Update>,
+    established: &mut bool,
+) -> anyhow::Result<()> {
     tracing::debug!("Matter descriptor read started");
     let mut report = tokio::time::timeout(
         Duration::from_secs(30),
@@ -503,6 +516,7 @@ async fn watch_once(node: &Node, tx: &mpsc::Sender<Update>) -> anyhow::Result<()
             tracing::warn!(kinds = %pairing::error_kinds(&format!("{error:?}")), "Matter subscription failed");
             failure()
         })?;
+    *established = true;
     tracing::debug!("Matter subscription established");
     while let Some(event) = sub.next().await {
         if let SubscriptionEvent::Established { max_interval, .. } = &event {
@@ -1096,11 +1110,17 @@ mod tests {
     }
     #[test]
     fn retries_back_off_up_to_a_cap() {
-        assert_eq!(retry_delay(0), Duration::from_secs(10));
+        assert_eq!(
+            retry_after(4, true),
+            (Duration::from_secs(10), 1),
+            "a disconnect after establishment starts a fresh retry sequence"
+        );
+        assert_eq!(retry_after(4, false), (Duration::from_secs(160), 5));
         assert_eq!(retry_delay(1), Duration::from_secs(20));
         assert_eq!(retry_delay(4), Duration::from_secs(160));
         assert_eq!(retry_delay(9), Duration::from_secs(160));
         assert_eq!(retry_delay(u32::MAX), Duration::from_secs(160));
+        assert_eq!(retry_delay(0), Duration::from_secs(10));
     }
     #[test]
     fn brightness_zero_switches_off_instead_of_dimming_to_the_floor() {
