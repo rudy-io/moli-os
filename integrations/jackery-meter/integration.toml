@@ -1,0 +1,26 @@
+[integration]
+id = "jackery-meter"
+name = "Compteur Jackery Smart Meter"
+brands = ["Jackery"]
+models = ["Smart Meter 1P"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the meter's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code ni donnée repris : réponses relevées sur le serveur web du compteur"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/measurement.json"
+request = "m"
