@@ -9,7 +9,12 @@
    * tone: « level » fills up to the thumb; « kelvin » shows warm to cold whites.
    * valuetext: the value in words for screen readers (« 2700 K, warm white »).
    */
-  let { min, max, step = 1, value, label, tone = 'level', valuetext = null, onlive = null, oncommit } = $props();
+  let { min, max, step = 1, value, label, tone = 'level', valuetext = null, disabled = false, onlive = null, oncommit } = $props();
+
+  // The position is rendered once, in the markup (server-side and first paint);
+  // after that only the effect below moves the value, and only once let go — a
+  // value arriving mid-drag must not snatch the thumb.
+  const initial = value;
 
   let el = $state();
   let held = $state(false);
@@ -41,6 +46,7 @@
   }
 
   function press() {
+    if (el.disabled) return;
     held = true;
     start = el.value;
   }
@@ -59,6 +65,8 @@
   {min}
   {max}
   {step}
+  value={initial}
+  {disabled}
   aria-label={label}
   onpointerdown={press}
   onpointerup={release}
@@ -125,6 +133,25 @@
   .slider:focus-visible::-moz-range-thumb,
   .slider:active::-moz-range-thumb {
     transform: scale(1.7);
+  }
+
+  /* Unknown or unavailable value: the slider keeps its place, greyed out. */
+  .slider:disabled {
+    background: var(--surface-3);
+    box-shadow: none;
+    cursor: default;
+  }
+
+  .slider:disabled::-webkit-slider-thumb {
+    background: var(--line);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .slider:disabled::-moz-range-thumb {
+    background: var(--line);
+    box-shadow: none;
+    transform: none;
   }
 
   .slider::-moz-range-track {

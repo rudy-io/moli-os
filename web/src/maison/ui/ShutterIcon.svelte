@@ -27,7 +27,7 @@
     flex: none;
     background: var(--surface);
     color: var(--ink-3);
-    transition: all 0.35s var(--ease);
+    transition: background-color 0.35s var(--ease), color 0.35s var(--ease), box-shadow 0.35s var(--ease);
   }
 
   .shutter-icon :global(svg) {
@@ -37,7 +37,7 @@
 
   .shutter-icon.open {
     background: var(--warm);
-    color: #fff;
+    color: var(--warm-deep);
     box-shadow: 0 0 0 6px var(--glow, var(--warm-glow)),
                 0 6px 22px var(--glow, var(--warm-glow));
   }
