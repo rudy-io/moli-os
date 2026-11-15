@@ -934,6 +934,8 @@ test('dual setpoints classify without a brand and render independent numeric con
   assert.equal(buttons(html).filter(tag => /disabled/.test(tag)).length, 3);
   const offline = show('ClimateCard', points, { heat_setpoint: 20 }, { online: false });
   assert.ok(inputs(offline).every(tag => /disabled/.test(tag)));
+});
+
 test('a button shows its last press while fresh, and always among the sensors (#198)', () => {
   const action = point('action', enumeration('single', 'double', 'hold'), false);
   const button = (state) => [{ id: 'z2m:button', native_name: 'Bouton', model: 'ZG-101ZL', label: { room: 'Workshop' }, online: true,
