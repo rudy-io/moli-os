@@ -71,3 +71,15 @@ test('a discharging battery feeds the house, the grid only beyond the sun', () =
   // Missing readings count as nothing.
   assert.equal(splitFlows({ bought: null, made: undefined, batteryW: null }).gridToHouse, 0);
 });
+
+test('no battery and the production unknown: what goes out came from the sun, as before', () => {
+  // A solar meter without a power point (or a silent inverter), the clamp at −400 W.
+  const f = splitFlows({ bought: 0, made: null, sent: 400, batteryW: null });
+  assert.equal(f.solarToGrid, 400);
+  assert.equal(f.solarToHouse, 0);
+  assert.equal(f.gridToHouse, 0);
+  // Known production keeps its own split.
+  const g = splitFlows({ bought: 0, made: 1000, sent: 400 });
+  assert.equal(g.solarToGrid, 400);
+  assert.equal(g.solarToHouse, 600);
+});

@@ -56,7 +56,7 @@
   const house = $derived(bought == null ? null : Math.max(0, bought + (made ?? 0) - sent - (batteryW ?? 0)));
   // Who feeds whom: the battery charges from the sun first, then the grid;
   // the sun then feeds the house, the rest goes out (`splitFlows`).
-  const split = $derived(splitFlows({ bought, made: made ?? 0, sent, batteryW }));
+  const split = $derived(splitFlows({ bought, made, sent, batteryW }));
   const toGrid = $derived(split.solarToGrid);
   const toHouse = $derived(split.solarToHouse);
 

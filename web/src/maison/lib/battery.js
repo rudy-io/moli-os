@@ -42,7 +42,10 @@ export function batteryNow(summary, current = () => null) {
  *  did not send out. */
 export function splitFlows({ bought = 0, made = 0, sent = 0, batteryW = 0 }) {
   const pos = (v) => (v != null && Number.isFinite(v) ? Math.max(0, v) : 0);
-  const [inGrid, sun, outGrid] = [pos(bought), pos(made), pos(sent)];
+  const [inGrid, outGrid] = [pos(bought), pos(sent)];
+  // Production unknown (a solar meter without power, a silent inverter):
+  // what goes out came from the sun, as before there was a battery.
+  const sun = made == null || !Number.isFinite(made) ? outGrid : pos(made);
   const charge = pos(batteryW);
   const discharge = pos(-(batteryW ?? 0));
   const solarToBattery = Math.min(charge, sun);

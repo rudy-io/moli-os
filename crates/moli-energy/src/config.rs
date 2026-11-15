@@ -349,6 +349,7 @@ impl Config {
         if let Some(live) = &self.live {
             live.check()?;
         }
+        self.check_battery_meters()?;
         if let Some(battery) = &self.battery {
             battery.check()?;
         }
@@ -365,6 +366,16 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    /// A battery is read both ways or not at all: `charge` alone would have
+    /// the house store every day and never get anything back.
+    fn check_battery_meters(&self) -> Result<(), String> {
+        let has = |role: &Role| self.meters.iter().any(|m| &m.role == role);
+        if has(&Role::Charge) == has(&Role::Discharge) {
+            return Ok(());
+        }
+        Err("a battery needs both a `charge` and a `discharge` meter: with one alone, the house would store every day and never get anything back".into())
     }
 
     /// The price of a kWh in this period, if the tariff knows it.
@@ -514,6 +525,10 @@ mod tests {
         assert!(parse(&state.replace("10.5", "0")).is_err());
         assert!(parse(&format!("{state}volts = \"bms:b/v\"\n")).is_err());
         assert!(!Role::Charge.consumes() && !Role::Discharge.consumes());
+        // One way only: refused (charge alone stores every day, never gives back).
+        let (charge, discharge) = stored.split_at(stored.find("[[meter]]\nid = \"out\"").unwrap());
+        assert!(parse(charge).is_err());
+        assert!(parse(discharge).is_err());
     }
 
     #[test]
