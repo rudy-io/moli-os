@@ -1,0 +1,17 @@
+{
+  "wifi_sta": {"connected": true, "ssid": "maison", "ip": "192.168.1.x", "rssi": -67},
+  "time": "08:30",
+  "unixtime": 1794731459,
+  "mac": "AABBCCDDEE01",
+  "relays": [{"ison": true, "has_timer": false, "overpower": false, "is_valid": true, "source": "input"}],
+  "emeters": [
+    {"power": 314.19, "reactive": -980.98, "pf": -0.31, "voltage": 240.22, "is_valid": true, "total": 455815.8, "total_returned": 9688.0},
+    {"power": 107.09, "reactive": 157.26, "pf": 0.56, "voltage": 240.22, "is_valid": true, "total": 113087.9, "total_returned": 2040.4}
+  ],
+  "update": {"status": "idle", "has_update": false, "new_version": "20230913-114150/v1.14.0-gcb84623", "old_version": "20230913-114150/v1.14.0-gcb84623"},
+  "ram_total": 50888,
+  "ram_free": 35084,
+  "fs_size": 233681,
+  "fs_free": 126755,
+  "uptime": 16255
+}

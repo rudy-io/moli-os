@@ -1372,6 +1372,7 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
     "meross-mss310",
     "meross-multiprise",
     "moonraker",
+    "shelly-em-gen1",
 ];
 
 #[cfg(test)]
@@ -1897,6 +1898,35 @@ refresh = "control"
             );
             assert!(try_compile(&toml).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn shelly_em_gen1_status_decodes_both_clamps() {
+        let c = compile("shelly-em-gen1");
+        // Captured from a real meter (firmware v1.14.0), made anonymous.
+        let status = Answer::parse(
+            Format::Json,
+            include_bytes!("../../../integrations/shelly-em-gen1/fixtures/status.json"),
+        )
+        .unwrap();
+        let get = |key: &str| {
+            c.points
+                .iter()
+                .find(|p| &*p.spec.key == key)
+                .unwrap()
+                .read(&status)
+        };
+        assert_eq!(get("power_1"), Some(Value::Float(314.2)));
+        assert_eq!(get("voltage_1"), Some(Value::Float(240.2)));
+        assert_eq!(get("power_factor_1"), Some(Value::Float(-0.31)));
+        // The counters are in Wh on the wire, kWh for `[energy]`.
+        assert_eq!(get("energy_1"), Some(Value::Float(455.816)));
+        assert_eq!(get("energy_returned_1"), Some(Value::Float(9.688)));
+        assert_eq!(get("power_2"), Some(Value::Float(107.1)));
+        assert_eq!(get("energy_2"), Some(Value::Float(113.088)));
+        assert_eq!(get("signal"), Some(Value::Float(-67.0)));
+        // Read only: neither the relay nor a reboot.
+        assert!(c.writes.is_empty());
     }
 
     #[test]

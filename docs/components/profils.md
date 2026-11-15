@@ -503,6 +503,7 @@ dossier dans les deux sens.
 | `meross-mss310` | prise connectée Meross MSS310 (relais et mesure) | HTTP local signé (`meross`) | `all` 15 s, `e` 15 s, `c` 5 min | `key` | **non** (idem) |
 | `meross-multiprise` | multiprises et prises doubles Meross MSS425, MSS620 | HTTP local signé (`meross`) | `all` 15 s | `key` | **non** (idem) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
+| `shelly-em-gen1` | compteur Shelly EM 1re génération (SHEM), 2 pinces | HTTP local, sans auth | `status` 10 s | aucun | oui, en lecture (firmware v1.14.0) |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
 | `tempo` | couleur EDF Tempo du jour et du lendemain | HTTPS `www.api-couleur-tempo.fr` | `today` 1 h, `tomorrow` 30 min | aucun | oui (sans fixture) |
@@ -593,6 +594,19 @@ fixtures sont construites, pas capturées.
   `progress` (%), `file`, `print_duration` (min), `nozzle_temperature`, `nozzle_target`,
   `bed_temperature`, `bed_target`. Le profil n'a pas de port par défaut : préciser `port`
   (Moonraker écoute souvent sur 7125).
+
+#### `shelly-em-gen1`
+
+- L'ancienne API HTTP des Shelly Gen1 (`GET /status`) ; les Gen2 et suivants ont le pilote
+  natif `shelly` (websocket RPC). Identité et MAC : `status.mac`.
+- Points par pince `N` (1, 2 = `emeters.0`, `emeters.1`) : `power_N` (W, signée),
+  `voltage_N` (V), `power_factor_N`, `energy_N` et `energy_returned_N` (kWh, depuis les
+  compteurs `total` / `total_returned` en Wh) ; boîtier : `signal` (dBm), `uptime` (s).
+- Lecture seule : ni le relais ni le redémarrage. Un relevé toutes les 10 s : l'appareil
+  (ESP8266) est modeste, et souvent déjà interrogé par d'autres (un pont Victron…).
+- Les compteurs ne tournent que si le Shelly a l'heure (SNTP joignable) et peuvent repartir de
+  zéro après un redémarrage : dans `[energy]`, garder `reset = "auto"` (par défaut).
+- Sans mot de passe sur l'appareil (l'authentification HTTP de base n'est pas prise en charge).
 
 #### `open-meteo`
 
