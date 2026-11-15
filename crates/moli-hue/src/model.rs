@@ -372,13 +372,14 @@ fn service_points(
                 .map(Into::into)
                 .collect();
             let label = moli_i18n::tr!("pilotes.hue.bouton", n = control);
+            // A press, sent with `pulse_state` (#211).
             points.push(point(
                 &key,
                 &label,
                 Kind::Enum { values },
                 false,
                 None,
-                Semantic::Other,
+                Semantic::Press,
             ));
             Feed::Button { key }
         }
@@ -825,6 +826,11 @@ mod tests {
             keys,
             ["button1", "button2", "button3", "button4", "battery"]
         );
+        for p in &dimmer.points[..4] {
+            assert_eq!(p.semantic, Semantic::Press, "{}", p.key);
+            assert!(!p.access.write);
+        }
+        assert_ne!(dimmer.points[4].semantic, Semantic::Press);
     }
 
     #[test]

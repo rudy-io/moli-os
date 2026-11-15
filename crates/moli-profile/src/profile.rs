@@ -687,6 +687,16 @@ fn compile_request(
     })
 }
 
+/// A meaning a profile may not declare. A profile reads states; a press is
+/// an occurrence a driver sends with `pulse_state` (#211): a polled value
+/// would replay the last one.
+fn declarable(semantic: Semantic) -> Result<(), String> {
+    if semantic == Semantic::Press {
+        return Err("semantic press is for a driver that receives presses, not a profile".into());
+    }
+    Ok(())
+}
+
 /// One point: its kind, value map, unit and meaning, checked together.
 fn compile_point(
     p: &PointDef,
@@ -757,6 +767,7 @@ fn compile_point(
     let semantic = p
         .semantic
         .unwrap_or_else(|| Semantic::infer(&p.key, unit.as_ref()));
+    declarable(semantic)?;
     if semantic == Semantic::Alert && kind != Kind::Binary {
         return Err("semantic alert is a binary point (true: something is wrong)".into());
     }
@@ -1271,6 +1282,15 @@ snapshot = \"{path}\""
         assert_eq!(compiled.points[0].spec.semantic, Semantic::Alert);
         let err = try_compile(&with("numeric")).unwrap_err();
         assert!(err.message.contains("alert"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_profile_never_declares_a_press() {
+        let text = "[profile]\nid = \"boitier\"\nname = \"Boîtier\"\n\
+             [[request]]\nid = \"s\"\npath = \"/etat\"\nformat = \"json\"\nevery = \"5m\"\n\
+             [[point]]\nkey = \"action\"\nlabel = \"Action\"\nfrom = \"s.action\"\nkind = \"text\"\nsemantic = \"press\"\n";
+        let err = try_compile(text).unwrap_err();
+        assert!(err.message.contains("press"), "{}", err.message);
     }
 
     #[test]

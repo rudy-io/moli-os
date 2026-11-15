@@ -185,6 +185,13 @@ pub enum Semantic {
     /// something is wrong): a backup, a disk, a link. A device with one is
     /// shown on the dashboard's « Parc » page; a text point `detail` words it.
     Alert,
+    /// A press of a button or of a remote's key (read-only): each value is
+    /// an occurrence, not a state, and the same value twice is two presses.
+    /// The value is the kind of press as the brand gives it (`single`,
+    /// `double`, `hold`, `short_release`…). Never deduced from a name (an
+    /// `action` or a `button` elsewhere keeps its meaning): the driver that
+    /// sends the point with `pulse_state` declares it (#211).
+    Press,
     /// The weather outside, as a station measures it or a forecast gives
     /// it. Never deduced from a name (a fan has a `wind_speed`, a pump a
     /// `rate`): the driver that knows the point declares it. Each has one
@@ -360,6 +367,18 @@ mod tests {
         );
         // No magic key: a point named so is not an alert until it says it is.
         assert_eq!(Semantic::infer("alert", None), Semantic::Other);
+    }
+
+    #[test]
+    fn press_is_declared_never_guessed() {
+        assert_eq!(
+            serde_json::to_string(&Semantic::Press).unwrap(),
+            "\"press\""
+        );
+        // A key named so is not a press until its driver says it is.
+        for key in ["action", "button", "button1", "press", "switch_mode1"] {
+            assert_eq!(Semantic::infer(key, None), Semantic::Other, "{key}");
+        }
     }
 
     #[test]
