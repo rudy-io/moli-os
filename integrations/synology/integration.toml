@@ -1,0 +1,48 @@
+[integration]
+id = "synology"
+name = "NAS Synology (DSM) : santé, disques, onduleur, sauvegardes, réveil, arrêt"
+brands = ["Synology"]
+# Read-only calls and the `reboot` order checked on a real one; `shutdown` and `wake` not: see the README.
+models = ["DS1019+ (DSM 7.4)"]
+transport = "https"
+driver = "synology"
+crate = "moli-synology"
+
+[discovery]
+# No discovery: the instance gives the NAS's address (DSM answers on 5001).
+mdns = []
+ssdp = []
+ports = [5001]
+
+[needs]
+# `cert` (the pinned fingerprint) is written by the driver itself.
+secrets = ["username", "password"]
+vars = []
+options = ["host"]
+
+[origin]
+reused = "aucun code repris : noms d'API et champs de la Web API DSM (SYNO.API.Auth, SYNO.DSM.Info, SYNO.Core.System.Utilization, SYNO.Storage.CGI.Storage, SYNO.Core.ExternalDevice.UPS, SYNO.Backup.Task, SYNO.Core.System), recoupés avec la documentation publique de Synology et la bibliothèque py-synologydsm-api (MIT) ; réponses réelles d'un DS1019+ (DSM 7.4) capturées en lecture seule puis anonymisées (info, utilisation, stockage, onduleur, Hyper Backup) ; les fixtures `*-faulty` (disque, volume ou sauvegarde en panne) sont reconstituées à la main, ce NAS étant sain"
+author = "agent"
+
+# Replayed by the crate's tests (crates/moli-synology/src/model.rs, tests.rs).
+# Real answers, anonymised, except the two `-faulty` ones (reconstructed).
+[[fixture]]
+file = "fixtures/info.json"
+
+[[fixture]]
+file = "fixtures/utilization.json"
+
+[[fixture]]
+file = "fixtures/storage.json"
+
+[[fixture]]
+file = "fixtures/ups.json"
+
+[[fixture]]
+file = "fixtures/backup.json"
+
+[[fixture]]
+file = "fixtures/storage-faulty.json"
+
+[[fixture]]
+file = "fixtures/backup-faulty.json"

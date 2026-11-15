@@ -547,5 +547,9 @@
   "systeme.engie.connecter": "Connecter",
   "systeme.engie.verification": "Connexion…",
   "systeme.engie.aide": "Moli ne voit jamais ton mot de passe : il garde seulement un jeton chiffré dans son coffre. Se connecter avec le même compte dans l'appli ou sur engie.be ferme la session de Moli : il te demandera alors de le reconnecter.",
-  "systeme.engie.officieux": "ENGIE ne propose pas d'interface officielle : Moli utilise celle de l'appli ENGIE Smart, qui peut changer sans prévenir."
+  "systeme.engie.officieux": "ENGIE ne propose pas d'interface officielle : Moli utilise celle de l'appli ENGIE Smart, qui peut changer sans prévenir.",
+  "systeme.infra.nas_allume": "allumé depuis {since}",
+  "systeme.infra.nas_eteint": "Éteint ou injoignable",
+  "systeme.infra.nas_onduleur": "Onduleur · batterie {pct} %",
+  "systeme.infra.alerte.nas": "{name} : {detail}"
 }

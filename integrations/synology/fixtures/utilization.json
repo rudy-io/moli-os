@@ -1,0 +1,26 @@
+{
+ "success": true,
+ "data": {
+  "cpu": {
+   "15min_load": 24,
+   "1min_load": 28,
+   "5min_load": 20,
+   "other_load": 2,
+   "system_load": 1,
+   "user_load": 0,
+   "device": "system"
+  },
+  "memory": {
+   "avail_real": 243028,
+   "avail_swap": 6047156,
+   "buffer": 52748,
+   "cached": 6192372,
+   "memory_size": 8388608,
+   "real_usage": 18,
+   "swap_usage": 12,
+   "total_real": 7989256,
+   "total_swap": 6893484,
+   "device": "memory"
+  }
+ }
+}

@@ -547,5 +547,9 @@
   "systeme.engie.connecter": "Connect",
   "systeme.engie.verification": "Connecting…",
   "systeme.engie.aide": "Moli never sees your password: it only keeps an encrypted token in its secret store. Signing in with the same account in the app or on engie.be closes Moli's session: it will then ask you to connect it again.",
-  "systeme.engie.officieux": "ENGIE offers no official interface: Moli uses the ENGIE Smart app's, which may change without notice."
+  "systeme.engie.officieux": "ENGIE offers no official interface: Moli uses the ENGIE Smart app's, which may change without notice.",
+  "systeme.infra.nas_allume": "up for {since}",
+  "systeme.infra.nas_eteint": "Off or unreachable",
+  "systeme.infra.nas_onduleur": "UPS · battery {pct} %",
+  "systeme.infra.alerte.nas": "{name}: {detail}"
 }

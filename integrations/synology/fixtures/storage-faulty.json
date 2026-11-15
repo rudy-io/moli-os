@@ -1,0 +1,10 @@
+{"success":true,"data":{
+ "volumes":[
+  {"id":"volume_1","status":"normal","fs_type":"btrfs","size":{"total":"2199023255552","used":"1099511627776"}},
+  {"id":"volume_2","status":"degrade","fs_type":"ext4","size":{"total":"1099511627776","used":"549755813888"}}
+ ],
+ "disks":[
+  {"id":"sda","name":"Drive 1","model":"EXAMPLE-HDD 2TB","temp":34,"status":"normal","smart_status":"normal","exceed_bad_sector_thr":false,"below_remain_life_thr":false},
+  {"id":"sdb","name":"Drive 2","model":"EXAMPLE-HDD 2TB","temp":47,"status":"warning","smart_status":"failing","exceed_bad_sector_thr":true,"below_remain_life_thr":false},
+  {"id":"sdc","name":"Drive 3","model":"EXAMPLE-SSD 500GB","temp":30,"status":"normal","smart_status":"normal","exceed_bad_sector_thr":false,"below_remain_life_thr":true}
+ ]}}
