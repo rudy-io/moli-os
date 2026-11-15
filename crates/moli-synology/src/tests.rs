@@ -22,6 +22,12 @@ struct Dsm {
     drop_shutdown: AtomicBool,
     /// Storage answers something that is not DSM's JSON.
     broken_storage: AtomicBool,
+    /// The system information answers something that is not DSM's JSON:
+    /// the NAS is there, but the poll cannot go through (a proxy in between,
+    /// a DSM that is still starting). Never a refused login.
+    broken_info: AtomicBool,
+    /// Hyper Backup has no task any more (the last one was deleted).
+    empty_backups: AtomicBool,
 }
 
 impl Dsm {
@@ -45,6 +51,9 @@ impl Dsm {
                 r#"{"success":true,"data":{"sid":"fake-session"}}"#
             };
         }
+        if api("SYNO.DSM.Info") && self.broken_info.load(Ordering::SeqCst) {
+            return "<html>gateway timeout</html>";
+        }
         if api("SYNO.Storage.CGI.Storage") && self.broken_storage.load(Ordering::SeqCst) {
             return "<html>gateway timeout</html>";
         }
@@ -64,7 +73,11 @@ impl Dsm {
         } else if api("SYNO.Storage.CGI.Storage") {
             include_str!("../../../integrations/synology/fixtures/storage-faulty.json")
         } else if api("SYNO.Backup.Task") {
-            include_str!("../../../integrations/synology/fixtures/backup-faulty.json")
+            if self.empty_backups.load(Ordering::SeqCst) {
+                r#"{"success":true,"data":{"task_list":[]}}"#
+            } else {
+                include_str!("../../../integrations/synology/fixtures/backup-faulty.json")
+            }
         } else if api("SYNO.Core.System") {
             r#"{"success":true}"#
         } else {
@@ -291,6 +304,45 @@ async fn a_reachable_nas_publishes_its_parts_and_takes_a_shutdown() {
 }
 
 #[tokio::test]
+async fn a_task_that_leaves_the_nas_goes_offline_without_its_old_problem() {
+    let dsm = Arc::new(Dsm::default());
+    let (port, _, server) = serve(Arc::clone(&dsm)).await;
+    let nas = start(port, None, None).await;
+    nas.until("a backup flagged", |f| {
+        f.value("backup_2", "problem") == Some(moli_core::Value::Bool(true))
+    })
+    .await;
+    // The task is deleted on the NAS: the next poll no longer lists it.
+    dsm.empty_backups.store(true, Ordering::SeqCst);
+    for _ in 0..500 {
+        if nas.value("backup_2", "problem") == Some(moli_core::Value::Null) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        nas.value("backup_2", "problem"),
+        Some(moli_core::Value::Null)
+    );
+    assert_eq!(
+        nas.value("backup_2", "detail"),
+        Some(moli_core::Value::Null)
+    );
+    let offline = nas
+        .hub
+        .snapshot()
+        .devices
+        .iter()
+        .find(|d| d.device.id.to_string() == "nas:backup_2")
+        .map(|d| d.online);
+    assert_eq!(offline, Some(Some(false)));
+    // The rest of the NAS is untouched.
+    assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(true)));
+    assert_eq!(nas.status(), DriverStatus::Running);
+    server.abort();
+}
+
+#[tokio::test]
 async fn a_dropped_session_is_reopened_once_and_the_read_goes_through() {
     let dsm = Arc::new(Dsm::default());
     dsm.drop_session.store(true, Ordering::SeqCst);
@@ -354,6 +406,29 @@ async fn refused_credentials_are_not_insisted_on_and_tried_again_later() {
     assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(true)));
     assert_eq!(dsm.logins.load(Ordering::SeqCst), 2);
     assert!(nas.warning().is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn the_refusal_warning_does_not_outlive_the_refusal() {
+    let dsm = Arc::new(Dsm::default());
+    dsm.refuse_login.store(true, Ordering::SeqCst);
+    let (port, _, server) = serve(Arc::clone(&dsm)).await;
+    let nas = start(port, None, None).await;
+    nas.until("warned", |f| f.warning().is_some()).await;
+    // DSM accepts the login again but the poll cannot go through, for a
+    // reason that is not a refusal: the warning must go.
+    dsm.refuse_login.store(false, Ordering::SeqCst);
+    dsm.broken_info.store(true, Ordering::SeqCst);
+    for _ in 0..500 {
+        if nas.warning().is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(nas.warning().is_none(), "{:?}", nas.warning());
+    assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(false)));
+    assert_eq!(nas.status(), DriverStatus::Running);
     server.abort();
 }
 
@@ -507,6 +582,24 @@ async fn a_changed_certificate_sends_nothing() {
     .await;
     assert!(dsm.bodies.lock().unwrap().is_empty());
     server.abort();
+}
+
+#[test]
+fn the_pause_before_another_try_doubles_and_stops_at_the_ceiling() {
+    assert_eq!(retry_after(1), RETRY_AFTER_REFUSAL);
+    assert_eq!(retry_after(2), RETRY_AFTER_REFUSAL * 2);
+    // The third doubles again, up to the ceiling (2 s → 4 s → 8 s in test:
+    // the third one already reaches it).
+    assert_eq!(
+        retry_after(3),
+        (RETRY_AFTER_REFUSAL * 4).min(RETRY_AFTER_REFUSAL_MAX)
+    );
+    // Never past the ceiling, and a counter that kept climbing cannot
+    // overflow: a saturated multiplication, not a shift that panics.
+    for refusals in 1..=10_000 {
+        assert!(retry_after(refusals) <= RETRY_AFTER_REFUSAL_MAX);
+    }
+    assert_eq!(retry_after(u32::MAX), RETRY_AFTER_REFUSAL_MAX);
 }
 
 #[test]

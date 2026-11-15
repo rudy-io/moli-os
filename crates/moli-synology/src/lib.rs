@@ -11,7 +11,7 @@ mod model;
 use anyhow::{Context as _, bail, ensure};
 use dsm::Client;
 use model::States;
-use moli_core::Value;
+use moli_core::{DeviceId, Value};
 use moli_net::{PIN_MISMATCH, PinnedHttps};
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
@@ -32,6 +32,22 @@ const STORAGE_EVERY: Duration = Duration::from_secs(600);
 /// blocks an address that fails a few times in a few minutes, yet it also
 /// refuses logins while it starts, so the refusal cannot be final.
 const RETRY_AFTER_REFUSAL: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 900 });
+/// The longest pause between two tries (two hours, on the fourth refusal in
+/// a row): past that, a NAS that keeps refusing is a fault to look at, not a
+/// transient state, and a shorter pause only feeds DSM's block list.
+const RETRY_AFTER_REFUSAL_MAX: Duration = Duration::from_secs(if cfg!(test) { 8 } else { 7200 });
+
+/// The pause before asking again, from the number of refusals in a row: the
+/// first waits the base (15 min, 2 s in test), then the pause doubles
+/// (30 min, 60 min, 2 h) and stops at the ceiling. Saturating, so a counter
+/// that kept climbing cannot overflow.
+fn retry_after(refusals: u32) -> Duration {
+    // Eight doublings already go past any ceiling: no need to shift further.
+    let doublings = refusals.saturating_sub(1).min(8);
+    RETRY_AFTER_REFUSAL
+        .saturating_mul(1 << doublings)
+        .min(RETRY_AFTER_REFUSAL_MAX)
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,12 +129,15 @@ struct State {
     storage: Option<(Instant, Json)>,
     /// When the NAS last refused the login (the cool-down runs from then).
     refused: Option<Instant>,
+    /// How many refusals in a row: the pause grows with it, and a reading
+    /// that goes through puts it back to zero.
+    refusals: u32,
 }
 
 impl State {
     fn cooling_down(&self) -> bool {
         self.refused
-            .is_some_and(|at| at.elapsed() < RETRY_AFTER_REFUSAL)
+            .is_some_and(|at| at.elapsed() < retry_after(self.refusals))
     }
 }
 
@@ -175,6 +194,7 @@ impl Synology {
             up: None,
             storage: None,
             refused: None,
+            refusals: 0,
         };
         publish_nas(ctx, &state, model::nas_states_down());
         ctx.ready();
@@ -204,6 +224,7 @@ impl Synology {
                             tracing::info!(instance = %ctx.instance(), "synology reachable");
                         }
                         state.up = Some(true);
+                        state.refusals = 0;
                         if state.refused.take().is_some() {
                             ctx.clear_warning();
                         }
@@ -227,6 +248,12 @@ impl Synology {
                     if state.up != Some(false) {
                         tracing::warn!(instance = %ctx.instance(), error = %format!("{error:#}"), "synology unreachable");
                     }
+                    // Not a refusal (asleep, out of reach): the « login
+                    // refused » warning no longer holds, and nothing is
+                    // cooled down.
+                    state.refused = None;
+                    state.refusals = 0;
+                    ctx.clear_warning();
                     state.up = Some(false);
                 }
             }
@@ -342,6 +369,7 @@ impl Synology {
         // removed, so its history stays readable.
         for id in ctx.devices() {
             if !present.contains(&id) {
+                forget(ctx, &id);
                 ctx.set_availability(&id, false);
             }
         }
@@ -429,7 +457,9 @@ fn refuse(ctx: &DriverCtx, state: &mut State, why: &str) {
     state.storage = None;
     state.up = Some(false);
     state.refused = Some(Instant::now());
-    tracing::warn!(instance = %ctx.instance(), why, "synology refused the login, next try in 15 minutes");
+    state.refusals = state.refusals.saturating_add(1);
+    let wait = retry_after(state.refusals);
+    tracing::warn!(instance = %ctx.instance(), why, wait = ?wait, "synology refused the login, next try later");
     ctx.warn(moli_i18n::tr!(
         "pilotes.synology.identifiants_refuses",
         instance = ctx.instance(),
@@ -487,10 +517,19 @@ fn unreachable(ctx: &DriverCtx, state: &State) {
     let nas = ctx.device_id(model::NAS);
     for id in ctx.devices() {
         if id != nas {
+            forget(ctx, &id);
             ctx.set_availability(&id, false);
         }
     }
     publish_nas(ctx, state, model::nas_states_down());
+}
+
+/// A part that is no longer read keeps no verdict: its `problem` and its
+/// words go back to `Null`, or the dashboard would show a fault that nothing
+/// reports any more.
+fn forget(ctx: &DriverCtx, id: &DeviceId) {
+    ctx.set_state(id, "problem", Value::Null);
+    ctx.set_state(id, "detail", Value::Null);
 }
 
 #[cfg(test)]
