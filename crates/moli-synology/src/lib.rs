@@ -17,13 +17,17 @@ use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, KnownAddress};
 use serde::Deserialize;
 use serde_json::Value as Json;
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const USERNAME: &str = "username";
 const PASSWORD: &str = "password";
 const CERT: &str = "cert";
 /// DSM: this account has no right to that API (not an administrator).
 const NO_RIGHT: u32 = 105;
+/// How often the storage is read. It is the Storage Manager's own call: read
+/// every minute, it can keep the disks from going to sleep (or wake them).
+/// Disk temperature, health and free space move slowly.
+const STORAGE_EVERY: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -100,6 +104,9 @@ struct State {
     model: Option<String>,
     /// Whether the last poll reached the NAS (`None`: not tried yet).
     up: Option<bool>,
+    /// The last storage read and when: read again once `STORAGE_EVERY` has
+    /// passed, or at once after the NAS stopped answering.
+    storage: Option<(Instant, Json)>,
 }
 
 /// `aabbccddeeff` → `aa:bb:cc:dd:ee:ff`.
@@ -153,6 +160,7 @@ impl Synology {
                 .or_else(|| ctx.known_address().and_then(|a| a.mac)),
             model: None,
             up: None,
+            storage: None,
         };
         publish_nas(ctx, &state, model::nas_states_down());
         ctx.ready();
@@ -179,6 +187,7 @@ impl Synology {
                         continue;
                     };
                     unreachable(ctx, &state);
+                    state.storage = None;
                     if error.downcast_ref::<dsm::Refused>().is_some() {
                         return wait_for_credentials(ctx).await;
                     }
@@ -237,6 +246,10 @@ impl Synology {
     }
 
     async fn poll(&self, ctx: &DriverCtx, state: &mut State) -> anyhow::Result<()> {
+        let storage_due = state
+            .storage
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= STORAGE_EVERY);
         let client = self.client(ctx, state).await?;
         let info = client
             .read("SYNO.DSM.Info", "2", "getinfo", &[])
@@ -252,7 +265,11 @@ impl Synology {
             &[("type", "current")],
         )
         .await?;
-        let storage = optional(client, "SYNO.Storage.CGI.Storage", "1", "load_info", &[]).await?;
+        let storage_read = if storage_due {
+            Some(optional(client, "SYNO.Storage.CGI.Storage", "1", "load_info", &[]).await?)
+        } else {
+            None
+        };
         let ups = optional(client, "SYNO.Core.ExternalDevice.UPS", "1", "get", &[]).await?;
         let tasks = optional(
             client,
@@ -262,6 +279,17 @@ impl Synology {
             &[("additional", r#"["last_bkp_time","last_bkp_result"]"#)],
         )
         .await?;
+
+        // A storage that could not be read is asked again at the next poll.
+        match storage_read {
+            Some(Json::Null) => state.storage = None,
+            Some(read) => state.storage = Some((Instant::now(), read)),
+            None => {}
+        }
+        let storage = state
+            .storage
+            .as_ref()
+            .map_or(Json::Null, |(_, s)| s.clone());
 
         let model = model::model(&info).map(str::to_owned);
         if model != state.model {

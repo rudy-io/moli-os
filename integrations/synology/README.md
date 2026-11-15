@@ -15,7 +15,13 @@ Pilote natif `crates/moli-synology`, **lecture et ordres**.
   jamais dans une adresse. Une seule session ; perdue, elle est rouverte et l'appel renvoyé une fois.
 - **Lecture** toutes les 60 s (option `poll_secs`, de 5 à 3600) : `SYNO.DSM.Info`,
   `SYNO.Core.System.Utilization`, `SYNO.Storage.CGI.Storage`, `SYNO.Core.ExternalDevice.UPS`,
-  `SYNO.Backup.Task`. Un compte qui n'a pas le droit à une partie la perd, pas le reste.
+  `SYNO.Backup.Task`. Un compte qui n'a pas le droit à une partie, ou une lecture annexe qui
+  échoue (délai compris), perd cette partie, pas le reste : seul `SYNO.DSM.Info` dit si le NAS répond.
+- **Veille des disques** : `SYNO.Storage.CGI.Storage` est l'appel du Gestionnaire de stockage, qui peut
+  garder éveillés (ou réveiller) des disques que DSM voudrait endormir. Moli ne le lit donc que
+  **toutes les 10 minutes** (et tout de suite après une coupure), pas à chaque lecture. Sur le
+  DS1019+ essayé, la veille est réglée à 20 min et le journal d'hibernation de DSM est désactivé : l'effet
+  réel du poll n'a pas été mesuré. Disques, volumes et leur alerte se rafraîchissent donc toutes les 10 min.
 - **Appareils** :
   - `nas` : en marche (`up`), température, processeur, mémoire, durée d'allumage, `problem` /
     `detail` (température trop haute), et l'ordre `control` (`wake`, `shutdown`, `reboot`) ;

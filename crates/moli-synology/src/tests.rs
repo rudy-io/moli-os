@@ -161,8 +161,12 @@ impl Drop for Fixture {
 }
 
 async fn start(port: u16, mac: Option<&str>, pin: Option<&str>) -> Fixture {
+    // One file per test: the clock alone is too coarse to tell two tests apart.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let secrets = std::env::temp_dir().join(format!(
-        "synology-{}.enc",
+        "synology-{}-{}-{}.enc",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -368,6 +372,27 @@ async fn credentials_refused_during_an_order_stop_the_driver_from_trying_again()
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(dsm.logins.load(Ordering::SeqCst), 2);
     assert_eq!(dsm.calls("method=shutdown"), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn the_storage_is_read_once_while_the_rest_is_polled() {
+    let dsm = Arc::new(Dsm::default());
+    let (port, _, server) = serve(Arc::clone(&dsm)).await;
+    let nas = start(port, None, None).await;
+    nas.until("volume published", |f| {
+        f.value("volume_1", "used").is_some()
+    })
+    .await;
+    // The poll is every 5 s here: wait for another one.
+    nas.until("a second poll", |_| dsm.calls("System.Utilization") >= 2)
+        .await;
+    assert_eq!(dsm.calls("SYNO.Storage.CGI.Storage"), 1);
+    // The volume stays published from the last reading.
+    assert_eq!(
+        nas.value("volume_1", "used"),
+        Some(moli_core::Value::Float(50.0))
+    );
     server.abort();
 }
 
