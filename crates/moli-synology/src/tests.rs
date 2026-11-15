@@ -20,6 +20,8 @@ struct Dsm {
     refuse_login: AtomicBool,
     /// The next shutdown finds the session gone.
     drop_shutdown: AtomicBool,
+    /// Storage answers something that is not DSM's JSON.
+    broken_storage: AtomicBool,
 }
 
 impl Dsm {
@@ -42,6 +44,9 @@ impl Dsm {
             } else {
                 r#"{"success":true,"data":{"sid":"fake-session"}}"#
             };
+        }
+        if api("SYNO.Storage.CGI.Storage") && self.broken_storage.load(Ordering::SeqCst) {
+            return "<html>gateway timeout</html>";
         }
         if api("SYNO.Storage.CGI.Storage") && self.drop_session.swap(false, Ordering::SeqCst) {
             return r#"{"success":false,"error":{"code":119}}"#;
@@ -331,6 +336,54 @@ async fn refused_credentials_wait_for_a_human_and_are_not_tried_again() {
     assert_eq!(dsm.logins.load(Ordering::SeqCst), 1);
     // The NAS device stays, honestly down.
     assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(false)));
+    server.abort();
+}
+
+#[tokio::test]
+async fn credentials_refused_during_an_order_stop_the_driver_from_trying_again() {
+    let dsm = Arc::new(Dsm::default());
+    let (port, _, server) = serve(Arc::clone(&dsm)).await;
+    let nas = start(port, None, None).await;
+    nas.until("volume published", |f| {
+        f.value("volume_1", "used").is_some()
+    })
+    .await;
+    // The session is gone, and the login that follows is refused.
+    dsm.drop_shutdown.store(true, Ordering::SeqCst);
+    dsm.refuse_login.store(true, Ordering::SeqCst);
+    let refused = nas
+        .hub
+        .command(
+            &nas.point("nas", "control"),
+            moli_core::Value::from("shutdown"),
+            Origin::Ui,
+            None,
+        )
+        .await;
+    assert!(refused.is_err());
+    nas.until("waiting", |f| {
+        matches!(f.status(), DriverStatus::Waiting { .. })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(dsm.logins.load(Ordering::SeqCst), 2);
+    assert_eq!(dsm.calls("method=shutdown"), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_part_that_cannot_be_read_loses_only_itself() {
+    let dsm = Arc::new(Dsm::default());
+    dsm.broken_storage.store(true, Ordering::SeqCst);
+    let (port, _, server) = serve(Arc::clone(&dsm)).await;
+    let nas = start(port, None, None).await;
+    nas.until("backups published", |f| {
+        f.value("backup_2", "problem") == Some(moli_core::Value::Bool(true))
+    })
+    .await;
+    assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(true)));
+    assert!(nas.value("volume_1", "used").is_none());
+    assert_eq!(nas.status(), DriverStatus::Running);
     server.abort();
 }
 

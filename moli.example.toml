@@ -224,6 +224,17 @@ base_topic = "zigbee2mqtt"
 # installation = 1234567                    # only when the account has several installations
 # redirect_uri = "vicare://oauth-callback/everest"   # only if the API key declares another
 
+# Synology NAS (DSM, HTTPS). Needs the master key and two secrets (username, password: an administrator
+# account); see integrations/synology/onboarding.md. Orders (wake, shutdown, reboot) need a person's approval.
+# [[driver]]
+# id = "nas"
+# kind = "synology"
+#
+# [driver.options]
+# host = "192.168.0.x"
+# port = 5001                  # DSM's HTTPS port, if changed
+# mac = "00:11:32:aa:bb:cc"    # to wake it (Wake-on-LAN); learned by itself on a local network
+
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
 # model = "gpt-4.1-mini"

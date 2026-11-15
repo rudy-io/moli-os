@@ -551,6 +551,5 @@
   "systeme.infra.nas_allume": "allumé depuis {since}",
   "systeme.infra.nas_eteint": "Éteint ou injoignable",
   "systeme.infra.nas_onduleur": "Onduleur · batterie {pct} %",
-  "systeme.infra.alerte.nas": "{name} : {detail}",
-  "systeme.infra.alerte.nas_eteint": "{name} ne répond pas"
+  "systeme.infra.alerte.nas": "{name} : {detail}"
 }

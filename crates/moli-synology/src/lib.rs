@@ -137,6 +137,11 @@ impl Synology {
             ctx.cancelled().await;
             return Ok(());
         };
+        if ctx.secret(CERT).is_none() && !ctx.can_store_secrets() {
+            ctx.wait_for(moli_i18n::tr!("pilotes.synology.coffre_indisponible"));
+            ctx.cancelled().await;
+            return Ok(());
+        }
         let mut state = State {
             username,
             password,
@@ -158,7 +163,12 @@ impl Synology {
                 command = ctx.next_command() => {
                     let Some(command) = command else { return Ok(()) };
                     let result = self.execute(ctx, &mut state, &command).await;
+                    let refused = matches!(&result, Err(e) if e.downcast_ref::<dsm::Refused>().is_some());
                     command.reply(result.map_err(|e| describe(&e)));
+                    if refused {
+                        unreachable(ctx, &state);
+                        return wait_for_credentials(ctx).await;
+                    }
                 }
                 _ = poll.tick() => {
                     let Err(error) = self.poll(ctx, &mut state).await else {
@@ -170,15 +180,7 @@ impl Synology {
                     };
                     unreachable(ctx, &state);
                     if error.downcast_ref::<dsm::Refused>().is_some() {
-                        // Asking again would get the hub's address blocked.
-                        ctx.wait_for(moli_i18n::tr!(
-                            "pilotes.synology.identifiants_refuses",
-                            instance = ctx.instance(),
-                            username = USERNAME,
-                            password = PASSWORD
-                        ));
-                        ctx.cancelled().await;
-                        return Ok(());
+                        return wait_for_credentials(ctx).await;
                     }
                     if format!("{error:#}").contains(PIN_MISMATCH) {
                         ctx.wait_for(moli_i18n::tr!(
@@ -364,8 +366,23 @@ impl Synology {
     }
 }
 
-/// A part DSM refuses to this account (code 105 and the like) reads as
-/// empty; a refused login or a transport failure is still an error.
+/// The NAS refused the login, from the poll or from an order. Asking again
+/// would get the hub's address blocked: the driver waits for new credentials.
+async fn wait_for_credentials(ctx: &mut DriverCtx) -> anyhow::Result<()> {
+    ctx.wait_for(moli_i18n::tr!(
+        "pilotes.synology.identifiants_refuses",
+        instance = ctx.instance(),
+        username = USERNAME,
+        password = PASSWORD
+    ));
+    ctx.cancelled().await;
+    Ok(())
+}
+
+/// A part that cannot be read (no right, too slow, a dropped connection)
+/// reads as empty: only that part is lost, and only `SYNO.DSM.Info` says
+/// whether the NAS answers. A refused login or a changed certificate still
+/// stops the poll.
 async fn optional(
     client: &mut Client,
     api: &str,
@@ -374,11 +391,17 @@ async fn optional(
     params: &[(&str, &str)],
 ) -> anyhow::Result<Json> {
     match client.read(api, version, method, params).await {
-        Err(e) if e.downcast_ref::<dsm::Api>().is_some() => {
-            tracing::debug!(api, error = %e, "synology part unavailable");
+        Err(e)
+            if e.downcast_ref::<dsm::Refused>().is_some()
+                || format!("{e:#}").contains(PIN_MISMATCH) =>
+        {
+            Err(e)
+        }
+        Err(e) => {
+            tracing::debug!(api, error = %format!("{e:#}"), "synology part unavailable");
             Ok(Json::Null)
         }
-        other => other,
+        ok => ok,
     }
 }
 

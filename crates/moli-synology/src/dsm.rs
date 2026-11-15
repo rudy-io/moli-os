@@ -2,9 +2,10 @@
 //!
 //! Every call is a form POST (the password and the session id never travel
 //! in an address). A session the NAS dropped (its answer proves the call
-//! did not run) is opened again, and the call sent once more. An order
-//! (shutdown, reboot) is never repeated after a failure that leaves its
-//! fate unknown: only a read is re-sent on a dropped connection.
+//! did not run) is opened again, and the call sent once more: that holds for
+//! an order too. An order (shutdown, reboot) is never repeated after a
+//! failure that leaves its fate unknown: only a read is re-sent on a dropped
+//! connection.
 
 use anyhow::{Context as _, ensure};
 use moli_net::{Method, PinnedHttps};

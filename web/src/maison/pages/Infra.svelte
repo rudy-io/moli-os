@@ -73,12 +73,9 @@
       else if (home.now - b.at > 36 * 3_600_000) out.push(t('systeme.infra.alerte.sauvegarde_ancienne', { label: b.label, days: Math.round((home.now - b.at) / 86_400_000) }));
     }
     if (server && server.online === false) out.push(t('systeme.infra.alerte.serveur'));
-    // A NAS that says something is wrong, part by part; one that does not answer says so once.
+    // A NAS that says something is wrong, part by part. One that does not answer is not an alert: it may sleep on purpose (its card says « off »).
     for (const g of nases) {
-      if (value(g.nas.id, 'up') === false) {
-        out.push(t('systeme.infra.alerte.nas_eteint', { name: nameOf(g.nas.id) }));
-        continue;
-      }
+      if (value(g.nas.id, 'up') === false) continue;
       for (const d of parts(g)) {
         if (value(d.id, 'problem') === true) out.push(t('systeme.infra.alerte.nas', { name: nameOf(d.id), detail: value(d.id, 'detail') || '—' }));
       }

@@ -551,6 +551,5 @@
   "systeme.infra.nas_allume": "up for {since}",
   "systeme.infra.nas_eteint": "Off or unreachable",
   "systeme.infra.nas_onduleur": "UPS · battery {pct} %",
-  "systeme.infra.alerte.nas": "{name}: {detail}",
-  "systeme.infra.alerte.nas_eteint": "{name} is not answering"
+  "systeme.infra.alerte.nas": "{name}: {detail}"
 }

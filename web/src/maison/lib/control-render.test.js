@@ -27,6 +27,7 @@ before(async () => {
   for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
+  components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
@@ -989,4 +990,27 @@ test('a room /api/home added (outside, unlisted) takes no place in the order', (
   home.home.config = { rooms: [{ name: 'Bureau' }, { name: 'Extérieur', outside: true, added: true }] };
   assert.deepEqual(home.roomList().map((r) => r.name), ['Bureau', 'Salon', 'Extérieur']);
   home.home.config = {};
+});
+
+function nasDevice(native, name, values) {
+  return { id: `nas:${native}`, instance: 'nas', native_name: name, model: null, manufacturer: 'Synology', label: {}, online: true, points: [], members: [], state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }])) };
+}
+
+test('the NAS card shows a NAS that answers, its volume, drive, UPS and backup, with no order button', () => {
+  const nas = nasDevice('nas', 'DiskStation', { up: true, cpu: 12, memory: 40, temperature: 41, uptime: 50 });
+  const group = { instance: 'nas', nas, volumes: [nasDevice('volume_1', 'Volume 1', { used: 63, free: 900, problem: false })], disks: [nasDevice('disk_sda', 'Drive 1', { temperature: 37, problem: false })], ups: nasDevice('ups', 'UPS', { battery: 100, problem: false }), backups: [nasDevice('backup_8', 'Night backup', { last_run: '2026/11/14 03:46:02', problem: false })] };
+  hub.devices = Object.fromEntries([nas, ...group.volumes, ...group.disks, group.ups, ...group.backups].map((d) => [d.id, d]));
+  const html = render(components.NasCard, { props: { group } }).body;
+  for (const word of ['DiskStation', 'Volume 1', 'Drive 1', 'Night backup', '14/11 03:46']) assert.ok(html.includes(word), word);
+  assert.equal(buttons(html).length, 0);
+});
+
+test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', () => {
+  const nas = nasDevice('nas', 'DiskStation', { up: false });
+  const group = { instance: 'nas', nas, volumes: [nasDevice('volume_1', 'Volume 1', {})], disks: [], ups: null, backups: [] };
+  hub.devices = Object.fromEntries([nas, ...group.volumes].map((d) => [d.id, d]));
+  const html = render(components.NasCard, { props: { group } }).body;
+  assert.ok(html.includes('DiskStation'));
+  assert.ok(!html.includes('Volume 1'));
+  assert.ok(!html.includes('class="gauges"'));
 });

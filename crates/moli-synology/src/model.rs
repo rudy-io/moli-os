@@ -34,8 +34,16 @@ fn num(value: &Json) -> Option<f64> {
         .filter(|n| n.is_finite())
 }
 
+/// The longest name or word taken from the NAS.
+const MAX_TEXT: usize = 80;
+
+/// A word from the NAS (a name, an identifier, a status): a text too long or
+/// holding a control character is not taken, since it ends up in identifiers,
+/// names and messages.
 fn text(value: &Json) -> Option<&str> {
-    value.as_str().map(str::trim).filter(|s| !s.is_empty())
+    value.as_str().map(str::trim).filter(|s| {
+        !s.is_empty() && s.chars().count() <= MAX_TEXT && !s.chars().any(char::is_control)
+    })
 }
 
 fn round1(n: f64) -> f64 {
@@ -44,6 +52,11 @@ fn round1(n: f64) -> f64 {
 
 fn float(n: Option<f64>) -> Value {
     n.map_or(Value::Null, |n| Value::Float(round1(n)))
+}
+
+/// A percentage, kept within 0 to 100 whatever the NAS says.
+fn percentage(n: Option<f64>) -> Value {
+    float(n.map(|n| n.clamp(0.0, 100.0)))
 }
 
 fn word(value: Option<&str>) -> Value {
@@ -200,7 +213,7 @@ pub(crate) fn nas_states(info: &Json, usage: &Json) -> States {
         .iter()
         .filter_map(|key| num(&cpu[*key]))
         .reduce(|a, b| a + b)
-        .map(|n| n.min(100.0));
+        .map(|n| n.clamp(0.0, 100.0));
     let mut reasons = Vec::new();
     if info["temperature_warn"].as_bool() == Some(true) {
         reasons.push(moli_i18n::tr!("pilotes.synology.detail_temperature"));
@@ -209,7 +222,7 @@ pub(crate) fn nas_states(info: &Json, usage: &Json) -> States {
         ("up", Value::Bool(true)),
         ("temperature", float(num(&info["temperature"]))),
         ("cpu", float(load)),
-        ("memory", float(num(&usage["memory"]["real_usage"]))),
+        ("memory", percentage(num(&usage["memory"]["real_usage"]))),
         ("uptime", float(num(&info["uptime"]).map(|s| s / 3600.0))),
     ];
     values.extend(alert(&reasons));
@@ -270,8 +283,14 @@ pub(crate) fn volumes(instance: &InstanceId, storage: &Json) -> Vec<Entity> {
             ];
             points.extend(alert_points());
             let mut values: States = vec![
-                ("used", float(total.zip(used).map(|(t, u)| u / t * 100.0))),
-                ("free", float(total.zip(used).map(|(t, u)| (t - u) / GIB))),
+                (
+                    "used",
+                    percentage(total.zip(used).map(|(t, u)| u / t * 100.0)),
+                ),
+                (
+                    "free",
+                    float(total.zip(used).map(|(t, u)| ((t - u) / GIB).max(0.0))),
+                ),
                 ("status", word(status)),
             ];
             values.extend(alert(&reasons));
@@ -378,7 +397,7 @@ pub(crate) fn ups(instance: &InstanceId, ups: &Json) -> Option<Entity> {
     ];
     points.extend(alert_points());
     let mut values: States = vec![
-        ("battery", float(num(&ups["charge"]))),
+        ("battery", percentage(num(&ups["charge"]))),
         ("status", word(status)),
     ];
     values.extend(alert(&reasons));
@@ -632,5 +651,29 @@ mod tests {
         assert!(volumes(&instance(), &Json::Null).is_empty());
         assert!(disks(&instance(), &json!({"disks":[{"temp":30}]})).is_empty());
         assert!(backups(&instance(), &json!({"task_list":[{"name":"x"}]})).is_empty());
+    }
+
+    #[test]
+    fn percentages_stay_within_range_and_odd_names_are_left_out() {
+        let storage = json!({
+            "volumes": [
+                {"id": "volume_1", "status": "normal", "size": {"total": "100", "used": "250"}},
+                {"id": "volume_2\u{7}", "size": {"total": "100", "used": "10"}}
+            ],
+            "disks": [
+                {"id": "x".repeat(81), "name": "Disk"},
+                {"id": "sda", "name": "Disk\n1"}
+            ]
+        });
+        let instance = instance();
+        let volumes = volumes(&instance, &storage);
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].states[0], ("used", Value::Float(100.0)));
+        assert_eq!(volumes[0].states[1], ("free", Value::Float(0.0)));
+        let disks = disks(&instance, &storage);
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks[0].device.id.to_string(), "nas:disk_sda");
+        let down = nas_states(&json!({}), &json!({"memory": {"real_usage": 140}}));
+        assert!(down.contains(&("memory", Value::Float(100.0))));
     }
 }
