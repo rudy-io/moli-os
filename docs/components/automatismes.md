@@ -61,6 +61,25 @@ Une automatisation = un **graphe** de nœuds reliés (comme n8n), stocké dans
 Messages : `{{<appareil>/<clé>}}` = valeur actuelle (avec unité), `{{texte}}` = dernier texte
 de Moli, `{{heure}}`.
 
+**Valeur lue dans un autre point.** Là où une automatisation attend une valeur (`value` d'un
+`set`, d'une règle `state`), elle peut la lire au moment de l'étape au lieu d'une constante :
+`{"from": "<appareil>/<clé>", "add": -0.5}` (`add` facultatif, nombres seulement). Usage
+type : une aide `number` de la maison (« Confort salon ») qui pilote une consigne ; la changer
+dans le tableau de bord change le comportement sans toucher au graphe (donc sans nouvelle
+validation). Jamais de valeur inventée : un point sans valeur, ou d'un appareil qui ne répond
+plus, fait échouer le `set` (raison au journal) et rend la règle fausse. Le vérificateur signale
+un point introuvable, une forme illisible, un genre de valeur qui ne va pas (un nombre vers un
+interrupteur…) ; le résumé dit le nom du point, le test à blanc la valeur lue (« → 21,5
+(Confort salon) »).
+
+Garde : un automatisme validé passe la garde, donc une valeur lue ailleurs laisserait celui
+qui écrit ce point (un agent, quelqu'un sans le code) choisir ce qu'il écrit. D'où : **jamais**
+vers une serrure, un portail ou l'arrêt d'une machine (valeur fixe obligatoire) ; vers une
+pièce protégée, seulement depuis un point protégé lui aussi (une aide rangée dans une pièce
+protégée) ; jamais depuis une valeur privée (position d'un téléphone…). Lancer à la main depuis
+le tableau de bord sans code juge un tel `set` comme une bascule (ce qui ouvre est retenu). Les seuils des déclencheurs `when_threshold`
+restent des constantes : pour comparer à un réglage, un `every` suivi d'un `if`.
+
 Modes (comme HA) : `restart` (défaut : minuteries « mouvement → lumière 5 min »), `single`,
 `queued`.
 

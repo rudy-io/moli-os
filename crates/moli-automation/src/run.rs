@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use moli_core::{Notice, Origin, PointId, Value};
 use moli_i18n::tr;
-use moli_runtime::CommandError;
+use moli_runtime::{CommandError, Hub};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use tokio_util::sync::CancellationToken;
 
-use crate::model::{Automation, Channel, DayNight, Op, Rule, Step, minutes_of};
+use crate::model::{Automation, Channel, DayNight, FromPoint, Op, Rule, Step, minutes_of};
 use crate::{Automations, clock, decimal, fold, lock, store, yes_no};
 
 /// Steps per run: a graph is small; more means something is wrong.
@@ -263,7 +263,20 @@ async fn step(
                 (StepStatus::No, None, Some("no"))
             }
         }
-        Step::Set { point, value } => act(autos, a, point, Value::from_json(value), dry).await,
+        Step::Set { point, value } => match resolve(hub, value) {
+            Ok(v) => {
+                let (status, said, port) = act(autos, a, point, v, dry).await;
+                // Say where the value came from: « → 22 (Comfort) ».
+                let said = match (said, FromPoint::of(value)) {
+                    (Some(s), Some(from)) if port.is_some() => {
+                        Some(format!("{s} ({})", source_label(hub, from.point)))
+                    }
+                    (s, _) => s,
+                };
+                (status, said, port)
+            }
+            Err(why) => (StepStatus::Failed, Some(why), None),
+        },
         Step::Toggle { point } => {
             let pid = PointId::from(point.as_str());
             let next = match hub.current_state(&pid).map(|s| s.value) {
@@ -422,6 +435,56 @@ async fn act(
     }
 }
 
+/// The value a step means: its constant, or what the point it names holds now
+/// (plus `add`). Never a guessed value: a source without a value is an error.
+///
+/// # Errors
+///
+/// The reference is malformed, its source point unknown, empty or on a device
+/// that stopped answering (its last value would be a guess), or `add` meets
+/// something that is not a number.
+pub fn resolve(hub: &Hub, value: &Json) -> Result<Value, String> {
+    if FromPoint::malformed(value) {
+        return Err(tr!("moteur.verif.source_illisible"));
+    }
+    let Some(from) = FromPoint::of(value) else {
+        return Ok(Value::from_json(value));
+    };
+    let pid = PointId::from(from.point);
+    if let Some((device, _)) = pid.split()
+        && hub.online(&device) == Some(false)
+    {
+        return Err(tr!("moteur.etape.source_hors_ligne", point = from.point));
+    }
+    let current = hub
+        .state(&pid)
+        .map(|s| s.value)
+        .filter(|v| !matches!(v, Value::Null))
+        .ok_or_else(|| tr!("moteur.etape.source_vide", point = from.point))?;
+    match from.add {
+        None => Ok(current),
+        Some(add) => current
+            .as_f64()
+            .map(|n| Value::Float(n + add))
+            .ok_or_else(|| tr!("moteur.etape.source_pas_nombre", point = from.point)),
+    }
+}
+
+/// The label of a point, for the run log (its key if nothing better).
+fn source_label(hub: &Hub, point: &str) -> String {
+    let pid = PointId::from(point);
+    pid.split()
+        .and_then(|(device, key)| {
+            let (found, _) = hub.describe(&device)?;
+            found
+                .points
+                .iter()
+                .find(|p| *p.key == *key)
+                .map(|p| p.label.to_string())
+        })
+        .unwrap_or_else(|| point.to_owned())
+}
+
 fn show(v: &Value) -> String {
     match v {
         Value::Bool(b) => yes_no(*b),
@@ -469,11 +532,16 @@ pub(crate) fn holds(autos: &Automations, rule: &Rule) -> bool {
             if matches!(current, Value::Null) {
                 return false;
             }
+            // A value read from another point: no value there, no answer.
+            let Ok(wanted) = resolve(&autos.0.hub, value) else {
+                return false;
+            };
+            let wanted = wanted.to_json();
             match op {
-                Op::Eq => same(&current, value),
-                Op::Ne => !same(&current, value),
+                Op::Eq => same(&current, &wanted),
+                Op::Ne => !same(&current, &wanted),
                 _ => {
-                    let (Some(c), Some(v)) = (current.as_f64(), value.as_f64()) else {
+                    let (Some(c), Some(v)) = (current.as_f64(), wanted.as_f64()) else {
                         return false;
                     };
                     match op {

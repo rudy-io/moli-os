@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use moli_automation::{
     Actor, Author, Automation, AutomationError, Automations, Config, Graph, Mode, RunStatus, Step,
-    Writer,
+    StepStatus, Writer,
 };
 use moli_core::{Access, Device, InstanceId, Kind, Origin, PointId, PointSpec, Semantic, Value};
 use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub, HubOptions, spawn_driver};
@@ -64,6 +64,90 @@ fn onoff(key: &str) -> PointSpec {
         unit: None,
         semantic: Semantic::OnOff,
     }
+}
+
+/// A heater (target, measured temperature) and the household's settings: a
+/// comfort temperature, a word, a setting without value.
+fn heating(ctx: &mut DriverCtx) {
+    let number = |key: &str, write: bool| PointSpec {
+        key: key.into(),
+        label: key.into(),
+        kind: Kind::Numeric {
+            min: Some(5.0),
+            max: Some(30.0),
+            step: Some(0.5),
+        },
+        access: Access { read: true, write },
+        unit: None,
+        semantic: Semantic::Other,
+    };
+    let heater = ctx.device_id("heater");
+    ctx.upsert_device(Device {
+        id: heater.clone(),
+        instance: ctx.instance().clone(),
+        native_name: "heater".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![number("target", true), number("temperature", false)],
+    });
+    ctx.set_state(&heater, "target", Value::Float(18.0));
+    ctx.set_state(&heater, "temperature", Value::Float(19.0));
+    let settings = ctx.device_id("settings");
+    ctx.upsert_device(Device {
+        id: settings.clone(),
+        instance: ctx.instance().clone(),
+        native_name: "settings".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![
+            PointSpec {
+                label: "Comfort".into(),
+                ..number("comfort", true)
+            },
+            PointSpec {
+                kind: Kind::Text,
+                ..number("word", true)
+            },
+            number("empty", true),
+        ],
+    });
+    ctx.set_state(&settings, "comfort", Value::Float(21.5));
+    ctx.set_state(&settings, "word", Value::Text("warm".into()));
+    // A thermometer that stopped answering (its last value stays), and a lock.
+    let away = ctx.device_id("away");
+    ctx.upsert_device(Device {
+        id: away.clone(),
+        instance: ctx.instance().clone(),
+        native_name: "away".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![number("value", false)],
+    });
+    ctx.set_state(&away, "value", Value::Float(20.0));
+    ctx.set_availability(&away, false);
+    ctx.upsert_device(Device {
+        id: ctx.device_id("lock"),
+        instance: ctx.instance().clone(),
+        native_name: "lock".into(),
+        manufacturer: None,
+        model: None,
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points: vec![PointSpec {
+            kind: Kind::Text,
+            ..number("code", true)
+        }],
+    });
 }
 
 impl Driver for Fake {
@@ -132,6 +216,7 @@ impl Driver for Fake {
                     semantic: Semantic::Other,
                 }],
             });
+            heating(ctx);
             ctx.ready();
             while let Some(cmd) = ctx.next_command().await {
                 if &*cmd.key == "press" {
@@ -1038,5 +1123,224 @@ async fn said_aloud_through_every_speaker() {
     assert_eq!(
         hub.state(&said).map(|s| s.value),
         Some(Value::Text("Quelqu'un est à la porte".into()))
+    );
+}
+
+async fn target_is(hub: &Hub, wanted: f64) -> bool {
+    for _ in 0..100 {
+        if hub
+            .state(&PointId::from("fake:heater/target"))
+            .and_then(|s| s.value.as_f64())
+            .is_some_and(|t| (t - wanted).abs() < 1e-9)
+        {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    false
+}
+
+/// Below the comfort setting by a degree, heat to the comfort setting.
+fn heat_to_comfort() -> serde_json::Value {
+    serde_json::json!({
+        "nodes": [
+            { "id": "t", "type": "manual" },
+            { "id": "c", "type": "if", "rules": [{
+                "kind": "state", "point": "fake:heater/temperature", "op": "lt",
+                "value": { "from": "fake:settings/comfort", "add": -1 }
+            }] },
+            { "id": "s", "type": "set", "point": "fake:heater/target",
+              "value": { "from": "fake:settings/comfort" } }
+        ],
+        "edges": [{ "from": "t", "to": "c" }, { "from": "c", "port": "yes", "to": "s" }]
+    })
+}
+
+#[tokio::test]
+async fn a_value_read_from_a_setting_follows_it() {
+    let (hub, autos, _c) = setup().await;
+    let a = approved(&autos, heat_to_comfort()).await;
+    let check = autos.check(&a.graph);
+    assert!(check.ok(), "{:?}", check.problems);
+    assert!(
+        check.summary.contains("« Comfort » de settings − 1"),
+        "{}",
+        check.summary
+    );
+
+    let dry = autos.run_now(&a.id, true, None, HUMAN).await.unwrap();
+    let said = dry.steps.iter().find(|s| s.node == "s").unwrap();
+    assert_eq!(said.detail.as_deref(), Some("→ 21,5 (Comfort)"));
+
+    autos
+        .run_now(&a.id, false, Some(&a.fingerprint()), HUMAN)
+        .await
+        .unwrap();
+    assert!(
+        target_is(&hub, 21.5).await,
+        "the setting, read when it runs"
+    );
+
+    // The household turns the setting up: same automation, new value.
+    hub.command(
+        &PointId::from("fake:settings/comfort"),
+        Value::Float(22.0),
+        Origin::Api,
+        None,
+    )
+    .await
+    .unwrap();
+    autos
+        .run_now(&a.id, false, Some(&a.fingerprint()), HUMAN)
+        .await
+        .unwrap();
+    assert!(target_is(&hub, 22.0).await);
+
+    // Warm enough (19 is not below 18 − 1): the rule reads the setting too.
+    hub.command(
+        &PointId::from("fake:settings/comfort"),
+        Value::Float(18.0),
+        Origin::Api,
+        None,
+    )
+    .await
+    .unwrap();
+    let run = autos.run_now(&a.id, true, None, HUMAN).await.unwrap();
+    assert!(run.steps.iter().all(|s| s.node != "s"), "{:?}", run.steps);
+}
+
+#[tokio::test]
+async fn a_setting_without_value_fails_the_step() {
+    let (hub, autos, _c) = setup().await;
+    let a = approved(
+        &autos,
+        serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": "fake:heater/target",
+                  "value": { "from": "fake:settings/empty" } }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }),
+    )
+    .await;
+    let run = autos
+        .run_now(&a.id, false, Some(&a.fingerprint()), HUMAN)
+        .await
+        .unwrap();
+    let mut status = run.status;
+    for _ in 0..100 {
+        if status != RunStatus::Running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        status = autos.runs(Some(&a.id), 1)[0].status;
+    }
+    assert_eq!(status, RunStatus::Failed, "never a guessed value");
+    assert_eq!(
+        hub.state(&PointId::from("fake:heater/target"))
+            .map(|s| s.value),
+        Some(Value::Float(18.0))
+    );
+}
+
+#[tokio::test]
+async fn the_checker_reads_references_too() {
+    let (_hub, autos, _c) = setup().await;
+    let problems = |value: serde_json::Value| {
+        let graph = serde_json::from_value::<Graph>(serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": "fake:heater/target", "value": value }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }))
+        .unwrap();
+        autos.check(&graph).problems.len()
+    };
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:settings/comfort" })),
+        0
+    );
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:settings/comfort", "add": 0.5 })),
+        0
+    );
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:nowhere/comfort" })),
+        1,
+        "unknown device"
+    );
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:settings/word" })),
+        1,
+        "text into a number"
+    );
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:settings/comfort", "plus": 1 })),
+        1,
+        "malformed"
+    );
+    assert_eq!(
+        problems(serde_json::json!({ "from": "fake:settings/comfort", "add": "1" })),
+        1,
+        "malformed add"
+    );
+    let into = |point: &str, value: serde_json::Value| {
+        let graph = serde_json::from_value::<Graph>(serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": point, "value": value }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }))
+        .unwrap();
+        autos.check(&graph).problems.len()
+    };
+    assert_eq!(
+        into(
+            "fake:lamp/on",
+            serde_json::json!({ "from": "fake:settings/comfort" })
+        ),
+        1,
+        "a number into a switch"
+    );
+    assert_eq!(
+        into(
+            "fake:lock/code",
+            serde_json::json!({ "from": "fake:settings/word" })
+        ),
+        1,
+        "whoever writes the setting would choose what the lock gets"
+    );
+    assert_eq!(
+        into("fake:lock/code", serde_json::json!("1234")),
+        0,
+        "a fixed value stays allowed"
+    );
+}
+
+#[tokio::test]
+async fn a_source_that_stopped_answering_is_not_trusted() {
+    let (hub, autos, _c) = setup().await;
+    let a = approved(
+        &autos,
+        serde_json::json!({
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": "fake:heater/target",
+                  "value": { "from": "fake:away/value" } }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }),
+    )
+    .await;
+    let run = autos.run_now(&a.id, true, None, HUMAN).await.unwrap();
+    let step = run.steps.iter().find(|s| s.node == "s").unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{:?}", step.detail);
+    assert_eq!(
+        hub.state(&PointId::from("fake:heater/target"))
+            .map(|s| s.value),
+        Some(Value::Float(18.0))
     );
 }

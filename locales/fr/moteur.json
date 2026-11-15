@@ -36,6 +36,12 @@
   "moteur.verif.ecrit_vide": "Dis à Moli ce qu'il doit écrire.",
   "moteur.verif.moli_absent": "Moli n'est pas branché : ce nœud n'écrira rien.",
   "moteur.verif.position_inconnue": "Position de la maison inconnue ([automations] latitude/longitude) : le soleil se lira sur la météo.",
+  "moteur.verif.source_illisible": "Valeur lue ailleurs illisible : il faut « from » (appareil/valeur) et, en option, « add » (un nombre).",
+  "moteur.verif.source_pas_nombre": "« {nom} » n'est pas un nombre : il ne peut pas servir ici.",
+  "moteur.verif.source_incompatible": "« {nom} » ne donne pas le genre de valeur attendu ici.",
+  "moteur.verif.source_garde": "Une serrure, un portail ou l'arrêt d'une machine prend une valeur fixe, jamais une valeur lue ailleurs.",
+  "moteur.verif.source_protegee": "Dans une pièce protégée ({piece}), une valeur lue ailleurs doit venir d'un point protégé lui aussi.",
+  "moteur.verif.source_privee": "Cette valeur reste privée : elle ne peut pas être recopiée ailleurs.",
 
   "moteur.nombre.separateur": ",",
   "moteur.valeur.oui": "oui",
@@ -43,6 +49,10 @@
   "moteur.valeur.vrai": "oui",
   "moteur.valeur.faux": "non",
   "moteur.valeur.texte": "« {texte} »",
+  "moteur.valeur.depuis": "« {libelle} » de {appareil}",
+  "moteur.valeur.depuis_ecart": "« {libelle} » de {appareil} {ecart}",
+  "moteur.valeur.reglage": "« {libelle} »",
+  "moteur.valeur.reglage_ecart": "« {libelle} » {ecart}",
 
   "moteur.duree.h": "{heures} h",
   "moteur.duree.h_min": "{heures} h {minutes}",
@@ -163,6 +173,9 @@
   "moteur.etape.moli_lent": "Moli n'a pas répondu à temps",
   "moteur.etape.declencheur_milieu": "déclencheur au milieu du graphe",
   "moteur.etape.retenu": "retenu par la garde : {raison}",
+  "moteur.etape.source_vide": "pas de valeur à lire dans {point}",
+  "moteur.etape.source_pas_nombre": "{point} ne donne pas un nombre",
+  "moteur.etape.source_hors_ligne": "{point} ne répond plus : sa dernière valeur n'est pas fiable",
 
   "moteur.canal.annonce": "annonce",
   "moteur.canal.telephone": "téléphone",

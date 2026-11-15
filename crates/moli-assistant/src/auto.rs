@@ -39,6 +39,23 @@ fn any_value() -> Json {
     json!({ "type": ["string", "number", "boolean", "null"] })
 }
 
+/// What a `set` writes or a `state` rule compares to: a constant, or a value
+/// read from another point when it runs (`add: null` is stripped).
+fn wanted_value() -> Json {
+    json!({ "anyOf": [
+        any_value(),
+        {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "add"],
+            "properties": {
+                "from": { "type": "string" },
+                "add": nullable("number")
+            }
+        }
+    ] })
+}
+
 fn rule_schema() -> Json {
     json!({
         "type": "object",
@@ -48,7 +65,7 @@ fn rule_schema() -> Json {
             "kind": { "type": "string", "enum": ["state", "time", "sun", "stale"] },
             "point": nullable("string"),
             "op": { "type": ["string", "null"], "enum": ["eq", "ne", "gt", "ge", "lt", "le", null] },
-            "value": any_value(),
+            "value": wanted_value(),
             "after": nullable("string"),
             "before": nullable("string"),
             "days": { "type": ["array", "null"], "items": { "type": "integer" } },
@@ -103,7 +120,7 @@ fn schema() -> Json {
                         "if", "set", "toggle", "wait", "wait_for", "notify", "write"
                     ] },
                     "point": nullable("string"),
-                    "value": any_value(),
+                    "value": wanted_value(),
                     "to": any_value(),
                     "from": any_value(),
                     "for_s": nullable("integer"),

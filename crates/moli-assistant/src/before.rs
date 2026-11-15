@@ -16,8 +16,9 @@ use crate::import::HaAutomation;
 /// cards; the cheerful voice speaks faster; a question about a state is
 /// never an order; an app opens on the TV by its name; 11 Oct.: music
 /// plays on a speaker of the room, by a search; 22 Oct.: the automation
-/// builder knows when a sensor stops reporting).
-const REWORDED: [(&str, &str); 8] = [
+/// builder knows when a sensor stops reporting; 2 Nov.: a value read from
+/// another point, a household setting).
+const REWORDED: [(&str, &str); 9] = [
     (
         "sun (is day|night)",
         "sun (is day|night) ; stale (point, for_s entier de 1 à 86400 secondes, jamais null)\nLa règle stale est vraie si aucun relevé n'a jamais été reçu ou si le dernier date d'au moins for_s secondes. Une valeur identique fraîchement reçue remet le délai à zéro. Dans les autres règles, for_s = null. Pour surveiller ce silence périodiquement : every → if stale.",
@@ -43,6 +44,10 @@ const REWORDED: [(&str, &str); 8] = [
         "Cette réponse sera dite à voix haute, dans une conversation : une seule phrase courte, une quinzaine de mots, qui répond à la question et à rien d'autre, sans te répéter ni poser de question en retour. Pas de carte à l'écran : n'appelle pas `show`. Sans liste,",
     ),
     ("débit vif,", "débit rapide, sans traîner,"),
+    (
+        "ou le texte exact d'une liste)",
+        "ou le texte exact d'une liste ; ou, pour suivre un réglage de la maison, un objet avec from = « appareil/clé » du réglage et add = un écart ou null : la valeur est lue au moment d'agir, aussi pour la value d'une règle state)",
+    ),
     (
         "n'annonce jamais une protection, un refus ou un succès sans le résultat de `set`.",
         "n'annonce jamais une protection ni un refus sans le résultat de `set`. Ta courte confirmation (« C'est allumé. ») va dans `say` : elle n'est dite que si la maison a tout fait ; sinon tu reçois le résultat et tu réponds.",
