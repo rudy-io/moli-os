@@ -118,3 +118,4 @@ GET    /api/weather/forecast               foyer   oui
 GET    /api/weather/map                    foyer   oui
 GET    /api/weather/land/{z}/{x}/{y}       foyer   oui
 POST   /mcp                                foyer   non
+POST   /mcp/readonly                       foyer   non  # reads only: the 3 writing tools are switched off

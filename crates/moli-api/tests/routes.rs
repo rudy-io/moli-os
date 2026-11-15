@@ -106,6 +106,11 @@ async fn every_route_is_listed_and_holds_its_level() {
     );
     code.push(("POST".into(), "/mcp".into()));
     assert!(
+        lib.contains("\"/mcp/readonly\""),
+        "the read-only MCP service moved: update this test"
+    );
+    code.push(("POST".into(), "/mcp/readonly".into()));
+    assert!(
         code.len() > 80,
         "only {} routes found: is the parser lost?",
         code.len()
@@ -129,7 +134,10 @@ async fn every_route_is_listed_and_holds_its_level() {
             // The sign-in is how a person comes in from outside (I3).
             assert!(level != "public" || remote == "oui", "routes.txt: {l:?}");
             // Agents stay at home unless the house decides otherwise (I4).
-            assert!(path != "/mcp" || remote == "non", "routes.txt: {l:?}");
+            assert!(
+                !path.starts_with("/mcp") || remote == "non",
+                "routes.txt: {l:?}"
+            );
             (method.to_owned(), path.to_owned(), level.to_owned())
         })
         .collect();

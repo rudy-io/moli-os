@@ -46,6 +46,9 @@ pub struct Config {
     pub drivers: Vec<DriverConfig>,
     #[serde(default)]
     pub guard: GuardConfig,
+    /// What agents reach over MCP. Edited by humans only, like `[guard]`.
+    #[serde(default)]
+    pub mcp: McpConfig,
     /// Energy meters and tariff (absent: no energy tracking).
     #[serde(default)]
     pub energy: Option<moli_energy::Config>,
@@ -74,6 +77,35 @@ pub struct Config {
     /// The house's time zone, resolved once and given to every section.
     #[serde(skip)]
     pub zone: crate::timezone::Zone,
+}
+
+/// What agents reach over MCP. Edited by humans only: no surface can
+/// change it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpConfig {
+    /// Tools switched off, on `/mcp` as on `/mcp/readonly`: neither listed
+    /// nor callable (e.g. `["camera_snapshot"]`: no camera image leaves
+    /// through an agent).
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
+}
+
+impl McpConfig {
+    /// The tools to switch off, each one checked: a misspelt name would
+    /// switch nothing off and look like a guard.
+    pub fn disabled_tools(&self) -> anyhow::Result<Vec<String>> {
+        let known = moli_api::mcp_tool_names();
+        for name in &self.disabled_tools {
+            if !known.contains(name) {
+                bail!(
+                    "[mcp] disabled_tools: no tool {name:?} (tools: {})",
+                    known.join(", ")
+                );
+            }
+        }
+        Ok(self.disabled_tools.clone())
+    }
 }
 
 /// Where and when agents need a human's approval. Edited by humans only:
@@ -363,6 +395,7 @@ impl Config {
     }
 
     fn check(&self) -> anyhow::Result<()> {
+        self.mcp.disabled_tools()?;
         if !moli_i18n::languages().contains(&self.server.language.as_str()) {
             bail!(
                 "[server] language = {:?}: Moli speaks {}",
@@ -425,6 +458,19 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_tools_switched_off_must_exist() {
+        let config: Config =
+            toml::from_str("[mcp]\ndisabled_tools = [\"camera_snapshot\"]\n").unwrap();
+        assert_eq!(config.mcp.disabled_tools().unwrap(), ["camera_snapshot"]);
+        // Misspelt: refused, rather than a guard that guards nothing.
+        let config: Config =
+            toml::from_str("[mcp]\ndisabled_tools = [\"camera_snaphot\"]\n").unwrap();
+        let error = config.check().unwrap_err().to_string();
+        assert!(error.contains("camera_snaphot"), "{error}");
+        assert!(toml::from_str::<Config>("[mcp]\ndisabled = []\n").is_err());
+    }
 
     #[test]
     fn example_config_is_valid() {

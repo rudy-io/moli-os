@@ -51,6 +51,12 @@ timezone = "Europe/Paris"
 # to = "07:30"
 # rooms = []            # empty = the whole home
 
+# Agents over MCP. /mcp offers every tool; /mcp/readonly the reads only (no
+# send_command, set_label, save_automation_draft). A tool switched off here is
+# gone from both: not listed, not callable. Humans only, like [guard].
+# [mcp]
+# disabled_tools = ["camera_snapshot"]   # no camera image leaves through an agent
+
 # Energy: cumulative counters (Wh or kWh) become kWh and cost per hour,
 # kept forever in data/energy.db. Roles: grid (billed: the reference),
 # total (whole home, fine), circuit (part of the total).

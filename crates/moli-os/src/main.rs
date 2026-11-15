@@ -484,6 +484,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         automations: Some(automations),
         access: config.server.access.clone(),
         demo: config.server.demo,
+        mcp_disabled_tools: config.mcp.disabled_tools()?,
         household: Some(household),
         phones: gates.phones,
         machines: gates.machines,
