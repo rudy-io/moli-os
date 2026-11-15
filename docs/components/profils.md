@@ -451,6 +451,7 @@ dossier dans les deux sens.
 |---|---|---|---|---|---|
 | `daikin-brp069` | climatiseur Daikin, adaptateur Wi-Fi BRP069 | HTTP local, sans auth, `kv` | `basic` 1 h, `sensor` 60 s, `control` 30 s | aucun | oui, en lecture (écritures d'après le protocole documenté par pydaikin) |
 | `meross-em06` | compteur d'énergie Meross EM06/EM06P, 6 circuits | HTTP local signé (`meross`) | `all` 1 h, `e` 15 s | `key` | oui (EM06P) |
+| `shelly-em-gen1` | compteur Shelly EM 1re génération (SHEM), 2 pinces | HTTP local, sans auth | `status` 10 s | aucun | oui, en lecture (firmware v1.14.0) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
@@ -492,6 +493,19 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
 - Clé de l'appareil (celle du compte Meross qui l'a installé) :
   `moli-os secrets set <instance> key`. Les points `power_N` et `energy_month_N` alimentent
   la section `[energy]`.
+
+#### `shelly-em-gen1`
+
+- L'ancienne API HTTP des Shelly Gen1 (`GET /status`) ; les Gen2 et suivants ont le pilote
+  natif `shelly` (websocket RPC). Identité et MAC : `status.mac`.
+- Points par pince `N` (1, 2 = `emeters.0`, `emeters.1`) : `power_N` (W, signée),
+  `voltage_N` (V), `power_factor_N`, `energy_N` et `energy_returned_N` (kWh, depuis les
+  compteurs `total` / `total_returned` en Wh) ; boîtier : `signal` (dBm), `uptime` (s).
+- Lecture seule : ni le relais ni le redémarrage. Un relevé toutes les 10 s : l'appareil
+  (ESP8266) est modeste, et souvent déjà interrogé par d'autres (un pont Victron…).
+- Les compteurs ne tournent que si le Shelly a l'heure (SNTP joignable) et peuvent repartir de
+  zéro après un redémarrage : dans `[energy]`, garder `reset = "auto"` (par défaut).
+- Sans mot de passe sur l'appareil (l'authentification HTTP de base n'est pas prise en charge).
 
 #### `moonraker`
 

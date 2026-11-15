@@ -1,0 +1,26 @@
+[integration]
+id = "shelly-em-gen1"
+name = "Compteur Shelly EM (1re génération)"
+brands = ["Shelly"]
+models = ["Shelly EM (SHEM)"]
+transport = "http"
+driver = "profile"
+
+[discovery]
+# No discovery: the instance gives the meter's address.
+mdns = []
+ssdp = []
+ports = [80]
+
+[needs]
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = "documentation publique de l'API HTTP Shelly Gen1 (/shelly, /status) : aucun code copié"
+author = "agent"
+
+[[fixture]]
+file = "fixtures/status.json"
+request = "status"
