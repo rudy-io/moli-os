@@ -47,6 +47,7 @@ moli-recycleapp = { path = "crates/moli-recycleapp" }
 moli-engie = { path = "crates/moli-engie" }
 moli-tapo = { path = "crates/moli-tapo" }
 moli-lifx = { path = "crates/moli-lifx" }
+moli-govee = { path = "crates/moli-govee" }
 moli-shelly = { path = "crates/moli-shelly" }
 moli-izypower = { path = "crates/moli-izypower" }
 moli-solarman = { path = "crates/moli-solarman" }

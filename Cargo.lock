@@ -1906,6 +1906,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-govee"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "moli-helpers"
 version = "0.1.0"
 dependencies = [
@@ -2220,6 +2235,7 @@ dependencies = [
  "moli-engie",
  "moli-esphome",
  "moli-frigate",
+ "moli-govee",
  "moli-helpers",
  "moli-history",
  "moli-homeassistant",

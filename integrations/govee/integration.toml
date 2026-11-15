@@ -1,0 +1,36 @@
+[integration]
+id = "govee"
+name = "Govee (lumières Wi-Fi, API locale)"
+brands = ["Govee"]
+# None seen yet: the driver has never run against a real light. The LAN API
+# is the same for every model that has it (see README.md).
+models = []
+# UDP datagrams: a multicast search, then orders and readings to each light.
+transport = "native"
+driver = "govee"
+crate = "moli-govee"
+
+# Messages built from Govee's LAN API manual, NOT heard from a real light
+# (identifier and address made up). Read by moli-govee's tests.
+[[fixture]]
+file = "fixtures/scan.json"
+
+[[fixture]]
+file = "fixtures/dev-status.json"
+
+[discovery]
+# The driver sends the API's own `scan` to 239.255.255.250:4001; lights
+# answer to port 4002 and take orders on port 4003. No mDNS, no SSDP.
+mdns = []
+ssdp = []
+ports = [4001, 4002, 4003]
+
+[needs]
+secrets = []
+vars = []
+# All optional: hosts (fixed addresses), discovery, poll_secs.
+options = []
+
+[origin]
+reused = "aucun code repris, aucune table de modèles. Protocole : manuel public de l'API locale de Govee (« Govee LAN API user manual », developer.govee.com). Lus pour comprendre, sans rien en copier : la bibliothèque govee-local-api (Galorhallen/govee-local-api, Apache-2.0) et l'intégration govee_light_local de Home Assistant (Apache-2.0) ; idées gardées, réécrites en Rust : réponse rattachée à la lumière par l'adresse d'où elle vient, scan envoyé aussi à une adresse donnée, température 0 = la lumière affiche une couleur"
+author = "agent"

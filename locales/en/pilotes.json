@@ -906,5 +906,21 @@
   "pilotes.jackery.lecture_seule": "only the Jackery battery's reserve can be set from Moli",
   "pilotes.jackery.hors_bornes": "the Jackery battery's reserve is set between 5 and 49%",
   "pilotes.jackery.injoignable": "the Jackery battery is not answering right now: nothing was sent",
-  "pilotes.jackery.jeton_manquant": "the Jackery battery's token is missing (shown in the Jackery app, with the MQTT settings): store it with \"moli-os secrets set {instance} {name}\", then restart Moli"
+  "pilotes.jackery.jeton_manquant": "the Jackery battery's token is missing (shown in the Jackery app, with the MQTT settings): store it with \"moli-os secrets set {instance} {name}\", then restart Moli",
+  "pilotes.govee.adresse_invalide": "invalid IPv4 address in hosts: {host}",
+  "pilotes.govee.rien_a_chercher": "no address in hosts and discovery is off: nothing to look for",
+  "pilotes.govee.poll_secs": "poll_secs must be between 1 and 3600",
+  "pilotes.govee.port_occupe": "UDP port {port} is already taken on this machine: Govee lights answer to that port only (a single govee instance, and no other program listening on it)",
+  "pilotes.govee.aucune": "no Govee light answered; searching again every minute (the LAN API is switched on light by light in the Govee app)",
+  "pilotes.govee.lumiere": "Govee light ({end})",
+  "pilotes.govee.lumiere_modele": "Govee {sku} ({end})",
+  "pilotes.govee.allumee": "On",
+  "pilotes.govee.luminosite": "Brightness",
+  "pilotes.govee.temperature_couleur": "Colour temperature",
+  "pilotes.govee.couleur": "Colour",
+  "pilotes.govee.pas_de_reponse": "the light did not answer",
+  "pilotes.govee.ne_se_regle_pas": "“{point}” cannot be set on this light",
+  "pilotes.govee.couleur_invalide": "colour expected as #rrggbb",
+  "pilotes.govee.injoignable": "unknown or unreachable light",
+  "pilotes.govee.trop": "at most {max} lights per instance: the next ones are ignored"
 }
