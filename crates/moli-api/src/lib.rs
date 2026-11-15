@@ -32,6 +32,7 @@ mod whereabouts;
 
 pub use whereabouts::INSTANCE as PEOPLE_INSTANCE;
 pub mod airzone_setup;
+mod outside;
 mod phones;
 mod plan;
 mod rest;
