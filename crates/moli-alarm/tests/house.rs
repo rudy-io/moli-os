@@ -101,3 +101,72 @@ async fn armed_it_triggers_on_the_sensor_and_refuses_to_arm_on_it() {
     assert_eq!(state(&hub, "state").await, Value::Text("disarmed".into()));
     cancel.cancel();
 }
+
+#[tokio::test]
+async fn its_settings_change_from_the_screen_disarmed_only_and_stay() {
+    let dir = std::env::temp_dir().join(format!("moli-alarm-settings-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let key = moli_runtime::MasterKey::generate().unwrap();
+    let start = |key: moli_runtime::MasterKey| {
+        let hub = Hub::new(HubOptions {
+            secrets: Some((dir.join("secrets.enc"), key)),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        let alarm: Config = toml::from_str("[modes.night]\n").unwrap();
+        let cancel = CancellationToken::new();
+        spawn_driver(
+            &hub,
+            InstanceId::from("alarme"),
+            Arc::new(AlarmDriver::new(alarm).unwrap()),
+            cancel.clone(),
+        );
+        (hub, cancel)
+    };
+    let (hub, cancel) = start(key.clone());
+    settle(&hub, 1).await;
+    let mode = PointId::from("alarme:maison/mode".to_owned());
+    let setup = PointId::from("alarme:maison/setup".to_owned());
+    let new = r#"{"modes":{"night":{"exit":0,"entry":0,"trigger":60},"home":{}},"sensors":[{"point":"maison:porte/on","name":"Porte","modes":["home"]}]}"#;
+
+    // Armed: refused.
+    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    let refused = hub
+        .command(&setup, Value::Text(new.into()), Origin::Ui, None)
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+    // Disarmed: taken, shown, and the new mode can be armed.
+    hub.command(&mode, Value::Text("off".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    hub.command(&setup, Value::Text(new.into()), Origin::Ui, None)
+        .await
+        .unwrap();
+    let shown = state(&hub, "setup").await;
+    assert!(format!("{shown:?}").contains("Porte"), "{shown:?}");
+    hub.command(&mode, Value::Text("home".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    // Nonsense: refused.
+    hub.command(&mode, Value::Text("off".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    assert!(
+        hub.command(&setup, Value::Text("{".into()), Origin::Ui, None)
+            .await
+            .is_err()
+    );
+    cancel.cancel();
+    drop(hub);
+
+    // After a restart, the screen's settings are still the alarm's.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (hub, cancel) = start(key);
+    settle(&hub, 1).await;
+    let shown = state(&hub, "setup").await;
+    assert!(format!("{shown:?}").contains("Porte"), "{shown:?}");
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
+}
