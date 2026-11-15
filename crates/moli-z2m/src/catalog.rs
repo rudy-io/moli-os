@@ -146,6 +146,7 @@ impl Entry {
         let id = DeviceId::new(instance, &raw.ieee_address);
         mark_impulses(&id, impulses, &mut points, &mut codecs, applied);
         mark_soil(&mut points);
+        mark_presses(&mut points);
         let flame = mark_flame(&mut points, &mut codecs);
         let device = Device {
             id,
@@ -669,6 +670,16 @@ pub fn is_press(point: &PointSpec) -> bool {
     &*point.key == "action" && matches!(point.kind, Kind::Enum { .. }) && !point.access.write
 }
 
+/// A button's `action` says it is a press (#211): the driver sends it with
+/// `pulse_state`, so the dashboard and the assistant know it whatever the brand.
+fn mark_presses(points: &mut [PointSpec]) {
+    for point in points.iter_mut() {
+        if is_press(point) {
+            point.semantic = Semantic::Press;
+        }
+    }
+}
+
 /// What a button sends in `command` mode (`on`, `off`, `brightness_*`,
 /// `color_temperature_*`): in `event` mode, no press of its own (#214).
 pub fn is_command_action(action: &str) -> bool {
@@ -946,12 +957,32 @@ mod tests {
         let catalog = catalog();
         for ieee in ["0x00124b000000000c", "0x00124b000000000d"] {
             let entry = catalog.by_name(ieee).unwrap();
-            assert!(is_press(entry.device.point("action").unwrap()), "{ieee}");
+            let action = entry.device.point("action").unwrap();
+            assert!(is_press(action), "{ieee}");
+            assert_eq!(action.semantic, Semantic::Press, "{ieee}");
             let values: HashMap<_, _> = entry.decode(&state(ieee)).into_iter().collect();
             assert_eq!(values["action"], Value::from("single"), "{ieee}");
         }
         let button = catalog.by_name("0x00124b000000000d").unwrap();
-        assert!(!is_press(button.device.point("operation_mode").unwrap()));
+        let mode = button.device.point("operation_mode").unwrap();
+        assert!(!is_press(mode));
+        assert_ne!(mode.semantic, Semantic::Press);
+        // Only these two buttons' `action` is a press (#211): nothing else in
+        // the bridge, and never a point Moli can set.
+        let mut presses: Vec<_> = catalog
+            .entries()
+            .flat_map(|e| e.device.points.iter().map(move |p| (e, p)))
+            .filter(|(_, p)| p.semantic == Semantic::Press)
+            .map(|(e, p)| {
+                assert!(!p.access.write, "{}/{}", e.ieee, p.key);
+                format!("{}/{}", e.ieee, p.key)
+            })
+            .collect();
+        presses.sort();
+        assert_eq!(
+            presses,
+            ["0x00124b000000000c/action", "0x00124b000000000d/action"]
+        );
         // Z2M clears a press right after it: nothing to tell, nothing to show.
         let cleared = serde_json::json!({ "action": "", "battery": 100 });
         let values: HashMap<_, _> = button

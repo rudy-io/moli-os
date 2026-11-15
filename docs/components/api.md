@@ -594,7 +594,9 @@ Notifier un téléphone : `POST /api/command` sur `telephones:<id>/push` (texte 
   `battery`, `battery_low`, `signal_strength`, `contact`, `position`, `occupancy`, `water_leak`,
   `soil_moisture` (humidité du sol, %), `soil_dry` (binaire, `true` = la plante a soif ; jamais
   une alerte de sécurité), `smoke`, `tamper`, `config`, `alert` (binaire, `true` = quelque chose
-  ne va pas), la météo avec une seule unité chacun : `wind_speed` et `wind_gust` (km/h),
+  ne va pas), `press` (en lecture seule : un appui de bouton, un événement et non un état ; la
+  valeur est le genre d'appui tel que la marque le donne, `single`, `double`, `short_release`… ;
+  jamais déduit d'un nom), la météo avec une seule unité chacun : `wind_speed` et `wind_gust` (km/h),
   `wind_direction` (°, d'où vient le vent, 0 = nord), `rain_rate` (mm/h), `rain_today` (mm,
   remis à zéro chaque jour par la source), `uv_index` (sans unité), et `other`.
 - `value` : scalaire JSON (`true`, `42`, `21.5`, `"auto"`, `null`). Binaire → booléen,
