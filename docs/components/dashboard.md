@@ -102,7 +102,7 @@ telles que les appareils les nomment).
   parmi ceux de `moli_core::outside::WORDS` : « Extérieur », « Jardin », « Terrasse », « Allée »,
   « Piscine », « Spa », « Garden », « Porch »…). `/api/home` renvoie chaque pièce avec son
   `outside`, et ajoute en fin de `rooms` les pièces extérieures que seuls les appareils ou le Plan
-  nomment. Le nom ne peut pas tout dire : `{ "name": "Jardin d'hiver", "outside": false }`,
+  nomment, avec `"added": true` (elles ne prennent pas de place dans l'ordre des pièces). Le nom ne peut pas tout dire : `{ "name": "Jardin d'hiver", "outside": false }`,
   `{ "name": "Cour intérieure", "outside": false }`, `{ "name": "Préau", "outside": true }`.
 - `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment (nombres et heures dans la langue de la maison) ; relu toutes les 10 à 60 s selon la fenêtre, jamais quand la page est cachée. 8 points au plus par carte, `minutes` de 1 à 10 080 (une semaine) ; un point mal écrit (sans `/`) ou que la maison n'a pas est écarté, et la carte le dit.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui

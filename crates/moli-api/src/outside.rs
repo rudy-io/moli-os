@@ -8,7 +8,9 @@
 //! 3. its name or one of its aliases says so ([`moli_core::outside::WORDS`]).
 //!
 //! A room only devices or the plan name (not in `rooms[]`) that is outside
-//! is added at the end of `rooms`, `{ "name", "outside": true }`.
+//! is added at the end of `rooms`, `{ "name", "outside": true, "added": true }`:
+//! `added` says the family did not list it, so it does not take a place in
+//! the order of the rooms.
 
 use std::collections::BTreeMap;
 
@@ -105,7 +107,7 @@ pub(crate) fn resolve<'a>(
     let mut added = false;
     for name in extra.into_values() {
         if verdict(&name, &[]) {
-            rooms.push(json!({ "name": name, "outside": true }));
+            rooms.push(json!({ "name": name, "outside": true, "added": true }));
             added = true;
         }
     }
@@ -226,6 +228,8 @@ mod tests {
         let rooms = l["rooms"].as_array().unwrap();
         assert_eq!(rooms.len(), 3, "{l}");
         assert_eq!(rooms[0]["name"], "Salon");
+        assert_eq!(rooms[0].get("added"), None);
+        assert_eq!(rooms[1]["added"], true);
         assert_eq!(outside(&l, "Extérieur"), Some(true));
         assert_eq!(outside(&l, "Terrasse"), Some(true));
         assert_eq!(outside(&l, "Bureau"), None);
