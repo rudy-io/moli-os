@@ -117,7 +117,7 @@ timezone = "Europe/Paris"
 # not a safety: an automation that must act on a measure checks
 # dehors:meteo/<key>_source (see docs/components/pilotes.md, `dehors`).
 # [outdoor]
-# forecast = ["meteo:api.open-meteo.com:443", "air:air-quality-api.open-meteo.com:443"]
+# forecast = ["meteo:…", "air:…"]
 # forecast_stale_after = "1h"   # optional: 30 min by default
 #
 # [[outdoor.station]]           # in order of preference

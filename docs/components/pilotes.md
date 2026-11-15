@@ -1084,7 +1084,7 @@ l'id `dehors` est réservé). Sans cette section, rien ne change : la page Dehor
 
 ```toml
 [outdoor]
-forecast = ["meteo:api.open-meteo.com:443", "air:air-quality-api.open-meteo.com:443"]  # un id ou une liste
+forecast = ["meteo:…", "air:…"]  # un id ou une liste
 forecast_stale_after = "1h"   # facultatif : 30 min par défaut
 
 [[outdoor.station]]           # les stations, par ordre de préférence
