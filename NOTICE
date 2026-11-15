@@ -33,3 +33,10 @@ at commit 5f31858570e14be4f58e6cc58b7a448000556449, used by
 crates/moli-overkiz/src/cloud/protocol.rs.
 Copyright (c) 2020 Mick Vleeshouwer. Licensed under the MIT License;
 see licenses/pyoverkiz-MIT.txt.
+
+This product includes protocol knowledge derived from the official Jackery
+Home Assistant integration (https://github.com/Jackery-Official/jackery):
+the message types and field names of the battery's local MQTT link, used by
+crates/moli-jackery/src/wire.rs. No code copied.
+Copyright (c) 2025 Jackery. Licensed under the MIT License; see
+licenses/jackery-MIT.txt.

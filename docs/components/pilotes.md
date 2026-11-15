@@ -1214,6 +1214,28 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
 - **Tests** : `src/v5.rs` (trames V5 et Modbus TCP, trame courte refusée), `src/deye.rs`,
   `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs).
 
+## `jackery` : batteries Jackery HomePower / SolarVault (`crates/moli-jackery`)
+
+- **Couvre** : la batterie, par son lien MQTT local. Elle est un client MQTT : on lui donne
+  un broker de la maison dans l'appli Jackery, Moli se connecte au même broker.
+- **Transport** : MQTT (rumqttc). Questions sur `<préfixe>/device/<série>/action` (un tour
+  toutes les 30 s, un message par seconde : flux `105`, état et réglages `2`), réponses sur
+  `…/status` et `…/event`. Le jeton de l'appli (secret `token`) accompagne chaque question.
+- **Points** : `battery` (%), `charge_power`, `discharge_power`, `solar_power`, `grid_power`
+  (signé, absent si la batterie ne voit plus son compteur), `home_power` (W), `status`,
+  `reserve` (%), `charge_limit` (%), `max_output_power` (W), `temperature`, `signal`, `packs`.
+- **Écrit** : `reserve` seulement (5 à 49 %, bornes de la batterie posées sur le point). Un
+  ordre pour la valeur déjà annoncée ne part pas ; les réglages sont relus juste après.
+  Batterie muette ou broker absent : l'ordre est refusé, rien n'attend dans une file.
+- **Silences** : au repos la batterie quitte le broker pendant des minutes et revient seule.
+  Hors ligne après 100 s sans réponse, dernières valeurs gardées, aucune relance. La mesure du
+  réseau se lit de préférence sur le compteur lui-même (profil `jackery-meter`).
+- **Pas encore** : prises et compteurs rattachés, limite de charge et puissance de sortie en
+  écriture, veille automatique, détail par batterie. Aucune charge forcée.
+- **Tests** : `wire.rs` (trois réponses réelles rejouées, injection négative, compteur perdu,
+  état inconnu, forme des questions et de l'ordre), `lib.rs` (écriture seulement si la valeur
+  change, plancher, segments de sujet, configuration).
+
 ## `kasa` : prises TP-Link Kasa, protocole local historique (`crates/moli-kasa`)
 
 - **Couvre** : les prises Kasa qui parlent encore le protocole local d'origine (HS100, HS110…),
@@ -1371,6 +1393,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
+| `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO (voir [profils.md](profils.md#les-profils-du-catalogue)) |
