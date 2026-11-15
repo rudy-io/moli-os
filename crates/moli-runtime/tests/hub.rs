@@ -150,6 +150,45 @@ async fn command_round_trip_updates_state_and_journal() {
     assert!(matches!(journal[0].action, Action::Command { .. }));
 }
 
+/// The same plug, kept by Moli itself (like the alarm's state).
+struct InsidePlug(Arc<FakePlug>);
+
+impl Driver for InsidePlug {
+    fn kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        self.0.run(ctx)
+    }
+
+    fn stays_inside(&self) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn a_mirror_house_lets_through_what_stays_inside_moli() {
+    let hub = Hub::new(HubOptions {
+        mirror: true,
+        ..HubOptions::default()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(InsidePlug(FakePlug::new(false))),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+    hub.command(&point("state"), Value::Bool(true), Origin::Automation, None)
+        .await
+        .unwrap();
+    assert_eq!(hub.state(&point("state")).unwrap().value, Value::Bool(true));
+    cancel.cancel();
+}
+
 #[tokio::test]
 async fn a_mirror_house_journals_every_order_and_sends_none() {
     let (hub, _cancel) = start_with(HubOptions {

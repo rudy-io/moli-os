@@ -32,7 +32,12 @@ pub fn spawn_driver(
     driver: Arc<dyn Driver>,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
-    let commands = hub.register_driver(&instance, driver.kind(), driver.integration());
+    let commands = hub.register_driver(
+        &instance,
+        driver.kind(),
+        driver.integration(),
+        driver.stays_inside(),
+    );
     let mut ctx = DriverCtx::new(hub.clone(), instance.clone(), commands, cancel.clone());
     let hub = hub.clone();
     tokio::spawn(async move {

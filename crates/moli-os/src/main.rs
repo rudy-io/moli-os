@@ -1364,6 +1364,7 @@ const KINDS: &[&str] = &[
     "reolink",
     "tuya",
     "helpers",
+    "alarm",
     "presence",
     "telegram",
     "phones",
@@ -1644,6 +1645,7 @@ fn build_driver(
         "recycleapp" => configured_driver(config, moli_recycleapp::RecycleApp::new)?,
         "engie" => configured_driver(config, moli_engie::Engie::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "alarm" => configured_driver(config, moli_alarm::AlarmDriver::new)?,
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,

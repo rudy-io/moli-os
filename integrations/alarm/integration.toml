@@ -1,0 +1,24 @@
+[integration]
+id = "alarm"
+name = "Alarme de la maison"
+brands = []
+models = []
+# Nothing on the network: Moli watches its own sensors.
+transport = "native"
+driver = "alarm"
+crate = "moli-alarm"
+
+[discovery]
+mdns = []
+ssdp = []
+ports = []
+
+[needs]
+secrets = []
+vars = []
+# Modes in [driver.options.modes.<mode>], sensors in [[driver.options.sensor]].
+options = []
+
+[origin]
+reused = "même rôle qu'Alarmo dans HA (modes, capteurs, délais) ; les réactions sont des automatismes"
+author = "agent"

@@ -197,6 +197,8 @@ struct Prepared {
     key: Arc<str>,
     value: Value,
     commands: mpsc::Sender<CommandRequest>,
+    /// Its driver changes nothing outside Moli: a mirror lets it through.
+    inside: bool,
     /// An on/off switch that reports its state: its order is followed until
     /// the state says it was obeyed (see [`CONFIRM_WINDOW`]). Sending it again
     /// changes nothing when it was; a momentary point (a gate's pulse) is
@@ -474,6 +476,8 @@ struct DriverSlot {
     status: DriverStatus,
     warning: Option<String>,
     commands: mpsc::Sender<CommandRequest>,
+    /// Its orders change nothing outside Moli ([`Driver::stays_inside`]).
+    inside: bool,
 }
 
 #[derive(Debug)]
@@ -1543,7 +1547,7 @@ impl Hub {
     /// Resolves and validates an order without sending it.
     fn prepare(&self, point: &PointId, value: &Value) -> Result<Prepared, CommandError> {
         let (device_id, key) = point.split().ok_or(CommandError::UnknownPoint)?;
-        let (device, key, kind, commands, confirm) = {
+        let (device, key, kind, commands, inside, confirm) = {
             let model = self.read();
             let device = model
                 .devices
@@ -1564,6 +1568,7 @@ impl Hub {
                 spec.key.clone(),
                 spec.kind.clone(),
                 slot.commands.clone(),
+                slot.inside,
                 confirm,
             )
         };
@@ -1578,6 +1583,7 @@ impl Hub {
             key,
             value,
             commands,
+            inside,
             confirm,
         })
     }
@@ -1702,8 +1708,10 @@ impl Hub {
 
     /// Hands a prepared order to its driver and waits for the answer.
     async fn send(&self, prepared: Prepared) -> Result<(), CommandError> {
-        // Every order ends here, approved ones too: a mirror stops them all.
-        if self.0.opts.mirror {
+        // Every order ends here, approved ones too: a mirror stops them all,
+        // but those that change nothing outside Moli (it runs them in the
+        // shadow of the real house).
+        if self.0.opts.mirror && !prepared.inside {
             return Err(CommandError::Mirror);
         }
         let Prepared {
@@ -1712,6 +1720,7 @@ impl Hub {
             key,
             value,
             commands,
+            inside: _,
             confirm: _,
         } = prepared;
         let (reply, answer) = oneshot::channel();
@@ -1980,6 +1989,7 @@ impl Hub {
         instance: &InstanceId,
         kind: &'static str,
         integration: Arc<str>,
+        inside: bool,
     ) -> mpsc::Receiver<CommandRequest> {
         let (commands, rx) = mpsc::channel(COMMAND_QUEUE);
         let restored = {
@@ -1992,6 +2002,7 @@ impl Hub {
                     status: DriverStatus::Starting,
                     warning: None,
                     commands,
+                    inside,
                 },
             );
             let foreign: Vec<_> = model
