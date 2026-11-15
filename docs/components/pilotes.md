@@ -1228,13 +1228,27 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
   Solis S6-GR1P (`model = "solis"`) derrière leur enregistreur Wi-Fi. **Lecture seule** : seules
   les fonctions Modbus de lecture 0x03 (registres de maintien, Deye) et 0x04 (registres d'entrée,
   Solis) sont envoyées.
+- **Écrits d'après une carte publique, jamais vus sur un vrai onduleur** : les micro-onduleurs
+  TSUN TITAN (`model = "tsun-titan"`, TSOL-MP3000 et MP2250) et GEN4 (`model = "tsun-gen4"`,
+  TSOL-MX dont le MX3000D), les ZCS Azzurro 1PH TL-V3 (`model = "zcs-tl"`) et HYD-ZSS-HP
+  (`model = "zcs-hyd"`, hybride : batterie, réseau et consommation en lecture). Leurs fixtures
+  sont des trames construites à la main à partir de la carte. Une famille de plus = une
+  implémentation de `regs::Map` (blocs à lire, appareil, valeurs), lue par `run_map`.
+- **Trame native TSUN** (`v5::native_request`, `native_parse`) : les TITAN ne parlent pas Modbus
+  RTU dans l'enveloppe V5 mais une trame à eux (codes de lecture 0xA1 à 0xA4, mots octet faible
+  en premier, CRC octet fort en premier, réponse précédée de `7E`), décrite par tsun-gen3-proxy
+  sur le port local 8899 et jamais essayée par ce pilote.
 - **Transport** : TCP 8899, une connexion par lecture. `transport = "v5"` (par défaut) : trame
   Modbus RTU dans l'enveloppe V5 de l'enregistreur, numéro de série obligatoire.
   `transport = "modbus_tcp"` : Modbus TCP nu (en-tête MBAP), pour les clés qui ne parlent pas V5
   (une clé Solis en est) ; ces clés ne servent qu'un client à la fois.
 - **Configuration** : `host`, `serial` (V5), `slave` (1), `model`, `transport`, `timezone`.
-- **Registres** : cartes de ha-solarman (MIT, voir `NOTICE`) : `deye_micro.yaml` et
-  `solis_s6-gr1p.yaml`. Solis : registres 3004 à 3043 en deux blocs.
+- **Registres** : cartes de ha-solarman (MIT, voir `NOTICE`) : `deye_micro.yaml`,
+  `solis_s6-gr1p.yaml`, et pour ZCS `sofar_string.yaml` (1PH TL-V3, 0x0000 à 0x001C) et
+  `sofar_g3.yaml` (HYD-ZSS-HP, cinq blocs de 0x0404 à 0x069B). Solis : registres 3004 à 3043 en
+  deux blocs. TSUN : cartes de tsun-gen3-proxy (BSD-3-Clause, voir `NOTICE`), TITAN 3000, 3600 et
+  3800, GEN4 0x1100, 0x1200 et 0x1300 ; le nombre d'entrées vient du bloc d'identité (6 tant
+  qu'il n'a pas répondu). Rien n'est repris de l'intégration tsun-local (GPL-3.0).
 - **Compteurs** : la production totale (`energy`) ne recule jamais, et un compteur qui saute plus
   loin que ce que l'onduleur a pu produire depuis la lecture précédente est écarté. Solis : le
   total à vie de l'onduleur est en kWh entiers ; Moli le complète au dixième avec le compteur du
@@ -1242,8 +1256,11 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
   peut lire (puissance, tensions, courants, fréquence, température) sont écartées.
 - **La nuit** : l'onduleur dort et l'enregistreur avec lui : l'appareil passe hors ligne sans
   avertissement.
-- **Tests** : `src/v5.rs` (trames V5 et Modbus TCP, trame courte refusée), `src/deye.rs`,
-  `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs).
+- **Tests** : `src/v5.rs` (trames V5, Modbus TCP et natives TSUN, trame courte refusée),
+  `src/deye.rs`, `src/solis.rs` (valeurs comparées à Home Assistant au même instant, compteurs),
+  `src/tsun.rs` et `src/zcs.rs` (trames construites à la main : la carte est lue comme elle est
+  écrite, rien de plus ; une seule réponse réelle, d'un TITAN, publiée par tsun-gen3-proxy),
+  `src/lib.rs` (noms des modèles, lectures seules).
 
 ## `jackery` : batteries Jackery HomePower / SolarVault (`crates/moli-jackery`)
 
@@ -1424,7 +1441,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `esphome` | `moli-esphome` | API native ESPHome, TCP 6053, Noise écrite à la main | oui : volume, sourdine, `say`, interrupteurs | pas encore (cible : satellite ESP32-S3) |
 | `phones` | `moli-phones` | rapports HTTP de l'appli (jeton) | `notify` (notification) | iPhone (appli Moli) |
 | `telegram` | `moli-telegram` | HTTPS, API des bots | `notify` (message) | oui (API des bots) |
-| `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) |
+| `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) ; **pas encore** : TSUN TITAN et GEN4, ZCS Azzurro 1PH TL-V3 et HYD-ZSS-HP |
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |

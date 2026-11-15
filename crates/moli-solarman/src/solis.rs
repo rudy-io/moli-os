@@ -48,7 +48,7 @@ impl Counters {
     /// further than the inverter could make since the last read (one wrong
     /// read would otherwise hold the total up for good), or when the
     /// inverter reads all zero.
-    fn total(&mut self, lifetime: f64, today: f64, now: Instant) -> Option<f64> {
+    pub(crate) fn total(&mut self, lifetime: f64, today: f64, now: Instant) -> Option<f64> {
         if lifetime <= 0.0 {
             return None;
         }
