@@ -240,9 +240,15 @@ impl AlarmDriver {
 }
 
 /// Whether a sensor's value says it sees something: on, open, a count of
-/// people above zero.
+/// people above zero. A `contact` reads true when closed (the house's
+/// convention, as Zigbee2MQTT's): open is what counts.
 #[must_use]
-pub fn active(value: &Value) -> bool {
+pub fn active(point: &str, value: &Value) -> bool {
+    if point.rsplit('/').next() == Some("contact")
+        && let Value::Bool(closed) = value
+    {
+        return !closed;
+    }
     match value {
         Value::Bool(b) => *b,
         Value::Int(i) => *i > 0,
@@ -354,7 +360,7 @@ impl Driver for AlarmDriver {
                 .map(|p| {
                     let on = ctx
                         .read(&PointId::from(p.clone()))
-                        .is_some_and(|s| active(&s.value));
+                        .is_some_and(|s| active(p, &s.value));
                     (p.clone(), on)
                 })
                 .collect();
@@ -407,7 +413,7 @@ impl Driver for AlarmDriver {
                             if !watched.contains(&key) {
                                 continue;
                             }
-                            let on = active(&value);
+                            let on = active(&key, &value);
                             let was = seeing.insert(key.clone(), on).unwrap_or(false);
                             if on && !was {
                                 let happened = alarm.sensed(&key, now());
@@ -418,7 +424,7 @@ impl Driver for AlarmDriver {
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             tracing::warn!(instance = %ctx.instance(), missed = n, "alarm: events missed, sensors read again");
                             for (p, on) in &mut seeing {
-                                *on = ctx.read(&PointId::from(p.clone())).is_some_and(|s| active(&s.value));
+                                *on = ctx.read(&PointId::from(p.clone())).is_some_and(|s| active(p, &s.value));
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
@@ -435,12 +441,16 @@ mod tests {
 
     #[test]
     fn what_counts_as_seeing_something() {
-        assert!(active(&Value::Bool(true)));
-        assert!(active(&Value::Int(2)));
-        assert!(!active(&Value::Int(0)));
-        assert!(active(&Value::Text("open".into())));
-        assert!(!active(&Value::Text("closed".into())));
-        assert!(!active(&Value::Null));
+        let p = "x:capteur/occupancy";
+        assert!(active(p, &Value::Bool(true)));
+        assert!(active(p, &Value::Int(2)));
+        assert!(!active(p, &Value::Int(0)));
+        assert!(active(p, &Value::Text("open".into())));
+        assert!(!active(p, &Value::Text("closed".into())));
+        assert!(!active(p, &Value::Null));
+        // A door: true is closed.
+        assert!(!active("z2m:porte/contact", &Value::Bool(true)));
+        assert!(active("z2m:porte/contact", &Value::Bool(false)));
     }
 
     #[test]
