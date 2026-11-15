@@ -14,6 +14,6 @@
 - Vérifié en vrai le 15 nov. 2026 sur une Freebox Player POP (Android TV), appairage repris de
   Home Assistant : appareil publié, `power` et `app` lus, ADB connecté (titre, appli, état et
   position de YouTube), page Salon du tableau de bord (télécommande et « à l'écran »).
-- **Jamais essayé** : touches, maintien, texte, lancement d'appli, `media_control`, TvOverlay.
+- Essayés ensuite sur la même box par son propriétaire, et ils fonctionnent : touches, maintien, texte, lancement d'appli, `media_control`, TvOverlay.
 - Reste : appairer Android TV Remote depuis Moli (port 6467, code à l'écran) pour une box que
   Home Assistant n'a pas connue.

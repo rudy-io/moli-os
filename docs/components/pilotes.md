@@ -1483,7 +1483,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `airplay` | `moli-airplay` | RAOP : RTSP 5000, RTP/UDP | oui : annonces, volume | Freebox Delta Player |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
-| `androidtv` | `moli-androidtv` | Android TV Remote, Cast, ADB (aucun protocole propre) | oui : appli, touches, maintien, texte, lecture, notifications | Freebox Player POP (état, lecture, ADB ; touches et lancement d'appli non essayés) |
+| `androidtv` | `moli-androidtv` | Android TV Remote, Cast, ADB (aucun protocole propre) | oui : appli, touches, maintien, texte, lecture, notifications | Freebox Player POP (état, lecture, ADB, touches, lancement d'appli, notifications) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |
 | `bambu` | `moli-bambu` | MQTT TLS 8883, épinglé | lumière, `control` (humain pour un agent) | pas encore (cible : Bambu Lab A1) |
 | `moonraker` | `moli-moonraker` | HTTP local 7125 | lumière, `control` (humain pour un agent) | Snapmaker U1, Creality K2 Combo |
