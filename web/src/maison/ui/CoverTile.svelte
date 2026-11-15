@@ -66,14 +66,17 @@
   function selectSpeed(next) {
     if (next === 'normal' || next === 'slow' && hasSlow) speedChoice = { id, speed: next };
   }
-  function previewPosition(v) {
-    if (positionWritable && pos != null) dragging = { id, key: positionTarget.point.key, speed, value: quantize(v, range) };
+  // The Slider reports a plain number; the position gestures keep reading the
+  // event shape of the native input they replaced.
+  const gesture = (value) => ({ currentTarget: { value } });
+  function previewPosition(event) {
+    if (positionWritable && pos != null) dragging = { id, key: positionTarget.point.key, speed, value: quantize(Number(event.currentTarget.value), range) };
   }
-  function setPosition(v) {
+  function setPosition(event) {
     const validTarget = !dragging || sameTarget;
     dragging = null;
     if (!validTarget || !positionWritable || pos == null) return;
-    const next = quantize(v, range);
+    const next = quantize(Number(event.currentTarget.value), range);
     if (next != null && next !== pos) return submit(positionTarget.point.key, next, label);
   }
   function sendOrder(command, key) {
@@ -143,7 +146,7 @@
       />
     </div>
   {/if}
-  {#if positionWritable && pos != null}
+  {#if positionWritable}
     <div class="position">
       {#if !icons}<span>{t('commun.volet.position')}</span>{/if}
       <Slider
@@ -151,9 +154,10 @@
         max={range.last}
         step={range.step}
         value={shown ?? range.first}
+        disabled={pos == null}
         label={t('commun.volet.ouverture', { label })}
-        onlive={previewPosition}
-        oncommit={setPosition}
+        onlive={(value) => previewPosition(gesture(value))}
+        oncommit={(value) => setPosition(gesture(value))}
       />
     </div>
   {/if}
