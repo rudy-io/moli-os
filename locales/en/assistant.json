@@ -115,6 +115,8 @@
   "assistant.auto.role_circuit": "a circuit",
   "assistant.auto.role_appliance": "an appliance (metered plug)",
   "assistant.auto.role_solar": "what the solar panels produce (lifetime index)",
+  "assistant.auto.role_charge": "what goes into the home battery (index)",
+  "assistant.auto.role_discharge": "what comes out of the home battery (index)",
   "assistant.auto.role_export": "what the home sends to the grid (index)",
   "assistant.auto.meter_power": "- {name} ({role}): power in W = {power}",
   "assistant.auto.meter_energy": "- {name} ({role}): energy = {point}",

@@ -32,6 +32,10 @@ pub struct Config {
     /// What the supplier's meter draws right now, for the live gauge.
     #[serde(default)]
     pub live: Option<Live>,
+    /// A home battery right now: its charge and power, for the live views
+    /// (what went in and out is counted by `charge` / `discharge` meters).
+    #[serde(default)]
+    pub battery: Option<Battery>,
     #[serde(default, rename = "meter")]
     pub meters: Vec<MeterConfig>,
     /// Loads Moli switches on the panels' surplus and in off-peak hours.
@@ -79,6 +83,57 @@ impl Live {
     #[must_use]
     pub fn warn(&self) -> f64 {
         self.warn.unwrap_or(self.max / 4.0)
+    }
+
+    fn check(&self) -> Result<(), String> {
+        check_point(&self.power).map_err(|e| format!("[energy.live] {e}"))?;
+        if !(self.max.is_finite() && self.max > 0.0) {
+            return Err(format!("[energy.live] max {} must be above 0", self.max));
+        }
+        if let Some(warn) = self.warn
+            && !(warn.is_finite() && warn > 0.0 && warn <= self.max)
+        {
+            return Err(format!(
+                "[energy.live] warn {warn} must be above 0 and at most max"
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A home battery's state right now.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Battery {
+    /// State of charge point, in %.
+    #[serde(default)]
+    pub soc: Option<String>,
+    /// Power point (W), positive while it charges, negative while it
+    /// discharges.
+    #[serde(default)]
+    pub power: Option<String>,
+    /// `power` is positive while the battery discharges instead (an
+    /// inverter that counts what it gives the home).
+    #[serde(default)]
+    pub discharge_positive: bool,
+    /// Usable capacity (kWh), to say how much the charge holds.
+    #[serde(default)]
+    pub capacity_kwh: Option<f64>,
+}
+
+impl Battery {
+    fn check(&self) -> Result<(), String> {
+        for point in self.soc.iter().chain(&self.power) {
+            check_point(point).map_err(|e| format!("[energy.battery] {e}"))?;
+        }
+        if let Some(kwh) = self.capacity_kwh
+            && !(kwh.is_finite() && kwh > 0.0 && kwh < 1000.0)
+        {
+            return Err(format!(
+                "[energy.battery] capacity_kwh {kwh} must be above 0 and below 1000"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -178,14 +233,30 @@ pub enum Role {
     /// shown and priced on its own, never mixed with the electricity, and
     /// priced only by its own `price` / `price_point`.
     Gas,
+    /// What went into a home battery (its charged-energy index): never
+    /// billed; what is stored now is not used now.
+    Charge,
+    /// What came out of a home battery (its discharged-energy index): never
+    /// billed; used at home without being bought.
+    Discharge,
 }
 
 impl Role {
     /// Meters that count energy the home takes (grid, whole home, circuits,
-    /// appliances), as opposed to what it makes or sends out.
+    /// appliances), as opposed to what it makes, stores or sends out.
     #[must_use]
     pub fn consumes(self) -> bool {
-        !matches!(self, Self::Solar | Self::Export | Self::Gas)
+        !matches!(
+            self,
+            Self::Solar | Self::Export | Self::Gas | Self::Charge | Self::Discharge
+        )
+    }
+
+    /// Meters whose energy has no price: production and a battery's
+    /// in and out (an `export` meter's price is what selling earns).
+    #[must_use]
+    pub fn unpriced(self) -> bool {
+        matches!(self, Self::Solar | Self::Charge | Self::Discharge)
     }
 }
 
@@ -247,9 +318,9 @@ impl Config {
                     m.id
                 ));
             }
-            if m.role == Role::Solar && m.price.is_some() {
+            if m.role.unpriced() && m.price.is_some() {
                 return Err(format!(
-                    "meter {:?}: solar production has no price (an `export` meter's price is what selling earns)",
+                    "meter {:?}: solar production and a battery's in and out have no price (an `export` meter's price is what selling earns)",
                     m.id
                 ));
             }
@@ -276,17 +347,10 @@ impl Config {
             }
         }
         if let Some(live) = &self.live {
-            check_point(&live.power).map_err(|e| format!("[energy.live] {e}"))?;
-            if !(live.max.is_finite() && live.max > 0.0) {
-                return Err(format!("[energy.live] max {} must be above 0", live.max));
-            }
-            if let Some(warn) = live.warn
-                && !(warn.is_finite() && warn > 0.0 && warn <= live.max)
-            {
-                return Err(format!(
-                    "[energy.live] warn {warn} must be above 0 and at most max"
-                ));
-            }
+            live.check()?;
+        }
+        if let Some(battery) = &self.battery {
+            battery.check()?;
         }
         if let Some(fee) = self.monthly_fee {
             check_price(fee).map_err(|e| format!("monthly_fee: {e}"))?;
@@ -339,8 +403,11 @@ fn check_meter_price(m: &MeterConfig) -> Result<(), String> {
     }
     if let Some(point) = &m.price_point {
         check_point(point).map_err(|e| format!("meter {:?}: price_point: {e}", m.id))?;
-        if m.role == Role::Solar {
-            return Err(format!("meter {:?}: solar production has no price", m.id));
+        if m.role.unpriced() {
+            return Err(format!(
+                "meter {:?}: solar production and a battery's in and out have no price",
+                m.id
+            ));
         }
     }
     if let Some(f) = m.kwh_per_unit
@@ -430,6 +497,23 @@ mod tests {
         parse(&format!("{bill}{ok}")).unwrap();
         assert!(parse(&format!("{}{ok}", bill.replace("19.56", "-1.0"))).is_err());
         assert!(parse(&format!("{}{ok}", bill.replace("maison:", ""))).is_err());
+    }
+
+    #[test]
+    fn a_battery_has_no_price_and_points_for_its_state() {
+        let stored = "[[meter]]\nid = \"in\"\nname = \"Charge\"\npoint = \"bms:b/charged\"\nrole = \"charge\"\nreset = \"never\"\n[[meter]]\nid = \"out\"\nname = \"Décharge\"\npoint = \"bms:b/discharged\"\nrole = \"discharge\"\n";
+        parse(stored).unwrap();
+        assert!(parse(&format!("{stored}price = 0.2\n")).is_err());
+        assert!(parse(&format!("{stored}price_point = \"x:y/z\"\n")).is_err());
+        assert!(parse(&format!("{stored}period = \"HC\"\n")).is_err());
+        let state =
+            "[battery]\nsoc = \"bms:b/soc\"\npower = \"bms:b/power\"\ncapacity_kwh = 10.5\n";
+        parse(&format!("{state}{stored}")).unwrap();
+        parse("[battery]\nsoc = \"bms:b/soc\"\n").unwrap();
+        assert!(parse(&state.replace("bms:b/soc", "soc")).is_err());
+        assert!(parse(&state.replace("10.5", "0")).is_err());
+        assert!(parse(&format!("{state}volts = \"bms:b/v\"\n")).is_err());
+        assert!(!Role::Charge.consumes() && !Role::Discharge.consumes());
     }
 
     #[test]

@@ -112,8 +112,28 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   `consumption_w`. L'appareil `energie:maison` gagne `today_production_kwh`,
   `today_export_kwh`, `today_self_consumed_kwh`, `today_self_consumption_rate`,
   `today_self_sufficiency`, `month_production_kwh`, `month_self_consumption_rate` (%).
-  Pas encore : batterie. Ce qu'un premier pilotage de batterie (sous Home Assistant, un hiver)
-  a appris, à respecter le jour où elle entre ici :
+- **Batterie de la maison** : rôles `charge` (index de ce qui entre dans la batterie) et
+  `discharge` (index de ce qui en sort), sans prix, jamais dans `total`. Chaque période donne
+  `battery_charge` et `battery_discharge` ; le bilan solaire en tient compte : `consumption` =
+  acheté + autoconsommé − stocké + rendu (ce que la maison a vraiment utilisé sur la période),
+  `self_sufficiency` = (consommation − acheté) / consommation, `self_consumed` reste production −
+  injection (utilisé ou stocké). « Le reste de la maison » retranche ce qui est stocké et ajoute
+  ce qui est rendu. Sans compteur `charge` ni `discharge`, rien ne change. `[energy.battery]`
+  (optionnel) : `soc` (le point de la charge, en %), `power` (W, positif en charge ; avec
+  `discharge_positive = true`, un point positif en décharge est retourné), `capacity_kwh` (ce
+  que la charge contient en kWh). `/api/energy` ajoute `battery` (charge, puissance signée,
+  kWh contenus) et `flows.battery_w` ; `consumption_w` = réseau + production − batterie.
+  L'appareil `energie:maison` gagne `today_battery_charge_kwh` et `today_battery_discharge_kwh`.
+  Page Énergie : carte « Batterie » (charge, en charge / alimente la maison / au repos, kWh du
+  jour) ; le flux en direct (Accueil, Énergie) montre la batterie sous la maison. Pas encore :
+  piloter la batterie, ni distinguer ce qu'elle a pris au réseau de ce qu'elle a pris au soleil.
+  Deux limites, connues : l'autosuffisance du jour suppose que tout ce qui est stocké vient du
+  soleil (chargée en heures creuses, la journée paraît moins autonome qu'elle n'est, le lendemain
+  plus : sur le mois, cela se compense aux pertes près) ; une batterie qui injecte vers le réseau
+  voit ce qu'elle a envoyé effacé par la borne « jamais plus d'injection que de production »,
+  seulement quand l'injection dépasse la production sur la période.
+  Ce qu'un premier pilotage de batterie (sous Home Assistant, un hiver) a appris, à respecter le
+  jour où le pilotage entrera ici :
   - la mesure du réseau ne passe jamais par la batterie : elle peut se couper du réseau au
     repos, et la maison perdrait la pince avec elle (lire le compteur en direct, voir le
     profil `jackery-meter`) ;

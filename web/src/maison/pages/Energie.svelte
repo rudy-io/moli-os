@@ -11,6 +11,7 @@
   import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
   import EnergyFlow from '../ui/EnergyFlow.svelte';
+  import { batteryNow } from '../lib/battery.js';
 
   onMount(useEnergy);
 
@@ -40,6 +41,9 @@
     const v = hub.devices[point.slice(0, i)]?.state?.[point.slice(i + 1)]?.value;
     return typeof v === 'number' ? v : (fallback ?? null);
   };
+
+  // The home battery: its charge and power read live from their points.
+  const battery = $derived(batteryNow(s, (point) => livePower(point)));
 
   const total = $derived(s?.meters.find((m) => m.role === 'total'));
   const now = $derived(total ? livePower(total.power, total.power_w) : null);
@@ -306,6 +310,29 @@
           </div>
         {/if}
       </section>
+
+      {#if battery}
+        <section class="card battery">
+          <span class="eyebrow">{t('energie.batterie.titre')}</span>
+          <strong class="big num">{battery.soc == null ? '—' : `${Math.round(battery.soc)} %`}</strong>
+          {#if battery.soc != null}
+            <div class="bar {battery.tone}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(battery.soc)} aria-label={t('energie.batterie.charge_pct')}>
+              <span style:width="{battery.soc}%"></span>
+            </div>
+          {/if}
+          <div class="row">
+            {#if battery.state}
+              <span class="state {battery.state} small">{t(`energie.batterie.${battery.state}`, { w: watts(Math.abs(battery.power)) })}</span>
+            {/if}
+            {#if battery.stored != null}
+              <span class="muted small num">{t('energie.batterie.stocke', { kwh: kwh(battery.stored), total: kwh(battery.capacity) })}</span>
+            {/if}
+          </div>
+          {#if battery.charged != null || battery.discharged != null}
+            <span class="muted small num">{t('energie.batterie.aujourdhui', { entre: kwh(battery.charged), sorti: kwh(battery.discharged) })}</span>
+          {/if}
+        </section>
+      {/if}
 
       {#if s.month.gas}
         <section class="card">
@@ -600,6 +627,35 @@
 
   .budget.over .bar span {
     background: var(--alert);
+  }
+
+  /* The battery's charge: green, orange under 40 %, red under 20 %. */
+  .battery .bar {
+    margin-bottom: 10px;
+  }
+
+  .battery .bar.mid span {
+    background: var(--warm);
+  }
+
+  .battery .bar.low span {
+    background: var(--alert);
+  }
+
+  .battery .state {
+    font-weight: 650;
+  }
+
+  .battery .state.charge {
+    color: var(--good);
+  }
+
+  .battery .state.decharge {
+    color: var(--warm);
+  }
+
+  .battery .state.repos {
+    color: var(--ink-3);
   }
 
   .budget.over .small.num {

@@ -143,6 +143,8 @@
   "serveur.energie.charge.raison": "Ce que fait Moli",
   "serveur.energie.charge.duree": "Temps de marche du cycle",
   "serveur.energie.point.today_production_kwh": "Production solaire aujourd'hui",
+  "serveur.energie.point.today_battery_charge_kwh": "Stocké dans la batterie aujourd'hui",
+  "serveur.energie.point.today_battery_discharge_kwh": "Rendu par la batterie aujourd'hui",
   "serveur.energie.point.today_export_kwh": "Injecté sur le réseau aujourd'hui",
   "serveur.energie.point.today_self_consumed_kwh": "Solaire consommé sur place aujourd'hui",
   "serveur.energie.point.today_self_consumption_rate": "Autoconsommation aujourd'hui",
