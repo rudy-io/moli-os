@@ -297,7 +297,9 @@ export function deviceKind(d) {
 /** Rooms with their devices sorted by kind, the layout's order first. */
 export function roomList() {
   const defs = home.config?.rooms ?? [];
-  const map = new Map(defs.map((r) => [r.name, []]));
+  // A room `/api/home` added (`added`: outside, not listed by the family)
+  // takes no place in the order: it comes with the other unlisted rooms.
+  const map = new Map(defs.filter((r) => !r.added).map((r) => [r.name, []]));
   // A fixture's bulbs and relay show inside it, not beside it.
   const inFixture = new Set(Object.values(hub.devices).filter(isFixture).flatMap((d) => d.members ?? []));
   for (const d of Object.values(hub.devices)) {

@@ -979,3 +979,14 @@ test('a heat pump and its circuit are heating and stay off the room cards; a the
   hub.devices = { [pump.id]: pump, [circuit.id]: circuit };
   assert.deepEqual(home.roomList(), []);
 });
+
+test('a room /api/home added (outside, unlisted) takes no place in the order', () => {
+  const lamp = (id, room) => ({
+    id, model: 'Home Assistant light', label: { name: id, room }, online: true,
+    points: [point('on', { type: 'binary' }, false, 'on_off')], state: {},
+  });
+  hub.devices = Object.fromEntries([lamp('l:salon', 'Salon'), lamp('l:ext', 'Extérieur'), lamp('l:bureau', 'Bureau')].map((d) => [d.id, d]));
+  home.home.config = { rooms: [{ name: 'Bureau' }, { name: 'Extérieur', outside: true, added: true }] };
+  assert.deepEqual(home.roomList().map((r) => r.name), ['Bureau', 'Salon', 'Extérieur']);
+  home.home.config = {};
+});

@@ -71,7 +71,7 @@
   "maison.air.mauvais": "Bad",
 
   "maison.dehors.titre": "Outside",
-  "maison.dehors.sous_titre": "The weather, the air, the pool and the garden.",
+  "maison.dehors.sous_titre": "The weather, the air and everything outside.",
   "maison.dehors.ressenti": "Feels like {feels}° · high {max}° · low {min}°",
   "maison.dehors.humidite": "Humidity",
   "maison.dehors.vent": "Wind",
