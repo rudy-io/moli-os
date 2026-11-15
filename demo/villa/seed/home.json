@@ -99,7 +99,8 @@
   {
    "name": "Pool house",
    "icon": "home-outline",
-   "aliases": []
+   "aliases": [],
+   "outside": false
   },
   {
    "name": "Jardin",
@@ -247,21 +248,7 @@
   "air": "air:ville",
   "weather": "meteo:ville",
   "pool": "piscine:bassin",
-  "pool_pump": "tuya:pompe-piscine",
-  "garden_lights": [
-   {
-    "id": "tuya:allee",
-    "name": "Allée"
-   },
-   {
-    "id": "tuya:fond-jardin",
-    "name": "Fond du jardin"
-   },
-   {
-    "id": "tuya:eclairage-piscine",
-    "name": "Piscine"
-   }
-  ]
+  "pool_pump": "tuya:pompe-piscine"
  },
  "safety": [
   "z2m:fumee-salon",

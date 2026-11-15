@@ -23,7 +23,7 @@ Le flux SSE `/api/events` est ouvert **une seule fois** et partagé (`web/src/li
 | Caméras | `#/cameras` | mur d'images (rafraîchies si visibles ; caméras sur batterie au toucher seulement), plein écran avec les passages du jour |
 | Énergie | `#/energie` | en ce moment (Linky en direct coloré selon la conso, repère à `warn`, prochain changement heures creuses / pleines), aujourd'hui (au rythme d'hier), mois + projection vs mois dernier + part en heures creuses, Tempo ; **conseils du moment** (`lib/energy-advice.js` : porte ouverte clim allumée, grosse conso en heures pleines et qui tire, clim alors qu'il fait plus frais dehors, consignes, pompe de piscine en heures pleines, heures creuses en cours ou proches, talon (heure la plus calme de chaque jour, médiane sur 7 jours) en €/an) ; qui consomme maintenant ; où ça part (aujourd'hui / hier / ce mois, par circuit, %) ; **journée type** (moyenne heure par heure sur 7 jours, heures creuses **apprises** de l'historique du point PTEC, talon) ; graphe 24 h / 30 j / 12 mois. Mobile : une colonne, chiffres deux par deux **Journée type** : la journée en cours par-dessus (repère sur chaque heure passée, « aujourd'hui jusqu'à X h : … kWh, d'habitude … (± %) ») ; lumières estimées « ≈ estimé » dans « qui consomme » et « où ça part ». |
 | Impression 3D | `#/impression` | une carte par imprimante (Klipper, Bambu) : état, vignette du travail, progression, couche, temps restant et heure de fin, buse / plateau / enceinte, têtes et filaments (couleurs ; AMS pour Bambu), lumière, **pause / reprise / annulation** (annuler demande une confirmation) ; totaux (impressions, heures, km de filament). Sur l'Accueil, une pastille tant qu'une impression tourne, est en pause ou en erreur ; dans Pièces, une pastille sur la carte de la pièce |
-| Dehors | `#/dehors` | météo (soleil calculé), air/UV, piscine (pH, chlore, filtration : `outdoor.pool`, sinon l'appareil d'une pièce extérieure qui mesure pH ou chlore ; la pompe seulement par `outdoor.pool_pump`), une carte par pièce extérieure (`rooms[].outside`) avec ses lumières, portail, volets, prises et capteurs comme dans Pièces (sauf une station déjà sur « Données réelles »), jardin (`outdoor.garden_lights` qu'aucune pièce extérieure ne montre déjà), caméras extérieures (favorites et celles des pièces extérieures, une fois chacune). Avec `[outdoor]` dans `moli.toml` (#210, voir [pilotes.md](pilotes.md), `dehors`), la température, l'humidité, le vent, les rafales, la pluie du jour et l'UV viennent de `dehors:meteo` : chacun porte une pastille visible sans survol, « mesuré » (une station) ou « prévu » (« prévu · station muette » quand une station a ce sens mais s'est tue) ; un appui dit la source et l'âge (« Station · il y a 25 min »). La direction du vent s'écrit après sa vitesse (N, NNE…). Une carte « Données réelles » montre chaque station : toutes ses mesures (pas ses réglages, ce qui se règle, ni sa radio), chacune avec son âge. En bas, le crédit dit les deux : prévisions et mesures |
+| Dehors | `#/dehors` | météo (soleil calculé), air/UV, piscine (pH, chlore, filtration : `outdoor.pool`, sinon l'appareil d'une pièce extérieure qui mesure pH ou chlore ; la pompe seulement par `outdoor.pool_pump`), une carte par pièce extérieure (`rooms[].outside`) avec ses lumières, portail, volets, prises et capteurs comme dans Pièces (sauf une station déjà sur « Données réelles »), jardin (`outdoor.garden_lights`, clé ancienne : les lumières qu'aucune pièce extérieure ne montre déjà), caméras extérieures (favorites et celles des pièces extérieures, une fois chacune). Avec `[outdoor]` dans `moli.toml` (#210, voir [pilotes.md](pilotes.md), `dehors`), la température, l'humidité, le vent, les rafales, la pluie du jour et l'UV viennent de `dehors:meteo` : chacun porte une pastille visible sans survol, « mesuré » (une station) ou « prévu » (« prévu · station muette » quand une station a ce sens mais s'est tue) ; un appui dit la source et l'âge (« Station · il y a 25 min »). La direction du vent s'écrit après sa vitesse (N, NNE…). Une carte « Données réelles » montre chaque station : toutes ses mesures (pas ses réglages, ce qui se règle, ni sa radio), chacune avec son âge. En bas, le crédit dit les deux : prévisions et mesures |
 | Automatismes | `#/automatismes`, `#/automatismes/<id>` | liste, idées, éditeur à canevas (voir [automatismes.md](automatismes.md)) |
 | Système | `#/systeme` | **carte vivante** du système et comparaison avec HA (voir plus bas) |
 
@@ -76,7 +76,7 @@ telles que les appareils les nomment).
   },
   "salon":   { "tv": "tele:…", "speaker": "sonos:…", "room_light": "hue:…", "lamps": ["hue:…"] },
   "doors":   [{ "id": "tuya:…", "name": "Entrée" }],
-  "outdoor": { "weather": "meteo:…", "air": "air:…", "tempo": "tempo:…", "pool": "piscine:…", "pool_pump": "tuya:…", "garden_lights": [{ "id": "tuya:…", "name": "Lumière du jardin" }] },
+  "outdoor": { "weather": "meteo:…", "air": "air:…", "tempo": "tempo:…", "pool": "piscine:…", "pool_pump": "tuya:…" },
   "safety":  ["z2m:…"],
   "hidden":  ["tuya:…", "compteur:…"],
   "quiet":   ["tuya:…"],
@@ -102,8 +102,25 @@ telles que les appareils les nomment).
   parmi ceux de `moli_core::outside::WORDS` : « Extérieur », « Jardin », « Terrasse », « Allée »,
   « Piscine », « Spa », « Garden », « Porch »…). `/api/home` renvoie chaque pièce avec son
   `outside`, et ajoute en fin de `rooms` les pièces extérieures que seuls les appareils ou le Plan
-  nomment, avec `"added": true` (elles ne prennent pas de place dans l'ordre des pièces). Le nom ne peut pas tout dire : `{ "name": "Jardin d'hiver", "outside": false }`,
-  `{ "name": "Cour intérieure", "outside": false }`, `{ "name": "Préau", "outside": true }`.
+  nomment, avec `"added": true` (elles ne prennent pas de place dans l'ordre des pièces).
+  Ce qui est rangé dans une pièce dehors s'affiche sur la page Dehors, sans autre liste.
+  Le nom ne peut pas tout dire : un mot de la liste suffit, même avec un autre à côté. Le
+  marqueur tranche :
+
+  ```json
+  "rooms": [
+    { "name": "Jardin d'hiver", "outside": false },
+    { "name": "Cour intérieure", "outside": false },
+    { "name": "Pool house", "outside": false },
+    { "name": "Local piscine", "outside": false },
+    { "name": "Préau", "outside": true }
+  ]
+  ```
+- `outdoor.garden_lights` (clé ancienne, toujours lue) : la liste des lumières de la carte
+  « Jardin » de la page Dehors. Une pièce extérieure suffit maintenant : rangez la lumière dans
+  une pièce dehors (« Jardin », « Allée »… ou `outside: true`), elle s'affiche dans la carte de
+  sa pièce, puis retirez son entrée. La carte « Jardin » ne garde que les lumières qu'aucune
+  pièce extérieure ne montre déjà, et disparaît quand la liste est vide.
 - `charts` (facultatif) : des cartes d'historique sur l'accueil, `[{ "title": "Historique 10 minutes", "minutes": 10, "points": ["p1:…/momentary_active_import", "prise:…/power"] }]` : un graphique par unité, une légende qui masque ou montre chaque courbe et dit sa valeur du moment (nombres et heures dans la langue de la maison) ; relu toutes les 10 à 60 s selon la fenêtre, jamais quand la page est cachée. 8 points au plus par carte, `minutes` de 1 à 10 080 (une semaine) ; un point mal écrit (sans `/`) ou que la maison n'a pas est écarté, et la carte le dit.
 - `hidden` : masqué du dashboard **et** de l'inventaire de la conversation (pas de celui
   qui sert à créer les automatismes). Par exemple un compteur EM06 (sinon Moli montre une fiche
