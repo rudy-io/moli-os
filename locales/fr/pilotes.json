@@ -974,5 +974,6 @@
   "pilotes.synology.identifiants_manquants": "pas d'identifiants du NAS : ranger le compte DSM et son mot de passe avec \"moli-os secrets set {instance} {username}\" et \"… {password}\", puis relancer Moli",
   "pilotes.synology.identifiants_refuses": "le NAS refuse ce compte ou ce mot de passe (double authentification, compte désactivé ou adresse bloquée ?) : les corriger avec \"moli-os secrets set {instance} {username}\" et \"… {password}\", puis relancer Moli ; Moli n'insiste pas, pour que DSM ne bloque pas son adresse",
   "pilotes.synology.coffre_indisponible": "coffre de secrets indisponible : Moli ne peut pas garder l'empreinte du certificat du NAS",
+  "pilotes.synology.refus_en_cours": "le NAS a refusé la connexion il y a peu : nouvel essai dans quelques minutes, sans insister pour que DSM ne bloque pas l'adresse de Moli",
   "pilotes.synology.certificat_change": "le certificat du NAS a changé : si c'est voulu, oublier l'ancien avec \"moli-os secrets forget {instance} {key}\", puis relancer Moli"
 }

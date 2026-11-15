@@ -227,6 +227,10 @@ impl Fixture {
         panic!("{what}: {:?}", self.hub.snapshot().drivers);
     }
 
+    fn warning(&self) -> Option<String> {
+        self.hub.snapshot().drivers[0].warning.clone()
+    }
+
     fn status(&self) -> DriverStatus {
         self.hub.snapshot().drivers[0].status.clone()
     }
@@ -327,19 +331,29 @@ async fn an_order_met_by_a_lost_session_is_sent_again_after_a_new_login() {
 }
 
 #[tokio::test]
-async fn refused_credentials_wait_for_a_human_and_are_not_tried_again() {
+async fn refused_credentials_are_not_insisted_on_and_tried_again_later() {
     let dsm = Arc::new(Dsm::default());
     dsm.refuse_login.store(true, Ordering::SeqCst);
     let (port, _, server) = serve(Arc::clone(&dsm)).await;
     let nas = start(port, None, None).await;
-    nas.until("waiting", |f| {
-        matches!(f.status(), DriverStatus::Waiting { .. })
-    })
-    .await;
+    nas.until("warned", |f| f.warning().is_some()).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(dsm.logins.load(Ordering::SeqCst), 1);
-    // The NAS device stays, honestly down.
+    // The NAS device stays, honestly down, and the driver keeps running.
     assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(false)));
+    assert_eq!(nas.status(), DriverStatus::Running);
+    // DSM accepts again (it was starting): the next poll after the
+    // cool-down logs in, and the warning goes.
+    dsm.refuse_login.store(false, Ordering::SeqCst);
+    for _ in 0..500 {
+        if nas.value("nas", "up") == Some(moli_core::Value::Bool(true)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(nas.value("nas", "up"), Some(moli_core::Value::Bool(true)));
+    assert_eq!(dsm.logins.load(Ordering::SeqCst), 2);
+    assert!(nas.warning().is_none());
     server.abort();
 }
 
@@ -365,13 +379,21 @@ async fn credentials_refused_during_an_order_stop_the_driver_from_trying_again()
         )
         .await;
     assert!(refused.is_err());
-    nas.until("waiting", |f| {
-        matches!(f.status(), DriverStatus::Waiting { .. })
-    })
-    .await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    nas.until("warned", |f| f.warning().is_some()).await;
+    // Still cooling down: an order does not log in again.
+    let again = nas
+        .hub
+        .command(
+            &nas.point("nas", "control"),
+            moli_core::Value::from("reboot"),
+            Origin::Ui,
+            None,
+        )
+        .await;
+    assert!(again.is_err());
     assert_eq!(dsm.logins.load(Ordering::SeqCst), 2);
     assert_eq!(dsm.calls("method=shutdown"), 1);
+    assert_eq!(dsm.calls("method=reboot"), 0);
     server.abort();
 }
 

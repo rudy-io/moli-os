@@ -1408,8 +1408,9 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
 - **Ordres** (sens `control`) : `wake` (paquet Wake-on-LAN, `moli_net::wol`, seulement proposé si la MAC est connue),
   `shutdown` et `reboot` (`SYNO.Core.System`, `force=false`, **exécutés au plus une fois** : renvoyés seulement
   si DSM répond « session perdue »).
-- **Identifiants refusés** ou certificat changé : attente d'une personne (`wait_for`), **sans insister** (DSM
-  bloque l'adresse après quelques échecs). Un certificat Let's Encrypt renouvelé change l'empreinte épinglée :
+- **Connexion refusée** : avertissement (`warn`), NAS « éteint », ordres refusés, **un seul nouvel essai toutes
+  les 15 min** (`RETRY_AFTER_REFUSAL` : DSM refuse aussi pendant son démarrage, et bloque l'adresse après
+  quelques échecs rapprochés). **Certificat changé** : attente d'une personne (`wait_for`). Un certificat Let's Encrypt renouvelé change l'empreinte épinglée :
   `moli-os secrets forget <instance> cert` à chaque renouvellement.
 - **État** : lecture éprouvée sur un DS1019+ (DSM 7.4), fixtures = réponses réelles anonymisées ; **ordres, onduleur
   activé et pannes non éprouvés** (fixtures `*-faulty` reconstituées). Détail : `integrations/synology/README.md`.

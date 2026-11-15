@@ -43,9 +43,11 @@ Pilote natif `crates/moli-synology`, **lecture et ordres**.
   - `shutdown`, `reboot` : `SYNO.Core.System` (`force=false`). **Demandent un compte administrateur.**
     **Exécutés au plus une fois** : renvoyés seulement si DSM répond « session perdue » (preuve qu'il
     ne les a pas exécutés), jamais après un échec dont on ignore l'issue.
-- **Identifiants refusés** : le pilote s'arrête en attente d'un humain et **n'insiste pas** (DSM
-  bloque l'adresse après quelques échecs). Le certificat qui change (`PIN_MISMATCH`) : même attente,
-  avec la commande `moli-os secrets forget <instance> cert`.
+- **Connexion refusée** : le pilote **n'insiste pas** (DSM bloque l'adresse après quelques échecs) :
+  avertissement visible, NAS affiché « éteint », ordres refusés, et **un seul nouvel essai toutes les
+  15 minutes**. DSM refuse aussi les connexions pendant son démarrage : un NAS qui redémarre (essai réel
+  du `reboot`) revient donc tout seul. Mot de passe en cause : `moli-os secrets set`, puis relancer Moli.
+  Le certificat qui change (`PIN_MISMATCH`) : attente d'un humain, avec `moli-os secrets forget <instance> cert`.
 - **Certificat renouvelé** : si DSM renouvelle un certificat Let's Encrypt (environ tous les 90
   jours), l'empreinte épinglée change et le pilote s'arrête en attente (`PIN_MISMATCH`) jusqu'à
   `moli-os secrets forget <instance> cert`. Un certificat auto-signé de DSM, lui, ne change pas.

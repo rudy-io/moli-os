@@ -28,6 +28,10 @@ const NO_RIGHT: u32 = 105;
 /// every minute, it can keep the disks from going to sleep (or wake them).
 /// Disk temperature, health and free space move slowly.
 const STORAGE_EVERY: Duration = Duration::from_secs(600);
+/// After a refused login, the NAS is not asked again before this long: DSM
+/// blocks an address that fails a few times in a few minutes, yet it also
+/// refuses logins while it starts, so the refusal cannot be final.
+const RETRY_AFTER_REFUSAL: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 900 });
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,6 +111,15 @@ struct State {
     /// The last storage read and when: read again once `STORAGE_EVERY` has
     /// passed, or at once after the NAS stopped answering.
     storage: Option<(Instant, Json)>,
+    /// When the NAS last refused the login (the cool-down runs from then).
+    refused: Option<Instant>,
+}
+
+impl State {
+    fn cooling_down(&self) -> bool {
+        self.refused
+            .is_some_and(|at| at.elapsed() < RETRY_AFTER_REFUSAL)
+    }
 }
 
 /// `aabbccddeeff` → `aa:bb:cc:dd:ee:ff`.
@@ -161,6 +174,7 @@ impl Synology {
             model: None,
             up: None,
             storage: None,
+            refused: None,
         };
         publish_nas(ctx, &state, model::nas_states_down());
         ctx.ready();
@@ -171,25 +185,35 @@ impl Synology {
                 command = ctx.next_command() => {
                     let Some(command) = command else { return Ok(()) };
                     let result = self.execute(ctx, &mut state, &command).await;
-                    let refused = matches!(&result, Err(e) if e.downcast_ref::<dsm::Refused>().is_some());
+                    let refused = result
+                        .as_ref()
+                        .err()
+                        .filter(|e| e.downcast_ref::<dsm::Refused>().is_some())
+                        .map(|e| format!("{e:#}"));
                     command.reply(result.map_err(|e| describe(&e)));
-                    if refused {
-                        unreachable(ctx, &state);
-                        return wait_for_credentials(ctx).await;
+                    if let Some(why) = refused {
+                        refuse(ctx, &mut state, &why);
                     }
                 }
                 _ = poll.tick() => {
+                    if state.cooling_down() {
+                        continue;
+                    }
                     let Err(error) = self.poll(ctx, &mut state).await else {
                         if state.up != Some(true) {
                             tracing::info!(instance = %ctx.instance(), "synology reachable");
                         }
                         state.up = Some(true);
+                        if state.refused.take().is_some() {
+                            ctx.clear_warning();
+                        }
                         continue;
                     };
                     unreachable(ctx, &state);
                     state.storage = None;
                     if error.downcast_ref::<dsm::Refused>().is_some() {
-                        return wait_for_credentials(ctx).await;
+                        refuse(ctx, &mut state, &format!("{error:#}"));
+                        continue;
                     }
                     if format!("{error:#}").contains(PIN_MISMATCH) {
                         ctx.wait_for(moli_i18n::tr!(
@@ -373,6 +397,10 @@ impl Synology {
                 moli_net::wol::wake(&colon(mac), Some(&self.config.host)).await
             }
             order @ (model::SHUTDOWN | model::REBOOT) => {
+                ensure!(
+                    !state.cooling_down(),
+                    moli_i18n::tr!("pilotes.synology.refus_en_cours")
+                );
                 let client = self.client(ctx, state).await?;
                 // Last check before the one request: it is never repeated.
                 ensure!(
@@ -394,17 +422,20 @@ impl Synology {
     }
 }
 
-/// The NAS refused the login, from the poll or from an order. Asking again
-/// would get the hub's address blocked: the driver waits for new credentials.
-async fn wait_for_credentials(ctx: &mut DriverCtx) -> anyhow::Result<()> {
-    ctx.wait_for(moli_i18n::tr!(
+/// The NAS refused the login, from the poll or from an order: nothing is
+/// known of it any more, and it is not asked again for a while.
+fn refuse(ctx: &DriverCtx, state: &mut State, why: &str) {
+    unreachable(ctx, state);
+    state.storage = None;
+    state.up = Some(false);
+    state.refused = Some(Instant::now());
+    tracing::warn!(instance = %ctx.instance(), why, "synology refused the login, next try in 15 minutes");
+    ctx.warn(moli_i18n::tr!(
         "pilotes.synology.identifiants_refuses",
         instance = ctx.instance(),
         username = USERNAME,
         password = PASSWORD
     ));
-    ctx.cancelled().await;
-    Ok(())
 }
 
 /// A part that cannot be read (no right, too slow, a dropped connection)
