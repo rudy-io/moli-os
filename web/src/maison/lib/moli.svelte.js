@@ -240,9 +240,11 @@ export async function settle(a, approve, label) {
     moli.decided[a.request] = 'denied';
     return;
   }
-  if (hub.session?.human) {
-    await decide({ id: a.request, point: a.point }, true);
-    moli.decided[a.request] = 'approved';
+  // Some orders want the code each time (disarming the alarm): the sheet
+  // asks it even in a human session.
+  const wantsCode = hub.approvals.some((r) => r.id === a.request && r.code);
+  if (hub.session?.human && !wantsCode) {
+    if (await decide({ id: a.request, point: a.point }, true)) moli.decided[a.request] = 'approved';
     return;
   }
   home.held = { id: a.request, point: a.point, reason: a.reason, label, onApproved: () => (moli.decided[a.request] = 'approved') };

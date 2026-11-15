@@ -849,6 +849,21 @@ impl Hub {
         if is_agent(origin) && self.opens(point, value) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"));
         }
+        // A person allowed agents this very order (arming the alarm by
+        // voice): no person is needed for the control or the device, but
+        // protected rooms and quiet hours still hold.
+        if is_agent(origin) && self.0.opts.guard.agents_may(point.as_str(), value) {
+            let rooms = point
+                .split()
+                .map(|(device, _)| self.rooms_of(&device))
+                .unwrap_or_default();
+            let rooms: Vec<&str> = rooms.iter().map(String::as_str).collect();
+            return self
+                .0
+                .opts
+                .guard
+                .check(&rooms, origin, jiff::Timestamp::now());
+        }
         self.verdict(point, origin)
     }
 

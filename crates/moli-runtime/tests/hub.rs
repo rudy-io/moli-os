@@ -242,6 +242,32 @@ async fn some_orders_want_the_code_each_time_even_from_a_session() {
 }
 
 #[tokio::test]
+async fn agents_may_what_a_person_allowed_them_in_the_file() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            protected_devices: vec!["fake:plug1".into()],
+            agents_may: vec![moli_runtime::guard::PointValues {
+                point: "fake:plug1/state".into(),
+                values: vec!["true".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    // The assistant switches on: allowed in the file.
+    hub.command(&point("state"), Value::Bool(true), Origin::Assistant, None)
+        .await
+        .unwrap();
+    // Off is not: the protected device still wants a person.
+    assert!(matches!(
+        hub.command(&point("state"), Value::Bool(false), Origin::Assistant, None)
+            .await,
+        Err(CommandError::NeedsApproval { .. })
+    ));
+}
+
+#[tokio::test]
 async fn a_mirror_house_journals_every_order_and_sends_none() {
     let (hub, _cancel) = start_with(HubOptions {
         mirror: true,
@@ -445,6 +471,7 @@ fn guarded_hub() -> HubOptions {
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
             code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     }
@@ -786,6 +813,7 @@ async fn groups_are_guarded_by_their_members_rooms_and_lost_rooms_are_reported()
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
             code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     })
@@ -1208,6 +1236,7 @@ fn quiet_all_day() -> HubOptions {
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
             code_each_time: vec![],
+            agents_may: vec![],
         },
         ..HubOptions::default()
     }

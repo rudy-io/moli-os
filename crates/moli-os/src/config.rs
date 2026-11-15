@@ -132,6 +132,10 @@ pub struct GuardConfig {
     /// `[[guard.code_each_time]] point = "alarme:maison/mode", values = ["off"]`.
     #[serde(default)]
     pub code_each_time: Vec<moli_runtime::guard::CodeEachTime>,
+    /// Orders agents may give themselves on a point kept for a person:
+    /// `[[guard.agents_may]] point = "alarme:maison/mode", values = ["home", "night"]`.
+    #[serde(default)]
+    pub agents_may: Vec<moli_runtime::guard::PointValues>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +176,7 @@ impl GuardConfig {
             protect_unassigned: self.protect_unassigned,
             dashboard: self.dashboard,
             code_each_time: self.code_each_time.clone(),
+            agents_may: self.agents_may.clone(),
         })
     }
 }

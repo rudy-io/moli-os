@@ -283,8 +283,10 @@ export async function decide(request, approve, pin) {
       hub.approvals = hub.approvals.filter((a) => a.id !== request.id);
     }
     if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    return true;
   } catch (err) {
     toast(t('systeme.hub.decision_non_appliquee', { message: err.message }));
+    return false;
   }
 }
 

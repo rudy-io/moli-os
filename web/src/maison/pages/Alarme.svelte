@@ -2,6 +2,7 @@
   import { hub, value, since, act, home, relative, clock } from '../lib/home.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
+  import AlarmSettings from '../ui/AlarmSettings.svelte';
   import { isAlarm, setupOf, MODES, sensorActive, blocking, toneOf, secondsLeft, delay, journal } from '../lib/alarm.js';
 
   const alarm = $derived(Object.values(hub.devices).find(isAlarm));
@@ -51,6 +52,7 @@
   });
 
   let busy = $state(null);
+  let editing = $state(false);
   async function set(mode) {
     busy = mode;
     await act(`${id}/mode`, mode, mode === 'off' ? t('alarme.desarmer') : t('alarme.armer_en', { mode: modeName(mode) }));
@@ -130,10 +132,24 @@
         {/each}
       </div>
 
+      <div class="tools">
+        {#if state === 'disarmed'}
+          <button class="link" onclick={() => (editing = !editing)} aria-expanded={editing}>
+            <Icon name="tune" size={16} />{t('alarme.reglages.titre')}
+          </button>
+        {:else}
+          <small class="muted">{t('alarme.reglages.desarmer_pour')}</small>
+        {/if}
+      </div>
+
       {#each modes.filter((m) => current !== m && blocking(setup, m, valueOf).length) as m (m)}
         <p class="why"><Icon name="warning" size={15} />{t('alarme.impossible_mode', { mode: modeName(m), capteurs: blocking(setup, m, valueOf).join(', ') })}</p>
       {/each}
     </section>
+
+    {#if editing && state === 'disarmed'}
+      <AlarmSettings {id} {setup} onclose={() => (editing = false)} />
+    {/if}
 
     <div class="cols">
       <section class="card sensors">
@@ -335,6 +351,27 @@
     color: var(--warm-ink);
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .tools {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: -6px;
+  }
+
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .cols {

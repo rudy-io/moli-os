@@ -76,3 +76,31 @@ test('the journal pairs each event with its cause', () => {
     ],
   );
 });
+
+import { candidates, draftOf, withoutMode, problems } from './alarm.js';
+
+test('what can be a sensor: doors, presence, camera zones', () => {
+  const devices = [
+    device,
+    { id: 'z2m:porte', points: [{ key: 'contact', semantic: 'contact', label: 'contact' }, { key: 'battery' }] },
+    { id: 'frigate:zone-cour', points: [{ key: 'person', label: 'Personnes' }, { key: 'all', label: 'Objets' }] },
+    { id: 'hue:lampe', points: [{ key: 'on' }] },
+  ];
+  const names = { 'z2m:porte': 'Porte atelier', 'frigate:zone-cour': 'Zone cour' };
+  const c = candidates(devices, (d) => names[d.id]);
+  assert.deepEqual(c, [
+    { point: 'z2m:porte/contact', name: 'Porte atelier' },
+    { point: 'frigate:zone-cour/person', name: 'Zone cour (Personnes)' },
+  ]);
+});
+
+test('a draft: a mode turned off leaves the sensors, and what blocks saving', () => {
+  const d = draftOf(setupOf(device));
+  assert.deepEqual(problems(d), []);
+  const without = withoutMode(d, 'night');
+  assert.deepEqual(Object.keys(without.modes), []);
+  assert.ok(without.sensors.every((s) => !s.modes.includes('night')));
+  assert.ok(problems(without).includes('alarme.reglages.aucun_mode'));
+  d.modes.night.exit = 4000;
+  assert.ok(problems(d).includes('alarme.reglages.delai_invalide'));
+});

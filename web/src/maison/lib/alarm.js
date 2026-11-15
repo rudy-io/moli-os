@@ -71,3 +71,49 @@ export function journal(events, causes) {
     })
     .sort((a, b) => b.ts - a.ts);
 }
+
+// ---- settings (point `setup`, written back disarmed) -------------------
+
+/** Points a sensor can be: an opening, a presence, a count in a camera zone. */
+const SENSOR_KEYS = ['contact', 'occupancy', 'motion', 'presence', 'person', 'car', 'vibration', 'tamper', 'water_leak', 'smoke'];
+
+/** Every point of the house that can watch for the alarm: [{ point, name }],
+ *  by name. `nameOf(device)` gives the device's name in Moli. */
+export function candidates(devices, nameOf) {
+  const out = [];
+  for (const d of devices) {
+    if (isAlarm(d)) continue;
+    for (const p of d.points ?? []) {
+      if (!SENSOR_KEYS.includes(p.key) && !['contact', 'occupancy'].includes(p.semantic)) continue;
+      const zone = d.id.includes(':zone-');
+      out.push({ point: `${d.id}/${p.key}`, name: zone || p.key !== 'contact' ? `${nameOf(d)} (${p.label ?? p.key})` : nameOf(d) });
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A draft from what the alarm shows: a copy the screen may change. */
+export function draftOf(setup) {
+  return { modes: structuredClone(setup.modes ?? {}), sensors: structuredClone(setup.sensors ?? []) };
+}
+
+/** Turning a mode off takes it from every sensor. */
+export function withoutMode(draft, mode) {
+  const modes = { ...draft.modes };
+  delete modes[mode];
+  return { modes, sensors: draft.sensors.map((s) => ({ ...s, modes: s.modes.filter((m) => m !== mode) })) };
+}
+
+/** What stops the draft from being kept, as keys of the screen's words. */
+export function problems(draft) {
+  const out = [];
+  if (!Object.keys(draft.modes).length) out.push('alarme.reglages.aucun_mode');
+  for (const d of Object.values(draft.modes)) {
+    if ([d.exit, d.entry, d.trigger].some((v) => !Number.isInteger(v) || v < 0 || v > 3600)) {
+      out.push('alarme.reglages.delai_invalide');
+      break;
+    }
+  }
+  if (draft.sensors.some((s) => !s.modes.length)) out.push('alarme.reglages.capteur_sans_mode');
+  return out;
+}
