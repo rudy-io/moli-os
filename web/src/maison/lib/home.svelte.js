@@ -83,16 +83,38 @@ export function since(id, key) {
   return hub.devices[id]?.state?.[key]?.ts ?? null;
 }
 
-/** A button's or a remote's last press (#198): its `action` (an enum it only
- *  tells), with when. `null`: no button; `{ action: null }`: no press seen yet. */
+/** A button's or a remote's last press (#198, #211): the most recent of its
+ *  `press` points (the driver says which, whatever the key: Z2M `action`, Hue
+ *  `button<N>`, Dirigera `button`, Tuya `switch_mode…`), with when. `button`:
+ *  the point's label when the device has several (a Hue dimmer), else null.
+ *  `null`: no button; `{ action: null }`: no press seen yet. */
 export function lastPress(d) {
-  const point = d?.points.find((p) => p.key === 'action' && p.kind?.type === 'enum' && !p.access?.write);
-  if (!point) return null;
-  const action = value(d.id, 'action');
-  return { action: typeof action === 'string' && action ? action : null, ts: since(d.id, 'action') };
+  const points = (d?.points ?? []).filter((p) => p.semantic === 'press' && !p.access?.write);
+  if (!points.length) return null;
+  let last = { action: null, ts: null, button: null };
+  for (const p of points) {
+    const action = value(d.id, p.key);
+    if (typeof action !== 'string' || !action) continue;
+    const ts = since(d.id, p.key);
+    if (last.action == null || (ts ?? 0) > (last.ts ?? 0)) {
+      last = { action, ts, button: points.length > 1 ? (p.label ?? p.key) : null };
+    }
+  }
+  return last;
 }
 
-const PRESSES = { single: 'commun.appui.simple', double: 'commun.appui.double', triple: 'commun.appui.triple', hold: 'commun.appui.maintenu', long: 'commun.appui.maintenu', release: 'commun.appui.relache' };
+// Each gesture named by the event that ends it: a Hue press sends
+// `initial_press` then `short_release` (or `long_press`, `repeat`… then
+// `long_release`), and the chip shows the last one, so a hold ends « maintenu ».
+const PRESSES = {
+  single: 'commun.appui.simple', click: 'commun.appui.simple', short_release: 'commun.appui.simple',
+  double: 'commun.appui.double', double_click: 'commun.appui.double', double_short_release: 'commun.appui.double',
+  triple: 'commun.appui.triple',
+  hold: 'commun.appui.maintenu', long: 'commun.appui.maintenu', press: 'commun.appui.maintenu',
+  long_press: 'commun.appui.maintenu', repeat: 'commun.appui.maintenu', long_release: 'commun.appui.maintenu',
+  initial_press: 'commun.appui.appui',
+  release: 'commun.appui.relache',
+};
 /** A press in words (« simple », « double », « maintenu »); any other, as told. */
 export const pressWord = (action) => (PRESSES[action] ? t(PRESSES[action]) : action);
 

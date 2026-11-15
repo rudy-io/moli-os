@@ -203,6 +203,7 @@
   "commun.piece.dernier_appui": "{name}: last press {action}, {when}",
   "commun.appui.simple": "single",
   "commun.appui.double": "double",
+  "commun.appui.appui": "press",
   "commun.appui.triple": "triple",
   "commun.appui.maintenu": "held",
   "commun.appui.relache": "released",

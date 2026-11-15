@@ -126,7 +126,10 @@
       if (fresh || every) {
         const word = pressWord(press.action);
         const when = relative(press.ts, home.now);
-        out.push({ tone: fresh ? 'warm' : '', icon: 'hand', text: when ? `${word} · ${when}` : word, title: t('commun.piece.dernier_appui', { name: nameOf(d.id), action: word, when }) });
+        // A remote with several buttons says which one (« Bouton 2 · simple »).
+        const what = press.button ? `${press.button} · ${word}` : word;
+        const name = press.button ? `${nameOf(d.id)} · ${press.button}` : nameOf(d.id);
+        out.push({ tone: fresh ? 'warm' : '', icon: 'hand', text: when ? `${what} · ${when}` : what, title: t('commun.piece.dernier_appui', { name, action: word, when }) });
       }
     }
     if (lowBattery(d.id)) out.push({ tone: 'alert', icon: 'battery-alert', text: t('commun.piece.pile_faible', { name: nameOf(d.id) }) });

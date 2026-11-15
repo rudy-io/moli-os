@@ -194,6 +194,7 @@
   "commun.piece.dernier_appui": "{name} : dernier appui {action}, {when}",
   "commun.appui.simple": "simple",
   "commun.appui.double": "double",
+  "commun.appui.appui": "appui",
   "commun.appui.triple": "triple",
   "commun.appui.maintenu": "maintenu",
   "commun.appui.relache": "relâché",
