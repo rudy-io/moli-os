@@ -429,6 +429,7 @@ mod tests {
                 via,
                 key: "synthetic".into(),
                 person: None,
+                remote: false,
             });
             parts.extensions.insert(humans.clone());
             parts.extensions.insert(persons.clone());

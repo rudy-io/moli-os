@@ -32,6 +32,19 @@ timezone = "Europe/Paris"
 # aud = "<application audience tag>"
 # known_only = false
 
+# Other ways in from outside the house, declared (docs/SECURITY-MODEL.md).
+# Nothing declared: the home network as before. What comes in through them
+# is refused what stays at home (agents over MCP, machines, satellites, the
+# installation, integrations' setup, keys, the house's code).
+# vpn: subnets of a VPN (WireGuard, Tailscale…): the household, from outside.
+# proxies: addresses of reverse proxies (this machine or the home network):
+# what they relay is a stranger's until a person signs in with a password,
+# known by the client address the proxy adds last to X-Forwarded-For. Add the
+# public name to allowed_hosts. A public subnet or proxy is refused.
+# [server.remote]
+# vpn = ["10.6.0.0/24", "100.64.0.0/10"]
+# proxies = ["127.0.0.1"]
+
 # Guard: where and when agents (MCP), scripts (API) and the CLI must ask a
 # human (approval from the dashboard). The household in the dashboard is
 # obeyed without a code (dashboard = "trusted", the default: the home network

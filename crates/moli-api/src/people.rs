@@ -1184,6 +1184,7 @@ mod tests {
     /// Someone on the Internet, where invitations and passwords come from.
     fn stranger(key: &str) -> Caller {
         Caller {
+            remote: false,
             via: crate::caller::Via::Outside,
             key: key.to_owned(),
             person: None,

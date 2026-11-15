@@ -1,5 +1,6 @@
 {
   "serveur.acces.refuse": "accès refusé : réseau de la maison, ou Cloudflare Access",
+  "serveur.acces.a_la_maison": "refusé depuis l'extérieur : à faire depuis la maison",
   "serveur.limite.trop_de_demandes": "trop de demandes à la suite : réessaie dans quelques secondes",
   "serveur.limite.trop_de_flux": "trop de flux en direct ouverts : ferme un onglet ou réessaie plus tard",
 

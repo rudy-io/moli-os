@@ -10,8 +10,8 @@
 #
 # Remote (`oui` / `non`): reached through a remote entry (VPN, proxy, tunnel) or not. Least
 # privilege (I4): what an agent, a satellite, a machine or the installation calls, and what writes
-# secrets, stays at home. Checked now: every route says it, the sign-in stays reachable, MCP stays
-# at home; enforced on the remote entries when they exist (docs/SECURITY-MODEL.md, step 2).
+# secrets or the house's code, stays at home. Enforced on what comes in through [server.remote] (a
+# declared VPN or proxy): the test checks it behind a declared proxy, route by route.
 #
 # Limit: a handler that reads the person only after the body is parsed cannot be probed with an
 # empty body (it answers 400/422 first); such routes are listed `foyer` until they get a probe.
@@ -46,7 +46,7 @@ DELETE /api/integrations/overkiz-cloud/{instance} humain non # owner: purge one 
 GET    /api/integrations/overkiz-cloud/{instance}/catalog humain  non  # owner: cached private catalogue
 GET    /api/integrations/overkiz-cloud/{instance}/definitions/{collection}/{index} humain  non  # owner: cached definitions
 POST   /api/integrations/overkiz-cloud/{instance}/requests humain  non  # owner: bounded observation/session requests
-PUT    /api/session/pin                    foyer   oui
+PUT    /api/session/pin                    foyer   non
 GET    /api/people                         foyer   oui
 POST   /api/people                         foyer   oui
 PUT    /api/people/{id}                    foyer   oui

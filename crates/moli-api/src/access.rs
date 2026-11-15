@@ -505,6 +505,7 @@ mod tests {
             demo: false,
             people: people.clone(),
             known_only,
+            remote: std::sync::Arc::default(),
         };
         let (pair, _) = signer();
         let assertion =

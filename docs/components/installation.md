@@ -57,18 +57,27 @@ Pour les autres intégrations, une à la fois dans `data/moli.toml` : un bloc `[
 
 ## 5. Y accéder hors de chez soi (facultatif)
 
-Ne jamais ouvrir le port 8790 sur Internet. Deux façons sûres :
+Ne jamais ouvrir le port 8790 sur Internet. Les règles sont dans
+[SECURITY-MODEL.md](../SECURITY-MODEL.md). Trois façons sûres :
 
-- **Tailscale** (ou un autre VPN) en **routeur de sous-réseau** : le téléphone joint Moli à son adresse
-  sur le réseau de la maison. Une adresse Tailscale directe (`100.x`) est traitée comme l'extérieur.
+- **Un VPN** (WireGuard, Tailscale…) : en **routeur de sous-réseau**, le téléphone joint Moli à son
+  adresse sur le réseau de la maison. Mieux : déclarer le sous-réseau du VPN dans `[server.remote] vpn`
+  ; ses appareils sont alors le foyer **venu de l'extérieur**, et ce qui reste à la maison (agents,
+  machines, installation, clés, code) leur est refusé. Une adresse Tailscale directe (`100.x`) non
+  déclarée est traitée comme l'extérieur.
 - **Cloudflare Tunnel + Access** : Moli vérifie lui-même l'identité signée par Access ; section
   `[server.access]` de `moli.toml` (`team`, `aud`, et `owners` pour les e-mails qui peuvent choisir le code
   sans connaître l'actuel). Voir [api.md](api.md).
 
-Jamais de proxy inverse devant Moli (Nginx, Caddy, Traefik, `tailscale serve`…), ni sur la même machine
-ni sur une autre du réseau : tout le monde y paraîtrait local ou de la maison. Moli traite d'ailleurs
-toute requête qui dit avoir été relayée (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) comme venue de
-l'extérieur : seules la page de connexion et la connexion par mot de passe y répondent.
+- **Un proxy inverse déclaré** (Nginx, Caddy, Traefik…, sur cette machine ou une autre du réseau) :
+  son adresse dans `[server.remote] proxies`, le nom public dans `allowed_hosts`. Ce qu'il relaie est un
+  inconnu jusqu'à la connexion par mot de passe, reconnu par l'adresse que le proxy ajoute en dernier à
+  `X-Forwarded-For` ; ce qui reste à la maison est refusé. Bloquer les abus devant Moli (CrowdSec,
+  fail2ban).
+
+Un proxy non déclaré ne fait passer personne pour la maison : toute requête qui dit avoir été relayée
+(`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) d'une adresse non déclarée est traitée comme venue de
+l'extérieur ; seules la page de connexion et la connexion par mot de passe y répondent.
 
 ## Changer ou retrouver le code
 
