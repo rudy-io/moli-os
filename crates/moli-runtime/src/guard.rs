@@ -32,6 +32,34 @@ pub struct GuardPolicy {
     /// Who the dashboard is: the household (no code to command), or only a
     /// person with a PIN session.
     pub dashboard: Dashboard,
+    /// Orders that want the house's code typed for them, every time, even
+    /// from an open session (disarming the alarm): only an automation a
+    /// person approved goes without.
+    pub code_each_time: Vec<CodeEachTime>,
+}
+
+/// One order that wants the code each time: a point, and the values that
+/// do (none listed: every value).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeEachTime {
+    pub point: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+impl GuardPolicy {
+    /// Whether this order wants the code typed for it.
+    #[must_use]
+    pub fn code_each_time(&self, point: &str, value: &moli_core::Value) -> bool {
+        let text = match value {
+            moli_core::Value::Text(t) => t.to_string(),
+            other => other.to_json().to_string(),
+        };
+        self.code_each_time
+            .iter()
+            .any(|r| r.point == point && (r.values.is_empty() || r.values.contains(&text)))
+    }
 }
 
 /// How the dashboard is recognized as the family (`[guard] dashboard`).
@@ -270,6 +298,7 @@ mod tests {
             quiet_hours: Some(QuietHours::parse("21:00", "07:30", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
         }
     }
 
@@ -326,6 +355,7 @@ mod tests {
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: Dashboard::Pin,
+            code_each_time: vec![],
         };
         // No protected room, no quiet hours: a script, an agent, the command
         // line and the dashboard without a code still wait for the code.
@@ -423,6 +453,7 @@ mod tests {
             ),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
         };
         let night = at("2026-10-02T21:30:00Z");
         assert!(matches!(
@@ -483,6 +514,7 @@ mod tests {
             ),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
         };
         assert!(quiet_salon.room_change_needs_human(&["salon"]).is_some());
         assert!(quiet_salon.room_change_needs_human(&["Grenier"]).is_none());
@@ -496,6 +528,7 @@ mod tests {
             quiet_hours: Some(QuietHours::parse("00:00", "00:00", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
         };
         assert!(matches!(
             p.check(&[], Origin::Mcp, at("2026-10-03T12:00:00Z")),

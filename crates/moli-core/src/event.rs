@@ -111,6 +111,10 @@ pub struct ApprovalRequest {
     /// cannot change: shown beside the label on approval cards.
     pub native_name: String,
     pub rooms: Vec<String>,
+    /// Approving it wants the house's code typed for it, not only an open
+    /// session (`[guard] code_each_time`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub code: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

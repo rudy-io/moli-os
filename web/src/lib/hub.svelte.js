@@ -270,12 +270,13 @@ export async function command(point, value) {
 
 /** A human approves or denies an order the guard held (naming the point
  *  shown on the card, so a decision never lands on another request). */
-export async function decide(request, approve) {
+export async function decide(request, approve, pin) {
   try {
     const res = await fetch(`/api/approvals/${request.id}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ approve, point: request.point }),
+      // The code typed for it: some orders want it each time (disarming).
+      body: JSON.stringify(pin ? { approve, point: request.point, pin } : { approve, point: request.point }),
     });
     // Gone: already decided or expired — the card can go.
     if (res.ok || res.status === 410) {

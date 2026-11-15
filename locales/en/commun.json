@@ -284,6 +284,7 @@
   "commun.code.actuel_d_abord": "Enter the current house code first.",
   "commun.code.choisir": "Choose the house code ({min} to 8 digits). It replaces the old one everywhere.",
   "commun.code.seconde_fois": "Enter it once more.",
+  "commun.code.raison_chaque_fois": "This action asks for the code every time.",
   "commun.code.raison_automatisme": "An automation is acting on its own: the house wants to be sure it’s you approving it.",
   "commun.code.raison_calme": "It’s quiet hours: the house wants to be sure it’s you.",
   "commun.code.raison_protegee": "This room is protected: the house wants to be sure it’s you.",

@@ -77,6 +77,7 @@ async fn bedroom_with(dir: &std::path::Path, dashboard: Dashboard) -> Hub {
             quiet_hours: None,
             protect_unassigned: false,
             dashboard,
+            code_each_time: vec![],
         },
         ..HubOptions::default()
     })
