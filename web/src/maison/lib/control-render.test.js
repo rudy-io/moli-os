@@ -1180,7 +1180,7 @@ test('beside the week, the card leaves the schedule out and the editor opens the
   assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 2);
 });
 
-test('an alarm panel shows its arm mode, health and a switch per setting', () => {
+test('an alarm panel shows its arm mode, health and its settings', () => {
   const html = show('AlarmCard', [
     point('system_arm_type', enumeration('disarmed', 'armed', 'home')),
     point('bat_status', number(0, 100, 1), false),
@@ -1210,7 +1210,20 @@ test('an alarm panel shows its arm mode, health and a switch per setting', () =>
   assert.match(html, /Armement dans 30 s/);
   assert.match(html, /Réglages/);
   assert.match(html, /Délai d'armement/);
-  assert.equal(buttons(html).filter((tag) => /role="switch"/.test(tag)).length, 2);
+  // Settings are grouped, numbers are sliders with a step-by-step value,
+  // and the siren's on/off is a two-word choice.
+  assert.match(html, />Délais</);
+  assert.match(html, />Sirène</);
+  assert.match(html, /type="range"/);
+  assert.match(html, /aria-label="Diminuer : Délai d'armement"/);
+  assert.match(html, /aria-label="Augmenter : Délai d'armement"/);
+  const segments = buttons(html).filter((tag) => /class="segment\b/.test(tag));
+  assert.equal(segments.length, 2);
+  assert.match(segments[0], /aria-pressed="true"/);
+  assert.match(segments[1], /aria-pressed="false"/);
+  assert.match(html, />Fort</);
+  assert.match(html, />Muet</);
+  assert.equal(buttons(html).filter((tag) => /role="switch"/.test(tag)).length, 1);
 });
 
 test('an alarm panel reaches the house and its room, not the sensors', () => {

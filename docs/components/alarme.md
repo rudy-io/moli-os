@@ -100,9 +100,12 @@ printf '%s' "$LOCAL_KEY" | podman exec -i moli-os /moli-os --config /data/moli.t
   **Alarme**.
 - **Réglages** : les délais, la durée de la sirène, les sirènes intérieure et
   sans fil, le GSM, les SMS et les tonalités se règlent dans le volet
-  « Réglages » de la carte. Chaque changement suit le même chemin qu'un
-  bouton : la garde peut le retenir (pièce protégée, heures calmes) et
-  demander le code de la maison.
+  « Réglages » de la carte, en quatre sections (Délais, Sirène, Alertes,
+  Tonalités). Les valeurs numériques se règlent au curseur, affiné par un
+  pas-à-pas − / + ; l'ordre ne part qu'au relâchement, un geste pour une
+  commande. Le son de la sirène se choisit en deux mots (Fort / Muet).
+  Chaque changement suit le même chemin qu'un bouton : la garde peut le
+  retenir (pièce protégée, heures calmes) et demander le code de la maison.
 
 ## Limites et sécurité
 

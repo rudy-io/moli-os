@@ -3,6 +3,8 @@
   import { alarmPoint } from '../lib/capabilities.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
+  import SegmentedControl from './SegmentedControl.svelte';
+  import Slider from './Slider.svelte';
 
   /** A security panel: its arm mode, its health, and the settings it takes.
    *  `compact` fits inside another card (the cameras' safety panel, a room);
@@ -87,28 +89,103 @@
     ['alarm_delay_tone_en', 'maison.alarme.reglage.alarm_delay_tone_en'],
     ['arm_disarm_tone_en', 'maison.alarme.reglage.arm_disarm_tone_en'],
   ];
+  // The settings, grouped as one reads a panel: its delays, its siren, what
+  // it calls, and what it beeps. A point absent from the panel is skipped.
+  const GROUPS = [
+    { icon: 'timer', titleKey: 'maison.alarme.groupe.delais', keys: ['arm_delay', 'alarm_delay'] },
+    {
+      icon: 'bell',
+      titleKey: 'maison.alarme.groupe.sirene',
+      keys: ['alarm_sound_duration', 'inside_siren_sound', 'inside_siren_en', 'wireless_siren_en'],
+    },
+    {
+      icon: 'alert',
+      titleKey: 'maison.alarme.groupe.alertes',
+      keys: ['ring_times', 'tel_alarm_cycle', 'gsm_en', 'tel_ctrl_en', 'arm_sms_en', 'disarm_sms_en'],
+    },
+    {
+      icon: 'tune',
+      titleKey: 'maison.alarme.groupe.tonalites',
+      keys: ['keyboard_tone_en', 'arm_delay_tone_en', 'alarm_delay_tone_en', 'arm_disarm_tone_en'],
+    },
+  ];
   const settings = $derived(
-    SETTINGS.map(([k, labelKey]) => ({ point: d?.points.find((p) => p.key === k), labelKey })).filter((s) => s.point),
+    new Map(
+      SETTINGS.map(([k, labelKey]) => [k, { key: k, labelKey, point: d?.points.find((p) => p.key === k) }]).filter(
+        ([, s]) => s.point,
+      ),
+    ),
+  );
+  const groups = $derived(
+    GROUPS.map((g) => ({ ...g, settings: g.keys.map((k) => settings.get(k)).filter(Boolean) })).filter((g) => g.settings.length),
   );
 
   const controlOf = (p) =>
     p.kind.type === 'numeric'
       ? 'number'
-      : p.kind.type === 'binary' ||
-          (p.kind.type === 'enum' && p.kind.values?.length === 2 && p.kind.values.includes('ON') && p.kind.values.includes('OFF'))
+      : p.kind.type === 'binary'
         ? 'switch'
-        : 'select';
-  const isOn = (p, v) => (p.kind.type === 'binary' ? v === true : v === 'ON');
-  const nextValue = (p, v) => (p.kind.type === 'binary' ? v !== true : v === 'ON' ? 'OFF' : 'ON');
+        : p.kind.type === 'enum' && p.kind.values?.length === 2 && p.kind.values.includes('ON') && p.kind.values.includes('OFF')
+          ? 'segments'
+          : 'select';
 
-  function setSetting(p, v, labelKey) {
+  // What is on screen right after an order: the panel's answer replaces it,
+  // or four seconds pass. A held or failed order drops it at once.
+  let sent = $state({});
+  const timers = new Map();
+  function remember(key, v) {
+    sent = { ...sent, [key]: v };
+    clearTimeout(timers.get(key));
+    timers.set(key, setTimeout(() => forget(key), 4000));
+  }
+  function forget(key) {
+    clearTimeout(timers.get(key));
+    timers.delete(key);
+    if (key in sent) {
+      const next = { ...sent };
+      delete next[key];
+      sent = next;
+    }
+  }
+  $effect(() => () => [...timers.values()].forEach((timer) => clearTimeout(timer)));
+  const shown = (p) => (p.key in sent ? sent[p.key] : value(id, p.key));
+
+  async function setSetting(p, v, labelKey) {
     if (p.access?.write !== true || offline || pending(id, p.key)) return;
-    act(`${id}/${p.key}`, v, t('maison.alarme.reglage_commande', { name: label, reglage: t(labelKey) }));
+    remember(p.key, v);
+    const result = await act(
+      `${id}/${p.key}`,
+      v,
+      t('maison.alarme.reglage_commande', { name: label, reglage: t(labelKey) }),
+    );
+    if (result !== 'ok') forget(p.key);
   }
-  function setNumber(p, e, labelKey) {
-    const n = Number(e.currentTarget.value);
-    if (Number.isFinite(n) && n !== value(id, p.key)) setSetting(p, n, labelKey);
+
+  const boundsOf = (p) => ({
+    min: Number.isFinite(p.kind.min) ? p.kind.min : 0,
+    max: Number.isFinite(p.kind.max) ? p.kind.max : 100,
+  });
+  const digitsOf = (p) => (p.kind.step && p.kind.step < 1 ? 1 : 0);
+  const atBound = (p, v, direction) => {
+    const { min, max } = boundsOf(p);
+    const n = Number(v);
+    return Number.isFinite(n) && (direction < 0 ? n <= min : n >= max);
+  };
+  function nudge(p, direction, labelKey) {
+    const { min, max } = boundsOf(p);
+    const step = p.kind.step ?? 1;
+    const current = Number(shown(p));
+    const from = Number.isFinite(current) ? current : min;
+    const next = Math.min(max, Math.max(min, from + direction * step));
+    setSetting(p, Number(next.toFixed(3)), labelKey);
   }
+  // On/off enums on a panel are sounds: loud or muted, in the house's words.
+  const segmentChoices = (p, disabled) =>
+    (p.kind.values ?? []).map((v) => ({
+      value: v,
+      label: v === 'ON' ? t('maison.alarme.son.fort') : t('maison.alarme.son.muet'),
+      disabled,
+    }));
 </script>
 
 {#if point}
@@ -174,56 +251,101 @@
       {/if}
     </div>
 
-    {#if !compact && settings.length}
+    {#if !compact && groups.length}
       <details class="settings">
-        <summary><Icon name="tune" size={16} />{t('maison.alarme.reglages')}</summary>
-        <div class="rows">
-          {#each settings as s (s.point.key)}
-            {@const p = s.point}
-            {@const kind = controlOf(p)}
-            {@const v = value(id, p.key)}
-            {@const held = pending(id, p.key)}
-            <div class="row" class:held>
-              <span class="row-label">{t(s.labelKey)}</span>
-              {#if kind === 'switch'}
-                <button
-                  class="switch"
-                  role="switch"
-                  aria-checked={isOn(p, v)}
-                  aria-label={t(s.labelKey)}
-                  disabled={!writable || held}
-                  onclick={() => setSetting(p, nextValue(p, v), s.labelKey)}
-                >
-                  <span class="knob"></span>
-                </button>
-              {:else if kind === 'number'}
-                <span class="number">
-                  <input
-                    type="number"
-                    class="num"
-                    value={v ?? ''}
-                    min={p.kind.min}
-                    max={p.kind.max}
-                    step={p.kind.step ?? 'any'}
-                    aria-label={t(s.labelKey)}
-                    disabled={!writable || held}
-                    onchange={(e) => setNumber(p, e, s.labelKey)}
-                  />
-                  {#if p.unit}<span class="unit">{p.unit}</span>{/if}
-                </span>
-              {:else}
-                <select
-                  value={v ?? ''}
-                  aria-label={t(s.labelKey)}
-                  disabled={!writable || held}
-                  onchange={(e) => setSetting(p, e.currentTarget.value, s.labelKey)}
-                >
-                  {#each p.kind.values ?? [] as choice (choice)}
-                    <option value={choice}>{choice}</option>
+        <summary>
+          <Icon name="tune" size={16} />{t('maison.alarme.reglages')}
+          <span class="chevron"><Icon name="chevron-down" size={16} /></span>
+        </summary>
+        <div class="groups">
+          {#each groups as g (g.titleKey)}
+            <section class="group" aria-label={t(g.titleKey)}>
+              <h3><Icon name={g.icon} size={15} />{t(g.titleKey)}</h3>
+              {#each g.settings.filter((s) => controlOf(s.point) !== 'switch') as s (s.key)}
+                {@const p = s.point}
+                {@const v = shown(p)}
+                {@const held = pending(id, p.key)}
+                {@const { min, max } = boundsOf(p)}
+                <div class="setting" class:held>
+                  <div class="setting-head">
+                    <span class="row-label">{t(s.labelKey)}</span>
+                    {#if controlOf(p) === 'number'}
+                      <span class="stepper">
+                        <button
+                          type="button"
+                          class="step"
+                          disabled={!writable || held || atBound(p, v, -1)}
+                          aria-label={t('maison.alarme.diminuer', { reglage: t(s.labelKey) })}
+                          onclick={() => nudge(p, -1, s.labelKey)}>−</button
+                        >
+                        <output class="value"
+                          >{num(v, digitsOf(p))}{#if p.unit} <span class="unit">{p.unit}</span>{/if}</output
+                        >
+                        <button
+                          type="button"
+                          class="step"
+                          disabled={!writable || held || atBound(p, v, 1)}
+                          aria-label={t('maison.alarme.augmenter', { reglage: t(s.labelKey) })}
+                          onclick={() => nudge(p, 1, s.labelKey)}>+</button
+                        >
+                      </span>
+                    {/if}
+                  </div>
+                  {#if controlOf(p) === 'number'}
+                    <div class="slider-wrap">
+                      <Slider
+                        {min}
+                        {max}
+                        step={p.kind.step ?? 1}
+                        value={Number.isFinite(Number(v)) ? Number(v) : min}
+                        disabled={!writable || held}
+                        label={t(s.labelKey)}
+                        valuetext={(n) => `${num(n, digitsOf(p))} ${p.unit ?? ''}`.trim()}
+                        oncommit={(n) => setSetting(p, n, s.labelKey)}
+                      />
+                    </div>
+                  {:else if controlOf(p) === 'segments'}
+                    <SegmentedControl
+                      segments={segmentChoices(p, !writable || held)}
+                      value={v}
+                      onchange={(choice) => setSetting(p, choice, s.labelKey)}
+                      label={t(s.labelKey)}
+                    />
+                  {:else}
+                    <select
+                      value={v ?? ''}
+                      aria-label={t(s.labelKey)}
+                      disabled={!writable || held}
+                      onchange={(e) => setSetting(p, e.currentTarget.value, s.labelKey)}
+                    >
+                      {#each p.kind.values ?? [] as choice (choice)}
+                        <option value={choice}>{choice}</option>
+                      {/each}
+                    </select>
+                  {/if}
+                </div>
+              {/each}
+              {#if g.settings.some((s) => controlOf(s.point) === 'switch')}
+                <div class="tiles">
+                  {#each g.settings.filter((s) => controlOf(s.point) === 'switch') as s (s.key)}
+                    {@const p = s.point}
+                    {@const v = shown(p)}
+                    {@const held = pending(id, p.key)}
+                    <button
+                      type="button"
+                      class="tile"
+                      role="switch"
+                      aria-checked={v === true}
+                      disabled={!writable || held}
+                      onclick={() => setSetting(p, v !== true, s.labelKey)}
+                    >
+                      <span class="tile-label">{t(s.labelKey)}</span>
+                      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+                    </button>
                   {/each}
-                </select>
+                </div>
               {/if}
-            </div>
+            </section>
           {/each}
         </div>
       </details>
@@ -347,8 +469,8 @@
 
   .modes button:focus-visible,
   .confirm button:focus-visible,
-  .switch:focus-visible,
-  input:focus-visible,
+  .step:focus-visible,
+  .tile:focus-visible,
   select:focus-visible,
   summary:focus-visible {
     outline: 3px solid var(--cool);
@@ -421,41 +543,81 @@
   }
 
   .settings summary {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 7px;
+    padding: 9px 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
     color: var(--ink-2);
     font-size: 13.5px;
     font-weight: 650;
     cursor: pointer;
     list-style: none;
+    transition: background 0.15s;
+  }
+
+  .settings summary:hover {
+    background: color-mix(in srgb, var(--ink) 6%, var(--surface-2));
   }
 
   .settings summary::-webkit-details-marker {
     display: none;
   }
 
-  .rows {
+  .chevron {
+    display: inline-flex;
+    margin-left: auto;
+    color: var(--ink-3);
+    transition: transform 0.2s var(--ease);
+  }
+
+  .settings[open] .chevron {
+    transform: rotate(180deg);
+  }
+
+  .groups {
     display: grid;
-    gap: 2px;
+    gap: 10px;
     margin-top: 10px;
   }
 
-  .row {
+  .group {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+  }
+
+  .group h3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--ink-3);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .setting {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .setting.held {
+    opacity: 0.6;
+  }
+
+  .setting-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    min-height: 34px;
-    padding: 2px 0;
-  }
-
-  .row + .row {
-    border-top: 1px solid var(--line);
-  }
-
-  .row.held {
-    opacity: 0.6;
+    gap: 10px;
+    min-width: 0;
   }
 
   .row-label {
@@ -465,36 +627,120 @@
     overflow-wrap: anywhere;
   }
 
-  .switch {
-    position: relative;
+  .stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
     flex: none;
-    width: 40px;
-    height: 24px;
+    padding: 2px;
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .step {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
     padding: 0;
     border: 0;
-    border-radius: 999px;
-    background: var(--surface-3);
+    border-radius: 50%;
+    background: none;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1;
     cursor: pointer;
-    transition: background 0.2s var(--ease);
+    transition: background 0.15s, color 0.15s;
   }
 
-  .switch:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--ink) 8%, var(--surface-3));
+  .step:hover:not(:disabled) {
+    background: var(--surface-3);
+    color: var(--ink);
   }
 
-  .switch[aria-checked='true'] {
-    background: var(--warm);
+  .step:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
 
-  .switch:disabled {
+  .value {
+    min-width: 54px;
+    padding: 0 4px;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .value .unit {
+    color: var(--ink-3);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .slider-wrap :global(.slider) {
+    margin: 6px 2px 2px;
+  }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+
+  .tile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 11px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .tile:hover:not(:disabled) {
+    background: var(--surface-3);
+  }
+
+  .tile:disabled {
     opacity: 0.5;
     cursor: default;
   }
 
-  .knob {
-    position: absolute;
-    top: 3px;
-    left: 3px;
+  .tile-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .track {
+    display: flex;
+    flex: none;
+    width: 36px;
+    height: 22px;
+    padding: 2px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    transition: background 0.2s var(--ease);
+  }
+
+  .tile[aria-checked='true'] .track {
+    background: var(--warm);
+  }
+
+  .thumb {
     width: 18px;
     height: 18px;
     border-radius: 50%;
@@ -503,23 +749,16 @@
     transition: transform 0.2s var(--ease);
   }
 
-  .switch[aria-checked='true'] .knob {
-    transform: translateX(16px);
+  .tile[aria-checked='true'] .thumb {
+    transform: translateX(14px);
   }
 
-  .number {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    flex: none;
-  }
-
-  input,
   select {
+    justify-self: start;
     min-height: 32px;
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--ink);
     padding: 5px 9px;
     font: inherit;
@@ -527,21 +766,17 @@
     font-weight: 550;
   }
 
-  input:disabled,
   select:disabled {
     opacity: 0.55;
     cursor: default;
   }
 
-  input {
-    width: 86px;
-    text-align: right;
-  }
-
-  .unit {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--ink-3);
+  @media (prefers-reduced-motion: reduce) {
+    .chevron,
+    .track,
+    .thumb {
+      transition: none;
+    }
   }
 
   @media (max-width: 380px) {
