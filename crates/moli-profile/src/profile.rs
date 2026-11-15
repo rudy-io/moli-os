@@ -620,6 +620,16 @@ fn check_read_query(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A meaning a profile may not declare. A profile reads states; a press is
+/// an occurrence a driver sends with `pulse_state` (#211): a polled value
+/// would replay the last one.
+fn declarable(semantic: Semantic) -> Result<(), String> {
+    if semantic == Semantic::Press {
+        return Err("semantic press is for a driver that receives presses, not a profile".into());
+    }
+    Ok(())
+}
+
 fn compile_request(
     r: &Request,
     secrets: Secrets,
@@ -685,16 +695,6 @@ fn compile_request(
         every,
         call,
     })
-}
-
-/// A meaning a profile may not declare. A profile reads states; a press is
-/// an occurrence a driver sends with `pulse_state` (#211): a polled value
-/// would replay the last one.
-fn declarable(semantic: Semantic) -> Result<(), String> {
-    if semantic == Semantic::Press {
-        return Err("semantic press is for a driver that receives presses, not a profile".into());
-    }
-    Ok(())
 }
 
 /// One point: its kind, value map, unit and meaning, checked together.
