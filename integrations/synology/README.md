@@ -1,10 +1,13 @@
 # NAS Synology (DSM)
 
-Pilote natif `crates/moli-synology`, **lecture et ordres**.
+Pilote natif `crates/moli-synology`, **lecture et ordres** (`wake`, `shutdown`, `reboot`).
 
-> **Éprouvé en lecture seule** sur un DS1019+ (DSM 7.4) : connexion, `SYNO.DSM.Info`,
+> **Éprouvé** sur un DS1019+ (DSM 7.4) : connexion, `SYNO.DSM.Info`,
 > utilisation, stockage, onduleur et Hyper Backup ont répondu comme prévu ; les fixtures sont ces
-> réponses, anonymisées. **Pas éprouvé** : `shutdown`, `reboot`, `wake` (jamais envoyés), un disque,
+> réponses, anonymisées. L'ordre **`reboot`** a aussi été envoyé pour de vrai : retenu par la garde,
+> approuvé, DSM répond `success`, le NAS redémarre et Moli le relit seul (c'est ainsi qu'on a trouvé le refus
+> de connexion pendant le démarrage de DSM). **Pas éprouvé** : `shutdown` (même appel que `reboot`, jamais
+> envoyé) et `wake` (Wake-on-LAN désactivé sur ce NAS), un disque,
 > un volume ou une sauvegarde **en panne** (fixtures `*-faulty` reconstituées : ce NAS est sain),
 > un onduleur **activé** (celui de ce NAS ne l'est pas : les mots de statut NUT `OB`, `LB`, `RB`
 > restent à confirmer).
@@ -44,8 +47,8 @@ Pilote natif `crates/moli-synology`, **lecture et ordres**.
     **Exécutés au plus une fois** : renvoyés seulement si DSM répond « session perdue » (preuve qu'il
     ne les a pas exécutés), jamais après un échec dont on ignore l'issue.
 - **Connexion refusée** : le pilote **n'insiste pas** (DSM bloque l'adresse après quelques échecs) :
-  avertissement visible, NAS affiché « éteint », ordres refusés, et **un seul nouvel essai toutes les
-  15 minutes**. DSM refuse aussi les connexions pendant son démarrage : un NAS qui redémarre (essai réel
+  avertissement visible, NAS affiché « éteint », ordres refusés, et **un seul nouvel essai par
+  pause, de plus en plus longue** (15 min, 30, 60, puis toutes les 2 h). DSM refuse aussi les connexions pendant son démarrage : un NAS qui redémarre (essai réel
   du `reboot`) revient donc tout seul. Mot de passe en cause : `moli-os secrets set`, puis relancer Moli.
   Le certificat qui change (`PIN_MISMATCH`) : attente d'un humain, avec `moli-os secrets forget <instance> cert`.
 - **Certificat renouvelé** : si DSM renouvelle un certificat Let's Encrypt (environ tous les 90

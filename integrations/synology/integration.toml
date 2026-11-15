@@ -2,7 +2,7 @@
 id = "synology"
 name = "NAS Synology (DSM) : santé, disques, onduleur, sauvegardes, réveil, arrêt"
 brands = ["Synology"]
-# Read-only calls checked on a real one; orders not: see the README.
+# Read-only calls and the `reboot` order checked on a real one; `shutdown` and `wake` not: see the README.
 models = ["DS1019+ (DSM 7.4)"]
 transport = "https"
 driver = "synology"

@@ -972,7 +972,7 @@
   "pilotes.synology.connexion_refusee": "the NAS refuses Moli's login: check the credentials",
   "pilotes.synology.injoignable": "NAS unreachable ({error})",
   "pilotes.synology.identifiants_manquants": "no NAS credentials: store the DSM account and its password with \"moli-os secrets set {instance} {username}\" and \"… {password}\", then restart Moli",
-  "pilotes.synology.identifiants_refuses": "the NAS refuses this account or password (2-step verification, disabled account or blocked address?): fix them with \"moli-os secrets set {instance} {username}\" and \"… {password}\", then restart Moli; Moli does not insist, so that DSM does not block its address",
+  "pilotes.synology.identifiants_refuses": "the NAS refuses this account or password, or is not ready to open a session (it also refuses while it starts): Moli tries again less and less often (15 minutes, then 30, 60, then every 2 hours), without insisting so that DSM does not block its address. If the account or password is at fault (2-step verification, disabled account), fix them with \"moli-os secrets set {instance} {username}\" and \"… {password}\", then restart Moli",
   "pilotes.synology.coffre_indisponible": "secret store unavailable: Moli cannot keep the NAS's certificate fingerprint",
   "pilotes.synology.refus_en_cours": "the NAS refused the login a moment ago: trying again in a few minutes, without insisting so that DSM does not block Moli's address",
   "pilotes.synology.certificat_change": "the NAS's certificate changed: if that is intended, forget the old one with \"moli-os secrets forget {instance} {key}\", then restart Moli"

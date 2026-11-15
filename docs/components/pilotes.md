@@ -1408,12 +1408,12 @@ Sans la seconde règle, la prévision suffit à relever le store ; avec, seule l
 - **Ordres** (sens `control`) : `wake` (paquet Wake-on-LAN, `moli_net::wol`, seulement proposé si la MAC est connue),
   `shutdown` et `reboot` (`SYNO.Core.System`, `force=false`, **exécutés au plus une fois** : renvoyés seulement
   si DSM répond « session perdue »).
-- **Connexion refusée** : avertissement (`warn`), NAS « éteint », ordres refusés, **un seul nouvel essai toutes
-  les 15 min** (`RETRY_AFTER_REFUSAL` : DSM refuse aussi pendant son démarrage, et bloque l'adresse après
+- **Connexion refusée** : avertissement (`warn`), NAS « éteint », ordres refusés, **un seul nouvel essai par pause,
+  de plus en plus longue** (15 min, 30, 60, puis 2 h ; `retry_after` : DSM refuse aussi pendant son démarrage, et bloque l'adresse après
   quelques échecs rapprochés). **Certificat changé** : attente d'une personne (`wait_for`). Un certificat Let's Encrypt renouvelé change l'empreinte épinglée :
   `moli-os secrets forget <instance> cert` à chaque renouvellement.
-- **État** : lecture éprouvée sur un DS1019+ (DSM 7.4), fixtures = réponses réelles anonymisées ; **ordres, onduleur
-  activé et pannes non éprouvés** (fixtures `*-faulty` reconstituées). Détail : `integrations/synology/README.md`.
+- **État** : lecture éprouvée sur un DS1019+ (DSM 7.4), fixtures = réponses réelles anonymisées ; `reboot` **essayé pour de vrai**, `shutdown` et `wake`
+  (Wake-on-LAN désactivé) **jamais envoyés**, onduleur activé et pannes non éprouvés (fixtures `*-faulty` reconstituées). Détail : `integrations/synology/README.md`.
 - **Tests** : `src/model.rs` (fixtures de `integrations/synology/fixtures/`) ; `src/tests.rs` (faux DSM en TLS :
   publication, ordre d'arrêt, session perdue, identifiants refusés, certificat changé, NAS éteint qui garde ses ordres).
 
@@ -1476,7 +1476,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `solarman` | `moli-solarman` | V5 ou Modbus TCP sur TCP 8899, lecture seule | non | micro-onduleurs Deye 2 et 4 entrées ; Solis S6-GR1P (Modbus TCP) ; **pas encore** : TSUN TITAN et GEN4, ZCS Azzurro 1PH TL-V3 et HYD-ZSS-HP |
 | `jackery` | `moli-jackery` | MQTT local (broker de la maison), jeton de l'appli | `reserve` (5 à 49 %) | HomePower, 2 batteries, micrologiciel 1.6.0 : lecture ; écriture pas encore essayée |
 | `vicare` | `moli-vicare` | HTTPS, cloud Viessmann (deux hôtes fixes) | oui : modes, consignes, eau chaude | PAC Viessmann (régulation CU401B_S, passerelle Vitoconnect) |
-| `synology` | `moli-synology` | HTTPS (5001), certificat épinglé, API web DSM | oui : réveil, arrêt, redémarrage | DS1019+ (DSM 7.4), lecture seule |
+| `synology` | `moli-synology` | HTTPS (5001), certificat épinglé, API web DSM | oui : réveil, arrêt, redémarrage | DS1019+ (DSM 7.4) ; `reboot` essayé, `shutdown` et `wake` non |
 | `kasa` | `moli-kasa` | JSON sur TCP 9999, XOR, local | relais, voyant | HS110(EU) matériel 1.0 (lecture, relais, voyant) ; matériel 2 : pas encore |
 | `profile` | `moli-profile` | HTTP/HTTPS GET, Meross signé | oui si le profil déclare `[[write]]` (Daikin, relais des prises Meross) | Daikin BRP069 (lecture), Meross EM06, Open-Meteo, Tempo, iopool EcO ; prises Meross MSS110, MSS210, MSS310 et multiprises : **pas essayées** (voir [profils.md](profils.md#les-profils-du-catalogue)) |
 | `helpers` | `moli-helpers` | aucun (valeurs gardées par Moli) | oui | sans objet |
