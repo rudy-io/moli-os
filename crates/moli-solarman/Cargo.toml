@@ -1,6 +1,6 @@
 [package]
 name = "moli-solarman"
-description = "Moli OS driver for Solarman Wi-Fi loggers (protocol V5 over TCP 8899) and the Deye micro-inverters behind them."
+description = "Moli OS driver for Solarman Wi-Fi loggers (protocol V5 over TCP 8899) and the inverters behind them (Deye, Solis, TSUN, ZCS Azzurro)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

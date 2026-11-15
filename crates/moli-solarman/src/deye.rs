@@ -223,7 +223,7 @@ pub struct Counters {
 }
 
 impl Counters {
-    fn accept(&mut self, key: &str, value: f64) -> bool {
+    pub(crate) fn accept(&mut self, key: &str, value: f64) -> bool {
         if value < 0.1 {
             return false;
         }

@@ -16,10 +16,23 @@ Licensed under the MIT License; see licenses/zigbee-herdsman-MIT.txt.
 
 This product includes data derived from ha-solarman
 (https://github.com/davidrapan/ha-solarman): the Deye micro-inverter
-register map in crates/moli-solarman/src/deye.rs, and the Solis S6-GR1P
-register map (solis_s6-gr1p.yaml) in crates/moli-solarman/src/solis.rs.
+register map in crates/moli-solarman/src/deye.rs, the Solis S6-GR1P
+register map (solis_s6-gr1p.yaml) in crates/moli-solarman/src/solis.rs,
+and the ZCS Azzurro register maps (sofar_string.yaml and sofar_g3.yaml,
+which its zcs_azzurro-1ph-tl-v3.yaml and zcs_azzurro-hyd-zss-hp.yaml
+profiles point to) in crates/moli-solarman/src/zcs.rs.
 Copyright (c) 2024 David Rapan and Contributors. Licensed under the MIT
 License; see licenses/ha-solarman-MIT.txt.
+
+This product includes data derived from tsun-gen3-proxy
+(https://github.com/s-allius/tsun-gen3-proxy), app/src/modbus.py and
+app/src/gen3plus/solarman_v5.py at commit
+439caaa8ae40e2014eae0cd0acffe23685a29128: the TSUN TITAN and GEN4
+register maps and the layout of TSUN's native frames in
+crates/moli-solarman/src/tsun.rs and crates/moli-solarman/src/v5.rs, and
+one inverter answer from its tests, replayed by the tests of tsun.rs.
+Copyright (c) 2023 Stefan Allius. Licensed under the BSD 3-Clause License;
+see licenses/tsun-gen3-proxy-BSD-3-Clause.txt.
 
 This product includes data derived from tuya-local
 (https://github.com/make-all/tuya-local): the X-plorer Serie 75 data points
