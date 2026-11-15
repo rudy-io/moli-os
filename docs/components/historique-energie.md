@@ -87,7 +87,9 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   résumés, pas des compteurs à additionner. Sert les automatismes (par exemple une alerte de
   budget mensuel) et les agents.
 - Robustesse : saut impossible (> 36 kW) ou baisse = suspect ; remise à zéro comptée une fois
-  confirmée ; nouveau socle après 3 relevés cohérents ; chaque heure au prix de sa période
+  confirmée ; nouveau socle après 3 relevés cohérents ; un compteur dont on change le `point`
+  (un autre appareil sous le même `id`) repart de son premier relevé, sans compter l'écart
+  entre les deux totaux, et garde son historique ; chaque heure au prix de sa période
   (l'index HC n'est étalé que sur du temps HC).
 - Chiffre principal = la plus complète des deux mesures (`grid` et `total`, par exemple Linky
   et EM06).
@@ -110,7 +112,20 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   `consumption_w`. L'appareil `energie:maison` gagne `today_production_kwh`,
   `today_export_kwh`, `today_self_consumed_kwh`, `today_self_consumption_rate`,
   `today_self_sufficiency`, `month_production_kwh`, `month_self_consumption_rate` (%).
-  Pas encore : batterie.
+  Pas encore : batterie. Ce qu'un premier pilotage de batterie (sous Home Assistant, un hiver)
+  a appris, à respecter le jour où elle entre ici :
+  - la mesure du réseau ne passe jamais par la batterie : elle peut se couper du réseau au
+    repos, et la maison perdrait la pince avec elle (lire le compteur en direct, voir le
+    profil `jackery-meter`) ;
+  - une batterie se vide aussi toute seule : une limite de décharge arrête la fourniture à la
+    maison, pas sa propre consommation. La réserve se pose avec une marge au-dessus du
+    plancher du fabricant (`min` du point, que le hub fait respecter), et une alerte prévient
+    avant de l'atteindre ;
+  - une consigne ne s'écrit que si elle change vraiment, par paliers (quelques points de
+    charge), pas à chaque relevé : un réglage réécrit toutes les cinq minutes ne sert à rien
+    et sollicite l'appareil ;
+  - ce que Moli ne peut pas commander (une charge forcée depuis le réseau, par exemple) reste
+    dit comme tel à la famille : jamais de promesse qu'un réglage ne peut pas tenir.
 - **Charges pilotées** (`[[energy.load]]`, `crates/moli-energy/src/load.rs`) : un chauffe-eau
   (ou toute charge qui stocke) sur un relais, mis en marche sur le surplus solaire et complété
   en heures creuses. Logique **déterministe** (jamais de modèle dans la boucle), testée, un tour

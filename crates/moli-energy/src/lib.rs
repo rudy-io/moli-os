@@ -202,6 +202,17 @@ impl Energy {
         let store = Arc::new(Store::open(path)?);
         // Subscribe before reading anything: no reading falls in between.
         let events = hub.subscribe();
+        let sources: Vec<(String, String)> = config
+            .meters
+            .iter()
+            .map(|m| (m.id.clone(), m.point.clone()))
+            .collect();
+        for meter in store.follow_sources(&sources)? {
+            tracing::warn!(
+                meter,
+                "energy meter reads another point: starting from its first reading, nothing counted"
+            );
+        }
         let last = store.last_readings()?;
         let prices = HousePrices::new(store.house_prices()?);
         let recorder = Recorder::new(hub.clone(), config.clone(), last, Arc::clone(&store))

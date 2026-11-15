@@ -1218,6 +1218,7 @@ pub const BUILTIN: &[(&str, &str)] = catalogue![
     "tempo",
     "iopool",
     "meross-em06",
+    "jackery-meter",
     "moonraker",
 ];
 
@@ -1659,6 +1660,33 @@ refresh = "control"
         let new_firmware = Answer::parse(Format::Kv, b"mode=9,pow=1").unwrap();
         let mode = c.points.iter().find(|p| &*p.spec.key == "mode").unwrap();
         assert_eq!(mode.read(&new_firmware), Some(Value::Null));
+    }
+
+    #[test]
+    fn jackery_meter_answers_decode() {
+        let c = compile("jackery-meter");
+        // Captured from a real single-phase meter (serial replaced).
+        let m = Answer::parse(
+            Format::Json,
+            include_bytes!("../../../integrations/jackery-meter/fixtures/measurement.json"),
+        )
+        .unwrap();
+        let get = |key: &str| {
+            c.points
+                .iter()
+                .find(|p| &*p.spec.key == key)
+                .unwrap()
+                .read(&m)
+        };
+        assert_eq!(get("power"), Some(Value::Float(958.0)));
+        assert_eq!(get("power_factor"), Some(Value::Float(0.77)));
+        assert_eq!(get("energy"), Some(Value::Float(251.33)));
+        assert_eq!(get("energy_returned"), Some(Value::Float(24.51)));
+        // Sending out: the sign is the meter's, nothing is clamped.
+        let out = Answer::parse(Format::Json, br#"{"sn":"x","power":-766}"#).unwrap();
+        let power = c.points.iter().find(|p| &*p.spec.key == "power").unwrap();
+        assert_eq!(power.read(&out), Some(Value::Float(-766.0)));
+        assert!(c.writes.is_empty(), "read-only");
     }
 
     #[test]

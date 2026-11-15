@@ -451,6 +451,7 @@ dossier dans les deux sens.
 |---|---|---|---|---|---|
 | `daikin-brp069` | climatiseur Daikin, adaptateur Wi-Fi BRP069 | HTTP local, sans auth, `kv` | `basic` 1 h, `sensor` 60 s, `control` 30 s | aucun | oui, en lecture (écritures d'après le protocole documenté par pydaikin) |
 | `meross-em06` | compteur d'énergie Meross EM06/EM06P, 6 circuits | HTTP local signé (`meross`) | `all` 1 h, `e` 15 s | `key` | oui (EM06P) |
+| `jackery-meter` | compteur Jackery Smart Meter (pince des batteries HomePower / SolarVault) | HTTP local, sans auth | `m` 10 s | aucun | oui, en lecture (Smart Meter 1P) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
@@ -492,6 +493,17 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
 - Clé de l'appareil (celle du compte Meross qui l'a installé) :
   `moli-os secrets set <instance> key`. Les points `power_N` et `energy_month_N` alimentent
   la section `[energy]`.
+
+#### `jackery-meter`
+
+- Identité : `sn` (numéro de série). Une requête, `GET /api/measurement`.
+- Points : `power` (W, **signé** : positif quand la maison achète, négatif quand elle
+  injecte), `apparent_power` (VA), `voltage`, `current`, `power_factor`, `frequency`,
+  `energy` et `energy_returned` (kWh, compteurs à vie tenus par l'appareil), `signal` (dBm).
+- Le compteur répond sans la batterie ni le cloud : la mesure du réseau ne dépend plus de
+  la liaison de la batterie. `power` et `energy` alimentent le compteur `total` de
+  `[energy]`, `energy_returned` un compteur `export`. Monophasé seulement (le 3P n'a pas
+  été vu).
 
 #### `moonraker`
 

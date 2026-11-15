@@ -1,0 +1,86 @@
+# Jackery Smart Meter (the clamp sold with the HomePower / SolarVault
+# batteries): it answers on the home network by itself, without the battery
+# and without the cloud. Read-only, no key.
+# `power` is signed: positive when the home buys, negative when it sends out.
+# Found by asking the meter (its own web server); no code copied.
+
+[profile]
+id = "jackery-meter"
+name = "Compteur Jackery Smart Meter"
+manufacturer = "Jackery"
+model = "Smart Meter"
+identity = "m.sn"
+
+[[request]]
+id = "m"
+path = "/api/measurement"
+format = "json"
+every = "10s"
+
+[[point]]
+key = "power"
+label = "Puissance"
+from = "m.power"
+kind = "numeric"
+unit = "W"
+
+[[point]]
+key = "apparent_power"
+label = "Puissance apparente"
+from = "m.ap"
+kind = "numeric"
+unit = "VA"
+
+[[point]]
+key = "voltage"
+label = "Tension"
+from = "m.volt"
+kind = "numeric"
+unit = "V"
+
+[[point]]
+key = "current"
+label = "Courant"
+from = "m.curr"
+kind = "numeric"
+unit = "A"
+
+[[point]]
+key = "power_factor"
+label = "Facteur de puissance"
+from = "m.fact"
+kind = "numeric"
+semantic = "other"
+scale = 0.001
+round = 2
+
+[[point]]
+key = "frequency"
+label = "Fréquence"
+from = "m.freq"
+kind = "numeric"
+unit = "Hz"
+semantic = "other"
+
+# Lifetime counters, kept by the meter.
+[[point]]
+key = "energy"
+label = "Énergie achetée"
+from = "m.engy"
+kind = "numeric"
+unit = "kWh"
+
+[[point]]
+key = "energy_returned"
+label = "Énergie injectée"
+from = "m.engyo"
+kind = "numeric"
+unit = "kWh"
+
+[[point]]
+key = "signal"
+label = "Signal Wi-Fi"
+from = "m.rssi"
+kind = "numeric"
+unit = "dBm"
+semantic = "signal_strength"
