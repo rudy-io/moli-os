@@ -233,7 +233,7 @@ base_topic = "zigbee2mqtt"
 # [driver.options]
 # host = "192.168.0.x"
 # port = 5001                  # DSM's HTTPS port, if changed
-# mac = "00:11:32:aa:bb:cc"    # to wake it (Wake-on-LAN); learned by itself on a local network
+# mac = "aa:bb:cc:dd:ee:ff"    # to wake it (Wake-on-LAN); learned by itself on a local network
 
 # Moli, l'assistant (API compatible OpenAI). Clé : <source> | moli-os secrets set assistant api_key
 # [assistant]
