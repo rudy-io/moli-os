@@ -1,0 +1,17 @@
+{
+  "intent": "VID/PID near the 16-bit ceiling",
+  "input": {
+    "version": 0,
+    "vendor_id": 65524,
+    "product_id": 65535,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 1929,
+    "passcode": 70707070
+  },
+  "expected": {
+    "qr": "MT:6JS18FGW01568J6TI10"
+  }
+}

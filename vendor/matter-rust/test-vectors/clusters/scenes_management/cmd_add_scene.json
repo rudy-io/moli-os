@@ -1,0 +1,63 @@
+{
+  "cluster": "ScenesManagement",
+  "cluster_id": 98,
+  "command": "AddScene",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "GroupId",
+      "id": 0,
+      "value": 0
+    },
+    {
+      "name": "SceneId",
+      "id": 1,
+      "value": 1
+    },
+    {
+      "name": "TransitionTime",
+      "id": 2,
+      "value": 1000
+    },
+    {
+      "name": "SceneName",
+      "id": 3,
+      "value": "Evening"
+    },
+    {
+      "name": "ExtensionFieldSetStructs",
+      "id": 4,
+      "value": [
+        {
+          "ClusterId": 6,
+          "AttributeValueList": [
+            {
+              "AttributeId": 0,
+              "ValueUnsigned8": 1
+            }
+          ]
+        },
+        {
+          "ClusterId": 8,
+          "AttributeValueList": [
+            {
+              "AttributeId": 0,
+              "ValueUnsigned8": 128
+            }
+          ]
+        },
+        {
+          "ClusterId": 513,
+          "AttributeValueList": [
+            {
+              "AttributeId": 18,
+              "ValueSigned16": -250
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "note": "nested request lists whose AttributeValuePairStruct entries carry one of eight optional value fields (encoded with matter.js TlvAddSceneRequest)",
+  "payload_tlv_b64": "FSQAACQBASUC6AMsAwdFdmVuaW5nNgQVJAAGNgEVJAAAJAEBGBgYFSQACDYBFSQAACQBgBgYGBUlAAECNgEVJAASIQQG/xgYGBgY"
+}

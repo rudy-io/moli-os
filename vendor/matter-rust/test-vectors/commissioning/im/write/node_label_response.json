@@ -1,0 +1,11 @@
+{
+  "response_message_b64": "FTYAFTcAJAIAJAMoJAQFGDUBJAAAGBgYJP8LGA==",
+  "expected": [
+    {
+      "endpoint": 0,
+      "cluster": 40,
+      "attribute": 5,
+      "status": 0
+    }
+  ]
+}

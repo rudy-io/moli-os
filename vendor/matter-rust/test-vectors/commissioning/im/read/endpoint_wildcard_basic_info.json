@@ -1,0 +1,9 @@
+{
+  "paths": [
+    {
+      "cluster": 40,
+      "attribute": 5
+    }
+  ],
+  "expected_message_b64": "FTYAFyQDKCQEBRgYKAMk/wsY"
+}

@@ -1,0 +1,43 @@
+[
+  {
+    "name": "chip_test_request_decode",
+    "source": "chip:src/ble/tests/TestBleLayer.cpp:118",
+    "direction": "rx",
+    "role": "peripheral",
+    "packet_hex": "656c54000000c80006",
+    "expect": {
+      "versions": [4, 5],
+      "mtu": 200,
+      "window": 6
+    },
+    "provisional": false
+  },
+  {
+    "name": "our_canonical_request",
+    "source": "hand-encoded: spec 4.18.3 + chip:src/ble/BleLayer.cpp:135-178",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "656c04000000000006",
+    "expect": {
+      "versions": [4],
+      "mtu": 0,
+      "window": 6
+    },
+    "note": "Bytes 0x65 0x6c are CAPABILITIES_MSG_CHECK_BYTE_1/2 ('e','l'). Next 4 bytes are the nibble-packed supported-version array (BleTransportCapabilitiesRequestMessage::SetSupportedProtocolVersion, BleLayer.cpp:135-155): even index -> low nibble of slot[index/2], odd index -> high nibble. Version 4 at index 0 -> slot0 = 0x04, remaining slots 0x00. MTU 0 = unknown/unobserved (BLEEndPoint.cpp:991-998 falls back to platform delegate when 0). Window 6.",
+    "provisional": false
+  },
+  {
+    "name": "expected_chip_peripheral_response",
+    "source": "hand-encoded: chip:src/ble/BleLayer.cpp:206-223 + BLEEndPoint.cpp:1000-1010",
+    "direction": "rx",
+    "role": "central",
+    "packet_hex": "656c04f40006",
+    "expect": {
+      "version": 4,
+      "segment_size": 244,
+      "window": 6
+    },
+    "note": "BleTransportCapabilitiesResponseMessage::Encode layout (BleLayer.cpp:206-223): check bytes 0x65 0x6c, selected version (1 byte), fragment size (u16 LE), window (1 byte) = 6 bytes total (kCapabilitiesResponseLength). Fragment size 244 = assumed ATT_MTU 247 minus 3-byte ATT header (BLEEndPoint.cpp:1000-1010 clamp formula), a common BLE default MTU -- not an observed value. PROVISIONAL until morning btmon capture against the Pi DUT confirms the real peripheral's negotiated MTU/fragment size.",
+    "provisional": true
+  }
+]

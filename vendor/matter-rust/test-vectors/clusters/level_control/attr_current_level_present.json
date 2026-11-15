@@ -1,0 +1,10 @@
+{
+  "cluster": "LevelControl",
+  "cluster_id": 8,
+  "attribute": "CurrentLevel",
+  "attribute_id": 0,
+  "type": "uint8",
+  "writable": false,
+  "note": "nullable uint8, present",
+  "value_tlv_b64": "BP4="
+}

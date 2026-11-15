@@ -275,7 +275,7 @@ export function deviceKind(d) {
   if (has(d, 'clean') && has(d, 'battery')) return 'vacuum';
   // A heat pump, or a heating circuit (the three set points a thermostat or a valve never has together).
   if (has(d, 'compressor_active') || (has(d, 'mode', true) && has(d, 'comfort_temperature') && has(d, 'reduced_temperature'))) return 'heating';
-  if (has(d, 'target_temperature') || isValve(d)) return 'climate';
+  if (has(d, 'target_temperature') || (has(d, 'heat_setpoint') && has(d, 'cool_setpoint')) || isValve(d)) return 'climate';
   if (has(d, 'playing') && has(d, 'volume')) return 'speaker';
   if (positionPoint(d) || coverOrder(d) || has(d, 'percent_control'))
     return 'cover';

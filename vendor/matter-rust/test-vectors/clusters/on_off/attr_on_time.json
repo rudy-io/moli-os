@@ -1,0 +1,10 @@
+{
+  "cluster": "OnOff",
+  "cluster_id": 6,
+  "attribute": "OnTime",
+  "attribute_id": 16385,
+  "type": "uint16",
+  "writable": true,
+  "note": "plain uint16 writable attribute",
+  "value_tlv_b64": "BDw="
+}

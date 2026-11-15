@@ -1,0 +1,26 @@
+[package]
+name = "matter-clusters"
+version = "0.6.0"
+description = "Matter protocol cluster definitions (generated from the spec)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["matter", "cluster", "smart-home", "iot"]
+categories = ["api-bindings", "embedded"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+matter-codec = { path = "../matter-codec", version = "0.3.0" }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+base64 = { workspace = true }
+proptest = { workspace = true }

@@ -1,0 +1,10 @@
+{
+  "cluster": "Descriptor",
+  "cluster_id": 29,
+  "attribute": "ServerList",
+  "attribute_id": 1,
+  "type": "list[uint32]",
+  "writable": false,
+  "note": "list of scalars (cluster-id -> u32)",
+  "value_tlv_b64": "FgQGBB0EKBg="
+}

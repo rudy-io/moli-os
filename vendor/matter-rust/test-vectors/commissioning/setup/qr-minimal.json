@@ -1,0 +1,17 @@
+{
+  "intent": "Standard flow, on-network discovery, mid-range fields",
+  "input": {
+    "version": 0,
+    "vendor_id": 65522,
+    "product_id": 66,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 1280,
+    "passcode": 16777217
+  },
+  "expected": {
+    "qr": "MT:86PS0EQM00QH000ID00"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "cluster": "ContentLauncher",
+  "cluster_id": 1290,
+  "command": "LaunchURL",
+  "command_id": 1,
+  "fields": [
+    {
+      "name": "ContentURL",
+      "id": 0,
+      "value": "https://example.com/watch"
+    },
+    {
+      "name": "DisplayString",
+      "id": 1,
+      "value": "Now playing"
+    },
+    {
+      "name": "BrandingInformation",
+      "id": 2,
+      "value": {
+        "providerName": "Example",
+        "background": {
+          "imageUrl": "https://example.com/bg.png",
+          "color": "#000000",
+          "size": {
+            "width": 1920.5,
+            "height": 1080.25,
+            "metric": 0
+          }
+        },
+        "logo": {
+          "size": {
+            "width": 12.5,
+            "height": 7.25,
+            "metric": 1
+          }
+        }
+      }
+    }
+  ],
+  "note": "request struct nesting structs three deep, with two doubles per DimensionStruct (encoded with matter.js TlvLaunchUrlRequest)",
+  "payload_tlv_b64": "FSwAGWh0dHBzOi8vZXhhbXBsZS5jb20vd2F0Y2gsAQtOb3cgcGxheWluZzUCLAAHRXhhbXBsZTUBLAAaaHR0cHM6Ly9leGFtcGxlLmNvbS9iZy5wbmcsAQcjMDAwMDAwNQIrAAAAAAAAAp5AKwEAAAAAAOGQQCQCABgYNQI1AisAAAAAAAAAKUArAQAAAAAAAB1AJAIBGBgYGA=="
+}

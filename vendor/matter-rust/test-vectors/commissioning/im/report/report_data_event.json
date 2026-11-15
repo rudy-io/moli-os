@@ -1,0 +1,11 @@
+{
+  "event": {
+    "endpoint": 0,
+    "cluster": 40,
+    "event": 0,
+    "event_number": 1,
+    "priority": 2,
+    "epoch_timestamp": 0
+  },
+  "response_message_b64": "FTYCFTUBNwAkAQAkAigkAwAYJAEBJAICJAMANQckAAEYGBgYJP8LGA=="
+}

@@ -1,0 +1,18 @@
+{
+  "intent": "UserIntent commissioning flow",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "UserIntent",
+    "discovery_capabilities": [
+      "Ble",
+      "OnNetwork"
+    ],
+    "discriminator": 2748,
+    "passcode": 33333334
+  },
+  "expected": {
+    "qr": "MT:Y.K906HV147E912TQ00"
+  }
+}

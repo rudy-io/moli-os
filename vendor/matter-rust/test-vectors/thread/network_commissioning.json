@@ -1,0 +1,40 @@
+[
+  {
+    "name": "reference_operational_dataset",
+    "source": "OTBR ot-ctl dataset active -x, rig 2026-07-17",
+    "hex": "0e08000000000001000000030000184a0300001235060004001fffe002087896217f787f6ebe0708fdec3f34f3cd2020051071dccee3f164f15da92254e0b9c8a3a5030f4f70656e5468726561642d38396437010289d70410dc4b544c7a58671a2ce4f876f5d6dcd90c0402a0f7f8",
+    "expect": {
+      "ext_pan_id": "7896217f787f6ebe",
+      "len": 111
+    },
+    "note": "Thread's own TLV format (type-1/length-1/value), NOT Matter TLV. Walked all 11 TLVs to confirm well-formedness and that they consume exactly the 111-byte buffer with no overrun/underrun: type=0x0e len=8 (Active Timestamp), 0x00 len=3 (Channel), 0x4a len=3 (Channel Mask), 0x35 len=6 (PSKc... actually Security Policy per Thread TLV numbering), 0x02 len=8 (Extended PAN ID) value 7896217f787f6ebe, 0x07 len=8 (PSKc), 0x05 len=16 (Network Master Key... /Mesh-Local Prefix per TLV type), 0x03 len=15 (Network Name 'OpenThread-89d7'), 0x01 len=2 (PAN ID 0x89d7), 0x04 len=16 (Network Key), 0x0c len=4 (Active/Delay Timer). Field-name-to-type mapping is illustrative only -- the dataset is treated as opaque (YAGNI, no full dataset model); only the Extended PAN ID (type 0x02, len 8) extraction is load-bearing for ConnectNetwork. Dataset rotates if the Thread network is re-formed -- re-derive before any live run.",
+    "provisional": false
+  },
+  {
+    "name": "add_or_update_thread_network",
+    "source": "hand-encoded: spec 11.9.6.4 + matter-codec TlvWriter (matched against crates/matter-commissioning/src/clusters/network_commissioning.rs::encode_add_or_update_wifi_network, which was read in full before deriving this entry)",
+    "hex": "1530006f0e08000000000001000000030000184a0300001235060004001fffe002087896217f787f6ebe0708fdec3f34f3cd2020051071dccee3f164f15da92254e0b9c8a3a5030f4f70656e5468726561642d38396437010289d70410dc4b544c7a58671a2ce4f876f5d6dcd90c0402a0f7f824010118",
+    "expect": {
+      "cluster_id": "0x0031",
+      "command_id": "0x03 (ADD_OR_UPDATE_THREAD_NETWORK)",
+      "struct": "{ ctx0: octet-string(dataset, 111 bytes), ctx1: uint(breadcrumb=1) }",
+      "len": 119
+    },
+    "note": "AddOrUpdateThreadNetwork = TLV struct { ctx0: operationalDataset (octet-string), ctx1: breadcrumb (uint) } (Matter Core spec §11.9.6.4) -- NOTE ctx numbering differs from the Wi-Fi command: Wi-Fi is ctx0=ssid, ctx1=credentials, ctx2=breadcrumb, but Thread has no credentials field so breadcrumb is ctx1, not ctx2 (Matter Core spec §11.9.6.4). Byte derivation, mirroring TlvWriter::put_bytes/put_string_payload (crates/matter-codec/src/writer.rs:194-261, read in full): struct-open 0x15 (anonymous struct). ctx0: dataset length 111 (0x6f) fits u8 so put_string_payload picks the 1-byte-length octet-string form -- control byte 0x30 (context-tag-control 0x20 | octet-string-len8 element type 0x10), tag byte 0x00, length byte 0x6f, then the 111 dataset bytes verbatim (matches the wifi encoder's ssid/credentials control-byte pattern exactly, e.g. add_or_update_wifi_network_matter_no_creds_matches_spec_bytes uses the identical 0x30 0x00 <len> shape for a 6-byte ssid). ctx1: breadcrumb=1 fits u8 so put_uint picks the 1-byte uint form -- control byte 0x24 (context-tag-control 0x20 | uint-len1 element type 0x04), tag byte 0x01, value byte 0x01 (matches connect_network_matter_matches_spec_bytes's 0x24 0x01 <val> shape). struct-close 0x18. This derivation only has one length branch to get right (dataset is 111 <= 255 bytes so the 1-byte length form applies, not a wider form) and it mirrors byte-for-byte the two already-committed, test-covered wifi encoders, so confidence is high. The encoder's output was diffed against this hex: byte-for-byte identical.",
+    "provisional": false
+  },
+  {
+    "name": "connect_network_thread",
+    "source": "hand-encoded: spec 11.9.7 + matter-codec (matched against crates/matter-commissioning/src/clusters/network_commissioning.rs::encode_connect_network, which was read in full before deriving this entry)",
+    "hex": "153000087896217f787f6ebe24010118",
+    "expect": {
+      "cluster_id": "0x0031",
+      "command_id": "0x06 (CONNECT_NETWORK)",
+      "struct": "{ ctx0: octet-string(network_id = ext_pan_id, 8 bytes), ctx1: uint(breadcrumb=1) }",
+      "network_id": "7896217f787f6ebe",
+      "len": 16
+    },
+    "note": "ConnectNetwork is reused unchanged from the Wi-Fi path (encode_connect_network(network_id, breadcrumb) already takes an opaque network_id) -- only the caller changes: for Thread, network_id = ThreadDataset::ext_pan_id() (the 8-byte Extended PAN ID from the reference_operational_dataset entry above), not an SSID. Byte derivation exactly mirrors connect_network_matter_matches_spec_bytes (crates/matter-commissioning/src/clusters/network_commissioning.rs test, which encodes a 6-byte SSID as 0x15 0x30 0x00 0x06 <ssid> 0x24 0x01 <breadcrumb> 0x18): struct-open 0x15, ctx0 octet-string control 0x30 tag 0x00 length 0x08 (8 bytes, 1-byte-length form since 8 <= 255) + the 8 ext-pan-id bytes 7896217f787f6ebe, ctx1 uint control 0x24 tag 0x01 value 0x01 (breadcrumb=1, 1-byte form), struct-close 0x18. Reconciled 2026-07-17: verified against encode_connect_network(&[0x78,0x96,0x21,0x7f,0x78,0x7f,0x6e,0xbe], 1) in connect_network_thread_bytes_match_vector -- real output diffed byte-for-byte against this hex, identical, no correction needed.",
+    "provisional": false
+  }
+]

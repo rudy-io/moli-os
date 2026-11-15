@@ -1,0 +1,17 @@
+{
+  "intent": "smallest allowed passcode (1)",
+  "input": {
+    "version": 0,
+    "vendor_id": 65521,
+    "product_id": 32768,
+    "commissioning_flow": "Standard",
+    "discovery_capabilities": [
+      "OnNetwork"
+    ],
+    "discriminator": 256,
+    "passcode": 1
+  },
+  "expected": {
+    "qr": "MT:Y.K90AFN00CE0000000"
+  }
+}

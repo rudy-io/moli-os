@@ -1,4 +1,6 @@
 {
+  "commun.clim.heat_setpoint": "Consigne de chauffage",
+  "commun.clim.cool_setpoint": "Consigne de refroidissement",
   "commun.volet.feedback.sending": "Envoi de la commande…",
   "commun.volet.feedback.sent": "Commande envoyée · état à confirmer",
   "commun.volet.feedback.held": "En attente de votre validation",

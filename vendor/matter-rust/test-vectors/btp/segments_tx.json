@@ -1,0 +1,62 @@
+[
+  {
+    "name": "one_byte_sdu_frag20_no_ack",
+    "source": "hand-encoded: chip:src/ble/BtpEngine.cpp:405-481 (HandleCharacteristicSend, kState_Idle branch)",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "78",
+    "expect": {
+      "packets_hex": ["0500010078"]
+    },
+    "precondition": "Freshly-initialized engine (Init(nullptr, false), mTxNextSeqNum starts at 0). Single HandleCharacteristicSend(sdu=[0x78], send_ack=false) call, fragment size 20.",
+    "note": "packet_hex is the 1-byte SDU (input to fragmentation), not a wire packet. Output flags 0x05 = kStartMessage|kEndMessage (whole 1-byte SDU fits in one fragment: header 4 + payload 1 = 5 <= 20). seq 0x00 (first central tx). msgLen 0x0001 LE. payload 0x78. Verified by re-deriving BtpEngine.cpp's HandleCharacteristicSend algorithm in a standalone Python simulator.",
+    "provisional": false
+  },
+  {
+    "name": "one_byte_sdu_frag20_piggyback_ack1",
+    "source": "hand-encoded: chip:src/ble/BtpEngine.cpp:405-481 (HandleCharacteristicSend, send_ack branch)",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "78",
+    "expect": {
+      "packets_hex": ["0d0100010078"]
+    },
+    "precondition": "Freshly-initialized engine with one unacked received fragment pending ack (mRxNewestUnackedSeqNum = 1). Single HandleCharacteristicSend(sdu=[0x78], send_ack=true) call, fragment size 20.",
+    "note": "packet_hex is the 1-byte SDU (input). Output flags 0x0d = kStartMessage(0x01)|kFragmentAck(0x08)|kEndMessage(0x04). ack byte 0x01 (GetAndRecordRxAckSeqNum piggybacks pending rx ack). seq 0x00. msgLen 0x0001 LE. payload 0x78. Verified via Python simulation of BtpEngine.cpp's encode algorithm.",
+    "provisional": false
+  },
+  {
+    "name": "forty_byte_sdu_frag20",
+    "source": "hand-encoded: chip:src/ble/BtpEngine.cpp:405-535 (HandleCharacteristicSend, Idle then two InProgress calls) + length assertions cross-checked against chip:src/ble/tests/TestBtpEngine.cpp:162-182 (HandleCharacteristicSendThreePacket, packet lengths 20/20/8)",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+    "expect": {
+      "packets_hex": [
+        "01002800000102030405060708090a0b0c0d0e0f",
+        "0201101112131415161718191a1b1c1d1e1f2021",
+        "0602222324252627"
+      ]
+    },
+    "precondition": "Freshly-initialized engine (mTxNextSeqNum starts at 0). packet_hex is the 40-byte sequential SDU 0x00..0x27 (input). Three HandleCharacteristicSend calls: first with the full SDU and send_ack=false, then two with data=nullptr, send_ack=false, fragment size 20 (mirrors TestBtpEngine.cpp:162-182, which asserts packet0->DataLength() == 20, 20, then 8 after each call).",
+    "note": "DISCREPANCY with the first hand-derivation, which stated the third (final) fragment's header flags as 0x04 (End only). Actual chip source (BtpEngine.cpp:499,514: `BitFlags<HeaderFlags> headerFlags(HeaderFlags::kContinueMessage)` is the base for every non-initial fragment, then `headerFlags.Set(HeaderFlags::kEndMessage)` ORs in the End bit -- it does not replace kContinueMessage) produces flags 0x06 (kContinueMessage|kEndMessage) for the final fragment of a multi-fragment TX message, not 0x04 alone. This differs from the RX-side test fixtures (e.g. HandleCharacteristicReceivedThreePacket) which hand-construct a bare 0x04 End-only final packet purely to test decoder acceptance (DidReceiveData/HasAny(Continue,End) accepts either) -- that is not what the real chip encoder emits. Chip source wins: final fragment here is flags 0x06, not 0x04. That hand-derivation also implied fragment 2's payload was 'first 16 payload bytes' followed immediately by fragment 3's 'final 6' with no gap -- confirmed correct after independently re-deriving the algorithm in Python (fragment1 payload = SDU[16:34), 18 bytes; fragment2 payload = SDU[34:40), 6 bytes). Byte breakdown: pkt0 = flags 0x01, seq 0x00, msgLen 0x0028 LE (40), payload = SDU[0:16) -- 4+16=20. pkt1 = flags 0x02 (kContinueMessage only, not last), seq 0x01, payload = SDU[16:34) (18 bytes) -- 2+18=20. pkt2 = flags 0x06 (kContinueMessage|kEndMessage), seq 0x02, payload = SDU[34:40) (6 bytes) -- 2+6=8.",
+    "provisional": false
+  },
+  {
+    "name": "forty_byte_sdu_frag20_midstream_ack",
+    "source": "hand-encoded: chip:src/ble/BtpEngine.cpp:482-527 (HandleCharacteristicSend, kState_InProgress branch, send_ack piggyback on a mid fragment)",
+    "direction": "tx",
+    "role": "central",
+    "packet_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+    "expect": {
+      "packets_hex": [
+        "01002800000102030405060708090a0b0c0d0e0f",
+        "0a0201101112131415161718191a1b1c1d1e1f20",
+        "060221222324252627"
+      ]
+    },
+    "precondition": "Same 40-byte sequential SDU (0x00..0x27, packet_hex above) and fragment size 20 as forty_byte_sdu_frag20. First HandleCharacteristicSend(sdu, send_ack=false) as before. Before the second call, a pending rx ack becomes available (mRxNewestUnackedSeqNum = 2); second call is HandleCharacteristicSend(nullptr, send_ack=true), piggybacking that ack onto fragment 2 (kTransferProtocolMidFragmentMaxHeaderSize = 3 bytes: flags+ack+seq, no msgLen on continuation fragments). Third call HandleCharacteristicSend(nullptr, send_ack=false) with no ack pending, completing the message.",
+    "note": "pkt0 identical to forty_byte_sdu_frag20's first fragment (ack piggyback only starts at fragment 2): flags 0x01, seq 0x00, msgLen 0x0028 LE, payload = SDU[0:16). pkt1: flags 0x0a = kContinueMessage(0x02)|kFragmentAck(0x08), ack byte 0x02, seq 0x01, payload = SDU[16:33) (17 bytes) -- header 3 + payload 17 = 20 (recomputed split: mid-fragment header grows from 2 to 3 bytes when acking, so payload shrinks by 1 vs the no-ack split at this same offset). Remaining SDU after pkt1 = 40-16-17=7 bytes. pkt2: flags 0x06 = kContinueMessage|kEndMessage (per the same chip-source correction documented in forty_byte_sdu_frag20 -- the final fragment ORs End onto the Continue base, it does not replace it), seq 0x02, payload = SDU[33:40) (7 bytes) -- header 2 + payload 7 = 9. Every packet <= 20 bytes total as required. All four entries' output bytes were cross-checked with an independent Python re-implementation of BtpEngine.cpp's HandleCharacteristicSend algorithm.",
+    "provisional": false
+  }
+]

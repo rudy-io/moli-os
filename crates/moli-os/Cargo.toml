@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+moli-matter.workspace = true
 moli-core.workspace = true
 moli-i18n.workspace = true
 moli-runtime.workspace = true

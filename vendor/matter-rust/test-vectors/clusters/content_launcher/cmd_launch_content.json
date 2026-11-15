@@ -1,0 +1,67 @@
+{
+  "cluster": "ContentLauncher",
+  "cluster_id": 1290,
+  "command": "LaunchContent",
+  "command_id": 0,
+  "fields": [
+    {
+      "name": "Search",
+      "id": 0,
+      "value": {
+        "parameterList": [
+          {
+            "type": 0,
+            "value": "Gaby sHoffman",
+            "externalIdList": [
+              {
+                "name": "imdb",
+                "value": "nm0001"
+              },
+              {
+                "name": "tmdb",
+                "value": "42"
+              }
+            ]
+          },
+          {
+            "type": 6,
+            "value": "Horror"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlay",
+      "id": 1,
+      "value": true
+    },
+    {
+      "name": "PlaybackPreferences",
+      "id": 3,
+      "value": {
+        "playbackPosition": null,
+        "textTrack": {
+          "languageCode": "en",
+          "characteristics": null
+        },
+        "audioTracks": [
+          {
+            "languageCode": "fr",
+            "characteristics": [
+              0,
+              17
+            ],
+            "audioOutputIndex": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "UseCurrentContext",
+      "id": 4,
+      "value": false
+    }
+  ],
+  "note": "request list of structs with an optional list present and absent; nullable struct, nullable lists and an enum list nested in an optional struct (encoded with matter.js TlvLaunchContentRequest)",
+  "payload_tlv_b64": "FTUANgAVJAAALAENR2FieSBzSG9mZm1hbjYCFSwABGltZGIsAQZubTAwMDEYFSwABHRtZGIsAQI0MhgYGBUkAAYsAQZIb3Jyb3IYGBgpATUDNAA1ASwAAmVuNAEYNgIVLAACZnI2AQQABBEYJAIBGBgYKAQY"
+}

@@ -1,0 +1,16 @@
+{
+  "inputs": {
+    "exchange_id": 16962,
+    "protocol_id": {
+      "vendor": 0,
+      "protocol": 1
+    },
+    "opcode": 2,
+    "is_initiator": true,
+    "requires_ack": true,
+    "ack_counter": null
+  },
+  "expected": {
+    "wire_hex": "050242420100"
+  }
+}

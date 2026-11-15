@@ -1,0 +1,8 @@
+{
+  "kind": "malformed-pkcs10",
+  "nocsr_elements_b64": "FTABFDCBuzBiAgEAMAAwWTATBgcqhkjOMAIgMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMY",
+  "attestation_signature_b64": "nEOGaoBFafwTTV6pfOgCNC6H8j9cyTfv9NkR0giJWxkaYCRUC1g1tnO6d1ntTmwcfQIaErltGPg5uweybVKAwg==",
+  "expected_csr_nonce_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "attestation_challenge_hex": "77777777777777777777777777777777",
+  "dac_public_key_b64": "BKxDukVQQ+riPuGighS3Wasu65/t/sQqMphj/EvXUIB88U3ec0nr4/Vr4Z7+2w4iJ/GAiq0h+T1VoSiF56os444="
+}

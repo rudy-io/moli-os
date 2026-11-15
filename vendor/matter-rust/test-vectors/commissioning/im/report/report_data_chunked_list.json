@@ -1,0 +1,14 @@
+{
+  "chunks_b64": [
+    "FTYBFTUBNwEkAgAkAx0kBAMYNgIYGBgYKQMk/wsY",
+    "FTYBFTUBNwEkAgAkAx0kBAM0BRgkAgEYGBgpBCT/Cxg="
+  ],
+  "expected_path": {
+    "endpoint": 0,
+    "cluster": 29,
+    "attribute": 3
+  },
+  "expected_list": [
+    1
+  ]
+}

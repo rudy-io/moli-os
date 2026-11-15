@@ -1,0 +1,48 @@
+{
+  "scenario": "happy-path",
+  "comment": "Captured by xtask capture-attestation. ECDSA P-256/SHA-256 sign+verify roundtrip with matter.js NodeJsStyleCrypto. signature_hex is raw r||s (64 bytes, Matter §3.5.3 fixed-width). Re-running the script overwrites the file with a fresh keypair + fresh signature; mutations are regenerated against the new tuple. Byte-parity claim is on accept/reject verdicts, not on raw bytes (ECDSA k is randomized per call).",
+  "inputs": {
+    "dac_public_key_hex": "04fb042b21499a47393ce432b3fcd5f31e040d11058dc4a0cecc3665802f6de3ff680f6d92453e467b94d98cd90b2b3ed36fb220b2a25a3071de013c4b41c19378",
+    "attestation_elements_hex": "15000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e",
+    "attestation_challenge_hex": "42434445464748494a4b4c4d4e4f5051",
+    "signature_hex": "0e45b27a050f3e3a6aed3ce31a92acac8dc69b23c5320ceec5fff775eaf37d3952658dead3db7cba34463a04d96ddc0ccbe356e4c65ace9bcf6126a03c32c873"
+  },
+  "matter_js_verify": "accept",
+  "mutations": [
+    {
+      "name": "flip_signature_byte_0",
+      "patch": {
+        "field": "signature_hex",
+        "byte_index": 0,
+        "xor": 128
+      },
+      "matter_js_verify": "reject"
+    },
+    {
+      "name": "flip_challenge_byte_0",
+      "patch": {
+        "field": "attestation_challenge_hex",
+        "byte_index": 0,
+        "xor": 1
+      },
+      "matter_js_verify": "reject"
+    },
+    {
+      "name": "flip_elements_byte_0",
+      "patch": {
+        "field": "attestation_elements_hex",
+        "byte_index": 0,
+        "xor": 128
+      },
+      "matter_js_verify": "reject"
+    },
+    {
+      "name": "wrong_public_key",
+      "patch": {
+        "field": "dac_public_key_hex",
+        "replace_hex": "042ebfff56b483385dc29258fc527e1598d7aca3c1f73e5f85a185f77a08766ecef6cff21445eb848df0e3bb1dd990177854ec6bfcbd43f80dae4ce2e33bc0c898"
+      },
+      "matter_js_verify": "reject"
+    }
+  ]
+}

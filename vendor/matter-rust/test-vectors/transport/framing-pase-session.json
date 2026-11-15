@@ -1,0 +1,15 @@
+{
+  "inputs": {
+    "i2r_key": "00112233445566778899aabbccddeeff",
+    "r2i_key": "ffeeddccbbaa99887766554433221100",
+    "session_id": 16962,
+    "message_counter": 1,
+    "source_node_id": null,
+    "destination_node_id": null,
+    "role": "Initiator",
+    "payload_hex": "052102d10a0001003501290218"
+  },
+  "expected": {
+    "wire_hex": "0042420001000000e7c0482083b31d17fa6226657baaca97bde1c21de96c64485f7ce74f87"
+  }
+}

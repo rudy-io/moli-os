@@ -1,0 +1,10 @@
+{
+  "cluster": "Binding",
+  "cluster_id": 30,
+  "attribute": "Binding",
+  "attribute_id": 0,
+  "type": "TargetStruct (list entry, write form)",
+  "writable": true,
+  "note": "TargetStruct { Node 0x1122, Endpoint 1, Cluster 0x0006 } with no FabricIndex, as a write sends it (matter.js Binding.TlvTarget, forWriteInteraction)",
+  "value_tlv_b64": "FSUBIhEkAwEkBAYY"
+}

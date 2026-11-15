@@ -1,0 +1,8 @@
+{
+  "kind": "malformed-nocsr-tlv",
+  "nocsr_elements_b64": "FTABvTCBujBiAgEAMAAwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQjMoi3m3LzP++gSQNJ0uLu/fv1zYHhhk02LR/vlPWG/XIRivLnLbHLSnFPtrGZkmxzaArKyqH9Akp8XXAIIjdpoAAwCgYIKoZIzj0EAwIDSAAwRQIhAJYdzqQeKC2YxRmUYUzugvKY9dgraTZne6HIV5M6czXCAiBGKdCE7XzFTSK/IXOR7viKvKrborhc2NCRGTh/Q6GNcTACIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=",
+  "attestation_signature_b64": "RfpZJclyC/GSsc8G5uHUcoiS4+Ii/3DwPC2VRtY6Xs0YuzH/aIeUQmj4aL2TmClcLwvks+zOVzLCRNJGD7yU8Q==",
+  "expected_csr_nonce_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "attestation_challenge_hex": "77777777777777777777777777777777",
+  "dac_public_key_b64": "BJONnARNap0xHUnqHRhCfP/TPFtx8LdUT1yQgRP3dcgxsvcBMEi0aAmIpASaTyaAisWDXjbYwMkFZOdR3jqmyxg="
+}

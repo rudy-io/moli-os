@@ -1,0 +1,18 @@
+{
+  "source": "matter.js 0.17.1: SecureChannelMessenger.sendCloseSession on a MessageExchange.initiate exchange (mirrors ExchangeManager.#sendCloseSession; stub NodeSession)",
+  "inputs": {
+    "exchange_id": 48879
+  },
+  "expected": {
+    "payload_header": {
+      "exchange_id": 48879,
+      "protocol_id": 0,
+      "message_type": 64,
+      "is_initiator": true,
+      "requires_ack": false,
+      "acked_message_id": null
+    },
+    "payload_header_hex": "0140efbe0000",
+    "payload_hex": "0000000000000300"
+  }
+}

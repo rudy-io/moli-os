@@ -1,0 +1,15 @@
+{
+  "inputs": {
+    "i2r_key": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+    "r2i_key": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "session_id": 1,
+    "message_counter": 2147483649,
+    "source_node_id": "DEADBEEFCAFEBABE",
+    "destination_node_id": null,
+    "role": "Initiator",
+    "payload_hex": "052102d10a0001003501290218"
+  },
+  "expected": {
+    "wire_hex": "0401000001000080bebafecaefbeaddee278a60c2d09da05a917bc1f1e7ecb8f9f5154c1647c2876dc01985a85"
+  }
+}
