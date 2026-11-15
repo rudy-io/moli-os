@@ -1,11 +1,13 @@
 <script>
   import { onMount } from 'svelte';
-  import { hub, home, value, relative } from '../lib/home.svelte.js';
+  import { hub, home, value, relative, nameOf } from '../lib/home.svelte.js';
+  import { nasGroups, parts } from '../lib/nas.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import Gauge from '../ui/infra/Gauge.svelte';
   import Spark from '../ui/infra/Spark.svelte';
   import PcCard from '../ui/infra/PcCard.svelte';
+  import NasCard from '../ui/infra/NasCard.svelte';
 
   /** The house's machines, the digital side of « is everything fine at
    *  home? »: the server (live from Moli), its disks and containers (the host
@@ -32,6 +34,7 @@
   const server = $derived(devices.find((d) => d.model === 'Serveur de la maison'));
   const pcs = $derived(devices.filter((d) => d.model === 'Ordinateur'));
   const box = $derived(devices.find((d) => d.points.some((p) => p.key === 'external_ip')));
+  const nases = $derived(nasGroups(devices));
   const sv = (k) => (server ? value(server.id, k) : null);
 
   // ---- words and numbers ----
@@ -70,6 +73,16 @@
       else if (home.now - b.at > 36 * 3_600_000) out.push(t('systeme.infra.alerte.sauvegarde_ancienne', { label: b.label, days: Math.round((home.now - b.at) / 86_400_000) }));
     }
     if (server && server.online === false) out.push(t('systeme.infra.alerte.serveur'));
+    // A NAS that says something is wrong, part by part; one that does not answer says so once.
+    for (const g of nases) {
+      if (value(g.nas.id, 'up') === false) {
+        out.push(t('systeme.infra.alerte.nas_eteint', { name: nameOf(g.nas.id) }));
+        continue;
+      }
+      for (const d of parts(g)) {
+        if (value(d.id, 'problem') === true) out.push(t('systeme.infra.alerte.nas', { name: nameOf(d.id), detail: value(d.id, 'detail') || '—' }));
+      }
+    }
     return out;
   });
   const stale = $derived(infra && home.now - infra.ts > 5 * 60_000);
@@ -184,6 +197,10 @@
         </ul>
       </section>
     {/if}
+
+    {#each nases as group (group.instance)}
+      <NasCard {group} />
+    {/each}
 
     {#each pcs as pc (pc.id)}
       <PcCard {pc} />
