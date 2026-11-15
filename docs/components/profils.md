@@ -451,8 +451,8 @@ dossier dans les deux sens.
 |---|---|---|---|---|---|
 | `daikin-brp069` | climatiseur Daikin, adaptateur Wi-Fi BRP069 | HTTP local, sans auth, `kv` | `basic` 1 h, `sensor` 60 s, `control` 30 s | aucun | oui, en lecture (écritures d'après le protocole documenté par pydaikin) |
 | `meross-em06` | compteur d'énergie Meross EM06/EM06P, 6 circuits | HTTP local signé (`meross`) | `all` 1 h, `e` 15 s | `key` | oui (EM06P) |
-| `shelly-em-gen1` | compteur Shelly EM 1re génération (SHEM), 2 pinces | HTTP local, sans auth | `status` 10 s | aucun | oui, en lecture (firmware v1.14.0) |
 | `moonraker` | imprimante 3D Klipper + Moonraker | HTTP local, sans auth | `info` 1 h, `q` 15 s | aucun | oui (Snapmaker U1) ; remplacé depuis par le pilote natif `moonraker` (paquet `klipper`) |
+| `shelly-em-gen1` | compteur Shelly EM 1re génération (SHEM), 2 pinces | HTTP local, sans auth | `status` 10 s | aucun | oui, en lecture (firmware v1.14.0) |
 | `open-meteo` | météo du moment et du jour | HTTPS `api.open-meteo.com`, vars `lat`, `lon` | `w` 15 min | aucun | oui (sans fixture) |
 | `open-meteo-air` | qualité de l'air et UV (modèles CAMS) | HTTPS `air-quality-api.open-meteo.com`, vars `lat`, `lon` | `a` 30 min | aucun | oui (sans fixture) |
 | `tempo` | couleur EDF Tempo du jour et du lendemain | HTTPS `www.api-couleur-tempo.fr` | `today` 1 h, `tomorrow` 30 min | aucun | oui (sans fixture) |
@@ -494,6 +494,14 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
   `moli-os secrets set <instance> key`. Les points `power_N` et `energy_month_N` alimentent
   la section `[energy]`.
 
+#### `moonraker`
+
+- Identité et nom : `hostname` de la machine (un nom d'hôte : stable en pratique, mais à garder fixe).
+- Points : `state` (`standby`, `printing`, `paused`, `complete`, `cancelled`, `error`),
+  `progress` (%), `file`, `print_duration` (min), `nozzle_temperature`, `nozzle_target`,
+  `bed_temperature`, `bed_target`. Le profil n'a pas de port par défaut : préciser `port`
+  (Moonraker écoute souvent sur 7125).
+
 #### `shelly-em-gen1`
 
 - L'ancienne API HTTP des Shelly Gen1 (`GET /status`) ; les Gen2 et suivants ont le pilote
@@ -506,14 +514,6 @@ Seul `daikin-brp069` écrit (4 points) ; les autres sont en lecture seule.
 - Les compteurs ne tournent que si le Shelly a l'heure (SNTP joignable) et peuvent repartir de
   zéro après un redémarrage : dans `[energy]`, garder `reset = "auto"` (par défaut).
 - Sans mot de passe sur l'appareil (l'authentification HTTP de base n'est pas prise en charge).
-
-#### `moonraker`
-
-- Identité et nom : `hostname` de la machine (un nom d'hôte : stable en pratique, mais à garder fixe).
-- Points : `state` (`standby`, `printing`, `paused`, `complete`, `cancelled`, `error`),
-  `progress` (%), `file`, `print_duration` (min), `nozzle_temperature`, `nozzle_target`,
-  `bed_temperature`, `bed_target`. Le profil n'a pas de port par défaut : préciser `port`
-  (Moonraker écoute souvent sur 7125).
 
 #### `open-meteo`
 
