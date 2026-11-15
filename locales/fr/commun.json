@@ -273,6 +273,7 @@
   "commun.code.actuel_d_abord": "Tape d’abord le code actuel de la maison.",
   "commun.code.choisir": "Choisis le code de la maison ({min} à 8 chiffres). Il remplace l’ancien partout.",
   "commun.code.seconde_fois": "Tape-le une seconde fois.",
+  "commun.code.raison_chaque_fois": "Cette action demande le code à chaque fois.",
   "commun.code.raison_automatisme": "Un automatisme agit tout seul : la maison demande que ce soit bien toi qui le valides.",
   "commun.code.raison_calme": "Ce sont les heures calmes : la maison demande que ce soit bien toi.",
   "commun.code.raison_protegee": "Cette pièce est protégée : la maison demande que ce soit bien toi.",

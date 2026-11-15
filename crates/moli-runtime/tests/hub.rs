@@ -190,6 +190,58 @@ async fn a_mirror_house_lets_through_what_stays_inside_moli() {
 }
 
 #[tokio::test]
+async fn some_orders_want_the_code_each_time_even_from_a_session() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            code_each_time: vec![moli_runtime::guard::CodeEachTime {
+                point: "fake:plug1/state".into(),
+                values: vec!["false".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    // Switching on is not concerned.
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    // Off wants the code: a person with a session is held too.
+    let Err(CommandError::NeedsApproval { id, .. }) = hub
+        .command(&point("state"), Value::Bool(false), Origin::Ui, None)
+        .await
+    else {
+        panic!("held");
+    };
+    assert!(hub.approvals().iter().any(|a| a.id == id && a.code));
+    assert_eq!(
+        hub.resolve_approval(id, &point("state"), true, Origin::Ui, None)
+            .await,
+        Err(moli_runtime::ApprovalError::CodeNeeded)
+    );
+    // Still waiting: typed now, it goes.
+    hub.resolve_approval_with_code(id, &point("state"), true, Origin::Ui, None, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        hub.state(&point("state")).unwrap().value,
+        Value::Bool(false)
+    );
+    // An automation a person approved carries their intent.
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    hub.command(
+        &point("state"),
+        Value::Bool(false),
+        Origin::Automation,
+        None,
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn a_mirror_house_journals_every_order_and_sends_none() {
     let (hub, _cancel) = start_with(HubOptions {
         mirror: true,
@@ -392,6 +444,7 @@ fn guarded_hub() -> HubOptions {
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
         },
         ..HubOptions::default()
     }
@@ -732,6 +785,7 @@ async fn groups_are_guarded_by_their_members_rooms_and_lost_rooms_are_reported()
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
         },
         ..HubOptions::default()
     })
@@ -1153,6 +1207,7 @@ fn quiet_all_day() -> HubOptions {
             ),
             protect_unassigned: false,
             dashboard: moli_runtime::guard::Dashboard::Trusted,
+            code_each_time: vec![],
         },
         ..HubOptions::default()
     }
