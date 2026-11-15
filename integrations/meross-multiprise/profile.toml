@@ -1,0 +1,123 @@
+# Meross power strips and double plugs (MSS425, MSS620): local signed API (no cloud at run time).
+# The device key comes from the Meross account the plug was set up with;
+# store it once:
+#   moli-os secrets set <instance> key        (value on standard input)
+# Protocol knowledge from the community (meross_lan, merossiot); no code
+# copied. Channel 0 is every outlet at once; 1 and up, each outlet (then the USB ports).
+# Never tried on a real device: written from those descriptions.
+
+[profile]
+id = "meross-multiprise"
+name = "Multiprise connectée Meross (MSS425, MSS620)"
+manufacturer = "Meross"
+model = "MSS425"
+secret = "key"
+identity = "all.payload.all.system.hardware.uuid"
+mac = "all.payload.all.system.hardware.macAddress"
+name_from = "all.payload.all.system.hardware.type"
+
+# Identity and the relay state (digest), in one message.
+[[request]]
+id = "all"
+path = "/config"
+format = "json"
+every = "15s"
+transport = "meross"
+namespace = "Appliance.System.All"
+payload = "{}"
+
+[[point]]
+key = "on"
+label = "Toutes les sorties"
+from = "all.payload.all.digest.togglex.[channel=0].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "on_1"
+label = "Sortie 1"
+from = "all.payload.all.digest.togglex.[channel=1].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "on_2"
+label = "Sortie 2"
+from = "all.payload.all.digest.togglex.[channel=2].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "on_3"
+label = "Sortie 3"
+from = "all.payload.all.digest.togglex.[channel=3].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "on_4"
+label = "Sortie 4"
+from = "all.payload.all.digest.togglex.[channel=4].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[point]]
+key = "on_5"
+label = "Sortie 5"
+from = "all.payload.all.digest.togglex.[channel=5].onoff"
+kind = "binary"
+semantic = "on_off"
+
+[[write]]
+point = "on"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 0, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+
+[[write]]
+point = "on_1"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 1, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+
+[[write]]
+point = "on_2"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 2, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+
+[[write]]
+point = "on_3"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 3, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+
+[[write]]
+point = "on_4"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 4, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"
+
+[[write]]
+point = "on_5"
+path = "/config"
+transport = "meross"
+namespace = "Appliance.Control.ToggleX"
+payload = '{"togglex": {"channel": 5, "onoff": "{value}"}}'
+map = { true = "1", false = "0" }
+refresh = "all"

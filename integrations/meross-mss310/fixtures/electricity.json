@@ -1,0 +1,24 @@
+{
+  "header": {
+    "messageId": "00000000000000000000000000000000",
+    "namespace": "Appliance.Control.Electricity",
+    "method": "GETACK",
+    "payloadVersion": 1,
+    "from": "/appliance/00000000000000000000000000000001/publish",
+    "timestamp": 1767355200,
+    "timestampMs": 0,
+    "sign": "00000000000000000000000000000000"
+  },
+  "payload": {
+    "electricity": {
+      "channel": 0,
+      "current": 1042,
+      "voltage": 2331,
+      "power": 228400,
+      "config": {
+        "voltageRatio": 188,
+        "electricityRatio": 100
+      }
+    }
+  }
+}
