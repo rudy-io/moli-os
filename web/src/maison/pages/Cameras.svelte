@@ -3,6 +3,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import CameraTile from '../ui/CameraTile.svelte';
+  import LiveVideo from '../ui/LiveVideo.svelte';
   import SecurityPanel from '../ui/SecurityPanel.svelte';
 
   // The layout's cameras first (their names, pace, battery), then any other.
@@ -95,7 +96,12 @@
         <button class="close" onclick={() => (open = null)} aria-label={t('commun.fermer')}><Icon name="close" size={22} /></button>
       </div>
       {#key current.id}
-        <CameraTile id={current.id} name={current.name} refresh={current.battery ? 0 : 2} battery={current.battery} big />
+        {#if hub.devices[current.id]?.live && !current.locked}
+          <!-- Live video, played by this browser straight from the camera. -->
+          <div class="live-slot"><LiveVideo id={current.id} /></div>
+        {:else}
+          <CameraTile id={current.id} name={current.name} refresh={current.battery ? 0 : 2} battery={current.battery} big />
+        {/if}
       {/key}
       <div class="seen">
         <h3>{t('salon.cameras.aujourdhui')}</h3>
