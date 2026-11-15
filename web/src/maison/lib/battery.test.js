@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batteryNow } from './battery.js';
+import { batteryNow, splitFlows } from './battery.js';
 
 const summary = (battery, today = {}) => ({ battery, today });
 
@@ -42,4 +42,32 @@ test('what went in and out today', () => {
   const b = batteryNow(summary({ soc: 50 }, { battery_charge: { kwh: 3.2 }, battery_discharge: { kwh: 1.1 } }));
   assert.equal(b.charged, 3.2);
   assert.equal(b.discharged, 1.1);
+});
+
+test('the battery charges from the sun first, then the grid', () => {
+  // 202 W of sun, 42 W into the battery, 1.5 kW bought.
+  let f = splitFlows({ bought: 1500, made: 202, sent: 0, batteryW: 42 });
+  assert.deepEqual(f, { solarToBattery: 42, gridToBattery: 0, solarToGrid: 0, solarToHouse: 160, gridToHouse: 1500, batteryToGrid: 0, batteryToHouse: 0 });
+  // Little sun, the battery takes 1 kW: the grid gives the rest.
+  f = splitFlows({ bought: 1500, made: 300, sent: 0, batteryW: 1000 });
+  assert.equal(f.solarToBattery, 300);
+  assert.equal(f.gridToBattery, 700);
+  assert.equal(f.gridToHouse, 800);
+  // A sunny noon: 3 kW made, 1 kW stored, 500 W sent out.
+  f = splitFlows({ bought: 0, made: 3000, sent: 500, batteryW: 1000 });
+  assert.equal(f.solarToBattery, 1000);
+  assert.equal(f.solarToGrid, 500);
+  assert.equal(f.solarToHouse, 1500);
+});
+
+test('a discharging battery feeds the house, the grid only beyond the sun', () => {
+  let f = splitFlows({ bought: 200, made: 0, sent: 0, batteryW: -900 });
+  assert.equal(f.batteryToHouse, 900);
+  assert.equal(f.gridToHouse, 200);
+  f = splitFlows({ bought: 0, made: 100, sent: 300, batteryW: -500 });
+  assert.equal(f.solarToGrid, 100);
+  assert.equal(f.batteryToGrid, 200);
+  assert.equal(f.batteryToHouse, 300);
+  // Missing readings count as nothing.
+  assert.equal(splitFlows({ bought: null, made: undefined, batteryW: null }).gridToHouse, 0);
 });

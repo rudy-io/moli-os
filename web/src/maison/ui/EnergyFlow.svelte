@@ -4,7 +4,7 @@
   import { energy, useEnergy, kwh, watts } from '../lib/energy-live.svelte.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
-  import { batteryNow } from '../lib/battery.js';
+  import { batteryNow, splitFlows } from '../lib/battery.js';
 
   /** Where the energy goes right now: the grid (bought, sent back), the
    *  panels, the house, and gas today. From the meters' live powers
@@ -54,9 +54,11 @@
   const batteryW = $derived(battery?.power ?? null);
   const hasBattery = $derived(batteryW != null);
   const house = $derived(bought == null ? null : Math.max(0, bought + (made ?? 0) - sent - (batteryW ?? 0)));
-  // The panels feed the house first; the rest goes out.
-  const toGrid = $derived(Math.min(sent, made ?? sent));
-  const toHouse = $derived(made == null ? 0 : Math.max(0, made - toGrid));
+  // Who feeds whom: the battery charges from the sun first, then the grid;
+  // the sun then feeds the house, the rest goes out (`splitFlows`).
+  const split = $derived(splitFlows({ bought, made: made ?? 0, sent, batteryW }));
+  const toGrid = $derived(split.solarToGrid);
+  const toHouse = $derived(split.solarToHouse);
 
   const today = $derived(s?.today);
   const boughtToday = $derived(kwhOf('grid', today) ?? kwhOf('total', today));
@@ -73,22 +75,28 @@
     solarGrid: 'M 200 92 C 200 170 110 172 98 172',
     gridHouse: 'M 98 180 L 302 180',
     gasHouse: 'M 340 92 L 340 136',
-    houseBattery: 'M 313 203 C 300 240 270 262 230 262',
-    batteryHouse: 'M 230 262 C 270 262 300 240 313 203',
+    solarBattery: 'M 200 92 L 200 238',
+    gridBattery: 'M 98 186 C 170 186 194 200 194 238',
+    batteryGrid: 'M 194 238 C 194 200 170 186 98 186',
+    batteryHouse: 'M 206 238 C 206 200 230 186 302 186',
   };
 </script>
 
 {#if s && bought != null && shown}
   <section class="card flow" class:home aria-label={t('energie.flux.titre')}>
     <div class="card-head"><h2><Icon name="flash" size={18} />{t('energie.flux.titre')}</h2></div>
-    <svg viewBox="0 0 400 {hasBattery ? 300 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
+    <svg viewBox="0 0 400 {hasBattery ? 324 : 236}" role="img" aria-label={t('energie.flux.resume', { maison: watts(house), reseau: watts(bought), solaire: watts(made ?? 0) })}>
       {#if hasSolar}
         <path class="line solar" d={PATHS.solarHouse} />
         <path class="line export" d={PATHS.solarGrid} />
       {/if}
       <path class="line grid" d={PATHS.gridHouse} />
       {#if hasGas}<path class="line gas" d={PATHS.gasHouse} />{/if}
-      {#if hasBattery}<path class="line battery" d={PATHS.batteryHouse} />{/if}
+      {#if hasBattery}
+        {#if hasSolar}<path class="line solar" d={PATHS.solarBattery} />{/if}
+        <path class="line grid" d={PATHS.gridBattery} />
+        <path class="line battery" d={PATHS.batteryHouse} />
+      {/if}
 
       {#if hasSolar && flowing(toHouse)}
         {#key duration(toHouse)}<circle class="dot solar" r="4"><animateMotion dur={duration(toHouse)} repeatCount="indefinite" path={PATHS.solarHouse} /></circle>{/key}
@@ -96,12 +104,15 @@
       {#if hasSolar && flowing(toGrid)}
         {#key duration(toGrid)}<circle class="dot export" r="4"><animateMotion dur={duration(toGrid)} repeatCount="indefinite" path={PATHS.solarGrid} /></circle>{/key}
       {/if}
-      {#if hasBattery && flowing(Math.abs(batteryW))}
-        {@const path = batteryW > 0 ? PATHS.houseBattery : PATHS.batteryHouse}
-        {#key `${path}${duration(Math.abs(batteryW))}`}<circle class="dot battery" r="4"><animateMotion dur={duration(Math.abs(batteryW))} repeatCount="indefinite" {path} /></circle>{/key}
+      {#if hasBattery}
+        {#each [['solar', split.solarToBattery, PATHS.solarBattery], ['grid', split.gridToBattery, PATHS.gridBattery], ['battery', split.batteryToHouse, PATHS.batteryHouse], ['battery', split.batteryToGrid, PATHS.batteryGrid]] as [kind, w, path] (path)}
+          {#if flowing(w)}
+            {#key duration(w)}<circle class="dot {kind}" r="4"><animateMotion dur={duration(w)} repeatCount="indefinite" {path} /></circle>{/key}
+          {/if}
+        {/each}
       {/if}
-      {#if flowing(bought)}
-        {#key duration(bought)}<circle class="dot grid" r="4"><animateMotion dur={duration(bought)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
+      {#if flowing(split.gridToHouse)}
+        {#key duration(split.gridToHouse)}<circle class="dot grid" r="4"><animateMotion dur={duration(split.gridToHouse)} repeatCount="indefinite" path={PATHS.gridHouse} /></circle>{/key}
       {/if}
 
       {#if hasSolar}
@@ -126,9 +137,9 @@
         <text class="label" y="56">{t('energie.flux.reseau')}</text>
       </g>
       {#if hasBattery}
-        <g class="node battery" transform="translate(200 262)">
+        <g class="node battery" transform="translate(200 268)">
           <circle r="30" />
-          <text class="label" y="-38">{t('energie.flux.batterie')}</text>
+          <text class="label" y="46">{t('energie.flux.batterie')}</text>
           <text class="big" y="0">{battery.soc == null ? watts(Math.abs(batteryW)) : `${Math.round(battery.soc)} %`}</text>
           <text class="small" y="15">{batteryW > 0 ? '↓' : batteryW < 0 ? '↑' : ''} {watts(Math.abs(batteryW))}</text>
         </g>
