@@ -53,6 +53,10 @@ pub struct Config {
     /// (D12). Moli runs them as instance `lumieres`.
     #[serde(default, rename = "fixture")]
     pub fixtures: Vec<moli_lights::Fixture>,
+    /// The weather outside (#210): the stations, then the forecast, as one
+    /// device. Moli runs it as instance `dehors` (absent: nothing changes).
+    #[serde(default)]
+    pub outdoor: Option<moli_outdoor::Config>,
     /// Scenes: lights of several rooms set to a look in one gesture. Moli
     /// runs them (and the rhythm) as instance `scenes`.
     #[serde(default, rename = "scene")]
@@ -244,6 +248,7 @@ pub(crate) fn reserved_instance(id: &str) -> bool {
         moli_energy::points::INSTANCE,
         moli_energy::load::INSTANCE,
         moli_lights::INSTANCE,
+        moli_outdoor::INSTANCE,
         moli_scenes::INSTANCE,
         moli_api::PEOPLE_INSTANCE,
     ]
@@ -408,6 +413,9 @@ impl Config {
                 .map_err(|e| anyhow::anyhow!("[energy] {e}"))?;
         }
         moli_lights::check(&self.fixtures).map_err(|e| anyhow::anyhow!("[[fixture]] {e}"))?;
+        if let Some(outdoor) = &self.outdoor {
+            moli_outdoor::check(outdoor).map_err(|e| anyhow::anyhow!("[outdoor] {e}"))?;
+        }
         moli_scenes::check(&self.scenes, self.rhythm.as_ref())
             .map_err(|e| anyhow::anyhow!("[[scene]] {e}"))?;
         Ok(())

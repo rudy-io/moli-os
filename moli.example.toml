@@ -111,6 +111,19 @@ timezone = "Europe/Paris"
 # bulbs = ["hue:…", "hue:…"]
 # power = "tuya:…/switch_1"
 
+# The weather outside (dehors:meteo): for each meaning, the fresh measure of
+# the first station, else the fresh forecast, else the latest value known.
+# Read-only; nothing is converted. Falling back to the forecast is a choice,
+# not a safety: an automation that must act on a measure checks
+# dehors:meteo/<key>_source (see docs/components/pilotes.md, `dehors`).
+# [outdoor]
+# forecast = ["meteo:…", "air:…"]
+# forecast_stale_after = "1h"   # optional: 30 min by default
+#
+# [[outdoor.station]]           # in order of preference
+# device = "z2m:0x…"
+# stale_after = "15m"           # optional: 30 min by default
+
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]
 id = "z2m"

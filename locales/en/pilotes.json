@@ -850,5 +850,20 @@
   "pilotes.vicare.commande_refusee": "the Viessmann cloud refuses the order ({why})",
   "pilotes.vicare.identifiants_manquants": "no Viessmann credentials: store the application key, and the ViCare account's e-mail and password with \"moli-os secrets set {instance} {client}\", \"… {user}\" and \"… {password}\", then restart Moli",
   "pilotes.vicare.identifiants_refuses": "the Viessmann cloud refuses these credentials or this key ({error}): fix them with \"moli-os secrets set {instance} …\" (and check the key's redirect address), trying again in 30 minutes",
-  "pilotes.vicare.injoignable": "Viessmann cloud unreachable ({error}), trying again in 2 minutes 30"
+  "pilotes.vicare.injoignable": "Viessmann cloud unreachable ({error}), trying again in 2 minutes 30",
+  "pilotes.dehors.nom": "Outdoor weather",
+  "pilotes.dehors.temperature": "Temperature",
+  "pilotes.dehors.humidite": "Humidity",
+  "pilotes.dehors.pression": "Pressure",
+  "pilotes.dehors.luminosite": "Illuminance",
+  "pilotes.dehors.vent": "Wind",
+  "pilotes.dehors.rafales": "Gusts",
+  "pilotes.dehors.direction": "Wind direction",
+  "pilotes.dehors.intensite_pluie": "Rain rate",
+  "pilotes.dehors.pluie_jour": "Rain today",
+  "pilotes.dehors.uv": "UV index",
+  "pilotes.dehors.source": "Source: {what}",
+  "pilotes.dehors.stations": "Stations",
+  "pilotes.dehors.previsions": "Forecast",
+  "pilotes.dehors.lecture_seule": "the outdoor weather is read only: it takes no order"
 }

@@ -1,0 +1,22 @@
+[package]
+name = "moli-outdoor"
+description = "Moli OS « Dehors » weather: the measured weather when a station speaks, the forecast when it does not, as one device."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+anyhow.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

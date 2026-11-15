@@ -1889,3 +1889,88 @@ async fn a_gate_is_never_sent_again() {
     assert_eq!(orders.load(Ordering::SeqCst), 1, "a gate's order goes once");
     assert_eq!(hub.journal(10).len(), 1);
 }
+
+/// A device that copies another's readings (the « Dehors » weather): its
+/// values keep the time they were read at.
+struct Copier;
+
+impl Driver for Copier {
+    fn kind(&self) -> &'static str {
+        "copier"
+    }
+
+    fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let id = ctx.device_id("copy");
+            let numeric = Kind::Numeric {
+                min: None,
+                max: None,
+                step: None,
+            };
+            ctx.upsert_device(Device {
+                id: id.clone(),
+                instance: ctx.instance().clone(),
+                native_name: "copy".into(),
+                manufacturer: None,
+                model: None,
+                description: None,
+                native_room: None,
+                members: Vec::new(),
+                points: vec![
+                    spec("copied", numeric.clone(), false, Semantic::Temperature),
+                    spec("own", numeric, false, Semantic::Temperature),
+                ],
+            });
+            // The same reading, then read again later, then the same again.
+            ctx.set_state_at(&id, "copied", Value::Int(12), 1_000);
+            ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
+            ctx.set_state_at(&id, "copied", Value::Int(12), 2_000);
+            // set_state as before: now, and no event when nothing changed.
+            ctx.set_state(&id, "own", Value::Int(7));
+            ctx.set_state(&id, "own", Value::Int(7));
+            ctx.ready();
+            while let Some(cmd) = ctx.next_command().await {
+                cmd.reply(Ok(()));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_copied_value_keeps_the_time_it_was_read_at() {
+    let hub = Hub::new(HubOptions::default()).unwrap();
+    let mut events = hub.subscribe();
+    let cancel = CancellationToken::new();
+    let before = moli_core::now_ms();
+    spawn_driver(
+        &hub,
+        InstanceId::from("copier"),
+        Arc::new(Copier),
+        cancel.clone(),
+    );
+    wait_running(&hub).await;
+
+    let copied = hub.state(&PointId::from("copier:copy/copied")).unwrap();
+    assert_eq!(copied.value, Value::Int(12));
+    assert_eq!(copied.ts, 2_000, "the time given is kept, not now");
+    let own = hub.state(&PointId::from("copier:copy/own")).unwrap();
+    assert!(own.ts >= before, "set_state still records now");
+
+    // A newer reading of the same value is told (its age changed); the same
+    // reading twice, or set_state with the same value, is not.
+    let mut copied_events = 0;
+    let mut own_events = 0;
+    while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(50), events.recv()).await {
+        if let Event::State { point, .. } = event {
+            match point.as_str() {
+                "copier:copy/copied" => copied_events += 1,
+                "copier:copy/own" => own_events += 1,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(copied_events, 2);
+    assert_eq!(own_events, 1);
+    cancel.cancel();
+}
