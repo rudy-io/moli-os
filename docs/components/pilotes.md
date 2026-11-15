@@ -850,6 +850,30 @@ mac = "aa:bb:cc:dd:ee:ff"   # pour le Wake-on-LAN
 - **Identité** : ⚠️ l'id natif est **l'adresse `host`** (`ctx.device_id(&config.host)`), pas un identifiant de l'appareil : un changement d'IP créerait un nouvel appareil.
 - **Tests** : digest vérifié sur l'exemple de la RFC 2617.
 
+## `androidtv` : box ou télé Android (`crates/moli-androidtv`)
+
+- **Couvre** : une box ou une télé Android TV quelconque, sans API de constructeur : l'appli au premier plan, **ouvrir une appli**, les touches de la télécommande (appuyées ou **maintenues**), le texte dans le champ ouvert, ce qui se joue (titre, image, lecture/pause ; avec ADB, quelle que soit l'appli), et une notification à l'écran si TvOverlay est installé. Ni alimentation en écriture, ni volume, ni Ambilight.
+- **Protocole** : aucun propre à ce pilote. Il ne fait que déclarer les points et traduire les ordres : le cœur `moli_androidtv::tv` tient les connexions, décrites à la section [`philips`](#philips--télé-philips-android-cratesmoli-philips) — Android TV Remote v2 (TLS **6466**, certificat client de l'appairage), Google Cast (TLS **8009**), ADB (TCP **5555**, `adb = true`), TvOverlay (HTTP **5001**, `overlay = true`) —, avec son épinglage, ses reprises de 5 s à 60 s et le réveil des connexions coupées.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "box"
+kind = "androidtv"
+[driver.options]
+host = "192.168.1.x"
+# adb = true       # ce que joue toute appli (débogage réseau de la box allumé)
+# overlay = true   # notifications par-dessus l'image (appli TvOverlay sur la box)
+```
+
+- **Secrets** : `atv_cert` et `atv_key` (PEM de l'appairage Android TV Remote, **repris de Home Assistant**, par un tube), lus par le cœur ; sans eux le pilote démarre quand même, **Cast seul** (ce qui est casté, play/pause ; aucune touche, aucune appli à ouvrir). `atv_pin`, `cast_pin` et `adb_key` sont écrits par le cœur, comme pour `philips`. Appairage, formats et pièges : section `philips`.
+- **Points** : `power` en **lecture seule**, l'état que dit la télécommande Android (vide sans appairage : Cast ne dit pas si l'écran est allumé) ; `app` : l'appli au premier plan (paquet Android), **écrire** un paquet, un lien ou le nom d'une appli connue l'ouvre (l'ordre attend la réponse de la box : l'appli à l'écran, ou un refus dit à qui a demandé) ; `key` en écriture seule (énumération de 23 touches : curseurs, `Confirm`, `Back`, `Home`, `Options`, `Info`, lecture, volume, chaînes, `Source`) ; `hold` en écriture seule (une flèche, `FastForward` ou `Rewind` maintenue jusqu'à `release`) ; `text` en écriture seule (le champ ouvert, un retour à la ligne final = Entrée) ; `media_control` (`play`, `pause`, `stop`) en écriture seule ; `media_app`, `media_state` (`playing`, `paused`, `buffering`, `idle`), `media_title`, `media_subtitle`, `media_image`, `media_duration`, `media_position` (s) en lecture ; `notify` en écriture seule si `overlay = true`.
+- **Ordres perdus** : une touche sans code Android connu, ou un ordre quand la télécommande est coupée, est refusé tout de suite et **jamais rejoué** (un appui compté deux fois vaut moins qu'un appui perdu).
+- **Limites** : pas d'alimentation en écriture (pas de Wake-on-LAN : la box se réveille à sa télécommande, par HDMI-CEC, ou reste allumée) ; pas de volume réglable, seulement les touches `VolumeUp`, `VolumeDown` et `Mute` (Moli ne lit pas le niveau, une box n'ayant pas d'API commune pour le dire) ; ni Ambilight ni aucun réglage de marque : c'est la contrepartie d'un pilote qui vaut pour n'importe quelle box. Le pilote n'interroge rien lui-même : il déclare la box joignable à chaque tour de 5 s, ce qui fait retenter les connexions coupées.
+- **Identité** : ⚠️ l'id natif est l'**adresse `host`** (`ctx.device_id(&config.host)`) : un changement d'IP créerait un nouvel appareil (même remarque que pour `philips`).
+- **Page Salon** : la box y apparaît quand `salon.tv` de `data/home.json` porte son id (`"salon": { "tv": "box:<host>" }`) : titre, appli, position, télécommande, raccourcis d'applis. L'étiquette de pièce seule ne suffit pas : la page ne choisit pas sa télé d'après la pièce.
+- **Tests** : chaque touche de `KEYS` a son code Android ; une touche de maintien inconnue est refusée.
+
 ## `frigate` : NVR Frigate (`crates/moli-frigate`)
 
 - **Couvre** : caméras de Frigate : mouvement, objets vus, interrupteurs de Frigate, images. Et le **serveur** (appareil « Serveur Frigate », `<instance>:frigate-server`, déclaré au premier `frigate/stats`) : `running`, `version`, `uptime` (h), `inference_speed` (ms, premier détecteur), `detection_fps`, `gpu_load` et `cpu_load` (%).
@@ -1459,6 +1483,7 @@ ni pièce native). Il ne déplace jamais rien. Sans argument : plan à blanc ; `
 | `sonos` | `moli-sonos` | UPnP/SOAP HTTP 1400 ; annonces en WebSocket TLS 1443 | oui : lecture, volume, sourdine, annonces | Sonos Beam |
 | `airplay` | `moli-airplay` | RAOP : RTSP 5000, RTP/UDP | oui : annonces, volume | Freebox Delta Player |
 | `philips` | `moli-philips` | JointSpace HTTPS 1926, digest, WoL ; Android TV Remote, Cast | oui : alimentation, volume, sourdine, Ambilight, touches, appli | Philips Google TV (lecture) |
+| `androidtv` | `moli-androidtv` | Android TV Remote, Cast, ADB (aucun protocole propre) | oui : appli, touches, maintien, texte, lecture, notifications | Freebox Player POP (état, lecture, ADB ; touches et lancement d'appli non essayés) |
 | `frigate` | `moli-frigate` | MQTT + HTTP interne 5000 | oui : détection, enregistrement, instantanés | Frigate |
 | `bambu` | `moli-bambu` | MQTT TLS 8883, épinglé | lumière, `control` (humain pour un agent) | pas encore (cible : Bambu Lab A1) |
 | `moonraker` | `moli-moonraker` | HTTP local 7125 | lumière, `control` (humain pour un agent) | Snapmaker U1, Creality K2 Combo |

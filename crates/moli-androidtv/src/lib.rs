@@ -12,15 +12,20 @@
 //!
 //! Each runs one connection until it fails; the driver reconnects.
 //!
+//! - [`driver`]: the `androidtv` driver, a box or a TV through [`tv`] with no
+//!   maker's API beside it.
 //! - [`tv`]: one TV through them (ADB when asked), kept connected: what any
 //!   Android TV driver needs (a maker's, like Philips, runs it beside its
 //!   own API).
 
 pub mod adb;
 pub mod cast;
+pub mod driver;
 pub mod overlay;
 pub mod remote;
 pub mod tv;
+
+pub use driver::AndroidTv;
 
 /// The protobuf codec, shared with the other protocols.
 pub use moli_net::proto;
