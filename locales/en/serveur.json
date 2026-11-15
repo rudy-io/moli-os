@@ -143,6 +143,8 @@
   "serveur.energie.charge.raison": "What Moli is doing",
   "serveur.energie.charge.duree": "Run time this cycle",
   "serveur.energie.point.today_production_kwh": "Solar production today",
+  "serveur.energie.point.today_battery_charge_kwh": "Stored in the battery today",
+  "serveur.energie.point.today_battery_discharge_kwh": "Given back by the battery today",
   "serveur.energie.point.today_export_kwh": "Sent to the grid today",
   "serveur.energie.point.today_self_consumed_kwh": "Solar used at home today",
   "serveur.energie.point.today_self_consumption_rate": "Self-consumption today",

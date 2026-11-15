@@ -101,6 +101,26 @@ timezone = "Europe/Paris"
 # history = true
 # price = 0.17
 
+# A home battery: what went in and out (lifetime indexes, no price), plus its
+# charge and power for the live views (power positive while charging; set
+# discharge_positive = true for an inverter that counts the other way):
+# [[energy.meter]]
+# id = "batterie-in"
+# name = "Battery in"
+# point = "bms:aabbccddeeff/charged_energy"
+# role = "charge"
+# reset = "never"
+# [[energy.meter]]
+# id = "batterie-out"
+# name = "Battery out"
+# point = "bms:aabbccddeeff/discharged_energy"
+# role = "discharge"
+# reset = "never"
+# [energy.battery]
+# soc = "bms:aabbccddeeff/soc"
+# power = "bms:aabbccddeeff/power"
+# capacity_kwh = 10.0
+
 # Light fixtures: bulbs and the relay that feeds them as one light
 # (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb
 # answers, and comes back on its own when the light is switched on.

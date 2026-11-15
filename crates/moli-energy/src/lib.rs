@@ -27,7 +27,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-pub use config::{Config, MeterConfig, Reset, Role, Tariff};
+pub use config::{Battery, Config, MeterConfig, Reset, Role, Tariff};
 use meter::{Integral, Outcome, Reading, Tracker};
 pub use price::HousePrice;
 use price::HousePrices;
@@ -102,15 +102,21 @@ pub struct Flows {
     /// it sends out (the `total` meter's power, a clamp that sees both ways).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grid_w: Option<f64>,
-    /// What the home uses: bought + made.
+    /// The home battery, signed: positive while it charges, negative while
+    /// it gives back (`[energy.battery] power`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_w: Option<f64>,
+    /// What the home uses: bought + made, less what the battery takes,
+    /// plus what it gives back.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumption_w: Option<f64>,
 }
 
 impl Flows {
-    /// From the meters' live powers (`None` without a solar power).
+    /// From the meters' live powers and the battery's (`None` without a
+    /// solar power).
     #[must_use]
-    pub fn of(meters: &[MeterInfo]) -> Option<Self> {
+    pub fn of(meters: &[MeterInfo], battery_w: Option<f64>) -> Option<Self> {
         let solar: Vec<f64> = meters
             .iter()
             .filter(|m| m.role == Role::Solar)
@@ -128,8 +134,67 @@ impl Flows {
         Some(Self {
             production_w,
             grid_w,
-            consumption_w: grid_w.map(|g| (g + production_w).max(0.0)),
+            battery_w,
+            consumption_w: grid_w.map(|g| (g + production_w - battery_w.unwrap_or(0.0)).max(0.0)),
         })
+    }
+}
+
+/// The home battery right now (`[energy.battery]`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct BatteryInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soc_point: Option<String>,
+    /// State of charge, in %.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soc_ts: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power_point: Option<String>,
+    /// Signed like `Flows::battery_w`: positive while it charges.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power_w: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power_ts: Option<u64>,
+    /// The power point reads positive while discharging: live views that
+    /// read it themselves flip it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub discharge_positive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity_kwh: Option<f64>,
+    /// What the charge holds now (kWh), with a capacity and a charge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored_kwh: Option<f64>,
+}
+
+impl BatteryInfo {
+    /// From the configuration and the points' current values (value, ts).
+    #[must_use]
+    pub fn of(
+        config: &config::Battery,
+        soc: Option<(f64, u64)>,
+        power: Option<(f64, u64)>,
+    ) -> Self {
+        // A charge outside 0–100 % is a bad reading, not a state.
+        let soc = soc.filter(|(v, _)| v.is_finite() && (0.0..=100.0).contains(v));
+        let power = power
+            .filter(|(w, _)| w.is_finite())
+            .map(|(w, ts)| (if config.discharge_positive { -w } else { w }, ts));
+        Self {
+            soc_point: config.soc.clone(),
+            soc: soc.map(|(v, _)| v),
+            soc_ts: soc.map(|(_, ts)| ts),
+            power_point: config.power.clone(),
+            power_w: power.map(|(w, _)| w),
+            power_ts: power.map(|(_, ts)| ts),
+            discharge_positive: config.discharge_positive,
+            capacity_kwh: config.capacity_kwh,
+            stored_kwh: config
+                .capacity_kwh
+                .zip(soc)
+                .map(|(c, (v, _))| (c * v).round() / 100.0),
+        }
     }
 }
 
@@ -154,6 +219,9 @@ pub struct Summary {
     /// Where the power goes right now, with solar meters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flows: Option<Flows>,
+    /// The home battery right now, with `[energy.battery]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery: Option<BatteryInfo>,
     pub today: Period,
     pub yesterday: Period,
     pub month: Period,
@@ -307,6 +375,22 @@ impl Energy {
         })
     }
 
+    fn battery(&self) -> Option<BatteryInfo> {
+        let battery = self.inner.config.battery.as_ref()?;
+        let hub = &self.inner.hub;
+        let read = |point: &Option<String>| {
+            point
+                .as_ref()
+                .and_then(|p| hub.current_state(&PointId::from(p.clone())))
+                .and_then(|s| s.value.as_f64().map(|v| (v, s.ts)))
+        };
+        Some(BatteryInfo::of(
+            battery,
+            read(&battery.soc),
+            read(&battery.power),
+        ))
+    }
+
     fn period_now(&self) -> Option<String> {
         let tariff = self.inner.config.tariff.as_ref()?;
         match self
@@ -336,6 +420,7 @@ impl Energy {
         let month_period = Period::of(config, &rows, month, month_end);
         let period = self.period_now();
         let meters = self.meters();
+        let battery = self.battery();
         Ok(Summary {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
@@ -346,7 +431,8 @@ impl Energy {
                 .or_else(|| self.inner.prices.at(now)),
             period_point: config.tariff.as_ref().map(|t| t.period.clone()),
             period,
-            flows: Flows::of(&meters),
+            flows: Flows::of(&meters, battery.as_ref().and_then(|b| b.power_w)),
+            battery,
             meters,
             live: self.live(),
             today: Period::of(config, &rows, today, tomorrow),
@@ -1085,6 +1171,64 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_battery_takes_its_share_of_the_live_power() {
+        let meter = |role: Role, power_w: Option<f64>| MeterInfo {
+            id: format!("{role:?}"),
+            name: String::new(),
+            role,
+            point: "a:b/c".into(),
+            power: None,
+            power_w,
+            power_ts: None,
+            within: None,
+            feeds: Vec::new(),
+            estimated: false,
+        };
+        let meters = [
+            meter(Role::Solar, Some(3000.0)),
+            meter(Role::Total, Some(-200.0)),
+        ];
+        // 3 kW made, 200 W sent out, 1 kW into the battery: 1.8 kW used.
+        let f = Flows::of(&meters, Some(1000.0)).unwrap();
+        assert_eq!(f.battery_w, Some(1000.0));
+        assert_eq!(f.consumption_w, Some(1800.0));
+        // At night it gives back: 500 W bought + 700 W from the battery.
+        let night = [
+            meter(Role::Solar, Some(0.0)),
+            meter(Role::Total, Some(500.0)),
+        ];
+        assert_eq!(
+            Flows::of(&night, Some(-700.0)).unwrap().consumption_w,
+            Some(1200.0)
+        );
+        assert_eq!(Flows::of(&night, None).unwrap().consumption_w, Some(500.0));
+
+        let config = Battery {
+            soc: Some("bms:b/soc".into()),
+            power: Some("bms:b/power".into()),
+            discharge_positive: false,
+            capacity_kwh: Some(10.0),
+        };
+        let b = BatteryInfo::of(&config, Some((45.0, 1)), Some((-300.0, 2)));
+        assert_eq!(
+            (b.soc, b.power_w, b.stored_kwh),
+            (Some(45.0), Some(-300.0), Some(4.5))
+        );
+        // An inverter that counts what it gives the home: flipped.
+        let flipped = Battery {
+            discharge_positive: true,
+            ..config.clone()
+        };
+        assert_eq!(
+            BatteryInfo::of(&flipped, None, Some((300.0, 2))).power_w,
+            Some(-300.0)
+        );
+        // A charge outside 0–100 % is a bad reading.
+        let bad = BatteryInfo::of(&config, Some((140.0, 1)), None);
+        assert_eq!((bad.soc, bad.stored_kwh), (None, None));
+    }
 
     const H: u64 = meter::HOUR_MS;
 

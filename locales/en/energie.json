@@ -362,6 +362,14 @@
   "energie.flux.gaz": "Gas",
   "energie.flux.reseau": "Grid",
   "energie.flux.maison": "Home",
+  "energie.flux.batterie": "Battery",
+  "energie.batterie.titre": "Battery",
+  "energie.batterie.charge_pct": "Battery charge",
+  "energie.batterie.charge": "Charging · {w}",
+  "energie.batterie.decharge": "Powering the home · {w}",
+  "energie.batterie.repos": "Idle",
+  "energie.batterie.stocke": "{kwh} kWh of {total}",
+  "energie.batterie.aujourdhui": "Today: {entre} kWh in, {sorti} kWh given back",
   "energie.flux.aujourdhui": "Today: {achete} kWh bought, {injecte} kWh sent out",
   "energie.flux.resume": "The home uses {maison}: {reseau} from the grid, {solaire} from the panels"
 }

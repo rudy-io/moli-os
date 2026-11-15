@@ -115,6 +115,8 @@
   "assistant.auto.role_circuit": "un circuit",
   "assistant.auto.role_appliance": "un appareil (prise mesurée)",
   "assistant.auto.role_solar": "la production des panneaux solaires (index à vie)",
+  "assistant.auto.role_charge": "ce qui entre dans la batterie de la maison (index)",
+  "assistant.auto.role_discharge": "ce qui sort de la batterie de la maison (index)",
   "assistant.auto.role_export": "ce que la maison injecte sur le réseau (index)",
   "assistant.auto.meter_power": "- {name} ({role}) : puissance en W = {power}",
   "assistant.auto.meter_energy": "- {name} ({role}) : énergie = {point}",
