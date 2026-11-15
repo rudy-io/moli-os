@@ -1597,6 +1597,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moli-alarm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-helpers",
+ "moli-i18n",
+ "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "moli-alexa"
 version = "0.1.0"
 dependencies = [
@@ -2223,6 +2240,7 @@ dependencies = [
  "jiff",
  "moli-airplay",
  "moli-airzone",
+ "moli-alarm",
  "moli-alexa",
  "moli-androidtv",
  "moli-api",

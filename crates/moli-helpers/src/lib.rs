@@ -154,6 +154,11 @@ impl Driver for Helpers {
         "helpers"
     }
 
+    /// Values Moli keeps for itself: a mirror house changes them too.
+    fn stays_inside(&self) -> bool {
+        true
+    }
+
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
             for h in &self.config.helpers {
