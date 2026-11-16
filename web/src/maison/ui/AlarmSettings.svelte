@@ -27,9 +27,16 @@
       .filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase())),
   );
 
+  // A mode switched off shows its delays greyed, as they were: switched
+  // back on, it gets them again.
+  const DEFAULT_DELAYS = { exit: 0, entry: 0, trigger: 60 };
+  let remembered = $state({});
+
   function toggleMode(m) {
-    if (draft.modes[m]) draft = withoutMode(draft, m);
-    else draft.modes[m] = { exit: 0, entry: 0, trigger: 60 };
+    if (draft.modes[m]) {
+      remembered[m] = { ...draft.modes[m] };
+      draft = withoutMode(draft, m);
+    } else draft.modes[m] = { ...(remembered[m] ?? DEFAULT_DELAYS) };
   }
 
   function setDelay(m, key, value) {
@@ -75,25 +82,24 @@
   <div class="modes">
     {#each MODES as m (m)}
       {@const d = draft.modes[m]}
+      {@const shown = d ?? remembered[m] ?? DEFAULT_DELAYS}
       <div class="mode" class:off={!d}>
         <label class="switch-line">
           <input type="checkbox" checked={!!d} onchange={() => toggleMode(m)} />
           <Icon name={ICONS[m]} size={18} /><b>{modeName(m)}</b>
         </label>
-        {#if d}
-          <div class="delays">
-            {#each [['exit', 'alarme.sortie'], ['entry', 'alarme.entree'], ['trigger', 'alarme.sirene']] as [key, label] (key)}
-              <label>
-                <span>{t(label)}</span>
-                <span class="num">
-                  <input type="number" min="0" max="3600" step="1" value={d[key]} oninput={(e) => setDelay(m, key, e.currentTarget.value)} />
-                  <small>s</small>
-                </span>
-              </label>
-            {/each}
-          </div>
-          <small class="muted">{t('alarme.reglages.sirene_zero')}</small>
-        {/if}
+        <div class="delays">
+          {#each [['exit', 'alarme.sortie'], ['entry', 'alarme.entree'], ['trigger', 'alarme.sirene']] as [key, label] (key)}
+            <label>
+              <span>{t(label)}</span>
+              <span class="num">
+                <input type="number" min="0" max="3600" step="1" value={shown[key]} disabled={!d} oninput={(e) => setDelay(m, key, e.currentTarget.value)} />
+                <small>s</small>
+              </span>
+            </label>
+          {/each}
+        </div>
+        <small class="muted">{t(d ? 'alarme.reglages.sirene_zero' : 'alarme.reglages.mode_inactif')}</small>
       </div>
     {/each}
   </div>
@@ -108,8 +114,16 @@
             <small class="muted">{s.point}</small>
           </div>
           <div class="in" role="group" aria-label={t('alarme.reglages.surveille_en')}>
-            {#each enabled as m (m)}
-              <button class="chip" class:on={s.modes.includes(m)} aria-pressed={s.modes.includes(m)} onclick={() => toggleSensorMode(s, m)}>
+            {#each MODES as m (m)}
+              {@const active = !!draft.modes[m]}
+              <button
+                class="chip"
+                class:on={active && s.modes.includes(m)}
+                aria-pressed={active && s.modes.includes(m)}
+                disabled={!active}
+                title={active ? undefined : t('alarme.reglages.mode_inactif_capteur', { mode: modeName(m) })}
+                onclick={() => toggleSensorMode(s, m)}
+              >
                 {modeName(m)}
               </button>
             {/each}
@@ -123,6 +137,7 @@
         </li>
       {/each}
     </ul>
+    <p class="muted legend">{t('alarme.reglages.immediat_legende')}</p>
   {:else}
     <p class="muted">{t('alarme.reglages.aucun_capteur')}</p>
   {/if}
@@ -295,6 +310,17 @@
     font: inherit;
     font-size: 12.5px;
     cursor: pointer;
+  }
+
+  .legend {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+  }
+
+  .chip:disabled {
+    border-style: dashed;
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .chip.on {
