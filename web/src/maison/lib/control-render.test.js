@@ -431,6 +431,16 @@ test('offline and unmeasured semantic covers cannot expose an active slider', ()
     assert.equal(inputs(unmeasured).length, 1);
     assert.match(inputs(unmeasured)[0], /disabled/);
   }
+  // Unmeasured but writable: the slider stays, greyed out at its lower bound, range intact.
+  const [grey] = inputs(show('CoverTile', points, {}));
+  assert.match(grey, /value="0"/);
+  assert.match(grey, /min="0"/);
+  assert.match(grey, /max="100"/);
+  assert.match(grey, /step="1"/);
+  // The mirror image: a measured reading keeps the slider live at that value.
+  const [live] = inputs(show('CoverTile', points, { opening: 42 }));
+  assert.match(live, /value="42"/);
+  assert.doesNotMatch(live, /disabled/);
 });
 
 test('case-preserving motor orders identify a cover without inventing a power switch or position', () => {
