@@ -280,8 +280,15 @@ fn check_node(
         protected,
     };
     match &node.step {
-        Step::WhenState { point, .. } => {
-            c.need(point, false);
+        Step::WhenState { point, for_s, .. } => {
+            // A press is an occurrence (#211): « for 5 min » would fire 5 min
+            // after the last one, never while someone holds the button.
+            if let Some(spec) = c.need(point, false)
+                && is_press(Some(&spec))
+                && *for_s > 0
+            {
+                c.push(Level::Warning, tr!("moteur.verif.appui_duree"));
+            }
         }
         Step::WhenThreshold {
             point,
@@ -485,10 +492,18 @@ fn said(hub: &Hub, point: &str) -> Said {
         };
     };
     match hub.describe(&DeviceId::from(device.as_str())) {
-        Some((found, label)) => Said {
-            device: name(&found, &label),
-            spec: found.points.iter().find(|p| *p.key == *key).cloned(),
-        },
+        Some((found, label)) => {
+            let spec = found.points.iter().find(|p| *p.key == *key).cloned();
+            let mut device = name(&found, &label);
+            // A remote with several buttons: which one (« Variateur · Bouton 2 »).
+            let presses = found.points.iter().filter(|p| is_press(Some(p))).count();
+            if let Some(press) = spec.as_ref().filter(|s| is_press(Some(s)))
+                && presses > 1
+            {
+                device = format!("{device} · {}", press.label);
+            }
+            Said { device, spec }
+        }
         None => Said {
             device: device.to_string(),
             spec: None,
@@ -499,6 +514,30 @@ fn said(hub: &Hub, point: &str) -> Said {
 /// A plant sensor's thirst (`dry` on a Tuya soil sensor): no leak, no alarm.
 fn is_soil_dry(spec: Option<&PointSpec>) -> bool {
     spec.is_some_and(|s| s.semantic == moli_core::Semantic::SoilDry)
+}
+
+/// A button's press (#211): an occurrence, never a state.
+fn is_press(spec: Option<&PointSpec>) -> bool {
+    spec.is_some_and(|s| s.semantic == moli_core::Semantic::Press && !s.access.write)
+}
+
+/// A press in the dashboard's words (« simple », « double », « maintenu »):
+/// each gesture named by the event that ends it (a Hue hold ends on
+/// `long_release`); any other value, as the brand gives it.
+fn press_word(value: &str) -> Option<String> {
+    let key = match value {
+        "single" | "click" | "short_release" => "commun.appui.simple",
+        "double" | "double_click" | "double_short_release" => "commun.appui.double",
+        "triple" => "commun.appui.triple",
+        "hold" | "long" | "press" | "long_press" | "repeat" | "long_release" => {
+            "commun.appui.maintenu"
+        }
+        // The start of a Hue press: no gesture yet.
+        "initial_press" => return None,
+        "release" => "commun.appui.relache",
+        other => return Some(other.to_owned()),
+    };
+    Some(tr!(key))
 }
 
 fn is_power(spec: Option<&PointSpec>) -> bool {
@@ -595,6 +634,12 @@ fn clock_words(at: &str) -> String {
 
 /// What a point changing to a value means, in words.
 fn change_words(key: &str, spec: Option<&PointSpec>, to: Option<&Json>) -> String {
+    if is_press(spec) {
+        return match to.and_then(Json::as_str).and_then(press_word) {
+            Some(word) => tr!("moteur.changement.appui", appui = word),
+            None => tr!("moteur.changement.appui_tout"),
+        };
+    }
     let t = to.and_then(truthy);
     let known = match (key, t) {
         ("contact", Some(false)) | ("doorcontact_state", Some(true)) => "moteur.changement.ouvre",
@@ -1055,6 +1100,58 @@ mod tests {
         let words = change_words("dry", Some(&dry), Some(&serde_json::json!(true)));
         assert_eq!(words, tr!("moteur.changement.soif"));
         assert_ne!(words, tr!("moteur.changement.fuite"));
+    }
+
+    #[test]
+    fn a_press_reads_as_a_press_never_as_a_state() {
+        let press = PointSpec {
+            key: "button2".into(),
+            label: "Bouton 2".into(),
+            kind: moli_core::Kind::Enum {
+                values: ["initial_press", "short_release", "long_release"]
+                    .map(Into::into)
+                    .to_vec(),
+            },
+            access: moli_core::Access {
+                read: true,
+                write: false,
+            },
+            unit: None,
+            semantic: moli_core::Semantic::Press,
+        };
+        let say =
+            |to: Option<serde_json::Value>| change_words("button2", Some(&press), to.as_ref());
+        let word = |key| tr!("moteur.changement.appui", appui = tr!(key));
+        assert_eq!(
+            say(Some(serde_json::json!("short_release"))),
+            word("commun.appui.simple")
+        );
+        assert_eq!(
+            say(Some(serde_json::json!("double"))),
+            word("commun.appui.double")
+        );
+        // A Hue hold ends on `long_release`: held, never released.
+        assert_eq!(
+            say(Some(serde_json::json!("long_release"))),
+            word("commun.appui.maintenu")
+        );
+        // Any press, or the start of one: no gesture to name.
+        assert_eq!(say(None), tr!("moteur.changement.appui_tout"));
+        assert_eq!(
+            say(Some(serde_json::json!("initial_press"))),
+            tr!("moteur.changement.appui_tout")
+        );
+        // An unknown value, as the brand gives it.
+        assert_eq!(
+            say(Some(serde_json::json!("rotate_left"))),
+            tr!("moteur.changement.appui", appui = "rotate_left")
+        );
+        // Not a press any more once settable, nor with another meaning.
+        let other = PointSpec {
+            semantic: moli_core::Semantic::Other,
+            ..press.clone()
+        };
+        assert!(!is_press(Some(&other)));
     }
 
     #[test]

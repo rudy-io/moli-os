@@ -230,6 +230,9 @@ pub(crate) fn inventory(
             if plant(view) {
                 let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.plant"));
             }
+            if button(view) {
+                let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.button"));
+            }
             let points = points_of(view, reader);
             if !points.is_empty() {
                 let _ = write!(out, " · {}", points.join(", "));
@@ -294,6 +297,9 @@ pub(crate) fn inventory_static(
             if plant(view) {
                 let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.plant"));
             }
+            if button(view) {
+                let _ = write!(out, " {}", moli_i18n::tr!("assistant.house.button"));
+            }
             let points = static_points_of(view);
             if !points.is_empty() {
                 let _ = write!(out, " · {}", points.join(", "));
@@ -318,6 +324,11 @@ fn static_points_of(view: &DeviceView) -> Vec<String> {
         .map(|p| {
             let unit = p.unit.as_ref().map(|u| u.symbol().to_owned());
             let mut text = format!("{}{}", p.key, if p.access.write { "✎" } else { "" });
+            if is_press(p) {
+                // `action (appui) [single|double|hold]`.
+                let tag = moli_i18n::tr!("assistant.house.press");
+                return format!("{text} {tag}{}", press_values(p));
+            }
             match &p.kind {
                 Kind::Enum { values } if p.access.write => {
                     let shown: Vec<&str> = values.iter().take(MAX_CHOICES).map(|v| &**v).collect();
@@ -449,6 +460,28 @@ pub(crate) fn private(key: &str) -> bool {
     PRIVATE_POINTS.iter().any(|p| key.eq_ignore_ascii_case(p))
 }
 
+/// A button or a remote (#211): a point its driver calls a press.
+pub(crate) fn button(view: &DeviceView) -> bool {
+    view.device.points.iter().any(is_press)
+}
+
+/// A press: each value an occurrence, never a state.
+fn is_press(p: &moli_core::PointSpec) -> bool {
+    p.semantic == moli_core::Semantic::Press && !p.access.write
+}
+
+/// What a press can tell (` [single|double|hold]`): what a trigger waits for.
+/// Empty for a press told in free text (Dirigera).
+fn press_values(p: &moli_core::PointSpec) -> String {
+    match &p.kind {
+        Kind::Enum { values } => {
+            let shown: Vec<&str> = values.iter().take(MAX_CHOICES).map(|v| &**v).collect();
+            format!(" [{}]", shown.join("|"))
+        }
+        _ => String::new(),
+    }
+}
+
 /// A plant sensor: it has a soil moisture reading.
 pub(crate) fn plant(view: &DeviceView) -> bool {
     view.device
@@ -496,6 +529,11 @@ fn points_of(view: &DeviceView, reader: Reader) -> Vec<String> {
                 .state
                 .get(&p.key)
                 .map_or_else(|| "?".to_owned(), |s| show(&s.value));
+            if is_press(p) {
+                // The last press, then what it can tell: `action (appui)=double [single|double]`.
+                let tag = moli_i18n::tr!("assistant.house.press");
+                return format!("{} {tag}={value}{}", p.key, press_values(p));
+            }
             let mut text = format!("{}{}={value}", p.key, if p.access.write { "✎" } else { "" });
             if let Some(unit) = &p.unit {
                 let _ = write!(text, " {}", unit.symbol());
@@ -763,6 +801,84 @@ mod tests {
         );
         let chat = inventory(&static_house(), &layout, &protected, Reader::Chat);
         assert!(chat.contains("## Salon (étage : en bas)\n"), "{chat}");
+    }
+
+    #[test]
+    fn a_button_says_its_presses_never_a_state() {
+        let gestures = |values: &[&str]| Kind::Enum {
+            values: values.iter().map(|v| (*v).into()).collect(),
+        };
+        let press = |key: &str, kind: Kind| moli_core::PointSpec {
+            semantic: moli_core::Semantic::Press,
+            ..spec(key, kind, false, None)
+        };
+        let mut button = named(
+            "z2m:button",
+            "Bouton du garage",
+            "Salon",
+            vec![
+                press("action", gestures(&["single", "double", "hold"])),
+                spec(
+                    "battery",
+                    Kind::Numeric {
+                        min: None,
+                        max: None,
+                        step: None,
+                    },
+                    false,
+                    Some(moli_core::Unit::Percent),
+                ),
+            ],
+        );
+        button.state.insert(
+            "action".into(),
+            moli_core::Sample {
+                value: Value::Text("double".into()),
+                ts: 1,
+            },
+        );
+        let remote = named(
+            "dirigera:remote",
+            "Télécommande",
+            "Salon",
+            vec![press("button", Kind::Text)],
+        );
+        // An `action` its driver does not call a press is no button.
+        let other = named(
+            "x:action",
+            "Autre",
+            "Salon",
+            vec![spec("action", gestures(&["single"]), false, None)],
+        );
+        let devices = [button, remote, other];
+
+        let (text, _) = inventory_static(&devices, &layout(), &[]);
+        let line = |name: &str| {
+            text.lines()
+                .find(|l| l.contains(name))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let tag = moli_i18n::tr!("assistant.house.button");
+        let press_tag = moli_i18n::tr!("assistant.house.press");
+        assert!(line("Bouton du garage").contains(&tag), "{text}");
+        assert!(
+            line("Bouton du garage").contains(&format!("action {press_tag} [single|double|hold]")),
+            "{text}"
+        );
+        assert!(
+            line("Télécommande").contains(&format!("button {press_tag}")),
+            "{text}"
+        );
+        assert!(!line("Autre").contains(&tag), "{text}");
+
+        // For the automations' writer: the last press, then what it can tell.
+        let text = inventory(&devices, &layout(), &[], Reader::Builder);
+        assert!(
+            text.contains(&format!("action {press_tag}=double [single|double|hold]")),
+            "{text}"
+        );
+        assert!(!text.contains("action=double"), "{text}");
     }
 
     /// A plant sensor's temperature is the pot's: the conversation never reads it as
