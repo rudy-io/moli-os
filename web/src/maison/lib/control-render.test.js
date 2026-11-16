@@ -897,6 +897,27 @@ test('the security panel lists a presence radar beside the motion sensors', () =
   assert.doesNotMatch(html, /Le foyer/);
 });
 
+test('the security panel keeps the « Sécurité » room switches beside the panel card', () => {
+  const at = (values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }]));
+  const roomDevice = (id, name, value) => ({
+    id, native_name: name, model: null, label: { room: 'Sécurité' }, online: true, members: [],
+    points: [point('value', { type: 'binary' }, true, 'on_off')], state: at({ value }),
+  });
+  hub.devices = {
+    'maison:alarme_active': roomDevice('maison:alarme_active', 'Alarme', false),
+    'maison:alarme_en_cours': roomDevice('maison:alarme_en_cours', 'Alarme en cours', true),
+    'fixture:panel': { id: 'fixture:panel', native_name: "Centrale d'alarme", model: null, label: { room: 'Entrée' }, online: true, members: [], points: [point('system_arm_type', enumeration('disarmed', 'armed', 'home'))], state: at({ system_arm_type: 'armed' }) },
+  };
+  const html = render(components.SecurityPanel, { props: {} }).body;
+  // The room's switches, as before, and the ringing line first.
+  assert.match(html, /Alarme : non/);
+  assert.match(html, /Alarme en cours : oui/);
+  assert.match(html, /Alarme en cours !/);
+  // The panel keeps its own card, with its mode.
+  assert.match(html, /Centrale d'alarme/);
+  assert.match(html, />Armée</);
+});
+
 test('a plant sensor shows its soil, and its pot stays out of the room readings (#163)', () => {
   const celsius = (key) => ({ ...point(key, number(), false, 'temperature'), unit: '°C' });
   const percent = (key, semantic) => ({ ...point(key, number(0, 100), false, semantic), unit: '%' });
