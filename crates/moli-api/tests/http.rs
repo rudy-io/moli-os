@@ -3056,3 +3056,204 @@ async fn airzone_fresh_code_attempts_share_the_session_lockout() {
     );
     assert_eq!(setup.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
+
+// ---- garde-fous du MCP (D103 à D105) ----------------------------------------------
+
+/// The 11 tools that only read, and the 3 that write.
+const MCP_READS: [&str; 11] = [
+    "system_status",
+    "list_devices",
+    "get_device",
+    "camera_snapshot",
+    "get_journal",
+    "history",
+    "energy",
+    "list_automations",
+    "get_automation",
+    "test_automation",
+    "history_sql",
+];
+const MCP_WRITES: [&str; 3] = ["send_command", "set_label", "save_automation_draft"];
+
+/// `tools/list` on `path`: each tool's name and annotations.
+async fn mcp_tools(addr: &str, path: &str) -> Vec<(String, Json)> {
+    let (status, body) = request(addr, "POST", path, Some(&rpc(1, "tools/list", &json!({})))).await;
+    assert_eq!(status, 200, "{body}");
+    let body: Json = serde_json::from_str(&body).unwrap_or_else(|e| panic!("{e}: {body}"));
+    body["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no tools: {body}"))
+        .iter()
+        .map(|t| {
+            (
+                t["name"].as_str().unwrap().to_owned(),
+                t["annotations"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// D103: a tool switched off in `[mcp] disabled_tools` is neither listed nor
+/// callable; with nothing switched off, the same tool is there.
+#[tokio::test]
+async fn mcp_tool_switched_off_by_the_house_is_gone() {
+    let hub = lamp_hub().await;
+    let open = serve(&hub, &moli_api::Options::default()).await;
+    let names: Vec<String> = mcp_tools(&open, "/mcp")
+        .await
+        .into_iter()
+        .map(|t| t.0)
+        .collect();
+    assert!(names.iter().any(|n| n == "camera_snapshot"), "{names:?}");
+    assert!(names.iter().any(|n| n == "send_command"), "{names:?}");
+
+    let closed = serve(
+        &hub,
+        &moli_api::Options {
+            mcp_disabled_tools: vec!["camera_snapshot".into(), "send_command".into()],
+            ..moli_api::Options::default()
+        },
+    )
+    .await;
+    let names: Vec<String> = mcp_tools(&closed, "/mcp")
+        .await
+        .into_iter()
+        .map(|t| t.0)
+        .collect();
+    assert!(!names.iter().any(|n| n == "camera_snapshot"), "{names:?}");
+    assert!(!names.iter().any(|n| n == "send_command"), "{names:?}");
+    assert!(names.iter().any(|n| n == "list_devices"), "{names:?}");
+    // Switched off on the read-only route too.
+    let names: Vec<String> = mcp_tools(&closed, "/mcp/readonly")
+        .await
+        .into_iter()
+        .map(|t| t.0)
+        .collect();
+    assert!(!names.iter().any(|n| n == "camera_snapshot"), "{names:?}");
+
+    // Called anyway: refused, and the lamp did not move.
+    let call = rpc(
+        2,
+        "tools/call",
+        &json!({"name": "send_command", "arguments": {"point": "fake:lamp/state", "value": true, "actor": "test-agent"}}),
+    );
+    let (_, body) = request(&closed, "POST", "/mcp", Some(&call)).await;
+    assert!(body.contains("tool not found"), "{body}");
+    assert_ne!(
+        hub.state(&"fake:lamp/state".into()).map(|s| s.value),
+        Some(Value::Bool(true))
+    );
+    assert!(hub.journal(10).is_empty(), "{:?}", hub.journal(10));
+}
+
+/// D104: `/mcp/readonly` lists the reads only and refuses a write on the
+/// server's side; the same write on `/mcp` goes through.
+#[tokio::test]
+async fn mcp_readonly_route_refuses_every_write() {
+    let (addr, hub) = server().await;
+    let names: Vec<String> = mcp_tools(&addr, "/mcp/readonly")
+        .await
+        .into_iter()
+        .map(|t| t.0)
+        .collect();
+    for read in MCP_READS {
+        assert!(names.iter().any(|n| n == read), "missing {read}: {names:?}");
+    }
+    for write in MCP_WRITES {
+        assert!(
+            !names.iter().any(|n| n == write),
+            "{write} offered: {names:?}"
+        );
+    }
+    assert_eq!(names.len(), MCP_READS.len(), "{names:?}");
+
+    let call = |id: u64, name: &str, arguments: Json| {
+        rpc(
+            id,
+            "tools/call",
+            &json!({ "name": name, "arguments": arguments }),
+        )
+    };
+    for (id, name, arguments) in [
+        (
+            2,
+            "send_command",
+            json!({"point": "fake:lamp/state", "value": true, "actor": "test-agent"}),
+        ),
+        (
+            3,
+            "set_label",
+            json!({"device_id": "fake:lamp", "name": "Renommée", "actor": "test-agent"}),
+        ),
+        (
+            4,
+            "save_automation_draft",
+            json!({"automation": {}, "actor": "test-agent"}),
+        ),
+    ] {
+        let (_, body) = request(
+            &addr,
+            "POST",
+            "/mcp/readonly",
+            Some(&call(id, name, arguments)),
+        )
+        .await;
+        assert!(body.contains("tool not found"), "{name}: {body}");
+    }
+    assert_ne!(
+        hub.state(&"fake:lamp/state".into()).map(|s| s.value),
+        Some(Value::Bool(true))
+    );
+    assert!(hub.journal(10).is_empty(), "{:?}", hub.journal(10));
+
+    // A read goes through there.
+    let (_, body) = request(
+        &addr,
+        "POST",
+        "/mcp/readonly",
+        Some(&call(5, "get_device", json!({"device_id": "fake:lamp"}))),
+    )
+    .await;
+    assert!(
+        body.contains("fake:lamp") && !body.contains("\"error\""),
+        "{body}"
+    );
+
+    // The same order on /mcp: done.
+    let (status, body) = request(
+        &addr,
+        "POST",
+        "/mcp",
+        Some(&call(
+            6,
+            "send_command",
+            json!({"point": "fake:lamp/state", "value": true, "actor": "test-agent"}),
+        )),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        hub.state(&"fake:lamp/state".into()).unwrap().value,
+        Value::Bool(true)
+    );
+}
+
+/// D105: each tool says what it does to the client, tool by tool.
+#[tokio::test]
+async fn mcp_tools_carry_their_annotations() {
+    let (addr, _hub) = server().await;
+    let tools = mcp_tools(&addr, "/mcp").await;
+    assert_eq!(tools.len(), MCP_READS.len() + MCP_WRITES.len(), "{tools:?}");
+    for (name, a) in &tools {
+        let read_only = a["readOnlyHint"].as_bool();
+        if MCP_READS.contains(&name.as_str()) {
+            assert_eq!(read_only, Some(true), "{name}: {a}");
+        } else {
+            assert_ne!(read_only, Some(true), "{name} is a write: {a}");
+        }
+    }
+    let of = |name: &str| tools.iter().find(|t| t.0 == name).unwrap().1.clone();
+    assert_eq!(of("set_label")["destructiveHint"], json!(false));
+    assert_eq!(of("save_automation_draft")["destructiveHint"], json!(false));
+    assert_eq!(of("send_command")["openWorldHint"], json!(true));
+}

@@ -795,8 +795,20 @@ Canal de 256 messages ; un abonné en retard **perd silencieusement** les messag
 
 ### 4.1 Point d'entrée
 
-`http://<hôte>:8790/mcp`, transport « streamable HTTP » (`rmcp` 3.5,
-`crates/moli-api/src/mcp.rs`) :
+`http://<hôte>:8790/mcp`, transport « streamable HTTP » (`rmcp` 3.9,
+`crates/moli-api/src/mcp.rs`). Deux routes, un même serveur :
+
+- **`/mcp`** : les 14 outils (moins ceux que la maison coupe, voir plus bas).
+- **`/mcp/readonly`** : les 11 lectures seulement. `send_command`, `set_label` et
+  `save_automation_draft` n'y sont **ni listés ni appelables** : le serveur répond
+  `tool not found` (erreur JSON-RPC), quoi que fasse le client. Pour un agent branché pour
+  regarder. Mêmes gardes que `/mcp` (foyer, pas de distant, limiteur `mcp`).
+- **Outils coupés par la maison** : `[mcp] disabled_tools = ["camera_snapshot"]` dans
+  `moli.toml`, réglable par des humains seulement (comme `[guard]`). Un outil coupé
+  disparaît des **deux** routes : absent de `tools/list`, `tool not found` à l'appel. Un
+  nom inconnu empêche Moli de démarrer (une faute de frappe ne coupe rien en silence).
+
+Le service :
 
 - `StreamableHttpService` avec `LocalSessionManager` (sessions en mémoire),
   `json_response(true)` : les réponses arrivent en `application/json` plutôt qu'en flux ;
@@ -819,7 +831,15 @@ est un résultat `isError: true` avec un message texte (pas une erreur JSON-RPC)
 exception : `camera_snapshot` renvoie un bloc image (base64 + type MIME).
 
 Brancher un client : `claude mcp add --transport http moli http://<hôte>:8790/mcp`
-(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent.
+(Claude Code), ou l'équivalent « serveur MCP HTTP » de tout autre agent ; `…/mcp/readonly`
+pour un agent qui ne doit que lire.
+
+**Annotations** (MCP `ToolAnnotations`, dans `tools/list`) : `readOnlyHint: true` sur les
+11 lectures ; `readOnlyHint: false, destructiveHint: false` sur `set_label` et
+`save_automation_draft` (un nom se remet, un brouillon n'agit pas) ; `readOnlyHint: false,
+destructiveHint: true, openWorldHint: true` sur `send_command` (il agit sur le monde
+physique). Elles aident le client à décider quand demander confirmation ; **elles ne
+gardent rien** : la garde est côté serveur (route, outils coupés, § 1.4 et 1.5).
 
 ### 4.2 Les 14 outils
 
