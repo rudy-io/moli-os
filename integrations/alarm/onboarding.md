@@ -9,6 +9,7 @@
    par capteur ; mettre l'appareil de l'alarme dans `[guard] protected_devices` (désarmer
    demande le code) ; `moli-os check-config`, redémarrer.
 4. Reprendre en automatismes la programmation (heures d'armement) et les notifications
-   d'Alarmo, puis les désactiver dans HA au moment de la bascule.
+   d'Alarmo, puis les désactiver dans HA au moment de la bascule. Sans Alarmo à reprendre :
+   au moins `automatisme-declenchee.json` (prévenir quand elle se déclenche).
 5. Tester : armer avec un capteur actif (refusé, avec son nom), armer, passer devant un
    capteur, désarmer pendant le délai d'entrée.

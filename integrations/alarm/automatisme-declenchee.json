@@ -1,0 +1,19 @@
+{
+  "name": "Alarme déclenchée : prévenir",
+  "mode": "single",
+  "graph": {
+    "nodes": [
+      { "id": "t", "type": "when_state", "point": "alarme:maison/state", "to": "triggered", "x": 0, "y": 0 },
+      {
+        "id": "n1",
+        "type": "notify",
+        "title": "Alarme",
+        "message": "Alarme déclenchée : {{alarme:maison/cause}}",
+        "channels": ["maison", "telegram"],
+        "x": 300,
+        "y": 0
+      }
+    ],
+    "edges": [{ "from": "t", "port": "out", "to": "n1" }]
+  }
+}
