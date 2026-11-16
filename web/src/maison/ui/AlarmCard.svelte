@@ -46,10 +46,6 @@
   // A setting about to make the alarm weaker waits here until a human says
   // yes, exactly like arming: a mute panel watches without warning anyone.
   let weakening = $state(null);
-  // The segmented control writes its own copy before the panel answers; a
-  // remount keeps it on the real value while a confirmation is pending, so
-  // nothing on screen claims a change that was not sent.
-  let epoch = $state(0);
 
   function choose(next) {
     if (!writable || busy || next === mode) {
@@ -57,7 +53,6 @@
       return;
     }
     weakening = null;
-    epoch += 1;
     // Disarming is the safe direction: one tap. Arming asks once more.
     if (next === 'disarmed') return send(next);
     confirming = next;
@@ -173,7 +168,6 @@
     // Re-selecting the value already in force is not an order.
     if (String(v) === String(shown(p))) return;
     if (!confirmed && weakensAlarm(p.key, v)) {
-      epoch += 1;
       weakening = { point: p, value: v, labelKey };
       return;
     }
@@ -238,14 +232,12 @@
     </div>
 
     <div class="modes">
-      {#key epoch}
-        <SegmentedControl
-          segments={modeSegments}
-          value={mode}
-          onchange={(next) => choose(next)}
-          label={t('maison.alarme.mode')}
-        />
-      {/key}
+      <SegmentedControl
+        segments={modeSegments}
+        value={mode}
+        onchange={(next) => choose(next)}
+        label={t('maison.alarme.mode')}
+      />
     </div>
 
     {#if confirming}
@@ -333,14 +325,12 @@
                       />
                     </div>
                   {:else if controlOf(p) === 'segments'}
-                    {#key epoch}
-                      <SegmentedControl
-                        segments={segmentChoices(p, !writable || held)}
-                        value={v}
-                        onchange={(choice) => setSetting(p, choice, s.labelKey)}
-                        label={t(s.labelKey)}
-                      />
-                    {/key}
+                    <SegmentedControl
+                      segments={segmentChoices(p, !writable || held)}
+                      value={v}
+                      onchange={(choice) => setSetting(p, choice, s.labelKey)}
+                      label={t(s.labelKey)}
+                    />
                   {:else}
                     <select
                       value={v ?? ''}
