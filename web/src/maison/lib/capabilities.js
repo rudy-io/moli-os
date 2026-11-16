@@ -87,6 +87,16 @@ export function alarmPoint(device) {
   return points.find((point) => point.key === 'system_arm_type' && panel(point)) ?? points.find(panel) ?? null;
 }
 
+/** Settings that make the alarm weaker once turned off: a silenced siren, a
+ *  cut GSM link. Turning one off deserves the same confirmation as arming —
+ *  a silent panel watches without warning anyone. */
+const WEAKENING = new Set(['inside_siren_en', 'wireless_siren_en', 'inside_siren_sound', 'gsm_en']);
+const OFF = new Set([false, 'OFF', 'off']);
+
+export function weakensAlarm(key, value) {
+  return WEAKENING.has(key) && OFF.has(value);
+}
+
 /** Reading power and commanding it are separate capabilities. */
 export function powerPoint(device, writable = true) {
   // A shutter's state is a motor order, never an on/off switch.

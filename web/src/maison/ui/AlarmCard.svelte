@@ -1,6 +1,6 @@
 <script>
   import { device, value, nameOf, act, pending, num } from '../lib/home.svelte.js';
-  import { alarmPoint } from '../lib/capabilities.js';
+  import { alarmPoint, weakensAlarm } from '../lib/capabilities.js';
   import { icons } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
@@ -43,12 +43,21 @@
   );
 
   let confirming = $state(null);
+  // A setting about to make the alarm weaker waits here until a human says
+  // yes, exactly like arming: a mute panel watches without warning anyone.
+  let weakening = $state(null);
+  // The segmented control writes its own copy before the panel answers; a
+  // remount keeps it on the real value while a confirmation is pending, so
+  // nothing on screen claims a change that was not sent.
+  let epoch = $state(0);
 
   function choose(next) {
     if (!writable || busy || next === mode) {
       confirming = null;
       return;
     }
+    weakening = null;
+    epoch += 1;
     // Disarming is the safe direction: one tap. Arming asks once more.
     if (next === 'disarmed') return send(next);
     confirming = next;
@@ -159,8 +168,16 @@
   $effect(() => () => [...timers.values()].forEach((timer) => clearTimeout(timer)));
   const shown = (p) => (p.key in sent ? sent[p.key] : value(id, p.key));
 
-  async function setSetting(p, v, labelKey) {
+  async function setSetting(p, v, labelKey, confirmed = false) {
     if (p.access?.write !== true || offline || pending(id, p.key)) return;
+    // Re-selecting the value already in force is not an order.
+    if (String(v) === String(shown(p))) return;
+    if (!confirmed && weakensAlarm(p.key, v)) {
+      epoch += 1;
+      weakening = { point: p, value: v, labelKey };
+      return;
+    }
+    weakening = null;
     remember(p.key, v);
     const result = await act(
       `${id}/${p.key}`,
@@ -168,6 +185,16 @@
       t('maison.alarme.reglage_commande', { name: label, reglage: t(labelKey) }),
     );
     if (result !== 'ok') forget(p.key);
+  }
+
+  // The muting of a sound is not a cut of a capability: each keeps its words.
+  const weakeningKey = (w) => (w.point.key === 'inside_siren_sound' ? 'maison.alarme.confirmer_muet' : 'maison.alarme.confirmer_affaiblir');
+  const weakeningAction = (w) => t(w.point.key === 'inside_siren_sound' ? 'maison.alarme.mettre_muet' : 'maison.alarme.couper');
+  function confirmWeakening() {
+    const w = weakening;
+    if (!w) return;
+    weakening = null;
+    setSetting(w.point, w.value, w.labelKey, true);
   }
 
   const boundsOf = (p) => ({
@@ -211,12 +238,14 @@
     </div>
 
     <div class="modes">
-      <SegmentedControl
-        segments={modeSegments}
-        value={mode}
-        onchange={(next) => choose(next)}
-        label={t('maison.alarme.mode')}
-      />
+      {#key epoch}
+        <SegmentedControl
+          segments={modeSegments}
+          value={mode}
+          onchange={(next) => choose(next)}
+          label={t('maison.alarme.mode')}
+        />
+      {/key}
     </div>
 
     {#if confirming}
@@ -304,12 +333,14 @@
                       />
                     </div>
                   {:else if controlOf(p) === 'segments'}
-                    <SegmentedControl
-                      segments={segmentChoices(p, !writable || held)}
-                      value={v}
-                      onchange={(choice) => setSetting(p, choice, s.labelKey)}
-                      label={t(s.labelKey)}
-                    />
+                    {#key epoch}
+                      <SegmentedControl
+                        segments={segmentChoices(p, !writable || held)}
+                        value={v}
+                        onchange={(choice) => setSetting(p, choice, s.labelKey)}
+                        label={t(s.labelKey)}
+                      />
+                    {/key}
                   {:else}
                     <select
                       value={v ?? ''}
@@ -342,6 +373,13 @@
                       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
                     </button>
                   {/each}
+                </div>
+              {/if}
+              {#if weakening && g.keys.includes(weakening.point.key)}
+                <div class="confirm" role="alert">
+                  <p>{t(weakeningKey(weakening), { reglage: t(weakening.labelKey) })}</p>
+                  <button class="yes" onclick={confirmWeakening}>{weakeningAction(weakening)}</button>
+                  <button onclick={() => (weakening = null)}>{t('maison.alarme.annuler')}</button>
                 </div>
               {/if}
             </section>

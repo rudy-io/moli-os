@@ -105,8 +105,11 @@ printf '%s' "$LOCAL_KEY" | podman exec -i moli-os /moli-os --config /data/moli.t
   Tonalités). Les valeurs numériques se règlent au curseur, affiné par un
   pas-à-pas − / + ; l'ordre ne part qu'au relâchement, un geste pour une
   commande. Le son de la sirène se choisit en deux mots (Fort / Muet).
-  Chaque changement suit le même chemin qu'un bouton : la garde peut le
-  retenir (pièce protégée, heures calmes) et demander le code de la maison.
+  Couper une sirène ou le GSM — mettre la centrale en sourdine — demande la
+  même confirmation qu'un armement : le panneau continue de veiller, mais
+  sans prévenir personne. Chaque changement suit le même chemin qu'un bouton :
+  la garde peut le retenir (pièce protégée, heures calmes) et demander le code
+  de la maison.
 
 ## Limites et sécurité
 
@@ -118,6 +121,13 @@ printf '%s' "$LOCAL_KEY" | podman exec -i moli-os /moli-os --config /data/moli.t
   désactivent au lieu de faire semblant.
 - **L'appairage des zones, la SIM et les numéros d'appel** restent dans
   l'application du fabricant : Moli ne les modifie pas.
+- **Désarmer part en un geste** : c'est commode, mais quiconque atteint
+  l'écran peut couper l'alarme sans code. Pour une maison qui s'en sert
+  vraiment, ranger la centrale dans une **pièce protégée**
+  (`protected_rooms` dans `moli.toml`, la même liste que pour les autres
+  appareils) : la garde demande alors le code de la maison avant de désarmer,
+  comme pour toute commande dans cette pièce. Le choix de la pièce se fait
+  dans l'Atelier ou par `PUT /api/labels/{id}`.
 - **Tester sans armer la maison** : d'abord lire l'état, puis essayer un
   délai (`arm_delay`) sur une cible neutre, un humain présent. Ne jamais
   armer une pièce protégée où quelqu'un se trouve, ni laisser un essai de
