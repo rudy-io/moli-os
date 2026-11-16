@@ -50,7 +50,7 @@ pub struct Delays {
 /// One sensor, as the alarm sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sensor {
-    /// Its point (`frigate:allee_portail/person`).
+    /// Its point (`frigate:jardin/person`).
     pub point: String,
     pub name: String,
     pub modes: BTreeSet<Mode>,
@@ -373,14 +373,14 @@ mod tests {
             ],
             vec![
                 Sensor {
-                    point: "z:allee/person".into(),
-                    name: "Allée".into(),
+                    point: "z:jardin/person".into(),
+                    name: "Jardin".into(),
                     modes: modes(&[Mode::Home, Mode::Night]),
                     immediate: false,
                 },
                 Sensor {
-                    point: "z:cour/person".into(),
-                    name: "Cour".into(),
+                    point: "z:terrasse/person".into(),
+                    name: "Terrasse".into(),
                     modes: modes(&[Mode::Night]),
                     immediate: false,
                 },
@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(a.phase().state(), "arming");
         assert_eq!(a.phase().until(), Some(105));
         // Leaving: what the cameras see does not count.
-        assert!(a.sensed("z:cour/person", 102).is_empty());
+        assert!(a.sensed("z:terrasse/person", 102).is_empty());
         assert!(a.tick(104, NOBODY).is_empty());
         assert_eq!(a.tick(105, NOBODY), vec![Happening::Armed(Mode::Night)]);
         assert_eq!(a.phase().state(), "armed_night");
@@ -415,15 +415,15 @@ mod tests {
     #[test]
     fn it_will_not_arm_while_a_sensor_sees_something() {
         let mut a = alarm();
-        let cour: &dyn Fn(&str) -> bool = &|p| p == "z:cour/person";
+        let terrasse: &dyn Fn(&str) -> bool = &|p| p == "z:terrasse/person";
         assert_eq!(
-            a.arm(Mode::Night, 100, cour).unwrap(),
-            vec![Happening::ArmFailure(Mode::Night, vec!["Cour".into()])]
+            a.arm(Mode::Night, 100, terrasse).unwrap(),
+            vec![Happening::ArmFailure(Mode::Night, vec!["Terrasse".into()])]
         );
         assert_eq!(a.phase(), &Phase::Disarmed);
         // The courtyard is not watched by day.
         assert_eq!(
-            a.arm(Mode::Home, 100, cour).unwrap(),
+            a.arm(Mode::Home, 100, terrasse).unwrap(),
             vec![Happening::Armed(Mode::Home)]
         );
         assert!(
@@ -437,14 +437,17 @@ mod tests {
         let mut a = alarm();
         a.restore(Some(Mode::Night));
         assert_eq!(
-            a.sensed("z:allee/person", 200),
-            vec![Happening::Pending(vec!["Allée".into()])]
+            a.sensed("z:jardin/person", 200),
+            vec![Happening::Pending(vec!["Jardin".into()])]
         );
         assert_eq!(a.phase().until(), Some(205));
-        assert!(a.sensed("z:cour/person", 201).is_empty());
+        assert!(a.sensed("z:terrasse/person", 201).is_empty());
         assert_eq!(
             a.tick(205, NOBODY),
-            vec![Happening::Triggered(vec!["Allée".into(), "Cour".into()])]
+            vec![Happening::Triggered(vec![
+                "Jardin".into(),
+                "Terrasse".into()
+            ])]
         );
         assert_eq!(a.phase().until(), Some(685));
         assert_eq!(a.tick(685, NOBODY), vec![Happening::Armed(Mode::Night)]);
@@ -454,10 +457,10 @@ mod tests {
     fn disarmed_in_time_nothing_triggers() {
         let mut a = alarm();
         a.restore(Some(Mode::Night));
-        a.sensed("z:allee/person", 200);
+        a.sensed("z:jardin/person", 200);
         assert_eq!(a.disarm(), vec![Happening::Disarmed]);
         assert!(a.tick(300, NOBODY).is_empty());
-        assert!(a.sensed("z:allee/person", 301).is_empty());
+        assert!(a.sensed("z:jardin/person", 301).is_empty());
         assert!(a.disarm().is_empty(), "already disarmed");
     }
 
@@ -473,25 +476,25 @@ mod tests {
         let mut a = alarm();
         a.restore(Some(Mode::Home));
         assert_eq!(
-            a.sensed("z:allee/person", 10),
-            vec![Happening::Triggered(vec!["Allée".into()])]
+            a.sensed("z:jardin/person", 10),
+            vec![Happening::Triggered(vec!["Jardin".into()])]
         );
         // A sensor of another mode is not watched.
         let mut a = alarm();
         a.restore(Some(Mode::Home));
-        assert!(a.sensed("z:cour/person", 10).is_empty());
+        assert!(a.sensed("z:terrasse/person", 10).is_empty());
     }
 
     #[test]
     fn someone_still_there_when_the_exit_delay_ends_counts() {
         let mut a = alarm();
         a.arm(Mode::Night, 100, NOBODY).unwrap();
-        let cour: &dyn Fn(&str) -> bool = &|p| p == "z:cour/person";
+        let terrasse: &dyn Fn(&str) -> bool = &|p| p == "z:terrasse/person";
         assert_eq!(
-            a.tick(105, cour),
+            a.tick(105, terrasse),
             vec![
                 Happening::Armed(Mode::Night),
-                Happening::Pending(vec!["Cour".into()])
+                Happening::Pending(vec!["Terrasse".into()])
             ]
         );
     }
