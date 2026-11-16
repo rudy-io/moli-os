@@ -217,6 +217,11 @@ Règles, dans l'ordre :
    décision (`pin`), vérifié à ce moment, avec le même verrouillage que la connexion ; sans
    lui, `401` et la demande reste en attente. Seuls un automatisme validé et le système y
    échappent.
+0 bis. **Ce que les agents peuvent** (`[[guard.agents_may]]` : `point`, `values`) : un ordre qu'une
+   personne a permis aux agents dans le fichier (armer l'alarme à la voix : `point =
+   "alarme:maison/mode"`, `values = ["home", "night", "away"]`) passe sans personne pour la commande
+   ou l'appareil protégé ; les pièces protégées et les heures calmes valent toujours. Jamais réglable
+   depuis un écran ni l'API.
 1. **Pièce protégée** (`protected_rooms`) : l'appareil, ou un membre s'il s'agit d'un
    groupe, est dans une pièce protégée. Toutes ses pièces comptent : l'étiquette de
    l'utilisateur **et** la pièce native (Hue…). Comparaison insensible à la casse, aux
