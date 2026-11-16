@@ -460,7 +460,6 @@ pub(crate) fn private(key: &str) -> bool {
     PRIVATE_POINTS.iter().any(|p| key.eq_ignore_ascii_case(p))
 }
 
-/// A plant sensor: it has a soil moisture reading.
 /// A button or a remote (#211): a point its driver calls a press.
 pub(crate) fn button(view: &DeviceView) -> bool {
     view.device.points.iter().any(is_press)
@@ -483,6 +482,7 @@ fn press_values(p: &moli_core::PointSpec) -> String {
     }
 }
 
+/// A plant sensor: it has a soil moisture reading.
 pub(crate) fn plant(view: &DeviceView) -> bool {
     view.device
         .points
@@ -803,8 +803,6 @@ mod tests {
         assert!(chat.contains("## Salon (étage : en bas)\n"), "{chat}");
     }
 
-    /// A plant sensor's temperature is the pot's: the conversation never reads it as
-    /// the room's (#163), drafting automations still can.
     #[test]
     fn a_button_says_its_presses_never_a_state() {
         let gestures = |values: &[&str]| Kind::Enum {
@@ -883,6 +881,8 @@ mod tests {
         assert!(!text.contains("action=double"), "{text}");
     }
 
+    /// A plant sensor's temperature is the pot's: the conversation never reads it as
+    /// the room's (#163), drafting automations still can.
     #[test]
     fn a_plant_sensor_says_its_soil_not_the_rooms_climate() {
         let numeric = Kind::Numeric {
