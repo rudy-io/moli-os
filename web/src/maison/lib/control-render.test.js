@@ -1218,9 +1218,8 @@ test('an alarm panel shows its arm mode, health and its settings', () => {
   assert.match(html, /aria-label="Diminuer : Délai d'armement"/);
   assert.match(html, /aria-label="Augmenter : Délai d'armement"/);
   const segments = buttons(html).filter((tag) => /class="segment\b/.test(tag));
-  assert.equal(segments.length, 2);
-  assert.match(segments[0], /aria-pressed="true"/);
-  assert.match(segments[1], /aria-pressed="false"/);
+  assert.equal(segments.length, 5, 'three arm modes, two siren sounds');
+  assert.equal(segments.filter((tag) => /aria-pressed="true"/.test(tag)).length, 2, 'the current mode and Fort');
   assert.match(html, />Fort</);
   assert.match(html, />Muet</);
   assert.equal(buttons(html).filter((tag) => /role="switch"/.test(tag)).length, 1);

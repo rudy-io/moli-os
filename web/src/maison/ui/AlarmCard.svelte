@@ -1,6 +1,7 @@
 <script>
   import { device, value, nameOf, act, pending, num } from '../lib/home.svelte.js';
   import { alarmPoint } from '../lib/capabilities.js';
+  import { icons } from '../lib/icons.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import SegmentedControl from './SegmentedControl.svelte';
@@ -30,6 +31,16 @@
   const label = $derived(name ?? nameOf(id, t('maison.alarme.titre')));
   const current = $derived(STATES[mode] ?? { icon: 'shield', tone: '' });
   const modeName = (m) => (STATES[m]?.key ? t(STATES[m].key) : (m ?? t('maison.alarme.inconnu')));
+  // The three modes as one control: its icon and its word in the house's
+  // language, the current one held by the panel itself.
+  const modeSegments = $derived(
+    choices.map((c) => ({
+      value: c.value,
+      label: modeName(c.value),
+      icon: icons[c.icon] ?? icons.shield,
+      disabled: !writable || busy,
+    })),
+  );
 
   let confirming = $state(null);
 
@@ -201,17 +212,13 @@
       {/if}
     </div>
 
-    <div class="modes" role="group" aria-label={t('maison.alarme.mode')}>
-      {#each choices as c (c.value)}
-        <button
-          class:on={mode === c.value}
-          disabled={!writable || busy}
-          aria-pressed={mode === c.value}
-          onclick={() => choose(c.value)}
-        >
-          <Icon name={c.icon} size={18} />{modeName(c.value)}
-        </button>
-      {/each}
+    <div class="modes">
+      <SegmentedControl
+        segments={modeSegments}
+        value={mode}
+        onchange={(next) => choose(next)}
+        label={t('maison.alarme.mode')}
+      />
     </div>
 
     {#if confirming}
@@ -429,45 +436,28 @@
     opacity: 0.5;
   }
 
-  .modes {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+  /* The three modes fill the card: the shared pill, one third each. */
+  .modes :global(.segmented-control),
+  .modes :global(.segments) {
+    width: 100%;
   }
 
-  .modes button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
+  .modes :global(.segment) {
+    flex: 1 1 0;
     min-width: 0;
-    padding: 11px 10px;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
-    color: var(--ink);
-    font: inherit;
+    gap: 7px;
+    padding: 11px 8px;
     font-size: 13.5px;
     font-weight: 650;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
   }
 
-  .modes button:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--ink) 10%, var(--surface-2));
+  .modes :global(.segment span) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .modes button.on {
-    background: var(--ink);
-    color: var(--surface);
-  }
-
-  .modes button:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-
-  .modes button:focus-visible,
   .confirm button:focus-visible,
   .step:focus-visible,
   .tile:focus-visible,
@@ -780,8 +770,10 @@
   }
 
   @media (max-width: 380px) {
-    .modes {
-      grid-template-columns: 1fr;
+    .modes :global(.segment) {
+      gap: 4px;
+      padding: 10px 4px;
+      font-size: 12.5px;
     }
   }
 </style>

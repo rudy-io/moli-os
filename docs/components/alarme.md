@@ -90,9 +90,10 @@ printf '%s' "$LOCAL_KEY" | podman exec -i moli-os /moli-os --config /data/moli.t
 ## Dans l'interface
 
 - **Accueil** : une carte « Alarme » au-dessus des tuiles, avec le mode
-  courant, trois boutons (Désarmée, Armée, Maison), la batterie, le secteur,
-  le GSM, la sirène et les délais. Désarmer part en un geste ; armer demande
-  une confirmation, car une porte ouverte peut faire sonner la sirène.
+  courant, le choix du mode en un contrôle segmenté (Désarmée, Armée,
+  Maison), la batterie, le secteur, le GSM, la sirène et les délais.
+  Désarmer part en un geste ; armer demande une confirmation, car une porte
+  ouverte peut faire sonner la sirène.
 - **Caméras** : le panneau « Sécurité » (portes, présences) porte la même
   commande, en version compacte.
 - **Pièces** : la centrale apparaît dans sa pièce — réglable dans l'Atelier
