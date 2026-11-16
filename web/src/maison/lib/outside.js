@@ -5,6 +5,15 @@
 /** The device Moli builds when `[outdoor]` is declared. */
 export const OUTSIDE = 'dehors:meteo';
 
+/** An outside value for a meaning: `dehors:meteo`'s when it has one (it
+ *  already chose the fresh measure or the forecast), else the forecast's own
+ *  point, as before `[outdoor]`. Decides nothing itself. `read(id, key)`
+ *  reads a point (the store's `value`). */
+export function readOutside(read, key, forecast, forecastKey = key) {
+  const v = read(OUTSIDE, key);
+  return v != null ? v : read(forecast, forecastKey);
+}
+
 /** The ids in a comma-separated config point (`stations`, `forecast`). */
 export function idsOf(text) {
   return String(text ?? '')

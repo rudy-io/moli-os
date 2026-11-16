@@ -17,6 +17,7 @@
   import ScenePicker from '../ui/ScenePicker.svelte';
   import Routines from '../ui/Routines.svelte';
   import SkyHero from '../ui/SkyHero.svelte';
+  import { readOutside } from '../lib/outside.js';
 
   const cfg = $derived(home.config ?? {});
   const out = $derived(cfg.outdoor ?? {});
@@ -260,8 +261,8 @@
       <div class="card-head"><h2><Icon name="flower-outline" size={18} />{t('maison.accueil.dehors')}</h2><span class="more" aria-hidden="true"><Icon name="arrow-top-right" size={18} /></span></div>
       <div class="facts">
         <div><small>{t('maison.accueil.air')}</small><b>{aqiWord}</b></div>
-        <div><small>UV</small><b class="num">{num(value(out.air, 'uv_index'), 0)}</b></div>
-        <div><small>{t('maison.accueil.humidite')}</small><b class="num">{value(out.weather, 'humidity') != null ? `${num(value(out.weather, 'humidity'))} %` : '—'}</b></div>
+        <div><small>UV</small><b class="num">{num(readOutside(value, 'uv_index', out.air), 0)}</b></div>
+        <div><small>{t('maison.accueil.humidite')}</small><b class="num">{readOutside(value, 'humidity', out.weather) != null ? `${num(readOutside(value, 'humidity', out.weather))} %` : '—'}</b></div>
         {#if out.pool}
           <div><small>{t('maison.accueil.piscine')}</small><b class="num">{value(out.pool, 'temperature') != null ? `${num(value(out.pool, 'temperature'), 1)}°` : '—'}</b></div>
         {/if}
