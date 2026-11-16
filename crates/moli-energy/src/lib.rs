@@ -15,7 +15,7 @@ mod price;
 pub mod report;
 mod store;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -103,7 +103,8 @@ pub struct Flows {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grid_w: Option<f64>,
     /// The home battery, signed: positive while it charges, negative while
-    /// it gives back (`[energy.battery] power`).
+    /// it gives back (`[energy.battery] power`, else the `charge` /
+    /// `discharge` meters' powers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_w: Option<f64>,
     /// What the home uses: bought + made, less what the battery takes,
@@ -152,7 +153,9 @@ pub struct BatteryInfo {
     pub soc_ts: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power_point: Option<String>,
-    /// Signed like `Flows::battery_w`: positive while it charges.
+    /// Signed like `Flows::battery_w`: positive while it charges. Without
+    /// `power_point`, from the `charge` / `discharge` meters (their `power`
+    /// in `meters`, which live views read themselves).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power_w: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -196,6 +199,48 @@ impl BatteryInfo {
                 .map(|(c, (v, _))| (c * v).round() / 100.0),
         }
     }
+
+    /// Without a `power` point, the power from the `charge` / `discharge`
+    /// meters' own power points instead ([`meters_battery_power`]).
+    #[must_use]
+    pub fn or_meters(mut self, meters: &[MeterInfo]) -> Self {
+        if self.power_point.is_none()
+            && let Some((w, ts)) = meters_battery_power(meters)
+        {
+            self.power_w = Some(w);
+            self.power_ts = Some(ts);
+        }
+        self
+    }
+}
+
+/// The battery's power from the `charge` / `discharge` meters' power
+/// points, like `solar` gives the production: what goes in less what comes
+/// out (W, positive while charging). For a battery that says both as
+/// positive powers (a Jackery's `charge_power` and `discharge_power`, its
+/// meters integrated). Each point once (two indexes may share one); `None`
+/// when none of them reads.
+#[must_use]
+pub fn meters_battery_power(meters: &[MeterInfo]) -> Option<(f64, u64)> {
+    let mut seen = HashSet::new();
+    let mut out: Option<(f64, u64)> = None;
+    for m in meters {
+        let sign = match m.role {
+            Role::Charge => 1.0,
+            Role::Discharge => -1.0,
+            _ => continue,
+        };
+        let (Some(point), Some(w)) = (&m.power, m.power_w) else {
+            continue;
+        };
+        if !w.is_finite() || !seen.insert(point.as_str()) {
+            continue;
+        }
+        // A battery at rest may read a few negative watts: nothing moves.
+        let (sum, ts) = out.unwrap_or((0.0, 0));
+        out = Some((sum + sign * w.max(0.0), ts.max(m.power_ts.unwrap_or(0))));
+    }
+    out
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -375,8 +420,20 @@ impl Energy {
         })
     }
 
-    fn battery(&self) -> Option<BatteryInfo> {
-        let battery = self.inner.config.battery.as_ref()?;
+    /// With `[energy.battery]`, or `charge` / `discharge` meters that say
+    /// their power (then without a charge nor a capacity).
+    fn battery(&self, meters: &[MeterInfo]) -> Option<BatteryInfo> {
+        let by_meters = config::Battery::default();
+        let battery = match &self.inner.config.battery {
+            Some(battery) => battery,
+            None if meters
+                .iter()
+                .any(|m| matches!(m.role, Role::Charge | Role::Discharge) && m.power.is_some()) =>
+            {
+                &by_meters
+            }
+            None => return None,
+        };
         let hub = &self.inner.hub;
         let read = |point: &Option<String>| {
             point
@@ -384,11 +441,7 @@ impl Energy {
                 .and_then(|p| hub.current_state(&PointId::from(p.clone())))
                 .and_then(|s| s.value.as_f64().map(|v| (v, s.ts)))
         };
-        Some(BatteryInfo::of(
-            battery,
-            read(&battery.soc),
-            read(&battery.power),
-        ))
+        Some(BatteryInfo::of(battery, read(&battery.soc), read(&battery.power)).or_meters(meters))
     }
 
     fn period_now(&self) -> Option<String> {
@@ -420,7 +473,7 @@ impl Energy {
         let month_period = Period::of(config, &rows, month, month_end);
         let period = self.period_now();
         let meters = self.meters();
-        let battery = self.battery();
+        let battery = self.battery(&meters);
         Ok(Summary {
             currency: config.currency.clone(),
             timezone: config.timezone.clone(),
@@ -1228,6 +1281,75 @@ mod tests {
         // A charge outside 0–100 % is a bad reading.
         let bad = BatteryInfo::of(&config, Some((140.0, 1)), None);
         assert_eq!((bad.soc, bad.stored_kwh), (None, None));
+    }
+
+    #[test]
+    fn the_battery_power_comes_from_its_meters_without_a_power_point() {
+        let meter = |id: &str, role: Role, power: Option<(&str, f64, u64)>| MeterInfo {
+            id: id.into(),
+            name: String::new(),
+            role,
+            point: "a:b/c".into(),
+            power: power.map(|(p, _, _)| p.into()),
+            power_w: power.map(|(_, w, _)| w),
+            power_ts: power.map(|(_, _, ts)| ts),
+            within: None,
+            feeds: Vec::new(),
+            estimated: false,
+        };
+        // Two positive powers (integrated meters): 1.2 kW in, nothing out.
+        let meters = [
+            meter("pv", Role::Solar, Some(("inv:i/power", 2000.0, 5))),
+            meter(
+                "bat-in",
+                Role::Charge,
+                Some(("jk:b/charge_power", 1200.0, 7)),
+            ),
+            meter(
+                "bat-out",
+                Role::Discharge,
+                Some(("jk:b/discharge_power", 0.0, 6)),
+            ),
+        ];
+        assert_eq!(meters_battery_power(&meters), Some((1200.0, 7)));
+        let b = BatteryInfo::of(&Battery::default(), None, None).or_meters(&meters);
+        assert_eq!((b.power_w, b.power_ts), (Some(1200.0), Some(7)));
+        // At night it gives back 700 W; a few negative watts at rest are none.
+        let night = [
+            meter("bat-in", Role::Charge, Some(("jk:b/charge_power", -3.0, 9))),
+            meter(
+                "bat-out",
+                Role::Discharge,
+                Some(("jk:b/discharge_power", 700.0, 9)),
+            ),
+        ];
+        assert_eq!(meters_battery_power(&night), Some((-700.0, 9)));
+        // Two indexes on one power point count it once.
+        let shared = [
+            meter("in-a", Role::Charge, Some(("bms:b/in", 500.0, 1))),
+            meter("in-b", Role::Charge, Some(("bms:b/in", 500.0, 1))),
+            meter("out", Role::Discharge, Some(("bms:b/out", 0.0, 1))),
+        ];
+        assert_eq!(meters_battery_power(&shared), Some((500.0, 1)));
+        // Nothing reads yet, or only indexes: no power.
+        let silent = [
+            meter("bat-in", Role::Charge, None),
+            meter("bat-out", Role::Discharge, None),
+        ];
+        assert_eq!(meters_battery_power(&silent), None);
+        // A `power` point of its own wins, even when it does not read.
+        let config = Battery {
+            power: Some("bms:b/power".into()),
+            ..Battery::default()
+        };
+        let own = BatteryInfo::of(&config, None, Some((-300.0, 2))).or_meters(&meters);
+        assert_eq!(own.power_w, Some(-300.0));
+        assert_eq!(
+            BatteryInfo::of(&config, None, None)
+                .or_meters(&meters)
+                .power_w,
+            None
+        );
     }
 
     const H: u64 = meter::HOUR_MS;

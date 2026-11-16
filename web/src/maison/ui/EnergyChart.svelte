@@ -1,6 +1,7 @@
 <script>
   import { kwh, euros } from '../lib/energy-live.svelte.js';
   import { deviceSeries } from '../lib/energy-series.js';
+  import { ownUse } from '../lib/energy-own.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
 
   /** Bars over 24 h / 30 days / 12 months, stacked by what drew it
@@ -40,6 +41,8 @@
   const grid = $derived(meters.filter((m) => m.role === 'grid'));
   const byCircuit = $derived(range === 'hour' || !grid.length);
   const parts = $derived(deviceSeries(meters));
+  // What the circuits ran on without it being bought (panels, battery).
+  const own = $derived(ownUse(meters));
 
   const series = $derived.by(() => {
     if (by === 'devices' && parts.length) return parts;
@@ -61,7 +64,9 @@
     const all = bucket.meters[whole.id];
     const parts = circuits.map((m) => bucket.meters[m.id]).filter(Boolean);
     const sum = (k) => parts.reduce((t, a) => t + (a[k] ?? 0), 0);
-    return { kwh: Math.max(0, (all?.kwh ?? 0) - sum('kwh')), cost: all?.cost != null ? Math.max(0, all.cost - sum('cost')) : undefined };
+    // With panels or a battery, what was paid no longer splits by kWh: no cost, as on the server.
+    const cost = all?.cost != null && !own ? Math.max(0, all.cost - sum('cost')) : undefined;
+    return { kwh: Math.max(0, (all?.kwh ?? 0) + (own?.(bucket) ?? 0) - sum('kwh')), cost };
   };
 
   const bars = $derived(
