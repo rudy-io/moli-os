@@ -167,6 +167,9 @@ numérotés `d1…dN` et leurs points) et les 25 outils du contrat (`tools/model
    règles d'action, garde-fous, date, **électricité en direct par circuit**, pièces,
    **inventaire** (pièce → appareils : `id · nom · clé✎=valeur unité [choix]` ; pièces
    protégées marquées ; un appareil injoignable n'a pas de valeurs : « état inconnu »).
+   Un bouton ou une télécommande (un point de sens `press`, #211) est marqué « (bouton :
+   chaque valeur est un appui, pas un état) », et son point dit ce qu'il peut recevoir :
+   `action (appui) [single|double|hold]` ; jamais une clé seule, ni un appui présenté comme un état.
 2. Boucle d'outils (6 tours maxi, le dernier sans outil) :
    - `show(cards)` : ce que l'écran affiche (`device`, `room`, `energy`, `weather`,
      `remote`, `cameras`, `history`) ; cartes inventées ou masquées refusées.
@@ -200,7 +203,8 @@ numérotés `d1…dN` et leurs points) et les 25 outils du contrat (`tools/model
   soi-même une pièce protégée.
 - Inventaire « constructeur » : **tous** les appareils et leurs valeurs, joignables ou non (un
   automatisme agit plus tard), et les compteurs électriques par leur sens (« la
-  consommation » = le compteur général).
+  consommation » = le compteur général). Un point d'appui y donne son dernier appui puis
+  les valeurs brutes à écrire dans un déclencheur : `action (appui)=double [single|double|hold]`.
 - Modifier un automatisme existant : le graphe actuel est donné, les positions des nœuds
   conservées sont gardées.
 - Les règles `stale` sont disponibles dans `if.rules[]` et `wait_for.rule`, y compris
