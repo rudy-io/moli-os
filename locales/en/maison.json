@@ -361,8 +361,6 @@
   "maison.alarme.secteur.coupe": "Mains off",
   "maison.alarme.sirene_prete": "Siren ready",
   "maison.alarme.sirene_coupee": "Siren off",
-  "maison.alarme.armement_dans": "Arming in {s} s",
-  "maison.alarme.alarme_dans": "Alarm in {s} s",
   "maison.alarme.reglages": "Settings",
   "maison.alarme.groupe.delais": "Delays",
   "maison.alarme.groupe.sirene": "Siren",

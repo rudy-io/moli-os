@@ -62,8 +62,6 @@
   const gsm = $derived(value(id, 'gsm_status'));
   const dc = $derived(value(id, 'dc_status'));
   const siren = $derived(value(id, 'inside_siren_en'));
-  const armDelay = $derived(value(id, 'arm_delay'));
-  const alarmDelay = $derived(value(id, 'alarm_delay'));
 
   const GSM = {
     Normal: 'maison.alarme.gsm.normal',
@@ -249,12 +247,6 @@
         <span class="chip" class:warn={siren === false}>
           <Icon name={siren === false ? 'volume-off' : 'bell'} size={15} />{siren === false ? t('maison.alarme.sirene_coupee') : t('maison.alarme.sirene_prete')}
         </span>
-      {/if}
-      {#if typeof armDelay === 'number' && armDelay > 0}
-        <span class="chip"><Icon name="timer" size={15} />{t('maison.alarme.armement_dans', { s: num(armDelay) })}</span>
-      {/if}
-      {#if typeof alarmDelay === 'number' && alarmDelay > 0}
-        <span class="chip"><Icon name="timer" size={15} />{t('maison.alarme.alarme_dans', { s: num(alarmDelay) })}</span>
       {/if}
     </div>
 

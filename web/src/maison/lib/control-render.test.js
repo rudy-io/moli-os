@@ -1228,7 +1228,8 @@ test('an alarm panel shows its arm mode, health and its settings', () => {
   // Health and the settings the panel takes, in the house's words.
   assert.match(html, /92 %/);
   assert.match(html, /GSM OK/);
-  assert.match(html, /Armement dans 30 s/);
+  // A delay is a setting, never a countdown: it lives in the settings only.
+  assert.doesNotMatch(html, /Armement dans|Alarme dans/);
   assert.match(html, /Réglages/);
   assert.match(html, /Délai d'armement/);
   // Settings are grouped, numbers are sliders with a step-by-step value,

@@ -361,8 +361,6 @@
   "maison.alarme.secteur.coupe": "Secteur coupé",
   "maison.alarme.sirene_prete": "Sirène prête",
   "maison.alarme.sirene_coupee": "Sirène coupée",
-  "maison.alarme.armement_dans": "Armement dans {s} s",
-  "maison.alarme.alarme_dans": "Alarme dans {s} s",
   "maison.alarme.reglages": "Réglages",
   "maison.alarme.groupe.delais": "Délais",
   "maison.alarme.groupe.sirene": "Sirène",
