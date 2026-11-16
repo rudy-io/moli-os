@@ -938,7 +938,7 @@ test('dual setpoints classify without a brand and render independent numeric con
 });
 
 test('a button shows its last press while fresh, and always among the sensors (#198)', () => {
-  const action = point('action', enumeration('single', 'double', 'hold'), false);
+  const action = point('action', enumeration('single', 'double', 'hold'), false, 'press');
   const button = (state) => [{ id: 'z2m:button', native_name: 'Bouton', model: 'ZG-101ZL', label: { room: 'Workshop' }, online: true,
     points: [action, { ...point('battery', number(0, 100), false, 'battery'), unit: '%' }], members: [], state }];
   const card = (state, every = false) => {
@@ -965,6 +965,41 @@ test('a button shows its last press while fresh, and always among the sensors (#
   // A settable `action` is no press.
   hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, access: { read: true, write: true } }] } };
   assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
+  // Nor an `action` its driver did not call a press (#211): the key says nothing.
+  hub.devices = { 'z2m:x': { ...button(pressed('single', 1))[0], id: 'z2m:x', points: [{ ...action, semantic: 'other' }] } };
+  assert.doesNotMatch(render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body, /dernier appui/);
+});
+
+test('a press shows whatever the brand, one chip for a remote, named by the gesture (#211)', () => {
+  const now = Date.now();
+  home.home.now = now;
+  const at = (value, seconds) => ({ value, ts: now - seconds * 1000 });
+  const card = (d) => {
+    hub.devices = { [d.id]: { native_name: 'Télécommande', model: null, label: { room: 'Workshop' }, online: true, members: [], ...d } };
+    return render(components.RoomCard, { props: { room: home.roomList()[0], every: true } }).body;
+  };
+  const hueButton = (n) => ({
+    ...point(`button${n}`, enumeration('initial_press', 'repeat', 'short_release', 'long_release', 'long_press', 'double_short_release'), false, 'press'),
+    label: `Bouton ${n}`,
+  });
+  const dimmer = { id: 'hue:dimmer', points: [1, 2, 3, 4].map(hueButton) };
+
+  // A Hue dimmer: one chip, the last button pressed, by its name.
+  const two = card({ ...dimmer, state: { button1: at('short_release', 600), button2: at('short_release', 120) } });
+  assert.equal(two.match(/dernier appui/g)?.length, 1);
+  assert.match(two, />Bouton 2 · simple · il y a 2 min</);
+  assert.match(two, /title="Télécommande · Bouton 2 : dernier appui simple, il y a 2 min"/);
+  // A hold ends on `long_release`: « maintenu », never « relâché ».
+  assert.match(card({ ...dimmer, state: { button3: at('long_release', 60) } }), />Bouton 3 · maintenu · il y a 1 min</);
+  assert.match(card({ ...dimmer, state: { button1: at('double_short_release', 60) } }), />Bouton 1 · double · il y a 1 min</);
+
+  // Dirigera (`button`, text) and Tuya (`switch_mode1`): their own keys, their own words.
+  const dirigera = { id: 'dirigera:remote', points: [point('button', { type: 'text' }, false, 'press')] };
+  assert.match(card({ ...dirigera, state: { button: at('long', 60) } }), />maintenu · il y a 1 min</);
+  const tuya = { id: 'tuya:switch', points: [point('switch_mode1', enumeration('click', 'double_click', 'press'), false, 'press')] };
+  assert.match(card({ ...tuya, state: { switch_mode1: at('double_click', 60) } }), />double · il y a 1 min</);
+  // An unknown word shows as told.
+  assert.match(card({ ...tuya, state: { switch_mode1: at('rotate_left', 60) } }), />rotate_left · il y a 1 min</);
 });
 
 test('a heat pump and its circuit are heating and stay off the room cards; a thermostat stays climate', () => {
