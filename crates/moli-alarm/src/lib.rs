@@ -34,8 +34,8 @@
 //! entry = 5       # seconds to disarm on coming home
 //! trigger = 480   # seconds triggered (0: until disarmed)
 //! [[driver.options.sensor]]
-//! point = "frigate:zone_allee_portail/person"
-//! name = "Allée du portail"
+//! point = "frigate:zone_jardin/person"
+//! name = "Jardin"
 //! modes = ["home", "night"]
 //! immediate = false   # true: no entry delay for it
 //! ```
@@ -573,7 +573,7 @@ mod tests {
             entry = 5
             trigger = 480
             [[sensor]]
-            point = "frigate:zone_cour/person"
+            point = "frigate:zone_terrasse/person"
             modes = ["night"]
             "#,
         );
@@ -582,7 +582,7 @@ mod tests {
             r#"
             [modes.night]
             [[sensor]]
-            point = "frigate:zone_cour/person"
+            point = "frigate:zone_terrasse/person"
             modes = ["away"]
             "#,
         );

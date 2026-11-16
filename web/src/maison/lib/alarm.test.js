@@ -11,7 +11,7 @@ const device = {
         modes: { night: { exit: 5, entry: 5, trigger: 480 } },
         sensors: [
           { point: 'z2m:porte/contact', name: 'Porte', modes: ['home', 'night'] },
-          { point: 'frigate:zone-cour/person', name: 'Cour', modes: ['night'] },
+          { point: 'frigate:zone-terrasse/person', name: 'Terrasse', modes: ['night'] },
         ],
       }),
     },
@@ -28,19 +28,19 @@ test('the alarm device and its setup', () => {
 test('what a sensor sees: an open door, someone in a zone', () => {
   assert.equal(sensorActive('z2m:porte/contact', true), false, 'closed');
   assert.equal(sensorActive('z2m:porte/contact', false), true, 'open');
-  assert.equal(sensorActive('frigate:zone-cour/person', 1), true);
-  assert.equal(sensorActive('frigate:zone-cour/person', 0), false);
+  assert.equal(sensorActive('frigate:zone-terrasse/person', 1), true);
+  assert.equal(sensorActive('frigate:zone-terrasse/person', 0), false);
   assert.equal(sensorActive('x:y/on', null), false);
 });
 
 test('what would block arming, mode by mode', () => {
   const s = setupOf(device);
-  const values = { 'z2m:porte/contact': false, 'frigate:zone-cour/person': 0 };
+  const values = { 'z2m:porte/contact': false, 'frigate:zone-terrasse/person': 0 };
   assert.deepEqual(blocking(s, 'home', (p) => values[p]), ['Porte']);
   values['z2m:porte/contact'] = true;
-  values['frigate:zone-cour/person'] = 2;
+  values['frigate:zone-terrasse/person'] = 2;
   assert.deepEqual(blocking(s, 'home', (p) => values[p]), []);
-  assert.deepEqual(blocking(s, 'night', (p) => values[p]), ['Cour']);
+  assert.deepEqual(blocking(s, 'night', (p) => values[p]), ['Terrasse']);
 });
 
 test('tones, countdowns and delays', () => {
@@ -63,7 +63,7 @@ test('the journal pairs each event with its cause', () => {
       [9000, 'disarmed'],
     ],
     [
-      [4999, 'Cour'],
+      [4999, 'Terrasse'],
       [9000, ''],
     ],
   );
@@ -71,7 +71,7 @@ test('the journal pairs each event with its cause', () => {
     j.map((e) => [e.what, e.cause]),
     [
       ['disarmed', ''],
-      ['triggered', 'Cour'],
+      ['triggered', 'Terrasse'],
       ['armed', ''],
     ],
   );
@@ -83,14 +83,14 @@ test('what can be a sensor: doors, presence, camera zones', () => {
   const devices = [
     device,
     { id: 'z2m:porte', points: [{ key: 'contact', semantic: 'contact', label: 'contact' }, { key: 'battery' }] },
-    { id: 'frigate:zone-cour', points: [{ key: 'person', label: 'Personnes' }, { key: 'all', label: 'Objets' }] },
+    { id: 'frigate:zone-terrasse', points: [{ key: 'person', label: 'Personnes' }, { key: 'all', label: 'Objets' }] },
     { id: 'hue:lampe', points: [{ key: 'on' }] },
   ];
-  const names = { 'z2m:porte': 'Porte atelier', 'frigate:zone-cour': 'Zone cour' };
+  const names = { 'z2m:porte': 'Porte du garage', 'frigate:zone-terrasse': 'Zone terrasse' };
   const c = candidates(devices, (d) => names[d.id]);
   assert.deepEqual(c, [
-    { point: 'z2m:porte/contact', name: 'Porte atelier' },
-    { point: 'frigate:zone-cour/person', name: 'Zone cour (Personnes)' },
+    { point: 'z2m:porte/contact', name: 'Porte du garage' },
+    { point: 'frigate:zone-terrasse/person', name: 'Zone terrasse (Personnes)' },
   ]);
 });
 
