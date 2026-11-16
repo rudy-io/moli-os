@@ -126,6 +126,21 @@ timezone = "Europe/Paris"
 # soc = "bms:aabbccddeeff/soc"
 # power = "bms:aabbccddeeff/power"
 # capacity_kwh = 10.0
+# A battery that says only two positive powers (a Jackery): integrate them;
+# without [energy.battery] power, the live power is charge − discharge (its
+# charge still goes in [energy.battery] soc = "jackery:aabbccddeeff/battery").
+# [[energy.meter]]
+# id = "jackery-in"
+# name = "Battery in"
+# point = "jackery:aabbccddeeff/charge_power"
+# role = "charge"
+# integrate = true
+# [[energy.meter]]
+# id = "jackery-out"
+# name = "Battery out"
+# point = "jackery:aabbccddeeff/discharge_power"
+# role = "discharge"
+# integrate = true
 
 # Light fixtures: bulbs and the relay that feeds them as one light
 # (lumieres:<id>). Orders go to the bulbs; the relay only cuts when no bulb

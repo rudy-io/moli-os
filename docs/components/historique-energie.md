@@ -118,11 +118,18 @@ Les compteurs cumulés deviennent des **kWh et des euros heure par heure**, gard
   acheté + autoconsommé − stocké + rendu (ce que la maison a vraiment utilisé sur la période),
   `self_sufficiency` = (consommation − acheté) / consommation, `self_consumed` reste production −
   injection (utilisé ou stocké). « Le reste de la maison » retranche ce qui est stocké et ajoute
-  ce qui est rendu. Sans compteur `charge` ni `discharge`, rien ne change. `[energy.battery]`
-  (optionnel) : `soc` (le point de la charge, en %), `power` (W, positif en charge ; avec
-  `discharge_positive = true`, un point positif en décharge est retourné), `capacity_kwh` (ce
-  que la charge contient en kWh). `/api/energy` ajoute `battery` (charge, puissance signée,
-  kWh contenus) et `flows.battery_w` ; `consumption_w` = réseau + production − batterie.
+  ce qui est rendu, dans le bilan comme dans les graphiques par appareil (`energy-own.js`, qui
+  y ajoute aussi l'autoconsommé, comme `unmeasured`) ; chaque part y est alors comptée au prix
+  payé par kWh utilisé, plus par kWh acheté. Sans compteur `charge` ni `discharge`, rien ne
+  change. `[energy.battery]` (optionnel) : `soc` (le point de la charge, en %), `power` (W,
+  positif en charge ; avec `discharge_positive = true`, un point positif en décharge est
+  retourné), `capacity_kwh` (ce que la charge contient en kWh). Sans `power`, la puissance vient
+  des `power` des compteurs `charge` et `discharge` (entré − sorti, chacun positif), comme
+  `solar` donne la production : une batterie qui donne deux puissances positives (Jackery :
+  `charge_power`, `discharge_power`) se déclare en deux compteurs `integrate = true`, sans
+  `[energy.battery] power`. `/api/energy` ajoute `battery` (charge, puissance signée, kWh
+  contenus ; aussi sans `[energy.battery]`, dès qu'un compteur `charge` ou `discharge` a une
+  puissance) et `flows.battery_w` ; `consumption_w` = réseau + production − batterie.
   L'appareil `energie:maison` gagne `today_battery_charge_kwh` et `today_battery_discharge_kwh`.
   Page Énergie : carte « Batterie » (charge, en charge / alimente la maison / au repos, kWh du
   jour) ; le flux en direct (Accueil, Énergie) montre la batterie sous la maison. Pas encore :

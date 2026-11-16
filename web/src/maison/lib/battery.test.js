@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batteryNow, splitFlows } from './battery.js';
+import { batteryNow, metersPower, splitFlows } from './battery.js';
 
 const summary = (battery, today = {}) => ({ battery, today });
 
@@ -82,4 +82,35 @@ test('no battery and the production unknown: what goes out came from the sun, as
   const g = splitFlows({ bought: 0, made: 1000, sent: 400 });
   assert.equal(g.solarToGrid, 400);
   assert.equal(g.solarToHouse, 600);
+});
+
+test('without a power point, the charge and discharge meters say the power', () => {
+  // A Jackery: two positive powers, its meters integrated.
+  const meters = [
+    { id: 'pv', role: 'solar', power: 'inv:i/power', power_w: 2000 },
+    { id: 'bat-in', role: 'charge', point: 'jk:b/charge_power', power: 'jk:b/charge_power', power_w: 0 },
+    { id: 'bat-out', role: 'discharge', point: 'jk:b/discharge_power', power: 'jk:b/discharge_power', power_w: 0 },
+  ];
+  const live = { 'jk:b/charge_power': 1200, 'jk:b/discharge_power': 0, 'jk:b/battery': 64 };
+  const s = { battery: { soc_point: 'jk:b/battery', power_w: 0 }, meters, today: {} };
+  const b = batteryNow(s, (p) => live[p] ?? null);
+  assert.equal(b.power, 1200);
+  assert.equal(b.state, 'charge');
+  assert.equal(b.soc, 64);
+  // At night it gives back; a few negative watts at rest are none.
+  const night = { 'jk:b/charge_power': -3, 'jk:b/discharge_power': 700 };
+  assert.equal(batteryNow(s, (p) => night[p] ?? null).power, -700);
+  assert.equal(batteryNow(s, (p) => night[p] ?? null).state, 'decharge');
+  // Not live yet: the summary's values.
+  assert.equal(metersPower([{ role: 'charge', power: 'a:b/in', power_w: 300 }]), 300);
+  // Two indexes on one power point count it once; indexes alone say nothing.
+  const shared = [
+    { role: 'charge', power: 'bms:b/in', power_w: 500 },
+    { role: 'charge', power: 'bms:b/in', power_w: 500 },
+  ];
+  assert.equal(metersPower(shared), 500);
+  assert.equal(metersPower([{ role: 'charge', point: 'bms:b/charged' }, { role: 'discharge', point: 'bms:b/discharged' }]), null);
+  // A power point of its own wins over the meters.
+  const own = { battery: { power_point: 'bms:b/power', power_w: -300 }, meters, today: {} };
+  assert.equal(batteryNow(own, (p) => live[p] ?? null).power, -300);
 });

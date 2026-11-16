@@ -1,10 +1,13 @@
 // What each part of the house drew, bucket by bucket (an hour, a day…),
 // from an energy report (/api/energy/series): the circuits (net of the
 // appliances measured inside them), the appliances, the lights (estimated,
-// together), and the rest of the house. The parts add up to the house's
-// total (its main clamp, else the Linky): nothing counted twice.
+// together), and the rest of the house. The parts add up to what the
+// house used: its total (its main clamp, else the Linky), plus what it
+// made and kept, less what the battery stored, plus what it gave back
+// (`ownUse`). Nothing counted twice.
 
 import { t } from '../../lib/i18n.svelte.js';
+import { ownUse } from './energy-own.js';
 
 const PALETTE = ['#e9a23b', '#5b8def', '#3fae7c', '#c46ad8', '#e0705a', '#2fb3b8', '#8c7ae6', '#d4a373'];
 const LIGHTS = '#f2c94c';
@@ -21,6 +24,10 @@ export function deviceSeries(meters) {
   const top = whole ? (b) => k(b, whole.id) : grid.length ? (b) => grid.reduce((t, g) => t + k(b, g.id), 0) : null;
   const paid = whole ? (b) => b.meters[whole.id]?.cost : grid.length ? (b) => grid.reduce((t, g) => t + (b.meters[g.id]?.cost ?? 0), 0) : null;
 
+  const own = ownUse(meters);
+  // What the house used: what was bought, plus what it used of its own.
+  const used = top ? (b) => top(b) + (own?.(b) ?? 0) : null;
+
   const parts = [];
   let n = 0;
   for (const m of circuits) {
@@ -31,13 +38,15 @@ export function deviceSeries(meters) {
   if (lights.length) parts.push({ id: '__lights', name: t('energie.lumieres'), estimated: true, color: LIGHTS, kwh: (b) => lights.reduce((t, a) => t + k(b, a.id), 0) });
   if (top) {
     const others = [...parts];
-    parts.push({ id: '__rest', name: t('energie.reste'), rest: true, color: 'var(--surface-3)', kwh: (b) => Math.max(0, top(b) - others.reduce((t, p) => t + p.kwh(b), 0)) });
+    parts.push({ id: '__rest', name: t('energie.reste'), rest: true, color: 'var(--surface-3)', kwh: (b) => Math.max(0, used(b) - others.reduce((t, p) => t + p.kwh(b), 0)) });
   }
-  // Each part at that bucket's price (what the house paid per kWh then).
+  // Each part at that bucket's price: what the house paid then per kWh it
+  // used (with panels or a battery, not every kWh used was bought), so the
+  // parts add up to what was paid.
   const price = (b) => {
-    const t = top?.(b);
+    const u = used?.(b);
     const c = paid?.(b);
-    return t > 0 && c != null ? c / t : null;
+    return u > 0 && c != null ? c / u : null;
   };
   for (const p of parts) {
     p.cost = (b) => {

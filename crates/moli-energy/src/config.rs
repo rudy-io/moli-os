@@ -370,12 +370,26 @@ impl Config {
 
     /// A battery is read both ways or not at all: `charge` alone would have
     /// the house store every day and never get anything back.
+    /// Their powers say what goes in and what comes out, each positive: one
+    /// point for both is signed, and belongs in `[energy.battery] power`.
     fn check_battery_meters(&self) -> Result<(), String> {
         let has = |role: &Role| self.meters.iter().any(|m| &m.role == role);
-        if has(&Role::Charge) == has(&Role::Discharge) {
-            return Ok(());
+        if has(&Role::Charge) != has(&Role::Discharge) {
+            return Err("a battery needs both a `charge` and a `discharge` meter: with one alone, the house would store every day and never get anything back".into());
         }
-        Err("a battery needs both a `charge` and a `discharge` meter: with one alone, the house would store every day and never get anything back".into())
+        let powers = |role: Role| {
+            self.meters
+                .iter()
+                .filter(move |m| m.role == role)
+                .filter_map(MeterConfig::power_point)
+        };
+        if let Some(both) = powers(Role::Charge).find(|p| powers(Role::Discharge).any(|q| q == *p))
+        {
+            return Err(format!(
+                "power {both:?} is on both a `charge` and a `discharge` meter: a signed battery power goes in [energy.battery] power"
+            ));
+        }
+        Ok(())
     }
 
     /// The price of a kWh in this period, if the tariff knows it.
@@ -529,6 +543,25 @@ mod tests {
         let (charge, discharge) = stored.split_at(stored.find("[[meter]]\nid = \"out\"").unwrap());
         assert!(parse(charge).is_err());
         assert!(parse(discharge).is_err());
+        // Two positive powers (a Jackery, integrated): each its own point.
+        let powers = stored
+            .replace("bms:b/charged", "jk:b/charge_power")
+            .replace("bms:b/discharged", "jk:b/discharge_power")
+            .replace("reset = \"never\"\n", "")
+            .replace(
+                "role = \"charge\"\n",
+                "role = \"charge\"\nintegrate = true\n",
+            )
+            .replace(
+                "role = \"discharge\"\n",
+                "role = \"discharge\"\nintegrate = true\n",
+            );
+        parse(&powers).unwrap();
+        // One signed point for both ways: its place is [battery] power.
+        let signed =
+            format!("{charge}power = \"bms:b/power\"\n{discharge}power = \"bms:b/power\"\n");
+        assert!(parse(&signed).is_err());
+        parse(&signed.replacen("bms:b/power", "bms:b/power_in", 1)).unwrap();
     }
 
     #[test]
