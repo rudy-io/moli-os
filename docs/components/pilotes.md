@@ -1176,11 +1176,12 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   reviennent, 15 s au plus), sinon les ampoules (allumées puis réglées) ; aucune ampoule
   joignable sans relais → refus « coupée à l'interrupteur ».
 
-## `dehors` : la météo dehors, mesurée ou prévue (`crates/moli-outdoor`, #210)
+## `dehors` : la météo dehors, mesurée ou prévue, et le soleil (`crates/moli-outdoor`, #210, #258)
 
-Pilote interne, lancé par Moli dès que `moli.toml` déclare `[outdoor]` (pas de `[[driver]]`,
-l'id `dehors` est réservé). Sans cette section, rien ne change : la page Dehors lit
-`outdoor.weather` de `home.json` comme avant.
+Pilote interne (pas de `[[driver]]`, l'id `dehors` est réservé). Il porte deux appareils :
+`dehors:meteo`, dès que `moli.toml` déclare `[outdoor]`, et `dehors:soleil` (plus bas), dès
+que la position de la maison est connue, `[outdoor]` ou pas. Sans `[outdoor]`, la page Dehors
+lit `outdoor.weather` de `home.json` comme avant.
 
 ```toml
 [outdoor]
@@ -1245,6 +1246,31 @@ transmet aucun). Ses `members` sont les sources.
 ```
 
 Sans la seconde règle, la prévision suffit à relever le store ; avec, seule la station le fait.
+
+### `dehors:soleil` : où est le soleil (#258)
+
+Calculé **dans la maison**, sans Internet ni station, depuis la position de la maison
+(`[automations] latitude/longitude`, ou celle choisie dans la conversation, suivie sans
+redémarrage). Mêmes formules que le lever et le coucher des automatismes (`moli_core::sun`,
+approximation NOAA) : « soleil levé » et l'élévation ne se contredisent jamais. Sans position
+(et dans la maison de démo), pas d'appareil ; une position retirée le retire.
+
+| Point | Valeur |
+|---|---|
+| `elevation` | hauteur du centre du soleil au-dessus de l'horizon, en degrés (-90 à 90, négative la nuit) |
+| `azimuth` | direction du soleil, en degrés, dans le sens des aiguilles d'une montre depuis le nord (90 = est, 180 = sud) |
+
+- Lecture seule, sens `other`, unité `°`.
+- **Recalculé chaque minute, publié par pas de 0,5°** : à midi, l'élévation monte d'environ
+  0,25° par minute, et le calcul est juste à environ 0,5° près (vérifié contre la formule de
+  l'*Astronomical Almanac* toute l'année, dans les deux hémisphères). L'historique prend donc
+  une ligne toutes les quelques minutes, pas à chaque minute.
+- **Élévation géométrique** (sans la réfraction de l'air) : au lever et au coucher calculés,
+  elle vaut environ -0,83° (le bord haut du disque à l'horizon, réfraction comprise). Elle passe
+  donc 0° quelques minutes après le lever et avant le coucher.
+- Exemple d'automatisme : « allumer dehors quand le soleil passe sous 5° »,
+  `when_threshold` sur `dehors:soleil/elevation` avec `below` 5 ; « le soleil est à l'ouest »,
+  `dehors:soleil/azimuth` `gt` 225.
 
 ## `presence` : qui est à la maison (`crates/moli-presence`)
 

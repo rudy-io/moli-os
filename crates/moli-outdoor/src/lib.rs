@@ -36,6 +36,11 @@
 //!
 //! Read-only: it takes no order and passes none on. Nothing is converted:
 //! a source whose unit differs from the meaning's is left out (and said so).
+//!
+//! The same instance carries `dehors:soleil` ([`sun`], #258): where the sun
+//! is, from the house's position alone, `[outdoor]` or not.
+
+pub mod sun;
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -566,7 +571,11 @@ fn ids(sources: &[Source], measured: bool) -> String {
 
 pub struct Outdoor {
     hub: Hub,
+    /// `[outdoor]` is declared: `dehors:meteo` is there.
+    weather: bool,
     sources: Vec<Source>,
+    /// Where the house is, for `dehors:soleil` (`None`: no sun, the demo).
+    place: Option<sun::Place>,
     /// Where the day's extremes start again after a restart.
     history: Option<History>,
     /// The house's time zone: the day starts at its midnight.
@@ -582,12 +591,21 @@ impl std::fmt::Debug for Outdoor {
 }
 
 impl Outdoor {
-    /// `zone`: the house's IANA time zone (UTC if unknown).
+    /// `config`: `[outdoor]`, if declared (else only the sun); `zone`: the
+    /// house's IANA time zone (UTC if unknown); `place`: where the house is.
     #[must_use]
-    pub fn new(hub: Hub, config: &Config, history: Option<History>, zone: &str) -> Self {
+    pub fn new(
+        hub: Hub,
+        config: Option<&Config>,
+        history: Option<History>,
+        zone: &str,
+        place: Option<sun::Place>,
+    ) -> Self {
         Self {
             hub,
-            sources: config.sources(),
+            weather: config.is_some(),
+            sources: config.map(Config::sources).unwrap_or_default(),
+            place,
             history,
             zone: jiff::tz::TimeZone::get(zone).unwrap_or(jiff::tz::TimeZone::UTC),
         }
@@ -608,10 +626,40 @@ struct Published {
     day: Extremes,
     shown: (Reading, Reading),
     restored: HashSet<PointId>,
+    /// What `dehors:soleil` shows.
+    sun: sun::Shown,
 }
 
 impl Outdoor {
+    /// Where the sun is now: published as it moves by a step.
+    fn sun(&self, ctx: &DriverCtx, published: &mut Published) {
+        let place = self.place.as_ref().and_then(|place| place());
+        let id = ctx.device_id(sun::NATIVE);
+        match sun::tick(&mut published.sun, place, now_ms()) {
+            sun::Change::Nothing => {}
+            sun::Change::Remove => ctx.remove_device(&id),
+            sun::Change::Show {
+                declare,
+                elevation,
+                azimuth,
+            } => {
+                if declare {
+                    ctx.upsert_device(sun::device(id.clone(), ctx.instance()));
+                    ctx.set_availability(&id, true);
+                }
+                for (key, value) in [(sun::ELEVATION, elevation), (sun::AZIMUTH, azimuth)] {
+                    if let Some(v) = value {
+                        ctx.set_state(&id, key, Value::Float(v));
+                    }
+                }
+            }
+        }
+    }
+
     async fn refresh(&self, ctx: &DriverCtx, published: &mut Published) {
+        if !self.weather {
+            return;
+        }
         let id = ctx.device_id(NATIVE);
         let views: Vec<_> = self
             .sources
@@ -770,6 +818,7 @@ impl Driver for Outdoor {
                 self.sources.iter().map(|s| s.device.clone()).collect();
             let mut published = Published::default();
             self.refresh(ctx, &mut published).await;
+            self.sun(ctx, &mut published);
             ctx.ready();
             let mut tick = tokio::time::interval(TICK);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -787,7 +836,11 @@ impl Driver for Outdoor {
                 };
                 let refresh = match next {
                     Next::Stop | Next::Event(Err(RecvError::Closed)) => return Ok(()),
-                    Next::Refresh | Next::Event(Err(RecvError::Lagged(_))) => true,
+                    Next::Refresh => {
+                        self.sun(ctx, &mut published);
+                        true
+                    }
+                    Next::Event(Err(RecvError::Lagged(_))) => true,
                     Next::Event(Ok(event)) => {
                         let device = match &event {
                             Event::State { point, .. } => point.split().map(|(d, _)| d),
