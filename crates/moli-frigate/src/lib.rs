@@ -187,11 +187,12 @@ async fn review_api(config: &Config, ctx: &DriverCtx) -> Option<Review> {
         seen
     };
     let https = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin)).ok()?;
-    Some(Review::Ready(std::sync::Arc::new(review::Api::new(
-        https,
-        r.user.clone(),
-        password,
-    ))))
+    let api = std::sync::Arc::new(review::Api::new(https, r.user.clone(), password));
+    // In the background: the session and the live streams, before anyone
+    // opens a camera.
+    let warming = std::sync::Arc::clone(&api);
+    tokio::spawn(async move { warming.warm().await });
+    Some(Review::Ready(api))
 }
 
 /// Waits until Frigate shows another certificate (never, without `review`).

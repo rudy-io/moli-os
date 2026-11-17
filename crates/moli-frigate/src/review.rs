@@ -69,6 +69,14 @@ impl Api {
         }
     }
 
+    /// Signs in and reads the cameras' live streams ahead of the first live
+    /// view: the hub gives an answer 10 s in all, go2rtc alone may take 9.
+    pub async fn warm(&self) {
+        if let Err(e) = self.stream_of("").await {
+            tracing::debug!(error = %e, "frigate review: not ready yet");
+        }
+    }
+
     /// The stream Frigate plays for a camera: the first of its
     /// `live.streams`, else the camera's own name (what Frigate accepts on
     /// `/api/go2rtc/webrtc`). From Frigate's configuration, never a request.

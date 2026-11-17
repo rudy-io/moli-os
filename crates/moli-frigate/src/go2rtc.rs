@@ -66,7 +66,7 @@ impl LiveSource for Stream {
             let request =
                 moli_net::text_body(request, "application/sdp", for_go2rtc(&offer, viewer))?;
             // go2rtc answers once it knows its addresses (STUN included):
-            // up to 5 s, within the hub's 10.
+            // up to ANSWER_WAIT (9 s), within the hub's 10.
             let (status, reply) =
                 moli_net::plain_within(&self.host, self.port, request, ANSWER_WAIT).await?;
             if !status.is_success() {
