@@ -189,3 +189,58 @@ async fn its_settings_change_from_the_screen_disarmed_only_and_stay() {
     cancel.cancel();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Armed, then Moli stops at once (a power cut): the state cache, written
+/// once a minute, never saw it. The phase kept in the vault brings it back
+/// armed; triggered, it comes back triggered.
+#[tokio::test]
+async fn a_power_cut_right_after_arming_or_triggering_loses_nothing() {
+    let dir = std::env::temp_dir().join(format!("moli-alarm-cut-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let key = moli_runtime::MasterKey::generate().unwrap();
+    let start = |key: moli_runtime::MasterKey| {
+        let hub = Hub::new(HubOptions {
+            secrets: Some((dir.join("secrets.enc"), key)),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        let alarm: Config = toml::from_str("[modes.night]\ntrigger = 600\n[modes.home]\n").unwrap();
+        let cancel = CancellationToken::new();
+        spawn_driver(
+            &hub,
+            InstanceId::from("alarme"),
+            Arc::new(AlarmDriver::new(alarm).unwrap()),
+            cancel.clone(),
+        );
+        (hub, cancel)
+    };
+    let mode = PointId::from("alarme:maison/mode".to_owned());
+
+    let (hub, cancel) = start(key.clone());
+    settle(&hub, 1).await;
+    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        state(&hub, "state").await,
+        Value::Text("armed_night".into())
+    );
+    cancel.cancel();
+    drop(hub);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (hub, cancel) = start(key);
+    settle(&hub, 1).await;
+    assert_eq!(
+        state(&hub, "state").await,
+        Value::Text("armed_night".into())
+    );
+    // And it holds: another mode is refused, off only.
+    assert!(
+        hub.command(&mode, Value::Text("home".into()), Origin::Automation, None)
+            .await
+            .is_err()
+    );
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -11,15 +11,19 @@
   (point inconnu, appareil hors ligne). Le point `silent` nomme les capteurs qui ne répondent
   pas ; armée, un capteur muet depuis une minute donne l'événement `silent` (pas pour une
   coupure de quelques secondes, ni à l'arrêt de Moli).
-- Armée, en délai d'entrée ou déclenchée, changer de mode est refusé : ce serait la désarmer,
-  et c'est `off`, avec le code, puis le nouveau mode. Pendant le délai de sortie, le mode peut
-  encore changer (rien n'est encore surveillé).
+- Une fois un mode choisi (délai de sortie, armée, délai d'entrée, déclenchée), en changer est
+  refusé : ce serait l'affaiblir ou la faire taire, et c'est `off`, avec le code, puis le nouveau
+  mode. Le délai de sortie ne repart jamais.
 - Un redémarrage ne la fait pas taire : déclenchée, elle le reste ; un délai d'entrée ou de
-  sortie en cours repart en entier. Les délais se comptent sur une horloge régulière (un saut
+  sortie en cours repart en entier. Sa phase est gardée dans le coffre à chaque changement :
+  une coupure de courant juste après l'armement ou le déclenchement ne la perd pas. Un capteur
+  actif avant le redémarrage compte de nouveau dès qu'une valeur fraîche le dit (jamais sur le
+  cache seul). Les délais se comptent sur une horloge régulière (un saut
   de l'heure au démarrage ne les change pas) ; `until` est donné en heure murale.
 - Sans automatisme, une alarme déclenchée ne fait rien de visible. Point de départ :
   `automatisme-declenchee.json` (déclenchée → prévenir la maison et Telegram, avec les capteurs
-  en cause), à créer par `POST /api/automations` puis à valider avec le code, ou à demander à
+  en cause) et `automatisme-capteur-muet.json` (armée, un capteur ne répond plus depuis une
+  minute → prévenir : débrancher ou brouiller un capteur, c'est ce qu'un intrus ferait), à créer par `POST /api/automations` puis à valider avec le code, ou à demander à
   Moli ; remplacer `alarme` par l'id du pilote s'il diffère.
 - Réglages (modes, délais, capteurs) à l'écran (page Alarme, désarmée) : gardés par Moli dans le
   coffre de l'instance, `moli.toml` ne donne que les premiers réglages. Ils tiennent dans un

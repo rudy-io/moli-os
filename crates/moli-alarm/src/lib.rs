@@ -8,9 +8,9 @@
 //!
 //! - `mode` (writable): `off` or a mode. Arming is refused, and said, while
 //!   a sensor of that mode sees something or does not answer; the order
-//!   then fails with the sensors' names. Armed, in an entry delay or
-//!   triggered, another mode is refused: that would be disarming, which is
-//!   `off`, with its code (during the exit delay it may still change).
+//!   then fails with the sensors' names. Once a mode is chosen (leaving,
+//!   armed, in an entry delay, triggered), another one is refused: that
+//!   would weaken or silence it, which is `off`, with its code.
 //! - `state`: `disarmed`, `arming`, `armed_home`, `armed_night`,
 //!   `armed_away`, `pending` (entry delay), `triggered`.
 //! - `until`: when the current delay ends (Unix seconds, 0 without one).
@@ -28,7 +28,10 @@
 //!   changes them without a person.
 //!
 //! A restart never silences it: triggered stays triggered, and an entry or
-//! exit delay under way starts again in full.
+//! exit delay under way starts again in full. The phase is kept in the
+//! instance's vault at each change, so a power cut right after arming or
+//! triggering does not lose it. A sensor that was active before the restart
+//! counts again once a fresh value says it still is (never on the cache).
 //!
 //! In `[guard]` (the recommendation, the same in the README and the
 //! onboarding): the code each time on `mode` = `off` and on `setup`
@@ -78,6 +81,10 @@ const MAX_SENSORS: usize = 32;
 /// `silent`): a Wi-Fi blip, or Moli stopping (other drivers go first), is
 /// not a lost sensor.
 const SILENT_GRACE: Duration = Duration::from_secs(60);
+/// Where the alarm's phase is kept at each change (the instance's vault):
+/// the state cache is written once a minute, a power cut just after arming
+/// or triggering would lose it.
+const PHASE: &str = "phase";
 /// Where the settings made on the screen are kept (the instance's vault).
 const SETTINGS: &str = "settings";
 
@@ -201,6 +208,24 @@ impl AlarmDriver {
             name: config.name,
             initial,
         })
+    }
+
+    /// Settings made on the screen win over the file's, while valid; kept
+    /// ones become invalid (a newer Moli checks more): said, the file's.
+    fn settings(&self, ctx: &DriverCtx) -> Settings {
+        let Some(text) = ctx.secret(SETTINGS) else {
+            return self.initial.clone();
+        };
+        match serde_json::from_str::<Settings>(&text)
+            .map_err(anyhow::Error::from)
+            .and_then(|s| s.check().map(|()| s))
+        {
+            Ok(settings) => settings,
+            Err(e) => {
+                tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: settings kept from the screen are not valid any more, moli.toml's used");
+                self.initial.clone()
+            }
+        }
     }
 
     fn device(&self, ctx: &DriverCtx) -> Device {
@@ -408,6 +433,25 @@ fn publish(ctx: &DriverCtx, id: &DeviceId, alarm: &Alarm, happened: &[Happening]
     }
 }
 
+/// The phase as kept across a restart: the mode, the state shown, the
+/// sensors in cause (a list: a name may hold a comma).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+struct Kept {
+    mode: Option<Mode>,
+    state: String,
+    cause: Vec<String>,
+}
+
+impl Kept {
+    fn of(phase: &Phase) -> Self {
+        Self {
+            mode: phase.mode(),
+            state: phase.state().to_owned(),
+            cause: phase.cause().to_vec(),
+        }
+    }
+}
+
 /// The running alarm: its settings, its state, and what each sensor sees.
 struct Live {
     id: DeviceId,
@@ -420,6 +464,13 @@ struct Live {
     quiet_since: BTreeMap<String, Instant>,
     /// The steady clock the alarm counts on.
     start: Instant,
+    /// When this run started (Unix ms): a value older comes from the cache.
+    started_ms: u64,
+    /// Sensors seen active only in values from before this start: they
+    /// count once a fresh value says so, never on the cache alone.
+    unconfirmed: BTreeSet<String>,
+    /// The phase last kept in the vault.
+    kept: Option<Kept>,
 }
 
 impl Live {
@@ -433,10 +484,88 @@ impl Live {
             silent: BTreeSet::new(),
             quiet_since: BTreeMap::new(),
             start: Instant::now(),
+            started_ms: moli_core::now_ms(),
+            unconfirmed: BTreeSet::new(),
+            kept: None,
         };
         live.look(ctx);
         live.silent = live.not_answering(ctx);
         live
+    }
+
+    /// Where it stood when Moli stopped: the vault first (kept at each
+    /// change), else the state cache (an older Moli, or no vault).
+    fn was(&self, ctx: &DriverCtx) -> Kept {
+        if let Some(kept) = ctx
+            .secret(PHASE)
+            .and_then(|s| serde_json::from_str::<Kept>(&s).ok())
+        {
+            return kept;
+        }
+        let text = |key: &str| match ctx.current(&self.id, key) {
+            Some(Value::Text(t)) => t.to_string(),
+            _ => String::new(),
+        };
+        let cause = text("cause");
+        Kept {
+            mode: Mode::parse(&text("mode")),
+            state: text("state"),
+            cause: if cause.is_empty() {
+                Vec::new()
+            } else {
+                vec![cause]
+            },
+        }
+    }
+
+    /// Keeps the phase in the vault when it changed.
+    async fn keep(&mut self, ctx: &DriverCtx) {
+        let now = Kept::of(self.alarm.phase());
+        if self.kept.as_ref() == Some(&now) {
+            return;
+        }
+        let Ok(text) = serde_json::to_string(&now) else {
+            return;
+        };
+        if let Err(e) = ctx.store_secret(PHASE, &text).await {
+            tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: phase not kept (a power cut would lose it)");
+        }
+        self.kept = Some(now);
+    }
+
+    /// After a restart: the sensors the cache says active are to be
+    /// confirmed by a fresh value (a door left open while Moli was off).
+    fn doubt_the_cache(&mut self, ctx: &DriverCtx) {
+        self.unconfirmed = self
+            .seeing
+            .iter()
+            .filter(|(_, on)| **on)
+            .map(|(point, _)| point.clone())
+            .collect();
+        self.confirm(ctx);
+    }
+
+    /// Those of the unconfirmed sensors whose device answers with a value
+    /// from this run: still active, they count now.
+    fn confirm(&mut self, ctx: &DriverCtx) {
+        let fresh: Vec<String> = self
+            .unconfirmed
+            .iter()
+            .filter(|p| {
+                let point = PointId::from((*p).clone());
+                ctx.answers(&point)
+                    && ctx
+                        .read(&point)
+                        .is_some_and(|s| s.ts >= self.started_ms && active(p, &s.value))
+            })
+            .cloned()
+            .collect();
+        let now = self.now();
+        for point in fresh {
+            self.unconfirmed.remove(&point);
+            let happened = self.alarm.sensed(&point, now);
+            publish(ctx, &self.id, &self.alarm, &happened, now);
+        }
     }
 
     /// Seconds on the steady clock, rounded up: a delay is never shorter
@@ -512,6 +641,7 @@ impl Live {
         self.quiet_since.retain(|point, _| silent.contains(point));
         self.silent = silent;
         self.show_silent(ctx);
+        self.confirm(ctx);
     }
 
     /// When the next sensor gone quiet is to be said.
@@ -644,13 +774,17 @@ impl Live {
         }
     }
 
-    fn sensed(&mut self, ctx: &DriverCtx, point: &str, value: &Value) {
+    fn sensed(&mut self, ctx: &DriverCtx, point: &str, value: &Value, ts: u64) {
         if !self.seeing.contains_key(point) {
             return;
         }
         let on = active(point, value);
         let was = self.seeing.insert(point.to_owned(), on).unwrap_or(false);
-        if on && !was {
+        // A fresh value for a sensor the cache said active: it counts now
+        // if it still sees something (a value restored from the cache, older
+        // than this run, confirms nothing).
+        let confirmed = ts >= self.started_ms && self.unconfirmed.remove(point) && on;
+        if on && (!was || confirmed) {
             let now = self.now();
             let happened = self.alarm.sensed(point, now);
             publish(ctx, &self.id, &self.alarm, &happened, now);
@@ -692,30 +826,17 @@ impl Driver for AlarmDriver {
         Box::pin(async move {
             let mut events = ctx.watch();
             ctx.upsert_device(self.device(ctx));
-            // Settings made on the screen win over the file's, while valid.
-            let settings = ctx
-                .secret(SETTINGS)
-                .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
-                .filter(|s| s.check().is_ok())
-                .unwrap_or_else(|| self.initial.clone());
-            let mut live = Live::new(ctx, settings);
-            let text = |key: &str| match ctx.current(&live.id, key) {
-                Some(Value::Text(t)) => t.to_string(),
-                _ => String::new(),
-            };
-            let (mode, state, cause) = (text("mode"), text("state"), text("cause"));
-            live.alarm.restore(Mode::parse(&mode));
-            let cause = cause
-                .split(", ")
-                .filter(|c| !c.is_empty())
-                .map(str::to_owned)
-                .collect();
-            let resumed = live.alarm.resume(&state, cause, live.now());
+            let mut live = Live::new(ctx, self.settings(ctx));
+            let was = live.was(ctx);
+            live.alarm.restore(was.mode);
+            let resumed = live.alarm.resume(&was.state, was.cause, live.now());
             if !resumed.is_empty() {
-                tracing::warn!(instance = %ctx.instance(), was = %state, "alarm: restarted while {state}, resumed");
+                tracing::warn!(instance = %ctx.instance(), was = %was.state, "alarm: restarted while {}, resumed", was.state);
             }
             ctx.set_availability(&live.id, true);
             live.show(ctx, &resumed);
+            live.doubt_the_cache(ctx);
+            live.keep(ctx).await;
             ctx.ready();
             loop {
                 let wake = live.wake();
@@ -732,7 +853,7 @@ impl Driver for AlarmDriver {
                         if let Some(at) = lost { tokio::time::sleep_until(at).await }
                     }, if lost.is_some() => live.report_lost(ctx),
                     event = events.recv() => match event {
-                        Ok(Event::State { point, value, .. }) => live.sensed(ctx, point.as_str(), &value),
+                        Ok(Event::State { point, value, ts, .. }) => live.sensed(ctx, point.as_str(), &value, ts),
                         Ok(Event::Availability { .. } | Event::DeviceUpserted { .. }
                             | Event::DeviceRestored { .. } | Event::DeviceRemoved { .. }) => live.recount(ctx),
                         Ok(_) => {}
@@ -743,6 +864,7 @@ impl Driver for AlarmDriver {
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
                     },
                 }
+                live.keep(ctx).await;
             }
         })
     }

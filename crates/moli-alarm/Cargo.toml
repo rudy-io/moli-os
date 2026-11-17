@@ -14,11 +14,11 @@ moli-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time", "macros", "sync"] }
-toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 moli-helpers.workspace = true
+toml.workspace = true
 tokio = { workspace = true, features = ["test-util", "rt", "macros"] }
 tokio-util.workspace = true
 

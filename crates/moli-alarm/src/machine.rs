@@ -170,8 +170,9 @@ impl Happening {
 pub enum ArmError {
     /// The mode is not set up.
     NotSetUp(Mode),
-    /// Armed in another mode, entry delay, or triggered: changing the mode
-    /// would be disarming, which wants `off` (and the code).
+    /// A mode is already chosen (leaving, armed, entry delay, triggered):
+    /// changing it would weaken or silence it, which wants `off` (and the
+    /// code).
     DisarmFirst,
 }
 
@@ -274,9 +275,11 @@ impl Alarm {
     /// something, or does not answer: nobody should leave a door open
     /// behind an armed alarm, nor count on a sensor that is not there.
     ///
-    /// From disarmed, or while leaving (nothing is watched yet), it arms.
-    /// Armed in another mode, in an entry delay or triggered, changing the
-    /// mode would be disarming: refused, `off` and its code first.
+    /// From disarmed, it arms. Once a mode is chosen (leaving, armed, in an
+    /// entry delay or triggered), another one is refused, `off` and its code
+    /// first: while leaving too, so that nobody allowed to arm (an agent)
+    /// can turn `away` into a mode watching less, nor start the exit delay
+    /// again and again so that it never arms. The same mode changes nothing.
     ///
     /// # Errors
     /// The mode is not set up, or changing it would disarm.
@@ -289,11 +292,11 @@ impl Alarm {
     ) -> Result<Vec<Happening>, ArmError> {
         let delays = self.delays(mode).ok_or(ArmError::NotSetUp(mode))?;
         match self.phase {
-            Phase::Armed { mode: m } if m == mode => return Ok(Vec::new()),
-            Phase::Armed { .. } | Phase::Pending { .. } | Phase::Triggered { .. } => {
-                return Err(ArmError::DisarmFirst);
+            Phase::Disarmed => {}
+            Phase::Armed { mode: m } | Phase::Arming { mode: m, .. } if m == mode => {
+                return Ok(Vec::new());
             }
-            Phase::Disarmed | Phase::Arming { .. } => {}
+            _ => return Err(ArmError::DisarmFirst),
         }
         let silent: Vec<String> = self
             .watched(mode)
@@ -608,14 +611,18 @@ mod tests {
     }
 
     #[test]
-    fn leaving_it_may_still_change_its_mind() {
-        // Nothing is watched during the exit delay.
+    fn leaving_the_mode_holds_and_the_delay_never_starts_again() {
         let mut a = alarm();
         a.arm(Mode::Night, 100, NOBODY, ANSWERS).unwrap();
+        // Another mode while leaving: refused, it goes on leaving at night.
         assert_eq!(
-            a.arm(Mode::Home, 101, NOBODY, ANSWERS).unwrap(),
-            vec![Happening::Armed(Mode::Home)]
+            a.arm(Mode::Home, 101, NOBODY, ANSWERS),
+            Err(ArmError::DisarmFirst)
         );
+        // The same one again: nothing, the delay keeps its end.
+        assert!(a.arm(Mode::Night, 104, NOBODY, ANSWERS).unwrap().is_empty());
+        assert_eq!(a.phase().until(), Some(105));
+        assert_eq!(a.tick(105, NOBODY), vec![Happening::Armed(Mode::Night)]);
     }
 
     #[test]
