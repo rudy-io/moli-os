@@ -113,7 +113,9 @@ Deux règles de `[guard]`, écrites par une personne dans le fichier, jamais par
 - `[[guard.agents_may]]` (point + valeurs) : un agent (l'assistant, une voix, MCP, un script)
   peut donner cet ordre lui-même sur une commande ou un appareil protégé, sans qu'une personne
   le valide (armer l'alarme à la voix). Les pièces protégées et les heures calmes s'appliquent
-  toujours, et une valeur non listée attend une personne comme avant.
+  toujours, et une valeur non listée attend une personne comme avant. Donc sans effet avec
+  `dashboard = "pin"` (tout ordre y attend le code), ni avec `protect_unassigned` pour un
+  appareil sans pièce.
 
 Sans ces sections, rien ne change. Preuves : `some_orders_want_the_code_each_time_even_from_a_session`,
 `the_house_s_own_orders_and_toggles_want_the_code_each_time_too` et

@@ -650,6 +650,21 @@ impl Hub {
         ))
     }
 
+    /// Whether a point is there to be read: its device is in the house,
+    /// has this point, and is not known to be offline.
+    #[must_use]
+    pub fn answers(&self, point: &PointId) -> bool {
+        let Some((device, key)) = point.split() else {
+            return false;
+        };
+        let model = self.read();
+        model
+            .devices
+            .get(&device)
+            .is_some_and(|d| d.points.iter().any(|p| &*p.key == key))
+            && model.availability.get(&device) != Some(&false)
+    }
+
     #[must_use]
     pub fn state(&self, point: &PointId) -> Option<Sample> {
         let (device, key) = point.split()?;

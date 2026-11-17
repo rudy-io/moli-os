@@ -532,6 +532,8 @@
   "pilotes.alarme.reglages_non_gardes": "alarm settings not kept: {raison}",
   "pilotes.alarme.reglages_invalides": "alarm settings refused: {raison}",
   "pilotes.alarme.desarmer_dabord": "disarm the alarm before changing its settings",
+  "pilotes.alarme.desarmer_avant_mode": "disarm first (with the code): this mode change would amount to disarming",
+  "pilotes.alarme.armement_muet": "not armed: {capteurs} do(es) not answer",
   "pilotes.phones.push_refuse": "push service ({status}): {why}",
   "pilotes.host.machine_inconnue": "unknown machine (or no agent)",
   "pilotes.host.jeton_refuse": "token refused",

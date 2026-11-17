@@ -319,15 +319,25 @@ impl DriverCtx {
 
     /// Every change in the house (states, devices, availability), to follow
     /// other devices: read-only, the driver still acts on its own only.
+    /// The whole house, so for trusted drivers: compiled into Moli and
+    /// reviewed like the rest of it (the alarm), never a plug-in.
     #[must_use]
     pub fn watch(&self) -> tokio::sync::broadcast::Receiver<moli_core::Event> {
         self.hub.subscribe()
     }
 
-    /// The last value of any point of the house, with its time.
+    /// The last value of any point of the house, with its time (trusted
+    /// drivers only, as [`DriverCtx::watch`]).
     #[must_use]
     pub fn read(&self, point: &PointId) -> Option<moli_core::Sample> {
         self.hub.state(point)
+    }
+
+    /// Whether a point of the house is there to be read (its device known,
+    /// with this point, not offline).
+    #[must_use]
+    pub fn answers(&self, point: &PointId) -> bool {
+        self.hub.answers(point)
     }
 
     /// What people call a device (its name in Moli), if the house has it.

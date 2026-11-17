@@ -1,6 +1,7 @@
 //! The alarm itself, with no clock and no network: what it is, and what one
-//! order, one sensor or the passing of time makes of it. Times are Unix
-//! seconds, handed in by the driver.
+//! order, one sensor or the passing of time makes of it. Times are seconds
+//! on a steady clock (not the wall's: a clock set at boot by NTP neither
+//! shortens nor stretches a delay), handed in by the driver.
 
 use std::collections::BTreeSet;
 
@@ -139,9 +140,14 @@ pub enum Happening {
     Armed(Mode),
     /// Not armed: these sensors see something.
     ArmFailure(Mode, Vec<String>),
+    /// Not armed: these sensors do not answer (unknown point, device
+    /// offline). An alarm does not watch through a sensor that is not there.
+    ArmSilent(Mode, Vec<String>),
     Pending(Vec<String>),
     Triggered(Vec<String>),
     Disarmed,
+    /// Armed, these sensors stopped answering.
+    Silent(Vec<String>),
 }
 
 impl Happening {
@@ -150,12 +156,23 @@ impl Happening {
         match self {
             Happening::Arming(_) => "arming",
             Happening::Armed(_) => "armed",
-            Happening::ArmFailure(..) => "arm_failure",
+            Happening::ArmFailure(..) | Happening::ArmSilent(..) => "arm_failure",
             Happening::Pending(_) => "pending",
             Happening::Triggered(_) => "triggered",
             Happening::Disarmed => "disarmed",
+            Happening::Silent(_) => "silent",
         }
     }
+}
+
+/// Why an order on the mode is refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArmError {
+    /// The mode is not set up.
+    NotSetUp(Mode),
+    /// Armed in another mode, entry delay, or triggered: changing the mode
+    /// would be disarming, which wants `off` (and the code).
+    DisarmFirst,
 }
 
 /// The alarm: its settings and where it stands.
@@ -198,13 +215,50 @@ impl Alarm {
             .map(|(_, d)| *d)
     }
 
-    /// Back where it was before a restart: armed stays armed (a delay or a
-    /// siren under way is not resumed).
+    /// Back where it was before a restart: armed stays armed.
     pub fn restore(&mut self, mode: Option<Mode>) {
         self.phase = match mode {
             Some(mode) if self.delays(mode).is_some() => Phase::Armed { mode },
             _ => Phase::Disarmed,
         };
+    }
+
+    /// After [`Alarm::restore`], what was under way when Moli stopped
+    /// (`state` as it was last shown): a triggered alarm stays triggered,
+    /// an entry or exit delay starts again in full. A restart never
+    /// silences an intrusion.
+    pub fn resume(&mut self, state: &str, cause: Vec<String>, now: u64) -> Vec<Happening> {
+        let Phase::Armed { mode } = self.phase else {
+            return Vec::new();
+        };
+        let Some(delays) = self.delays(mode) else {
+            return Vec::new();
+        };
+        match state {
+            "pending" if delays.entry > 0 => {
+                self.phase = Phase::Pending {
+                    mode,
+                    until: now + delays.entry,
+                    cause: cause.clone(),
+                };
+                vec![Happening::Pending(cause)]
+            }
+            // Triggered, or pending in a mode without an entry delay.
+            "triggered" | "pending" => self.trigger(mode, cause, now),
+            "arming" if delays.exit > 0 => {
+                self.phase = Phase::Arming {
+                    mode,
+                    until: now + delays.exit,
+                };
+                vec![Happening::Arming(mode)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The sensors `mode` watches.
+    fn watched(&self, mode: Mode) -> impl Iterator<Item = &Sensor> {
+        self.sensors.iter().filter(move |s| s.modes.contains(&mode))
     }
 
     /// The names of the sensors of `mode` that see something now.
@@ -217,21 +271,37 @@ impl Alarm {
     }
 
     /// Arm in `mode`. Refused (and said) while one of its sensors sees
-    /// something: nobody should leave a door open behind an armed alarm.
+    /// something, or does not answer: nobody should leave a door open
+    /// behind an armed alarm, nor count on a sensor that is not there.
+    ///
+    /// From disarmed, or while leaving (nothing is watched yet), it arms.
+    /// Armed in another mode, in an entry delay or triggered, changing the
+    /// mode would be disarming: refused, `off` and its code first.
     ///
     /// # Errors
-    /// The mode is not set up.
+    /// The mode is not set up, or changing it would disarm.
     pub fn arm(
         &mut self,
         mode: Mode,
         now: u64,
         active: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<Happening>, String> {
-        let delays = self
-            .delays(mode)
-            .ok_or_else(|| format!("mode {} is not set up", mode.id()))?;
-        if matches!(self.phase, Phase::Armed { mode: m } if m == mode) {
-            return Ok(Vec::new());
+        answers: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<Happening>, ArmError> {
+        let delays = self.delays(mode).ok_or(ArmError::NotSetUp(mode))?;
+        match self.phase {
+            Phase::Armed { mode: m } if m == mode => return Ok(Vec::new()),
+            Phase::Armed { .. } | Phase::Pending { .. } | Phase::Triggered { .. } => {
+                return Err(ArmError::DisarmFirst);
+            }
+            Phase::Disarmed | Phase::Arming { .. } => {}
+        }
+        let silent: Vec<String> = self
+            .watched(mode)
+            .filter(|s| !answers(&s.point))
+            .map(|s| s.name.clone())
+            .collect();
+        if !silent.is_empty() {
+            return Ok(vec![Happening::ArmSilent(mode, silent)]);
         }
         let open = self.seeing(mode, active);
         if !open.is_empty() {
@@ -395,12 +465,13 @@ mod tests {
     }
 
     const NOBODY: &dyn Fn(&str) -> bool = &|_| false;
+    const ANSWERS: &dyn Fn(&str) -> bool = &|_| true;
 
     #[test]
     fn night_arms_after_its_exit_delay() {
         let mut a = alarm();
         assert_eq!(
-            a.arm(Mode::Night, 100, NOBODY).unwrap(),
+            a.arm(Mode::Night, 100, NOBODY, ANSWERS).unwrap(),
             vec![Happening::Arming(Mode::Night)]
         );
         assert_eq!(a.phase().state(), "arming");
@@ -417,17 +488,17 @@ mod tests {
         let mut a = alarm();
         let terrasse: &dyn Fn(&str) -> bool = &|p| p == "z:terrasse/person";
         assert_eq!(
-            a.arm(Mode::Night, 100, terrasse).unwrap(),
+            a.arm(Mode::Night, 100, terrasse, ANSWERS).unwrap(),
             vec![Happening::ArmFailure(Mode::Night, vec!["Terrasse".into()])]
         );
         assert_eq!(a.phase(), &Phase::Disarmed);
         // The courtyard is not watched by day.
         assert_eq!(
-            a.arm(Mode::Home, 100, terrasse).unwrap(),
+            a.arm(Mode::Home, 100, terrasse, ANSWERS).unwrap(),
             vec![Happening::Armed(Mode::Home)]
         );
         assert!(
-            a.arm(Mode::Away, 100, NOBODY).is_err(),
+            a.arm(Mode::Away, 100, NOBODY, ANSWERS).is_err(),
             "away is not set up"
         );
     }
@@ -488,7 +559,7 @@ mod tests {
     #[test]
     fn someone_still_there_when_the_exit_delay_ends_counts() {
         let mut a = alarm();
-        a.arm(Mode::Night, 100, NOBODY).unwrap();
+        a.arm(Mode::Night, 100, NOBODY, ANSWERS).unwrap();
         let terrasse: &dyn Fn(&str) -> bool = &|p| p == "z:terrasse/person";
         assert_eq!(
             a.tick(105, terrasse),
@@ -506,5 +577,97 @@ mod tests {
         assert_eq!(a.phase().state(), "armed_night");
         a.restore(Some(Mode::Away));
         assert_eq!(a.phase(), &Phase::Disarmed, "away is not set up");
+    }
+
+    #[test]
+    fn changing_the_mode_never_silences_it() {
+        // Triggered, then an entry delay: any mode is refused, `off` only.
+        for state in ["triggered", "pending"] {
+            let mut a = alarm();
+            a.restore(Some(Mode::Night));
+            a.resume(state, vec!["Jardin".into()], 10);
+            for mode in [Mode::Home, Mode::Night] {
+                assert_eq!(
+                    a.arm(mode, 11, NOBODY, ANSWERS),
+                    Err(ArmError::DisarmFirst),
+                    "{state} → {mode:?}"
+                );
+            }
+            assert_eq!(a.phase().state(), state);
+        }
+        // Armed, another mode is refused whichever way: watching less or
+        // more, it is `off` and the code first.
+        for (from, to) in [(Mode::Night, Mode::Home), (Mode::Home, Mode::Night)] {
+            let mut a = alarm();
+            a.restore(Some(from));
+            assert_eq!(a.arm(to, 10, NOBODY, ANSWERS), Err(ArmError::DisarmFirst));
+            assert_eq!(a.phase().mode(), Some(from));
+            // The same mode again changes nothing.
+            assert!(a.arm(from, 10, NOBODY, ANSWERS).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn leaving_it_may_still_change_its_mind() {
+        // Nothing is watched during the exit delay.
+        let mut a = alarm();
+        a.arm(Mode::Night, 100, NOBODY, ANSWERS).unwrap();
+        assert_eq!(
+            a.arm(Mode::Home, 101, NOBODY, ANSWERS).unwrap(),
+            vec![Happening::Armed(Mode::Home)]
+        );
+    }
+
+    #[test]
+    fn it_will_not_arm_on_a_sensor_that_does_not_answer() {
+        let mut a = alarm();
+        let window_gone: &dyn Fn(&str) -> bool = &|p| p != "z:fenetre/contact";
+        assert_eq!(
+            a.arm(Mode::Night, 100, NOBODY, window_gone).unwrap(),
+            vec![Happening::ArmSilent(Mode::Night, vec!["Fenêtre".into()])]
+        );
+        assert_eq!(a.phase(), &Phase::Disarmed);
+        // Home does not watch the window.
+        assert_eq!(
+            a.arm(Mode::Home, 100, NOBODY, window_gone).unwrap(),
+            vec![Happening::Armed(Mode::Home)]
+        );
+    }
+
+    #[test]
+    fn a_restart_never_silences_an_intrusion() {
+        let mut a = alarm();
+        a.restore(Some(Mode::Night));
+        assert_eq!(
+            a.resume("triggered", vec!["Jardin".into()], 1000),
+            vec![Happening::Triggered(vec!["Jardin".into()])]
+        );
+        // The siren's time starts again.
+        assert_eq!(a.phase().until(), Some(1480));
+        // An entry delay starts again in full, and so does leaving.
+        let mut a = alarm();
+        a.restore(Some(Mode::Night));
+        assert_eq!(
+            a.resume("pending", vec!["Jardin".into()], 1000),
+            vec![Happening::Pending(vec!["Jardin".into()])]
+        );
+        assert_eq!(a.phase().until(), Some(1005));
+        let mut a = alarm();
+        a.restore(Some(Mode::Night));
+        assert_eq!(
+            a.resume("arming", Vec::new(), 1000),
+            vec![Happening::Arming(Mode::Night)]
+        );
+        // Day mode has no entry delay: what was pending triggers.
+        let mut a = alarm();
+        a.restore(Some(Mode::Home));
+        assert_eq!(
+            a.resume("pending", vec!["Jardin".into()], 1000),
+            vec![Happening::Triggered(vec!["Jardin".into()])]
+        );
+        // Disarmed stays disarmed.
+        let mut a = alarm();
+        a.restore(None);
+        assert!(a.resume("triggered", Vec::new(), 1000).is_empty());
     }
 }

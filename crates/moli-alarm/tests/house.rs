@@ -94,6 +94,16 @@ async fn armed_it_triggers_on_the_sensor_and_refuses_to_arm_on_it() {
         .unwrap();
     assert_eq!(state(&hub, "state").await, Value::Text("triggered".into()));
     assert_eq!(state(&hub, "event").await, Value::Text("triggered".into()));
+    // Another mode, or the same one, does not silence it: `off` only.
+    let refused = hub
+        .command(&mode, Value::Text("night".into()), Origin::Automation, None)
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(state(&hub, "state").await, Value::Text("triggered".into()));
+    assert_eq!(
+        state(&hub, "silent").await,
+        Value::Text(String::new().into())
+    );
 
     hub.command(&mode, Value::Text("off".into()), Origin::Automation, None)
         .await
@@ -146,7 +156,16 @@ async fn its_settings_change_from_the_screen_disarmed_only_and_stay() {
         .unwrap();
     let shown = state(&hub, "setup").await;
     assert!(format!("{shown:?}").contains("Porte"), "{shown:?}");
-    hub.command(&mode, Value::Text("home".into()), Origin::Automation, None)
+    // The door is not in this house: it does not answer, said on `silent`,
+    // and the mode watching it is not armed.
+    assert_eq!(state(&hub, "silent").await, Value::Text("Porte".into()));
+    let refused = hub
+        .command(&mode, Value::Text("home".into()), Origin::Automation, None)
+        .await;
+    assert!(format!("{refused:?}").contains("Porte"), "{refused:?}");
+    assert_eq!(state(&hub, "state").await, Value::Text("disarmed".into()));
+    // Night watches nothing: it arms.
+    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
         .await
         .unwrap();
     // Nonsense: refused.
