@@ -10,5 +10,6 @@
 4. Tester en lecture : sans clé, statut `waiting` avec la commande à lancer ; avec la clé, la
    prise apparaît avec `on`. Une clé fausse : le pilote échoue (« wrong key or namespace? »).
 5. Écrire `on` seulement avec la personne, sur un appareil qu'on peut couper sans risque, et
-   remettre l'état initial. Ce profil n'a jamais été essayé sur une vraie prise : noter ce qui
-   se passe (modèle, firmware) dans le README du paquet.
+   remettre l'état initial. Un ordre refusé par « connection closed before message completed »
+   vient d'une prise qui veut des ordres chiffrés que le moteur n'a pas reconnue comme telle :
+   noter le modèle et le firmware dans le README du paquet.

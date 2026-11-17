@@ -206,6 +206,15 @@ refresh = "all"
   `<méthode>` `<code>` `<détail>` » (80 caractères au plus de ce que l'appareil a dit, jamais
   ce qui a été envoyé). `expect` ne s'applique donc pas, et est refusé.
 - Pas de `{requête.chemin}` : le message ne reprend rien des réponses, rien n'est relu avant.
+- **Chiffré quand l'appareil l'exige.** Avant son premier ordre, le moteur demande une fois
+  à l'appareil ses capacités (`Appliance.System.Ability`, un `GET` en clair). S'il annonce
+  `Appliance.Encrypt.ECDHE` (vu : MSS110 en firmware 7.3.46), l'ordre part chiffré et la
+  réponse revient chiffrée. Sinon, l'ordre part en clair. Un tel appareil répond encore aux
+  lectures en clair, mais coupe la connexion sans un octet sur un `SET` en clair.
+  Le chiffrement est AES-256-CBC, avec un vecteur de seize `0` ASCII et un bourrage par
+  octets nuls, puis le tout en base64. Sa clé est `md5(uuid[3..22] ‖ clé[1..9] ‖ MAC ‖
+  clé[10..28])` en hexadécimal ; l'uuid et la MAC sont lus dans `Appliance.System.All`.
+  Rien de plus à déclarer dans le profil.
 - Un profil fichier peut écrire ainsi, aux conditions de tout profil à secret : son propre
   `host`, et l'approbation d'un humain, à qui `profile trust` montre l'espace de noms et le
   `payload` de chaque écriture.
