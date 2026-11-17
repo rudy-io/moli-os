@@ -1598,9 +1598,7 @@ fn build_driver(
         "androidtv" => Arc::new(moli_androidtv::AndroidTv::new(
             config.options.clone().try_into().with_context(context)?,
         )),
-        "frigate" => Arc::new(moli_frigate::Frigate::new(
-            config.options.clone().try_into().with_context(context)?,
-        )),
+        "frigate" => configured_driver(config, moli_frigate::Frigate::new)?,
         "bambu" => Arc::new(moli_bambu::Bambu::new(
             config.options.clone().try_into().with_context(context)?,
         )),

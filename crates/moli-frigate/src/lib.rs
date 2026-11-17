@@ -4,7 +4,9 @@
 //! version, uptime, inference speed, detection rate, GPU and CPU load). No
 //! HTTP, no credentials: the same broker Zigbee2MQTT uses.
 
-use std::collections::BTreeSet;
+mod go2rtc;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use moli_core::{Access, Device, Kind, PointSpec, Semantic, Value};
@@ -44,6 +46,13 @@ pub struct Config {
     /// port).
     #[serde(default = "default_api")]
     pub api: String,
+    /// A go2rtc serving these cameras (`http://host:1984`): their live video
+    /// (WebRTC, played by the browser) and their images, instead of the API.
+    #[serde(default)]
+    pub go2rtc: Option<String>,
+    /// Frigate camera → its stream on that go2rtc, when the names differ.
+    #[serde(default)]
+    pub streams: BTreeMap<String, String>,
 }
 
 fn default_api() -> String {
@@ -98,9 +107,45 @@ pub struct Frigate {
 }
 
 impl Frigate {
-    #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    /// Checks the configuration.
+    ///
+    /// # Errors
+    /// See [`Config::check`].
+    pub fn new(config: Config) -> anyhow::Result<Self> {
+        config.check()?;
+        Ok(Self { config })
+    }
+}
+
+impl Config {
+    /// A go2rtc address is `http://host[:port]`, without credentials: Moli
+    /// speaks to go2rtc without any (its API has none by default), and an
+    /// address carrying some would end up in error messages. A stream name
+    /// is a plain name. The messages never repeat the address.
+    ///
+    /// # Errors
+    /// A go2rtc address Moli cannot use, or a stream name that is not one.
+    pub fn check(&self) -> anyhow::Result<()> {
+        if let Some(url) = &self.go2rtc {
+            let at = moli_net::upnp::Location::parse(url)
+                .filter(|at| !at.host.is_empty() && at.path.trim_end_matches('/').is_empty());
+            let Some(at) = at else {
+                anyhow::bail!("frigate: go2rtc is an address like http://host:1984");
+            };
+            anyhow::ensure!(
+                !at.host.contains('@'),
+                "frigate: no credentials in the go2rtc address (keep go2rtc on the home network)"
+            );
+        }
+        for (camera, stream) in &self.streams {
+            anyhow::ensure!(
+                !stream.trim().is_empty()
+                    && stream.len() <= 100
+                    && !stream.chars().any(char::is_control),
+                "frigate: streams.{camera}: a go2rtc stream name"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -357,6 +402,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let (client, mut events) = AsyncClient::new(options, 32);
     let base = config.base_topic.trim_end_matches('/').to_owned();
     let api = moli_net::upnp::Location::parse(&config.api);
+    let go2rtc = config
+        .go2rtc
+        .as_deref()
+        .and_then(moli_net::upnp::Location::parse);
     let mut cameras: BTreeSet<String> = BTreeSet::new();
     let mut available = true;
     let mut server = false;
@@ -418,16 +467,7 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                         }
                         cameras.insert(camera.to_owned());
                         ctx.upsert_device(camera_device(ctx, camera));
-                        if let Some(api) = &api {
-                            ctx.provide_snapshots(
-                                &ctx.device_id(camera),
-                                std::sync::Arc::new(CameraImages {
-                                    host: api.host.clone(),
-                                    port: api.port,
-                                    camera: camera.to_owned(),
-                                }),
-                            );
-                        }
+                        provide_media(ctx, config, camera, api.as_ref(), go2rtc.as_ref());
                         ctx.set_availability(&ctx.device_id(camera), available);
                     }
                     ctx.set_state(&ctx.device_id(camera), key, value);
@@ -443,6 +483,39 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 }
             },
         }
+    }
+}
+
+/// Where a camera's images (and live video) come from: the go2rtc when one
+/// is set, else Frigate's API.
+fn provide_media(
+    ctx: &DriverCtx,
+    config: &Config,
+    camera: &str,
+    api: Option<&moli_net::upnp::Location>,
+    go2rtc: Option<&moli_net::upnp::Location>,
+) {
+    if let Some(g) = go2rtc {
+        let stream = std::sync::Arc::new(go2rtc::Stream {
+            host: g.host.clone(),
+            port: g.port,
+            name: config
+                .streams
+                .get(camera)
+                .cloned()
+                .unwrap_or_else(|| camera.to_owned()),
+        });
+        ctx.provide_snapshots(&ctx.device_id(camera), stream.clone());
+        ctx.provide_live(&ctx.device_id(camera), stream);
+    } else if let Some(api) = api {
+        ctx.provide_snapshots(
+            &ctx.device_id(camera),
+            std::sync::Arc::new(CameraImages {
+                host: api.host.clone(),
+                port: api.port,
+                camera: camera.to_owned(),
+            }),
+        );
     }
 }
 
@@ -523,5 +596,30 @@ mod tests {
         assert_eq!(v["gpu_load"], Value::Float(7.5));
         assert_eq!(v["cpu_load"], Value::Float(14.0));
         assert!(parse_stats("not json").is_empty());
+    }
+
+    #[test]
+    fn a_go2rtc_address_carries_no_credentials() {
+        let config = |go2rtc: &str| -> Config {
+            serde_json::from_value(serde_json::json!({ "go2rtc": go2rtc })).unwrap()
+        };
+        assert!(config("http://nvr.example:1984").check().is_ok());
+        assert!(config("http://nvr.example:1984/").check().is_ok());
+        let error = config("http://admin:secret@example.com:1984")
+            .check()
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"), "{error}");
+        for bad in [
+            "nvr.example:1984",
+            "https://nvr.example",
+            "http://nvr.example:1984/api",
+        ] {
+            let error = config(bad).check().unwrap_err().to_string();
+            assert!(!error.contains("nvr.example"), "{error}");
+        }
+        let named: Config =
+            serde_json::from_value(serde_json::json!({ "streams": { "jardin": "" } })).unwrap();
+        assert!(named.check().is_err());
     }
 }

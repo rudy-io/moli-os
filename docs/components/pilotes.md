@@ -889,8 +889,24 @@ kind = "frigate"
 # port = 1883
 # base_topic = "frigate"
 # api = "http://127.0.0.1:5000"
+# go2rtc = "http://nvr.example:1984"      # images ET direct par go2rtc, au lieu de l'API
+# streams = { jardin = "camera-jardin" }  # caméra Frigate → flux go2rtc, si les noms diffèrent
 ```
 
+- **go2rtc** (facultatif) : un go2rtc qui lit les mêmes caméras (celui de Frigate quand son port
+  est ouvert, ou un autre). Images par `GET /api/frame.jpeg?src=<flux>` ; **direct** WebRTC joué
+  par le navigateur : Moli passe l'offre SDP (`POST /api/webrtc?src=<flux>`) et rend la réponse,
+  la vidéo va de go2rtc au navigateur sans passer par Moli. Un candidat du navigateur caché
+  derrière un nom `.local` reçoit son adresse sur le réseau de la maison (sinon il est omis).
+  Le nom du flux vient **seulement** de la config (`streams`, sinon le nom de la caméra dans
+  Frigate), jamais de la requête ; l'offre est bornée (64 Kio) ; rien de ce que répond go2rtc
+  ne ressort dans une erreur ni un journal. Adresse sans identifiants (refusée au démarrage).
+  Loin de la maison (Cloudflare, VPN sans route vers go2rtc), le direct ne s'établit pas : la
+  page montre les images à la place.
+  ⚠️ **Choix explicite de la maison.** L'API de go2rtc n'a pas de mot de passe par défaut et
+  montre les adresses des caméras, identifiants compris : à garder sur le réseau local, jamais
+  exposée. Quand Frigate aura son accès authentifié dans Moli (port 8971), images et direct
+  passeront par lui, sans go2rtc.
 - **Secrets** : aucun. ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
 - **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : elles sont ignorées). Disponibilité globale via `frigate/available`.
