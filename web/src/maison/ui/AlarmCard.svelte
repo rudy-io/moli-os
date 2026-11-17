@@ -67,20 +67,29 @@
   const dc = $derived(value(id, 'dc_status'));
   const siren = $derived(value(id, 'inside_siren_en'));
 
-  const GSM = {
-    Normal: 'maison.alarme.gsm.normal',
-    NoSimCard: 'maison.alarme.gsm.sans_carte',
-    NoNetWork: 'maison.alarme.gsm.sans_reseau',
-    GsmOff: 'maison.alarme.gsm.coupe',
+  const gsmWord = (v) => {
+    switch (v) {
+      case 'Normal': return t('maison.alarme.gsm.normal');
+      case 'NoSimCard': return t('maison.alarme.gsm.sans_carte');
+      case 'NoNetWork': return t('maison.alarme.gsm.sans_reseau');
+      case 'GsmOff': return t('maison.alarme.gsm.coupe');
+      default: return v ?? '—';
+    }
   };
-  const DC = {
-    normal: 'maison.alarme.secteur.normal',
-    low: 'maison.alarme.secteur.faible',
-    high: 'maison.alarme.secteur.eleve',
-    off: 'maison.alarme.secteur.coupe',
+  const dcWord = (v) => {
+    switch (v) {
+      case 'normal': return t('maison.alarme.secteur.normal');
+      case 'low': return t('maison.alarme.secteur.faible');
+      case 'high': return t('maison.alarme.secteur.eleve');
+      case 'off': return t('maison.alarme.secteur.coupe');
+      default: return v ?? '—';
+    }
   };
-  const gsmWord = (v) => (GSM[v] ? t(GSM[v]) : (v ?? '—'));
-  const dcWord = (v) => (DC[v] ? t(DC[v]) : (v ?? '—'));
+  const choiceWord = (key, v) => {
+    if (key === 'gsm_en' || key === 'gsm_status') return gsmWord(v);
+    if (key === 'dc_status') return dcWord(v);
+    return v ?? '—';
+  };
 
   // What a panel lets one change, in the house's words. The arm mode is the
   // card's own buttons; `language` is the panel's, not the house's.
@@ -339,7 +348,7 @@
                       onchange={(e) => setSetting(p, e.currentTarget.value, s.labelKey)}
                     >
                       {#each p.kind.values ?? [] as choice (choice)}
-                        <option value={choice}>{choice}</option>
+                        <option value={choice}>{choiceWord(s.key, choice)}</option>
                       {/each}
                     </select>
                   {/if}
