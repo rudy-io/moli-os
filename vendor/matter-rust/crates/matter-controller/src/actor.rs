@@ -1199,6 +1199,10 @@ pub(crate) enum Command {
     Commission {
         setup_payload: matter_commissioning::SetupPayload,
         label: Option<String>,
+        /// Where the device listens, given by a human instead of found by mDNS
+        /// (a device whose commissionable record never reaches the LAN), with
+        /// its retransmission timing when it sleeps. `None`: mDNS discovery.
+        target: Option<CommissionTarget>,
         reply: oneshot::Sender<Result<crate::NodeInfo, Error>>,
     },
     /// Commission a device over BLE/BTP from a parsed setup payload and required
@@ -2236,8 +2240,17 @@ struct CommissionCompletion {
 /// can be `tokio::spawn`ed. `commission()` binds nothing itself here — the
 /// transient PASE/CASE handshakes run on this task's own socket.
 #[allow(clippy::too_many_arguments)]
+/// A commissionable device reached at a known address (see
+/// [`crate::MatterController::commission_at`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CommissionTarget {
+    pub(crate) address: std::net::SocketAddr,
+    pub(crate) mrp: Option<matter_transport::MrpConfig>,
+}
+
 async fn run_commission_task(
     setup_payload: matter_commissioning::SetupPayload,
+    target: Option<CommissionTarget>,
     trust: Arc<crate::trust::AttestationTrust>,
     fabric_record: matter_commissioning::FabricRecord,
     commissioner_node_id: u64,
@@ -2279,7 +2292,9 @@ async fn run_commission_task(
     };
     let config = DriverConfig {
         commissioner,
-        commissionable_addr: None, // discover via mDNS using the discriminator
+        // A known address skips mDNS; otherwise discover by discriminator.
+        commissionable_addr: target.map(|t| t.address),
+        commissionable_mrp: target.and_then(|t| t.mrp),
         passcode: setup_payload.passcode.as_u32(),
         commissioner_noc: &commissioner_noc,
         commissioner_signer_pkcs8: &commissioner_pkcs8,
@@ -2833,13 +2848,14 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
             Command::Commission {
                 setup_payload,
                 label,
+                target,
                 reply,
             } => {
                 // M9-G-d: spawn on its own socket + return to the loop
                 // immediately; the result is resolved later via the completions
                 // channel, so a multi-second commission no longer pauses other
                 // sessions' MRP/liveness.
-                self.spawn_commission(setup_payload, label, reply);
+                self.spawn_commission(setup_payload, label, target, reply);
             }
             #[cfg(feature = "ble")]
             Command::CommissionBle {
@@ -3190,6 +3206,7 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
         &mut self,
         setup_payload: matter_commissioning::SetupPayload,
         label: Option<String>,
+        target: Option<CommissionTarget>,
         reply: oneshot::Sender<Result<crate::NodeInfo, Error>>,
     ) {
         let Some(trust) = self.trust.clone() else {
@@ -3241,6 +3258,7 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
         tokio::spawn(async move {
             let result = run_commission_task(
                 setup_payload,
+                target,
                 trust,
                 fabric_record,
                 commissioner_node_id,
@@ -16473,6 +16491,7 @@ mod tests {
                 setup_payload: matter_commissioning::parse_manual_code("11693312331")
                     .expect("valid sample manual pairing code"),
                 label: None,
+                target: None,
                 reply: c_tx,
             })
             .await

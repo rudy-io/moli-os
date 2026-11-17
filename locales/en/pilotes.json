@@ -851,6 +851,7 @@
   "pilotes.matter.leak": "Water leak",
   "pilotes.matter.occupancy": "Occupancy",
   "pilotes.matter.pairing_failed": "Matter pairing failed. The one-shot pairing request may have been consumed; inspect device fabric membership before retrying.",
+  "pilotes.matter.pairing_pace": "Matter: pairing_idle_ms and pairing_active_ms go together, with pairing_address, between 1 and 3,600,000 ms.",
   "pilotes.matter.brightness": "Brightness",
   "pilotes.matter.color_temp": "Color temperature",
   "pilotes.matter.color": "Color",

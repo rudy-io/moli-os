@@ -289,6 +289,7 @@ async fn run_loopback_commission() {
     let config = DriverConfig {
         commissioner,
         commissionable_addr: Some(dev_addr),
+        commissionable_mrp: None,
         passcode: PASSCODE,
         commissioner_noc: &commissioner_noc,
         commissioner_signer_pkcs8: &commissioner_pkcs8,
@@ -474,6 +475,7 @@ async fn run_loopback_commission_with_icac() {
     let config = DriverConfig {
         commissioner,
         commissionable_addr: Some(dev_addr),
+        commissionable_mrp: None,
         passcode: PASSCODE,
         commissioner_noc: &commissioner_noc,
         commissioner_signer_pkcs8: &commissioner_pkcs8,

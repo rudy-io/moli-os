@@ -35,7 +35,7 @@ pub use exchange::{
     secured_read, secured_round_trip, SecuredResponse, MAX_READ_BYTES, MAX_READ_CHUNKS,
     MAX_READ_CHUNK_BYTES,
 };
-pub use pase::{run_pase, run_pase_with};
+pub use pase::{run_pase, run_pase_for, run_pase_with};
 pub use unsecured::{
     decode_unsecured, encode_unsecured, encode_unsecured_reply, parse_status_report,
     random_exchange_id, require_handshake_opcode, require_handshake_opcode_any,

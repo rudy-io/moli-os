@@ -565,12 +565,52 @@ impl MatterController {
         setup_code: &str,
         label: Option<String>,
     ) -> Result<NodeInfo, Error> {
+        self.commission_to(setup_code, None, label).await
+    }
+
+    /// [`Self::commission`] for a device reached at a known `address` rather
+    /// than found by mDNS: a device whose commissionable record never reaches
+    /// the LAN (some Thread devices behind a border router only publish their
+    /// operational record) still answers PASE at its operational address while
+    /// a commissioning window is open.
+    ///
+    /// `sleepy` is the device's `(SII, SAI)` (Session Idle / Active Interval,
+    /// from its mDNS TXT record) when it is a sleepy Thread device: PASE and
+    /// the pre-operational exchanges then wait as long as it sleeps, where the
+    /// spec defaults give up after about 5.6 s. `None` keeps the defaults.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::commission`].
+    pub async fn commission_at(
+        &self,
+        setup_code: &str,
+        address: std::net::SocketAddr,
+        sleepy: Option<(std::time::Duration, std::time::Duration)>,
+        label: Option<String>,
+    ) -> Result<NodeInfo, Error> {
+        let target = crate::actor::CommissionTarget {
+            address,
+            mrp: sleepy.map(|(sii, sai)| {
+                matter_transport::MrpConfig::for_peer(Some(sii), Some(sai), None)
+            }),
+        };
+        self.commission_to(setup_code, Some(target), label).await
+    }
+
+    async fn commission_to(
+        &self,
+        setup_code: &str,
+        target: Option<crate::actor::CommissionTarget>,
+        label: Option<String>,
+    ) -> Result<NodeInfo, Error> {
         let setup_payload = parse_setup_code(setup_code)?;
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Command::Commission {
                 setup_payload,
                 label,
+                target,
                 reply,
             })
             .await
