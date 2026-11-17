@@ -52,7 +52,7 @@
 
 <div class="impulse" class:icons title={icons ? label : undefined}>
   <div class="heading">
-    <span class="device-icon"><Icon name={live ? impulseIcon(label) : 'offline'} size={24} /></span>
+    <span class="device-icon"><Icon name={live ? impulseIcon(label) : 'offline'} size={icons ? 22 : 18} /></span>
     {#if !icons}<span class="name">{label}</span>{/if}
   </div>
   <div class="actions">
@@ -74,7 +74,8 @@
 <style>
   .impulse { display: grid; gap: 12px; min-width: 0; padding: 14px; background: var(--surface-2); border-radius: var(--r-md); color: var(--ink-2); }
   .heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .device-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); }
+  /* Same badge as a room pad: 30 px (38 px icons-only). */
+  .device-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 50%; background: var(--surface); color: var(--ink-3); }
   .name { flex: 1; font-weight: 650; color: var(--ink); min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .actions button { flex: 1 1 120px; display: grid; justify-items: center; align-content: center; gap: 2px; min-width: 0; min-height: 52px; }
@@ -98,6 +99,7 @@
   /* Room preference: compact icons without shrinking the touch targets. */
   .icons { display: flex; flex-wrap: wrap; align-items: center; padding: 8px 10px; gap: 8px; }
   .icons .actions { flex-wrap: wrap; }
+  .icons .device-icon { width: 38px; height: 38px; }
   .icons button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
   @media (prefers-reduced-motion: reduce) {
     button { transition: none; }
