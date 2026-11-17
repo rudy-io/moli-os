@@ -1,6 +1,7 @@
 // The family dashboard's model: the hub's live state (SSE, shared with the
 // Atelier), the home layout (/api/home), and gentle helpers on top.
 
+import { orderError } from './errors.js';
 import { hub, connect, login, decide, refreshSession } from '../../lib/hub.svelte.js';
 import { t, locale } from '../../lib/i18n.svelte.js';
 import { canWrite, powerPoint, knownDeviceKind, positionPoint, coverOrder, isValve, impulsePoints } from './capabilities.js';
@@ -449,9 +450,8 @@ export async function setLook(lights, look, label) {
 }
 
 function humanError(message) {
-  if (/unreachable|injoignable|did not answer|no answer/i.test(message)) return t('commun.appareil_injoignable');
-  if (/read-only|lecture seule|cannot be set/i.test(message)) return t('commun.non_pilotable');
-  return message;
+  const e = orderError(message);
+  return e.key ? t(e.key) : e.text;
 }
 
 export function toggle(id, label, point = null) {

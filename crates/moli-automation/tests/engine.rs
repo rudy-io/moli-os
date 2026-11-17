@@ -440,6 +440,7 @@ fn automation(graph: serde_json::Value) -> Automation {
         author: Author::Human,
         approved: None,
         approved_version: None,
+        approved_with_code: false,
         note: None,
         created: 0,
         updated: 0,
@@ -1039,4 +1040,70 @@ async fn said_aloud_through_every_speaker() {
         hub.state(&said).map(|s| s.value),
         Some(Value::Text("Quelqu'un est à la porte".into()))
     );
+}
+
+/// The house, its automations kept in `dir`, with or without a rule that
+/// wants the code each time for switching the lamp on.
+async fn house_in(dir: &std::path::Path, rule: bool) -> (Hub, Automations, CancellationToken) {
+    let mut options = HubOptions::default();
+    if rule {
+        options.guard.code_each_time = vec![moli_runtime::guard::CodeEachTime {
+            point: "fake:lamp/on".into(),
+            values: vec!["true".into()],
+        }];
+    }
+    let hub = Hub::new(options).unwrap();
+    let cancel = CancellationToken::new();
+    spawn_driver(
+        &hub,
+        InstanceId::from("fake"),
+        Arc::new(Fake),
+        cancel.clone(),
+    );
+    for _ in 0..200 {
+        if hub.current_state(&PointId::from("fake:lamp/on")).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (autos, _task) = Automations::start(&hub, Config::default(), Some(dir), cancel.clone())
+        .await
+        .unwrap();
+    (hub, autos, cancel)
+}
+
+/// Approved before the house wrote a rule wanting the code for one of its
+/// orders: it still runs (the known limit), and is named at start until a
+/// person approves it again with the code. What is saved never says the
+/// code was typed.
+#[tokio::test]
+async fn an_automation_approved_before_the_rule_is_named_at_start() {
+    let dir = std::env::temp_dir().join(format!("moli-autos-code-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let (_hub, autos, cancel) = house_in(&dir, false).await;
+    let a = approved(&autos, switch_lights_lamp()).await;
+    assert!(a.is_live() && !a.approved_with_code);
+    assert!(autos.approved_before_the_code().is_empty(), "no rule yet");
+    cancel.cancel();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // The rule is written, Moli starts again: named.
+    let (_hub, autos, cancel) = house_in(&dir, true).await;
+    assert_eq!(autos.approved_before_the_code(), vec!["Test".to_owned()]);
+    // A save claiming the code was typed changes nothing.
+    let mut claimed = autos.get(&a.id).unwrap();
+    claimed.approved_with_code = true;
+    autos.save(claimed, AGENT).await.unwrap();
+    assert_eq!(autos.approved_before_the_code(), vec!["Test".to_owned()]);
+    // Approved again, with the code: no longer named.
+    let current = autos.get(&a.id).unwrap();
+    autos
+        .approve_with_code(&a.id, &current.fingerprint(), HUMAN, true)
+        .await
+        .unwrap();
+    assert!(autos.approved_before_the_code().is_empty());
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
 }

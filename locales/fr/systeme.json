@@ -12,6 +12,8 @@
   "systeme.approbations.retenu": "Retenu : {reason} · expire dans",
   "systeme.approbations.autoriser": "Autoriser",
   "systeme.approbations.refuser": "Refuser",
+  "systeme.approbations.code": "Code de la maison",
+  "systeme.approbations.annuler": "Annuler",
   "systeme.approbations.indice": "Clique « Je suis là » en haut et saisis ton code pour décider.",
   "systeme.chargement": "Chargement…",
   "systeme.bench.aria": "Comparaison avec Home Assistant",

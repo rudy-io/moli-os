@@ -14,6 +14,8 @@
   import Pieces from './pages/Pieces.svelte';
   import Plan from './pages/Plan.svelte';
   import Cameras from './pages/Cameras.svelte';
+  import Alarme from './pages/Alarme.svelte';
+  import { isAlarm } from './lib/alarm.js';
   import Energie from './pages/Energie.svelte';
   import Impression from './pages/Impression.svelte';
   import Dehors from './pages/Dehors.svelte';
@@ -54,6 +56,7 @@
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
+    { path: 'alarme', label: 'commun.nav.alarme', icon: 'shield', shown: () => Object.values(hub.devices).some(isAlarm) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating') },
@@ -183,6 +186,8 @@
       <Chauffage />
     {:else if page === 'moli'}
       <Moli />
+    {:else if page === 'alarme'}
+      <Alarme />
     {:else if page === 'automatismes'}
       <Automatismes {route} />
     {:else if page === 'somfy'}
