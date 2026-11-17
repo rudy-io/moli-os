@@ -1194,6 +1194,15 @@ transmet aucun). Ses `members` sont les sources.
   l'appareil source. Il ne change que quand la source change : son heure dit depuis quand cette
   source est retenue. `stations` et `forecast` (texte, sens `config`) listent les sources
   (ids séparés par des virgules) : la page Dehors s'en sert pour « mesuré » ou « prévu ».
+- **Le max/min mesuré du jour** (#246) : avec une station qui mesure la température,
+  `measured_max` et `measured_min` (sens `temperature`, même unité) donnent le plus haut et le plus
+  bas **mesurés** depuis minuit, à l'heure de la maison (`[server] timezone`). Seulement ce que les
+  stations ont mesuré, jamais la prévision : une station muette une partie du jour compte ce
+  qu'elle a mesuré ; rien de mesuré depuis minuit, pas de valeur. La valeur garde l'heure du
+  relevé qui l'a faite (« le minimum de 6 h 40 »). Au redémarrage, le pilote relit la journée dans
+  l'historique avant de continuer. Les `today_max` / `today_min` de la prévision restent à part :
+  le prévu dit ce qui vient, le mesuré ce qui a eu lieu. Exemple d'automatisme : « s'il a gelé
+  cette nuit », `dehors:meteo/measured_min` `lt` 0.
 - **Joignable** tant qu'une de ses sources l'est.
 - **Rien à relire en boucle** : le pilote suit les changements de ses sources ; une horloge
   par minute fait seulement passer une source de fraîche à ancienne.

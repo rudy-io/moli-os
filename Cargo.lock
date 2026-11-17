@@ -2294,7 +2294,9 @@ name = "moli-outdoor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "jiff",
  "moli-core",
+ "moli-history",
  "moli-i18n",
  "moli-runtime",
  "serde",

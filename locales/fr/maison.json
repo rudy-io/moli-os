@@ -118,6 +118,7 @@
   "maison.dehors.station_inconnue": "{id} : appareil inconnu de Moli pour l’instant.",
   "maison.dehors.credit_previsions": "Prévisions :",
   "maison.dehors.credit_mesures": "Mesures : {names}",
+  "maison.dehors.mesure_jour": "Mesuré aujourd’hui : max {max}° · min {min}°",
   "maison.dehors.sens_temperature": "Température",
   "maison.dehors.sens_pression": "Pression",
   "maison.dehors.sens_luminosite": "Luminosité",

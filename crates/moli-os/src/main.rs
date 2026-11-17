@@ -449,7 +449,13 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     };
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
-    tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
+    tasks.extend(spawn_house_drivers(
+        &config,
+        &hub,
+        energy.as_ref(),
+        history.as_ref(),
+        &cancel,
+    ));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
 
@@ -1382,6 +1388,7 @@ fn spawn_house_drivers(
     config: &Config,
     hub: &Hub,
     energy: Option<&moli_energy::Energy>,
+    history: Option<&moli_history::History>,
     cancel: &CancellationToken,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let mut tasks = Vec::new();
@@ -1400,7 +1407,12 @@ fn spawn_house_drivers(
         tasks.push(spawn_driver(
             hub,
             InstanceId::from(moli_outdoor::INSTANCE),
-            Arc::new(moli_outdoor::Outdoor::new(hub.clone(), outdoor)),
+            Arc::new(moli_outdoor::Outdoor::new(
+                hub.clone(),
+                outdoor,
+                history.cloned(),
+                &config.zone.name,
+            )),
             cancel.clone(),
         ));
     }

@@ -916,6 +916,8 @@
   "pilotes.dehors.intensite_pluie": "Rain rate",
   "pilotes.dehors.pluie_jour": "Rain today",
   "pilotes.dehors.uv": "UV index",
+  "pilotes.dehors.max_mesure": "Measured high today",
+  "pilotes.dehors.min_mesure": "Measured low today",
   "pilotes.dehors.source": "Source: {what}",
   "pilotes.dehors.stations": "Stations",
   "pilotes.dehors.previsions": "Forecast",
