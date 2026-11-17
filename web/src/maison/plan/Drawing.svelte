@@ -2,6 +2,7 @@
   import { hub, home, value, deviceKind, isOn, roomOf, num, isPlant } from '../lib/home.svelte.js';
   import { area, bbox, inside, labelAt, points } from './geometry.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
+  import { OUTSIDE } from '../lib/outside.js';
 
   /**
    * A drawn floor (cm): rooms, walls, openings, fixtures and the house's
@@ -254,7 +255,8 @@
    *  the garden without one takes the weather's. Shown at the room's
    *  foot, not where the probe hangs. */
   const climates = $derived.by(() => {
-    const outside = tempOf(home.config?.outdoor?.weather);
+    // Measured when a station speaks (#246): `dehors:meteo`, else the forecast.
+    const outside = tempOf(OUTSIDE) ?? tempOf(home.config?.outdoor?.weather);
     let garden = false;
     const out = [];
     const rooms = (floor.rooms ?? []).filter((r) => r.kind !== 'void' && r.kind !== 'roof');
