@@ -87,6 +87,7 @@ import {
   mdiFire,
   mdiFlash,
   mdiFlowerOutline,
+  mdiGarage,
   mdiGate,
   mdiHomeOutline,
   mdiHomeRoof,
@@ -247,6 +248,7 @@ export const icons = {
   fire: mdiFire,
   flash: mdiFlash,
   'flower-outline': mdiFlowerOutline,
+  garage: mdiGarage,
   gate: mdiGate,
   home: mdiHomeOutline,
   'home-roof': mdiHomeRoof,
@@ -314,6 +316,15 @@ export const icons = {
 };
 
 export const icon = (name) => icons[name] ?? mdiLightbulbOutline;
+
+/** A trigger device's icon, from what it is called: a garage or workshop
+ *  door is not a gate. */
+export function impulseIcon(name) {
+  const n = String(name ?? '').toLowerCase();
+  if (/portail|portillon|barri[eè]re|\bgate\b/.test(n)) return 'gate';
+  if (/garage|atelier|porte|\bdoor\b|workshop/.test(n)) return 'garage';
+  return 'gate';
+}
 
 /** WMO weather code (Open-Meteo) → icon and words (said in the house's
  *  language when called, not when the module loads). */

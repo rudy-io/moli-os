@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n.svelte.js';
   import { hub } from '../../lib/hub.svelte.js';
   import Icon from './Icon.svelte';
+  import { impulseIcon } from '../lib/icons.js';
   import { canWrite, impulsePoints } from '../lib/capabilities.js';
   import { completionGuard } from '../lib/completion-guard.js';
 
@@ -51,7 +52,7 @@
 
 <div class="impulse" class:icons title={icons ? label : undefined}>
   <div class="heading">
-    <span class="device-icon"><Icon name={live ? 'gate' : 'offline'} size={24} /></span>
+    <span class="device-icon"><Icon name={live ? impulseIcon(label) : 'offline'} size={24} /></span>
     {#if !icons}<span class="name">{label}</span>{/if}
   </div>
   <div class="actions">
@@ -73,7 +74,7 @@
 <style>
   .impulse { display: grid; gap: 12px; min-width: 0; padding: 14px; background: var(--surface-2); border-radius: var(--r-md); color: var(--ink-2); }
   .heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .device-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: var(--r-sm); background: var(--surface-3); color: var(--ink-2); }
+  .device-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); }
   .name { flex: 1; font-weight: 650; color: var(--ink); min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .actions button { flex: 1 1 120px; display: grid; justify-items: center; align-content: center; gap: 2px; min-width: 0; min-height: 52px; }
