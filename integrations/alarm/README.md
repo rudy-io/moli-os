@@ -9,7 +9,8 @@
   `event` et `cause`, et écrivent `mode`.
 - Armer est refusé, et dit, tant qu'un capteur du mode voit quelque chose, ou ne répond pas
   (point inconnu, appareil hors ligne). Le point `silent` nomme les capteurs qui ne répondent
-  pas ; armée, un capteur qui cesse de répondre donne l'événement `silent`.
+  pas ; armée, un capteur muet depuis une minute donne l'événement `silent` (pas pour une
+  coupure de quelques secondes, ni à l'arrêt de Moli).
 - Armée, en délai d'entrée ou déclenchée, changer de mode est refusé : ce serait la désarmer,
   et c'est `off`, avec le code, puis le nouveau mode. Pendant le délai de sortie, le mode peut
   encore changer (rien n'est encore surveillé).

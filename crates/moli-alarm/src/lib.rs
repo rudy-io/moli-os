@@ -20,7 +20,7 @@
 //!   offline), empty when all do.
 //! - `event`: what just happened, each time anew (`arming`, `armed`,
 //!   `arm_failure`, `pending`, `triggered`, `disarmed`, and `silent` when,
-//!   armed, a sensor stops answering).
+//!   armed, a sensor has stopped answering for a minute).
 //! - `setup`: its modes and sensors (JSON, 4 000 characters at most, about
 //!   30 sensors). Written (the alarm disarmed), new settings: checked like
 //!   the file's, kept in the instance's vault, used from then on,
@@ -74,6 +74,10 @@ const MAX_DELAY: u64 = 3600;
 /// Sensors one alarm watches at most. The settings must also fit in one
 /// text point (`setup`, [`moli_core::MAX_TEXT`] characters): checked.
 const MAX_SENSORS: usize = 32;
+/// How long a sensor stays silent before the alarm says so (`event` =
+/// `silent`): a Wi-Fi blip, or Moli stopping (other drivers go first), is
+/// not a lost sensor.
+const SILENT_GRACE: Duration = Duration::from_secs(60);
 /// Where the settings made on the screen are kept (the instance's vault).
 const SETTINGS: &str = "settings";
 
@@ -412,6 +416,8 @@ struct Live {
     seeing: HashMap<String, bool>,
     /// The sensors (points) that do not answer.
     silent: BTreeSet<String>,
+    /// Those that stopped answering, since when, not said yet.
+    quiet_since: BTreeMap<String, Instant>,
     /// The steady clock the alarm counts on.
     start: Instant,
 }
@@ -425,6 +431,7 @@ impl Live {
             alarm,
             seeing: HashMap::new(),
             silent: BTreeSet::new(),
+            quiet_since: BTreeMap::new(),
             start: Instant::now(),
         };
         live.look(ctx);
@@ -432,9 +439,11 @@ impl Live {
         live
     }
 
-    /// Seconds on the steady clock.
+    /// Seconds on the steady clock, rounded up: a delay is never shorter
+    /// than set (rounded down, five seconds could be four and a bit).
     fn now(&self) -> u64 {
-        self.start.elapsed().as_secs()
+        let elapsed = self.start.elapsed();
+        elapsed.as_secs() + u64::from(elapsed.subsec_nanos() > 0)
     }
 
     /// When the current delay ends, on the steady clock.
@@ -488,27 +497,53 @@ impl Live {
         ctx.set_state(&self.id, "silent", Value::Text(names.join(", ").into()));
     }
 
-    /// A device came, went, or went offline: which sensors answer. Armed,
-    /// one that stops answering is said (`event` = `silent`).
+    /// A device came, went, or went offline: which sensors answer, shown
+    /// at once on `silent` (and arming refused). One that stops answering
+    /// is said later, if it is still silent ([`SILENT_GRACE`]).
     fn recount(&mut self, ctx: &DriverCtx) {
         let silent = self.not_answering(ctx);
         if silent == self.silent {
             return;
         }
-        let lost: Vec<String> = silent
-            .difference(&self.silent)
+        let at = Instant::now();
+        for point in silent.difference(&self.silent) {
+            self.quiet_since.insert(point.clone(), at);
+        }
+        self.quiet_since.retain(|point, _| silent.contains(point));
+        self.silent = silent;
+        self.show_silent(ctx);
+    }
+
+    /// When the next sensor gone quiet is to be said.
+    fn lost_due(&self) -> Option<Instant> {
+        self.quiet_since.values().min().map(|at| *at + SILENT_GRACE)
+    }
+
+    /// Armed, the sensors silent for long enough, watched in its mode, are
+    /// said (`event` = `silent`), once.
+    fn report_lost(&mut self, ctx: &DriverCtx) {
+        let due: Vec<String> = self
+            .quiet_since
+            .iter()
+            .filter(|(_, at)| at.elapsed() >= SILENT_GRACE)
+            .map(|(point, _)| point.clone())
+            .collect();
+        for point in &due {
+            self.quiet_since.remove(point);
+        }
+        let Some(mode) = self.alarm.phase().mode() else {
+            return;
+        };
+        let lost: Vec<String> = due
+            .iter()
             .filter(|p| {
-                self.alarm.phase().mode().is_some_and(|m| {
-                    self.alarm
-                        .sensors()
-                        .iter()
-                        .any(|s| &s.point == *p && s.modes.contains(&m))
-                })
+                self.alarm
+                    .sensors()
+                    .iter()
+                    .any(|s| &s.point == *p && s.modes.contains(&mode))
             })
             .map(|p| self.name(p))
             .collect();
-        self.silent = silent;
-        self.show_silent(ctx);
         if !lost.is_empty() {
             publish(
                 ctx,
@@ -684,6 +719,7 @@ impl Driver for AlarmDriver {
             ctx.ready();
             loop {
                 let wake = live.wake();
+                let lost = live.lost_due();
                 tokio::select! {
                     command = ctx.next_command() => {
                         let Some(command) = command else { return Ok(()) };
@@ -692,6 +728,9 @@ impl Driver for AlarmDriver {
                     () = async {
                         if let Some(at) = wake { tokio::time::sleep_until(at).await }
                     }, if wake.is_some() => live.tick(ctx),
+                    () = async {
+                        if let Some(at) = lost { tokio::time::sleep_until(at).await }
+                    }, if lost.is_some() => live.report_lost(ctx),
                     event = events.recv() => match event {
                         Ok(Event::State { point, value, .. }) => live.sensed(ctx, point.as_str(), &value),
                         Ok(Event::Availability { .. } | Event::DeviceUpserted { .. }
