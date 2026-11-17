@@ -76,9 +76,10 @@ export function impulsePoints(device) {
 
 /** A security panel's arm mode. Tuya's standard `system_arm_type` says it;
  *  any other enum that names both `disarmed` and `armed` is taken as one too.
- *  The value is the panel's own word (`disarmed`, `armed`, `home`). */
-export function alarmPoint(device) {
-  const points = device?.points ?? [];
+ *  By default, only writable points are considered: a physical panel should be
+ *  commandable. Pass `writable = false` to include read-only status enums. */
+export function alarmPoint(device, writable = true) {
+  const points = device?.points?.filter((point) => !writable || point.access?.write) ?? [];
   const panel = (point) =>
     point?.kind?.type === 'enum' &&
     Array.isArray(point.kind.values) &&
