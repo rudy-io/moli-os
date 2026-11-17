@@ -218,6 +218,8 @@
   "pilotes.frigate.charge_gpu": "Charge GPU",
   "pilotes.frigate.charge_processeur": "Charge processeur",
   "pilotes.frigate.broker_injoignable": "le broker de Frigate est injoignable",
+  "pilotes.frigate.passe_sans_mot_de_passe": "Frigate : le passé (review) est réglé, mais son mot de passe n'est pas dans le coffre : printf %s \"$MOT_DE_PASSE\" | moli-os secrets set {instance} {key}. Le pilote attend et réessaie, sans repasser par go2rtc.",
+  "pilotes.frigate.passe_injoignable": "Frigate : {host} ne répond pas encore sur son port authentifié. Le pilote attend et réessaie, sans repasser par go2rtc.",
   "pilotes.frigate.ne_se_regle_pas": "{point} ne peut pas être réglé",
   "pilotes.moonraker.imprimante_3d": "Imprimante 3D",
   "pilotes.moonraker.pas_encore_repondu": "l'imprimante n'a pas encore répondu",

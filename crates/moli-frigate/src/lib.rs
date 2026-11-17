@@ -94,7 +94,14 @@ enum Review {
     /// Frigate shows another certificate than the pinned one: the driver
     /// stops and says why (never pinned again on its own).
     Changed(String),
+    /// Not usable yet (no password, Frigate unreachable on first contact):
+    /// why, while the driver tries again.
+    NotYet(String),
 }
+
+/// First wait before trying `review` again, and the longest.
+const RETRY_FIRST: Duration = Duration::from_secs(5);
+const RETRY_MAX: Duration = Duration::from_secs(300);
 
 /// Lowercase hex without separators, as `moli-net` compares fingerprints.
 fn normalize(fingerprint: &str) -> String {
@@ -146,27 +153,67 @@ fn certificate_changed(
     }
 }
 
-/// Frigate's API for the past, when configured and its password stored.
-async fn review_api(config: &Config, ctx: &DriverCtx) -> Option<Review> {
-    let r = config.review.as_ref()?;
+/// With `review` set, Frigate's API for the past, tried again with a
+/// growing pause until it is usable: the driver never goes on without it
+/// (never back to go2rtc, which has no password, for the whole run).
+/// `Ok(None)`: no `review`; `Err(Some(why))`: the certificate changed, the
+/// driver stops on it; `Err(None)`: Moli stops.
+async fn review_when_ready(
+    config: &Config,
+    ctx: &DriverCtx,
+) -> Result<Option<std::sync::Arc<review::Api>>, Option<String>> {
+    let Some(r) = config.review.as_ref() else {
+        return Ok(None);
+    };
+    let mut pause = RETRY_FIRST;
+    loop {
+        match review_api(r, ctx).await {
+            Review::Ready(api) => return Ok(Some(api)),
+            Review::Changed(why) => return Err(Some(why)),
+            Review::NotYet(why) => {
+                ctx.wait_for(why);
+                tokio::select! {
+                    () = ctx.cancelled() => return Err(None),
+                    () = tokio::time::sleep(pause) => {}
+                }
+                pause = (pause * 2).min(RETRY_MAX);
+            }
+        }
+    }
+}
+
+/// Frigate's API for the past, as this attempt found it.
+async fn review_api(r: &ReviewConfig, ctx: &DriverCtx) -> Review {
+    let not_yet = || {
+        Review::NotYet(moli_i18n::tr!(
+            "pilotes.frigate.passe_injoignable",
+            host = r.host
+        ))
+    };
     let Some(password) = ctx.secret(PASSWORD) else {
         tracing::warn!(instance = %ctx.instance(), "frigate review: no password in the vault (moli-os secrets set <instance> password)");
-        return None;
+        return Review::NotYet(moli_i18n::tr!(
+            "pilotes.frigate.passe_sans_mot_de_passe",
+            instance = ctx.instance(),
+            key = PASSWORD
+        ));
     };
     let written = r.cert_sha256.as_deref().map(normalize);
     let pin = if let Some(pin) = written.or_else(|| ctx.secret(CERTIFICATE)) {
         // Checked now, before anything is sent: a changed certificate stops
         // the driver at start, not at the first image asked.
-        let probe = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin.clone())).ok()?;
+        let Ok(probe) = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin.clone())) else {
+            return not_yet();
+        };
         match probe.handshake().await {
             Err(e) if format!("{e:#}").contains(moli_net::PIN_MISMATCH) => {
                 let seen = probe.seen_fingerprint();
-                return Some(Review::Changed(certificate_changed(
+                return Review::Changed(certificate_changed(
                     r,
                     ctx.instance(),
                     &pin,
                     seen.as_deref(),
-                )));
+                ));
             }
             // Unreachable for now: the requests will say so, and a changed
             // certificate is still noticed on them.
@@ -174,25 +221,31 @@ async fn review_api(config: &Config, ctx: &DriverCtx) -> Option<Review> {
         }
     } else {
         // First contact: pin the certificate before any password is sent.
-        let probe = moli_net::PinnedHttps::new(&r.host, r.port, None).ok()?;
+        let Ok(probe) = moli_net::PinnedHttps::new(&r.host, r.port, None) else {
+            return not_yet();
+        };
         if let Err(e) = probe.handshake().await {
             tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: Frigate unreachable");
-            return None;
+            return not_yet();
         }
-        let seen = probe.seen_fingerprint()?;
+        let Some(seen) = probe.seen_fingerprint() else {
+            return not_yet();
+        };
         if let Err(e) = ctx.store_secret(CERTIFICATE, &seen).await {
             tracing::warn!(instance = %ctx.instance(), error = %e, "frigate review: cannot pin the certificate");
-            return None;
+            return not_yet();
         }
         seen
     };
-    let https = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin)).ok()?;
+    let Ok(https) = moli_net::PinnedHttps::new(&r.host, r.port, Some(pin)) else {
+        return not_yet();
+    };
     let api = std::sync::Arc::new(review::Api::new(https, r.user.clone(), password));
     // In the background: the session and the live streams, before anyone
     // opens a camera.
     let warming = std::sync::Arc::clone(&api);
     tokio::spawn(async move { warming.warm().await });
-    Some(Review::Ready(api))
+    Review::Ready(api)
 }
 
 /// Waits until Frigate shows another certificate (never, without `review`).
@@ -522,6 +575,11 @@ enum Update<'a> {
 
 fn parse<'a>(rest: &'a str, payload: &str) -> Option<Update<'a>> {
     let parts: Vec<&str> = rest.split('/').collect();
+    // A name Frigate would refuse comes from something else on the
+    // network: never a camera, never in a path or a query to Frigate.
+    if !review::is_camera(parts.first()?) {
+        return None;
+    }
     let on = |p: &str| match p {
         "ON" => Some(true),
         "OFF" => Some(false),
@@ -581,10 +639,10 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
     let (client, mut events) = AsyncClient::new(options, 32);
     let base = config.base_topic.trim_end_matches('/').to_owned();
     let api = moli_net::upnp::Location::parse(&config.api);
-    let review = match review_api(config, ctx).await {
-        Some(Review::Changed(reason)) => return park(ctx, reason).await,
-        Some(Review::Ready(api)) => Some(api),
-        None => None,
+    let review = match review_when_ready(config, ctx).await {
+        Ok(api) => api,
+        Err(Some(reason)) => return park(ctx, reason).await,
+        Err(None) => return Ok(()),
     };
     let mut certificate = review.as_ref().map(|api| api.certificate_changed());
     let mut cameras: BTreeSet<String> = BTreeSet::new();
@@ -785,6 +843,9 @@ mod tests {
         );
         assert_eq!(parse("jardin/motion_threshold/state", "30"), None);
         assert_eq!(parse("jardin/unicorn", "1"), None);
+        // A name Frigate would refuse is never a camera.
+        assert_eq!(parse("x&cameras=chambre/motion", "ON"), None);
+        assert_eq!(parse("../motion", "ON"), None);
         assert_eq!(parse("stats", "{}"), None);
     }
 

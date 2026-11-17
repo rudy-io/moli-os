@@ -218,6 +218,8 @@
   "pilotes.frigate.charge_gpu": "GPU load",
   "pilotes.frigate.charge_processeur": "CPU load",
   "pilotes.frigate.broker_injoignable": "Frigate’s broker is unreachable",
+  "pilotes.frigate.passe_sans_mot_de_passe": "Frigate: the past (review) is set, but its password is not in the vault: printf %s \"$PASSWORD\" | moli-os secrets set {instance} {key}. The driver waits and tries again, never through go2rtc instead.",
+  "pilotes.frigate.passe_injoignable": "Frigate: {host} does not answer on its authenticated port yet. The driver waits and tries again, never through go2rtc instead.",
   "pilotes.frigate.ne_se_regle_pas": "{point} cannot be set",
   "pilotes.moonraker.imprimante_3d": "3D printer",
   "pilotes.moonraker.pas_encore_repondu": "the printer has not answered yet",

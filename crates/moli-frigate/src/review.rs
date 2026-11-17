@@ -35,7 +35,6 @@ const GAP: f64 = 2.0;
 const WINDOW: f64 = 2.0 * 3600.0;
 
 /// Frigate's API, shared by the cameras of one Frigate.
-#[derive(Debug)]
 pub struct Api {
     https: PinnedHttps,
     user: String,
@@ -47,6 +46,16 @@ pub struct Api {
     /// Each camera's live streams on Frigate's own go2rtc, read once from
     /// its configuration.
     live: Mutex<Option<std::collections::BTreeMap<String, String>>>,
+}
+
+/// The password and the session never show in a log.
+impl std::fmt::Debug for Api {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Api")
+            .field("https", &self.https)
+            .field("user", &self.user)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Frigate showed another certificate than the pinned one.
@@ -266,7 +275,7 @@ pub struct Seen {
 impl SnapshotSource for Seen {
     fn snapshot(&self) -> BoxFuture<'_, anyhow::Result<Image>> {
         Box::pin(async move {
-            let path = format!("/api/{}/latest.jpg?h=720", safe(&self.camera)?);
+            let path = format!("/api/{}/latest.jpg?h=720", camera(&self.camera)?);
             let bytes = self.api.send(Method::GET, &path, None, WAIT).await?;
             if !bytes.starts_with(&[0xFF, 0xD8]) {
                 bail!("Frigate: no image for {}", self.camera);
@@ -312,7 +321,7 @@ impl ReviewSource for Camera {
         Box::pin(async move {
             let path = format!(
                 "/api/review?cameras={}&after={after:.0}&before={before:.0}&limit={LIMIT}",
-                self.name
+                camera(&self.name)?
             );
             Ok(review_items(&self.api.json(&path).await?))
         })
@@ -327,7 +336,7 @@ impl ReviewSource for Camera {
             for (from, to) in windows(after, before) {
                 let path = format!(
                     "/api/{}/recordings?after={from:.0}&before={to:.0}",
-                    self.name
+                    camera(&self.name)?
                 );
                 let body = self.api.send(Method::GET, &path, None, WAIT).await?;
                 let part: Vec<Segment> =
@@ -351,12 +360,14 @@ impl ReviewSource for Camera {
         Box::pin(async move {
             let path = match &what {
                 ReviewMedia::EventImage(id) => {
-                    format!("/api/events/{}/snapshot.jpg?bbox=1", safe(id)?)
+                    format!("/api/events/{}/snapshot.jpg?bbox=1", self.event(id).await?)
                 }
                 ReviewMedia::EventThumbnail(id) => {
-                    format!("/api/events/{}/thumbnail.jpg", safe(id)?)
+                    format!("/api/events/{}/thumbnail.jpg", self.event(id).await?)
                 }
-                ReviewMedia::EventClip(id) => format!("/api/events/{}/clip.mp4", safe(id)?),
+                ReviewMedia::EventClip(id) => {
+                    format!("/api/events/{}/clip.mp4", self.event(id).await?)
+                }
                 ReviewMedia::Recording { start, end } => {
                     if !(start.is_finite()
                         && end.is_finite()
@@ -365,7 +376,10 @@ impl ReviewSource for Camera {
                     {
                         bail!("a recording is asked for at most one hour");
                     }
-                    format!("/api/{}/start/{start:.0}/end/{end:.0}/clip.mp4", self.name)
+                    format!(
+                        "/api/{}/start/{start:.0}/end/{end:.0}/clip.mp4",
+                        camera(&self.name)?
+                    )
                 }
             };
             self.api.media(&path, range.as_deref()).await
@@ -373,11 +387,31 @@ impl ReviewSource for Camera {
     }
 }
 
+impl Camera {
+    /// An event of this camera, and of no other: its id goes into Frigate's
+    /// paths only once Frigate says the event is this camera's. The right
+    /// to see is checked on the camera of the route; an id read elsewhere
+    /// (another camera's timeline, MQTT, a notification) opens nothing.
+    async fn event<'a>(&self, id: &'a str) -> anyhow::Result<&'a str> {
+        let id = safe(id)?;
+        let event = self.api.json(&format!("/api/events/{id}")).await?;
+        if !of_camera(&event, &self.name) {
+            bail!("not an event of this camera");
+        }
+        Ok(id)
+    }
+}
+
+/// Whether Frigate's event (`/api/events/<id>`) is this camera's.
+fn of_camera(event: &Json, camera: &str) -> bool {
+    event["camera"].as_str() == Some(camera)
+}
+
 /// An id as Frigate writes them (`1731670000.123456-abcdef`): nothing else
-/// reaches its paths.
+/// reaches its paths. It starts with a letter or a digit, never `..`.
 fn safe(id: &str) -> anyhow::Result<&str> {
-    if !id.is_empty()
-        && id.len() <= 64
+    if id.len() <= 64
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
@@ -385,6 +419,26 @@ fn safe(id: &str) -> anyhow::Result<&str> {
         Ok(id)
     } else {
         bail!("not a Frigate event id")
+    }
+}
+
+/// A camera name as Frigate allows them (`[A-Za-z0-9_-]`): the only names
+/// the driver takes from MQTT, and the only ones that reach Frigate's paths
+/// and queries.
+#[must_use]
+pub fn is_camera(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+
+fn camera(name: &str) -> anyhow::Result<&str> {
+    if is_camera(name) {
+        Ok(name)
+    } else {
+        bail!("not a Frigate camera name")
     }
 }
 
@@ -666,6 +720,38 @@ mod tests {
     fn only_frigate_ids_reach_its_paths() {
         assert!(safe("1731670000.123456-abc123").is_ok());
         assert!(safe("../config").is_err());
+        assert!(safe("..").is_err());
+        assert!(safe(".hidden").is_err());
+        assert!(safe("").is_err());
         assert!(safe("a?b").is_err());
+        assert!(safe("a/b").is_err());
+    }
+
+    #[test]
+    fn an_event_opens_only_on_its_own_camera() {
+        let event = json!({"id": "1731670000.1-abc", "camera": "chambre", "label": "person"});
+        assert!(of_camera(&event, "chambre"));
+        assert!(!of_camera(&event, "jardin"));
+        assert!(!of_camera(&json!({"id": "x"}), "jardin"));
+        assert!(!of_camera(&json!({"camera": null}), ""));
+    }
+
+    #[test]
+    fn only_frigate_camera_names_reach_its_queries() {
+        assert!(is_camera("portail") && is_camera("Jardin_2") && is_camera("rue-est"));
+        assert!(!is_camera("x&cameras=chambre"));
+        assert!(!is_camera("a.b") && !is_camera("..") && !is_camera(""));
+        assert!(!is_camera("a b") && !is_camera("a?b") && !is_camera("a#b"));
+        assert!(camera("x&cameras=chambre").is_err());
+    }
+
+    #[test]
+    fn the_password_and_the_session_never_show() {
+        let https = PinnedHttps::new("frigate.local", 8971, None).unwrap();
+        let api = Api::new(https, "moli".into(), "s3cret-pass".into());
+        *api.cookie.try_lock().unwrap() = Some("frigate_token=jwt-xyz".into());
+        let shown = format!("{api:?}");
+        assert!(shown.contains("moli"));
+        assert!(!shown.contains("s3cret-pass") && !shown.contains("jwt-xyz"));
     }
 }

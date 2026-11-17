@@ -920,11 +920,19 @@ kind = "frigate"
   change n'est jamais ré-épinglé** : le pilote s'arrête (en attente, sans envoyer le mot de passe),
   au démarrage comme en marche, et dit quoi vérifier ; l'accepter se fait depuis la machine de Moli
   (`moli-os secrets forget <instance> certificate`, puis redémarrer) ou en changeant
-  `review.cert_sha256`. Session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
-  mémoire), `Range` transmis (le navigateur peut avancer dans le clip). Routes
+  `review.cert_sha256`. Avec `review` réglé, **jamais de repli** : sans mot de passe ou Frigate
+  injoignable au premier contact, le pilote attend (en le disant) et réessaie, de 5 s à 5 min,
+  sans passer par go2rtc. Session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
+  mémoire), `Range` transmis (le navigateur peut avancer dans le clip), `Cache-Control: no-store`
+  (rien ne reste dans le cache d'un navigateur partagé). Routes
   `/api/devices/{id}/review/…` : jamais pour un invité ; caméra d'une pièce protégée, personne
-  connectée avec le code de la maison seulement ; **à la maison seulement** (colonne `distant` de
-  `routes.txt` : le passé, les clips surtout, ne sort pas). Appareil `review: true`.
+  connectée avec le code de la maison seulement. Un événement n'est servi que si Frigate le dit
+  de la caméra de la route (`/api/events/<id>`, `camera`) : l'id d'un événement d'une autre
+  caméra n'ouvre rien. Seuls les noms de caméra que Frigate accepte (`[A-Za-z0-9_-]`) sont pris
+  de MQTT, et seuls eux entrent dans ses chemins et ses requêtes. Colonne `distant` de
+  `routes.txt` à `non` (le passé, les clips surtout, ne devrait pas sortir) : c'est l'intention
+  déclarée, **pas encore appliquée** tant que les entrées distantes ne la lisent pas (étape 2 de
+  `SECURITY-MODEL.md`). Appareil `review: true`.
 - **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
   (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).

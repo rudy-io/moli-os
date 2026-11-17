@@ -192,7 +192,7 @@ async fn stream(
     }
     out.insert(
         axum::http::header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=300"),
+        HeaderValue::from_static("no-store"),
     );
     response
 }

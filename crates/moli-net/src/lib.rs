@@ -560,8 +560,6 @@ impl PinnedHttps {
         Ok(())
     }
 
-    /// A long-lived response (event stream) on a dedicated connection. Its
-    /// length has no end by design: the caller bounds what it buffers.
     /// One request on a connection of its own, the whole answer: status,
     /// headers (a session cookie) and body (at most [`MAX_BODY`]).
     pub async fn exchange_full(
@@ -595,6 +593,8 @@ impl PinnedHttps {
             .map_err(Into::into)
     }
 
+    /// A long-lived response (event stream) on a dedicated connection. Its
+    /// length has no end by design: the caller bounds what it buffers.
     pub async fn stream(&self, request: Request<Full<Bytes>>) -> anyhow::Result<Incoming> {
         let mut sender = self.connect().await?;
         let response = tokio::time::timeout(TIMEOUT, sender.send_request(request))
