@@ -906,17 +906,25 @@ kind = "frigate"
   page montre les images à la place.
   ⚠️ **Choix explicite de la maison.** L'API de go2rtc n'a pas de mot de passe par défaut et
   montre les adresses des caméras, identifiants compris : à garder sur le réseau local, jamais
-  exposée. Quand Frigate aura son accès authentifié dans Moli (port 8971), images et direct
-  passeront par lui, sans go2rtc.
+  exposée. Avec `review` (ci-dessous), images et direct passent par le port authentifié de
+  Frigate et `go2rtc` n'est plus contacté.
 - **Passé** (facultatif, `review`) : l'API authentifiée de Frigate (port **8971**, HTTPS, compte
   au rôle *viewer*). Frise par caméra (`/api/review` et les segments de `/api/<caméra>/recordings`,
-  réunis en plages continues), zones (`/api/config`, coordonnées relatives 0–1), image, vignette
-  et clip d'un événement, enregistrement entre deux instants (une heure au plus). Le certificat
-  auto-signé est épinglé au premier contact (secret `certificate`), **avant** l'envoi du mot de
-  passe ; session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
+  réunis en plages continues, demandés deux heures à la fois), zones (`/api/config`, coordonnées
+  relatives 0–1), image, vignette et clip d'un événement, enregistrement entre deux instants (une
+  heure au plus). **Images et direct passent aussi par ce port** : `/api/<caméra>/latest.jpg` et
+  l'offre WebRTC sur `/api/go2rtc/webrtc?src=<flux>` (Frigate vérifie le flux contre les caméras du
+  compte) ; aucun go2rtc n'est joint directement. Le certificat auto-signé est épinglé au premier
+  contact (secret `certificate`), **avant** l'envoi du mot de passe, ou écrit dans
+  `review.cert_sha256` (empreinte SHA-256, gagne sur le premier contact). **Un certificat qui
+  change n'est jamais ré-épinglé** : le pilote s'arrête (en attente, sans envoyer le mot de passe),
+  au démarrage comme en marche, et dit quoi vérifier ; l'accepter se fait depuis la machine de Moli
+  (`moli-os secrets forget <instance> certificate`, puis redémarrer) ou en changeant
+  `review.cert_sha256`. Session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
   mémoire), `Range` transmis (le navigateur peut avancer dans le clip). Routes
   `/api/devices/{id}/review/…` : jamais pour un invité ; caméra d'une pièce protégée, personne
-  connectée avec le code de la maison seulement. Appareil `review: true`.
+  connectée avec le code de la maison seulement ; **à la maison seulement** (colonne `distant` de
+  `routes.txt` : le passé, les clips surtout, ne sort pas). Appareil `review: true`.
 - **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
   (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).

@@ -110,7 +110,7 @@ pub fn for_go2rtc(offer: &str, viewer: Option<IpAddr>) -> String {
 }
 
 /// A stream name in a query string.
-fn encode(name: &str) -> String {
+pub(crate) fn encode(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for b in name.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {

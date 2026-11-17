@@ -16,7 +16,10 @@ use http::Method;
 use http_body_util::BodyExt as _;
 use moli_net::PinnedHttps;
 use moli_runtime::BoxFuture;
-use moli_runtime::media::{MediaReply, Recorded, ReviewItem, ReviewMedia, ReviewSource, Zone};
+use moli_runtime::media::{
+    Image, LiveSource, MediaReply, Recorded, ReviewItem, ReviewMedia, ReviewSource, SnapshotSource,
+    Zone,
+};
 use serde_json::Value as Json;
 use tokio::sync::Mutex;
 
@@ -26,6 +29,10 @@ const WAIT: Duration = Duration::from_secs(15);
 const LIMIT: u32 = 500;
 /// Two recorded segments closer than this are one stretch (seconds).
 const GAP: f64 = 2.0;
+/// Recordings are asked two hours at a time: Frigate lists every segment of
+/// a few seconds, and a whole day went past what Moli reads of one answer
+/// (4 MiB) on a camera recording all day.
+const WINDOW: f64 = 2.0 * 3600.0;
 
 /// Frigate's API, shared by the cameras of one Frigate.
 #[derive(Debug)]
@@ -34,6 +41,16 @@ pub struct Api {
     user: String,
     password: String,
     cookie: Mutex<Option<String>>,
+    /// Set once Frigate shows another certificate than the pinned one: the
+    /// driver stops on it.
+    changed: tokio::sync::watch::Sender<Option<Changed>>,
+}
+
+/// Frigate showed another certificate than the pinned one.
+#[derive(Clone, Debug)]
+pub struct Changed {
+    /// Its fingerprint, when the handshake got that far.
+    pub seen: Option<String>,
 }
 
 impl Api {
@@ -44,14 +61,38 @@ impl Api {
             user,
             password,
             cookie: Mutex::new(None),
+            changed: tokio::sync::watch::Sender::new(None),
         }
+    }
+
+    /// Told when Frigate shows another certificate.
+    pub fn certificate_changed(&self) -> tokio::sync::watch::Receiver<Option<Changed>> {
+        self.changed.subscribe()
+    }
+
+    /// A refused handshake: the certificate changed. Said once to the
+    /// driver, which stops; never pinned again here.
+    fn noticed<T>(&self, result: anyhow::Result<T>) -> anyhow::Result<T> {
+        if let Err(e) = &result
+            && format!("{e:#}").contains(moli_net::PIN_MISMATCH)
+        {
+            let seen = self.https.seen_fingerprint();
+            self.changed.send_if_modified(|was| {
+                let first = was.is_none();
+                if first {
+                    *was = Some(Changed { seen });
+                }
+                first
+            });
+        }
+        result
     }
 
     async fn login(&self) -> anyhow::Result<String> {
         let body = serde_json::json!({ "user": self.user, "password": self.password }).to_string();
         let request = self.https.request(Method::POST, "/api/login");
         let request = moli_net::text_body(request, "application/json", body)?;
-        let (status, headers, _) = self.https.exchange_full(request, WAIT).await?;
+        let (status, headers, _) = self.noticed(self.https.exchange_full(request, WAIT).await)?;
         if !status.is_success() {
             bail!("Frigate refused the login (HTTP {})", status.as_u16());
         }
@@ -72,28 +113,43 @@ impl Api {
         self.login().await
     }
 
-    /// A JSON answer, logging in again once when the session ended.
-    async fn json(&self, path: &str) -> anyhow::Result<Json> {
+    /// One request in the session, logging in again once when it ended.
+    /// Only the status and the body come back: what Frigate (or the go2rtc
+    /// behind it) says in an error never reaches a message.
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<(&str, &str)>,
+        wait: Duration,
+    ) -> anyhow::Result<Vec<u8>> {
         for attempt in 0..2 {
             let cookie = self.cookie().await?;
             let request = self
                 .https
-                .request(Method::GET, path)
+                .request(method.clone(), path)
                 .header(http::header::COOKIE, cookie);
-            let (status, _, body) = self
-                .https
-                .exchange_full(moli_net::empty(request)?, WAIT)
-                .await?;
+            let request = match body {
+                Some((kind, text)) => moli_net::text_body(request, kind, text.to_owned())?,
+                None => moli_net::empty(request)?,
+            };
+            let (status, _, body) = self.noticed(self.https.exchange_full(request, wait).await)?;
             if status == http::StatusCode::UNAUTHORIZED && attempt == 0 {
                 *self.cookie.lock().await = None;
                 continue;
             }
             if !status.is_success() {
-                bail!("Frigate: HTTP {} for {path}", status.as_u16());
+                bail!("Frigate: HTTP {} for {}", status.as_u16(), path_only(path));
             }
-            return serde_json::from_slice(&body).context("Frigate: not JSON");
+            return Ok(body.to_vec());
         }
         bail!("Frigate: session refused")
+    }
+
+    /// A JSON answer.
+    async fn json(&self, path: &str) -> anyhow::Result<Json> {
+        let body = self.send(Method::GET, path, None, WAIT).await?;
+        serde_json::from_slice(&body).context("Frigate: not JSON")
     }
 
     /// A picture or a clip, streamed, `Range` passed on.
@@ -107,10 +163,11 @@ impl Api {
             if let Some(range) = range {
                 request = request.header(http::header::RANGE, range);
             }
-            let response = self
-                .https
-                .stream_response(moli_net::empty(request)?, WAIT)
-                .await?;
+            let response = self.noticed(
+                self.https
+                    .stream_response(moli_net::empty(request)?, WAIT)
+                    .await,
+            )?;
             let status = response.status();
             if status == http::StatusCode::UNAUTHORIZED && attempt == 0 {
                 *self.cookie.lock().await = None;
@@ -161,6 +218,73 @@ pub struct Camera {
     pub name: String,
 }
 
+/// A path without its query (a stream name, a time) for a message.
+fn path_only(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
+/// How long the go2rtc behind Frigate may take to answer an offer.
+const ANSWER_WAIT: Duration = Duration::from_secs(9);
+
+/// One camera through Frigate's authenticated port, once `review` is set:
+/// its image (`/api/<camera>/latest.jpg`) and its live video (the offer to
+/// `/api/go2rtc/webrtc?src=<stream>`, which Frigate checks against the
+/// account's cameras). No go2rtc is spoken to directly.
+#[derive(Debug)]
+pub struct Seen {
+    pub api: Arc<Api>,
+    pub camera: String,
+    /// Its go2rtc stream: from the configuration (`streams`), else the
+    /// camera's name; never from a request.
+    pub stream: String,
+}
+
+impl SnapshotSource for Seen {
+    fn snapshot(&self) -> BoxFuture<'_, anyhow::Result<Image>> {
+        Box::pin(async move {
+            let path = format!("/api/{}/latest.jpg?h=720", safe(&self.camera)?);
+            let bytes = self.api.send(Method::GET, &path, None, WAIT).await?;
+            if !bytes.starts_with(&[0xFF, 0xD8]) {
+                bail!("Frigate: no image for {}", self.camera);
+            }
+            Ok(Image {
+                content_type: "image/jpeg".into(),
+                bytes,
+            })
+        })
+    }
+}
+
+impl LiveSource for Seen {
+    fn answer(
+        &self,
+        offer: String,
+        viewer: Option<std::net::IpAddr>,
+    ) -> BoxFuture<'_, anyhow::Result<String>> {
+        Box::pin(async move {
+            let path = format!(
+                "/api/go2rtc/webrtc?src={}",
+                crate::go2rtc::encode(&self.stream)
+            );
+            let offer = crate::go2rtc::for_go2rtc(&offer, viewer);
+            let reply = self
+                .api
+                .send(
+                    Method::POST,
+                    &path,
+                    Some(("application/sdp", &offer)),
+                    ANSWER_WAIT,
+                )
+                .await?;
+            let answer = String::from_utf8_lossy(&reply).into_owned();
+            if !answer.starts_with("v=0") {
+                bail!("Frigate: no SDP answer for {}", self.camera);
+            }
+            Ok(answer)
+        })
+    }
+}
+
 impl ReviewSource for Camera {
     fn review(&self, after: f64, before: f64) -> BoxFuture<'_, anyhow::Result<Vec<ReviewItem>>> {
         Box::pin(async move {
@@ -174,11 +298,18 @@ impl ReviewSource for Camera {
 
     fn recorded(&self, after: f64, before: f64) -> BoxFuture<'_, anyhow::Result<Vec<Recorded>>> {
         Box::pin(async move {
-            let path = format!(
-                "/api/{}/recordings?after={after:.0}&before={before:.0}",
-                self.name
-            );
-            Ok(stretches(&self.api.json(&path).await?))
+            let mut segments = Vec::new();
+            for (from, to) in windows(after, before) {
+                let path = format!(
+                    "/api/{}/recordings?after={from:.0}&before={to:.0}",
+                    self.name
+                );
+                if let Json::Array(part) = self.api.json(&path).await? {
+                    segments.extend(part);
+                }
+            }
+            // A segment across two windows comes twice: merged like any overlap.
+            Ok(stretches(&Json::Array(segments)))
         })
     }
 
@@ -263,6 +394,19 @@ pub fn review_items(answer: &Json) -> Vec<ReviewItem> {
         .collect();
     items.sort_by(|a, b| b.start.total_cmp(&a.start));
     items
+}
+
+/// `after`..`before` in windows of [`WINDOW`] at most, in order.
+#[must_use]
+pub fn windows(after: f64, before: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    let mut from = after;
+    while from < before {
+        let to = (from + WINDOW).min(before);
+        out.push((from, to));
+        from = to;
+    }
+    out
 }
 
 /// `/api/<camera>/recordings` (10 s segments) → the stretches recorded.
@@ -378,6 +522,33 @@ mod tests {
                     end: 110.0
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn a_day_of_recordings_is_asked_two_hours_at_a_time() {
+        let day = windows(0.0, 86_400.0);
+        assert_eq!(day.len(), 12);
+        assert_eq!(day.first(), Some(&(0.0, 7200.0)));
+        assert_eq!(day.last(), Some(&(79_200.0, 86_400.0)));
+        assert!(
+            day.windows(2)
+                .all(|w| (w[0].1 - w[1].0).abs() < f64::EPSILON)
+        );
+        assert_eq!(windows(10.0, 70.0), vec![(10.0, 70.0)]);
+        assert!(windows(5.0, 5.0).is_empty());
+        // The same segment from two windows: one stretch.
+        let twice = json!([
+            {"start_time": 7195.0, "end_time": 7205.0},
+            {"start_time": 7195.0, "end_time": 7205.0},
+            {"start_time": 7205.0, "end_time": 7215.0}
+        ]);
+        assert_eq!(
+            stretches(&twice),
+            vec![Recorded {
+                start: 7195.0,
+                end: 7215.0
+            }]
         );
     }
 
