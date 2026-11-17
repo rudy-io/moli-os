@@ -203,6 +203,44 @@ async fn some_orders_want_the_code_each_time_even_from_a_session() {
 }
 
 #[tokio::test]
+async fn the_house_s_own_orders_and_toggles_want_the_code_each_time_too() {
+    let (hub, _cancel) = start_with(HubOptions {
+        guard: moli_runtime::guard::GuardPolicy {
+            code_each_time: vec![moli_runtime::guard::CodeEachTime {
+                point: "fake:plug1/state".into(),
+                values: vec!["false".into()],
+            }],
+            ..Default::default()
+        },
+        ..HubOptions::default()
+    })
+    .await;
+    hub.command(&point("state"), Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    // A scene, a fixture, a driven load: sent in the house's name, on a
+    // gesture that typed no code. Held, the code wanted.
+    let Err(CommandError::NeedsApproval { id, .. }) = hub
+        .command(&point("state"), Value::Bool(false), Origin::System, None)
+        .await
+    else {
+        panic!("held");
+    };
+    assert!(hub.approvals().iter().any(|a| a.id == id && a.code));
+    assert_eq!(hub.state(&point("state")).unwrap().value, Value::Bool(true));
+    // A toggle may become the order that wants it: held, whichever way.
+    for origin in [Origin::Household, Origin::Ui, Origin::System] {
+        assert!(hub.would_hold(&point("state"), None, origin).is_some());
+    }
+    assert!(hub.wants_code(&point("state"), None));
+    // Only an automation a person approved (with the code) goes without.
+    assert!(
+        hub.would_hold(&point("state"), None, Origin::Automation)
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn agents_may_what_a_person_allowed_them_in_the_file() {
     let (hub, _cancel) = start_with(HubOptions {
         guard: moli_runtime::guard::GuardPolicy {

@@ -745,12 +745,21 @@ impl Hub {
             );
             return Err(error);
         }
+        // The guard judges the value as the device will take it (validated:
+        // `0` and `0.0` are one number), not as it was spelt.
         let result = match self.prepare(point, &value) {
             Err(e) => Err(e),
-            Ok(prepared) => match self.verdict_for(point, &value, origin) {
+            Ok(prepared) => match self.verdict_for(point, &prepared.value, origin) {
                 Verdict::Allow => self.send_followed(prepared, origin, actor.as_ref()).await,
                 Verdict::Approval(reason) => {
-                    let id = self.hold(point, &value, origin, actor.clone(), caller, &reason);
+                    let id = self.hold(
+                        point,
+                        &prepared.value,
+                        origin,
+                        actor.clone(),
+                        caller,
+                        &reason,
+                    );
                     Err(CommandError::NeedsApproval { id, reason })
                 }
             },
@@ -787,7 +796,17 @@ impl Hub {
         origin: Origin,
     ) -> Option<String> {
         let verdict = match value {
-            Some(value) => self.verdict_for(point, value, origin),
+            Some(value) => {
+                let value = self.validated(point, value);
+                self.verdict_for(point, &value, origin)
+            }
+            // No value (a toggle): what wants the code each time, whichever
+            // way it goes, is held.
+            None if origin != Origin::Automation
+                && self.0.opts.guard.code_each_time_on(point.as_str()) =>
+            {
+                Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"))
+            }
             // No value (a toggle): what may open is held, whichever way it goes.
             None if is_agent(origin) && self.opener_of(point) != Opener::None => {
                 Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"))
@@ -798,6 +817,27 @@ impl Hub {
             Verdict::Allow => None,
             Verdict::Approval(reason) => Some(reason),
         }
+    }
+
+    /// Whether an order on this point wants the house's code typed for it,
+    /// each time (`[guard] code_each_time`): `value` as it will be sent, or
+    /// `None` for a toggle (any rule on the point counts). An automation
+    /// carrying such an order is approved with the code.
+    #[must_use]
+    pub fn wants_code(&self, point: &PointId, value: Option<&Value>) -> bool {
+        let guard = &self.0.opts.guard;
+        match value {
+            Some(value) => guard.code_each_time(point.as_str(), &self.validated(point, value)),
+            None => guard.code_each_time_on(point.as_str()),
+        }
+    }
+
+    /// `value` as the point would take it, or as it is when the point does
+    /// not take it (unknown, read-only, the wrong kind): the guard then
+    /// judges what was asked.
+    fn validated(&self, point: &PointId, value: &Value) -> Value {
+        self.prepare(point, value)
+            .map_or_else(|_| value.clone(), |prepared| prepared.value)
     }
 
     /// What the guard says about an order on this point from this origin.
@@ -835,11 +875,11 @@ impl Hub {
     /// person's call, whatever the room (closing is not); then the point's verdict.
     fn verdict_for(&self, point: &PointId, value: &Value, origin: Origin) -> Verdict {
         // Some orders want the code each time, an open session or not
-        // (disarming the alarm); an automation a person approved carries
-        // their intent.
-        if !matches!(origin, Origin::Automation | Origin::System)
-            && self.0.opts.guard.code_each_time(point.as_str(), value)
-        {
+        // (disarming the alarm). Only an automation goes without: a person
+        // approved it with the code (`Automations::approve_with_code`). The
+        // house's own orders (a scene, a fixture, a driven load) are sent on
+        // somebody's behalf, from a gesture that typed no code: held too.
+        if origin != Origin::Automation && self.0.opts.guard.code_each_time(point.as_str(), value) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"));
         }
         if is_agent(origin) && self.opens(point, value) {

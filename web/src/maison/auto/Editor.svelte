@@ -168,9 +168,9 @@
     }
     const imported = !!fromHa;
     try {
-      await asHuman(t('automatismes.editeur.valider_label', { nom: a.name }), async () => {
+      await asHuman(t('automatismes.editeur.valider_label', { nom: a.name }), async (pin) => {
         const fingerprint = dirty || !a.id ? (await save()).fingerprint : meta.fingerprint;
-        const v = await api.approve(a.id, fingerprint);
+        const v = await api.approve(a.id, fingerprint, pin);
         meta = metaOf(v);
         a.enabled = true;
         note(imported ? t('automatismes.editeur.parti_import') : t('automatismes.parti'));

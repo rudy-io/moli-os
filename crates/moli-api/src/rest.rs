@@ -235,15 +235,14 @@ pub(crate) async fn decide(
     headers: HeaderMap,
     Json(body): Json<DecisionBody>,
 ) -> Response {
-    let origin = if humans.is_human(&headers, &caller.key) {
-        Origin::Ui
-    } else {
-        Origin::Api
-    };
+    let human = humans.is_human(&headers, &caller.key);
+    let origin = if human { Origin::Ui } else { Origin::Api };
     let actor = Some(caller.describe());
-    // Checked now, behind the same lockout as signing in.
+    // Checked now, behind the same lockout as signing in, and only for a
+    // person in a session: without one, the decision is refused anyway, and
+    // this route must not become a place to try codes.
     let code_typed = match body.pin.as_deref() {
-        Some(pin) if body.approve => match humans.verify(pin, &caller) {
+        Some(pin) if body.approve && human => match humans.verify(pin, &caller) {
             Ok(()) => true,
             Err(e) => return crate::people_api::login_error(e, "serveur.code.incorrect"),
         },

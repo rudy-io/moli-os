@@ -104,16 +104,28 @@ Deux règles de `[guard]`, écrites par une personne dans le fichier, jamais par
   tapé pour lui, même d'une personne dont la session est ouverte (désarmer l'alarme). Il reste
   en attente ; valider sans code est refusé (`CodeNeeded`) et il attend toujours. Le code
   arrive dans la demande de validation (`pin`), vérifié comme à la connexion et avec le même
-  compteur d'essais. Seul un automatisme validé par une personne passe sans : il porte son
-  intention.
+  compteur d'essais, et seulement pour une personne en session (sans session, aucun code n'est
+  essayé). Seul un automatisme validé passe sans : **le valider ou l'allumer demande donc le code**
+  dès qu'il porte un tel ordre (un `toggle` sur le point compte), une session seule ne suffit
+  pas. Les ordres que la maison envoie en son nom (`system` : scènes, luminaires, charges
+  pilotées) sont retenus comme les autres, et une scène ou une charge qui en viserait un est
+  refusée au démarrage. La valeur se compare par son sens, une fois validée pour le point.
 - `[[guard.agents_may]]` (point + valeurs) : un agent (l'assistant, une voix, MCP, un script)
   peut donner cet ordre lui-même sur une commande ou un appareil protégé, sans qu'une personne
   le valide (armer l'alarme à la voix). Les pièces protégées et les heures calmes s'appliquent
   toujours, et une valeur non listée attend une personne comme avant.
 
-Sans ces sections, rien ne change. Preuves : `some_orders_want_the_code_each_time_even_from_a_session`
-et `agents_may_what_a_person_allowed_them_in_the_file` dans `crates/moli-runtime/tests/hub.rs`.
-Le passage du code par HTTP (`pin`, compteur d'essais partagé) n'a pas encore de test à lui.
+Sans ces sections, rien ne change. Preuves : `some_orders_want_the_code_each_time_even_from_a_session`,
+`the_house_s_own_orders_and_toggles_want_the_code_each_time_too` et
+`agents_may_what_a_person_allowed_them_in_the_file` dans `crates/moli-runtime/tests/hub.rs` ;
+`a_rule_reads_the_value_by_meaning_not_by_spelling` dans `crates/moli-runtime/src/guard.rs` ;
+`the_code_on_a_decision_is_tried_only_in_a_session` (code faux, compteur partagé avec la
+connexion, code juste sans session) et `an_automation_that_disarms_is_approved_with_the_code`
+dans `crates/moli-api/tests/household.rs` ;
+`a_scene_never_carries_an_order_that_wants_the_code_each_time` dans `crates/moli-os/src/config.rs`.
+
+Limite connue : un automatisme validé **avant** qu'une règle `code_each_time` soit écrite
+continue de tourner ; après avoir ajouté la règle, le revalider (avec le code).
 
 ## 5. Règles de conception
 

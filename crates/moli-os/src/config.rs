@@ -449,11 +449,37 @@ impl Config {
         if self.server.worker_threads == 0 {
             bail!("worker_threads must be ≥ 1");
         }
-        self.guard.policy()?;
+        let guard = self.guard.policy()?;
         if let Some(energy) = &self.energy {
             energy
                 .check()
                 .map_err(|e| anyhow::anyhow!("[energy] {e}"))?;
+            // A driven load switches on its own, in the house's name: never
+            // a point whose orders want the code each time.
+            for load in &energy.loads {
+                if guard.code_each_time_on(&load.switch) {
+                    bail!(
+                        "[[energy.load]] {:?}: {} wants the code each time \
+                         ([[guard.code_each_time]]); a load cannot switch it",
+                        load.id,
+                        load.switch
+                    );
+                }
+            }
+        }
+        // A scene runs on a gesture that typed no code (a button, a page, an
+        // agent): it never carries an order that wants it each time.
+        for scene in &self.scenes {
+            for order in &scene.orders {
+                if guard.code_each_time(&order.point, &order.value.value()) {
+                    bail!(
+                        "[[scene]] {:?}: the order on {} wants the code each time \
+                         ([[guard.code_each_time]]); a scene cannot carry it",
+                        scene.id,
+                        order.point
+                    );
+                }
+            }
         }
         moli_lights::check(&self.fixtures).map_err(|e| anyhow::anyhow!("[[fixture]] {e}"))?;
         if let Some(outdoor) = &self.outdoor {
@@ -480,6 +506,25 @@ mod tests {
         let error = config.check().unwrap_err().to_string();
         assert!(error.contains("camera_snaphot"), "{error}");
         assert!(toml::from_str::<Config>("[mcp]\ndisabled = []\n").is_err());
+    }
+
+    #[test]
+    fn a_scene_never_carries_an_order_that_wants_the_code_each_time() {
+        let guard =
+            "[[guard.code_each_time]]\npoint = \"alarme:maison/mode\"\nvalues = [\"off\"]\n";
+        let scene = |value: &str| {
+            format!(
+                "{guard}[[scene]]\nid = \"retour\"\nname = \"Retour\"\n\
+                 orders = [{{ point = \"alarme:maison/mode\", value = \"{value}\" }}]\n"
+            )
+        };
+        // Arming from a scene: the code is not wanted for it.
+        let config: Config = toml::from_str(&scene("away")).unwrap();
+        config.check().unwrap();
+        // Disarming from a scene: refused at start, not held at each press.
+        let config: Config = toml::from_str(&scene("off")).unwrap();
+        let error = config.check().unwrap_err().to_string();
+        assert!(error.contains("retour"), "{error}");
     }
 
     #[test]

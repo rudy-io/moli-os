@@ -25,7 +25,7 @@
 
   async function approve() {
     try {
-      await asHuman(t('automatismes.activer_label', { nom: v.automation.name }), () => api.approve(id, v.fingerprint));
+      await asHuman(t('automatismes.activer_label', { nom: v.automation.name }), (pin) => api.approve(id, v.fingerprint, pin));
       note(t('automatismes.parti'));
       load();
     } catch (err) {

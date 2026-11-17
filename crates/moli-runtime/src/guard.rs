@@ -55,11 +55,34 @@ pub struct PointValues {
 
 impl PointValues {
     fn covers(&self, point: &str, value: &moli_core::Value) -> bool {
-        let text = match value {
-            moli_core::Value::Text(t) => t.to_string(),
-            other => other.to_json().to_string(),
-        };
-        self.point == point && (self.values.is_empty() || self.values.contains(&text))
+        self.point == point
+            && (self.values.is_empty() || self.values.iter().any(|v| same_value(v, value)))
+    }
+}
+
+/// Whether a value written in the file (`"off"`, `"true"`, `"0"`) is this
+/// value, by meaning and not by spelling: `0`, `0.0` and `"0"` are one
+/// number, as a rule must not miss an order for the way it was written.
+fn same_value(written: &str, value: &moli_core::Value) -> bool {
+    use moli_core::Value;
+    let number = |n: f64| {
+        written
+            .trim()
+            .parse::<f64>()
+            .is_ok_and(|w| (w - n).abs() <= f64::EPSILON * w.abs().max(n.abs()).max(1.0))
+    };
+    match value {
+        Value::Text(t) => &**t == written,
+        Value::Bool(b) => written.trim() == if *b { "true" } else { "false" },
+        Value::Int(i) => {
+            written.trim().parse::<i64>().ok() == Some(*i) || {
+                #[allow(clippy::cast_precision_loss)]
+                let n = *i as f64;
+                number(n)
+            }
+        }
+        Value::Float(f) => number(*f),
+        Value::Null => written.trim() == "null",
     }
 }
 
@@ -71,6 +94,13 @@ impl GuardPolicy {
     #[must_use]
     pub fn code_each_time(&self, point: &str, value: &moli_core::Value) -> bool {
         self.code_each_time.iter().any(|r| r.covers(point, value))
+    }
+
+    /// Whether some order on this point wants the code each time, whatever
+    /// the value: what a toggle, or an order not known yet, may turn into.
+    #[must_use]
+    pub fn code_each_time_on(&self, point: &str) -> bool {
+        self.code_each_time.iter().any(|r| r.point == point)
     }
 
     /// Whether a person allowed agents this very order (`agents_may`).
@@ -557,6 +587,41 @@ mod tests {
             p.check(&[], Origin::Mcp, at("2026-10-03T12:00:00Z")),
             Verdict::Approval(_)
         ));
+    }
+
+    #[test]
+    fn a_rule_reads_the_value_by_meaning_not_by_spelling() {
+        use moli_core::Value;
+        let p = GuardPolicy {
+            code_each_time: vec![
+                PointValues {
+                    point: "x:t/level".into(),
+                    values: vec!["0".into()],
+                },
+                PointValues {
+                    point: "x:a/mode".into(),
+                    values: vec!["off".into()],
+                },
+                PointValues {
+                    point: "x:p/state".into(),
+                    values: vec!["false".into()],
+                },
+            ],
+            ..GuardPolicy::default()
+        };
+        // One number, however it was written.
+        assert!(p.code_each_time("x:t/level", &Value::Int(0)));
+        assert!(p.code_each_time("x:t/level", &Value::Float(0.0)));
+        assert!(p.code_each_time("x:t/level", &Value::Float(-0.0)));
+        assert!(!p.code_each_time("x:t/level", &Value::Float(0.5)));
+        // Words stay words; a boolean is `true` or `false`.
+        assert!(p.code_each_time("x:a/mode", &Value::from("off")));
+        assert!(!p.code_each_time("x:a/mode", &Value::from("home")));
+        assert!(p.code_each_time("x:p/state", &Value::Bool(false)));
+        assert!(!p.code_each_time("x:p/state", &Value::Bool(true)));
+        // Whatever the value: what a toggle may become.
+        assert!(p.code_each_time_on("x:p/state"));
+        assert!(!p.code_each_time_on("x:p/other"));
     }
 
     #[test]
