@@ -379,10 +379,18 @@ profile = "daikin-brp069"    # id intégré, ou chemin vers un fichier .toml lis
 host = "192.168.1.x"         # appareil du LAN (absent pour une API web : host du profil)
 # port = 80                  # sinon celui du profil, sinon 443/80
 # vars = { lat = "45.0", lon = "4.0" }
+# empty_secret = true        # l'appareil n'a pas de clé : signer avec une clé vide
 ```
 
 Une instance = un appareil. Un profil hors binaire se donne par son chemin, et ne tourne
 qu'approuvé (`moli-os profile trust <chemin>`, voir « Confiance »).
+
+`empty_secret = true` : pour un appareil qui n'a **pas** de clé, alors que son profil en
+demande une. C'est le cas d'une prise Meross installée par Matter, jamais rattachée à un compte
+Meross : elle accepte les messages signés avec une clé vide (`md5(messageId ‖ horodatage)`).
+Le coffre n'est alors pas lu, et rien n'est demandé. Un humain l'écrit, après avoir vérifié que
+l'appareil répond ainsi ; refusé sur un profil sans secret. Un tel appareil obéit à quiconque
+sur le réseau : ce n'est pas Moli qui l'ouvre, mais il vaut mieux le savoir.
 
 ## `moli-os profile list`, `profile check` et `profile trust`
 

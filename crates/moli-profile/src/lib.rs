@@ -67,6 +67,12 @@ pub struct Config {
     /// Values for the profile's `{placeholders}` (`lat`, `lon`…).
     #[serde(default)]
     pub vars: std::collections::BTreeMap<String, String>,
+    /// The device has no key: its messages are signed with an empty one
+    /// (a Meross plug set up through Matter, never bound to an account).
+    /// Written by a human; the vault is then not read. Refused on a profile
+    /// that has no secret.
+    #[serde(default)]
+    pub empty_secret: bool,
 }
 
 /// Where and how to reach the device.
@@ -100,6 +106,11 @@ impl Target {
                 "the driver options must give vars {{ {} }}",
                 missing.join(", ")
             )));
+        }
+        if config.empty_secret && profile.meta.secret.is_none() {
+            return Err(fail(
+                "`empty_secret`: this profile has no secret to leave empty".into(),
+            ));
         }
         // A key (sent, or signing messages) goes only to the host its profile
         // names; `compile` lets only a built-in profile go without one.
@@ -711,11 +722,19 @@ fn hex(bytes: &[u8]) -> String {
 
 /// The key a signing transport needs. `None` once a human has been told
 /// how to provide it and the system is shutting down; `Some(None)` when the
-/// profile needs no secret.
-async fn required_secret(profile: &Compiled, ctx: &DriverCtx) -> Option<Option<String>> {
+/// profile needs no secret; an empty key when the instance says the device
+/// has none (`empty_secret`).
+async fn required_secret(
+    config: &Config,
+    profile: &Compiled,
+    ctx: &DriverCtx,
+) -> Option<Option<String>> {
     let Some(name) = &profile.meta.secret else {
         return Some(None);
     };
+    if config.empty_secret {
+        return Some(Some(String::new()));
+    }
     if let Some(value) = ctx.secret(name) {
         return Some(Some(value));
     }
@@ -969,7 +988,7 @@ async fn run(driver: &ProfileDriver, ctx: &mut DriverCtx) -> anyhow::Result<()> 
     {
         return Ok(()); // waiting for a human, then shut down
     }
-    let Some(secret) = required_secret(profile, ctx).await else {
+    let Some(secret) = required_secret(&driver.config, profile, ctx).await else {
         return Ok(()); // waiting for a human, then shut down
     };
     let follow = followable(&driver.config, profile, driver.lan);
@@ -1322,6 +1341,7 @@ mod tests {
             host: Some("192.0.2.1".into()),
             port: None,
             vars: std::collections::BTreeMap::new(),
+            empty_secret: false,
         }
     }
 
@@ -1521,6 +1541,8 @@ mod tests {
     /// and answers `ERROR` to a message its key did not sign.
     struct Plug {
         port: u16,
+        /// The key it checks signatures against (`""`: a plug never bound).
+        key: &'static str,
         on: Arc<std::sync::atomic::AtomicBool>,
         seen: Arc<Mutex<Vec<serde_json::Value>>>,
         task: tokio::task::JoinHandle<()>,
@@ -1528,6 +1550,10 @@ mod tests {
 
     impl Plug {
         async fn start(stubborn: bool) -> Self {
+            Self::keyed(stubborn, PLUG_KEY).await
+        }
+
+        async fn keyed(stubborn: bool, key: &'static str) -> Self {
             use std::sync::atomic::Ordering::Relaxed;
             use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
             let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
@@ -1567,7 +1593,7 @@ mod tests {
                     let header = &message["header"];
                     let signed = hex(&Md5::digest(
                         format!(
-                            "{}{PLUG_KEY}{}",
+                            "{}{key}{}",
                             header["messageId"].as_str().unwrap(),
                             header["timestamp"].as_u64().unwrap()
                         )
@@ -1609,6 +1635,7 @@ mod tests {
             });
             Self {
                 port,
+                key,
                 on,
                 seen,
                 task,
@@ -1629,7 +1656,8 @@ mod tests {
         }
     }
 
-    /// A house whose instance `prise` is that plug, its key in the vault.
+    /// A house whose instance `prise` is that plug: its key in the vault, or
+    /// `empty_secret` for a plug that has none.
     async fn plugged(
         name: &str,
         plug: &Plug,
@@ -1644,9 +1672,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let vault = dir.join("secrets.enc");
         let master = || moli_runtime::MasterKey::new("ab".repeat(32));
-        moli_runtime::set_secret(&vault, &master(), "prise/key", PLUG_KEY)
-            .await
-            .unwrap();
+        let empty = plug.key.is_empty();
+        if !empty {
+            moli_runtime::set_secret(&vault, &master(), "prise/key", plug.key)
+                .await
+                .unwrap();
+        }
         let hub = moli_runtime::Hub::new(moli_runtime::HubOptions {
             secrets: Some((vault, master())),
             ..moli_runtime::HubOptions::default()
@@ -1657,6 +1688,7 @@ mod tests {
             host: Some(Ipv4Addr::LOCALHOST.to_string()),
             port: Some(plug.port),
             vars: std::collections::BTreeMap::new(),
+            empty_secret: empty,
         };
         let driver = ProfileDriver::new(config, dir.join(TRUST_FILE)).unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -1720,6 +1752,44 @@ mod tests {
         task.await.unwrap();
         plug.task.abort();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_plug_without_a_key_is_read_and_ordered_with_an_empty_one() {
+        let plug = Plug::keyed(false, "").await;
+        let (hub, cancel, task, dir) = plugged("keyless", &plug).await;
+        assert!(shows(&hub, true).await, "read, the vault never asked");
+        let point = moli_core::PointId::from(format!("{PLUG}/on"));
+        hub.command(&point, Value::Bool(false), moli_core::Origin::Ui, None)
+            .await
+            .unwrap();
+        assert!(!plug.is_on() && shows(&hub, false).await);
+        cancel.cancel();
+        task.await.unwrap();
+        plug.task.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_empty_secret_is_refused_where_there_is_no_secret() {
+        let (meteo, _) = open("open-meteo").unwrap();
+        let web = Config {
+            host: None,
+            vars: [("lat", "45.0"), ("lon", "4.0")]
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+            empty_secret: true,
+            ..config("open-meteo")
+        };
+        let error = Target::of(&web, &meteo).unwrap_err().to_string();
+        assert!(error.contains("empty_secret"), "{error}");
+        let (plug, _) = open("meross-mss310").unwrap();
+        let keyless = Config {
+            empty_secret: true,
+            ..config("meross-mss310")
+        };
+        assert!(Target::of(&keyless, &plug).is_ok());
     }
 
     #[tokio::test]
@@ -1883,6 +1953,7 @@ mod tests {
                 host: Some(CONFIGURED.to_string()),
                 port: Some(port),
                 vars: std::collections::BTreeMap::new(),
+                empty_secret: false,
             };
             let driver = ProfileDriver {
                 lan,
