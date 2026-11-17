@@ -317,12 +317,12 @@ export const icons = {
 
 export const icon = (name) => icons[name] ?? mdiLightbulbOutline;
 
-/** A trigger device's icon, from what it is called: a garage or workshop
+/** A trigger device's icon, from what it is called: a garage
  *  door is not a gate. */
 export function impulseIcon(name) {
   const n = String(name ?? '').toLowerCase();
   if (/portail|portillon|barri[eè]re|\bgate\b/.test(n)) return 'gate';
-  if (/garage|atelier|porte|\bdoor\b|workshop/.test(n)) return 'garage';
+  if (/garage|porte|\bdoor\b/.test(n)) return 'garage';
   return 'gate';
 }
 
