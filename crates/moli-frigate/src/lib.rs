@@ -703,7 +703,6 @@ fn provide_media(
         let seen = std::sync::Arc::new(review::Seen {
             api: std::sync::Arc::clone(api),
             camera: camera.to_owned(),
-            stream: stream_name(),
         });
         ctx.provide_snapshots(&id, seen.clone());
         ctx.provide_live(&id, seen);

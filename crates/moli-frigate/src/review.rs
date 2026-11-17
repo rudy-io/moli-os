@@ -44,6 +44,9 @@ pub struct Api {
     /// Set once Frigate shows another certificate than the pinned one: the
     /// driver stops on it.
     changed: tokio::sync::watch::Sender<Option<Changed>>,
+    /// Each camera's live streams on Frigate's own go2rtc, read once from
+    /// its configuration.
+    live: Mutex<Option<std::collections::BTreeMap<String, String>>>,
 }
 
 /// Frigate showed another certificate than the pinned one.
@@ -62,7 +65,22 @@ impl Api {
             password,
             cookie: Mutex::new(None),
             changed: tokio::sync::watch::Sender::new(None),
+            live: Mutex::new(None),
         }
+    }
+
+    /// The stream Frigate plays for a camera: the first of its
+    /// `live.streams`, else the camera's own name (what Frigate accepts on
+    /// `/api/go2rtc/webrtc`). From Frigate's configuration, never a request.
+    async fn stream_of(&self, camera: &str) -> anyhow::Result<String> {
+        let mut live = self.live.lock().await;
+        if live.is_none() {
+            *live = Some(live_streams(&self.json("/api/config").await?));
+        }
+        Ok(live
+            .as_ref()
+            .and_then(|l| l.get(camera).cloned())
+            .unwrap_or_else(|| camera.to_owned()))
     }
 
     /// Told when Frigate shows another certificate.
@@ -228,15 +246,13 @@ const ANSWER_WAIT: Duration = Duration::from_secs(9);
 
 /// One camera through Frigate's authenticated port, once `review` is set:
 /// its image (`/api/<camera>/latest.jpg`) and its live video (the offer to
-/// `/api/go2rtc/webrtc?src=<stream>`, which Frigate checks against the
-/// account's cameras). No go2rtc is spoken to directly.
+/// `/api/go2rtc/webrtc?src=<stream>`, a stream of Frigate's own go2rtc,
+/// which Frigate checks against the account's cameras). No go2rtc is spoken
+/// to directly, and `streams` (another go2rtc's names) is not used.
 #[derive(Debug)]
 pub struct Seen {
     pub api: Arc<Api>,
     pub camera: String,
-    /// Its go2rtc stream: from the configuration (`streams`), else the
-    /// camera's name; never from a request.
-    pub stream: String,
 }
 
 impl SnapshotSource for Seen {
@@ -262,10 +278,8 @@ impl LiveSource for Seen {
         viewer: Option<std::net::IpAddr>,
     ) -> BoxFuture<'_, anyhow::Result<String>> {
         Box::pin(async move {
-            let path = format!(
-                "/api/go2rtc/webrtc?src={}",
-                crate::go2rtc::encode(&self.stream)
-            );
+            let stream = self.api.stream_of(&self.camera).await?;
+            let path = format!("/api/go2rtc/webrtc?src={}", crate::go2rtc::encode(&stream));
             let offer = crate::go2rtc::for_go2rtc(&offer, viewer);
             let reply = self
                 .api
@@ -451,6 +465,24 @@ fn merge(mut segments: Vec<(f64, f64)>) -> Vec<Recorded> {
     out
 }
 
+/// `/api/config` → each camera's first live stream (`live.streams`, a
+/// label → its go2rtc stream).
+#[must_use]
+pub fn live_streams(config: &Json) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    if let Some(cameras) = config["cameras"].as_object() {
+        for (camera, c) in cameras {
+            let first = c["live"]["streams"]
+                .as_object()
+                .and_then(|streams| streams.values().find_map(Json::as_str));
+            if let Some(stream) = first {
+                out.insert(camera.clone(), stream.to_owned());
+            }
+        }
+    }
+    out
+}
+
 /// `/api/config` → this camera's zones (relative coordinates, `"x,y,x,y…"`
 /// or a list of numbers).
 #[must_use]
@@ -589,6 +621,22 @@ mod tests {
                 end: 30.0
             }]
         );
+    }
+
+    #[test]
+    fn a_camera_plays_its_own_stream_on_frigate() {
+        let config = json!({"cameras": {
+            "portail": {"live": {"streams": {"Principal": "portail_main", "Sous-flux": "portail_sub"}}},
+            "entree": {"live": {"streams": {}}},
+            "eye": {}
+        }});
+        let live = live_streams(&config);
+        assert_eq!(
+            live.get("portail").map(String::as_str),
+            Some("portail_main")
+        );
+        // Without streams of its own, Frigate plays it by its name.
+        assert!(!live.contains_key("entree") && !live.contains_key("eye"));
     }
 
     #[test]
