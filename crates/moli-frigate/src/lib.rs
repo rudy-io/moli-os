@@ -107,9 +107,45 @@ pub struct Frigate {
 }
 
 impl Frigate {
-    #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self { config }
+    /// Checks the configuration.
+    ///
+    /// # Errors
+    /// See [`Config::check`].
+    pub fn new(config: Config) -> anyhow::Result<Self> {
+        config.check()?;
+        Ok(Self { config })
+    }
+}
+
+impl Config {
+    /// A go2rtc address is `http://host[:port]`, without credentials: Moli
+    /// speaks to go2rtc without any (its API has none by default), and an
+    /// address carrying some would end up in error messages. A stream name
+    /// is a plain name. The messages never repeat the address.
+    ///
+    /// # Errors
+    /// A go2rtc address Moli cannot use, or a stream name that is not one.
+    pub fn check(&self) -> anyhow::Result<()> {
+        if let Some(url) = &self.go2rtc {
+            let at = moli_net::upnp::Location::parse(url)
+                .filter(|at| !at.host.is_empty() && at.path.trim_end_matches('/').is_empty());
+            let Some(at) = at else {
+                anyhow::bail!("frigate: go2rtc is an address like http://host:1984");
+            };
+            anyhow::ensure!(
+                !at.host.contains('@'),
+                "frigate: no credentials in the go2rtc address (keep go2rtc on the home network)"
+            );
+        }
+        for (camera, stream) in &self.streams {
+            anyhow::ensure!(
+                !stream.trim().is_empty()
+                    && stream.len() <= 100
+                    && !stream.chars().any(char::is_control),
+                "frigate: streams.{camera}: a go2rtc stream name"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -560,5 +596,30 @@ mod tests {
         assert_eq!(v["gpu_load"], Value::Float(7.5));
         assert_eq!(v["cpu_load"], Value::Float(14.0));
         assert!(parse_stats("not json").is_empty());
+    }
+
+    #[test]
+    fn a_go2rtc_address_carries_no_credentials() {
+        let config = |go2rtc: &str| -> Config {
+            serde_json::from_value(serde_json::json!({ "go2rtc": go2rtc })).unwrap()
+        };
+        assert!(config("http://nvr.example:1984").check().is_ok());
+        assert!(config("http://nvr.example:1984/").check().is_ok());
+        let error = config("http://admin:secret@example.com:1984")
+            .check()
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"), "{error}");
+        for bad in [
+            "nvr.example:1984",
+            "https://nvr.example",
+            "http://nvr.example:1984/api",
+        ] {
+            let error = config(bad).check().unwrap_err().to_string();
+            assert!(!error.contains("nvr.example"), "{error}");
+        }
+        let named: Config =
+            serde_json::from_value(serde_json::json!({ "streams": { "jardin": "" } })).unwrap();
+        assert!(named.check().is_err());
     }
 }

@@ -80,6 +80,8 @@
   "salon.cameras.protegee": "Protected room: only you can see it",
   "salon.cameras.aucune": "No cameras yet.",
   "salon.cameras.camera": "{nom} camera",
+  "salon.cameras.direct_impossible": "Live video cannot reach this browser: here are the camera’s images.",
+  "salon.cameras.essayer_direct": "Try live again",
   "salon.cameras.aujourdhui": "Today",
   "salon.cameras.rien": "Nothing to report in the last 24 h.",
 

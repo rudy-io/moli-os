@@ -11,8 +11,9 @@ crate = "moli-frigate"
 # Cameras appear when Frigate publishes their `motion` or `detect` state.
 mdns = []
 ssdp = []
-# The MQTT broker; Frigate's internal HTTP API (camera images).
-ports = [1883, 5000]
+# The MQTT broker; Frigate's internal HTTP API (camera images); go2rtc
+# (images and live video, optional).
+ports = [1883, 5000, 1984]
 
 [needs]
 # No MQTT credentials option (unlike z2m).

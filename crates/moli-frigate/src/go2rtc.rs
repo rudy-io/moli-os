@@ -152,4 +152,45 @@ mod tests {
         assert_eq!(s.path("webrtc"), "/api/webrtc?src=jardin%20nord%261");
         assert_eq!(encode("camera-allee"), "camera-allee");
     }
+
+    /// A go2rtc that answers with an error page naming a camera's address
+    /// (its URLs carry the camera's credentials).
+    fn go2rtc_failing() -> Stream {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut socket in listener.incoming().flatten() {
+                let mut buf = vec![0u8; 65536];
+                let _ = socket.read(&mut buf);
+                let body = "streams: jardin: rtsp://admin:secret@192.0.2.10:554/live";
+                let reply = format!(
+                    "HTTP/1.1 500 Internal Server Error\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(reply.as_bytes());
+            }
+        });
+        Stream {
+            host: "127.0.0.1".into(),
+            port,
+            name: "jardin".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn nothing_go2rtc_says_comes_out_in_an_error() {
+        let stream = go2rtc_failing();
+        let offer = "v=0\r\na=candidate:2 1 udp 1 192.168.1.50 5 typ host\r\n".to_owned();
+        let error = stream.answer(offer, None).await.unwrap_err().to_string();
+        assert!(
+            !error.contains("secret") && !error.contains("rtsp"),
+            "{error}"
+        );
+        let error = stream.snapshot().await.unwrap_err().to_string();
+        assert!(
+            !error.contains("secret") && !error.contains("rtsp"),
+            "{error}"
+        );
+    }
 }

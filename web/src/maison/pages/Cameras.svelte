@@ -19,6 +19,12 @@
   let open = $state(null);
   const current = $derived(cameras.find((c) => c.id === open));
 
+  // Live video goes from the camera to this browser: away from home (Access,
+  // outside) it cannot, so the images show at once. At home, a live view that
+  // fails falls back to them too, never a black screen.
+  const atHome = $derived(!['access', 'outside'].includes(hub.session?.via));
+  let noLive = $state(null);
+
   // What the camera saw today, from the history (rising edges only).
   const KINDS = [
     ['doorbell', 'salon.evenement.sonnette', 'bell'],
@@ -96,11 +102,17 @@
         <button class="close" onclick={() => (open = null)} aria-label={t('commun.fermer')}><Icon name="close" size={22} /></button>
       </div>
       {#key current.id}
-        {#if hub.devices[current.id]?.live && !current.locked}
+        {#if hub.devices[current.id]?.live && !current.locked && atHome && noLive !== current.id}
           <!-- Live video, played by this browser straight from the camera. -->
-          <div class="live-slot"><LiveVideo id={current.id} /></div>
+          <div class="live-slot"><LiveVideo id={current.id} onfail={() => (noLive = current.id)} /></div>
         {:else}
           <CameraTile id={current.id} name={current.name} refresh={current.battery ? 0 : 2} battery={current.battery} big />
+          {#if noLive === current.id}
+            <p class="no-live muted">
+              {t('salon.cameras.direct_impossible')}
+              <button class="link" onclick={() => (noLive = null)}>{t('salon.cameras.essayer_direct')}</button>
+            </p>
+          {/if}
         {/if}
       {/key}
       <div class="seen">
@@ -122,6 +134,25 @@
 {/if}
 
 <style>
+  .no-live {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0 0;
+    font-size: 13px;
+  }
+
+  .no-live .link {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--cool);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
   .cameras {
     display: grid;
     gap: 22px;
