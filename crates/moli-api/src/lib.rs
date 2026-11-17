@@ -36,6 +36,7 @@ mod outside;
 mod phones;
 mod plan;
 mod rest;
+mod review;
 mod session;
 pub mod settings;
 mod sse;
@@ -179,6 +180,13 @@ fn device_routes() -> Router<Hub> {
         )
         .route("/api/devices/{id}/snapshot", get(rest::snapshot))
         .route("/api/devices/{id}/live", post(rest::live))
+        .route("/api/devices/{id}/review", get(review::timeline))
+        .route("/api/devices/{id}/review/zones", get(review::zones))
+        .route(
+            "/api/devices/{id}/review/events/{event}/{what}",
+            get(review::event),
+        )
+        .route("/api/devices/{id}/review/recording", get(review::recording))
         .route(
             "/api/devices/{id}/print",
             post(rest::print).layer(DefaultBodyLimit::max(rest::MAX_PAGE)),

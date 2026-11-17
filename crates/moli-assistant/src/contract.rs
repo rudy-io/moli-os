@@ -99,6 +99,7 @@ pub fn render_prompt(house_json: &str) -> anyhow::Result<HousePrompt> {
             camera: d.camera,
             printer: d.printer,
             live: false,
+            review: false,
         })
         .collect();
     let (inventory, aliases) = house::inventory_static(&devices, &house.layout, &house.protected);

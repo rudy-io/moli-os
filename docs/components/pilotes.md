@@ -891,6 +891,7 @@ kind = "frigate"
 # api = "http://127.0.0.1:5000"
 # go2rtc = "http://nvr.example:1984"      # images ET direct par go2rtc, au lieu de l'API
 # streams = { jardin = "camera-jardin" }  # caméra Frigate → flux go2rtc, si les noms diffèrent
+# review = { host = "nvr.example", port = 8971, user = "moli" }  # le passé (frise, événements, clips, zones)
 ```
 
 - **go2rtc** (facultatif) : un go2rtc qui lit les mêmes caméras (celui de Frigate quand son port
@@ -905,9 +906,35 @@ kind = "frigate"
   page montre les images à la place.
   ⚠️ **Choix explicite de la maison.** L'API de go2rtc n'a pas de mot de passe par défaut et
   montre les adresses des caméras, identifiants compris : à garder sur le réseau local, jamais
-  exposée. Quand Frigate aura son accès authentifié dans Moli (port 8971), images et direct
-  passeront par lui, sans go2rtc.
-- **Secrets** : aucun. ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
+  exposée. Avec `review` (ci-dessous), images et direct passent par le port authentifié de
+  Frigate et `go2rtc` n'est plus contacté.
+- **Passé** (facultatif, `review`) : l'API authentifiée de Frigate (port **8971**, HTTPS, compte
+  au rôle *viewer*). Frise par caméra (`/api/review` et les segments de `/api/<caméra>/recordings`,
+  réunis en plages continues, demandés deux heures à la fois), zones (`/api/config`, coordonnées
+  relatives 0–1), image, vignette et clip d'un événement, enregistrement entre deux instants (une
+  heure au plus). **Images et direct passent aussi par ce port** : `/api/<caméra>/latest.jpg` et
+  l'offre WebRTC sur `/api/go2rtc/webrtc?src=<flux>` (Frigate vérifie le flux contre les caméras du
+  compte) ; aucun go2rtc n'est joint directement. Le certificat auto-signé est épinglé au premier
+  contact (secret `certificate`), **avant** l'envoi du mot de passe, ou écrit dans
+  `review.cert_sha256` (empreinte SHA-256, gagne sur le premier contact). **Un certificat qui
+  change n'est jamais ré-épinglé** : le pilote s'arrête (en attente, sans envoyer le mot de passe),
+  au démarrage comme en marche, et dit quoi vérifier ; l'accepter se fait depuis la machine de Moli
+  (`moli-os secrets forget <instance> certificate`, puis redémarrer) ou en changeant
+  `review.cert_sha256`. Avec `review` réglé, **jamais de repli** : sans mot de passe ou Frigate
+  injoignable au premier contact, le pilote attend (en le disant) et réessaie, de 5 s à 5 min,
+  sans passer par go2rtc. Session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
+  mémoire), `Range` transmis (le navigateur peut avancer dans le clip), `Cache-Control: no-store`
+  (rien ne reste dans le cache d'un navigateur partagé). Routes
+  `/api/devices/{id}/review/…` : jamais pour un invité ; caméra d'une pièce protégée, personne
+  connectée avec le code de la maison seulement. Un événement n'est servi que si Frigate le dit
+  de la caméra de la route (`/api/events/<id>`, `camera`) : l'id d'un événement d'une autre
+  caméra n'ouvre rien. Seuls les noms de caméra que Frigate accepte (`[A-Za-z0-9_-]`) sont pris
+  de MQTT, et seuls eux entrent dans ses chemins et ses requêtes. Colonne `distant` de
+  `routes.txt` à `non` (le passé, les clips surtout, ne devrait pas sortir) : c'est l'intention
+  déclarée, **pas encore appliquée** tant que les entrées distantes ne la lisent pas (étape 2 de
+  `SECURITY-MODEL.md`). Appareil `review: true`.
+- **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
+  (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
 - **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : elles sont ignorées). Disponibilité globale via `frigate/available`.
 - **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate).

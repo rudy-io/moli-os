@@ -19,6 +19,10 @@ GET    /api/devices                        foyer   oui
 GET    /api/devices/{id}                   foyer   oui
 GET    /api/devices/{id}/snapshot          foyer   oui
 POST   /api/devices/{id}/live              foyer   oui   # same rules as the snapshot, checked after the body
+GET    /api/devices/{id}/review            foyer   non   # same rules as the snapshot; at home only (the past, clips the most)
+GET    /api/devices/{id}/review/zones      foyer   non   # same rules as the snapshot; at home only (the past, clips the most)
+GET    /api/devices/{id}/review/events/{event}/{what}  foyer   non   # same rules as the snapshot; at home only (the past, clips the most)
+GET    /api/devices/{id}/review/recording  foyer   non   # same rules as the snapshot; at home only (the past, clips the most)
 POST   /api/devices/{id}/print             humain  oui
 PUT    /api/devices/{id}/visibility        foyer   oui   # origin ui (a person) checked after the body
 GET    /api/infra                          foyer   non
