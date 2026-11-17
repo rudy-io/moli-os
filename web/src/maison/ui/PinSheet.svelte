@@ -31,6 +31,8 @@
       ? mode === 'new'
         ? t('commun.code.choisir', { min })
         : t('commun.code.seconde_fois')
+      : /chaque fois|each time/i.test(home.held?.reason ?? '')
+        ? t('commun.code.raison_chaque_fois')
       : /automatisme|automation/i.test(home.held?.reason ?? '')
         ? t('commun.code.raison_automatisme')
         : home.held?.reason === 'airzone_control'

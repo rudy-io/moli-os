@@ -210,6 +210,25 @@ dashboard commande sans code), `via` et `who` (l'e-mail reconnu par Access).
 
 Règles, dans l'ordre :
 
+0. **Code à chaque fois** (`[[guard.code_each_time]]` : `point`, `values` ; aucune valeur =
+   toutes) : cet ordre est retenu **même venant d'une personne avec sa session** (désarmer
+   l'alarme : `point = "alarme:maison/mode"`, `values = ["off"]`). Raison `le code de la
+   maison, à chaque fois` ; la demande porte `code: true`. La valider exige le code dans la
+   décision (`pin`), vérifié à ce moment, avec le même verrouillage que la connexion, et
+   seulement pour une personne en session (sans session : `403`, aucun code essayé) ; sans
+   lui, `401` et la demande reste en attente. La valeur se compare par son sens (`0`, `0.0`
+   et `"0"` sont un même nombre), telle que l'appareil la recevra. Seul un automatisme validé
+   y échappe, et c'est pourquoi **valider ou allumer un automatisme qui porte un tel ordre**
+   (`set` sur une de ces valeurs, `toggle` sur le point) **demande le code** (`pin` dans
+   `/approve` ou `/enabled`, `401` sans lui) ; le tableau de bord sans code ne le lance pas.
+   Les ordres du système (scènes, luminaires, charges pilotées) sont retenus comme les
+   autres ; une scène ou une charge qui viserait un tel ordre est refusée dès la lecture de
+   `moli.toml`.
+0 bis. **Ce que les agents peuvent** (`[[guard.agents_may]]` : `point`, `values`) : un ordre qu'une
+   personne a permis aux agents dans le fichier (armer l'alarme à la voix : `point =
+   "alarme:maison/mode"`, `values = ["home", "night", "away"]`) passe sans personne pour la commande
+   ou l'appareil protégé ; les pièces protégées et les heures calmes valent toujours. Jamais réglable
+   depuis un écran ni l'API.
 1. **Pièce protégée** (`protected_rooms`) : l'appareil, ou un membre s'il s'agit d'un
    groupe, est dans une pièce protégée. Toutes ses pièces comptent : l'étiquette de
    l'utilisateur **et** la pièce native (Hue…). Comparaison insensible à la casse, aux
@@ -269,7 +288,9 @@ Chemin d'une commande (`Hub::command`, `crates/moli-runtime/src/hub.rs`) :
    `state` suivant.
 
 Décision humaine : `POST /api/approvals/{id}` avec `x-moli-origin: ui`, le cookie de
-session, et le corps `{"approve": true|false, "point": "<point affiché sur la carte>"}`.
+session, et le corps `{"approve": true|false, "point": "<point affiché sur la carte>",
+"pin"?: "<code>"}` (`pin` exigé pour une demande `code: true` ; faux : `401`, trop
+d'essais : `429`).
 
 | Contrôle | Échec |
 |---|---|

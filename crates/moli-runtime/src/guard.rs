@@ -32,6 +32,82 @@ pub struct GuardPolicy {
     /// Who the dashboard is: the household (no code to command), or only a
     /// person with a PIN session.
     pub dashboard: Dashboard,
+    /// Orders that want the house's code typed for them, every time, even
+    /// from an open session (disarming the alarm): only an automation a
+    /// person approved goes without.
+    pub code_each_time: Vec<CodeEachTime>,
+    /// Orders agents (the assistant, a voice, MCP, a script) may give
+    /// themselves, on a point the guard would otherwise keep for a person
+    /// (a control, a protected device): arming the alarm by voice. Protected
+    /// rooms and quiet hours still apply; written by a person, in the file.
+    pub agents_may: Vec<PointValues>,
+}
+
+/// Orders on a point: the point, and the values concerned (none listed:
+/// every value).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointValues {
+    pub point: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+impl PointValues {
+    fn covers(&self, point: &str, value: &moli_core::Value) -> bool {
+        self.point == point
+            && (self.values.is_empty() || self.values.iter().any(|v| same_value(v, value)))
+    }
+}
+
+/// Whether a value written in the file (`"off"`, `"true"`, `"0"`) is this
+/// value, by meaning and not by spelling: `0`, `0.0` and `"0"` are one
+/// number, as a rule must not miss an order for the way it was written.
+fn same_value(written: &str, value: &moli_core::Value) -> bool {
+    use moli_core::Value;
+    let number = |n: f64| {
+        written
+            .trim()
+            .parse::<f64>()
+            .is_ok_and(|w| (w - n).abs() <= f64::EPSILON * w.abs().max(n.abs()).max(1.0))
+    };
+    match value {
+        Value::Text(t) => &**t == written,
+        Value::Bool(b) => written.trim() == if *b { "true" } else { "false" },
+        Value::Int(i) => {
+            written.trim().parse::<i64>().ok() == Some(*i) || {
+                #[allow(clippy::cast_precision_loss)]
+                let n = *i as f64;
+                number(n)
+            }
+        }
+        Value::Float(f) => number(*f),
+        Value::Null => written.trim() == "null",
+    }
+}
+
+/// One order that wants the code each time.
+pub type CodeEachTime = PointValues;
+
+impl GuardPolicy {
+    /// Whether this order wants the code typed for it.
+    #[must_use]
+    pub fn code_each_time(&self, point: &str, value: &moli_core::Value) -> bool {
+        self.code_each_time.iter().any(|r| r.covers(point, value))
+    }
+
+    /// Whether some order on this point wants the code each time, whatever
+    /// the value: what a toggle, or an order not known yet, may turn into.
+    #[must_use]
+    pub fn code_each_time_on(&self, point: &str) -> bool {
+        self.code_each_time.iter().any(|r| r.point == point)
+    }
+
+    /// Whether a person allowed agents this very order (`agents_may`).
+    #[must_use]
+    pub fn agents_may(&self, point: &str, value: &moli_core::Value) -> bool {
+        self.agents_may.iter().any(|r| r.covers(point, value))
+    }
 }
 
 /// How the dashboard is recognized as the family (`[guard] dashboard`).
@@ -270,6 +346,8 @@ mod tests {
             quiet_hours: Some(QuietHours::parse("21:00", "07:30", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         }
     }
 
@@ -326,6 +404,8 @@ mod tests {
             quiet_hours: None,
             protect_unassigned: false,
             dashboard: Dashboard::Pin,
+            code_each_time: vec![],
+            agents_may: vec![],
         };
         // No protected room, no quiet hours: a script, an agent, the command
         // line and the dashboard without a code still wait for the code.
@@ -423,6 +503,8 @@ mod tests {
             ),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         };
         let night = at("2026-10-02T21:30:00Z");
         assert!(matches!(
@@ -483,6 +565,8 @@ mod tests {
             ),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         };
         assert!(quiet_salon.room_change_needs_human(&["salon"]).is_some());
         assert!(quiet_salon.room_change_needs_human(&["Grenier"]).is_none());
@@ -496,11 +580,48 @@ mod tests {
             quiet_hours: Some(QuietHours::parse("00:00", "00:00", "Europe/Paris", vec![]).unwrap()),
             protect_unassigned: false,
             dashboard: Dashboard::Trusted,
+            code_each_time: vec![],
+            agents_may: vec![],
         };
         assert!(matches!(
             p.check(&[], Origin::Mcp, at("2026-10-03T12:00:00Z")),
             Verdict::Approval(_)
         ));
+    }
+
+    #[test]
+    fn a_rule_reads_the_value_by_meaning_not_by_spelling() {
+        use moli_core::Value;
+        let p = GuardPolicy {
+            code_each_time: vec![
+                PointValues {
+                    point: "x:t/level".into(),
+                    values: vec!["0".into()],
+                },
+                PointValues {
+                    point: "x:a/mode".into(),
+                    values: vec!["off".into()],
+                },
+                PointValues {
+                    point: "x:p/state".into(),
+                    values: vec!["false".into()],
+                },
+            ],
+            ..GuardPolicy::default()
+        };
+        // One number, however it was written.
+        assert!(p.code_each_time("x:t/level", &Value::Int(0)));
+        assert!(p.code_each_time("x:t/level", &Value::Float(0.0)));
+        assert!(p.code_each_time("x:t/level", &Value::Float(-0.0)));
+        assert!(!p.code_each_time("x:t/level", &Value::Float(0.5)));
+        // Words stay words; a boolean is `true` or `false`.
+        assert!(p.code_each_time("x:a/mode", &Value::from("off")));
+        assert!(!p.code_each_time("x:a/mode", &Value::from("home")));
+        assert!(p.code_each_time("x:p/state", &Value::Bool(false)));
+        assert!(!p.code_each_time("x:p/state", &Value::Bool(true)));
+        // Whatever the value: what a toggle may become.
+        assert!(p.code_each_time_on("x:p/state"));
+        assert!(!p.code_each_time_on("x:p/other"));
     }
 
     #[test]

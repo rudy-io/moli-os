@@ -102,6 +102,9 @@ pub enum ApprovalError {
     Expired,
     #[error("this request is about another point than the one shown")]
     Mismatch,
+    /// Approving it wants the code typed now (`[guard] code_each_time`).
+    #[error("the house's code is needed for this order, each time")]
+    CodeNeeded,
     #[error("approved, but the order failed: {0}")]
     Command(CommandError),
 }
@@ -742,12 +745,21 @@ impl Hub {
             );
             return Err(error);
         }
+        // The guard judges the value as the device will take it (validated:
+        // `0` and `0.0` are one number), not as it was spelt.
         let result = match self.prepare(point, &value) {
             Err(e) => Err(e),
-            Ok(prepared) => match self.verdict_for(point, &value, origin) {
+            Ok(prepared) => match self.verdict_for(point, &prepared.value, origin) {
                 Verdict::Allow => self.send_followed(prepared, origin, actor.as_ref()).await,
                 Verdict::Approval(reason) => {
-                    let id = self.hold(point, &value, origin, actor.clone(), caller, &reason);
+                    let id = self.hold(
+                        point,
+                        &prepared.value,
+                        origin,
+                        actor.clone(),
+                        caller,
+                        &reason,
+                    );
                     Err(CommandError::NeedsApproval { id, reason })
                 }
             },
@@ -784,7 +796,17 @@ impl Hub {
         origin: Origin,
     ) -> Option<String> {
         let verdict = match value {
-            Some(value) => self.verdict_for(point, value, origin),
+            Some(value) => {
+                let value = self.validated(point, value);
+                self.verdict_for(point, &value, origin)
+            }
+            // No value (a toggle): what wants the code each time, whichever
+            // way it goes, is held.
+            None if origin != Origin::Automation
+                && self.0.opts.guard.code_each_time_on(point.as_str()) =>
+            {
+                Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"))
+            }
             // No value (a toggle): what may open is held, whichever way it goes.
             None if is_agent(origin) && self.opener_of(point) != Opener::None => {
                 Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"))
@@ -795,6 +817,27 @@ impl Hub {
             Verdict::Allow => None,
             Verdict::Approval(reason) => Some(reason),
         }
+    }
+
+    /// Whether an order on this point wants the house's code typed for it,
+    /// each time (`[guard] code_each_time`): `value` as it will be sent, or
+    /// `None` for a toggle (any rule on the point counts). An automation
+    /// carrying such an order is approved with the code.
+    #[must_use]
+    pub fn wants_code(&self, point: &PointId, value: Option<&Value>) -> bool {
+        let guard = &self.0.opts.guard;
+        match value {
+            Some(value) => guard.code_each_time(point.as_str(), &self.validated(point, value)),
+            None => guard.code_each_time_on(point.as_str()),
+        }
+    }
+
+    /// `value` as the point would take it, or as it is when the point does
+    /// not take it (unknown, read-only, the wrong kind): the guard then
+    /// judges what was asked.
+    fn validated(&self, point: &PointId, value: &Value) -> Value {
+        self.prepare(point, value)
+            .map_or_else(|_| value.clone(), |prepared| prepared.value)
     }
 
     /// What the guard says about an order on this point from this origin.
@@ -831,8 +874,31 @@ impl Hub {
     /// The verdict on this very order: opening a lock, a garage door or a gate is a
     /// person's call, whatever the room (closing is not); then the point's verdict.
     fn verdict_for(&self, point: &PointId, value: &Value, origin: Origin) -> Verdict {
+        // Some orders want the code each time, an open session or not
+        // (disarming the alarm). Only an automation goes without: a person
+        // approved it with the code (`Automations::approve_with_code`). The
+        // house's own orders (a scene, a fixture, a driven load) are sent on
+        // somebody's behalf, from a gesture that typed no code: held too.
+        if origin != Origin::Automation && self.0.opts.guard.code_each_time(point.as_str(), value) {
+            return Verdict::Approval(moli_i18n::tr!("serveur.garde.code_chaque_fois"));
+        }
         if is_agent(origin) && self.opens(point, value) {
             return Verdict::Approval(moli_i18n::tr!("serveur.garde.ouverture"));
+        }
+        // A person allowed agents this very order (arming the alarm by
+        // voice): no person is needed for the control or the device, but
+        // protected rooms and quiet hours still hold.
+        if is_agent(origin) && self.0.opts.guard.agents_may(point.as_str(), value) {
+            let rooms = point
+                .split()
+                .map(|(device, _)| self.rooms_of(&device))
+                .unwrap_or_default();
+            let rooms: Vec<&str> = rooms.iter().map(String::as_str).collect();
+            return self
+                .0
+                .opts
+                .guard
+                .check(&rooms, origin, jiff::Timestamp::now());
         }
         self.verdict(point, origin)
     }
@@ -1034,6 +1100,7 @@ impl Hub {
                 device_name,
                 native_name,
                 rooms,
+                code: self.0.opts.guard.code_each_time(point.as_str(), value),
             });
             let held = Held {
                 request: Arc::clone(&request),
@@ -1077,9 +1144,10 @@ impl Hub {
             .collect()
     }
 
-    /// A human approves (the order runs now) or denies a held order.
-    /// Only the dashboard (`Origin::Ui`) may decide, and it must name the
-    /// point it saw: a decision never lands on a request it did not show.
+    /// [`Hub::resolve_approval_with_code`], the code not typed for it.
+    ///
+    /// # Errors
+    /// See [`ApprovalError`].
     pub async fn resolve_approval(
         &self,
         id: u64,
@@ -1087,6 +1155,22 @@ impl Hub {
         approve: bool,
         origin: Origin,
         actor: Option<String>,
+    ) -> Result<(), ApprovalError> {
+        self.resolve_approval_with_code(id, expected_point, approve, origin, actor, false)
+            .await
+    }
+
+    /// A human approves (the order runs now) or denies a held order.
+    /// Only the dashboard (`Origin::Ui`) may decide, and it must name the
+    /// point it saw: a decision never lands on a request it did not show.
+    pub async fn resolve_approval_with_code(
+        &self,
+        id: u64,
+        expected_point: &PointId,
+        approve: bool,
+        origin: Origin,
+        actor: Option<String>,
+        code_typed: bool,
     ) -> Result<(), ApprovalError> {
         if origin != Origin::Ui {
             return Err(ApprovalError::HumanOnly);
@@ -1102,6 +1186,10 @@ impl Hub {
                 None => return Err(ApprovalError::Unknown),
                 Some(held) if &held.request.point != expected_point => {
                     return Err(ApprovalError::Mismatch);
+                }
+                // Left waiting: the code can still be typed.
+                Some(held) if approve && held.request.code && !code_typed => {
+                    return Err(ApprovalError::CodeNeeded);
                 }
                 Some(_) => approvals.take(id).ok_or(ApprovalError::Unknown)?,
             }

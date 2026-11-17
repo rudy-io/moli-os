@@ -219,6 +219,10 @@ pub(crate) struct DecisionBody {
     approve: bool,
     /// The point the human saw on the card.
     point: PointId,
+    /// The house's code, typed for this very order: some want it each time
+    /// (`[guard] code_each_time`), an open session or not.
+    #[serde(default)]
+    pin: Option<String>,
 }
 
 /// Approve or deny a held order: a human session (PIN) is required, even
@@ -231,17 +235,25 @@ pub(crate) async fn decide(
     headers: HeaderMap,
     Json(body): Json<DecisionBody>,
 ) -> Response {
-    let origin = if humans.is_human(&headers, &caller.key) {
-        Origin::Ui
-    } else {
-        Origin::Api
-    };
+    let human = humans.is_human(&headers, &caller.key);
+    let origin = if human { Origin::Ui } else { Origin::Api };
     let actor = Some(caller.describe());
+    // Checked now, behind the same lockout as signing in, and only for a
+    // person in a session: without one, the decision is refused anyway, and
+    // this route must not become a place to try codes.
+    let code_typed = match body.pin.as_deref() {
+        Some(pin) if body.approve && human => match humans.verify(pin, &caller) {
+            Ok(()) => true,
+            Err(e) => return crate::people_api::login_error(e, "serveur.code.incorrect"),
+        },
+        _ => false,
+    };
     match hub
-        .resolve_approval(id, &body.point, body.approve, origin, actor)
+        .resolve_approval_with_code(id, &body.point, body.approve, origin, actor, code_typed)
         .await
     {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e @ ApprovalError::CodeNeeded) => error(StatusCode::UNAUTHORIZED, &e.to_string()),
         Err(e @ ApprovalError::HumanOnly) => error(StatusCode::FORBIDDEN, &e.to_string()),
         Err(e @ (ApprovalError::Unknown | ApprovalError::Expired)) => {
             error(StatusCode::GONE, &e.to_string())

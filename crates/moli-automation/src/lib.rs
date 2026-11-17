@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
-use moli_core::{AutomationChange, Notice, Origin};
+use moli_core::{AutomationChange, Notice, Origin, PointId};
 use moli_i18n::tr;
 use moli_runtime::{BoxFuture, Hub};
 use serde::Deserialize;
@@ -118,6 +118,10 @@ pub enum AutomationError {
     /// The automation changed since the person looked at it.
     #[error("this automation changed since you looked at it")]
     Conflict,
+    /// One of its orders wants the house's code each time (`[guard]
+    /// code_each_time`): approving it, or switching it on, wants it typed now.
+    #[error("the house's code is needed to approve this automation")]
+    CodeNeeded,
     #[error("cannot save: {0}")]
     Io(String),
 }
@@ -519,11 +523,27 @@ impl Automations {
 
     /// A person approves the version they saw (`fingerprint`) and switches
     /// it on. Another version in between: refused, they must look again.
+    /// The code not typed for it: see [`Automations::approve_with_code`].
     pub async fn approve(
         &self,
         id: &str,
         fingerprint: &str,
         by: Actor,
+    ) -> Result<Automation, AutomationError> {
+        self.approve_with_code(id, fingerprint, by, false).await
+    }
+
+    /// [`Automations::approve`], `code_typed` saying whether the person typed
+    /// the house's code for this very gesture (checked by the caller). An
+    /// approved automation runs its orders without the code, so one that
+    /// carries an order wanting it each time (disarming the alarm) is
+    /// approved with the code, never with a session alone.
+    pub async fn approve_with_code(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        by: Actor,
+        code_typed: bool,
     ) -> Result<Automation, AutomationError> {
         if !by.human {
             return Err(AutomationError::NeedsHuman);
@@ -531,6 +551,9 @@ impl Automations {
         let current = self.get(id).ok_or(AutomationError::Unknown)?;
         if current.fingerprint() != fingerprint {
             return Err(AutomationError::Conflict);
+        }
+        if !code_typed && self.wants_code(&current.graph) {
+            return Err(AutomationError::CodeNeeded);
         }
         if !self.check(&current.graph).ok() {
             return Err(AutomationError::Invalid("fix the problems first".into()));
@@ -557,6 +580,21 @@ impl Automations {
         Ok(a)
     }
 
+    /// Whether one of its orders wants the house's code each time: a `set`
+    /// on such a value, a `toggle` on such a point (it may turn into one).
+    #[must_use]
+    pub fn wants_code(&self, graph: &Graph) -> bool {
+        let hub = &self.0.hub;
+        graph.nodes.iter().any(|node| match &node.step {
+            Step::Set { point, value } => hub.wants_code(
+                &PointId::from(point.as_str()),
+                Some(&moli_core::Value::from_json(value)),
+            ),
+            Step::Toggle { point } => hub.wants_code(&PointId::from(point.as_str()), None),
+            _ => false,
+        })
+    }
+
     /// Off: anyone, any time. On: a person approving what they saw.
     pub async fn set_enabled(
         &self,
@@ -565,10 +603,26 @@ impl Automations {
         fingerprint: Option<&str>,
         by: Actor,
     ) -> Result<Automation, AutomationError> {
+        self.set_enabled_with_code(id, on, fingerprint, by, false)
+            .await
+    }
+
+    /// [`Automations::set_enabled`]; switching on is approving, with the
+    /// code when one of its orders wants it ([`Automations::approve_with_code`]).
+    pub async fn set_enabled_with_code(
+        &self,
+        id: &str,
+        on: bool,
+        fingerprint: Option<&str>,
+        by: Actor,
+        code_typed: bool,
+    ) -> Result<Automation, AutomationError> {
         if on {
             let fingerprint =
                 fingerprint.ok_or_else(|| AutomationError::Invalid("which version?".into()))?;
-            return self.approve(id, fingerprint, by).await;
+            return self
+                .approve_with_code(id, fingerprint, by, code_typed)
+                .await;
         }
         let a = self.update(id, |a| a.enabled = false)?;
         self.stop(id);

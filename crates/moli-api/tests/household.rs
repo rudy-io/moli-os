@@ -65,19 +65,45 @@ async fn bedroom(dir: &std::path::Path) -> Hub {
 }
 
 async fn bedroom_with(dir: &std::path::Path, dashboard: Dashboard) -> Hub {
+    bedroom_guarded(
+        dir,
+        GuardPolicy {
+            protected_rooms: vec!["Chambre".into()],
+            protected_devices: vec![],
+            quiet_hours: None,
+            protect_unassigned: false,
+            dashboard,
+            code_each_time: vec![],
+            agents_may: vec![],
+        },
+    )
+    .await
+}
+
+/// The bedroom, and switching the bulb off wants the code each time.
+async fn bedroom_coded(dir: &std::path::Path) -> Hub {
+    bedroom_guarded(
+        dir,
+        GuardPolicy {
+            protected_rooms: vec!["Chambre".into()],
+            code_each_time: vec![moli_runtime::guard::CodeEachTime {
+                point: "fake:bulb/state".into(),
+                values: vec!["false".into()],
+            }],
+            ..GuardPolicy::default()
+        },
+    )
+    .await
+}
+
+async fn bedroom_guarded(dir: &std::path::Path, guard: GuardPolicy) -> Hub {
     std::fs::create_dir_all(dir).unwrap();
     let hub = Hub::new(HubOptions {
         secrets: Some((
             dir.join("secrets.enc"),
             moli_runtime::MasterKey::generate().unwrap(),
         )),
-        guard: GuardPolicy {
-            protected_rooms: vec!["Chambre".into()],
-            protected_devices: vec![],
-            quiet_hours: None,
-            protect_unassigned: false,
-            dashboard,
-        },
+        guard,
         ..HubOptions::default()
     })
     .unwrap();
@@ -318,5 +344,172 @@ async fn a_routine_reaching_a_bedroom_wants_the_code_from_the_dashboard() {
     let (status, _, body) =
         request(&addr, "POST", "/api/automations/nuit/run", &seen, &person).await;
     assert_eq!(status, 200, "{body}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The code typed on a held order is checked only for a person in a
+/// session, behind the lockout of signing in: without a session, this route
+/// is no place to try codes.
+#[tokio::test]
+async fn the_code_on_a_decision_is_tried_only_in_a_session() {
+    let dir = std::env::temp_dir().join(format!("moli-household-decide-{}", std::process::id()));
+    let hub = bedroom_coded(&dir).await;
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new(PIN)),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let bulb: moli_core::PointId = "fake:bulb/state".into();
+    hub.command(&bulb, Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    let held = |hub: Hub| async move {
+        match hub
+            .command(
+                &"fake:bulb/state".into(),
+                Value::Bool(false),
+                Origin::Ui,
+                None,
+            )
+            .await
+        {
+            Err(moli_runtime::CommandError::NeedsApproval { id, .. }) => id,
+            other => panic!("held: {other:?}"),
+        }
+    };
+    let id = held(hub.clone()).await;
+    let path = format!("/api/approvals/{id}");
+    let decision = |pin: &str| json!({ "approve": true, "point": "fake:bulb/state", "pin": pin });
+
+    // No session: refused, the code never looked at, the right one included.
+    for pin in [
+        "000000", "111111", "222222", "333333", "444444", "555555", PIN,
+    ] {
+        let (status, _, body) = request(&addr, "POST", &path, &decision(pin), UI).await;
+        assert_eq!(status, 403, "{body}");
+    }
+    // Nothing was counted: signing in still works.
+    let (status, cookie, _) =
+        request(&addr, "POST", "/api/session", &json!({ "pin": PIN }), "").await;
+    assert_eq!(status, 200);
+    let person = format!("{UI}Cookie: {}\r\n", cookie.unwrap());
+
+    // A session, no code: still waiting for it.
+    let none = json!({ "approve": true, "point": "fake:bulb/state" });
+    let (status, _, body) = request(&addr, "POST", &path, &none, &person).await;
+    assert_eq!(status, 401, "{body}");
+    // A wrong code: refused, and it counts.
+    let (status, _, body) = request(&addr, "POST", &path, &decision("999999"), &person).await;
+    assert_eq!(status, 401, "{body}");
+    // The right one: it goes.
+    let (status, _, body) = request(&addr, "POST", &path, &decision(PIN), &person).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(hub.state(&bulb).unwrap().value, Value::Bool(false));
+
+    // Wrong codes here and at the door share one count: past it, even
+    // signing in with the right code waits.
+    hub.command(&bulb, Value::Bool(true), Origin::Ui, None)
+        .await
+        .unwrap();
+    let path = format!("/api/approvals/{}", held(hub.clone()).await);
+    for _ in 0..5 {
+        request(&addr, "POST", &path, &decision("999999"), &person).await;
+    }
+    let (status, _, _) = request(&addr, "POST", "/api/session", &json!({ "pin": PIN }), "").await;
+    assert_ne!(status, 200);
+    assert_eq!(hub.state(&bulb).unwrap().value, Value::Bool(true));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// An approved automation runs without the code: one that carries an order
+/// wanting it each time is approved, or switched on, with the code.
+#[tokio::test]
+async fn an_automation_that_disarms_is_approved_with_the_code() {
+    use moli_automation::{Actor, Author, Automation, Automations};
+    let dir = std::env::temp_dir().join(format!("moli-household-coded-{}", std::process::id()));
+    let hub = bedroom_coded(&dir).await;
+    let (autos, _engine) = Automations::start(
+        &hub,
+        moli_automation::Config::default(),
+        None,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let person = Actor {
+        human: true,
+        author: Author::Human,
+    };
+    let routine: Automation = serde_json::from_value(json!({
+        "id": "off", "name": "off", "enabled": false,
+        "graph": {
+            "nodes": [
+                { "id": "t", "type": "manual" },
+                { "id": "s", "type": "set", "point": "fake:bulb/state", "value": false }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        }
+    }))
+    .unwrap();
+    let routine = autos.save(routine, person).await.unwrap();
+    let fingerprint = routine.fingerprint();
+    assert!(autos.wants_code(&routine.graph));
+    // A session alone is not enough, here or through the engine.
+    assert!(matches!(
+        autos.approve("off", &fingerprint, person).await,
+        Err(moli_automation::AutomationError::CodeNeeded)
+    ));
+    let options = moli_api::Options {
+        ui_pin: Some(moli_api::UiPin::new(PIN)),
+        automations: Some(autos.clone()),
+        ..moli_api::Options::default()
+    };
+    let addr = serve(&hub, &options).await;
+    let (_, cookie, _) = request(&addr, "POST", "/api/session", &json!({ "pin": PIN }), "").await;
+    let person = format!("{UI}Cookie: {}\r\n", cookie.unwrap());
+
+    let seen = json!({ "fingerprint": fingerprint });
+    let (status, _, body) = request(
+        &addr,
+        "POST",
+        "/api/automations/off/approve",
+        &seen,
+        &person,
+    )
+    .await;
+    assert_eq!(status, 401, "{body}");
+    let on = json!({ "on": true, "fingerprint": fingerprint });
+    let (status, _, body) =
+        request(&addr, "POST", "/api/automations/off/enabled", &on, &person).await;
+    assert_eq!(status, 401, "{body}");
+    // A wrong code, then none without a session: refused.
+    let wrong = json!({ "fingerprint": fingerprint, "pin": "999999" });
+    let (status, _, body) = request(
+        &addr,
+        "POST",
+        "/api/automations/off/approve",
+        &wrong,
+        &person,
+    )
+    .await;
+    assert_eq!(status, 401, "{body}");
+    let right = json!({ "fingerprint": fingerprint, "pin": PIN });
+    let (status, _, body) =
+        request(&addr, "POST", "/api/automations/off/approve", &right, UI).await;
+    assert_eq!(status, 403, "{body}");
+    // The code typed for it: approved.
+    let (status, _, body) = request(
+        &addr,
+        "POST",
+        "/api/automations/off/approve",
+        &right,
+        &person,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(autos.get("off").unwrap().is_approved());
+    // The dashboard without a code cannot run it either (D0).
+    let (status, _, body) = request(&addr, "POST", "/api/automations/off/run", &seen, UI).await;
+    assert_eq!(status, 403, "{body}");
     let _ = std::fs::remove_dir_all(dir);
 }
