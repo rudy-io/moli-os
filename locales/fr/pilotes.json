@@ -922,6 +922,8 @@
   "pilotes.dehors.intensite_pluie": "Intensité de la pluie",
   "pilotes.dehors.pluie_jour": "Pluie du jour",
   "pilotes.dehors.uv": "Indice UV",
+  "pilotes.dehors.max_mesure": "Max mesuré du jour",
+  "pilotes.dehors.min_mesure": "Min mesuré du jour",
   "pilotes.dehors.source": "Source : {what}",
   "pilotes.dehors.stations": "Stations",
   "pilotes.dehors.previsions": "Prévisions",

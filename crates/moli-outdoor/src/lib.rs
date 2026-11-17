@@ -27,6 +27,13 @@
 //! stale_after = "15m"               # optional, 30 min by default
 //! ```
 //!
+//! With a station that measures the temperature, it also says the day's
+//! measured extremes, `measured_max` and `measured_min` (#246): since
+//! midnight at the house's time, over what the stations measured only (never
+//! mixed with the forecast, which keeps its own `today_max` / `today_min`).
+//! Nothing measured since midnight: no value. On a restart it starts again
+//! from the day's history, not from nothing.
+//!
 //! Read-only: it takes no order and passes none on. Nothing is converted:
 //! a source whose unit differs from the meaning's is left out (and said so).
 
@@ -37,6 +44,7 @@ use moli_core::{
     Access, Device, DeviceId, Event, InstanceId, Kind, PointId, PointSpec, Semantic, Unit, Value,
     now_ms,
 };
+use moli_history::History;
 use moli_runtime::{BoxFuture, Driver, DriverCtx, Hub};
 use serde::{Deserialize, Deserializer};
 use tokio::sync::broadcast::error::RecvError;
@@ -344,6 +352,82 @@ pub fn publish(last: Option<&(Candidate, u64)>, chosen: &Candidate, now: u64) ->
     }
 }
 
+// ---- the day's measured extremes ------------------------------------------------------
+
+/// The day's measured extremes: their keys on the device.
+pub const MEASURED_MAX: &str = "measured_max";
+pub const MEASURED_MIN: &str = "measured_min";
+
+/// Midnight at the house's time, for the day `now` is in (ms since the epoch).
+#[must_use]
+pub fn day_start(now: u64, zone: &jiff::tz::TimeZone) -> u64 {
+    let Ok(at) = i64::try_from(now).map(jiff::Timestamp::from_millisecond) else {
+        return 0;
+    };
+    let Ok(at) = at else { return 0 };
+    at.to_zoned(zone.clone())
+        .start_of_day()
+        .ok()
+        .and_then(|midnight| u64::try_from(midnight.timestamp().as_millisecond()).ok())
+        .unwrap_or(0)
+}
+
+/// A measure and the time it was read at, if any.
+pub type Reading = Option<(f64, u64)>;
+
+/// The highest and the lowest measure since `start`, each with the time it
+/// was read at.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Extremes {
+    pub start: u64,
+    pub max: Reading,
+    pub min: Reading,
+}
+
+impl Extremes {
+    #[must_use]
+    pub fn since(start: u64) -> Self {
+        Self {
+            start,
+            ..Self::default()
+        }
+    }
+
+    /// A measure read at `ts`: counted if it is of the day.
+    pub fn see(&mut self, value: f64, ts: u64) {
+        self.see_range(value, value, ts);
+    }
+
+    /// A span of measures (a history bucket): its lowest and its highest.
+    pub fn see_range(&mut self, low: f64, high: f64, ts: u64) {
+        if ts < self.start || !low.is_finite() || !high.is_finite() {
+            return;
+        }
+        if self.max.is_none_or(|(max, _)| high > max) {
+            self.max = Some((high, ts));
+        }
+        if self.min.is_none_or(|(min, _)| low < min) {
+            self.min = Some((low, ts));
+        }
+    }
+}
+
+/// The stations' temperature points: what the day's extremes are made of.
+fn measured_temperature<'a>(sources: &[Source], layout: &'a Layout) -> Vec<&'a PointId> {
+    layout
+        .slots
+        .iter()
+        .find(|s| s.semantic == Semantic::Temperature)
+        .map(|slot| {
+            slot.points
+                .iter()
+                .filter(|(i, _)| sources[*i].measured)
+                .map(|(_, p)| p)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ---- the device -----------------------------------------------------------------------
 
 fn label(semantic: Semantic) -> String {
@@ -416,6 +500,30 @@ pub fn device(id: DeviceId, instance: &InstanceId, sources: &[Source], layout: &
             Semantic::Config,
         ));
     }
+    if !measured_temperature(sources, layout).is_empty() {
+        let unit = layout
+            .slots
+            .iter()
+            .find(|s| s.semantic == Semantic::Temperature)
+            .and_then(|s| s.unit.clone());
+        for (key, label) in [
+            (MEASURED_MAX, moli_i18n::tr!("pilotes.dehors.max_mesure")),
+            (MEASURED_MIN, moli_i18n::tr!("pilotes.dehors.min_mesure")),
+        ] {
+            let numeric = Kind::Numeric {
+                min: None,
+                max: None,
+                step: None,
+            };
+            points.push(read_only(
+                key,
+                &label,
+                numeric,
+                unit.clone(),
+                Semantic::Temperature,
+            ));
+        }
+    }
     points.push(read_only(
         "stations",
         &moli_i18n::tr!("pilotes.dehors.stations"),
@@ -456,18 +564,32 @@ fn ids(sources: &[Source], measured: bool) -> String {
 
 // ---- the driver -----------------------------------------------------------------------
 
-#[derive(Debug)]
 pub struct Outdoor {
     hub: Hub,
     sources: Vec<Source>,
+    /// Where the day's extremes start again after a restart.
+    history: Option<History>,
+    /// The house's time zone: the day starts at its midnight.
+    zone: jiff::tz::TimeZone,
+}
+
+impl std::fmt::Debug for Outdoor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Outdoor")
+            .field("sources", &self.sources)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Outdoor {
+    /// `zone`: the house's IANA time zone (UTC if unknown).
     #[must_use]
-    pub fn new(hub: Hub, config: &Config) -> Self {
+    pub fn new(hub: Hub, config: &Config, history: Option<History>, zone: &str) -> Self {
         Self {
             hub,
             sources: config.sources(),
+            history,
+            zone: jiff::tz::TimeZone::get(zone).unwrap_or(jiff::tz::TimeZone::UTC),
         }
     }
 }
@@ -481,10 +603,15 @@ struct Published {
     online: Option<bool>,
     /// Notes already logged: each once.
     noted: HashSet<String>,
+    /// The day's measured extremes, what of them was published, and the
+    /// station points whose day was read again from the history.
+    day: Extremes,
+    shown: (Reading, Reading),
+    restored: HashSet<PointId>,
 }
 
 impl Outdoor {
-    fn refresh(&self, ctx: &DriverCtx, published: &mut Published) {
+    async fn refresh(&self, ctx: &DriverCtx, published: &mut Published) {
         let id = ctx.device_id(NATIVE);
         let views: Vec<_> = self
             .sources
@@ -516,6 +643,7 @@ impl Outdoor {
             );
             published.device = Some(device);
             published.values.clear();
+            published.shown = (None, None);
         }
         let now = now_ms();
         for slot in &layout.slots {
@@ -549,12 +677,77 @@ impl Outdoor {
                 published.values.insert(slot.key, (chosen.clone(), now));
             }
         }
+        self.extremes(ctx, &id, &layout, published).await;
         // Reachable while one of its sources is.
         let online = views.iter().flatten().any(|v| v.online != Some(false));
         if published.online != Some(online) {
             ctx.set_availability(&id, online);
             published.online = Some(online);
         }
+    }
+}
+
+impl Outdoor {
+    /// The day's measured extremes: what the stations measured since
+    /// midnight, the day's history first after a restart.
+    async fn extremes(
+        &self,
+        ctx: &DriverCtx,
+        id: &DeviceId,
+        layout: &Layout,
+        published: &mut Published,
+    ) {
+        let points = measured_temperature(&self.sources, layout);
+        if points.is_empty() {
+            return;
+        }
+        let now = now_ms();
+        let start = day_start(now, &self.zone);
+        if published.day.start != start {
+            // A new day: nothing measured yet.
+            published.day = Extremes::since(start);
+            published.restored.clear();
+        }
+        for point in points {
+            if let Some(history) = &self.history
+                && published.restored.insert(point.clone())
+            {
+                match history.series(point.as_str(), start, now, 5_000).await {
+                    Ok(series) => {
+                        for (ts, value) in series.raw {
+                            if let Some(v) = value.as_f64() {
+                                published.day.see(v, ts);
+                            }
+                        }
+                        for bucket in series.buckets {
+                            published.day.see_range(bucket.min, bucket.max, bucket.ts);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(instance = INSTANCE, %point, "the day's history: {e}");
+                    }
+                }
+            }
+            if let Some(sample) = self.hub.state(point)
+                && let Some(v) = sample.value.as_f64()
+            {
+                published.day.see(v, sample.ts);
+            }
+        }
+        let day = (published.day.max, published.day.min);
+        for (key, now_, was) in [
+            (MEASURED_MAX, day.0, published.shown.0),
+            (MEASURED_MIN, day.1, published.shown.1),
+        ] {
+            if now_ == was {
+                continue;
+            }
+            match now_ {
+                Some((value, ts)) => ctx.set_state_at(id, key, Value::Float(value), ts),
+                None => ctx.set_state(id, key, Value::Null),
+            }
+        }
+        published.shown = day;
     }
 }
 
@@ -576,7 +769,7 @@ impl Driver for Outdoor {
             let members: HashSet<DeviceId> =
                 self.sources.iter().map(|s| s.device.clone()).collect();
             let mut published = Published::default();
-            self.refresh(ctx, &mut published);
+            self.refresh(ctx, &mut published).await;
             ctx.ready();
             let mut tick = tokio::time::interval(TICK);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -607,7 +800,7 @@ impl Driver for Outdoor {
                     }
                 };
                 if refresh {
-                    self.refresh(ctx, &mut published);
+                    self.refresh(ctx, &mut published).await;
                 }
             }
         })
@@ -887,6 +1080,104 @@ mod tests {
         );
     }
 
+    /// The day starts at midnight, the house's time: Paris is an hour ahead
+    /// of UTC in winter, two in summer.
+    #[test]
+    fn the_day_starts_at_the_house_midnight() {
+        let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+        // 2026-11-17 13:30 UTC = 14:30 in Paris → midnight in Paris = 23:00 UTC the day before.
+        let now: jiff::Timestamp = "2026-11-17T13:30:00Z".parse().unwrap();
+        let midnight: jiff::Timestamp = "2026-11-16T23:00:00Z".parse().unwrap();
+        let ms = |t: jiff::Timestamp| u64::try_from(t.as_millisecond()).unwrap();
+        assert_eq!(day_start(ms(now), &paris), ms(midnight));
+        // 23:30 UTC is already the next day in Paris.
+        let late: jiff::Timestamp = "2026-11-17T23:30:00Z".parse().unwrap();
+        let next: jiff::Timestamp = "2026-11-17T23:00:00Z".parse().unwrap();
+        assert_eq!(day_start(ms(late), &paris), ms(next));
+        // Summer: two hours ahead.
+        let july: jiff::Timestamp = "2026-07-01T12:00:00Z".parse().unwrap();
+        let july_midnight: jiff::Timestamp = "2026-06-30T22:00:00Z".parse().unwrap();
+        assert_eq!(day_start(ms(july), &paris), ms(july_midnight));
+    }
+
+    /// What was measured since midnight only; nothing measured, no value.
+    #[test]
+    fn the_day_extremes_count_the_day_only() {
+        let mut day = Extremes::since(1_000);
+        assert_eq!((day.max, day.min), (None, None));
+        // Read before midnight: yesterday's.
+        day.see(-3.0, 999);
+        assert_eq!((day.max, day.min), (None, None));
+        day.see(4.0, 1_100);
+        day.see(9.5, 1_200);
+        day.see(2.5, 1_300);
+        day.see(f64::NAN, 1_400);
+        assert_eq!(day.max, Some((9.5, 1_200)));
+        assert_eq!(day.min, Some((2.5, 1_300)));
+        // A history bucket brings its own lowest and highest.
+        day.see_range(1.0, 11.0, 1_500);
+        assert_eq!(day.max, Some((11.0, 1_500)));
+        assert_eq!(day.min, Some((1.0, 1_500)));
+        // The same value again keeps the first time it was reached.
+        day.see(11.0, 1_600);
+        assert_eq!(day.max, Some((11.0, 1_500)));
+    }
+
+    /// The extremes exist with a station that measures the temperature; a
+    /// forecast alone has its own `today_max` / `today_min`.
+    #[test]
+    fn the_extremes_come_with_a_measured_temperature() {
+        let both =
+            config("forecast = \"meteo:api\"\n[[station]]\ndevice = \"z2m:0x1\"\n").sources();
+        let station = device_with(
+            "z2m:0x1",
+            vec![spec(
+                "temperature",
+                Semantic::Temperature,
+                Some(Unit::Celsius),
+            )],
+        );
+        let forecast = device_with(
+            "meteo:api",
+            vec![spec(
+                "temperature",
+                Semantic::Temperature,
+                Some(Unit::Celsius),
+            )],
+        );
+        let id = || DeviceId::from("dehors:meteo");
+        let instance = InstanceId::from(INSTANCE);
+        let with = device(
+            id(),
+            &instance,
+            &both,
+            &layout(&both, &[Some(&station), Some(&forecast)]),
+        );
+        let max = with.point(MEASURED_MAX).unwrap();
+        assert_eq!(max.unit, Some(Unit::Celsius));
+        assert!(!max.access.write);
+        assert!(with.point(MEASURED_MIN).is_some());
+        // The station not there yet (or no station): no extremes.
+        let without = device(
+            id(),
+            &instance,
+            &both,
+            &layout(&both, &[None, Some(&forecast)]),
+        );
+        assert!(without.point(MEASURED_MAX).is_none());
+        let humid = device_with(
+            "z2m:0x1",
+            vec![spec("humidity", Semantic::Humidity, Some(Unit::Percent))],
+        );
+        let no_temperature = device(
+            id(),
+            &instance,
+            &both,
+            &layout(&both, &[Some(&humid), Some(&forecast)]),
+        );
+        assert!(no_temperature.point(MEASURED_MAX).is_none());
+    }
+
     fn forecast_of(ts: u64) -> Candidate {
         candidate("meteo:api", 12.0, ts, 30)
     }
@@ -913,7 +1204,14 @@ mod tests {
         let keys: Vec<&str> = d.points.iter().map(|p| &*p.key).collect();
         assert_eq!(
             keys,
-            ["temperature", "temperature_source", "stations", "forecast"]
+            [
+                "temperature",
+                "temperature_source",
+                "measured_max",
+                "measured_min",
+                "stations",
+                "forecast"
+            ]
         );
         assert!(d.points.iter().all(|p| !p.access.write));
         let source = d.point("temperature_source").unwrap();
