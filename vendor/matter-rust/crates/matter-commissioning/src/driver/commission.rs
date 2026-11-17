@@ -438,6 +438,11 @@ pub struct DriverConfig<'a> {
     /// `None`, `commission()` discovers it via mDNS using the setup payload's
     /// discriminator.
     pub commissionable_addr: Option<SocketAddr>,
+    /// Retransmission timing of the commissionable device, when known in
+    /// advance (a sleepy Thread device's advertised `SII`/`SAI`). Paces PASE
+    /// and the secured PASE session (see [`crate::driver::run_pase_for`]);
+    /// `None` keeps the spec defaults.
+    pub commissionable_mrp: Option<matter_transport::MrpConfig>,
     /// Device passcode (from the setup payload).
     pub passcode: u32,
     /// The controller's **persistent** commissioner operational identity on
@@ -729,6 +734,7 @@ where
         commissioner_pkcs8,
         TransportReliability::Mrp,
         crate::driver::case::RESOLVE_POLL_ATTEMPTS,
+        config.commissionable_mrp,
     )
     .await
 }
@@ -784,6 +790,7 @@ where
         config.commissioner_signer_pkcs8,
         TransportReliability::TransportProvides,
         crate::driver::case::BLE_RESOLVE_POLL_ATTEMPTS,
+        None,
     )
     .await
 }
@@ -839,6 +846,7 @@ async fn run_commission<P, O, D>(
     commissioner_pkcs8: &[u8],
     reliability: TransportReliability,
     resolve_attempts: u32,
+    pase_mrp: Option<matter_transport::MrpConfig>,
 ) -> Result<CommissionedFabric, DriverError>
 where
     P: AsyncDatagram,
@@ -853,12 +861,13 @@ where
     //    (`run_pase_with(.., Mrp)` == `run_pase`, so the IP path is byte-for-byte
     //    unchanged; the BLE path passes `TransportProvides`.)
     let mut sessions = SessionManager::new();
-    let pase_sid = crate::driver::pase::run_pase_with(
+    let pase_sid = crate::driver::pase::run_pase_for(
         pase_transport,
         &mut sessions,
         pase_peer,
         passcode,
         reliability,
+        pase_mrp,
     )
     .await?;
 

@@ -47,6 +47,22 @@ read once per driver run and consumed **before** network commissioning. A superv
 restart therefore cannot silently repeat a partially completed pairing. On failure,
 inspect the device's fabric membership before explicitly supplying a new code.
 
+**A device that never shows up for pairing.** Some Thread devices, shared from another
+controller, open their commissioning window but their commissionable record (`_matterc._udp`
+with `CM=1`/`2`) never reaches the LAN through the border router: mDNS discovery then fails
+(`Driver/Discovery`) although the device would accept the code. A human can give the address
+where it listens — its operational address (`_matter._tcp` AAAA record, port 5540) — and,
+for a sleepy device, its pace (`SII`/`SAI` from the same record, in ms):
+
+```toml
+pairing_address = "[fd00::1]:5540"   # tried instead of mDNS while a pairing_code waits
+pairing_idle_ms = 5000                # SII; both or neither, and only with an address
+pairing_active_ms = 2200              # SAI
+```
+
+Without the pace, PASE uses the spec defaults and gives up after about 5.6 s per message,
+before a sleepy device wakes. Remove the options once the device is paired.
+
 The encrypted vault stores `controller_snapshot` (private fabric keys, hex encoded,
 maximum decoded size 1 MiB). Back up the vault and master key together. Never copy this
 snapshot between simultaneously running controllers. Without a writable vault the driver

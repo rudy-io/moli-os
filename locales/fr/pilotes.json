@@ -857,6 +857,7 @@
   "pilotes.matter.leak": "Fuite d’eau",
   "pilotes.matter.occupancy": "Présence",
   "pilotes.matter.pairing_failed": "L’appairage Matter a échoué. La demande à usage unique a pu être consommée ; vérifier les contrôleurs associés à l’appareil avant de réessayer.",
+  "pilotes.matter.pairing_pace": "Matter : pairing_idle_ms et pairing_active_ms vont ensemble, avec pairing_address, entre 1 et 3 600 000 ms.",
   "pilotes.matter.brightness": "Luminosité",
   "pilotes.matter.color_temp": "Température de couleur",
   "pilotes.matter.color": "Couleur",

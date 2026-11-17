@@ -85,6 +85,28 @@ pub async fn run_pase_with<T: AsyncDatagram>(
     passcode: u32,
     reliability: TransportReliability,
 ) -> Result<SessionId, DriverError> {
+    run_pase_for(transport, sessions, peer, passcode, reliability, None).await
+}
+
+/// [`run_pase_with`] for a peer whose retransmission timing is known in
+/// advance: a sleepy (ICD) Thread device advertises its `SII`/`SAI` and only
+/// polls its parent every few seconds, so the spec defaults (300 ms base,
+/// about 5.6 s per message) give up before it ever wakes. `peer_mrp`, when
+/// given, paces the unsecured handshake and is installed on the resulting
+/// secured PASE session, so the whole pre-operational phase waits for it.
+/// `None` is exactly [`run_pase_with`].
+///
+/// # Errors
+///
+/// Same as [`run_pase_with`].
+pub async fn run_pase_for<T: AsyncDatagram>(
+    transport: &T,
+    sessions: &mut SessionManager,
+    peer: SocketAddr,
+    passcode: u32,
+    reliability: TransportReliability,
+    peer_mrp: Option<MrpConfig>,
+) -> Result<SessionId, DriverError> {
     let local = sessions.allocate_session_id();
     let mut prover = PaseProver::new_with_negotiation(passcode, local.0)?;
     // CSPRNG-seeded counter + ephemeral source node id (spec §4.6.1.1,
@@ -96,7 +118,7 @@ pub async fn run_pase_with<T: AsyncDatagram>(
     let mut exch = UnsecuredExchange::new_ephemeral_with(
         random_exchange_id()?,
         reliability,
-        MrpConfig::for_peer(None, None, None),
+        peer_mrp.unwrap_or_else(|| MrpConfig::for_peer(None, None, None)),
     )?;
 
     let request = prover.start()?;
@@ -183,6 +205,11 @@ pub async fn run_pase_with<T: AsyncDatagram>(
     if reliability == TransportReliability::TransportProvides {
         sessions.set_transport_reliable(local, true)?;
     }
+    if let Some(peer_mrp) = peer_mrp {
+        if let Some(session) = sessions.get_mut(local) {
+            session.mrp = matter_transport::MrpState::new(peer_mrp);
+        }
+    }
     Ok(local)
 }
 
@@ -208,6 +235,130 @@ mod tests {
         b.extend_from_slice(&0u32.to_le_bytes()); // SECURE_CHANNEL
         b.extend_from_slice(&protocol_code.to_le_bytes());
         b
+    }
+
+    /// The device side of a PASE handshake over `dev_io`, as in
+    /// [`run_pase_establishes_matching_session`]; returns its session keys.
+    async fn answer_pase(
+        dev_io: &InMemoryDatagram,
+        ctrl_addr: std::net::SocketAddr,
+        pin: u32,
+        params: PasePbkdfParams,
+    ) -> matter_crypto::pase::PaseSessionKeys {
+        let mut verifier = PaseVerifier::new_from_pin(pin, params, 0x00BB).unwrap();
+        let mut ctr: u32 = 100;
+        let (p, _) = dev_io.recv_from().await.unwrap();
+        let m = decode_unsecured(&p).unwrap();
+        verifier.handle_pbkdf_request(&m.payload).unwrap();
+        let resp = verifier.next_message().unwrap();
+        let wire = encode_unsecured(
+            ctr,
+            m.exchange_id,
+            OP_PBKDF_RESP,
+            matter_transport::ProtocolId::SECURE_CHANNEL,
+            false,
+            true,
+            Some(m.message_counter),
+            None,
+            &resp,
+        );
+        ctr += 1;
+        dev_io.send_to(&wire, ctrl_addr).await.unwrap();
+
+        let (p, _) = dev_io.recv_from().await.unwrap();
+        let m = decode_unsecured(&p).unwrap();
+        verifier.handle_pake1(&m.payload).unwrap();
+        let pake2 = verifier.next_message().unwrap();
+        let wire = encode_unsecured(
+            ctr,
+            m.exchange_id,
+            OP_PAKE2,
+            matter_transport::ProtocolId::SECURE_CHANNEL,
+            false,
+            true,
+            Some(m.message_counter),
+            None,
+            &pake2,
+        );
+        dev_io.send_to(&wire, ctrl_addr).await.unwrap();
+
+        let (p, _) = dev_io.recv_from().await.unwrap();
+        let m = decode_unsecured(&p).unwrap();
+        verifier.handle_pake3(&m.payload).unwrap();
+
+        // Real devices close the handshake with a reliable StatusReport
+        // (SessionEstablishmentSuccess) and expect it to be acked
+        // (observed: Tapo P110M, M6.6.5 validation).
+        ctr += 1;
+        let report = encode_unsecured(
+            ctr,
+            m.exchange_id,
+            OP_STATUS_REPORT,
+            matter_transport::ProtocolId::SECURE_CHANNEL,
+            false,
+            true,
+            Some(m.message_counter),
+            None,
+            &status_report_body(0, 0),
+        );
+        dev_io.send_to(&report, ctrl_addr).await.unwrap();
+
+        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), dev_io.recv_from())
+            .await
+            .expect("controller must ack the StatusReport")
+            .unwrap();
+        let ack = decode_unsecured(&ack.0).unwrap();
+        assert_eq!(ack.opcode, OP_STANDALONE_ACK);
+        assert_eq!(ack.ack_counter, Some(ctr));
+
+        verifier.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn run_pase_for_installs_the_sleepy_peer_timing_on_the_session() {
+        let pin = 20_202_021;
+        let params = PasePbkdfParams {
+            iterations: 1000,
+            salt: vec![0x55; 16],
+        };
+        let (ctrl_io, dev_io) = InMemoryDatagram::pair();
+        let (dev_addr, ctrl_addr) = (dev_io.local_addr(), ctrl_io.local_addr());
+        let mut sessions = SessionManager::new();
+        // A Thread device advertising SII=5000 / SAI=2200 (seen on a radiator valve).
+        let sleepy = MrpConfig::for_peer(
+            Some(std::time::Duration::from_millis(5000)),
+            Some(std::time::Duration::from_millis(2200)),
+            None,
+        );
+        let controller = run_pase_for(
+            &ctrl_io,
+            &mut sessions,
+            dev_addr,
+            pin,
+            TransportReliability::Mrp,
+            Some(sleepy),
+        );
+        let (ctrl_result, dev_keys) =
+            tokio::join!(controller, answer_pase(&dev_io, ctrl_addr, pin, params));
+        let sid = ctrl_result.unwrap();
+        let registered = sessions.get(sid).unwrap();
+        assert_eq!(registered.keys, SessionKeys::from(dev_keys));
+        assert_eq!(
+            registered.mrp.config(),
+            sleepy,
+            "the secured PASE session keeps its pace"
+        );
+        // Without a timing, the session keeps the defaults (run_pase_with).
+        let (ctrl_io, dev_io) = InMemoryDatagram::pair();
+        let (dev_addr, ctrl_addr) = (dev_io.local_addr(), ctrl_io.local_addr());
+        let params = PasePbkdfParams {
+            iterations: 1000,
+            salt: vec![0x55; 16],
+        };
+        let controller = run_pase(&ctrl_io, &mut sessions, dev_addr, pin);
+        let (sid, _) = tokio::join!(controller, answer_pase(&dev_io, ctrl_addr, pin, params));
+        let registered = sessions.get(sid.unwrap()).unwrap();
+        assert_ne!(registered.mrp.config(), sleepy);
     }
 
     #[tokio::test]

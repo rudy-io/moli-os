@@ -23,8 +23,16 @@ The setup code is consumed before network activity, so an uncertain failure cann
 be retried automatically on every supervised restart. Inspect device fabric
 membership before explicitly supplying another pairing code.
 
+If the device is reachable (it answers a ping at its operational address) but pairing fails
+in discovery, its commissionable record may not cross the border router: give its address and
+pace with `pairing_address`, `pairing_idle_ms`, `pairing_active_ms` (see [README.md](README.md)).
+
 Once commissioned, ongoing reads, commands and subscriptions use the common IP
 path; Bluetooth is not the ongoing control channel.
+
+FR : si l'appareil répond au ping mais que l'appairage échoue à la découverte, son annonce
+d'appairage ne traverse sans doute pas le routeur de bordure : donner son adresse et son
+rythme de sommeil (`pairing_address`, `pairing_idle_ms`, `pairing_active_ms`, voir le README).
 
 FR : cette contribution ne compile aucun chemin Bluetooth et n'appaire aucun
 réseau Thread. L'appareil Thread se commissionne une fois avec l'application du
