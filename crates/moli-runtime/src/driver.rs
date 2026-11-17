@@ -26,6 +26,13 @@ pub trait Driver: Send + Sync + 'static {
         Arc::from(self.kind())
     }
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>>;
+    /// Its orders change nothing outside Moli (the alarm's state, kept by
+    /// Moli itself): a mirror house lets them through, so the mirror runs
+    /// it in the shadow of the real house. What it then asks of real
+    /// devices is still stopped.
+    fn stays_inside(&self) -> bool {
+        false
+    }
 }
 
 /// A validated write addressed to a driver. The driver must answer through
@@ -308,6 +315,37 @@ impl DriverCtx {
         self.hub
             .state(&PointId::new(device, key))
             .map(|sample| sample.value)
+    }
+
+    /// Every change in the house (states, devices, availability), to follow
+    /// other devices: read-only, the driver still acts on its own only.
+    /// The whole house, so for trusted drivers: compiled into Moli and
+    /// reviewed like the rest of it (the alarm), never a plug-in.
+    #[must_use]
+    pub fn watch(&self) -> tokio::sync::broadcast::Receiver<moli_core::Event> {
+        self.hub.subscribe()
+    }
+
+    /// The last value of any point of the house, with its time (trusted
+    /// drivers only, as [`DriverCtx::watch`]).
+    #[must_use]
+    pub fn read(&self, point: &PointId) -> Option<moli_core::Sample> {
+        self.hub.state(point)
+    }
+
+    /// Whether a point of the house is there to be read (its device known,
+    /// with this point, not offline).
+    #[must_use]
+    pub fn answers(&self, point: &PointId) -> bool {
+        self.hub.answers(point)
+    }
+
+    /// What people call a device (its name in Moli), if the house has it.
+    #[must_use]
+    pub fn name_of(&self, device: &DeviceId) -> Option<String> {
+        self.hub
+            .describe(device)
+            .map(|(d, label)| label.name.unwrap_or_else(|| d.native_name.to_string()))
     }
 
     /// Records a value for a point of one of this instance's devices.

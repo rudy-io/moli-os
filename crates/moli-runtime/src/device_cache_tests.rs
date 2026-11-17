@@ -65,7 +65,7 @@ fn definition() -> Device {
     }
 }
 fn register(hub: &Hub) -> tokio::sync::mpsc::Receiver<crate::CommandRequest> {
-    hub.register_driver(&instance(), "synthetic", "synthetic-package".into())
+    hub.register_driver(&instance(), "synthetic", "synthetic-package".into(), false)
 }
 async fn save_fixture(f: &Fixture) {
     let hub = f.hub();
@@ -119,7 +119,7 @@ async fn cached_definitions_require_the_same_active_driver_identity() {
         ("synthetic", "synthetic", "other-package"),
     ] {
         let hub = f.hub();
-        let _commands = hub.register_driver(&owner.into(), kind, integration.into());
+        let _commands = hub.register_driver(&owner.into(), kind, integration.into(), false);
         assert!(hub.device(&id()).is_none());
     }
 }
@@ -334,7 +334,7 @@ async fn reregistered_instance_does_not_expose_another_integration_inventory() {
     hub.upsert_device(definition());
     hub.set_state(&id(), "on", Value::Bool(true));
     hub.unregister_driver(&instance());
-    let _other = hub.register_driver(&instance(), "other", "other-package".into());
+    let _other = hub.register_driver(&instance(), "other", "other-package".into(), false);
     assert!(hub.device(&id()).is_none());
     assert!(hub.known_device_ids_of(&instance()).is_empty());
     hub.unregister_driver(&instance());
