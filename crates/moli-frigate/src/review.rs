@@ -298,18 +298,22 @@ impl ReviewSource for Camera {
 
     fn recorded(&self, after: f64, before: f64) -> BoxFuture<'_, anyhow::Result<Vec<Recorded>>> {
         Box::pin(async move {
-            let mut segments = Vec::new();
+            // Only the two times of each segment are kept, read straight as
+            // numbers: a whole day as a JSON tree weighed tens of MiB, more
+            // than Moli has (several cameras are asked at once).
+            let mut segments: Vec<(f64, f64)> = Vec::new();
             for (from, to) in windows(after, before) {
                 let path = format!(
                     "/api/{}/recordings?after={from:.0}&before={to:.0}",
                     self.name
                 );
-                if let Json::Array(part) = self.api.json(&path).await? {
-                    segments.extend(part);
-                }
+                let body = self.api.send(Method::GET, &path, None, WAIT).await?;
+                let part: Vec<Segment> =
+                    serde_json::from_slice(&body).context("Frigate: not a list of recordings")?;
+                segments.extend(part.into_iter().map(|s| (s.start_time, s.end_time)));
             }
             // A segment across two windows comes twice: merged like any overlap.
-            Ok(stretches(&Json::Array(segments)))
+            Ok(merge(segments))
         })
     }
 
@@ -409,17 +413,33 @@ pub fn windows(after: f64, before: f64) -> Vec<(f64, f64)> {
     out
 }
 
-/// `/api/<camera>/recordings` (10 s segments) → the stretches recorded.
-#[must_use]
-pub fn stretches(answer: &Json) -> Vec<Recorded> {
-    let mut segments: Vec<(f64, f64)> = answer
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|s| Some((s["start_time"].as_f64()?, s["end_time"].as_f64()?)))
-        .filter(|(a, b)| b > a)
-        .collect();
+/// One recorded segment, its times only (the rest of Frigate's fields are
+/// skipped while reading, never kept).
+#[derive(serde::Deserialize)]
+struct Segment {
+    start_time: f64,
+    end_time: f64,
+}
+
+/// `/api/<camera>/recordings` (10 s segments) → the stretches recorded, from
+/// an answer already read as JSON (the tests' shape; the driver reads the
+/// times alone, see [`Segment`]).
+#[cfg(test)]
+fn stretches(answer: &Json) -> Vec<Recorded> {
+    merge(
+        answer
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| Some((s["start_time"].as_f64()?, s["end_time"].as_f64()?)))
+            .collect(),
+    )
+}
+
+/// Segments (start, end) → the stretches they make, gaps of [`GAP`] closed.
+fn merge(mut segments: Vec<(f64, f64)>) -> Vec<Recorded> {
+    segments.retain(|(a, b)| b > a);
     segments.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut out: Vec<Recorded> = Vec::new();
     for (start, end) in segments {
@@ -548,6 +568,25 @@ mod tests {
             vec![Recorded {
                 start: 7195.0,
                 end: 7215.0
+            }]
+        );
+    }
+
+    #[test]
+    fn a_segment_is_read_for_its_two_times_only() {
+        let body = br#"[{"id":"1700000000.0-abc","start_time":10.0,"end_time":20.0,
+            "motion":12,"objects":0,"dBFS":0,"duration":10.0,"segment_size":1.3},
+            {"start_time":20.5,"end_time":30.0,"region":{"x":1}}]"#;
+        let part: Vec<Segment> = serde_json::from_slice(body).unwrap();
+        let segments = part
+            .into_iter()
+            .map(|s| (s.start_time, s.end_time))
+            .collect();
+        assert_eq!(
+            merge(segments),
+            vec![Recorded {
+                start: 10.0,
+                end: 30.0
             }]
         );
     }
