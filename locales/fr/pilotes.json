@@ -192,6 +192,8 @@
   "pilotes.reolink.phrase": "une phrase de 1 à 500 caractères",
   "pilotes.reolink.sans_voix": "Moli n'a pas de voix (assistant absent)",
   "pilotes.reolink.certificat_change": "le certificat de la station a changé : si c'est normal, `moli-os secrets forget {instance} {key}` puis redémarrer",
+  "pilotes.frigate.zone": "Zone de caméra",
+  "pilotes.frigate.zone_nom": "Zone {zone} ({camera})",
   "pilotes.frigate.personnes": "Personnes",
   "pilotes.frigate.voitures": "Voitures",
   "pilotes.frigate.chiens": "Chiens",

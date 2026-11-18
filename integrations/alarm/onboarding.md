@@ -3,7 +3,7 @@
 1. À la reprise de HA, lire la configuration d'Alarmo (`.storage/alarmo.storage`) : modes
    actifs et leurs délais (`exit_time`, `entry_time`, `trigger_time`), capteurs et leurs
    modes, `use_entry_delay` (faux → `immediate = true`).
-2. Trouver dans Moli le point de chaque capteur (zone Frigate : `frigate:zone_<zone>/<objet>`,
+2. Trouver dans Moli le point de chaque capteur (zone Frigate : `frigate:zone.<zone>/<objet>`,
    porte : `…/contact`). Un capteur désactivé dans Alarmo n'est pas repris.
 3. Déclarer `kind = "alarm"`, `[driver.options.modes.<mode>]` et un `[[driver.options.sensor]]`
    par capteur (32 au plus) ; dans `[guard]`, la recommandation du README : le code à chaque

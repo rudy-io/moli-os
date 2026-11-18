@@ -451,6 +451,83 @@ fn camera_device(ctx: &DriverCtx, camera: &str) -> Device {
     }
 }
 
+/// A zone's native id: `zone.<name>`. Frigate never puts a dot in a
+/// camera's name (`review::is_camera`), so a zone and a camera never share
+/// an id.
+fn zone_id(zone: &str) -> String {
+    format!("zone.{zone}")
+}
+
+/// Whether one of this instance's devices is a zone (`<instance>:zone.…`).
+fn is_zone_device(instance: &str, id: &str) -> bool {
+    id.strip_prefix(instance)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|native| native.starts_with("zone."))
+}
+
+/// A zone drawn on a camera, as a device: how many people, cars… stand in
+/// it now (Frigate's counts for the zone). A sensor for the alarm (a count
+/// above 0 is active).
+fn zone_device(ctx: &DriverCtx, zone: &str, of: &review::ZoneOf) -> Device {
+    let points = OBJECTS
+        .iter()
+        .map(|(key, label)| {
+            let mut p = spec(
+                key,
+                &moli_i18n::tr(label),
+                Kind::Numeric {
+                    min: Some(0.0),
+                    max: None,
+                    step: Some(1.0),
+                },
+                false,
+            );
+            p.semantic = Semantic::Occupancy;
+            p
+        })
+        .collect();
+    Device {
+        id: ctx.device_id(&zone_id(zone)),
+        instance: ctx.instance().clone(),
+        native_name: moli_i18n::tr!(
+            "pilotes.frigate.zone_nom",
+            zone = of.name,
+            camera = of.camera.replace('_', " ")
+        )
+        .into(),
+        manufacturer: Some("Frigate".into()),
+        model: Some(moli_i18n::tr!("pilotes.frigate.zone").into()),
+        description: None,
+        native_room: None,
+        members: Vec::new(),
+        points,
+    }
+}
+
+/// Frigate's zones, read once from its configuration in the background,
+/// tried again with a growing pause while Frigate does not answer. Stops
+/// as soon as nobody waits for them (the driver stopped).
+async fn read_zones(
+    api: std::sync::Arc<review::Api>,
+    mut tx: tokio::sync::oneshot::Sender<BTreeMap<String, review::ZoneOf>>,
+) {
+    let mut pause = RETRY_FIRST;
+    loop {
+        match api.zones().await {
+            Ok(zones) => {
+                let _ = tx.send(zones);
+                return;
+            }
+            Err(e) => tracing::debug!(error = %e, "frigate: zones not read yet"),
+        }
+        tokio::select! {
+            () = tx.closed() => return,
+            () = tokio::time::sleep(pause) => {}
+        }
+        pause = (pause * 2).min(RETRY_MAX);
+    }
+}
+
 /// The server itself, as a device (its native id cannot be a camera's:
 /// Frigate camera names are lowercase words, this one has a dash).
 const SERVER: &str = "frigate-server";
@@ -645,9 +722,17 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
         Err(None) => return Ok(()),
     };
     let mut certificate = review.as_ref().map(|api| api.certificate_changed());
-    let mut cameras: BTreeSet<String> = BTreeSet::new();
-    let mut available = true;
-    let mut server = false;
+    // With `review`, the zones become devices once Frigate's configuration
+    // is read: zone → its camera and name.
+    let mut zones_coming = review.as_ref().map(|api| {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(read_zones(std::sync::Arc::clone(api), tx));
+        rx
+    });
+    let mut seen = Seen {
+        available: true,
+        ..Seen::default()
+    };
     let mut connected = false;
     let mut paused_until: Option<tokio::time::Instant> = None;
     ctx.ready();
@@ -656,11 +741,28 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             command = ctx.next_command() => {
                 let Some(command) = command else { return Ok(()) };
                 if connected {
-                    reply(&client, &base, ctx, &cameras, command);
+                    reply(&client, &base, ctx, &seen.cameras, command);
                 } else {
                     // Queued now, sent hours later: refuse instead.
                     command.reply(Err(moli_i18n::tr!("pilotes.frigate.broker_injoignable")));
                 }
+            }
+            found = async { zones_coming.as_mut().expect("guarded").await }, if zones_coming.is_some() => {
+                zones_coming = None;
+                let Ok(found) = found else { continue };
+                // A zone gone from Frigate's configuration leaves Moli too
+                // (`zone.` is never a camera's id, nor the server's).
+                let keep: Vec<_> = found.keys().map(|z| ctx.device_id(&zone_id(z))).collect();
+                for id in ctx.known_devices() {
+                    if is_zone_device(ctx.instance().as_str(), id.as_str()) && !keep.contains(&id) {
+                        ctx.remove_device(&id);
+                    }
+                }
+                for (zone, of) in &found {
+                    ctx.upsert_device(zone_device(ctx, zone, of));
+                    ctx.set_availability(&ctx.device_id(&zone_id(zone)), seen.available && connected);
+                }
+                seen.zones = found;
             }
             changed = certificate_lost(certificate.as_mut()) => {
                 return park(ctx, stopped_on(config, ctx, &changed)).await;
@@ -680,52 +782,99 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                 Ok(Event::Incoming(Packet::Publish(publish))) => {
                     let Some(rest) = publish.topic.strip_prefix(&format!("{base}/")) else { continue };
                     let payload = String::from_utf8_lossy(&publish.payload);
-                    if rest == "available" {
-                        available = payload == "online";
-                        for camera in &cameras {
-                            ctx.set_availability(&ctx.device_id(camera), available);
-                        }
-                        if server {
-                            ctx.set_state(&ctx.device_id(SERVER), "running", Value::Bool(available));
-                        }
-                        continue;
-                    }
-                    if rest == "stats" {
-                        let id = ctx.device_id(SERVER);
-                        if !server {
-                            server = true;
-                            ctx.upsert_device(server_device(ctx));
-                            ctx.set_state(&id, "running", Value::Bool(available));
-                        }
-                        for (key, value) in parse_stats(&payload) {
-                            ctx.set_state(&id, key, value);
-                        }
-                        continue;
-                    }
-                    let Some(Update::Value(camera, key, value)) = parse(rest, &payload) else { continue };
-                    if !cameras.contains(camera) {
-                        if !names_a_camera(key) {
-                            continue; // a zone, or not a camera yet
-                        }
-                        cameras.insert(camera.to_owned());
-                        ctx.upsert_device(camera_device(ctx, camera));
-                        provide_media(ctx, config, camera, api.as_ref(), review.as_ref());
-                        ctx.set_availability(&ctx.device_id(camera), available);
-                    }
-                    ctx.set_state(&ctx.device_id(camera), key, value);
+                    seen.publish(ctx, config, rest, &payload, api.as_ref(), review.as_ref());
                 }
                 Ok(_) => {}
                 Err(e) => {
                     connected = false;
                     tracing::debug!(instance = %ctx.instance(), error = %e, "frigate broker unreachable");
-                    for camera in &cameras {
-                        ctx.set_availability(&ctx.device_id(camera), false);
+                    for id in device_ids(&seen.cameras, &seen.zones) {
+                        ctx.set_availability(&ctx.device_id(&id), false);
                     }
                     paused_until = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                 }
             },
         }
     }
+}
+
+/// What the driver has learnt from Frigate so far.
+#[derive(Default)]
+struct Seen {
+    cameras: BTreeSet<String>,
+    /// With `review`: zone → its camera and name.
+    zones: BTreeMap<String, review::ZoneOf>,
+    /// `frigate/available`.
+    available: bool,
+    /// The server's device, declared at the first `stats`.
+    server: bool,
+}
+
+impl Seen {
+    /// One message of Frigate's, `rest` below the base topic.
+    fn publish(
+        &mut self,
+        ctx: &DriverCtx,
+        config: &Config,
+        rest: &str,
+        payload: &str,
+        api: Option<&moli_net::upnp::Location>,
+        review: Option<&std::sync::Arc<review::Api>>,
+    ) {
+        if rest == "available" {
+            self.available = payload == "online";
+            for id in device_ids(&self.cameras, &self.zones) {
+                ctx.set_availability(&ctx.device_id(&id), self.available);
+            }
+            if self.server {
+                ctx.set_state(
+                    &ctx.device_id(SERVER),
+                    "running",
+                    Value::Bool(self.available),
+                );
+            }
+            return;
+        }
+        if rest == "stats" {
+            let id = ctx.device_id(SERVER);
+            if !self.server {
+                self.server = true;
+                ctx.upsert_device(server_device(ctx));
+                ctx.set_state(&id, "running", Value::Bool(self.available));
+            }
+            for (key, value) in parse_stats(payload) {
+                ctx.set_state(&id, key, value);
+            }
+            return;
+        }
+        let Some(Update::Value(camera, key, value)) = parse(rest, payload) else {
+            return;
+        };
+        // Frigate never names a zone as a camera: its counts are the zone's.
+        if self.zones.contains_key(camera) {
+            ctx.set_state(&ctx.device_id(&zone_id(camera)), key, value);
+            return;
+        }
+        if !self.cameras.contains(camera) {
+            if !names_a_camera(key) {
+                return; // a zone (without `review`), or not a camera yet
+            }
+            self.cameras.insert(camera.to_owned());
+            ctx.upsert_device(camera_device(ctx, camera));
+            provide_media(ctx, config, camera, api, review);
+            ctx.set_availability(&ctx.device_id(camera), self.available);
+        }
+        ctx.set_state(&ctx.device_id(camera), key, value);
+    }
+}
+
+/// The native ids of the cameras and zones seen so far.
+fn device_ids(cameras: &BTreeSet<String>, zones: &BTreeMap<String, review::ZoneOf>) -> Vec<String> {
+    cameras
+        .iter()
+        .cloned()
+        .chain(zones.keys().map(|z| zone_id(z)))
+        .collect()
 }
 
 /// Where a camera's images, live video and past come from. With `review`,
@@ -847,6 +996,32 @@ mod tests {
         assert_eq!(parse("x&cameras=chambre/motion", "ON"), None);
         assert_eq!(parse("../motion", "ON"), None);
         assert_eq!(parse("stats", "{}"), None);
+    }
+
+    #[test]
+    fn a_zone_never_shares_a_cameras_id() {
+        // Camera names may hold a dash: `zone-x` could be one; never `zone.x`.
+        assert!(review::is_camera("zone-allee"));
+        assert!(!review::is_camera(&zone_id("allee")));
+        let cameras = BTreeSet::from(["portail".to_owned()]);
+        let zones = BTreeMap::from([(
+            "allee".to_owned(),
+            review::ZoneOf {
+                camera: "portail".into(),
+                name: "Allée".into(),
+            },
+        )]);
+        assert_eq!(device_ids(&cameras, &zones), ["portail", "zone.allee"]);
+        // Only zones are ever removed when gone from Frigate.
+        assert!(is_zone_device("frigate", "frigate:zone.allee"));
+        assert!(!is_zone_device("frigate", "frigate:zone-allee"));
+        assert!(!is_zone_device("frigate", "frigate:frigate-server"));
+        assert!(!is_zone_device("frigate", "frigate2:zone.allee"));
+        // A zone's counts read as a camera's: the loop gives them to the zone.
+        assert_eq!(
+            parse("allee/person", "1"),
+            Some(Update::Value("allee", "person", Value::Int(1)))
+        );
     }
 
     #[test]
