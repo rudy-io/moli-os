@@ -11,7 +11,8 @@
 
   // A Zigbee thermostatic valve: its setpoint and its mode, with the temperature
   // it measures for context. Every order goes through `act`, the hub's normal path and the guard.
-  let { id, name } = $props();
+  // `schedule`: false where the schedule is edited beside the card (the Chauffage page).
+  let { id, name, schedule = true } = $props();
 
   const d = $derived(device(id));
   const keys = $derived(climateKeys(d));
@@ -114,7 +115,7 @@
       <ValveChart {id} {name} />
     {/if}
   {/if}
-  {#if hasSchedule}
+  {#if hasSchedule && schedule}
     <button class="fold" onclick={() => (editing = !editing)} aria-expanded={editing}>{t('commun.vanne.prog.titre')}</button>
     {#if editing}
       <ScheduleEditor {id} {name} />

@@ -24,7 +24,7 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon', 'WeekSchedule']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
@@ -1058,4 +1058,24 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(html.includes('DiskStation'));
   assert.ok(!html.includes('Volume 1'));
   assert.ok(!html.includes('class="gauges"'));
+});
+
+test('the week shows every day as bands, a boundary to drag between two steps', () => {
+  const html = show('WeekSchedule', schedulePoints(), { ...valveValues, weekly_schedule_monday: '00:00/17 06:00/20 22:00/16' });
+  // Seven days to choose, one row each.
+  assert.equal(buttons(html).filter((tag) => tag.includes('aria-pressed')).length, 7);
+  // Monday's two changes can be dragged; the other days hold one step and none.
+  const edges = buttons(html).filter((tag) => tag.includes('class="edge'));
+  assert.equal(edges.length, 2);
+  assert.match(edges[0], /06:00 vers 20°/);
+  assert.match(html, /00:00 → 06:00 : 17°/);
+  assert.match(html, /22:00 → 00:00 : 16°/);
+  // The colour of a step is its warmth on the shared scale.
+  assert.match(html, /var\(--warm\) 63%/);
+});
+
+test('beside the week, the card leaves the schedule out and the editor opens the chosen day', () => {
+  assert.doesNotMatch(show('ValveCard', schedulePoints(), valveValues, {}, { schedule: false }), /Table horaire/);
+  const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_wednesday: '00:00/17 07:00/20' }, {}, { day: 'wednesday' });
+  assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 2);
 });

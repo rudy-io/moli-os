@@ -26,6 +26,8 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { isValve } from './lib/capabilities.js';
+  import { scheduleSpec } from './lib/schedule.js';
 
   let { route } = $props();
   $effect(() => {
@@ -56,7 +58,7 @@
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating') },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating' || (isValve(d) && scheduleSpec(d))) },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
