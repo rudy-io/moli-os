@@ -179,6 +179,7 @@
   "commun.piece.a_l_arret": "À l’arrêt",
   "commun.piece.eteinte": "Éteinte",
   "commun.piece.allumee": "Allumée",
+  "commun.piece.allumee_conso": "Allumée · {watts}",
   "commun.piece.en_marche": "En marche",
   "commun.piece.mode.froid": "Froid",
   "commun.piece.mode.chaud": "Chaud",
