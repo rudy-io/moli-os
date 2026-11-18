@@ -5,8 +5,9 @@
   import Icon from './Icon.svelte';
 
   /** A camera image, refreshed every `refresh` seconds while visible.
-   *  Battery cameras refresh only when asked: every image wakes them. */
-  let { id, name, refresh = 10, battery = false, big = false, onopen = null } = $props();
+   *  Battery cameras refresh only when asked: every image wakes them.
+   *  `onsize(w, h)`: the image's proportions, as each one shows. */
+  let { id, name, refresh = 10, battery = false, big = false, onopen = null, onsize = null } = $props();
 
   /** Never two automatic images closer than this, whatever re-runs. */
   const MIN_GAP = 1000;
@@ -96,7 +97,7 @@
 <figure class="cam" class:big>
   <button class="frame" onclick={() => (onopen ? onopen(id) : load(true))} aria-label={t(onopen ? 'salon.camera.agrandir' : 'salon.camera.actualiser', { nom: name })}>
     {#if src}
-      <img {src} alt={t('salon.camera.image', { nom: name })} />
+      <img {src} alt={t('salon.camera.image', { nom: name })} onload={(e) => onsize?.(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />
     {:else}
       <span class="placeholder"><Icon name="cctv" size={34} /><small>{failed ? t('salon.camera.indisponible') : t('salon.camera.chargement')}</small></span>
     {/if}
