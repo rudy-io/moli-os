@@ -223,7 +223,9 @@ tenir celle de la pièce.
 id = "parents"                       # stable : chauffage:parents
 name = "Chambre parentale"           # son nom, et sa pièce dans Moli
 sensor = "matter:…-6/temperature"    # la sonde de la pièce (°C)
-valves = [{ temperature = "matter:…-1/temperature", setpoint = "matter:…-1/target_temperature" }]
+valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
+# correction = false : les vannes reçoivent la consigne de la pièce telle quelle (une vanne
+#   qui régule déjà sur une sonde de la pièce, comme tado X avec la sienne)
 # min = 5.0, max = 25.0 : les consignes que la pièce accepte
 # initial = 19.0 : la consigne et le programme avant qu'on les règle
 ```
@@ -234,21 +236,26 @@ valves = [{ temperature = "matter:…-1/temperature", setpoint = "matter:…-1/t
   défaut, au demi-degré), `system_mode` (`auto` suit le programme, `heat` tient la consigne,
   `off` donne aux vannes leur consigne la plus basse, hors-gel), `weekly_schedule_<jour>`
   (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
-  `valve_correction` (l'écart appliqué aux vannes, °C, en lecture). En `auto`, une consigne
-  changée à la main tient jusqu'au créneau suivant.
-- **La correction** : écart = température de la vanne − température de la sonde, lissé (les deux
-  tiers d'un changement en 20 min, pour ne pas courir après la chaleur du radiateur), borné à
-  −3 / +6 °C. Consigne de la vanne = consigne de la pièce + écart, au demi-degré, dans les bornes
-  de la vanne. Exemple : pièce voulue à 20, sonde 20,9, vanne 22 → la vanne reçoit 21.
+  `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
+  l'autre). En `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
+- **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
+  reste sous sa consigne, il monte ; elle la dépasse, il descend ; à 0,2 °C près, il tient. 1 °C de
+  décalage par heure et par degré d'erreur, au plus un quart d'heure compté d'un coup, borné à
+  −3 / +6 °C ; arrêté en `off` et quand la sonde se tait. Consigne de la vanne = consigne de la
+  pièce + décalage, au demi-degré, dans les bornes de la vanne. Exemple : pièce voulue à 20, restée
+  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. **Le thermomètre de la vanne
+  n'entre pas dans le calcul** : un premier calcul sur l'écart « vanne − sonde » s'emballait
+  (le radiateur chauffe, la vanne lit plus chaud, l'écart grandit, la consigne monte, la vanne
+  reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
+  pièce (tado X) : une chambre voulue à 18 °C recevait 24.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
   plus toutes les 10 min (sauf quand la consigne ou le mode de la pièce vient de changer), jamais
   dans les 3 min qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Les ordres
   passent par le hub au nom de la maison (`system`), comme ceux d'une scène, acteur
   « Chauffage · <pièce> » au journal. Une vanne dont la consigne n'est pas inscriptible avec des
   bornes est laissée de côté.
-- **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : les vannes ne sont plus
-  touchées, avec leur dernière correction, sauf quand on change la consigne ou le mode de la pièce
-  (la dernière correction connue est alors appliquée).
+- **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
+  vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
   mal écrite, et une vanne dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`).

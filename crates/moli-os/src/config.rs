@@ -497,12 +497,12 @@ impl Config {
         // The heating writes its valves by itself, with no code typed.
         for room in &self.heating {
             for valve in &room.valves {
-                if guard.code_each_time_on(&valve.setpoint) {
+                if guard.code_each_time_on(valve) {
                     bail!(
                         "[[heating]] {:?}: {} wants the code each time \
                          ([[guard.code_each_time]]); the heating cannot write it",
                         room.id,
-                        valve.setpoint
+                        valve
                     );
                 }
             }

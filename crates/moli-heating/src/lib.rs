@@ -14,22 +14,25 @@
 //! - `system_mode` (writable): `auto` follows the schedule, `heat` holds the
 //!   setpoint, `off` gives the valves their lowest setpoint (frost guard).
 //! - `weekly_schedule_<day>` (writable): `00:00/17 06:30/20 22:00/17`.
-//! - `valve_correction`: the gap applied to the valves (°C), unknown before
-//!   the room's sensor and a valve's thermometer were both read.
+//! - `valve_correction`: the shift applied to the valves (°C), learned from
+//!   the room's error ([`regulation`]); kept across restarts. 0 with
+//!   `correction = false`.
 //!
 //! ```toml
 //! [[heating]]
 //! id = "parents"                                # never rename it
 //! name = "Chambre parentale"
 //! sensor = "matter:<meter>/temperature"
-//! valves = [{ temperature = "matter:<valve>/temperature", setpoint = "matter:<valve>/target_temperature" }]
+//! valves = ["matter:<valve>/target_temperature"]  # each valve's setpoint
+//! # correction = false: the valves get the room's setpoint as it is (a valve
+//! #   that already regulates on a sensor of the room, as tado X does with its own)
 //! # min = 5.0, max = 25.0: the setpoints the room accepts
 //! # initial = 19.0: the setpoint and schedule before anyone set one
 //! ```
 //!
 //! Orders go through the hub as the house's own, like a scene's. The room's
-//! sensor quiet, the valves are left as they are (with the last correction)
-//! unless the room's setpoint or mode changes. A valve is written only on a
+//! sensor quiet, the shift holds and the valves are left as they are unless
+//! the room's setpoint or mode changes. A valve is written only on a
 //! change of half a degree, at most every [`regulation::MIN_INTERVAL`] unless
 //! the room changed, and never in the first minutes after a start, while
 //! the drivers come back.
@@ -47,7 +50,7 @@ use moli_core::{
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, Hub};
 use serde::Deserialize;
 
-use regulation::{Gap, valve_setpoint, worth_sending};
+use regulation::{Shift, valve_setpoint, worth_sending};
 use schedule::{DAYS, Step, format_day, parse_day, step_at};
 
 /// The instance that runs the rooms.
@@ -73,7 +76,12 @@ pub struct Room {
     pub name: String,
     /// The room's temperature point (°C).
     pub sensor: String,
-    pub valves: Vec<Valve>,
+    /// Each valve's setpoint point (°C).
+    pub valves: Vec<String>,
+    /// Shift the valves' setpoint from the room's error (`false`: the valves
+    /// get the room's setpoint as it is).
+    #[serde(default = "default_correction")]
+    pub correction: bool,
     #[serde(default = "default_min")]
     pub min: f64,
     #[serde(default = "default_max")]
@@ -83,14 +91,9 @@ pub struct Room {
     pub initial: f64,
 }
 
-/// A valve of the room: its own thermometer and its setpoint (°C).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Valve {
-    pub temperature: String,
-    pub setpoint: String,
+fn default_correction() -> bool {
+    true
 }
-
 fn default_min() -> f64 {
     5.0
 }
@@ -140,8 +143,8 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
         );
         for valve in &room.valves {
             ensure!(
-                is_point(&valve.temperature) && is_point(&valve.setpoint),
-                "heating room {id}: a valve's temperature and setpoint are points (device/key)"
+                is_point(valve),
+                "heating room {id}: valve {valve:?} is not a point (device/key)"
             );
         }
         ensure!(
@@ -202,8 +205,6 @@ impl Mode {
 }
 
 struct ValveRun {
-    gap: Gap,
-    read: Option<Instant>,
     sent: Option<Instant>,
 }
 
@@ -215,6 +216,9 @@ struct RoomRun {
     /// The step in force (day, index), so a new one is applied once.
     step: Option<(usize, usize)>,
     valves: Vec<ValveRun>,
+    /// Learned from the room's error, and when it was last read.
+    shift: Shift,
+    read: Option<Instant>,
     /// The setpoint or mode changed since the valves were last written.
     urgent: bool,
 }
@@ -346,6 +350,17 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
             Value::from(format_day(steps).as_str()),
         );
     }
+    // The shift learned before a restart, not learned again from zero.
+    let shift = if room.correction {
+        Shift::from(
+            ctx.current(&id, "valve_correction")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0),
+        )
+    } else {
+        Shift::default()
+    };
+    ctx.set_state(&id, "valve_correction", Value::Float(shift.get()));
     ctx.set_availability(&id, true);
     RoomRun {
         id,
@@ -356,12 +371,10 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         valves: room
             .valves
             .iter()
-            .map(|_| ValveRun {
-                gap: Gap::default(),
-                read: None,
-                sent: None,
-            })
+            .map(|_| ValveRun { sent: None })
             .collect(),
+        shift,
+        read: None,
         urgent: false,
     }
 }
@@ -447,16 +460,21 @@ impl Heating {
         } else {
             run.urgent
         };
-        let mut gaps = Vec::new();
+        // The room's error moves the shift, while heating and the room known.
+        if let Some(room_t) = temperature
+            && room.correction
+            && run.mode != Mode::Off
+        {
+            let now = Instant::now();
+            let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
+            run.shift.update(run.setpoint - room_t, elapsed);
+            run.read = Some(now);
+        } else {
+            run.read = None;
+        }
+        let shift = run.shift.get();
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
-            if let (Some(room_t), Some(valve_t)) = (temperature, self.fresh(&valve.temperature)) {
-                let now = Instant::now();
-                let elapsed = state.read.map_or(Duration::ZERO, |t| now - t);
-                state.gap.update(valve_t - room_t, elapsed);
-                state.read = Some(now);
-            }
-            gaps.extend(state.gap.get());
-            let Some(bounds) = self.bounds(&valve.setpoint) else {
+            let Some(bounds) = self.bounds(valve) else {
                 continue;
             };
             // The room unknown: nothing is changed unless asked.
@@ -465,9 +483,9 @@ impl Heating {
             }
             let next = match run.mode {
                 Mode::Off => bounds.0,
-                Mode::Heat | Mode::Auto => valve_setpoint(run.setpoint, state.gap.get(), bounds),
+                Mode::Heat | Mode::Auto => valve_setpoint(run.setpoint, shift, bounds),
             };
-            let point = PointId::from(valve.setpoint.as_str());
+            let point = PointId::from(valve.as_str());
             let current = self.hub.state(&point).and_then(|s| s.value.as_f64());
             if !worth_sending(current, next, state.sent.map(|t| t.elapsed()), urgent) {
                 continue;
@@ -484,13 +502,10 @@ impl Heating {
                 }
             }
         }
-        #[allow(clippy::cast_precision_loss)] // at most MAX_VALVES gaps
-        let correction = (!gaps.is_empty())
-            .then(|| (gaps.iter().sum::<f64>() / gaps.len() as f64 * 10.0).round() / 10.0);
         ctx.set_state(
             &run.id,
             "valve_correction",
-            correction.map_or(Value::Null, Value::Float),
+            Value::Float((shift * 10.0).round() / 10.0),
         );
     }
 

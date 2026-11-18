@@ -50,7 +50,7 @@ fn rooms() -> Vec<Room> {
         id = "parents"
         name = "Chambre"
         sensor = "maison:piece/value"
-        valves = [{ temperature = "maison:vanne_t/value", setpoint = "maison:vanne_sp/value" }]
+        valves = ["maison:vanne_sp/value"]
         initial = 20.0
         "#,
     )
@@ -99,13 +99,14 @@ async fn house() -> (Hub, CancellationToken) {
 #[tokio::test]
 async fn the_valve_holds_the_room_by_the_room_sensor() {
     let (hub, cancel) = house().await;
-    // The schedule's 20 °C, the valve reading 1.1 above the room: 21.
+    // The schedule's 20 °C, no shift learned yet: the valve gets 20, whatever
+    // its own thermometer says (22, by the radiator).
     until(&hub, "chauffage:parents/occupied_heating_setpoint", 20.0).await;
-    until(&hub, "maison:vanne_sp/value", 21.0).await;
+    until(&hub, "maison:vanne_sp/value", 20.0).await;
     until(&hub, "chauffage:parents/local_temperature", 20.9).await;
-    until(&hub, "chauffage:parents/valve_correction", 1.1).await;
+    until(&hub, "chauffage:parents/valve_correction", 0.0).await;
 
-    // Held by hand: 21.5 + 1.1, on the half degree.
+    // Held by hand: 21.5, on the half degree.
     let order = |key: &str, value: Value| {
         let hub = hub.clone();
         let at = point(&format!("chauffage:parents/{key}"));
@@ -115,7 +116,7 @@ async fn the_valve_holds_the_room_by_the_room_sensor() {
     order("occupied_heating_setpoint", Value::Float(21.5))
         .await
         .unwrap();
-    until(&hub, "maison:vanne_sp/value", 22.5).await;
+    until(&hub, "maison:vanne_sp/value", 21.5).await;
 
     // Off: the valve's lowest setpoint.
     order("system_mode", Value::from("off")).await.unwrap();
@@ -151,7 +152,7 @@ fn bad_rooms_are_refused() {
         |r| r.name = " ".into(),
         |r| r.sensor = "piece".into(),
         |r| r.valves.clear(),
-        |r| r.valves[0].setpoint = "maison:vanne_sp".into(),
+        |r| r.valves[0] = "maison:vanne_sp".into(),
         |r| r.min = 26.0,
         |r| r.initial = 20.3,
         |r| r.initial = 26.0,

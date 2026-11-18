@@ -1,52 +1,71 @@
-//! The valve's thermometer sits by the radiator: it reads warmer than the room.
-//! The gap between the two, smoothed, moves the setpoint the valve is given,
-//! so that the valve, regulating on its own thermometer, holds the room's.
+//! A valve regulates on its own thermometer, by the radiator: given the
+//! room's setpoint, it stops too early (it feels warmer than the room) or,
+//! far from the radiator, too late. Moli moves the setpoint it gives the
+//! valve by a **shift** learned from the room's own error, read on the
+//! room's sensor:
 //!
-//! Example: the room should be at 20 °C, its sensor reads 20.9 and the valve
-//! 22: the gap is 1.1, the valve is given 21 (20 + 1.1, on the half degree).
+//! - the room stays under its setpoint: the shift grows, slowly;
+//! - the room goes over it: the shift comes down;
+//! - the room is where it should be: the shift holds.
+//!
+//! The valve's thermometer takes no part: a radiator heating up can never
+//! push the valve to heat more (what a gap « valve − room » did: the valve
+//! warms, the gap grows, the setpoint follows, the valve stays open).
+//!
+//! Example: the room should be at 20 °C and stays at 19.5 for an hour: the
+//! shift grows by about 0.5, the valve is given 20.5.
 
 use std::time::Duration;
 
-/// How quickly the gap follows a new reading: about two thirds of a change
-/// after this long. Slower than the radiator, so the valve opening and
-/// closing does not chase its own heat.
-pub const SMOOTHING: Duration = Duration::from_secs(20 * 60);
+/// How fast the shift follows the room's error: °C of shift per hour, per
+/// °C of error. Slower than a radiator warms a room, so the valve has time
+/// to act on one shift before the next.
+pub const GAIN_PER_HOUR: f64 = 1.0;
 
-/// The gap never moves the setpoint by more than this (°C): a sensor in the
-/// sun or by an open window must not send the valve to its limits.
-pub const GAP_RANGE: (f64, f64) = (-3.0, 6.0);
+/// An error this small (°C) moves nothing: a sensor's noise, half a step of
+/// the setpoint.
+pub const DEADBAND: f64 = 0.2;
+
+/// The shift never moves the setpoint by more than this (°C): a sensor in
+/// the sun or by an open window must not send the valve to its limits.
+pub const SHIFT_RANGE: (f64, f64) = (-3.0, 6.0);
+
+/// At most this much time counts at once (a sensor silent for hours, then
+/// back, does not move the shift by hours at a stroke).
+pub const MAX_STEP: Duration = Duration::from_secs(15 * 60);
 
 /// A valve is written again at most this often, except when the room's own
 /// setpoint changed: its battery, and the radio of a sleepy device.
 pub const MIN_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
-/// The smoothed gap between a valve's thermometer and the room's sensor.
+/// The shift a room's valves are given, learned from the room's error.
 #[derive(Clone, Debug, Default)]
-pub struct Gap {
-    value: Option<f64>,
+pub struct Shift {
+    value: f64,
 }
 
-impl Gap {
-    /// A new reading of the gap, `elapsed` after the previous one.
-    pub fn update(&mut self, raw: f64, elapsed: Duration) -> f64 {
-        let next = match self.value {
-            None => raw,
-            Some(value) => {
-                let weight = 1.0 - (-elapsed.as_secs_f64() / SMOOTHING.as_secs_f64()).exp();
-                value + weight * (raw - value)
-            }
-        };
-        self.value = Some(next);
-        next
+impl Shift {
+    /// Starts from a shift kept from before (bounded).
+    #[must_use]
+    pub fn from(value: f64) -> Self {
+        let value = if value.is_finite() { value } else { 0.0 };
+        Self {
+            value: value.clamp(SHIFT_RANGE.0, SHIFT_RANGE.1),
+        }
     }
 
-    /// The room's sensor or the valve's thermometer went quiet: start over.
-    pub fn forget(&mut self) {
-        self.value = None;
+    /// The room's error (`setpoint − temperature`), held for `elapsed`.
+    pub fn update(&mut self, error: f64, elapsed: Duration) -> f64 {
+        if error.is_finite() && error.abs() > DEADBAND {
+            let hours = elapsed.min(MAX_STEP).as_secs_f64() / 3600.0;
+            self.value =
+                (self.value + GAIN_PER_HOUR * error * hours).clamp(SHIFT_RANGE.0, SHIFT_RANGE.1);
+        }
+        self.value
     }
 
     #[must_use]
-    pub fn get(&self) -> Option<f64> {
+    pub fn get(&self) -> f64 {
         self.value
     }
 }
@@ -57,12 +76,11 @@ pub fn half_degree(temp: f64) -> f64 {
     (temp * 2.0).round() / 2.0
 }
 
-/// The setpoint the valve is given: the room's, moved by the gap (bounded by
-/// [`GAP_RANGE`]), on the half degree, within the valve's own bounds.
+/// The setpoint the valve is given: the room's, moved by the shift, on the
+/// half degree, within the valve's own bounds.
 #[must_use]
-pub fn valve_setpoint(room: f64, gap: Option<f64>, bounds: (f64, f64)) -> f64 {
-    let moved = room + gap.map_or(0.0, |g| g.clamp(GAP_RANGE.0, GAP_RANGE.1));
-    half_degree(moved).clamp(bounds.0, bounds.1)
+pub fn valve_setpoint(room: f64, shift: f64, bounds: (f64, f64)) -> f64 {
+    half_degree(room + shift.clamp(SHIFT_RANGE.0, SHIFT_RANGE.1)).clamp(bounds.0, bounds.1)
 }
 
 /// Whether to write `next`: it differs from what the valve holds by half a
@@ -83,45 +101,56 @@ pub fn worth_sending(
 mod tests {
     use super::*;
 
+    const MINUTE: Duration = Duration::from_secs(60);
+
     #[test]
-    fn the_gap_moves_the_setpoint_on_the_half_degree_within_bounds() {
+    fn the_shift_moves_the_setpoint_on_the_half_degree_within_bounds() {
         let bounds = (5.0, 30.0);
-        assert_eq!(valve_setpoint(20.0, Some(22.0 - 20.9), bounds), 21.0);
-        assert_eq!(valve_setpoint(20.0, None, bounds), 20.0);
-        assert_eq!(valve_setpoint(20.0, Some(-1.3), bounds), 18.5);
-        assert_eq!(
-            valve_setpoint(20.0, Some(15.0), bounds),
-            26.0,
-            "gap bounded"
-        );
-        assert_eq!(
-            valve_setpoint(20.0, Some(-9.0), bounds),
-            17.0,
-            "gap bounded"
-        );
-        assert_eq!(
-            valve_setpoint(28.0, Some(5.0), bounds),
-            30.0,
-            "valve bounds"
-        );
-        assert_eq!(valve_setpoint(5.0, Some(-2.0), bounds), 5.0, "valve bounds");
+        assert_eq!(valve_setpoint(20.0, 0.0, bounds), 20.0);
+        assert_eq!(valve_setpoint(20.0, 1.1, bounds), 21.0);
+        assert_eq!(valve_setpoint(20.0, -1.3, bounds), 18.5);
+        assert_eq!(valve_setpoint(20.0, 15.0, bounds), 26.0, "shift bounded");
+        assert_eq!(valve_setpoint(20.0, -9.0, bounds), 17.0, "shift bounded");
+        assert_eq!(valve_setpoint(28.0, 5.0, bounds), 30.0, "valve bounds");
+        assert_eq!(valve_setpoint(5.0, -2.0, bounds), 5.0, "valve bounds");
     }
 
     #[test]
-    fn the_gap_follows_slowly() {
-        let mut gap = Gap::default();
-        assert_eq!(gap.update(2.0, Duration::ZERO), 2.0, "first reading as is");
-        let after = gap.update(0.0, SMOOTHING);
-        assert!((after - 2.0 * (-1.0f64).exp()).abs() < 1e-9, "{after}");
-        assert!(gap.update(0.0, Duration::from_secs(60)) < after);
-        gap.forget();
-        assert_eq!(gap.get(), None);
+    fn a_cold_room_raises_the_shift_slowly_a_warm_one_lowers_it() {
+        let mut shift = Shift::default();
+        // Half a degree under for an hour (in 10-minute readings): + 0.5.
+        for _ in 0..6 {
+            shift.update(0.5, 10 * MINUTE);
+        }
+        assert!((shift.get() - 0.5).abs() < 1e-9, "{}", shift.get());
+        // A degree over for half an hour: − 0.5.
+        for _ in 0..3 {
+            shift.update(-1.0, 10 * MINUTE);
+        }
+        assert!(shift.get().abs() < 1e-9, "{}", shift.get());
+    }
+
+    #[test]
+    fn the_shift_holds_near_the_setpoint_and_stays_bounded() {
+        let mut shift = Shift::from(1.0);
+        shift.update(0.15, 10 * MINUTE);
+        shift.update(-0.2, 10 * MINUTE);
+        assert_eq!(shift.get(), 1.0, "inside the deadband");
+        // Hours of silence count as a quarter of an hour, never more.
+        shift.update(2.0, 5 * 60 * MINUTE);
+        assert!((shift.get() - 1.5).abs() < 1e-9, "{}", shift.get());
+        for _ in 0..100 {
+            shift.update(5.0, 15 * MINUTE);
+        }
+        assert_eq!(shift.get(), SHIFT_RANGE.1);
+        assert_eq!(Shift::from(-50.0).get(), SHIFT_RANGE.0);
+        assert_eq!(Shift::from(f64::NAN).get(), 0.0);
     }
 
     #[test]
     fn a_valve_is_written_on_a_real_change_and_not_too_often() {
         let long = Some(MIN_INTERVAL);
-        let short = Some(Duration::from_secs(60));
+        let short = Some(MINUTE);
         assert!(worth_sending(None, 20.0, None, false));
         assert!(worth_sending(Some(20.0), 20.5, long, false));
         assert!(!worth_sending(Some(20.0), 20.0, long, true));
