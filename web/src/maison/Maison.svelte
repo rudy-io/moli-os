@@ -26,6 +26,7 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { printersPresent, camerasUseful } from './lib/tabs.js';
 
   let { route } = $props();
   $effect(() => {
@@ -53,11 +54,12 @@
     { path: 'airzone', label: 'airzone_ui.title', icon: 'air-conditioner', shown: () => airzonePresent(hub.drivers) },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
     { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
-    { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
+    // A camera, or something for the Sécurité card that lives on the same page.
+    { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv', shown: () => camerasUseful(hub.devices, hub.drivers, home.config) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
     { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating') },
-    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d' },
+    { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => printersPresent(hub.devices) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },
     { path: 'infra', label: 'commun.nav.infra', icon: 'server' },
