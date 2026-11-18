@@ -203,6 +203,8 @@
   "systeme.pilotes.z2m.desc": "Les petits capteurs et prises sans fil, via Zigbee2MQTT.",
   "systeme.pilotes.zwave.nom": "Z-Wave",
   "systeme.pilotes.zwave.desc": "Les nœuds Z-Wave (interrupteurs, variateurs, capteurs), via la passerelle MQTT de Z-Wave JS UI.",
+  "systeme.pilotes.rfxcom.nom": "RFXcom 433 MHz",
+  "systeme.pilotes.rfxcom.desc": "Les sondes et prises 433 MHz (Oregon, Chacon…), via la passerelle MQTT rfxcom2mqtt.",
   "systeme.pilotes.hue.nom": "Philips Hue",
   "systeme.pilotes.hue.desc": "Les ampoules et pièces Hue, par le pont, en direct.",
   "systeme.pilotes.tuya.nom": "Tuya",

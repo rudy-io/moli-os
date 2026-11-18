@@ -1351,6 +1351,7 @@ const KINDS: &[&str] = &[
     "z2m",
     "zigbee",
     "zwave",
+    "rfxcom",
     "hue",
     "overkiz",
     "dirigera",
@@ -1595,6 +1596,9 @@ fn build_driver(
             data_dir,
         )),
         "zwave" => Arc::new(moli_zwave::Zwave::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "rfxcom" => Arc::new(moli_rfxcom::Rfxcom::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "hue" => Arc::new(moli_hue::Hue::new(

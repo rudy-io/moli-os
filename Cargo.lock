@@ -2268,6 +2268,7 @@ dependencies = [
  "moli-profile",
  "moli-recycleapp",
  "moli-reolink",
+ "moli-rfxcom",
  "moli-runtime",
  "moli-scenes",
  "moli-shelly",
@@ -2433,6 +2434,21 @@ dependencies = [
  "moli-i18n",
  "moli-net",
  "moli-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "moli-rfxcom"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moli-core",
+ "moli-i18n",
+ "moli-runtime",
+ "rumqttc",
  "serde",
  "serde_json",
  "tokio",

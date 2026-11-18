@@ -208,6 +208,20 @@ base_topic = "zigbee2mqtt"
 # username = "moli-os"
 # password_env = "MOLI_ZWAVE_PASSWORD"
 
+# 433 MHz sensors and plugs (Oregon, Chacon…), through an existing rfxcom2mqtt
+# bridge. Only the devices it announces through its discovery become devices.
+# [[driver]]
+# id = "rfxcom"
+# kind = "rfxcom"
+#
+# [driver.options]
+# host = "127.0.0.1"
+# port = 1883
+# base_topic = "rfxcom2mqtt"         # the bridge's mqtt.base_topic
+# discovery_topic = "homeassistant"  # the bridge's homeassistant.discovery_topic
+# username = "moli-os"
+# password_env = "MOLI_RFXCOM_PASSWORD"
+
 # Philips Hue bridge (CLIP v2). Needs MOLI_MASTER_KEY in the environment to
 # keep the pairing key encrypted; press the link button when asked.
 # [[driver]]
