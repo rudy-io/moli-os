@@ -14,6 +14,9 @@
 
   let events = $state([]);
   let loading = $state(true);
+  // Pictures arrived, or that will not come: keyed by camera and item.
+  let shown = $state({});
+  let broken = $state({});
 
   async function load() {
     const before = Math.ceil(Date.now() / 1000);
@@ -51,15 +54,32 @@
     <span class="muted">{t('revue.depuis', { n: HOURS })}</span>
   </div>
   {#if loading}
-    <p class="muted">…</p>
+    <!-- As many shapes as a phone shows, shining until the list comes. -->
+    <ul class="strip" aria-busy="true" aria-label={t('revue.chargement')}>
+      {#each [0, 1, 2, 3] as n (n)}
+        <li><span class="tile ghost"><span class="bar cam-bar"></span><span class="bar what-bar"></span></span></li>
+      {/each}
+    </ul>
   {:else if !events.length}
     <p class="muted">{t('revue.rien_24h')}</p>
   {:else}
     <ul class="strip">
       {#each events as { camera, item } (camera.id + item.id)}
+        {@const key = camera.id + item.id}
         <li>
-          <button onclick={() => onopen(camera.id, item)} aria-label={t('revue.revoir_camera', { camera: camera.name, heure: hm(item.start) })}>
-            <img loading="lazy" src="/api/devices/{encodeURIComponent(camera.id)}/review/events/{encodeURIComponent(item.events[0])}/thumbnail" alt="" />
+          <button class="tile" class:ghost={!shown[key] && !broken[key]} onclick={() => onopen(camera.id, item)} aria-label={t('revue.revoir_camera', { camera: camera.name, heure: hm(item.start) })}>
+            {#if broken[key]}
+              <span class="no-picture"><Icon name="cctv" size={30} /></span>
+            {:else}
+              <img
+                loading="lazy"
+                class:in={shown[key]}
+                src="/api/devices/{encodeURIComponent(camera.id)}/review/events/{encodeURIComponent(item.events[0])}/thumbnail"
+                alt=""
+                onload={() => (shown[key] = true)}
+                onerror={() => (broken[key] = true)}
+              />
+            {/if}
             <span class="cam"><i class={item.severity}></i>{camera.name}</span>
             <span class="what">
               <b>{item.labels.length ? item.labels.map(labelName).join(', ') : t('revue.mouvement')}</b>
@@ -119,7 +139,7 @@
     scroll-snap-align: start;
   }
 
-  button {
+  .tile {
     position: relative;
     display: block;
     width: 100%;
@@ -135,6 +155,56 @@
     font: inherit;
   }
 
+  span.tile {
+    display: block;
+  }
+
+  /* Waiting: a light that passes over the dark picture. */
+  .ghost::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 9%) 50%, transparent 70%) #0b0f16;
+    background-size: 220% 100%;
+    animation: shine 1.4s linear infinite;
+  }
+
+  @keyframes shine {
+    from {
+      background-position: 120% 0;
+    }
+    to {
+      background-position: -120% 0;
+    }
+  }
+
+  /* Where the camera's name and the event's words will be. */
+  .bar {
+    position: absolute;
+    left: 10px;
+    height: 12px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 10%);
+  }
+
+  .cam-bar {
+    top: 10px;
+    width: 38%;
+  }
+
+  .what-bar {
+    bottom: 12px;
+    width: 58%;
+  }
+
+  .no-picture {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    color: #8a93a8;
+  }
+
   button:focus-visible {
     outline: 2px solid var(--cool);
     outline-offset: 2px;
@@ -146,7 +216,14 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s var(--ease);
+    opacity: 0;
+    transition:
+      opacity 0.25s var(--ease),
+      transform 0.3s var(--ease);
+  }
+
+  img.in {
+    opacity: 1;
   }
 
   button:hover img {
@@ -203,6 +280,10 @@
   @media (prefers-reduced-motion: reduce) {
     img {
       transition: none;
+    }
+
+    .ghost::before {
+      animation: none;
     }
   }
 </style>

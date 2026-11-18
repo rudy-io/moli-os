@@ -36,6 +36,7 @@
   "revue.label.license_plate": "Plaque",
   "revue.label.face": "Visage",
   "revue.derniers": "Derniers événements",
+  "revue.chargement": "Chargement des événements…",
   "revue.depuis": "{n} dernières heures",
   "revue.rien_24h": "Rien de signalé depuis 24 h.",
   "revue.revoir_camera": "Revoir {camera} à {heure}"
