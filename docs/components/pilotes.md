@@ -210,6 +210,49 @@ lights = ["lumieres:suspensions", "hue:…"]
 - Les identifiants de scène `none`, `next` et `previous` sont réservés. `moli-os check-config`
   refuse une scène mal écrite (lumière nommée deux fois, `off` avec un réglage, couleur invalide…).
 
+## Chauffage : un thermostat de pièce sur la sonde de la pièce (`crates/moli-heating`)
+
+Pas un pilote à déclarer : dès que `moli.toml` a un `[[heating]]`, Moli lance l'instance
+`chauffage` et publie **un appareil par pièce**, `chauffage:<id>`. Une vanne thermostatique mesure
+la température contre le radiateur : elle croit la pièce plus chaude qu'elle n'est. Le thermostat de
+pièce lit la sonde de la pièce (loin du radiateur) et donne à chaque vanne la consigne qui lui fait
+tenir celle de la pièce.
+
+```toml
+[[heating]]
+id = "parents"                       # stable : chauffage:parents
+name = "Chambre parentale"           # son nom, et sa pièce dans Moli
+sensor = "matter:…-6/temperature"    # la sonde de la pièce (°C)
+valves = [{ temperature = "matter:…-1/temperature", setpoint = "matter:…-1/target_temperature" }]
+# min = 5.0, max = 25.0 : les consignes que la pièce accepte
+# initial = 19.0 : la consigne et le programme avant qu'on les règle
+```
+
+- **Points**, ceux d'une vanne Zigbee2MQTT, si bien que le tableau de bord en fait une carte de
+  vanne avec sa table horaire et sa courbe, sans rien de plus : `local_temperature` (la sonde ;
+  inconnue quand elle se tait), `occupied_heating_setpoint` (la consigne de la pièce, 5 à 25 par
+  défaut, au demi-degré), `system_mode` (`auto` suit le programme, `heat` tient la consigne,
+  `off` donne aux vannes leur consigne la plus basse, hors-gel), `weekly_schedule_<jour>`
+  (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
+  `valve_correction` (l'écart appliqué aux vannes, °C, en lecture). En `auto`, une consigne
+  changée à la main tient jusqu'au créneau suivant.
+- **La correction** : écart = température de la vanne − température de la sonde, lissé (les deux
+  tiers d'un changement en 20 min, pour ne pas courir après la chaleur du radiateur), borné à
+  −3 / +6 °C. Consigne de la vanne = consigne de la pièce + écart, au demi-degré, dans les bornes
+  de la vanne. Exemple : pièce voulue à 20, sonde 20,9, vanne 22 → la vanne reçoit 21.
+- **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
+  plus toutes les 10 min (sauf quand la consigne ou le mode de la pièce vient de changer), jamais
+  dans les 3 min qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Les ordres
+  passent par le hub au nom de la maison (`system`), comme ceux d'une scène, acteur
+  « Chauffage · <pièce> » au journal. Une vanne dont la consigne n'est pas inscriptible avec des
+  bornes est laissée de côté.
+- **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : les vannes ne sont plus
+  touchées, avec leur dernière correction, sauf quand on change la consigne ou le mode de la pièce
+  (la dernière correction connue est alors appliquée).
+- **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
+  consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
+  mal écrite, et une vanne dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`).
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.

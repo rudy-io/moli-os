@@ -1,0 +1,25 @@
+[package]
+name = "moli-heating"
+description = "Moli OS heating: a room's own thermostat, kept by Moli, that reads the room's sensor and corrects its valves' setpoints, with a weekly schedule."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+moli-i18n.workspace = true
+moli-core.workspace = true
+moli-runtime.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+moli-helpers.workspace = true
+tokio-util.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true
