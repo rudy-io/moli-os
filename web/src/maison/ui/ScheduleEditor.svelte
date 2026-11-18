@@ -6,7 +6,7 @@
   // A valve's weekly schedule, one day at a time. Writing it is an order like any
   // other: it goes through `act`, the hub's normal path and the guard.
   // `day`: the day shown, which a week view beside it may choose.
-  let { id, name, day = $bindable(null) } = $props();
+  let { id, name, day = $bindable() } = $props();
 
   const d = $derived(device(id));
   const spec = $derived(scheduleSpec(d));

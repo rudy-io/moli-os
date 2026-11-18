@@ -9,7 +9,7 @@
   // A boundary between two steps is dragged (or moved with the arrow keys) and the
   // day is written when it is let go: an order like any other, through `act`.
   // Choosing a row tells the editor below which day to open (`day`).
-  let { id, name, day = $bindable(null) } = $props();
+  let { id, name, day = $bindable() } = $props();
 
   const spec = $derived(scheduleSpec(device(id)));
   const days = $derived(spec ? DAYS.filter((d) => spec.days.includes(d)) : []);
