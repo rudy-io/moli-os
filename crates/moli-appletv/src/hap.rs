@@ -56,6 +56,8 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn unhex(s: &str) -> anyhow::Result<Vec<u8>> {
+    // Cut by bytes below: anything but ASCII is refused first.
+    ensure!(s.is_ascii(), "not hex");
     ensure!(s.len().is_multiple_of(2), "odd hex");
     (0..s.len())
         .step_by(2)
@@ -202,12 +204,22 @@ fn uuid(rng: &SystemRandom) -> String {
 }
 
 /// Pair setup, from the first message to the credentials.
-#[derive(Debug)]
 pub struct Setup {
     seed: [u8; 32],
     client_id: String,
     srp: Option<srp::Client>,
     session_key: Option<[u8; 32]>,
+    /// What the Apple TV signs in M6 starts with this (from SRP's key).
+    device_x: Option<[u8; 32]>,
+}
+
+impl std::fmt::Debug for Setup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never a key, even in a log.
+        f.debug_struct("Setup")
+            .field("client_id", &self.client_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Setup {
@@ -219,6 +231,7 @@ impl Setup {
             client_id: uuid(&rng).to_uppercase(),
             srp: None,
             session_key: None,
+            device_x: None,
         }
     }
 
@@ -235,7 +248,9 @@ impl Setup {
         let public = m2
             .get(tlv8::PUBLIC_KEY)
             .context("no key from the Apple TV")?;
-        let client = srp::Client::new(&self.seed, pin, salt, public)?;
+        // SRP's secret `a`: drawn for this pairing, not the long-term key.
+        let private: [u8; 32] = random(&SystemRandom::new());
+        let client = srp::Client::new(&private, pin, salt, public)?;
         let m3 = tlv8::write(&[
             (tlv8::STATE, &[0x03]),
             (tlv8::PUBLIC_KEY, &client.public),
@@ -275,15 +290,20 @@ impl Setup {
         ]);
         let sealed = seal(&session, label_nonce(*b"PS-Msg05"), &[], &inner);
         self.session_key = Some(session);
+        self.device_x = Some(derive(
+            "Pair-Setup-Accessory-Sign-Salt",
+            "Pair-Setup-Accessory-Sign-Info",
+            &srp.key,
+        ));
         Ok(tlv8::write(&[
             (tlv8::STATE, &[0x05]),
             (tlv8::ENCRYPTED_DATA, &sealed),
         ]))
     }
 
-    /// M6: the Apple TV's identity and long-term key. It is trusted because
-    /// only a device that knew the code can encrypt under the session key
-    /// (SRP's proof already said so).
+    /// M6: the Apple TV's identity and long-term key, signed by that key over
+    /// what SRP derived (as HAP has it), and encrypted under the session key
+    /// only a device that knew the code holds.
     pub fn finish(self, m6: &Tlv) -> anyhow::Result<Credentials> {
         answer(m6, 6)?;
         let session = self.session_key.context("pairing out of order")?;
@@ -294,6 +314,14 @@ impl Setup {
         let device_id = inner.get(tlv8::IDENTIFIER).context("no identifier")?;
         let device_key = inner.get(tlv8::PUBLIC_KEY).context("no key")?;
         ensure!(device_key.len() == 32, "the Apple TV's key is not Ed25519");
+        let device_x = self.device_x.context("pairing out of order")?;
+        let signature = inner.get(tlv8::SIGNATURE).context("no signature")?;
+        ring::signature::UnparsedPublicKey::new(&ED25519, device_key)
+            .verify(
+                &[device_x.as_slice(), device_id, device_key].concat(),
+                signature,
+            )
+            .map_err(|_| anyhow::anyhow!("the Apple TV's signature does not match its key"))?;
         Ok(Credentials {
             seed: hex(&self.seed),
             client_id: self.client_id,
@@ -310,11 +338,17 @@ impl Default for Setup {
 }
 
 /// Pair verify, once per connection.
-#[derive(Debug)]
 pub struct Verify {
     private: Option<EphemeralPrivateKey>,
     public: Vec<u8>,
     shared: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for Verify {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the shared secret, even in a log.
+        f.debug_struct("Verify").finish_non_exhaustive()
+    }
 }
 
 impl Verify {
@@ -556,25 +590,49 @@ pub(crate) mod tests {
         assert_eq!(Setup::start(), [0x00, 1, 0x00, 0x06, 1, 0x01]);
         // The device side of SRP is in srp.rs's vectors; here, M5's sealing
         // under the key SRP gave, and M6 read back the same way.
-        let mut setup = Setup::new();
         let k = vec![5u8; 64];
         let session = derive("Pair-Setup-Encrypt-Salt", "Pair-Setup-Encrypt-Info", &k);
-        setup.session_key = Some(session);
-        let device_key = [7u8; 32];
-        let inner = tlv8::write(&[(tlv8::IDENTIFIER, b"ATV"), (tlv8::PUBLIC_KEY, &device_key)]);
-        let m6 = tlv8::write(&[
-            (tlv8::STATE, &[6]),
-            (
-                tlv8::ENCRYPTED_DATA,
-                &seal(&session, label_nonce(*b"PS-Msg06"), &[], &inner),
-            ),
-        ]);
-        let credentials = setup.finish(&tlv8::read(&m6).unwrap()).unwrap();
+        let device_x = derive(
+            "Pair-Setup-Accessory-Sign-Salt",
+            "Pair-Setup-Accessory-Sign-Info",
+            &k,
+        );
+        let ready = || {
+            let mut setup = Setup::new();
+            setup.session_key = Some(session);
+            setup.device_x = Some(device_x);
+            setup
+        };
+        let device = Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).unwrap();
+        let device_key = device.public_key().as_ref().to_vec();
+        let m6 = |signer: &Ed25519KeyPair| {
+            let signed = [device_x.as_slice(), b"ATV", &device_key].concat();
+            let inner = tlv8::write(&[
+                (tlv8::IDENTIFIER, b"ATV"),
+                (tlv8::PUBLIC_KEY, &device_key),
+                (tlv8::SIGNATURE, signer.sign(&signed).as_ref()),
+            ]);
+            tlv8::read(&tlv8::write(&[
+                (tlv8::STATE, &[6]),
+                (
+                    tlv8::ENCRYPTED_DATA,
+                    &seal(&session, label_nonce(*b"PS-Msg06"), &[], &inner),
+                ),
+            ]))
+            .unwrap()
+        };
+        let credentials = ready().finish(&m6(&device)).unwrap();
         assert_eq!(credentials.device(), "ATV");
         assert_eq!(credentials.device_key, hex(&device_key));
+        // Signed by another key than the one it gives: refused.
+        let other = Ed25519KeyPair::from_seed_unchecked(&[9u8; 32]).unwrap();
+        let err = ready().finish(&m6(&other)).unwrap_err();
+        assert!(err.to_string().contains("signature"), "{err}");
         // A message sealed under another key is refused.
-        let mut other = Setup::new();
-        other.session_key = Some([1u8; 32]);
-        assert!(other.finish(&tlv8::read(&m6).unwrap()).is_err());
+        let mut stranger = ready();
+        stranger.session_key = Some([1u8; 32]);
+        assert!(stranger.finish(&m6(&device)).is_err());
+        // Hex that is not ASCII is refused, not cut inside a character.
+        assert!(unhex("é0").is_err());
     }
 }

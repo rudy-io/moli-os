@@ -56,10 +56,12 @@
   const listed = $derived.by(() => {
     const raw = value(tv, 'apps');
     if (typeof raw !== 'string' || !raw.trim()) return null;
+    // Each app once: a key seen twice would stop the page.
+    const ids = new Set();
     return raw.split('\n').map((line) => {
       const at = line.lastIndexOf('=');
       return at > 0 ? { id: line.slice(at + 1), name: line.slice(0, at) } : null;
-    }).filter(Boolean);
+    }).filter((a) => a && !ids.has(a.id) && ids.add(a.id));
   });
   // Brands: their own names, the same in every language.
   const FAVOURITES = ['Netflix', 'YouTube', 'Disney+', 'Prime Video', 'CANAL+', 'TV'];

@@ -240,15 +240,30 @@ fn device(ctx: &DriverCtx, id: &DeviceId) -> Device {
     }
 }
 
-/// The apps the Apple TV can open: (bundle id, name), by name.
+/// The apps the Apple TV can open: (bundle id, name), by name, each bundle
+/// id once. The `apps` point is « name=bundle id » per line: a name loses
+/// its `=` and line breaks, a bundle id holding one is left out.
 fn apps(content: &Op) -> Vec<(String, String)> {
-    let mut list: Vec<(String, String)> = match content {
-        Op::Dict(entries) => entries
-            .iter()
-            .filter_map(|(k, v)| Some((k.as_str()?.to_owned(), v.as_str()?.to_owned())))
-            .collect(),
-        _ => Vec::new(),
+    let Op::Dict(entries) = content else {
+        return Vec::new();
     };
+    let mut seen = std::collections::HashSet::new();
+    let mut list: Vec<(String, String)> = entries
+        .iter()
+        .filter_map(|(k, v)| {
+            let bundle = k.as_str()?.trim();
+            let name = v
+                .as_str()?
+                .replace(['=', '\n', '\r'], " ")
+                .trim()
+                .to_owned();
+            let usable = !bundle.is_empty()
+                && !name.is_empty()
+                && !bundle.contains(['=', '\n', '\r'])
+                && seen.insert(bundle.to_owned());
+            usable.then(|| (bundle.to_owned(), name))
+        })
+        .collect();
     list.sort_by_key(|a| a.1.to_lowercase());
     list
 }
@@ -636,6 +651,20 @@ mod tests {
             ("com.apple.TVWatchList", Op::from("TV")),
         ]));
         assert_eq!(list[0].1, "Netflix", "sorted by name");
+        // Each bundle id once; no `=` or line break where the point splits.
+        let odd = apps(&Op::Dict(vec![
+            (Op::from("com.a"), Op::from("A")),
+            (Op::from("com.a"), Op::from("A again")),
+            (Op::from("com.b"), Op::from("B=1\nx")),
+            (Op::from("com=c"), Op::from("C")),
+        ]));
+        assert_eq!(
+            odd,
+            [
+                ("com.a".to_owned(), "A".to_owned()),
+                ("com.b".to_owned(), "B 1 x".to_owned()),
+            ]
+        );
         assert_eq!(
             launch_target("netflix", &list).unwrap(),
             ("_bundleID", "com.netflix.Netflix")

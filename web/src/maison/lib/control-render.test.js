@@ -1088,5 +1088,9 @@ test('the living room drives an Apple TV: its own apps, and no key it does not h
   assert.match(html, /aria-label="Options"/);
   // A device that announces no keys keeps every one (an older driver).
   hub.devices[id].points = hub.devices[id].points.filter((p) => p.key !== 'key');
-  assert.match(render(components.Salon, { props: {} }).body, /Couper le son/);
+  assert.match(render(components.Salon, { props: {} }).body, /Couper le son/);  // An app listed twice (no favourite among them): shown once, the page stands.
+  hub.devices[id].state.apps = { value: 'Arte=tv.arte\nArte=tv.arte\nPhotos=com.apple.TVPhotos' };
+  const twice = render(components.Salon, { props: {} }).body;
+  assert.equal(twice.split('>Arte<').length, 2, 'Arte once');
+  assert.match(twice, />Photos</);
 });

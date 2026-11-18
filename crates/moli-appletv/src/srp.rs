@@ -47,7 +47,6 @@ fn hash_int(parts: &[&[u8]]) -> BigUint {
 }
 
 /// What a client sends and keeps once the device's salt and key are known.
-#[derive(Debug)]
 pub struct Client {
     /// `A`, to send.
     pub public: Vec<u8>,
@@ -57,6 +56,13 @@ pub struct Client {
     pub key: Vec<u8>,
     /// `M2`, what the device must answer.
     expected: Vec<u8>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the shared key, even in a log.
+        f.debug_struct("Client").finish_non_exhaustive()
+    }
 }
 
 impl Client {

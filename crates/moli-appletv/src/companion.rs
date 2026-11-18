@@ -69,10 +69,18 @@ fn counter_nonce(n: u64) -> Nonce {
 }
 
 /// One direction's key and counter.
-#[derive(Debug)]
 struct Cipher {
     key: [u8; 32],
     count: u64,
+}
+
+impl std::fmt::Debug for Cipher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the key, even in a log.
+        f.debug_struct("Cipher")
+            .field("count", &self.count)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Cipher {

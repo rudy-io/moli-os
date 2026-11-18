@@ -5,6 +5,8 @@
 //! sent again as its index in the list of values seen, each value once.
 //! Written plainly, without back-references (the receiver needs none).
 
+use std::collections::HashSet;
+
 use anyhow::{Context as _, bail};
 
 /// A decoded value.
@@ -193,10 +195,70 @@ fn write(value: &Value, out: &mut Vec<u8>) {
     }
 }
 
-/// Decodes one value; what follows it is left.
+/// Decodes one value; what follows it is left. A message decodes to at most
+/// [`BUDGET`] bytes, references counted at their full size: a small frame of
+/// references to one long string is refused, not copied a million times.
 pub fn unpack(data: &[u8]) -> anyhow::Result<(Value, &[u8])> {
-    let mut seen = Vec::new();
+    let mut seen = Seen::default();
     read(data, &mut seen, 0)
+}
+
+/// What one message may decode to, all values counted (each at least the
+/// size of a [`Value`], so a frame of tiny values is bounded too). A message
+/// is a few kilobytes; the list of applications, a few tens.
+pub const BUDGET: usize = 2 << 20;
+
+/// What a value counts against the budget (a list or a dictionary: its own
+/// slot; its items are counted as they are read).
+fn cost(value: &Value) -> usize {
+    std::mem::size_of::<Value>()
+        + match value {
+            Value::Str(s) => s.len(),
+            Value::Bytes(b) => b.len(),
+            _ => 0,
+        }
+}
+
+/// The values already seen in a message, each once, with what decoding has
+/// cost so far.
+#[derive(Default)]
+struct Seen {
+    values: Vec<Value>,
+    /// Each value's encoding, to know in one step if it was seen (only
+    /// scalars are remembered, and their encoding is exact).
+    known: HashSet<Vec<u8>>,
+    spent: usize,
+}
+
+impl Seen {
+    /// Counts a decoded value against the budget.
+    fn charge(&mut self, value: &Value) -> anyhow::Result<()> {
+        self.spent = self.spent.saturating_add(cost(value));
+        if self.spent > BUDGET {
+            bail!("OPACK: message larger than {BUDGET} bytes once decoded");
+        }
+        Ok(())
+    }
+
+    fn remember(&mut self, value: &Value) {
+        if self.known.insert(pack(value)) {
+            self.values.push(value.clone());
+        }
+    }
+
+    /// The value a reference names, counted before it is copied.
+    fn refer(&mut self, index: usize) -> anyhow::Result<Value> {
+        let value = self
+            .values
+            .get(index)
+            .with_context(|| format!("OPACK: no value {index} to refer to"))?;
+        // Only scalars are remembered: counting one costs nothing.
+        self.spent = self.spent.saturating_add(cost(value));
+        if self.spent > BUDGET {
+            bail!("OPACK: message larger than {BUDGET} bytes once decoded");
+        }
+        Ok(value.clone())
+    }
 }
 
 /// Nesting deeper than this is refused (a message is a few levels deep).
@@ -230,16 +292,13 @@ fn text(bytes: &[u8]) -> anyhow::Result<Value> {
 }
 
 #[allow(clippy::too_many_lines)] // one arm per type, as the format lists them
-fn read<'a>(
-    data: &'a [u8],
-    seen: &mut Vec<Value>,
-    depth: usize,
-) -> anyhow::Result<(Value, &'a [u8])> {
+fn read<'a>(data: &'a [u8], seen: &mut Seen, depth: usize) -> anyhow::Result<(Value, &'a [u8])> {
     if depth > DEPTH {
         bail!("OPACK: nested too deep");
     }
     let (&tag, rest) = data.split_first().context("OPACK: empty")?;
     let mut remember = true;
+    let mut charged = false;
     let (value, rest) = match tag {
         0x01 | 0x02 => {
             remember = false;
@@ -307,19 +366,15 @@ fn read<'a>(
         }
         0xA0..=0xC0 => {
             let index = usize::from(tag - 0xA0);
-            let value = seen
-                .get(index)
-                .cloned()
-                .with_context(|| format!("OPACK: no value {index} to refer to"))?;
-            (value, rest)
+            charged = true;
+            remember = false; // already in the list
+            (seen.refer(index)?, rest)
         }
         0xC1..=0xC4 => {
             let (index, rest) = length(rest, usize::from(tag - 0xC0))?;
-            let value = seen
-                .get(index)
-                .cloned()
-                .with_context(|| format!("OPACK: no value {index} to refer to"))?;
-            (value, rest)
+            charged = true;
+            remember = false; // already in the list
+            (seen.refer(index)?, rest)
         }
         0xD0..=0xDF => {
             remember = false;
@@ -352,7 +407,7 @@ fn read<'a>(
             let count = tag & 0xF;
             let mut entries = Vec::new();
             let mut ptr = rest;
-            let mut entry = |ptr: &'a [u8], seen: &mut Vec<Value>| -> anyhow::Result<&'a [u8]> {
+            let mut entry = |ptr: &'a [u8], seen: &mut Seen| -> anyhow::Result<&'a [u8]> {
                 let (k, next) = read(ptr, seen, depth + 1)?;
                 let (v, next) = read(next, seen, depth + 1)?;
                 entries.push((k, v));
@@ -377,9 +432,12 @@ fn read<'a>(
         }
         other => bail!("OPACK: unknown type 0x{other:02x}"),
     };
+    if !charged {
+        seen.charge(&value)?;
+    }
     // Each value once, as pyatv keeps them (a reference counts in that list).
-    if remember && !seen.contains(&value) {
-        seen.push(value.clone());
+    if remember {
+        seen.remember(&value);
     }
     Ok((value, rest))
 }
@@ -518,6 +576,41 @@ mod tests {
         assert!(unpack(b"\x00").is_err());
         let deep = [vec![0xD1; 40], vec![0x08]].concat();
         assert!(unpack(&deep).is_err(), "too deep");
+    }
+
+    #[test]
+    fn refuses_a_frame_that_would_decode_too_large() {
+        // A 512 KiB string, then an open list of references to it: a frame of
+        // about 1 MiB that would decode to hundreds of GiB.
+        let long = vec![b'a'; 512 << 10];
+        let mut frame = vec![0xD2, 0x63];
+        frame.extend_from_slice(&u32::try_from(long.len()).unwrap().to_le_bytes()[..3]);
+        frame.extend_from_slice(&long);
+        frame.push(0xDF);
+        frame.extend(std::iter::repeat_n(0xA0, 512 << 10));
+        frame.push(0x03);
+        let err = unpack(&frame).unwrap_err().to_string();
+        assert!(err.contains("larger than"), "{err}");
+        // So is a frame of many tiny values.
+        let tiny = [vec![0xDF], vec![0x08; 1 << 20], vec![0x03]].concat();
+        assert!(unpack(&tiny).is_err());
+    }
+
+    #[test]
+    fn many_distinct_values_decode_quickly() {
+        // Forty thousand small distinct strings: each is looked up in one
+        // step, not compared to all the previous ones.
+        let mut frame = vec![0xDF];
+        for i in 0..40_000u32 {
+            let s = format!("{i:05}");
+            frame.push(0x40 + u8::try_from(s.len()).unwrap());
+            frame.extend_from_slice(s.as_bytes());
+        }
+        frame.push(0x03);
+        let start = std::time::Instant::now();
+        let (value, _) = unpack(&frame).unwrap();
+        assert!(matches!(value, Value::List(ref items) if items.len() == 40_000));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]
