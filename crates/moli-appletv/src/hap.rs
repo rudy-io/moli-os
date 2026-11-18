@@ -158,7 +158,7 @@ pub(crate) fn open(k: &[u8; 32], nonce: Nonce, aad: &[u8], data: &[u8]) -> anyho
 }
 
 /// The device's answer, or the error it sent instead.
-fn answer(tlv: &Tlv, state: u8) -> anyhow::Result<()> {
+pub(crate) fn answer(tlv: &Tlv, state: u8) -> anyhow::Result<()> {
     if let Some(code) = tlv.get(tlv8::ERROR) {
         if let Some(wait) = tlv.get(tlv8::BACK_OFF) {
             let seconds = wait

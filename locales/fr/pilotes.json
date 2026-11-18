@@ -519,6 +519,7 @@
   "pilotes.appletv.ne_se_regle_pas": "{point} ne se règle pas sur l'Apple TV",
   "pilotes.appletv.attend_code": "Un code à 4 chiffres s'affiche sur l'Apple TV : donne-le à Moli, par un tube, avec `{command}` (5 minutes)",
   "pilotes.appletv.code_trop_tard": "Le code de l'Apple TV n'est pas arrivé à temps : redémarre Moli pour en afficher un nouveau",
+  "pilotes.appletv.appairage_echoue": "L'appairage de l'Apple TV a échoué ({raison}) : redémarre Moli pour réessayer",
   "pilotes.appletv.pas_appairee": "l'Apple TV n'est pas encore appairée",
   "pilotes.appletv.injoignable": "l'Apple TV ne répond pas",
   "pilotes.phones.nom": "nom : 1 à {max} caractères",

@@ -518,11 +518,23 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             ctx.wait_for(ctx.secrets_problem().unwrap_or("no vault").to_owned());
             return park(ctx).await;
         }
-        let Some(credentials) = pair(config, ctx).await? else {
-            ctx.wait_for(moli_i18n::tr!("pilotes.appletv.code_trop_tard"));
-            return park(ctx).await;
-        };
-        credentials
+        match pair(config, ctx).await {
+            Ok(Some(credentials)) => credentials,
+            Ok(None) => {
+                ctx.wait_for(moli_i18n::tr!("pilotes.appletv.code_trop_tard"));
+                return park(ctx).await;
+            }
+            // Not returned as an error: the restart would show a new code
+            // on the family's screen, again and again.
+            Err(e) => {
+                tracing::warn!(instance = %ctx.instance(), "Apple TV pairing failed: {e:#}");
+                ctx.wait_for(moli_i18n::tr!(
+                    "pilotes.appletv.appairage_echoue",
+                    raison = format!("{e:#}")
+                ));
+                return park(ctx).await;
+            }
+        }
     };
     let id = ctx.device_id(&credentials.device());
     ctx.upsert_device(device(ctx, &id));

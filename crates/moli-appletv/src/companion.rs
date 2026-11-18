@@ -126,6 +126,7 @@ pub struct Pairing {
     stream: TcpStream,
     setup: hap::Setup,
     m2: tlv8::Tlv,
+    since: std::time::Instant,
 }
 
 impl Pairing {
@@ -142,11 +143,50 @@ impl Pairing {
             frame::PS_NEXT,
         )
         .await?;
-        Ok(Self { stream, setup, m2 })
+        // A refusal (busy, wait) comes here, not with the code.
+        hap::answer(&m2, 2)?;
+        if m2.get(tlv8::SALT).is_none() || m2.get(tlv8::PUBLIC_KEY).is_none() {
+            bail!("the Apple TV started no pairing (no salt or key in its answer)");
+        }
+        Ok(Self {
+            stream,
+            setup,
+            m2,
+            since: std::time::Instant::now(),
+        })
+    }
+
+    /// Whether the Apple TV closed the request while the code was awaited
+    /// (it then never reads what follows).
+    /// Looked at, never read: what is there stays for the next step.
+    async fn closed(&self) -> Option<String> {
+        let mut probe = [0u8; 1];
+        let waited = self.since.elapsed().as_secs();
+        let peeked =
+            tokio::time::timeout(Duration::from_millis(20), self.stream.peek(&mut probe)).await;
+        match peeked {
+            // Nothing there: still open.
+            Err(_) => None,
+            Ok(Ok(0)) => Some(format!("the Apple TV closed the pairing after {waited} s")),
+            Ok(Ok(_)) => {
+                tracing::info!(
+                    "Apple TV: sent something unasked while the code was awaited ({waited} s)"
+                );
+                None
+            }
+            Ok(Err(e)) => Some(format!("the pairing link failed after {waited} s: {e}")),
+        }
     }
 
     /// The code the Apple TV shows, and the name it will list Moli under.
     pub async fn finish(mut self, pin: &str, name: &str) -> anyhow::Result<Credentials> {
+        if let Some(why) = self.closed().await {
+            bail!(why);
+        }
+        tracing::info!(
+            "Apple TV: code received after {} s, sending its proof",
+            self.since.elapsed().as_secs()
+        );
         let m3 = self.setup.code(&self.m2, pin)?;
         let m4 = step(
             &mut self.stream,
@@ -154,7 +194,8 @@ impl Pairing {
             vec![("_pd", Value::Bytes(m3)), ("_pwTy", Value::Int(1))],
             frame::PS_NEXT,
         )
-        .await?;
+        .await
+        .context("no answer to the code's proof")?;
         let m5 = self.setup.exchange(&m4, name)?;
         let m6 = step(
             &mut self.stream,

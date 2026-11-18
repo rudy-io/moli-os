@@ -519,6 +519,7 @@
   "pilotes.appletv.ne_se_regle_pas": "{point} cannot be set on the Apple TV",
   "pilotes.appletv.attend_code": "A 4-digit code shows on the Apple TV: give it to Moli, through a pipe, with `{command}` (5 minutes)",
   "pilotes.appletv.code_trop_tard": "The Apple TV's code did not arrive in time: restart Moli to show a new one",
+  "pilotes.appletv.appairage_echoue": "The Apple TV pairing failed ({raison}): restart Moli to try again",
   "pilotes.appletv.pas_appairee": "the Apple TV is not paired yet",
   "pilotes.appletv.injoignable": "the Apple TV does not answer",
   "pilotes.phones.nom": "name: 1–{max} characters",
