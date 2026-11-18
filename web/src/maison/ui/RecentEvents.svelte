@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
   import { home, relative } from '../lib/home.svelte.js';
@@ -18,11 +19,16 @@
   let shown = $state({});
   let broken = $state({});
 
+  // Asked again only when the cameras themselves change: not when the page
+  // rebuilds their list (a device arrives, another is renamed…).
+  const ids = $derived(cameras.map((c) => c.id).join('\n'));
+  const names = $derived(new Map(cameras.map((c) => [c.id, c.name])));
+
   async function load() {
     const before = Math.ceil(Date.now() / 1000);
     const after = before - HOURS * 3600;
     const lists = await Promise.all(
-      cameras.map((c) =>
+      untrack(() => cameras).map((c) =>
         fetch(`/api/devices/${encodeURIComponent(c.id)}/review?after=${after}&before=${before}`)
           .then((r) => (r.ok ? r.json() : { items: [] }))
           .then((b) => ({ camera: c, items: (b.items ?? []).filter((i) => i.events.length) }))
@@ -30,11 +36,17 @@
       ),
     );
     events = latest(lists, 20);
+    // What left the strip is forgotten.
+    const kept = new Set(events.map(({ camera, item }) => camera.id + item.id));
+    shown = keep(shown, kept);
+    broken = keep(broken, kept);
     loading = false;
   }
 
+  const keep = (marks, kept) => Object.fromEntries(Object.entries(marks).filter(([k]) => kept.has(k)));
+
   $effect(() => {
-    cameras;
+    ids;
     load();
     const every = setInterval(load, 60_000);
     return () => clearInterval(every);
@@ -67,7 +79,7 @@
       {#each events as { camera, item } (camera.id + item.id)}
         {@const key = camera.id + item.id}
         <li>
-          <button class="tile" class:ghost={!shown[key] && !broken[key]} onclick={() => onopen(camera.id, item)} aria-label={t('revue.revoir_camera', { camera: camera.name, heure: hm(item.start) })}>
+          <button class="tile" class:ghost={!shown[key] && !broken[key]} onclick={() => onopen(camera.id, item)} aria-label={t('revue.revoir_camera', { camera: names.get(camera.id) ?? camera.name, heure: hm(item.start) })}>
             {#if broken[key]}
               <span class="no-picture"><Icon name="cctv" size={30} /></span>
             {:else}
@@ -80,7 +92,7 @@
                 onerror={() => (broken[key] = true)}
               />
             {/if}
-            <span class="cam"><i class={item.severity}></i>{camera.name}</span>
+            <span class="cam"><i class={item.severity}></i>{names.get(camera.id) ?? camera.name}</span>
             <span class="what">
               <b>{item.labels.length ? item.labels.map(labelName).join(', ') : t('revue.mouvement')}</b>
               <small>{hm(item.start)} · {relative(item.start * 1000, home.now)}</small>

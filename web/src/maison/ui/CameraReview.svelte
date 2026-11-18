@@ -16,11 +16,16 @@
   const nowS = () => Date.now() / 1000;
 
   // ── The day shown ─────────────────────────────────────────────
-  let dayBack = $state(0); // 0 = today, 1 = yesterday…
+  // Today follows midnight (`home.now` ticks), even with the viewer open;
+  // a past day stays the one picked.
+  const today = $derived(dayOf(home.now / 1000)[0]);
+  let picked = $state(null); // the start of a past day; null = today
   const span = $derived.by(() => {
-    const [start, end] = dayOf(nowS() - dayBack * 86_400);
+    const [start, end] = dayOf(picked ?? today);
     return { after: start, before: end };
   });
+  const isToday = $derived(span.after === today);
+  const dayBack = $derived(Math.round((today - span.after) / 86_400)); // 0 = today, 1 = yesterday…
   let items = $state([]);
   let recorded = $state([]);
   let loading = $state(true);
@@ -58,7 +63,7 @@
     recorded = [];
     load();
     // Today keeps coming: refreshed each minute.
-    if (dayBack !== 0) return;
+    if (!isToday) return;
     const every = setInterval(load, 60_000);
     return () => clearInterval(every);
   });
@@ -73,16 +78,14 @@
       .then((r) => (r.ok ? r.json() : { zones: [] }))
       .then((b) => (zones = b.zones ?? []))
       .catch(() => {});
-    // The camera's own proportions, so the zones fall on the picture.
-    fetch(`/api/devices/${encodeURIComponent(id)}/snapshot`)
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((b) => (b ? createImageBitmap(b) : null))
-      .then((img) => {
-        if (img?.width && img?.height) frame = { w: img.width, h: img.height };
-        img?.close();
-      })
-      .catch(() => {});
   });
+
+  // The proportions of the picture shown (live, recording, photo, image),
+  // so the zones fall on it: never an image asked just for them (a camera
+  // on battery would wake for nothing).
+  function sized(w, h) {
+    if (w > 0 && h > 0 && (w !== frame.w || h !== frame.h)) frame = { w, h };
+  }
 
   // ── What plays ────────────────────────────────────────────────
   // { kind: 'live' } | { kind: 'video', start, end } | { kind: 'image', event, at }
@@ -137,6 +140,7 @@
   let lead = 0;
   function onmeta() {
     if (!video || mode.kind !== 'video') return;
+    sized(video.videoWidth, video.videoHeight);
     const extra = video.duration - (mode.end - mode.start);
     lead = Number.isFinite(extra) && extra > 0.5 ? extra : 0;
     if (lead) video.currentTime = lead;
@@ -167,7 +171,7 @@
   let hover = $state(null); // fraction under the pointer
   const shownBars = $derived(bars(recorded, span.after, span.before));
   const marks = $derived(hours(span.after, span.before));
-  const nowMark = $derived(dayBack === 0 ? at(home.now / 1000, span.after, span.before) : null);
+  const nowMark = $derived(isToday ? at(home.now / 1000, span.after, span.before) : null);
 
   function fractionOf(e) {
     const r = frieze.getBoundingClientRect();
@@ -178,7 +182,7 @@
     const step = e.shiftKey ? 600 : 60;
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault();
-      const from = position ?? (dayBack === 0 ? nowS() - 3600 : span.after);
+      const from = position ?? (isToday ? nowS() - 3600 : span.after);
       playFrom(from + (e.key === 'ArrowRight' ? step : -step));
     }
   }
@@ -229,12 +233,16 @@
       ></video>
       <span class="badge past"><Icon name="history" size={14} />{position ? hms(position) : ''}</span>
     {:else if mode.kind === 'image'}
-      <img src="{base}/events/{encodeURIComponent(mode.event)}/image" alt={t('revue.photo_de', { heure: hm(mode.at) })} />
+      <img
+        src="{base}/events/{encodeURIComponent(mode.event)}/image"
+        alt={t('revue.photo_de', { heure: hm(mode.at) })}
+        onload={(e) => sized(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+      />
       <span class="badge past"><Icon name="camera" size={14} />{hms(mode.at)}</span>
     {:else if live && !noLive}
-      <LiveVideo {id} onfail={() => (noLive = true)} />
+      <LiveVideo {id} onfail={() => (noLive = true)} onsize={sized} />
     {:else}
-      <CameraTile {id} {name} refresh={battery ? 0 : 2} {battery} big />
+      <CameraTile {id} {name} refresh={battery ? 0 : 2} {battery} big onsize={sized} />
       {#if noLive}
         <p class="no-live">
           {t('salon.cameras.direct_impossible')}
@@ -255,9 +263,9 @@
 
   <div class="tools">
     <div class="day" role="group" aria-label={t('revue.jour')}>
-      <button onclick={() => (dayBack += 1)} aria-label={t('revue.jour_precedent')}><Icon name="chevron-left" size={20} /></button>
+      <button onclick={() => (picked = dayOf(span.after - 1)[0])} aria-label={t('revue.jour_precedent')}><Icon name="chevron-left" size={20} /></button>
       <b>{dayTitle}</b>
-      <button onclick={() => (dayBack = Math.max(0, dayBack - 1))} disabled={dayBack === 0} aria-label={t('revue.jour_suivant')}><Icon name="chevron-right" size={20} /></button>
+      <button onclick={() => (picked = span.before >= today ? null : span.before)} disabled={isToday} aria-label={t('revue.jour_suivant')}><Icon name="chevron-right" size={20} /></button>
     </div>
     <div class="actions">
       {#if zones.length}

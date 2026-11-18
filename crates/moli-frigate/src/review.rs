@@ -86,6 +86,11 @@ impl Api {
         }
     }
 
+    /// Every camera's zones, from Frigate's configuration.
+    pub async fn zones(&self) -> anyhow::Result<std::collections::BTreeMap<String, ZoneOf>> {
+        Ok(zones_by_name(&self.json("/api/config").await?))
+    }
+
     /// The stream Frigate plays for a camera: the first of its
     /// `live.streams`, else the camera's own name (what Frigate accepts on
     /// `/api/go2rtc/webrtc`). From Frigate's configuration, never a request.
@@ -545,6 +550,44 @@ pub fn live_streams(config: &Json) -> std::collections::BTreeMap<String, String>
     out
 }
 
+/// A zone of Frigate's configuration: the camera it is drawn on, and the
+/// name Frigate shows for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZoneOf {
+    pub camera: String,
+    pub name: String,
+}
+
+/// `/api/config` → every camera's zones, by the name Frigate publishes
+/// their counts under (`<base>/<zone>/<object>`). A name Frigate would
+/// refuse is left out, as for a camera; a name drawn on two cameras keeps
+/// the first (Frigate counts them under one topic).
+#[must_use]
+pub fn zones_by_name(config: &Json) -> std::collections::BTreeMap<String, ZoneOf> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(cameras) = config["cameras"].as_object() else {
+        return out;
+    };
+    for (camera, c) in cameras {
+        let Some(zones) = c["zones"].as_object() else {
+            continue;
+        };
+        for (zone, z) in zones {
+            if !is_camera(camera) || !is_camera(zone) {
+                continue;
+            }
+            out.entry(zone.clone()).or_insert_with(|| ZoneOf {
+                camera: camera.clone(),
+                name: z["friendly_name"]
+                    .as_str()
+                    .filter(|n| !n.trim().is_empty())
+                    .map_or_else(|| zone.replace('_', " "), str::to_owned),
+            });
+        }
+    }
+    out
+}
+
 /// `/api/config` → this camera's zones (relative coordinates, `"x,y,x,y…"`
 /// or a list of numbers).
 #[must_use]
@@ -714,6 +757,41 @@ mod tests {
         assert_eq!(zones[0].points[2], (0.5, 0.9));
         assert_eq!(zones[1].points.len(), 3);
         assert!(zones_of(&config, "jardin").is_empty());
+    }
+
+    #[test]
+    fn zones_by_the_name_frigate_counts_them_under() {
+        let config = json!({"cameras": {
+            "entree": {"zones": {
+                "allee_portail": {"coordinates": "0,0,1,0,1,1", "friendly_name": "Allée du portail"},
+                "rue": {"coordinates": "0,0,1,0,1,1"}
+            }},
+            "portail": {"zones": {
+                "rue": {"coordinates": "0,0,1,0,1,1"},
+                "x&y": {"coordinates": "0,0,1,0,1,1"}
+            }},
+            "jardin": {}
+        }});
+        let zones = zones_by_name(&config);
+        assert_eq!(
+            zones.get("allee_portail"),
+            Some(&ZoneOf {
+                camera: "entree".into(),
+                name: "Allée du portail".into()
+            })
+        );
+        // No name of its own: its key, readable. Drawn twice: the first.
+        assert_eq!(
+            zones.get("rue"),
+            Some(&ZoneOf {
+                camera: "entree".into(),
+                name: "rue".into()
+            })
+        );
+        // A name Frigate would refuse is never a device.
+        assert!(!zones.contains_key("x&y"));
+        assert_eq!(zones.len(), 2);
+        assert!(zones_by_name(&json!({})).is_empty());
     }
 
     #[test]

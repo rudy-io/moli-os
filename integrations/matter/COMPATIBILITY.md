@@ -22,7 +22,11 @@ abonnées ; un changement invalide les capacités puis déclenche la redécouver
 Le pont exige aussi Reachable=true. Les identités ne dépendent ni du nom ni de la marque.
 
 Les températures cibles chauffage/refroidissement sont des écritures absolues avec
-limites et séparation minimale vérifiées. Un thermostat simple utilise
+limites et séparation minimale vérifiées. Les limites réglées (`Min/Max…SetpointLimit`)
+sont facultatives : un appareil qui ne les liste pas dans son AttributeList est borné par
+ses limites absolues, comme le prévoit la spécification (cas des vannes de radiateur) ;
+une limite listée mais absente ou invalide garde la consigne en lecture seule. Un
+thermostat simple utilise
 `target_temperature` ; un modèle double utilise les clés fixes `heat_setpoint` et
 `cool_setpoint`, y compris dans le dashboard. Le mode ne redirige jamais une commande
 mise en attente vers une autre consigne.
@@ -58,7 +62,8 @@ rediscovery; bridged devices also require Reachable. Device identity remains sta
 
 Lighting uses percent, kelvin and RGB with mode-aware subscriptions. Covers use
 100=open; observed position is never replaced by the requested target. Thermostats
-use absolute writes with advertised limits/deadband, fixed heat/cool keys on dual
+use absolute writes with advertised limits/deadband (user limits not in the
+AttributeList fall back to the absolute ones, per the specification), fixed heat/cool keys on dual
 models, and exact-path acknowledgements. Lock control is always timed and guarded;
 PIN-required or unknown-policy locks remain read only. No optimistic state updates.
 
