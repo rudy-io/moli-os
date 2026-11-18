@@ -1352,7 +1352,7 @@ name = "matter-cert"
 version = "0.3.2"
 dependencies = [
  "bitflags 2.13.2",
- "der 0.7.10",
+ "der 0.8.3",
  "matter-codec",
  "ring",
  "thiserror",
@@ -1381,7 +1381,7 @@ dependencies = [
  "base64",
  "bitflags 2.13.2",
  "cms",
- "der 0.7.10",
+ "der 0.8.3",
  "matter-cert",
  "matter-codec",
  "matter-crypto",
