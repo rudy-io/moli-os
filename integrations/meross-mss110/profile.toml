@@ -4,7 +4,8 @@
 #   moli-os secrets set <instance> key        (value on standard input)
 # Protocol knowledge from the community (meross_lan, merossiot); no code
 # copied. One relay, no metering.
-# Never tried on a real device: written from those descriptions.
+# Tried on a real MSS110 (firmware 7.3.46): it wants its orders encrypted,
+# which the engine does by itself (see docs/components/profils.md).
 
 [profile]
 id = "meross-mss110"

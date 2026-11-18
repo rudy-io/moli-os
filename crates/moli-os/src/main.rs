@@ -449,11 +449,15 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     };
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
+    // Where the house is, for `dehors:soleil`: the automations hold it (and
+    // follow a position chosen from the conversation); they start below.
+    let placed: Arc<std::sync::OnceLock<moli_automation::Automations>> = Arc::default();
     tasks.extend(spawn_house_drivers(
         &config,
         &hub,
         energy.as_ref(),
         history.as_ref(),
+        &placed,
         &cancel,
     ));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
@@ -478,6 +482,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .map(moli_api::UiPin::new);
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
+    let _ = placed.set(automations.clone());
     let surfaces = moli_api::Options {
         airzone_setup: Some(Arc::new(airzone_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
@@ -1400,6 +1405,7 @@ fn spawn_house_drivers(
     hub: &Hub,
     energy: Option<&moli_energy::Energy>,
     history: Option<&moli_history::History>,
+    placed: &Arc<std::sync::OnceLock<moli_automation::Automations>>,
     cancel: &CancellationToken,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let mut tasks = Vec::new();
@@ -1414,15 +1420,27 @@ fn spawn_house_drivers(
             cancel.clone(),
         ));
     }
-    if let Some(outdoor) = &config.outdoor {
+    // « Dehors »: the weather with `[outdoor]`, the sun wherever the house
+    // is placed (the demo house sits nowhere: no sun).
+    if config.outdoor.is_some() || !config.server.demo {
+        let place: Option<moli_outdoor::sun::Place> = (!config.server.demo).then(|| {
+            let placed = placed.clone();
+            let place: moli_outdoor::sun::Place = Arc::new(move || {
+                placed
+                    .get()
+                    .and_then(moli_automation::Automations::position)
+            });
+            place
+        });
         tasks.push(spawn_driver(
             hub,
             InstanceId::from(moli_outdoor::INSTANCE),
             Arc::new(moli_outdoor::Outdoor::new(
                 hub.clone(),
-                outdoor,
+                config.outdoor.as_ref(),
                 history.cloned(),
                 &config.zone.name,
+                place,
             )),
             cancel.clone(),
         ));

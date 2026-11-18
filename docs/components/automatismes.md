@@ -99,7 +99,8 @@ lui fait perdre sa validation, la maison est prévenue (notice dans le dashboard
   après un redémarrage dans la même minute). L'heure sautée au passage à l'heure d'été ne
   tire pas (comme HA).
 - Soleil : calcul astronomique local (NOAA, ±1 min, vérifié contre un almanach) depuis
-  `[automations] latitude/longitude` ; à défaut, le dernier point `daylight` frais
+  `[automations] latitude/longitude`, dans `moli_core::sun` : les mêmes formules donnent
+  `dehors:soleil` (élévation, azimut, #258, voir [pilotes.md](pilotes.md)) ; à défaut, le dernier point `daylight` frais
   de la météo. Sans position ni mesure fraîche, les conditions jour/nuit utilisent
   la dernière observation connue, même après redémarrage avec la météo hors ligne.
   Ce repli est une estimation qui reste figée tant que la météo ne revient pas ;

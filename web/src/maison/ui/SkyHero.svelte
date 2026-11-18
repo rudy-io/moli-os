@@ -182,6 +182,29 @@
     line-height: 1;
   }
 
+  /* The « mesuré » / « prévu » badge by the big temperature: in the sky icon's
+     colour (the sun's, golden over the map), large enough to read at a
+     glance. A forecast is a little fainter than a measure. */
+  .words strong :global(.src) {
+    margin-left: 8px;
+    padding: 2px 9px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: normal;
+    color: var(--sun);
+    background: color-mix(in srgb, var(--sun) 16%, transparent);
+    vertical-align: 0.9em;
+  }
+
+  .live .words strong :global(.src) {
+    color: #ffd75e;
+    background: rgb(0 0 0 / 35%);
+  }
+
+  .words strong :global(.src.forecast) {
+    opacity: 0.8;
+  }
+
   .label {
     font-weight: 650;
   }

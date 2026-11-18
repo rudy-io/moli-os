@@ -4,7 +4,7 @@
 #   moli-os secrets set <instance> key        (value on standard input)
 # Protocol knowledge from the community (meross_lan, merossiot); no code
 # copied. Channel 0 is every outlet at once; 1 and up, each outlet (then the USB ports).
-# Never tried on a real device: written from those descriptions.
+# Read on real MSS425F/MSS425FC; no order tried on one yet.
 
 [profile]
 id = "meross-multiprise"
