@@ -517,7 +517,7 @@
   "pilotes.appletv.appli_inconnue": "l'Apple TV n'a pas d'appli « {app} »",
   "pilotes.appletv.touche_inconnue": "touche {key} inconnue de l'Apple TV",
   "pilotes.appletv.ne_se_regle_pas": "{point} ne se règle pas sur l'Apple TV",
-  "pilotes.appletv.attend_code": "Un code à 4 chiffres s'affiche sur l'Apple TV : donne-le à Moli, par un tube, avec `{command}` (5 minutes)",
+  "pilotes.appletv.attend_code": "Un code à 4 chiffres s'affiche sur l'Apple TV (sinon : Réglages › Télécommandes et appareils › App Télécommande et appareils) : donne-le à Moli dans la minute, par un tube, avec `{command}`",
   "pilotes.appletv.code_trop_tard": "Le code de l'Apple TV n'est pas arrivé à temps : redémarre Moli pour en afficher un nouveau",
   "pilotes.appletv.appairage_echoue": "L'appairage de l'Apple TV a échoué ({raison}) : redémarre Moli pour réessayer",
   "pilotes.appletv.pas_appairee": "l'Apple TV n'est pas encore appairée",

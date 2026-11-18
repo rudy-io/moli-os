@@ -13,12 +13,14 @@
    # name = "Moli"   # le nom sous lequel l'Apple TV liste Moli
    ```
 
-   `moli-os check-config`, puis redémarrer Moli, **quelqu'un devant la télé**.
+   `moli-os check-config`. **Quelqu'un devant la télé** ouvre d'abord Réglages ›
+   Télécommandes et appareils › App Télécommande et appareils (le code y apparaît ; il ne
+   s'affiche pas toujours de lui-même), et prépare la commande ci-dessous. Puis redémarrer Moli.
 3. L'Apple TV affiche un code à 4 chiffres ; le statut du pilote dit la commande. L'humain le
-   donne par un tube, dans les 5 minutes :
+   donne par un tube, **dans la minute** (l'Apple TV abandonne la demande avant une minute) :
    `read -rs C && printf '%s' "$C" | docker exec -i moli-os /moli-os secrets set appletv pin; unset C`
-   Le pilote l'utilise une fois et l'efface. Trop tard : redémarrer Moli, un nouveau code
-   s'affiche.
+   Le pilote l'utilise une fois et l'efface. Trop tard ou échec (la raison est dans le
+   statut) : redémarrer Moli, un nouveau code s'affiche.
 4. Vérifier : l'appareil « Apple TV » apparaît, `power` dit si elle dort, `apps` liste ses
    applis. Essayer une touche (`key` = `CursorRight`) humain présent.
 5. Page Salon : étiqueter l'appareil dans « Salon » **et** renseigner

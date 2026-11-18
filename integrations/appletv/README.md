@@ -12,9 +12,13 @@
   texte dans un champ, le volume réglable (touches `VolumeUp` / `VolumeDown` seulement, si la
   télé ou la barre de son suit l'Apple TV).
 - Identité : l'identifiant d'appairage de l'Apple TV (stable, pas l'adresse).
-- Rien de chiffré sans appairage : le pilote attend le code (statut `waiting`) cinq minutes,
-  puis attend un redémarrage de Moli pour en afficher un autre (pas de code qui revient tout
-  seul sur l'écran de la famille).
+- Rien de chiffré sans appairage : le pilote attend le code (statut `waiting`). L'Apple TV
+  abandonne la demande en moins d'une minute ; le code ne s'affiche pas toujours de lui-même
+  (écran Réglages › Télécommandes et appareils › App Télécommande et appareils). Trop tard ou
+  échec : le pilote attend un redémarrage de Moli pour en afficher un autre (pas de code qui
+  revient tout seul sur l'écran de la famille).
+- Vérifié en vrai le 18 nov. 2026 sur une Apple TV 4K (3ᵉ génération) : appairage, veille lue,
+  applis listées, touches suivies à l'écran.
 - Essais : OPACK et TLV8 sur les vecteurs de pyatv, SRP octet par octet contre un portage
   indépendant des formules de srptools, vérification d'appairage et session chiffrée contre
   une fausse Apple TV.

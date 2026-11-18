@@ -21,8 +21,9 @@ use crate::opack::Value as Op;
 pub const CREDENTIALS: &str = "credentials";
 pub const PIN: &str = "pin";
 
-/// How long the code on the screen is waited for.
-const PIN_WAIT: Duration = Duration::from_secs(5 * 60);
+/// How long the code on the screen is waited for (the Apple TV itself
+/// drops the request sooner: measured, under a minute).
+const PIN_WAIT: Duration = Duration::from_secs(2 * 60);
 /// How often the vault is looked at for the code.
 const PIN_POLL: Duration = Duration::from_secs(1);
 /// Asked this often, the Apple TV says whether it sleeps (and the link
