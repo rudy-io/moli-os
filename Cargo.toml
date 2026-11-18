@@ -95,7 +95,7 @@ libc = "0.2"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 ring = "0.17"
 # Moli's ADB key (RSA, the TV's format): already in the tree through x509-parser.
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "limits"] }
 unicode-normalization = "0.1"
