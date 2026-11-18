@@ -39,7 +39,9 @@
     open = id;
   }
 
-  // What the camera saw today, from the history (rising edges only).
+  // What the camera saw today, from the history (rising edges only). A
+  // camera with a past has its NVR's list instead: only what the NVR does
+  // not tell is kept from the history, the doorbell's presses.
   const KINDS = [
     ['doorbell', 'salon.evenement.sonnette', 'bell'],
     ['person', 'salon.evenement.personne', 'account'],
@@ -53,9 +55,11 @@
   $effect(() => {
     const id = open;
     seen = [];
-    if (!id || pastOf(id)) return;
+    if (!id) return;
     const d = hub.devices[id];
-    const keys = KINDS.filter(([k]) => d?.points.some((p) => p.key === k));
+    const kinds = pastOf(id) ? KINDS.filter(([k]) => k === 'doorbell') : KINDS;
+    const keys = kinds.filter(([k]) => d?.points.some((p) => p.key === k));
+    if (!keys.length && pastOf(id)) return;
     seenLoading = true;
     Promise.all(
       keys.map(([k, label, icon]) =>
@@ -136,9 +140,9 @@
           {/if}
         {/if}
       {/key}
-      {#if !pastOf(current.id)}
+      {#if !pastOf(current.id) || seen.length}
         <div class="seen">
-          <h3>{t('salon.cameras.aujourdhui')}</h3>
+          <h3>{pastOf(current.id) ? t('salon.cameras.sonnette_24h') : t('salon.cameras.aujourdhui')}</h3>
           {#if seenLoading}
             <p class="muted">…</p>
           {:else if seen.length}
