@@ -874,6 +874,31 @@ host = "192.168.1.x"
 - **Page Salon** : la box y apparaît quand `salon.tv` de `data/home.json` porte son id (`"salon": { "tv": "box:<host>" }`) : titre, appli, position, télécommande, raccourcis d'applis. L'étiquette de pièce seule ne suffit pas : la page ne choisit pas sa télé d'après la pièce.
 - **Tests** : chaque touche de `KEYS` a son code Android ; une touche de maintien inconnue est refusée.
 
+## `appletv` : Apple TV (`crates/moli-appletv`)
+
+- **Couvre** : une Apple TV (4K ou HD) par instance, par le protocole **Companion**, celui de la télécommande Apple d'un iPhone : réveil et veille (l'écran suit par HDMI-CEC quand la télé le permet), touches de télécommande (appuyées ou **maintenues**), ouvrir une appli (par son nom, son identifiant ou un lien), lecture / pause. Pas encore ce qui se joue (titre, image, position : c'est MediaRemote, un autre protocole), ni texte dans un champ, ni volume réglable.
+- **Protocole** (tel que pyatv, MIT, le décrit) : TCP **49153** (annoncé en `_companion-link._tcp`). Trames : un octet de type, une longueur sur 24 bits gros-boutiste, puis de l'**OPACK** (`opack.rs` : l'encodage binaire d'Apple, avec ses renvois à une valeur déjà vue). **Appairage** une fois (`hap.rs`, `srp.rs`) : HomeKit pair setup en TLV8, l'Apple TV affiche un code à 4 chiffres, SRP-6a (groupe 3072 bits de la RFC 5054, SHA-512, utilisateur `Pair-Setup`) le prouve des deux côtés, puis chacun donne sa clé Ed25519 à long terme, chiffrée sous une clé tirée de SRP (HKDF-SHA512, ChaCha20-Poly1305, nonces `PS-Msg05` / `PS-Msg06`). À **chaque connexion**, pair verify : échange X25519 signé par les deux clés à long terme, d'où les deux clés de session (`ClientEncrypt-main`, `ServerEncrypt-main`) ; ensuite chaque trame est scellée, l'en-tête de 4 octets en données associées, un compteur par sens en nonce (12 octets, petit-boutiste). Messages : `_i` quoi, `_t` 1 événement / 2 requête / 3 réponse, `_x` le numéro de la requête, `_c` le contenu, `_em` une erreur. Après la vérification : `_systemInfo`, `_sessionStart`, `TVRCSessionStart`, abonnement à `SystemStatus` et `TVSystemStatus`, `FetchLaunchableApplicationsEvent` ; `FetchAttentionState` toutes les minutes (dit la veille et prouve que le lien vit). Uniquement `ring` et `num-bigint`, déjà dans le workspace.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "appletv"
+kind = "appletv"
+[driver.options]
+host = "192.168.1.x"
+# port = 49153
+# name = "Moli"   # le nom sous lequel l'Apple TV liste Moli (Réglages › Télécommandes et appareils)
+```
+
+- **Secrets** : `credentials` (l'appairage : la graine de la clé de Moli, son identifiant, l'identifiant et la clé de l'Apple TV ; JSON, écrit par le pilote, jamais journalisé) ; `pin`, le code affiché, donné **une fois** par une personne, par un tube, puis effacé par le pilote (`take_secret`). Il faut une clé maître.
+- **Appairage** : sans `credentials`, le pilote demande l'appairage, l'Apple TV affiche le code, statut `waiting` avec la commande `moli-os secrets set <instance> pin`. Il regarde le coffre chaque seconde pendant **5 minutes** ; passé ce délai, il attend un redémarrage de Moli (pas de nouveau code qui reviendrait tout seul sur l'écran de la famille). Pendant l'attente, tout ordre est refusé.
+- **Points** : `power` (lu : `SystemStatus` 1 = veille → faux, 2 économiseur, 3 éveillée, 4 inactive → vrai ; **écrit** : bouton HID `Wake` 13 ou `Sleep` 12, relâché seul comme pyatv) ; `key` en écriture seule (17 touches, les mêmes noms que `androidtv` pour la télécommande du Salon : curseurs, `Confirm` = Select, `Back` = Menu, `Home`, `PlayPause`, `VolumeUp` / `VolumeDown`, `ChannelStepUp` / `ChannelStepDown`, `Options` = Guide en boutons HID `_hidC` appuyés puis relâchés ; `Play`, `Pause`, `Next`, `Previous` en commandes média `_mcc`) ; `hold` en écriture seule (une flèche ou `Confirm` tenue jusqu'à `release`, une seule à la fois) ; `app` en écriture seule (`_launchApp` : un lien en `_urlS`, sinon l'identifiant d'une appli que l'Apple TV liste, ou le nom d'une appli listée sans tenir compte de la casse ; liste pas encore lue : un identifiant passe tel quel ; le reste est refusé, jamais deviné) ; `apps` en lecture (`nom=identifiant` par ligne, triées par nom) ; `media_control` (`play`, `pause`) en écriture seule.
+- **Ordres perdus** : un ordre pendant que l'Apple TV ne répond pas est refusé tout de suite, jamais rejoué. Reprises de connexion après 5, 15, 30 puis 60 s.
+- **Identité** : l'identifiant d'appairage de l'Apple TV (stable : un changement d'adresse ne crée pas un autre appareil).
+- **Désappairer** : sur l'Apple TV, Réglages › Télécommandes et appareils, retirer Moli ; puis `moli-os secrets forget <instance> credentials` et redémarrer.
+- **Page Salon** : comme `androidtv`, `"salon": { "tv": "<id>" }` dans `data/home.json`.
+- **Tests** : OPACK et TLV8 sur les vecteurs de pyatv (renvois compris), SRP octet par octet contre un portage indépendant des formules de srptools (bibliothèque standard de Python, côté appareil compris), pair verify contre une fausse Apple TV (signatures, clés de session, autre Apple TV refusée), une session chiffrée entière (requête, événement, refus `_em`, lien coupé), les touches, la veille, l'ouverture d'appli.
+
 ## `frigate` : NVR Frigate (`crates/moli-frigate`)
 
 - **Couvre** : caméras de Frigate : mouvement, objets vus, interrupteurs de Frigate, images. Et le **serveur** (appareil « Serveur Frigate », `<instance>:frigate-server`, déclaré au premier `frigate/stats`) : `running`, `version`, `uptime` (h), `inference_speed` (ms, premier détecteur), `detection_fps`, `gpu_load` et `cpu_load` (%).
