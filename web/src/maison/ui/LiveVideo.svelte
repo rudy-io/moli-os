@@ -7,8 +7,9 @@
    *  passes the offer and the answer (/api/devices/{id}/live); the video
    *  comes straight from the device. So it plays at home, where the
    *  browser reaches the device; elsewhere it says so, or tells `onfail`
-   *  (the page then shows the device's images instead). */
-  let { id, onfail = null } = $props();
+   *  (the page then shows the device's images instead). `onsize(w, h)`:
+   *  the video's proportions, once known and when they change. */
+  let { id, onfail = null, onsize = null } = $props();
 
   let video = $state(null);
   let status = $state('connecting'); // connecting | playing | failed
@@ -101,7 +102,7 @@
 
 <div class="live" data-status={status}>
   <!-- svelte-ignore a11y_media_has_caption -->
-  <video bind:this={video} autoplay muted playsinline></video>
+  <video bind:this={video} autoplay muted playsinline onresize={() => onsize?.(video.videoWidth, video.videoHeight)}></video>
   {#if status === 'connecting'}
     <span class="badge">{t('salon.impression.camera_connexion')}</span>
   {:else if status === 'playing'}
