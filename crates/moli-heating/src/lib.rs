@@ -30,6 +30,11 @@
 //! # initial = 19.0: the setpoint and schedule before anyone set one
 //! ```
 //!
+//! A valve is a writable setpoint in °C with bounds, on a device that is
+//! neither an opening nor a lock; anything else is left alone. The valves'
+//! devices are the room device's members, so an order to the room is judged
+//! on their rooms too (protected rooms, quiet hours).
+//!
 //! Orders go through the hub as the house's own, like a scene's. The room's
 //! sensor quiet, the shift holds and the valves are left as they are unless
 //! the room's setpoint or mode changes. A valve is written only on a
@@ -146,6 +151,11 @@ pub fn check(rooms: &[Room]) -> anyhow::Result<()> {
                 is_point(valve),
                 "heating room {id}: valve {valve:?} is not a point (device/key)"
             );
+            // The rooms' own points: the heating would wait for itself.
+            ensure!(
+                !valve.starts_with(&format!("{INSTANCE}:")),
+                "heating room {id}: valve {valve:?} is a heating room, not a valve"
+            );
         }
         ensure!(
             (5.0..=30.0).contains(&room.min)
@@ -171,6 +181,8 @@ pub struct Heating {
     rooms: Vec<Room>,
     zone: jiff::tz::TimeZone,
     settle: Duration,
+    /// [`regulation::URGENT_FLOOR`], shorter in the tests.
+    floor: Duration,
 }
 
 impl Heating {
@@ -182,8 +194,20 @@ impl Heating {
             rooms,
             zone,
             settle: SETTLE,
+            floor: regulation::URGENT_FLOOR,
         }
     }
+}
+
+/// What a valve's point is, as the hub knows it.
+#[derive(Debug, PartialEq)]
+enum Valve {
+    /// A setpoint in °C, and its bounds.
+    Writable((f64, f64)),
+    /// Its device not there yet (its driver starts).
+    Unknown,
+    /// Something else: never written.
+    Other,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -205,7 +229,14 @@ impl Mode {
 }
 
 struct ValveRun {
+    /// The last write tried (refused or not: a sleeping valve is not asked
+    /// again every minute).
     sent: Option<Instant>,
+    /// The room's setpoint or mode changed since this valve was last
+    /// written: kept until it is (a valve not known yet keeps it).
+    urgent: bool,
+    /// Its point said once not to be a valve's setpoint.
+    refused: bool,
 }
 
 struct RoomRun {
@@ -219,8 +250,15 @@ struct RoomRun {
     /// Learned from the room's error, and when it was last read.
     shift: Shift,
     read: Option<Instant>,
-    /// The setpoint or mode changed since the valves were last written.
-    urgent: bool,
+}
+
+impl RoomRun {
+    /// The setpoint or mode changed: each valve has it soon.
+    fn changed(&mut self) {
+        for valve in &mut self.valves {
+            valve.urgent = true;
+        }
+    }
 }
 
 /// The local day (Monday 0) and minute of the day.
@@ -250,6 +288,19 @@ fn numeric(
         unit: Some(Unit::Celsius),
         semantic,
     }
+}
+
+/// The devices of the room's valves, each once.
+fn valve_devices(room: &Room) -> Vec<DeviceId> {
+    let mut devices: Vec<DeviceId> = Vec::new();
+    for valve in &room.valves {
+        if let Some((device, _)) = PointId::from(valve.as_str()).split()
+            && !devices.contains(&device)
+        {
+            devices.push(device);
+        }
+    }
+    devices
 }
 
 fn device(ctx: &DriverCtx, room: &Room) -> Device {
@@ -314,7 +365,9 @@ fn device(ctx: &DriverCtx, room: &Room) -> Device {
         model: Some(moli_i18n::tr!("pilotes.chauffage.modele").into()),
         description: None,
         native_room: Some(room.name.as_str().into()),
-        members: Vec::new(),
+        // The valves' devices: an order to the room is judged on their rooms
+        // too (protected rooms, quiet hours), since the room writes them.
+        members: valve_devices(room),
         points,
     }
 }
@@ -371,11 +424,14 @@ fn restore(ctx: &DriverCtx, room: &Room) -> RoomRun {
         valves: room
             .valves
             .iter()
-            .map(|_| ValveRun { sent: None })
+            .map(|_| ValveRun {
+                sent: None,
+                urgent: false,
+                refused: false,
+            })
             .collect(),
         shift,
         read: None,
-        urgent: false,
     }
 }
 
@@ -412,19 +468,38 @@ impl Heating {
         (now_ms().saturating_sub(sample.ts) <= FRESH_MS).then_some(value)
     }
 
-    /// The valve's setpoint bounds, if Moli may write it.
-    fn bounds(&self, point: &str) -> Option<(f64, f64)> {
+    /// The valve's setpoint bounds, if Moli may write it: a writable
+    /// temperature in °C with its bounds, on a device that is not an opening
+    /// nor a lock (a shutter's position, a dimmer, a volume never are).
+    fn bounds(&self, point: &str) -> Valve {
         let point = PointId::from(point);
-        let (device, key) = point.split()?;
-        let view = self.hub.device(&device)?;
-        let spec = view.device.points.iter().find(|p| p.key.as_ref() == key)?;
+        let Some((device, key)) = point.split() else {
+            return Valve::Other;
+        };
+        let Some(view) = self.hub.device(&device) else {
+            return Valve::Unknown;
+        };
+        let points = &view.device.points;
+        let Some(spec) = points.iter().find(|p| p.key.as_ref() == key) else {
+            return Valve::Unknown;
+        };
+        let opening = points
+            .iter()
+            .any(|p| matches!(p.semantic, Semantic::Position | Semantic::Lock));
         match spec.kind {
             Kind::Numeric {
                 min: Some(min),
                 max: Some(max),
                 ..
-            } if spec.access.write && min < max => Some((min, max)),
-            _ => None,
+            } if spec.access.write
+                && min < max
+                && spec.unit == Some(Unit::Celsius)
+                && !matches!(spec.semantic, Semantic::Control | Semantic::Lock)
+                && !opening =>
+            {
+                Valve::Writable((min, max))
+            }
+            _ => Valve::Other,
         }
     }
 
@@ -440,7 +515,7 @@ impl Heating {
         if run.step != Some((day, index)) {
             run.step = Some((day, index));
             run.setpoint = temp;
-            run.urgent = true;
+            run.changed();
             ctx.set_state(&run.id, "occupied_heating_setpoint", Value::Float(temp));
         }
     }
@@ -453,13 +528,6 @@ impl Heating {
             "local_temperature",
             temperature.map_or(Value::Null, Value::Float),
         );
-        // Kept until the valves may be written: a change made while Moli
-        // starts is not lost.
-        let urgent = if settled {
-            std::mem::take(&mut run.urgent)
-        } else {
-            run.urgent
-        };
         // The room's error moves the shift, while heating and the room known.
         if let Some(room_t) = temperature
             && room.correction
@@ -474,11 +542,24 @@ impl Heating {
         }
         let shift = run.shift.get();
         for (valve, state) in room.valves.iter().zip(&mut run.valves) {
-            let Some(bounds) = self.bounds(valve) else {
+            // Kept until the valve may be written: a change made while Moli
+            // starts, or before its valve is known, is not lost.
+            if !settled {
                 continue;
+            }
+            let bounds = match self.bounds(valve) {
+                Valve::Writable(bounds) => bounds,
+                Valve::Unknown => continue,
+                Valve::Other => {
+                    if !std::mem::replace(&mut state.refused, true) {
+                        tracing::warn!(room = %room.id, %valve, "heating: not a valve's setpoint (°C), left alone");
+                    }
+                    continue;
+                }
             };
+            let urgent = state.urgent;
             // The room unknown: nothing is changed unless asked.
-            if !settled || (temperature.is_none() && !urgent) {
+            if temperature.is_none() && !urgent {
                 continue;
             }
             let next = match run.mode {
@@ -487,19 +568,24 @@ impl Heating {
             };
             let point = PointId::from(valve.as_str());
             let current = self.hub.state(&point).and_then(|s| s.value.as_f64());
-            if !worth_sending(current, next, state.sent.map(|t| t.elapsed()), urgent) {
+            let since = state.sent.map(|t| t.elapsed());
+            if !worth_sending(current, next, since, urgent, self.floor) {
+                // Nothing to change: done. Too soon after the last write:
+                // kept for the next look.
+                if !regulation::too_soon(since, self.floor) {
+                    state.urgent = false;
+                }
                 continue;
             }
+            state.urgent = false;
+            state.sent = Some(Instant::now());
             let actor = moli_i18n::tr!("pilotes.chauffage.acteur", piece = room.name);
-            match self
+            if let Err(e) = self
                 .hub
                 .command(&point, Value::Float(next), Origin::System, Some(actor))
                 .await
             {
-                Ok(()) => state.sent = Some(Instant::now()),
-                Err(e) => {
-                    tracing::warn!(room = %room.id, error = %e, "heating: valve setpoint refused");
-                }
+                tracing::warn!(room = %room.id, error = %e, "heating: valve setpoint refused");
             }
         }
         ctx.set_state(
@@ -512,12 +598,16 @@ impl Heating {
     /// An order to a room's own points (already checked against them by the
     /// hub, except a schedule's text).
     fn command(&self, ctx: &DriverCtx, room: &Room, run: &mut RoomRun, command: CommandRequest) {
+        // Given up by the hub (told the caller it failed): not applied after all.
+        if command.abandoned() {
+            return;
+        }
         let key = command.key.as_ref();
         let result = if key == "occupied_heating_setpoint" {
             match command.value.as_f64() {
                 Some(t) if (room.min..=room.max).contains(&t) => {
                     run.setpoint = regulation::half_degree(t).clamp(room.min, room.max);
-                    run.urgent = true;
+                    run.changed();
                     ctx.set_state(&run.id, key, Value::Float(run.setpoint));
                     Ok(())
                 }
@@ -528,7 +618,7 @@ impl Heating {
                 Some(mode) => {
                     run.mode = mode;
                     run.step = None;
-                    run.urgent = true;
+                    run.changed();
                     ctx.set_state(&run.id, key, Value::from(mode_name(mode)));
                     self.follow(ctx, run);
                     Ok(())

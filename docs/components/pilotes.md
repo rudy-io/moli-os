@@ -249,16 +249,25 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
   pièce (tado X) : une chambre voulue à 18 °C recevait 24.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
-  plus toutes les 10 min (sauf quand la consigne ou le mode de la pièce vient de changer), jamais
-  dans les 3 min qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Les ordres
-  passent par le hub au nom de la maison (`system`), comme ceux d'une scène, acteur
-  « Chauffage · <pièce> » au journal. Une vanne dont la consigne n'est pas inscriptible avec des
-  bornes est laissée de côté.
+  plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
+  toutes les 30 s, et le changement attend la vanne qui n'est pas encore là), jamais dans les 3 min
+  qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Une écriture refusée
+  (vanne endormie) compte aussi : elle n'est pas retentée chaque minute. Les ordres passent par le
+  hub au nom de la maison (`system`), comme ceux d'une scène, acteur « Chauffage · <pièce> » au
+  journal. **Une vanne, c'est une consigne en °C**, inscriptible, avec des bornes, sur un appareil
+  qui n'est ni un ouvrant ni une serrure : une position de volet, un variateur, un volume sont
+  laissés de côté (dit une fois au journal).
+- **La garde** : les appareils des vannes sont les **membres** de l'appareil de la pièce. Un ordre
+  d'un agent à `chauffage:<id>` est jugé sur la pièce du chauffage **et** sur celles de ses vannes
+  (pièces protégées, heures calmes) : une vanne rangée dans une chambre protégée la protège même si
+  le nom du `[[heating]]` diffère. Un ordre que le hub a déjà donné pour échoué n'est pas appliqué.
 - **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
   vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
-  mal écrite, et une vanne dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`).
+  mal écrite, une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
+  dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
+  ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
 
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
