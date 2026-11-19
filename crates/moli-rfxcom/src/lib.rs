@@ -1,11 +1,14 @@
 //! 433 MHz driver (rfxcom2mqtt MQTT gateway).
 //!
-//! Subscribes first to the bridge's Home Assistant discovery configs, and to
-//! its state topics only once they have settled (no new config for
-//! `DISCOVERY_QUIET_MS`): the broker does not order retained messages across
-//! subscriptions, and a retained state arriving before its device's config
-//! would be lost. At that moment, devices of a previous run the bridge no
-//! longer announces are removed.
+//! Subscribes first to the bridge's Home Assistant discovery configs and its
+//! retained status, and to its state topics only once the configs have
+//! settled (no new config for `DISCOVERY_QUIET_MS`): the broker does not
+//! order retained messages across subscriptions, and a retained state
+//! arriving before its device's config would be lost. At that moment, the
+//! devices of a previous run the bridge no longer announces are removed, but
+//! only when the bridge said `online` and announced at least one device: a
+//! broker restarted without persistence, or a bridge that has not published
+//! its configs yet, must not empty the house.
 //! Devices come from the discovery configs only (a 433 MHz receiver hears
 //! the whole street; see `catalog`). State topics (`{base}/devices/{id}`,
 //! `{base}/devices/{id}/{unit}`) update typed points, `{base}/bridge/status`
@@ -135,6 +138,8 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
                     // the module comment).
                     client.try_subscribe(format!("{discovery}/+/+/config"), QoS::AtLeastOnce)?;
                     client.try_subscribe(format!("{discovery}/+/+/+/config"), QoS::AtLeastOnce)?;
+                    // Retained: known by the time discovery has settled.
+                    client.try_subscribe(format!("{base}/bridge/status"), QoS::AtLeastOnce)?;
                     let now = Instant::now();
                     states_by = now + Duration::from_millis(DISCOVERY_MAX_MS);
                     states_at = Some(now + Duration::from_millis(DISCOVERY_QUIET_MS));
@@ -152,9 +157,16 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
             },
             () = sleep_until(states_at), if states_at.is_some() => {
                 states_at = None;
-                sweep(ctx, &state.catalog);
+                if may_sweep(&state) {
+                    sweep(ctx, &state.catalog);
+                } else {
+                    tracing::warn!(
+                        devices = state.catalog.len(),
+                        bridge_online = ?state.bridge_online,
+                        "rfxcom2mqtt not online or no device announced: known devices kept"
+                    );
+                }
                 client.try_subscribe(format!("{base}/devices/#"), QoS::AtLeastOnce)?;
-                client.try_subscribe(format!("{base}/bridge/status"), QoS::AtLeastOnce)?;
                 tracing::info!(devices = state.catalog.len(), "rfxcom2mqtt catalog loaded");
             },
             command = ctx.next_command() => {
@@ -182,6 +194,12 @@ async fn sleep_until(deadline: Option<Instant>) {
     }
 }
 
+/// Whether the catalog is trustworthy enough to remove the devices it lacks:
+/// the bridge said `online`, and announced at least one device.
+fn may_sweep(state: &State) -> bool {
+    state.bridge_online == Some(true) && !state.catalog.is_empty()
+}
+
 /// Removes the devices of a previous run the bridge no longer announces.
 fn sweep(ctx: &DriverCtx, catalog: &Catalog) {
     for id in ctx.devices() {
@@ -192,21 +210,12 @@ fn sweep(ctx: &DriverCtx, catalog: &Catalog) {
 }
 
 /// Mutable state of one driver run.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct State {
     catalog: Catalog,
-    /// The last `{base}/bridge/status`: a device announced while the
-    /// bridge is offline starts offline.
-    bridge_online: bool,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            catalog: Catalog::default(),
-            bridge_online: true,
-        }
-    }
+    /// The last `{base}/bridge/status` (`None`: not received yet): a
+    /// device announced while the bridge is offline starts offline.
+    bridge_online: Option<bool>,
 }
 
 /// The decision for one command: refuse it, or publish it.
@@ -314,7 +323,7 @@ fn on_publish(
                 Change::Upsert(device) => {
                     let id = device.id.clone();
                     ctx.upsert_device(device);
-                    ctx.set_availability(&id, state.bridge_online);
+                    ctx.set_availability(&id, state.bridge_online.unwrap_or(true));
                 }
                 Change::Remove(id) => ctx.remove_device(&id),
                 Change::None => {}
@@ -332,7 +341,7 @@ fn on_publish(
             let Some(online) = parse_status(&publish.payload) else {
                 return false;
             };
-            state.bridge_online = online;
+            state.bridge_online = Some(online);
             for entry in state.catalog.entries() {
                 ctx.set_availability(&entry.device.id, online);
             }
@@ -401,6 +410,30 @@ mod tests {
         );
         assert_eq!(route("rfxcom2mqtt/bridge/info"), Routed::Ignored);
         assert_eq!(route("zigbee2mqtt/bridge/state"), Routed::Ignored);
+    }
+
+    #[test]
+    fn the_sweep_needs_an_online_bridge_and_a_device() {
+        let config = br#"{"state_topic":"rfxcom2mqtt/devices/0x5A01","value_template":"{{ value_json.temperature }}","device":{"name":"x"}}"#;
+        let mut announced = Catalog::default();
+        announced.apply_config(
+            &moli_core::InstanceId::from("rfxcom"),
+            "rfxcom2mqtt",
+            "homeassistant/sensor/0x5A01/temperature/config",
+            "sensor",
+            config,
+        );
+        let state = |catalog: &Catalog, bridge_online| State {
+            catalog: catalog.clone(),
+            bridge_online,
+        };
+        // A broker restarted without persistence: nothing announced.
+        assert!(!may_sweep(&state(&Catalog::default(), Some(true))));
+        assert!(!may_sweep(&state(&Catalog::default(), None)));
+        // The bridge offline, or its status not received yet.
+        assert!(!may_sweep(&state(&announced, Some(false))));
+        assert!(!may_sweep(&state(&announced, None)));
+        assert!(may_sweep(&state(&announced, Some(true))));
     }
 
     #[test]

@@ -389,12 +389,15 @@ base_topic = "zwave"        # défaut
   interrupteurs 433 MHz (`lighting1`…`lighting6` : prises Chacon, DIO, KlikAanKlikUit…)
   qu'un pont rfxcom2mqtt annonce par sa découverte Home Assistant ; aucun code par marque.
 - **Protocole** : MQTT local (1883 par défaut). Abonnement d'abord à
-  `{discovery}/+/+/config` et `{discovery}/+/+/+/config`, puis, une fois la découverte
-  calme (aucune nouvelle configuration pendant 1 s, 15 s au plus), à `{base}/devices/#` et
-  `{base}/bridge/status` : le broker n'ordonne pas les messages retenus d'un abonnement à
-  l'autre (vérifié : les états retenus arrivaient avant la plupart des configurations), et
-  un état reçu avant la configuration de son appareil serait perdu. À ce moment, les
-  appareils d'une exécution précédente que le pont n'annonce plus sont retirés. Commandes
+  `{discovery}/+/+/config`, `{discovery}/+/+/+/config` et `{base}/bridge/status`
+  (retenu), puis, une fois la découverte calme (aucune nouvelle configuration pendant 1 s,
+  15 s au plus), à `{base}/devices/#` : le broker n'ordonne pas les messages retenus d'un
+  abonnement à l'autre (vérifié : les états retenus arrivaient avant la plupart des
+  configurations), et un état reçu avant la configuration de son appareil serait perdu. À
+  ce moment, les appareils d'une exécution précédente que le pont n'annonce plus sont
+  retirés, seulement si le pont a dit `online` et annoncé au moins un appareil : un broker
+  redémarré sans persistance, ou un pont qui n'a pas encore publié ses configurations, ne
+  vide pas la maison. Commandes
   publiées sur le `command_topic` de la configuration de l'interrupteur
   (`{base}/cmd/{type}/{sous-type}/{id}/{unité}`, payload `On` / `Off`), refusées si ce
   sujet ne commence pas par `{base}/cmd/`.
@@ -443,8 +446,8 @@ discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du p
 - **Tests** : `src/catalog.rs` sur `integrations/rfxcom/fixtures/discovery.json` et
   `states.json` (captures réelles anonymisées) : appareils issus de la seule découverte,
   typage, décodage des trames et des échos, encodage `on`, retrait, refus d'un sujet de
-  commande étranger ; `src/lib.rs` : routage des sujets, état du pont, décision de
-  commande.
+  commande étranger, collision d'identifiants, plafonds ; `src/lib.rs` : routage des
+  sujets, état du pont, conditions du nettoyage, décision de commande.
 
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 
