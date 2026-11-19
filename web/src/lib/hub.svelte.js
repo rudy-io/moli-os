@@ -269,8 +269,10 @@ export async function command(point, value) {
 }
 
 /** A human approves or denies an order the guard held (naming the point
- *  shown on the card, so a decision never lands on another request). */
-export async function decide(request, approve, pin) {
+ *  shown on the card, so a decision never lands on another request).
+ *  `quiet`: a refusal is returned as its message instead of a notice (a
+ *  wrong code is said beside the field). */
+export async function decide(request, approve, pin, { quiet = false } = {}) {
   try {
     const res = await fetch(`/api/approvals/${request.id}`, {
       method: 'POST',
@@ -282,9 +284,10 @@ export async function decide(request, approve, pin) {
     if (res.ok || res.status === 410) {
       hub.approvals = hub.approvals.filter((a) => a.id !== request.id);
     }
-    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
     return true;
   } catch (err) {
+    if (quiet) return err.message || 'error';
     toast(t('systeme.hub.decision_non_appliquee', { message: err.message }));
     return false;
   }

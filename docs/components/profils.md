@@ -206,6 +206,15 @@ refresh = "all"
   `<méthode>` `<code>` `<détail>` » (80 caractères au plus de ce que l'appareil a dit, jamais
   ce qui a été envoyé). `expect` ne s'applique donc pas, et est refusé.
 - Pas de `{requête.chemin}` : le message ne reprend rien des réponses, rien n'est relu avant.
+- **Chiffré quand l'appareil l'exige.** Avant son premier ordre, le moteur demande une fois
+  à l'appareil ses capacités (`Appliance.System.Ability`, un `GET` en clair). S'il annonce
+  `Appliance.Encrypt.ECDHE` (vu : MSS110 en firmware 7.3.46), l'ordre part chiffré et la
+  réponse revient chiffrée. Sinon, l'ordre part en clair. Un tel appareil répond encore aux
+  lectures en clair, mais coupe la connexion sans un octet sur un `SET` en clair.
+  Le chiffrement est AES-256-CBC, avec un vecteur de seize `0` ASCII et un bourrage par
+  octets nuls, puis le tout en base64. Sa clé est `md5(uuid[3..22] ‖ clé[1..9] ‖ MAC ‖
+  clé[10..28])` en hexadécimal ; l'uuid et la MAC sont lus dans `Appliance.System.All`.
+  Rien de plus à déclarer dans le profil.
 - Un profil fichier peut écrire ainsi, aux conditions de tout profil à secret : son propre
   `host`, et l'approbation d'un humain, à qui `profile trust` montre l'espace de noms et le
   `payload` de chaque écriture.
@@ -379,10 +388,18 @@ profile = "daikin-brp069"    # id intégré, ou chemin vers un fichier .toml lis
 host = "192.168.1.x"         # appareil du LAN (absent pour une API web : host du profil)
 # port = 80                  # sinon celui du profil, sinon 443/80
 # vars = { lat = "45.0", lon = "4.0" }
+# empty_secret = true        # l'appareil n'a pas de clé : signer avec une clé vide
 ```
 
 Une instance = un appareil. Un profil hors binaire se donne par son chemin, et ne tourne
 qu'approuvé (`moli-os profile trust <chemin>`, voir « Confiance »).
+
+`empty_secret = true` : pour un appareil qui n'a **pas** de clé, alors que son profil en
+demande une. C'est le cas d'une prise Meross installée par Matter, jamais rattachée à un compte
+Meross : elle accepte les messages signés avec une clé vide (`md5(messageId ‖ horodatage)`).
+Le coffre n'est alors pas lu, et rien n'est demandé. Un humain l'écrit, après avoir vérifié que
+l'appareil répond ainsi ; refusé sur un profil sans secret. Un tel appareil obéit à quiconque
+sur le réseau : ce n'est pas Moli qui l'ouvre, mais il vaut mieux le savoir.
 
 ## `moli-os profile list`, `profile check` et `profile trust`
 

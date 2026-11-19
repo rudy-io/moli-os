@@ -10,6 +10,7 @@
   import CoverTile from './CoverTile.svelte';
   import ImpulseTile from './ImpulseTile.svelte';
   import AmbiancePicker from './AmbiancePicker.svelte';
+  import { watts } from '../lib/energy-live.svelte.js';
   import { phase, PHASES } from '../lib/printers.js';
   import { canWrite, pointOf, isValve, climateKeys, impulsePoints } from '../lib/capabilities.js';
   import { coverCommands } from '../lib/cover-controls.js';
@@ -265,6 +266,15 @@
 
   let open = $state(null);
 
+  /** What a device measuring its own draw (a plug with a meter) pulls now, in W;
+   *  null when it measures nothing or has no reading. */
+  function drawOf(d) {
+    const p = d.points?.find((q) => q.semantic === 'power' && q.kind?.type === 'numeric' && (q.unit === 'W' || q.unit === 'kW'));
+    const v = p ? value(d.id, p.key) : null;
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    return p.unit === 'kW' ? v * 1000 : v;
+  }
+
   function stateOf(d, point, outlets, isCover) {
     if (isCover) {
       if (!reachable(d.id)) return t('commun.piece.injoignable');
@@ -278,6 +288,8 @@
     if (outlets) return t('commun.piece.prises_allumees', { on: litCount(outlets, d.id), count: outlets.length });
     if (deviceKind(d) === 'speaker') return value(d.id, 'playing') === true ? t('commun.piece.lecture_en_cours') : t('commun.piece.a_l_arret');
     if (!isOn(d.id, point)) return t('commun.piece.eteinte');
+    const draw = point ? null : drawOf(d);
+    if (draw != null) return t('commun.piece.allumee_conso', { watts: watts(draw) });
     const b = value(d.id, 'brightness');
     return typeof b === 'number' && fine(d) ? t('commun.pourcent', { n: Math.round(b) }) : t('commun.piece.allumee');
   }
@@ -374,7 +386,7 @@
               {#if !icons}<b>{label}</b><small>{said}</small>{/if}
             </button>
           {:else}
-            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
+            <button class="pad" class:on={lit} class:cut class:off-grid={!reachable(d.id) && !cut} disabled={isCover ? !coverPadEnabled(d) : !canTap(d, point, outlets)} onclick={() => tap(d, point, outlets, name, isCover)} title={isCover || (lit && !outlets && !point && drawOf(d) != null) ? [label, stateOf(d, point, outlets, isCover)].filter(Boolean).join(' · ') : label} data-cover-command={coverCommand} aria-pressed={lit} aria-label={t('commun.action', { label, action: stateOf(d, point, outlets, isCover) })}>
               <span class="ico"><Icon name={outlets ? 'power' : padIcon(d)} size={icons ? 22 : 18} /></span>
               {#if !icons}<b>{label}</b><small>{stateOf(d, point, outlets, isCover)}</small>{/if}
             </button>

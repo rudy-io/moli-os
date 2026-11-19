@@ -11,6 +11,7 @@ moli-i18n.workspace = true
 anyhow.workspace = true
 http.workspace = true
 http-body-util.workspace = true
+futures.workspace = true
 moli-core.workspace = true
 moli-net.workspace = true
 moli-runtime.workspace = true

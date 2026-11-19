@@ -123,6 +123,10 @@
         <span class="temp-line"><strong class="temp num">{num(val('temperature', w), 0)}°</strong><SourceBadge key="temperature" /></span>
         <span class="label">{sky.label}</span>
         <span class="muted">{t('maison.dehors.ressenti', { feels: num(v(w, 'feels_like'), 0), max: num(v(w, 'today_max'), 0), min: num(v(w, 'today_min'), 0) })}</span>
+        <!-- What the stations measured since midnight (#246): never mixed with the forecast above. -->
+        {#if v(OUTSIDE, 'measured_max') != null && v(OUTSIDE, 'measured_min') != null}
+          <span class="muted">{t('maison.dehors.mesure_jour', { max: num(v(OUTSIDE, 'measured_max'), 1), min: num(v(OUTSIDE, 'measured_min'), 1) })}</span>
+        {/if}
       </div>
     </div>
     <div class="facts">

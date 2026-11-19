@@ -26,6 +26,39 @@ pub struct Config {
     /// Stable listening port for hosts with an inbound firewall; zero is ephemeral.
     #[serde(default)]
     pub udp_port: u16,
+    /// Where to reach the device to pair (`[ipv6]:5540`), written by a human, when
+    /// its commissionable record never reaches the LAN (some Thread devices behind
+    /// a border router): the pairing code is then tried at this address instead of
+    /// being looked for by mDNS. Read only while a `pairing_code` waits.
+    #[serde(default)]
+    pub pairing_address: Option<std::net::SocketAddr>,
+    /// The device's sleep pace (`SII`, `SAI` of its mDNS record, in ms) for a sleepy
+    /// Thread device paired at `pairing_address`; both or neither.
+    #[serde(default)]
+    pub pairing_idle_ms: Option<u64>,
+    #[serde(default)]
+    pub pairing_active_ms: Option<u64>,
+}
+
+impl Config {
+    /// The sleep pace to pair with: both intervals, or none.
+    fn pairing_pace(&self) -> anyhow::Result<Option<(Duration, Duration)>> {
+        let refused = || anyhow::anyhow!(moli_i18n::tr!("pilotes.matter.pairing_pace"));
+        match (self.pairing_idle_ms, self.pairing_active_ms) {
+            (None, None) => Ok(None),
+            (Some(idle), Some(active))
+                if self.pairing_address.is_some()
+                    && (1..=3_600_000).contains(&idle)
+                    && (1..=3_600_000).contains(&active) =>
+            {
+                Ok(Some((
+                    Duration::from_millis(idle),
+                    Duration::from_millis(active),
+                )))
+            }
+            _ => Err(refused()),
+        }
+    }
 }
 #[derive(Debug)]
 pub struct Matter {
@@ -613,7 +646,8 @@ impl Matter {
             .await
             .map_err(|_| failure())?;
         ensure_fabric(&controller).await?;
-        pairing::pair(&controller, ctx).await?;
+        let pace = self.config.pairing_pace()?;
+        pairing::pair(&controller, ctx, self.config.pairing_address, pace).await?;
         let nodes = controller.nodes().await.map_err(|_| failure())?;
         anyhow::ensure!(nodes.len() <= 64, moli_i18n::tr!("pilotes.matter.failed"));
         let (tx, mut rx) = mpsc::channel(128);
@@ -740,6 +774,35 @@ fn order_outcome(result: &Result<bool, matter_controller::Error>) -> Result<(), 
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sleep_pace_goes_with_both_intervals_and_an_address() {
+        let config = |address: bool, idle: Option<u64>, active: Option<u64>| Config {
+            paa_roots: "/p".into(),
+            cd_roots: "/c".into(),
+            udp_port: 0,
+            pairing_address: address.then(|| "[fd00::1]:5540".parse().unwrap()),
+            pairing_idle_ms: idle,
+            pairing_active_ms: active,
+        };
+        assert_eq!(config(false, None, None).pairing_pace().unwrap(), None);
+        assert_eq!(config(true, None, None).pairing_pace().unwrap(), None);
+        assert_eq!(
+            config(true, Some(5000), Some(2200)).pairing_pace().unwrap(),
+            Some((Duration::from_millis(5000), Duration::from_millis(2200)))
+        );
+        for (address, idle, active) in [
+            (true, Some(5000), None),
+            (false, Some(5000), Some(2200)),
+            (true, Some(0), Some(2200)),
+            (true, Some(5000), Some(3_600_001)),
+        ] {
+            assert!(
+                config(address, idle, active).pairing_pace().is_err(),
+                "{address} {idle:?} {active:?}"
+            );
+        }
+    }
+
     use super::*;
     #[test]
     fn bridge_subscription_filters_do_not_grow_with_endpoint_count() {

@@ -431,6 +431,16 @@ test('offline and unmeasured semantic covers cannot expose an active slider', ()
     assert.equal(inputs(unmeasured).length, 1);
     assert.match(inputs(unmeasured)[0], /disabled/);
   }
+  // Unmeasured but writable: the slider stays, greyed out at its lower bound, range intact.
+  const [grey] = inputs(show('CoverTile', points, {}));
+  assert.match(grey, /value="0"/);
+  assert.match(grey, /min="0"/);
+  assert.match(grey, /max="100"/);
+  assert.match(grey, /step="1"/);
+  // The mirror image: a measured reading keeps the slider live at that value.
+  const [live] = inputs(show('CoverTile', points, { opening: 42 }));
+  assert.match(live, /value="42"/);
+  assert.doesNotMatch(live, /disabled/);
 });
 
 test('case-preserving motor orders identify a cover without inventing a power switch or position', () => {
@@ -1094,4 +1104,21 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(html.includes('DiskStation'));
   assert.ok(!html.includes('Volume 1'));
   assert.ok(!html.includes('class="gauges"'));
+});
+
+test('a plug that measures its draw says it on its pad, only while on', () => {
+  const plug = (on, power, unit = 'W') => ({
+    id: 'fixture:plug', model: 'Smart plug', label: { room: 'Workshop', name: 'Floor lamp' },
+    points: [point('on', { type: 'binary' }, true, 'on_off'), { ...point('power', { type: 'numeric' }, false, 'power'), unit }],
+    values: { on, power },
+  });
+  const lit = showRoom([plug(true, 42.4)]);
+  assert.match(lit, /42 W/);
+  assert.match(lit, /title="Floor lamp · [^"]*42 W"/);
+  assert.match(showRoom([plug(true, 1.5, 'kW')]), /1[,.]5 kW/);
+  const off = showRoom([plug(false, 0)]);
+  assert.doesNotMatch(off, /0 W/);
+  assert.match(off, /title="Floor lamp"/);
+  // No reading yet: the plain state, never an invented figure.
+  assert.doesNotMatch(showRoom([plug(true, null)]), / W</);
 });

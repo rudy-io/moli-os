@@ -11,6 +11,7 @@ mod id;
 mod model;
 pub mod outside;
 mod spec;
+pub mod sun;
 mod value;
 
 pub use event::{

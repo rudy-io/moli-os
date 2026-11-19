@@ -66,7 +66,7 @@ impl LiveSource for Stream {
             let request =
                 moli_net::text_body(request, "application/sdp", for_go2rtc(&offer, viewer))?;
             // go2rtc answers once it knows its addresses (STUN included):
-            // up to 5 s, within the hub's 10.
+            // up to ANSWER_WAIT (9 s), within the hub's 10.
             let (status, reply) =
                 moli_net::plain_within(&self.host, self.port, request, ANSWER_WAIT).await?;
             if !status.is_success() {
@@ -110,7 +110,7 @@ pub fn for_go2rtc(offer: &str, viewer: Option<IpAddr>) -> String {
 }
 
 /// A stream name in a query string.
-fn encode(name: &str) -> String {
+pub(crate) fn encode(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for b in name.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
@@ -128,13 +128,15 @@ mod tests {
 
     #[test]
     fn a_hidden_browser_candidate_gets_its_address() {
-        let offer = "v=0\r\na=ice-ufrag:abcd\r\na=candidate:1 1 udp 2113937151 1f2e3d4c.local 54321 typ host generation 0\r\na=candidate:2 1 udp 2113937151 192.168.1.50 54322 typ host\r\n";
-        let viewer: IpAddr = "192.168.1.50".parse().unwrap();
+        let offer = "v=0\r\na=ice-ufrag:abcd\r\na=candidate:1 1 udp 2113937151 1f2e3d4c.local 54321 typ host generation 0\r\na=candidate:2 1 udp 2113937151 192.0.2.50 54322 typ host\r\n";
+        let viewer: IpAddr = "192.0.2.50".parse().unwrap();
         let out = for_go2rtc(offer, Some(viewer));
-        assert!(out.contains(
-            "a=candidate:1 1 udp 2113937151 192.168.1.50 54321 typ host generation 0\r\n"
-        ));
-        assert!(out.contains("a=candidate:2 1 udp 2113937151 192.168.1.50 54322 typ host\r\n"));
+        assert!(
+            out.contains(
+                "a=candidate:1 1 udp 2113937151 192.0.2.50 54321 typ host generation 0\r\n"
+            )
+        );
+        assert!(out.contains("a=candidate:2 1 udp 2113937151 192.0.2.50 54322 typ host\r\n"));
         assert!(!out.contains(".local"));
         // Without the browser's address, the hidden candidate is left out.
         let out = for_go2rtc(offer, None);
@@ -181,7 +183,7 @@ mod tests {
     #[tokio::test]
     async fn nothing_go2rtc_says_comes_out_in_an_error() {
         let stream = go2rtc_failing();
-        let offer = "v=0\r\na=candidate:2 1 udp 1 192.168.1.50 5 typ host\r\n".to_owned();
+        let offer = "v=0\r\na=candidate:2 1 udp 1 192.0.2.50 5 typ host\r\n".to_owned();
         let error = stream.answer(offer, None).await.unwrap_err().to_string();
         assert!(
             !error.contains("secret") && !error.contains("rtsp"),

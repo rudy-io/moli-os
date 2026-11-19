@@ -449,7 +449,17 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
     };
 
     let (mut tasks, gates) = spawn_drivers(&config, &hub, &cancel, &airzone_setup)?;
-    tasks.extend(spawn_house_drivers(&config, &hub, energy.as_ref(), &cancel));
+    // Where the house is, for `dehors:soleil`: the automations hold it (and
+    // follow a position chosen from the conversation); they start below.
+    let placed: Arc<std::sync::OnceLock<moli_automation::Automations>> = Arc::default();
+    tasks.extend(spawn_house_drivers(
+        &config,
+        &hub,
+        energy.as_ref(),
+        history.as_ref(),
+        &placed,
+        &cancel,
+    ));
     let (household, whereabouts) = spawn_household(&config, &hub, gates.phones.clone(), &cancel);
     tasks.push(whereabouts);
 
@@ -472,6 +482,7 @@ async fn serve(config: Config, boot: Instant) -> anyhow::Result<()> {
         .map(moli_api::UiPin::new);
     let (assistant, automations, automating) =
         start_brains(&config, &hub, energy.as_ref(), history.as_ref(), &cancel).await?;
+    let _ = placed.set(automations.clone());
     let surfaces = moli_api::Options {
         airzone_setup: Some(Arc::new(airzone_setup.clone())),
         allowed_hosts: config.server.allowed_hosts.clone(),
@@ -585,6 +596,16 @@ async fn start_brains(
     )
     .await
     .context("cannot load the automations")?;
+    // Approved before a `[[guard.code_each_time]]` rule covered one of their
+    // orders: they still run without the code (SECURITY-MODEL.md, known
+    // limit). Named, so a person approves them again, with the code.
+    let unchecked = automations.approved_before_the_code();
+    if !unchecked.is_empty() {
+        tracing::warn!(
+            automations = %unchecked.join(", "),
+            "approved without the code an order of theirs now wants each time ([[guard.code_each_time]]): they still run without it; approve them again, with the code"
+        );
+    }
     let assistant = start_assistant(config, hub, energy, history)?;
     if let Some(moli) = &assistant {
         moli.set_automations(automations.clone());
@@ -1364,6 +1385,7 @@ const KINDS: &[&str] = &[
     "reolink",
     "tuya",
     "helpers",
+    "alarm",
     "presence",
     "telegram",
     "phones",
@@ -1382,6 +1404,8 @@ fn spawn_house_drivers(
     config: &Config,
     hub: &Hub,
     energy: Option<&moli_energy::Energy>,
+    history: Option<&moli_history::History>,
+    placed: &Arc<std::sync::OnceLock<moli_automation::Automations>>,
     cancel: &CancellationToken,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let mut tasks = Vec::new();
@@ -1396,11 +1420,28 @@ fn spawn_house_drivers(
             cancel.clone(),
         ));
     }
-    if let Some(outdoor) = &config.outdoor {
+    // « Dehors »: the weather with `[outdoor]`, the sun wherever the house
+    // is placed (the demo house sits nowhere: no sun).
+    if config.outdoor.is_some() || !config.server.demo {
+        let place: Option<moli_outdoor::sun::Place> = (!config.server.demo).then(|| {
+            let placed = placed.clone();
+            let place: moli_outdoor::sun::Place = Arc::new(move || {
+                placed
+                    .get()
+                    .and_then(moli_automation::Automations::position)
+            });
+            place
+        });
         tasks.push(spawn_driver(
             hub,
             InstanceId::from(moli_outdoor::INSTANCE),
-            Arc::new(moli_outdoor::Outdoor::new(hub.clone(), outdoor)),
+            Arc::new(moli_outdoor::Outdoor::new(
+                hub.clone(),
+                config.outdoor.as_ref(),
+                history.cloned(),
+                &config.zone.name,
+                place,
+            )),
             cancel.clone(),
         ));
     }
@@ -1414,6 +1455,20 @@ fn spawn_house_drivers(
                 hub.clone(),
                 config.scenes.clone(),
                 config.rhythm.clone(),
+                zone,
+            )),
+            cancel.clone(),
+        ));
+    }
+    if !config.heating.is_empty() {
+        // The schedule follows the house's clock; an unknown zone falls back to UTC.
+        let zone = jiff::tz::TimeZone::get(&config.zone.name).unwrap_or(jiff::tz::TimeZone::UTC);
+        tasks.push(spawn_driver(
+            hub,
+            InstanceId::from(moli_heating::INSTANCE),
+            Arc::new(moli_heating::Heating::new(
+                hub.clone(),
+                config.heating.clone(),
                 zone,
             )),
             cancel.clone(),
@@ -1642,6 +1697,7 @@ fn build_driver(
         "recycleapp" => configured_driver(config, moli_recycleapp::RecycleApp::new)?,
         "engie" => configured_driver(config, moli_engie::Engie::new)?,
         "helpers" => configured_driver(config, moli_helpers::Helpers::new)?,
+        "alarm" => configured_driver(config, moli_alarm::AlarmDriver::new)?,
         "demo" => configured_driver(config, moli_demo::Demo::new)?,
         "profile" => Arc::new(moli_profile::ProfileDriver::new(
             config.options.clone().try_into().with_context(context)?,

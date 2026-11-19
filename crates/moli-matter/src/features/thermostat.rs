@@ -70,9 +70,22 @@ impl Thermostat {
                 .flatten()
         };
         // No guessed default limits: missing or invalid optional policy leaves readings usable.
-        let limits = |ids: [u32; 4]| -> Option<(i32, i32)> {
-            let [a, b, c, d] = ids.map(|id| get(id).and_then(temperature));
-            let (a, b, c, d) = (a?, b?, c?, d?);
+        // The user limits (Min/Max…SetpointLimit) are optional: a device that does not
+        // list one in its AttributeList is bounded by the absolute limit, as the
+        // specification defines. A listed one that is missing or invalid still refuses.
+        let limits = |[abs_min, abs_max, min, max]: [u32; 4]| -> Option<(i32, i32)> {
+            let (a, b) = (
+                get(abs_min).and_then(temperature)?,
+                get(abs_max).and_then(temperature)?,
+            );
+            let user = |id, absolute| {
+                if cluster.attributes.contains(&id) {
+                    get(id).and_then(temperature)
+                } else {
+                    Some(absolute)
+                }
+            };
+            let (c, d) = (user(min, a)?, user(max, b)?);
             let (lo, hi) = (a.max(c), b.min(d));
             (a <= b && c <= d && lo <= hi).then_some((lo, hi))
         };
@@ -417,6 +430,48 @@ mod tests {
                 ..
             })
         ));
+    }
+    /// A radiator valve that lists only its absolute heat limits (no user limits in
+    /// its AttributeList) is bounded by them, as the specification defines.
+    #[test]
+    fn thermostat_without_user_limits_uses_the_absolute_ones() {
+        let mut r = report(1);
+        r.retain(|(p, _)| !matches!(p.attribute, 0x15 | 0x16));
+        for (p, v) in &mut r {
+            match p.attribute {
+                3 => *v = Tlv::Int(500),
+                0xfffb => {
+                    if let Tlv::Array(ids) = v {
+                        ids.retain(|id| !matches!(id, Tlv::Uint(0x15 | 0x16)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let t = Thermostat::discover(1, &r).unwrap();
+        let point = t
+            .points()
+            .into_iter()
+            .find(|p| p.key.as_ref() == "target_temperature")
+            .unwrap();
+        assert!(point.access.write);
+        let Kind::Numeric { min, max, .. } = point.kind else {
+            panic!("numeric setpoint expected");
+        };
+        assert_eq!((min, max), (Some(5.0), Some(30.0)));
+        for (n, ok) in [
+            (5.0, true),
+            (21.5, true),
+            (30.0, true),
+            (4.99, false),
+            (30.01, false),
+        ] {
+            assert_eq!(
+                t.plan("target_temperature", &Value::Float(n)).is_some(),
+                ok,
+                "{n}"
+            );
+        }
     }
     #[test]
     fn thermostat_dual_deadband_cache_and_modes() {

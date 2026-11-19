@@ -113,7 +113,9 @@ Deux règles de `[guard]`, écrites par une personne dans le fichier, jamais par
 - `[[guard.agents_may]]` (point + valeurs) : un agent (l'assistant, une voix, MCP, un script)
   peut donner cet ordre lui-même sur une commande ou un appareil protégé, sans qu'une personne
   le valide (armer l'alarme à la voix). Les pièces protégées et les heures calmes s'appliquent
-  toujours, et une valeur non listée attend une personne comme avant.
+  toujours, et une valeur non listée attend une personne comme avant. Donc sans effet avec
+  `dashboard = "pin"` (tout ordre y attend le code), ni avec `protect_unassigned` pour un
+  appareil sans pièce.
 
 Sans ces sections, rien ne change. Preuves : `some_orders_want_the_code_each_time_even_from_a_session`,
 `the_house_s_own_orders_and_toggles_want_the_code_each_time_too` et
@@ -125,7 +127,11 @@ dans `crates/moli-api/tests/household.rs` ;
 `a_scene_never_carries_an_order_that_wants_the_code_each_time` dans `crates/moli-os/src/config.rs`.
 
 Limite connue : un automatisme validé **avant** qu'une règle `code_each_time` soit écrite
-continue de tourner ; après avoir ajouté la règle, le revalider (avec le code).
+continue de tourner ; après avoir ajouté la règle, le revalider (avec le code). Moli les nomme
+au démarrage (avertissement au journal) : la validation retient si le code a été tapé
+(`approved_with_code`, hors de l'empreinte, jamais repris de ce qui est enregistré). Un
+automatisme validé avant cette version est nommé aussi tant qu'il n'est pas revalidé. Preuve :
+`an_automation_approved_before_the_rule_is_named_at_start` dans `crates/moli-automation/tests/engine.rs`.
 
 ## 5. Règles de conception
 

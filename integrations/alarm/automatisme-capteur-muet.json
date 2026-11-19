@@ -1,0 +1,35 @@
+{
+  "name": "Alarme : un capteur ne répond plus",
+  "mode": "single",
+  "graph": {
+    "nodes": [
+      {
+        "id": "t",
+        "type": "when_state",
+        "point": "alarme:maison/event",
+        "to": "silent",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "id": "n1",
+        "type": "notify",
+        "title": "Alarme",
+        "message": "Armée, un capteur ne répond plus : {{alarme:maison/silent}}",
+        "channels": [
+          "maison",
+          "telegram"
+        ],
+        "x": 300,
+        "y": 0
+      }
+    ],
+    "edges": [
+      {
+        "from": "t",
+        "port": "out",
+        "to": "n1"
+      }
+    ]
+  }
+}

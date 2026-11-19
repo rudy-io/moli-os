@@ -119,3 +119,16 @@ sent upstream in order.
   subscription reports without polling/keepalives or SDK firewall changes.
   Focused builder tests check the default and the actual configured socket port
   through the custom-discovery spawn seam, without mDNS or hardware.
+
+- Commissioning at a known address: `MatterController::commission_at(code, address,
+  sleepy, label)` fills the existing `DriverConfig::commissionable_addr` instead of
+  browsing `_matterc._udp`. Observed on a sleepy Thread radiator valve shared from
+  another ecosystem: its commissioning window was open (PASE succeeds at its
+  operational address) while no commissionable record (`CM=1`/`2`) ever reached
+  the LAN through the border router. `sleepy = (SII, SAI)` becomes
+  `DriverConfig::commissionable_mrp`: `driver::run_pase_for` paces the unsecured
+  PASE handshake with it and installs it on the secured PASE session, because the
+  spec defaults (about 5.6 s per message) give up before such a device wakes.
+  `run_pase_with` and `commission` without a target are unchanged. Covered by
+  `run_pase_for_installs_the_sleepy_peer_timing_on_the_session`; the loopback
+  commissioning tests pass `commissionable_mrp: None`.

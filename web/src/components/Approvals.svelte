@@ -29,6 +29,41 @@
     return { target, action, room: request.rooms.join(' / ') };
   }
 
+  // An order the house wants the code for each time (`code`): « Autoriser »
+  // asks for it here, and the decision carries it. Without, the server
+  // would refuse the decision.
+  let asking = $state(null);
+  let pin = $state('');
+  let error = $state('');
+  let busy = $state(false);
+
+  function ask(request) {
+    asking = request.id;
+    pin = '';
+    error = '';
+  }
+
+  async function approveWithCode(request) {
+    if (busy || pin.length < 4) return;
+    busy = true;
+    error = '';
+    const done = await decide(request, true, pin, { quiet: true });
+    busy = false;
+    if (done === true) {
+      asking = null;
+      pin = '';
+    } else {
+      pin = '';
+      // As the code sheet says them: a locked code is not « incorrect »
+      // (every code is refused, the right one too); anything else as it is.
+      error = /essais|attempts|verrou|locked/i.test(done)
+        ? t('commun.trop_d_essais')
+        : /incorrect/i.test(done)
+          ? t('commun.code_incorrect')
+          : t('systeme.hub.decision_non_appliquee', { message: done });
+    }
+  }
+
   function remaining(request) {
     const s = Math.max(0, Math.round((request.expires - now) / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -46,8 +81,19 @@
           <span class="why">{t('systeme.approbations.retenu', { reason: request.reason })} <span class="num">{remaining(request)}</span></span>
         </div>
         <div class="actions">
-          {#if hub.session.human}
-            <button class="yes" onclick={() => decide(request, true)}>{t('systeme.approbations.autoriser')}</button>
+          {#if hub.session.human && request.code && asking === request.id}
+            <form class="code" onsubmit={(e) => { e.preventDefault(); approveWithCode(request); }}>
+              <label>
+                <span>{t('systeme.approbations.code')}</span>
+                <!-- svelte-ignore a11y_autofocus -->
+                <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" autofocus bind:value={pin} oninput={() => (error = '')} />
+              </label>
+              <button class="yes" type="submit" disabled={busy || pin.length < 4}>{t('systeme.approbations.autoriser')}</button>
+              <button class="no" type="button" onclick={() => (asking = null)}>{t('systeme.approbations.annuler')}</button>
+              {#if error}<span class="error" role="alert">{error}</span>{/if}
+            </form>
+          {:else if hub.session.human}
+            <button class="yes" onclick={() => (request.code ? ask(request) : decide(request, true))}>{t('systeme.approbations.autoriser')}</button>
             <button class="no" onclick={() => decide(request, false)}>{t('systeme.approbations.refuser')}</button>
           {:else}
             <span class="hint">{t('systeme.approbations.indice')}</span>
@@ -102,6 +148,36 @@
   }
   .declared {
     color: var(--ink-2);
+  }
+  .code {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .code label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .code input {
+    width: 8em;
+    padding: 6px 8px;
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius);
+    font: inherit;
+    letter-spacing: 0.2em;
+  }
+  .error {
+    width: 100%;
+    font-size: 13px;
+    color: var(--alert, #b3261e);
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .hint {
     font-size: 13px;

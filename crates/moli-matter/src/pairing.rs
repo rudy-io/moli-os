@@ -44,7 +44,14 @@ fn invalid() -> anyhow::Error {
     anyhow::anyhow!(moli_i18n::tr!("pilotes.matter.pairing_failed"))
 }
 
-pub(super) async fn pair(controller: &MatterController, ctx: &DriverCtx) -> anyhow::Result<()> {
+/// Pairs the device a human opened a window for: found by mDNS, or at the
+/// `address` the configuration gives (with its sleep pace, if it sleeps).
+pub(super) async fn pair(
+    controller: &MatterController,
+    ctx: &DriverCtx,
+    address: Option<std::net::SocketAddr>,
+    pace: Option<(std::time::Duration, std::time::Duration)>,
+) -> anyhow::Result<()> {
     let Some(code) = ctx.secret("pairing_code").filter(|s| !s.trim().is_empty()) else {
         return Ok(());
     };
@@ -55,10 +62,15 @@ pub(super) async fn pair(controller: &MatterController, ctx: &DriverCtx) -> anyh
         .await
         .map_err(|_| invalid())?;
     anyhow::ensure!(code.len() <= 512, invalid());
-    controller
-        .commission(code.trim(), None)
-        .await
-        .map_err(|error| failed(&error))?;
+    let result = match address {
+        Some(address) => {
+            controller
+                .commission_at(code.trim(), address, pace, None)
+                .await
+        }
+        None => controller.commission(code.trim(), None).await,
+    };
+    result.map_err(|error| failed(&error))?;
     Ok(())
 }
 

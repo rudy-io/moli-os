@@ -210,6 +210,70 @@ lights = ["lumieres:suspensions", "hue:…"]
 - Les identifiants de scène `none`, `next` et `previous` sont réservés. `moli-os check-config`
   refuse une scène mal écrite (lumière nommée deux fois, `off` avec un réglage, couleur invalide…).
 
+## Chauffage : un thermostat de pièce sur la sonde de la pièce (`crates/moli-heating`)
+
+Pas un pilote à déclarer : dès que `moli.toml` a un `[[heating]]`, Moli lance l'instance
+`chauffage` et publie **un appareil par pièce**, `chauffage:<id>`. Une vanne thermostatique mesure
+la température contre le radiateur : elle croit la pièce plus chaude qu'elle n'est. Le thermostat de
+pièce lit la sonde de la pièce (loin du radiateur) et donne à chaque vanne la consigne qui lui fait
+tenir celle de la pièce.
+
+```toml
+[[heating]]
+id = "parents"                       # stable : chauffage:parents
+name = "Chambre parentale"           # son nom, et sa pièce dans Moli
+sensor = "matter:…-6/temperature"    # la sonde de la pièce (°C)
+valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
+# correction = false : les vannes reçoivent la consigne de la pièce telle quelle (une vanne
+#   qui régule déjà sur une sonde de la pièce, comme tado X avec la sienne)
+# min = 5.0, max = 25.0 : les consignes que la pièce accepte
+# initial = 19.0 : la consigne et le programme avant qu'on les règle
+```
+
+- **Points**, ceux d'une vanne Zigbee2MQTT, si bien que le tableau de bord en fait une carte de
+  vanne avec sa table horaire et sa courbe, sans rien de plus : `local_temperature` (la sonde ;
+  inconnue quand elle se tait), `occupied_heating_setpoint` (la consigne de la pièce, 5 à 25 par
+  défaut, au demi-degré), `system_mode` (`auto` suit le programme, `heat` tient la consigne,
+  `off` donne aux vannes leur consigne la plus basse, hors-gel), `weekly_schedule_<jour>`
+  (`00:00/17 06:30/20 22:00/17` : de 1 à 6 créneaux, le premier à 00:00, au demi-degré),
+  `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
+  l'autre). En `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
+- **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
+  reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
+  chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
+  décalage par heure et par degré d'erreur, au plus un quart d'heure compté d'un coup, borné à
+  −3 / +6 °C ; arrêté en `off` et quand la sonde se tait. Consigne de la vanne = consigne de la
+  pièce + décalage, au demi-degré, dans les bornes de la vanne. Exemple : pièce voulue à 20, restée
+  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. Une pièce encore chaude d'une
+  consigne qui vient de baisser (19,5 la nuit, 18 le jour) refroidit seule, vannes fermées : le
+  décalage tient au lieu de descendre toute la journée jusqu'à −3, ce qui laisserait les vannes
+  froides au retour de la consigne du soir. Une vanne est fermée quand son thermomètre dépasse de
+  plus de 0,5 °C la consigne qu'elle tient (sans thermomètre : quand la sonde de la pièce la
+  dépasse). **Le thermomètre de la vanne ne fait jamais monter le décalage** : un premier calcul sur l'écart « vanne − sonde » s'emballait
+  (le radiateur chauffe, la vanne lit plus chaud, l'écart grandit, la consigne monte, la vanne
+  reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
+  pièce (tado X) : une chambre voulue à 18 °C recevait 24.
+- **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
+  plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
+  toutes les 30 s, et le changement attend la vanne qui n'est pas encore là), jamais dans les 3 min
+  qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Une écriture refusée
+  (vanne endormie) compte aussi : elle n'est pas retentée chaque minute. Les ordres passent par le
+  hub au nom de la maison (`system`), comme ceux d'une scène, acteur « Chauffage · <pièce> » au
+  journal. **Une vanne, c'est une consigne en °C**, inscriptible, avec des bornes, sur un appareil
+  qui n'est ni un ouvrant ni une serrure : une position de volet, un variateur, un volume sont
+  laissés de côté (dit une fois au journal).
+- **La garde** : les appareils des vannes sont les **membres** de l'appareil de la pièce. Un ordre
+  d'un agent à `chauffage:<id>` est jugé sur la pièce du chauffage **et** sur celles de ses vannes
+  (pièces protégées, heures calmes) : une vanne rangée dans une chambre protégée la protège même si
+  le nom du `[[heating]]` diffère. Un ordre que le hub a déjà donné pour échoué n'est pas appliqué.
+- **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
+  vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
+- **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
+  consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
+  mal écrite, une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
+  dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
+  ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
+
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
 - **Couvre** : tous les appareils Zigbee que Zigbee2MQTT sait décrire (~4 000), sans code par marque.
@@ -891,6 +955,7 @@ kind = "frigate"
 # api = "http://127.0.0.1:5000"
 # go2rtc = "http://nvr.example:1984"      # images ET direct par go2rtc, au lieu de l'API
 # streams = { jardin = "camera-jardin" }  # caméra Frigate → flux go2rtc, si les noms diffèrent
+# review = { host = "nvr.example", port = 8971, user = "moli" }  # le passé (frise, événements, clips, zones)
 ```
 
 - **go2rtc** (facultatif) : un go2rtc qui lit les mêmes caméras (celui de Frigate quand son port
@@ -905,14 +970,48 @@ kind = "frigate"
   page montre les images à la place.
   ⚠️ **Choix explicite de la maison.** L'API de go2rtc n'a pas de mot de passe par défaut et
   montre les adresses des caméras, identifiants compris : à garder sur le réseau local, jamais
-  exposée. Quand Frigate aura son accès authentifié dans Moli (port 8971), images et direct
-  passeront par lui, sans go2rtc.
-- **Secrets** : aucun. ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
+  exposée. Avec `review` (ci-dessous), images et direct passent par le port authentifié de
+  Frigate et `go2rtc` n'est plus contacté.
+- **Passé** (facultatif, `review`) : l'API authentifiée de Frigate (port **8971**, HTTPS, compte
+  au rôle *viewer*). Frise par caméra (`/api/review` et les segments de `/api/<caméra>/recordings`,
+  réunis en plages continues, demandés deux heures à la fois), zones (`/api/config`, coordonnées
+  relatives 0–1), image, vignette et clip d'un événement, enregistrement entre deux instants (une
+  heure au plus). **Images et direct passent aussi par ce port** : `/api/<caméra>/latest.jpg` et
+  l'offre WebRTC sur `/api/go2rtc/webrtc?src=<flux>` (Frigate vérifie le flux contre les caméras du
+  compte) ; aucun go2rtc n'est joint directement. Le certificat auto-signé est épinglé au premier
+  contact (secret `certificate`), **avant** l'envoi du mot de passe, ou écrit dans
+  `review.cert_sha256` (empreinte SHA-256, gagne sur le premier contact). **Un certificat qui
+  change n'est jamais ré-épinglé** : le pilote s'arrête (en attente, sans envoyer le mot de passe),
+  au démarrage comme en marche, et dit quoi vérifier ; l'accepter se fait depuis la machine de Moli
+  (`moli-os secrets forget <instance> certificate`, puis redémarrer) ou en changeant
+  `review.cert_sha256`. Avec `review` réglé, **jamais de repli** : sans mot de passe ou Frigate
+  injoignable au premier contact, le pilote attend (en le disant) et réessaie, de 5 s à 5 min,
+  sans passer par go2rtc. Session par cookie, reconnexion sur 401. Les vidéos passent en flux (jamais gardées en
+  mémoire), `Range` transmis (le navigateur peut avancer dans le clip), `Cache-Control: no-store`
+  (rien ne reste dans le cache d'un navigateur partagé). Routes
+  `/api/devices/{id}/review/…` : jamais pour un invité ; caméra d'une pièce protégée, personne
+  connectée avec le code de la maison seulement. Un événement n'est servi que si Frigate le dit
+  de la caméra de la route (`/api/events/<id>`, `camera`) : l'id d'un événement d'une autre
+  caméra n'ouvre rien. Seuls les noms de caméra que Frigate accepte (`[A-Za-z0-9_-]`) sont pris
+  de MQTT, et seuls eux entrent dans ses chemins et ses requêtes. Colonne `distant` de
+  `routes.txt` à `non` (le passé, les clips surtout, ne devrait pas sortir) : c'est l'intention
+  déclarée, **pas encore appliquée** tant que les entrées distantes ne la lisent pas (étape 2 de
+  `SECURITY-MODEL.md`). Appareil `review: true`.
+- **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
+  (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
-- **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : elles sont ignorées). Disponibilité globale via `frigate/available`.
-- **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate).
+- **Zones** (avec `review` seulement) : chaque zone de la configuration de Frigate (`/api/config`, lue en tâche de
+  fond, nouvel essai de 5 s à 5 min tant que Frigate ne répond pas) devient un appareil « Zone <nom> (<caméra>) »,
+  `<instance>:zone.<zone>` : compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` (sens `occupancy`), tenus à jour
+  par MQTT (`frigate/<zone>/<objet>`). **Un capteur pour l'alarme** : un compte au-dessus de 0 est actif
+  (`[[driver.options.sensor]] point = "frigate:zone.allee/person"`). Le nom affiché est le `friendly_name` de la zone,
+  sinon sa clé. Une zone de même nom sur deux caméras : un seul appareil (Frigate les compte sous un seul sujet), au nom
+  de la première. Une zone ajoutée dans Frigate apparaît au redémarrage du pilote ; une zone retirée de Frigate est
+  retirée de Moli à ce moment-là (seuls les ids `zone.…` de l'instance).
+- **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : sans `review`, elles sont ignorées). Disponibilité globale via `frigate/available`, zones comprises.
+- **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate) ; zone : `zone.<nom>` (un point, que Frigate refuse dans un nom de caméra : jamais le même id qu'une caméra).
 - **Pièges** : abonnements ciblés, jamais les JPEG retenus (`…/snapshot`) ni `stats`. Broker injoignable : commandes refusées (pas mises en file), nouvel essai après 5 s.
-- **Tests** : correspondance sujets → points.
+- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra.
 
 ## `bambu` : imprimante Bambu Lab (`crates/moli-bambu`)
 
@@ -1149,11 +1248,12 @@ pièces ; il commande ensuite les membres en origine `system` (journal : `lumina
   reviennent, 15 s au plus), sinon les ampoules (allumées puis réglées) ; aucune ampoule
   joignable sans relais → refus « coupée à l'interrupteur ».
 
-## `dehors` : la météo dehors, mesurée ou prévue (`crates/moli-outdoor`, #210)
+## `dehors` : la météo dehors, mesurée ou prévue, et le soleil (`crates/moli-outdoor`, #210, #258)
 
-Pilote interne, lancé par Moli dès que `moli.toml` déclare `[outdoor]` (pas de `[[driver]]`,
-l'id `dehors` est réservé). Sans cette section, rien ne change : la page Dehors lit
-`outdoor.weather` de `home.json` comme avant.
+Pilote interne (pas de `[[driver]]`, l'id `dehors` est réservé). Il porte deux appareils :
+`dehors:meteo`, dès que `moli.toml` déclare `[outdoor]`, et `dehors:soleil` (plus bas), dès
+que la position de la maison est connue, `[outdoor]` ou pas. Sans `[outdoor]`, la page Dehors
+lit `outdoor.weather` de `home.json` comme avant.
 
 ```toml
 [outdoor]
@@ -1194,6 +1294,15 @@ transmet aucun). Ses `members` sont les sources.
   l'appareil source. Il ne change que quand la source change : son heure dit depuis quand cette
   source est retenue. `stations` et `forecast` (texte, sens `config`) listent les sources
   (ids séparés par des virgules) : la page Dehors s'en sert pour « mesuré » ou « prévu ».
+- **Le max/min mesuré du jour** (#246) : avec une station qui mesure la température,
+  `measured_max` et `measured_min` (sens `temperature`, même unité) donnent le plus haut et le plus
+  bas **mesurés** depuis minuit, à l'heure de la maison (`[server] timezone`). Seulement ce que les
+  stations ont mesuré, jamais la prévision : une station muette une partie du jour compte ce
+  qu'elle a mesuré ; rien de mesuré depuis minuit, pas de valeur. La valeur garde l'heure du
+  relevé qui l'a faite (« le minimum de 6 h 40 »). Au redémarrage, le pilote relit la journée dans
+  l'historique avant de continuer. Les `today_max` / `today_min` de la prévision restent à part :
+  le prévu dit ce qui vient, le mesuré ce qui a eu lieu. Exemple d'automatisme : « s'il a gelé
+  cette nuit », `dehors:meteo/measured_min` `lt` 0.
 - **Joignable** tant qu'une de ses sources l'est.
 - **Rien à relire en boucle** : le pilote suit les changements de ses sources ; une horloge
   par minute fait seulement passer une source de fraîche à ancienne.
@@ -1209,6 +1318,31 @@ transmet aucun). Ses `members` sont les sources.
 ```
 
 Sans la seconde règle, la prévision suffit à relever le store ; avec, seule la station le fait.
+
+### `dehors:soleil` : où est le soleil (#258)
+
+Calculé **dans la maison**, sans Internet ni station, depuis la position de la maison
+(`[automations] latitude/longitude`, ou celle choisie dans la conversation, suivie sans
+redémarrage). Mêmes formules que le lever et le coucher des automatismes (`moli_core::sun`,
+approximation NOAA) : « soleil levé » et l'élévation ne se contredisent jamais. Sans position
+(et dans la maison de démo), pas d'appareil ; une position retirée le retire.
+
+| Point | Valeur |
+|---|---|
+| `elevation` | hauteur du centre du soleil au-dessus de l'horizon, en degrés (-90 à 90, négative la nuit) |
+| `azimuth` | direction du soleil, en degrés, dans le sens des aiguilles d'une montre depuis le nord (90 = est, 180 = sud) |
+
+- Lecture seule, sens `other`, unité `°`.
+- **Recalculé chaque minute, publié par pas de 0,5°** : à midi, l'élévation monte d'environ
+  0,25° par minute, et le calcul est juste à environ 0,5° près (vérifié contre la formule de
+  l'*Astronomical Almanac* toute l'année, dans les deux hémisphères). L'historique prend donc
+  une ligne toutes les quelques minutes, pas à chaque minute.
+- **Élévation géométrique** (sans la réfraction de l'air) : au lever et au coucher calculés,
+  elle vaut environ -0,83° (le bord haut du disque à l'horizon, réfraction comprise). Elle passe
+  donc 0° quelques minutes après le lever et avant le coucher.
+- Exemple d'automatisme : « allumer dehors quand le soleil passe sous 5° »,
+  `when_threshold` sur `dehors:soleil/elevation` avec `below` 5 ; « le soleil est à l'ouest »,
+  `dehors:soleil/azimuth` `gt` 225.
 
 ## `presence` : qui est à la maison (`crates/moli-presence`)
 
