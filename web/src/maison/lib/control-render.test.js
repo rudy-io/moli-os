@@ -1059,3 +1059,20 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(!html.includes('Volume 1'));
   assert.ok(!html.includes('class="gauges"'));
 });
+
+test('a plug that measures its draw says it on its pad, only while on', () => {
+  const plug = (on, power, unit = 'W') => ({
+    id: 'fixture:plug', model: 'Smart plug', label: { room: 'Workshop', name: 'Floor lamp' },
+    points: [point('on', { type: 'binary' }, true, 'on_off'), { ...point('power', { type: 'numeric' }, false, 'power'), unit }],
+    values: { on, power },
+  });
+  const lit = showRoom([plug(true, 42.4)]);
+  assert.match(lit, /42 W/);
+  assert.match(lit, /title="Floor lamp · [^"]*42 W"/);
+  assert.match(showRoom([plug(true, 1.5, 'kW')]), /1[,.]5 kW/);
+  const off = showRoom([plug(false, 0)]);
+  assert.doesNotMatch(off, /0 W/);
+  assert.match(off, /title="Floor lamp"/);
+  // No reading yet: the plain state, never an invented figure.
+  assert.doesNotMatch(showRoom([plug(true, null)]), / W</);
+});

@@ -28,6 +28,7 @@
   import Orb from './moli/Orb.svelte';
   import { moli } from './lib/moli.svelte.js';
   import { airzonePresent } from './lib/airzone.js';
+  import { mapUseful } from './lib/map-tab.js';
 
   let { route } = $props();
   $effect(() => {
@@ -54,7 +55,8 @@
     { path: 'somfy', label: 'systeme.somfy.page_title', icon: 'shutter', shown: () => hub.drivers.some(d => d.integration === 'overkiz') },
     { path: 'airzone', label: 'airzone_ui.title', icon: 'air-conditioner', shown: () => airzonePresent(hub.drivers) },
     { path: 'plan', label: 'commun.nav.plan', icon: 'home-roof' },
-    { path: 'carte', label: 'commun.nav.carte', icon: 'map' },
+    // Where people are needs their phones: no phone and nobody located, no empty map.
+    { path: 'carte', label: 'commun.nav.carte', icon: 'map', shown: () => mapUseful(hub.drivers, hub.devices) },
     { path: 'cameras', label: 'commun.nav.cameras', icon: 'cctv' },
     { path: 'alarme', label: 'commun.nav.alarme', icon: 'shield', shown: () => Object.values(hub.devices).some(isAlarm) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },

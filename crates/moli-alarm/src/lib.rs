@@ -49,7 +49,7 @@
 //! entry = 5       # seconds to disarm on coming home
 //! trigger = 480   # seconds triggered (0: until disarmed)
 //! [[driver.options.sensor]]
-//! point = "frigate:zone_jardin/person"
+//! point = "frigate:zone.jardin/person"
 //! name = "Jardin"
 //! modes = ["home", "night"]
 //! immediate = false   # true: no entry delay for it
@@ -912,7 +912,7 @@ mod tests {
             entry = 5
             trigger = 480
             [[sensor]]
-            point = "frigate:zone_terrasse/person"
+            point = "frigate:zone.terrasse/person"
             modes = ["night"]
             "#,
         );
@@ -921,7 +921,7 @@ mod tests {
             r#"
             [modes.night]
             [[sensor]]
-            point = "frigate:zone_terrasse/person"
+            point = "frigate:zone.terrasse/person"
             modes = ["away"]
             "#,
         );
@@ -958,7 +958,7 @@ mod tests {
     #[test]
     fn the_settings_fit_in_the_point_they_are_written_on() {
         let sensor = |i: usize, name: &str| SensorConfig {
-            point: format!("frigate:zone_capteur_{i}/person"),
+            point: format!("frigate:zone.capteur_{i}/person"),
             name: Some(name.to_owned()),
             modes: vec![Mode::Night, Mode::Away],
             immediate: i.is_multiple_of(2),
