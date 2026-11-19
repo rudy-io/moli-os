@@ -296,6 +296,43 @@ async fn api_call(
     Ok((status, json))
 }
 
+/// Splits `scheme://host[:port][/path]` into `(host, has_userinfo)`; no userinfo,
+/// no empty host. Returns the lowercase host.
+fn url_host<'a>(url: &'a str, scheme: &str) -> Option<&'a str> {
+    let rest = url.strip_prefix(scheme)?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.contains('@') || authority.is_empty() {
+        return None;
+    }
+    let host = authority.rsplit_once(':').map_or(authority, |(h, port)| {
+        if port.bytes().all(|b| b.is_ascii_digit()) {
+            h
+        } else {
+            authority
+        }
+    });
+    (!host.is_empty()).then_some(host)
+}
+
+/// A camera relay address comes from the cloud: only `https://*.netatmo.net`.
+fn is_netatmo_vpn_url(url: &str) -> bool {
+    url_host(url, "https://").is_some_and(|h| {
+        let h = h.to_ascii_lowercase();
+        h.len() > ".netatmo.net".len()
+            && h.ends_with(".netatmo.net")
+            && h.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+    })
+}
+
+/// A camera local address comes from the cloud too: only `http://` to a private
+/// LAN IPv4 address, never a name, a public address or a loopback.
+fn is_private_lan_url(url: &str) -> bool {
+    url_host(url, "http://")
+        .and_then(|h| h.parse::<std::net::Ipv4Addr>().ok())
+        .is_some_and(|ip| ip.is_private())
+}
+
 async fn resolve_local_url(vpn_url: &str) -> Option<String> {
     let ping_url = format!("{}/command/ping", vpn_url.trim_end_matches('/'));
     let parsed = WebUrl::parse(&ping_url).ok()?;
@@ -320,7 +357,7 @@ async fn resolve_local_url(vpn_url: &str) -> Option<String> {
     }
     let json: Json = serde_json::from_slice(&bytes).ok()?;
     let local = json["local_url"].as_str()?.trim_end_matches('/').to_owned();
-    if local.is_empty() {
+    if !is_private_lan_url(&local) {
         return None;
     }
     let local_ping = WebUrl::parse(&format!("{local}/command/ping")).ok()?;
@@ -419,7 +456,9 @@ pub fn decode_module_status(module: &Json) -> DecodedModuleStatus {
         .map(|s| s == "on");
     let vpn_url = module["vpn_url"]
         .as_str()
-        .map(|s| s.trim_end_matches('/').to_owned());
+        .map(|s| s.trim_end_matches('/'))
+        .filter(|s| is_netatmo_vpn_url(s))
+        .map(str::to_owned);
     DecodedModuleStatus {
         online,
         monitoring,
@@ -896,6 +935,25 @@ mod tests {
             b"{\"error\":\"invalid_client\"}"
         ));
         assert!(!is_invalid_grant(StatusCode::UNAUTHORIZED, b"not json"));
+    }
+
+    #[test]
+    fn relay_and_local_addresses_are_checked() {
+        assert!(is_netatmo_vpn_url(
+            "https://prodvpn-eu-1.netatmo.net/restricted/10.0.0.1/abc/def"
+        ));
+        assert!(!is_netatmo_vpn_url("http://prodvpn-eu-1.netatmo.net/x"));
+        assert!(!is_netatmo_vpn_url("https://netatmo.net.evil.example/x"));
+        assert!(!is_netatmo_vpn_url("https://evil.example/x"));
+        assert!(!is_netatmo_vpn_url("https://a.netatmo.net@evil.example/x"));
+        assert!(is_private_lan_url("http://192.168.1.20"));
+        assert!(is_private_lan_url("http://10.0.0.5:80"));
+        assert!(!is_private_lan_url("https://192.168.1.20"));
+        assert!(!is_private_lan_url("http://8.8.8.8"));
+        assert!(!is_private_lan_url("http://127.0.0.1"));
+        assert!(!is_private_lan_url("http://169.254.169.254"));
+        assert!(!is_private_lan_url("http://camera.local"));
+        assert!(!is_private_lan_url("http://192.168.1.20@8.8.8.8"));
     }
 
     #[test]
