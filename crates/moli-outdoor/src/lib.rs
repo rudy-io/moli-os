@@ -576,6 +576,8 @@ pub struct Outdoor {
     sources: Vec<Source>,
     /// Where the house is, for `dehors:soleil` (`None`: no sun, the demo).
     place: Option<sun::Place>,
+    /// `[[sun.facade]]`: whether the sun is on each.
+    facades: Vec<sun::Facade>,
     /// Where the day's extremes start again after a restart.
     history: Option<History>,
     /// The house's time zone: the day starts at its midnight.
@@ -592,7 +594,8 @@ impl std::fmt::Debug for Outdoor {
 
 impl Outdoor {
     /// `config`: `[outdoor]`, if declared (else only the sun); `zone`: the
-    /// house's IANA time zone (UTC if unknown); `place`: where the house is.
+    /// house's IANA time zone (UTC if unknown); `place`: where the house is;
+    /// `facades`: `[[sun.facade]]`.
     #[must_use]
     pub fn new(
         hub: Hub,
@@ -600,12 +603,14 @@ impl Outdoor {
         history: Option<History>,
         zone: &str,
         place: Option<sun::Place>,
+        facades: Vec<sun::Facade>,
     ) -> Self {
         Self {
             hub,
             weather: config.is_some(),
             sources: config.map(Config::sources).unwrap_or_default(),
             place,
+            facades,
             history,
             zone: jiff::tz::TimeZone::get(zone).unwrap_or(jiff::tz::TimeZone::UTC),
         }
@@ -635,21 +640,34 @@ impl Outdoor {
     fn sun(&self, ctx: &DriverCtx, published: &mut Published) {
         let place = self.place.as_ref().and_then(|place| place());
         let id = ctx.device_id(sun::NATIVE);
-        match sun::tick(&mut published.sun, place, now_ms()) {
+        match sun::tick(&mut published.sun, place, now_ms(), &self.facades) {
             sun::Change::Nothing => {}
             sun::Change::Remove => ctx.remove_device(&id),
             sun::Change::Show {
                 declare,
                 elevation,
                 azimuth,
+                facades,
             } => {
                 if declare {
-                    ctx.upsert_device(sun::device(id.clone(), ctx.instance()));
+                    ctx.upsert_device(sun::device(id.clone(), ctx.instance(), &self.facades));
                     ctx.set_availability(&id, true);
                 }
                 for (key, value) in [(sun::ELEVATION, elevation), (sun::AZIMUTH, azimuth)] {
                     if let Some(v) = value {
                         ctx.set_state(&id, key, Value::Float(v));
+                    }
+                }
+                for (facade, (incidence, on)) in self.facades.iter().zip(facades) {
+                    if let Some(v) = incidence {
+                        ctx.set_state(
+                            &id,
+                            &format!("{}{}", facade.id, sun::INCIDENCE),
+                            Value::Float(v),
+                        );
+                    }
+                    if let Some(on) = on {
+                        ctx.set_state(&id, &format!("{}{}", facade.id, sun::ON), Value::Bool(on));
                     }
                 }
             }

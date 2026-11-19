@@ -1438,6 +1438,60 @@ approximation NOAA) : « soleil levé » et l'élévation ne se contredisent jam
   `when_threshold` sur `dehors:soleil/elevation` avec `below` 5 ; « le soleil est à l'ouest »,
   `dehors:soleil/azimuth` `gt` 225.
 
+#### Le soleil sur chaque façade (`[sun]`)
+
+Pour fermer un volet quand le soleil tape sur sa baie, `moli.toml` déclare les façades.
+Plusieurs baies orientées pareil partagent la même façade.
+
+```toml
+[sun]
+enter = 62            # facultatif : 62° par défaut, pour toutes les façades
+exit = 75             # facultatif : 75° par défaut
+
+[[sun.facade]]
+id = "sud"            # lettres minuscules, chiffres et _, unique
+name = "Façade sud"   # facultatif : l'id sinon
+azimuth = 180         # la direction vers laquelle regarde la façade (0 = nord, 90 = est)
+
+[[sun.facade]]
+id = "ouest"
+azimuth = 270
+enter = 55            # une façade peut avoir ses propres seuils
+min_elevation = 8     # facultatif (0° par défaut) : une haie masque le soleil bas
+```
+
+Pour chaque façade, `dehors:soleil` ajoute deux points, en lecture seule :
+
+| Point | Valeur |
+|---|---|
+| `<id>_incidence` | l'angle entre le soleil et la perpendiculaire de la façade, en degrés : 0 = pile en face, 90 = rasant, au-delà = derrière la façade (publié par pas de 0,5°) |
+| `<id>_sun` | vrai quand le soleil tape sur la façade |
+
+![L'incidence du soleil sur une baie, vue de dessus](../images/soleil-incidence.svg)
+
+- **L'incidence** vaut `acos(cos(élévation) × cos(azimut du soleil − azimut de la façade))`.
+  Par m² de vitrage, le rayonnement direct reçu suit le cosinus de l'incidence : environ
+  47 % de ce qu'il serait en face à 62°, 26 % à 75°. Le verre en réfléchit aussi davantage
+  quand l'incidence est grande.
+- **`<id>_sun` a une hystérésis.** Il devient vrai quand l'incidence passe **sous** `enter`
+  (et que le soleil est au-dessus de `min_elevation`), et redevient faux quand elle repasse
+  **au-dessus** de `exit`, ou quand le soleil descend sous `min_elevation`. Entre les deux,
+  il ne change pas : un volet ne fait pas d'allers-retours quand le soleil hésite autour d'un
+  seuil. `exit` doit donc être plus grand que `enter`, et le démarrage refuse l'inverse : avec
+  `exit` plus petit, une incidence entre les deux serait à la fois « tape » et « ne tape plus ».
+- Les seuils se règlent par façade : une grande baie plein ouest peut entrer plus tôt
+  (`enter = 70`) sans toucher aux autres.
+- Exemple d'automatisme : « fermer le volet du salon quand le soleil tape au sud et qu'il fait
+  plus de 24 °C dedans », `when_state` sur `dehors:soleil/sud_sun` avec `to` `true`, puis un
+  `if` avec une règle d'état sur la température de la pièce ; « rouvrir quand le soleil a quitté
+  la façade », `when_state` sur `dehors:soleil/sud_sun` avec `to` `false`.
+
+![L'incidence d'une baie sur une journée, et quand le soleil tape](../images/soleil-hysteresis.svg)
+
+Au démarrage, `[sun]` est vérifié : au moins une façade, des `id` simples et uniques,
+`azimuth` dans 0..360, `enter` dans 0..90, `exit` dans 0..=90 et plus grand que `enter`,
+`min_elevation` dans 0..90.
+
 ## `presence` : qui est à la maison (`crates/moli-presence`)
 
 - **Couvre** : la présence de chaque personne d'après le Wi-Fi de son téléphone, en local

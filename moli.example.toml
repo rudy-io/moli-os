@@ -165,6 +165,17 @@ timezone = "Europe/Paris"
 # device = "z2m:0x…"
 # stale_after = "15m"           # optional: 30 min by default
 
+# The façades the sun may be on (docs/components/pilotes.md, `dehors:soleil`):
+# dehors:soleil/<id>_incidence and <id>_sun, for the shutters.
+# [sun]
+# enter = 62                    # optional: the sun is on below this incidence
+# exit = 75                     # optional: no longer above this one (> enter)
+#
+# [[sun.facade]]
+# id = "sud"
+# name = "South"
+# azimuth = 180                 # where the façade looks, clockwise from north
+
 # Zigbee, through an existing Zigbee2MQTT bridge.
 [[driver]]
 id = "z2m"

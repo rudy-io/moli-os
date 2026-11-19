@@ -60,6 +60,10 @@ pub struct Config {
     /// device. Moli runs it as instance `dehors` (absent: nothing changes).
     #[serde(default)]
     pub outdoor: Option<moli_outdoor::Config>,
+    /// The façades the sun may be on (#258), on `dehors:soleil`: their
+    /// incidence and whether the sun is on each (absent: the sun only).
+    #[serde(default)]
+    pub sun: Option<moli_outdoor::sun::Config>,
     /// Scenes: lights of several rooms set to a look in one gesture. Moli
     /// runs them (and the rhythm) as instance `scenes`.
     #[serde(default, rename = "scene")]
@@ -490,6 +494,9 @@ impl Config {
         moli_lights::check(&self.fixtures).map_err(|e| anyhow::anyhow!("[[fixture]] {e}"))?;
         if let Some(outdoor) = &self.outdoor {
             moli_outdoor::check(outdoor).map_err(|e| anyhow::anyhow!("[outdoor] {e}"))?;
+        }
+        if let Some(sun) = &self.sun {
+            moli_outdoor::sun::check(sun).map_err(|e| anyhow::anyhow!("[sun] {e}"))?;
         }
         moli_scenes::check(&self.scenes, self.rhythm.as_ref())
             .map_err(|e| anyhow::anyhow!("[[scene]] {e}"))?;

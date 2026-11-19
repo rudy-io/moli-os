@@ -957,6 +957,8 @@
   "pilotes.dehors.soleil.nom": "Sun",
   "pilotes.dehors.soleil.elevation": "Sun elevation",
   "pilotes.dehors.soleil.azimut": "Sun azimuth",
+  "pilotes.dehors.soleil.incidence": "Sun incidence · {facade}",
+  "pilotes.dehors.soleil.sur_facade": "Sun on {facade}",
   "pilotes.jackery.nom": "Jackery battery",
   "pilotes.jackery.niveau": "Level",
   "pilotes.jackery.charge": "Charging",
