@@ -112,6 +112,34 @@ impl CameraKind {
 struct StreamUrls {
     local_url: Option<String>,
     vpn_url: Option<String>,
+    /// Failed local-address lookups in a row, and the time before which we do
+    /// not try again (Moli may simply not be on the camera's network).
+    failures: u32,
+    retry_at: Option<Instant>,
+}
+
+const RETRY_BASE: Duration = Duration::from_secs(30);
+const RETRY_MAX: Duration = Duration::from_secs(30 * 60);
+
+impl StreamUrls {
+    fn lookup_due(&self, vpn: &str) -> bool {
+        self.vpn_url.as_deref() != Some(vpn)
+            || (self.local_url.is_none() && self.retry_at.is_none_or(|t| Instant::now() >= t))
+    }
+
+    fn record_lookup(&mut self, local: Option<String>) {
+        if local.is_some() {
+            self.local_url = local;
+            self.failures = 0;
+            self.retry_at = None;
+        } else {
+            self.failures = self.failures.saturating_add(1);
+            let wait = RETRY_BASE
+                .saturating_mul(1 << self.failures.min(10))
+                .min(RETRY_MAX);
+            self.retry_at = Some(Instant::now() + wait);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -671,23 +699,23 @@ async fn poll_all_homes(
                     ctx.set_state(&id, "light", Value::Bool(lit));
                 }
                 if let Some(vpn) = decoded.vpn_url {
-                    let changed = {
-                        let guard = cam
-                            .urls
-                            .read()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        guard.vpn_url.as_deref() != Some(vpn.as_str()) || guard.local_url.is_none()
-                    };
-                    if changed {
+                    let due = cam
+                        .urls
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .lookup_due(&vpn);
+                    if due {
                         let local = resolve_local_url(&vpn).await;
                         let mut guard = cam
                             .urls
                             .write()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        guard.vpn_url = Some(vpn);
-                        if local.is_some() {
-                            guard.local_url = local;
+                        if guard.vpn_url.as_deref() != Some(vpn.as_str()) {
+                            guard.failures = 0;
+                            guard.retry_at = None;
                         }
+                        guard.vpn_url = Some(vpn);
+                        guard.record_lookup(local);
                     }
                 }
             }
@@ -954,6 +982,22 @@ mod tests {
         assert!(!is_private_lan_url("http://169.254.169.254"));
         assert!(!is_private_lan_url("http://camera.local"));
         assert!(!is_private_lan_url("http://192.168.1.20@8.8.8.8"));
+    }
+
+    #[test]
+    fn failed_local_lookups_back_off() {
+        let mut urls = StreamUrls::default();
+        assert!(urls.lookup_due("https://a.netatmo.net"));
+        urls.vpn_url = Some("https://a.netatmo.net".into());
+        urls.record_lookup(None);
+        assert!(!urls.lookup_due("https://a.netatmo.net"));
+        let first = urls.retry_at.unwrap();
+        urls.record_lookup(None);
+        assert!(urls.retry_at.unwrap() > first);
+        assert!(urls.lookup_due("https://b.netatmo.net"));
+        urls.record_lookup(Some("http://192.168.1.20".into()));
+        assert_eq!(urls.failures, 0);
+        assert!(!urls.lookup_due("https://a.netatmo.net"));
     }
 
     #[test]
