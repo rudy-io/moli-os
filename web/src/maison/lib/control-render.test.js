@@ -1128,7 +1128,6 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(!html.includes('class="gauges"'));
 });
 
-<<<<<<< HEAD
 test('the living room drives an Apple TV: its own apps, and no key it does not have', () => {
   const id = 'appletv:ATV-TEST';
   const keys = ['CursorUp', 'CursorDown', 'CursorLeft', 'CursorRight', 'Confirm', 'Back', 'Home', 'PlayPause', 'Next', 'Previous', 'VolumeUp', 'VolumeDown', 'Options'];
