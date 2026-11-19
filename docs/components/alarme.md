@@ -46,7 +46,7 @@ n'ont rien à faire dans un fichier de données.
   "name": "Centrale",
   "category": "mal",
   "product": "Daewoo SA501",
-  "ip": "192.168.1.50",
+  "ip": "192.0.2.50",
   "version": "3.3",
   "dps": [
     { "id": 101, "code": "system_arm_type", "type": "Enum", "writable": true, "scale": 0,
