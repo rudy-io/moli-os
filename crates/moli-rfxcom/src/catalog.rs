@@ -120,6 +120,13 @@ const BATTERY_LEVEL_MAX: f64 = 9.0;
 /// The highest RFXtrx signal level.
 const RSSI_MAX: f64 = 15.0;
 
+/// The most devices one bridge may announce: a house has tens, a busy
+/// street a few hundred; anything beyond is ignored.
+pub const MAX_DEVICES: usize = 2_000;
+
+/// The most points one device may carry.
+pub const MAX_POINTS: usize = 64;
+
 impl Catalog {
     #[must_use]
     pub fn len(&self) -> usize {
@@ -182,7 +189,8 @@ impl Catalog {
         // one announced keeps it.
         if !self.entries.contains_key(rest) {
             let id = DeviceId::new(instance, rest);
-            if self.entries.values().any(|e| e.device.id == id) {
+            if self.entries.values().any(|e| e.device.id == id) || self.entries.len() >= MAX_DEVICES
+            {
                 return Change::None;
             }
         }
@@ -191,6 +199,9 @@ impl Catalog {
             .entries
             .entry(rest.clone())
             .or_insert_with(|| new_entry(instance, &rest, &config));
+        if entry.device.points.len() >= MAX_POINTS && entry.device.point(&spec.key).is_none() {
+            return Change::None;
+        }
         let before = (entry.device.points.clone(), entry.command.clone());
         entry.configs.insert(topic.to_owned(), prop.key.clone());
         // In place when the key is known: a repeated config changes nothing.
@@ -832,6 +843,56 @@ mod tests {
         assert!(catalog.by_state("0x01_12").is_none());
         let kept = catalog.by_state("0x01/12").unwrap();
         assert!(kept.device.point("temperature").is_none());
+    }
+
+    #[test]
+    fn devices_and_points_are_capped() {
+        let sensor = |id: &str, field: &str| {
+            format!(
+                r#"{{"state_topic":"rfxcom2mqtt/devices/{id}","value_template":"{{{{ value_json.{field} }}}}","device":{{"name":"x"}}}}"#
+            )
+        };
+        let mut catalog = Catalog::default();
+        for n in 0..=MAX_DEVICES {
+            let id = format!("0x{n:04X}");
+            catalog.apply_config(
+                &instance(),
+                "rfxcom2mqtt",
+                &format!("homeassistant/sensor/{id}/temperature/config"),
+                "sensor",
+                sensor(&id, "temperature").as_bytes(),
+            );
+        }
+        assert_eq!(catalog.len(), MAX_DEVICES);
+        let mut catalog = Catalog::default();
+        for n in 0..=MAX_POINTS {
+            catalog.apply_config(
+                &instance(),
+                "rfxcom2mqtt",
+                &format!("homeassistant/sensor/0x01/field{n}/config"),
+                "sensor",
+                sensor("0x01", &format!("field{n}")).as_bytes(),
+            );
+        }
+        let device = &catalog.by_state("0x01").unwrap().device;
+        assert_eq!(device.points.len(), MAX_POINTS);
+        // A point already known still updates at the cap.
+        let change = catalog.apply_config(
+            &instance(),
+            "rfxcom2mqtt",
+            "homeassistant/sensor/0x01/field0/config",
+            "sensor",
+            sensor("0x01", "field0").as_bytes(),
+        );
+        assert_eq!(change, Change::None);
+        assert!(
+            catalog
+                .by_state("0x01")
+                .unwrap()
+                .device
+                .point("field0")
+                .is_some()
+        );
     }
 
     #[test]

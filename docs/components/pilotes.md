@@ -421,6 +421,8 @@ discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du p
   sont écartées avant d'être lues. Une configuration vidée retire son point, la dernière
   retire l'appareil. Un appareil qui n'a que `rssi` n'est pas publié (le capteur de signal
   que rfxcom2mqtt annonce sur l'identifiant nu d'un interrupteur, où aucun état n'arrive).
+  Plafonds : 2 000 appareils par pont, 64 points par appareil ; au-delà, les nouvelles
+  configurations sont ignorées.
 - **Points** : `temperature` (°C), `humidity` (%), `pressure` (hPa, champ `barometer`),
   `battery` (%, le niveau RFXtrx 0–9 converti), `rssi` (0–15, sens `signal_strength`) ;
   `on` (sens `on_off`, écriture) pour un `switch`, décodé depuis `command` avec ses
