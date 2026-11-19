@@ -16,7 +16,10 @@
   mode. Le délai de sortie ne repart jamais.
 - Un redémarrage ne la fait pas taire : déclenchée, elle le reste ; un délai d'entrée ou de
   sortie en cours repart en entier. Sa phase est gardée dans le coffre à chaque changement :
-  une coupure de courant juste après l'armement ou le déclenchement ne la perd pas. Un capteur
+  une coupure de courant juste après l'armement ou le déclenchement ne la perd pas. Un coffre
+  qui refuse l'écriture (disque plein, en lecture seule) est réessayé toutes les 5 s, pas à
+  chaque événement de la maison. Sans coffre (pas de clé), seul le cache d'état, écrit chaque
+  minute, la retrouve : Moli le dit au démarrage. Un capteur
   actif avant le redémarrage compte de nouveau dès qu'une valeur fraîche le dit (jamais sur le
   cache seul). Les délais se comptent sur une horloge régulière (un saut
   de l'heure au démarrage ne les change pas) ; `until` est donné en heure murale.
