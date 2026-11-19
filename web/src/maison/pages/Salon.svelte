@@ -51,6 +51,26 @@
   // The ones to open from here (the TV's own remote does the rest).
   const LAUNCH = ['com.netflix.ninja', 'com.google.android.youtube.tv', 'com.disney.disneyplus', 'com.amazon.amazonvideo.livingroom', 'com.limelight', 'org.droidtv.playtv'];
   const appName = $derived(app ? (appLabel(app) ?? t('salon.une_application')) : null);
+  /** The apps a device lists itself (an Apple TV's `apps`, « name=id » a
+   *  line), else the Android ones above. */
+  const listed = $derived.by(() => {
+    const raw = value(tv, 'apps');
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    // Each app once: a key seen twice would stop the page.
+    const ids = new Set();
+    return raw.split('\n').map((line) => {
+      const at = line.lastIndexOf('=');
+      return at > 0 ? { id: line.slice(at + 1), name: line.slice(0, at) } : null;
+    }).filter((a) => a && !ids.has(a.id) && ids.add(a.id));
+  });
+  // Brands: their own names, the same in every language.
+  const FAVOURITES = ['Netflix', 'YouTube', 'Disney+', 'Prime Video', 'CANAL+', 'TV'];
+  const launch = $derived.by(() => {
+    if (!listed) return LAUNCH.map((pkg) => ({ id: pkg, name: appLabel(pkg) }));
+    const named = (want) => listed.find((a) => a.name.toLowerCase() === want.toLowerCase());
+    const picked = FAVOURITES.map(named).filter(Boolean);
+    return picked.length ? picked : listed.slice(0, 6);
+  });
 
   // What plays, as Cast tells it (title, picture, progress).
   const title = $derived(value(tv, 'media_title'));
@@ -75,9 +95,9 @@
   };
   const playing = $derived(state === 'playing' || state === 'buffering');
   let busy = $state(null);
-  async function open(pkg) {
+  async function open(pkg, name) {
     busy = pkg;
-    await act(`${tv}/app`, pkg, t('salon.ouvrir', { app: appLabel(pkg) ?? t('salon.l_appli') }));
+    await act(`${tv}/app`, pkg, t('salon.ouvrir', { app: name ?? appLabel(pkg) ?? t('salon.l_appli') }));
     busy = null;
   }
   function playPause() {
@@ -120,8 +140,8 @@
           </p>
         {/if}
         <div class="apps" role="group" aria-label={t('salon.ouvrir_une_appli')}>
-          {#each LAUNCH as pkg (pkg)}
-            <button class:on={app === pkg} disabled={!tvOn || busy != null} onclick={() => open(pkg)}>{appLabel(pkg)}</button>
+          {#each launch as a (a.id)}
+            <button class:on={app === a.id} disabled={!tvOn || busy != null} onclick={() => open(a.id, a.name)}>{a.name}</button>
           {/each}
         </div>
       </section>

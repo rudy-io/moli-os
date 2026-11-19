@@ -29,6 +29,7 @@ before(async () => {
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.Salon = (await vite.ssrLoadModule('/src/maison/pages/Salon.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
@@ -1104,6 +1105,41 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(html.includes('DiskStation'));
   assert.ok(!html.includes('Volume 1'));
   assert.ok(!html.includes('class="gauges"'));
+});
+
+test('the living room drives an Apple TV: its own apps, and no key it does not have', () => {
+  const id = 'appletv:ATV-TEST';
+  const keys = ['CursorUp', 'CursorDown', 'CursorLeft', 'CursorRight', 'Confirm', 'Back', 'Home', 'PlayPause', 'Next', 'Previous', 'VolumeUp', 'VolumeDown', 'Options'];
+  hub.devices = { [id]: {
+    id, native_name: 'Apple TV', model: 'Apple TV', label: { room: 'Salon' }, online: true, members: [],
+    points: [
+      point('power', { type: 'binary' }, true, 'on_off'),
+      { ...point('key', enumeration(...keys)), access: { read: false, write: true } },
+      { ...point('app', { type: 'text' }), access: { read: false, write: true } },
+      point('apps', { type: 'text' }, false),
+    ],
+    state: {
+      power: { value: true },
+      apps: { value: 'App\u00a0Store=com.apple.TVAppStore\nDisney+=com.disney.disneyplus\nNetflix=com.netflix.Netflix\nPhotos=com.apple.TVPhotos' },
+    },
+  } };
+  home.home.config = { salon: { tv: id } };
+  const html = render(components.Salon, { props: {} }).body;
+  // Its favourites it has, in the usual order; none it lacks, nor Android's.
+  assert.ok(html.indexOf('>Netflix<') > 0 && html.indexOf('>Netflix<') < html.indexOf('>Disney+<'), 'Netflix then Disney+');
+  assert.doesNotMatch(html, />YouTube</);
+  assert.doesNotMatch(html, />Photos</, 'not a favourite');
+  // No mute on an Apple TV; the keys it has stay.
+  assert.doesNotMatch(html, /Couper le son/);
+  assert.match(html, /aria-label="Options"/);
+  // A device that announces no keys keeps every one (an older driver).
+  hub.devices[id].points = hub.devices[id].points.filter((p) => p.key !== 'key');
+  assert.match(render(components.Salon, { props: {} }).body, /Couper le son/);
+  // An app listed twice (no favourite among them): shown once, the page stands.
+  hub.devices[id].state.apps = { value: 'Arte=tv.arte\nArte=tv.arte\nPhotos=com.apple.TVPhotos' };
+  const twice = render(components.Salon, { props: {} }).body;
+  assert.equal(twice.split('>Arte<').length, 2, 'Arte once');
+  assert.match(twice, />Photos</);
 });
 
 test('a plug that measures its draw says it on its pad, only while on', () => {
