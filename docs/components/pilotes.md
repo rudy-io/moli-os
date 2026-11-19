@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
+kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -98,7 +98,7 @@ l'exige).
 - Un humain y range une valeur par un tube, jamais au clavier :
   `printf %s "$V" | moli-os secrets set <instance> <nom>` ; `moli-os secrets forget <instance> <nom>`.
   Redémarrer moli-os ensuite (les pilotes lisent leurs secrets au démarrage).
-- Seuls `z2m` et `zwave` (`password_env`) et, en option, `hue` (`app_key_env`) lisent un
+- Seuls `z2m`, `zwave` et `rfxcom2mqtt` (`password_env`) et, en option, `hue` (`app_key_env`) lisent un
   secret dans une variable d'environnement ; la config ne contient que le **nom** de la
   variable.
 - Aucune surface ne sert jamais un secret.
@@ -382,6 +382,74 @@ base_topic = "zwave"        # défaut
   `get_nodes_real.json` (capture réelle anonymisée) : découverte, typage, décodage,
   encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
   et de config.
+
+## `rfxcom2mqtt` : 433 MHz via rfxcom2mqtt (`crates/moli-rfxcom2mqtt`)
+
+- **Couvre** : les sondes (température, humidité, pression, batterie, signal) et les
+  interrupteurs 433 MHz (`lighting1`…`lighting6` : prises Chacon, DIO, KlikAanKlikUit…)
+  qu'un pont rfxcom2mqtt annonce par sa découverte Home Assistant ; aucun code par marque.
+  Le pilote passe par la passerelle, comme `z2m` : le nom `rfxcom` reste libre pour un
+  pilote qui parlerait directement au RFXtrx sur son port série, comme `zigbee`.
+- **Protocole** : MQTT local (1883 par défaut). Abonnement d'abord à
+  `{discovery}/+/+/config`, `{discovery}/+/+/+/config` et `{base}/bridge/status`
+  (retenu), puis, une fois la découverte calme (aucune nouvelle configuration pendant 1 s,
+  15 s au plus), à `{base}/devices/#` : le broker n'ordonne pas les messages retenus d'un
+  abonnement à l'autre (vérifié : les états retenus arrivaient avant la plupart des
+  configurations), et un état reçu avant la configuration de son appareil serait perdu. À
+  ce moment, les appareils d'une exécution précédente que le pont n'annonce plus sont
+  retirés, seulement si le pont a dit `online` et annoncé au moins un appareil : un broker
+  redémarré sans persistance, ou un pont qui n'a pas encore publié ses configurations, ne
+  vide pas la maison. Commandes
+  publiées sur le `command_topic` de la configuration de l'interrupteur
+  (`{base}/cmd/{type}/{sous-type}/{id}/{unité}`, payload `On` / `Off`), refusées si ce
+  sujet ne commence pas par `{base}/cmd/`.
+- **Configuration** :
+
+```toml
+[[driver]]
+id = "rfxcom"
+kind = "rfxcom2mqtt"
+[driver.options]
+host = "127.0.0.1"                 # défaut
+port = 1883                        # défaut
+base_topic = "rfxcom2mqtt"         # défaut (mqtt.base_topic du pont)
+discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du pont)
+# username = "moli-os"
+# password_env = "MOLI_RFXCOM_PASSWORD"   # NOM de la variable, jamais le mot de passe
+# client_id = "…"                        # défaut : moli-os-<instance>
+```
+
+- **Appareils** : uniquement ceux d'une configuration de découverte dont le `state_topic`
+  est sous `{base}/devices/`. Un récepteur 433 MHz entend toute la rue (plus de mille
+  sujets d'état retenus sur une maison réelle) : un sujet d'état sans configuration ne
+  crée jamais d'appareil. Les configurations des autres ponts du broker (Zigbee2MQTT)
+  sont écartées avant d'être lues. Une configuration vidée retire son point, la dernière
+  retire l'appareil. Un appareil qui n'a que `rssi` n'est pas publié (le capteur de signal
+  que rfxcom2mqtt annonce sur l'identifiant nu d'un interrupteur, où aucun état n'arrive).
+  Plafonds : 2 000 appareils par pont, 64 points par appareil ; au-delà, les nouvelles
+  configurations sont ignorées.
+- **Points** : `temperature` (°C), `humidity` (%), `pressure` (hPa, champ `barometer`),
+  `battery` (%, le niveau RFXtrx 0–9 converti), `rssi` (0–15, sens `signal_strength`) ;
+  `on` (sens `on_off`, écriture) pour un `switch`, décodé depuis `command` avec ses
+  `payload_on` / `payload_off` ; un autre champ de capteur en lecture seule sous son nom
+  en `snake_case` (valeur scalaire seulement : un objet ou un tableau est écarté) ; un
+  `binary_sensor` lu sans sens (`other`).
+- **Identité** : le sujet d'état sous `{base}/devices/` (`rfxcom:0x5A01`,
+  `rfxcom:0x00ABCDE1_12`) ; `device.name` de la configuration en `native_name`, suivi de
+  l'unité pour un interrupteur. Deux sujets qui donneraient le même identifiant
+  (`0x01/12` et `0x01_12`) : le premier annoncé le garde, l'autre est ignoré.
+- **Disponibilité** : `{base}/bridge/status` (`online` / `offline`) pour tous les
+  appareils ; un appareil annoncé pendant que le pont est hors ligne naît hors ligne.
+- **Pièges** : le 433 MHz n'acquitte rien : une commande réussie est remise au pont, pas
+  forcément entendue ; l'état relu est l'écho du pont (`{"type","command",…}`, sans `id`
+  ni `rssi`). Une sonde Oregon change d'identifiant au changement de piles. Une commande
+  avant `ConnAck` est refusée (`broker injoignable`). Taille de paquet portée à 1 Mio (les
+  configurations des autres ponts passent par le même préfixe).
+- **Tests** : `src/catalog.rs` sur `integrations/rfxcom2mqtt/fixtures/discovery.json` et
+  `states.json` (captures réelles anonymisées) : appareils issus de la seule découverte,
+  typage, décodage des trames et des échos, encodage `on`, retrait, refus d'un sujet de
+  commande étranger, collision d'identifiants, plafonds ; `src/lib.rs` : routage des
+  sujets, état du pont, conditions du nettoyage, décision de commande.
 
 ## `zigbee` : Zigbee natif, clé EZSP (`crates/moli-zigbee`)
 

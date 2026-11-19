@@ -22,6 +22,7 @@ moli-voltalis = { path = "crates/moli-voltalis" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-zigbee = { path = "crates/moli-zigbee" }
 moli-zwave = { path = "crates/moli-zwave" }
+moli-rfxcom2mqtt = { path = "crates/moli-rfxcom2mqtt" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-homeassistant = { path = "crates/moli-homeassistant" }
