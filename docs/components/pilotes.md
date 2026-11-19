@@ -425,7 +425,8 @@ discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du p
   `battery` (%, le niveau RFXtrx 0–9 converti), `rssi` (0–15, sens `signal_strength`) ;
   `on` (sens `on_off`, écriture) pour un `switch`, décodé depuis `command` avec ses
   `payload_on` / `payload_off` ; un autre champ de capteur en lecture seule sous son nom
-  en `snake_case` ; un `binary_sensor` lu sans sens (`other`).
+  en `snake_case` (valeur scalaire seulement : un objet ou un tableau est écarté) ; un
+  `binary_sensor` lu sans sens (`other`).
 - **Identité** : le sujet d'état sous `{base}/devices/` (`rfxcom:0x5A01`,
   `rfxcom:0x00ABCDE1_12`) ; `device.name` de la configuration en `native_name`, suivi de
   l'unité pour un interrupteur.

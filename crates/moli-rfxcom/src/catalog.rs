@@ -39,7 +39,8 @@ pub enum Conv {
     BatteryLevel,
     /// A text compared to the config's on/off payloads.
     Binary { on: String, off: String },
-    /// Anything else, as the JSON gives it.
+    /// Anything else, as the JSON gives it: a scalar only (a number, a
+    /// text, a boolean), an object or an array is dropped.
     Raw,
 }
 
@@ -558,7 +559,10 @@ fn convert(conv: &Conv, raw: &Json) -> Option<Value> {
                 None
             }
         }
-        Conv::Raw => Some(Value::from_json(raw)),
+        Conv::Raw => match raw {
+            Json::Bool(_) | Json::Number(_) | Json::String(_) => Some(Value::from_json(raw)),
+            Json::Null | Json::Array(_) | Json::Object(_) => None,
+        },
     }
 }
 
@@ -814,5 +818,15 @@ mod tests {
             convert(&Conv::BatteryLevel, &serde_json::json!(5)),
             Some(Value::Int(56))
         );
+    }
+
+    #[test]
+    fn a_raw_field_keeps_scalars_only() {
+        assert!(convert(&Conv::Raw, &serde_json::json!("RAIN")).is_some());
+        assert!(convert(&Conv::Raw, &serde_json::json!(3)).is_some());
+        assert!(convert(&Conv::Raw, &serde_json::json!(true)).is_some());
+        assert_eq!(convert(&Conv::Raw, &serde_json::json!({"a": 1})), None);
+        assert_eq!(convert(&Conv::Raw, &serde_json::json!([1, 2])), None);
+        assert_eq!(convert(&Conv::Raw, &serde_json::json!(null)), None);
     }
 }
