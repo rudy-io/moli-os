@@ -429,7 +429,8 @@ discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du p
   `binary_sensor` lu sans sens (`other`).
 - **Identité** : le sujet d'état sous `{base}/devices/` (`rfxcom:0x5A01`,
   `rfxcom:0x00ABCDE1_12`) ; `device.name` de la configuration en `native_name`, suivi de
-  l'unité pour un interrupteur.
+  l'unité pour un interrupteur. Deux sujets qui donneraient le même identifiant
+  (`0x01/12` et `0x01_12`) : le premier annoncé le garde, l'autre est ignoré.
 - **Disponibilité** : `{base}/bridge/status` (`online` / `offline`) pour tous les
   appareils ; un appareil annoncé pendant que le pont est hors ligne naît hors ligne.
 - **Pièges** : le 433 MHz n'acquitte rien : une commande réussie est remise au pont, pas

@@ -178,6 +178,14 @@ impl Catalog {
         let Some((prop, spec, command)) = point_for(component, &field, &config, base) else {
             return Change::None;
         };
+        // `0x01/12` and `0x01_12` would share one `DeviceId`: the first
+        // one announced keeps it.
+        if !self.entries.contains_key(rest) {
+            let id = DeviceId::new(instance, rest);
+            if self.entries.values().any(|e| e.device.id == id) {
+                return Change::None;
+            }
+        }
         let rest = rest.to_owned();
         let entry = self
             .entries
@@ -797,6 +805,33 @@ mod tests {
         );
         assert_eq!(change, Change::None);
         assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn two_state_topics_never_share_a_device_id() {
+        let mut catalog = Catalog::default();
+        let unit = br#"{"state_topic":"rfxcom2mqtt/devices/0x01/12","value_template":"{{ value_json.command }}","command_topic":"rfxcom2mqtt/cmd/lighting2/0/0x01/12","payload_on":"On","payload_off":"Off","device":{"name":"x"}}"#;
+        let flat = br#"{"state_topic":"rfxcom2mqtt/devices/0x01_12","value_template":"{{ value_json.temperature }}","device":{"name":"y"}}"#;
+        let first = catalog.apply_config(
+            &instance(),
+            "rfxcom2mqtt",
+            "homeassistant/switch/0x01/12/config",
+            "switch",
+            unit,
+        );
+        assert!(matches!(first, Change::Upsert(_)));
+        let second = catalog.apply_config(
+            &instance(),
+            "rfxcom2mqtt",
+            "homeassistant/sensor/0x01_12/temperature/config",
+            "sensor",
+            flat,
+        );
+        assert_eq!(second, Change::None);
+        assert_eq!(catalog.len(), 1);
+        assert!(catalog.by_state("0x01_12").is_none());
+        let kept = catalog.by_state("0x01/12").unwrap();
+        assert!(kept.device.point("temperature").is_none());
     }
 
     #[test]
