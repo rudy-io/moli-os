@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="400" viewBox="0 0 680 400" font-family="sans-serif" role="img">
+<title>L'incidence du soleil sur une baie, vue de dessus</title>
+<rect width="680" height="400" fill="#ffffff"/>
+<path d="M300 320 L300 120 A200 200 0 0 1 477 226 Z" fill="#EF9F27" opacity="0.25"/>
+<path d="M300 320 L477 226 A200 200 0 0 1 493 268 Z" fill="#EF9F27" opacity="0.1"/>
+<path d="M300 320 L493 268 A200 200 0 0 1 500 320 Z" fill="#888780" opacity="0.15"/>
+<line x1="300" y1="320" x2="300" y2="110" stroke="#888780" stroke-width="1" stroke-dasharray="4 4"/>
+<line x1="300" y1="320" x2="477" y2="226" stroke="#BA7517" stroke-width="1.5"/>
+<line x1="300" y1="320" x2="493" y2="268" stroke="#BA7517" stroke-width="1.5"/>
+<line x1="200" y1="147" x2="296" y2="314" stroke="#D85A30" stroke-width="2"/>
+<path d="M296 314 L285 303 M296 314 L282 310" stroke="#D85A30" stroke-width="2" fill="none"/>
+<circle cx="200" cy="147" r="12" fill="#EF9F27"/>
+<path d="M300 220 A100 100 0 0 0 250 233" fill="none" stroke="#D85A30" stroke-width="1"/>
+<line x1="80" y1="320" x2="540" y2="320" stroke="#5F5E5A" stroke-width="3"/>
+<line x1="260" y1="320" x2="340" y2="320" stroke="#378ADD" stroke-width="6"/>
+<g font-size="12" fill="#444441">
+<text x="300" y="345" text-anchor="middle">Baie</text>
+<text x="80" y="345">Façade</text>
+<text x="540" y="345" text-anchor="end">Intérieur en dessous</text>
+<text x="300" y="100" text-anchor="middle">0° : soleil pile en face</text>
+<text x="487" y="222">62° : enter</text>
+<text x="505" y="266">75° : exit</text>
+<text x="515" y="312">90° : rasant</text>
+<text x="40" y="104">Soleil à 30° d'incidence</text>
+<text x="40" y="122">(angle avec la perpendiculaire)</text>
+<rect x="60" y="370" width="14" height="12" rx="2" fill="#EF9F27" opacity="0.45"/>
+<text x="82" y="380">Sous enter : le soleil tape</text>
+<rect x="260" y="370" width="14" height="12" rx="2" fill="#EF9F27" opacity="0.2"/>
+<text x="282" y="380">Entre les deux : état inchangé</text>
+<rect x="480" y="370" width="14" height="12" rx="2" fill="#888780" opacity="0.3"/>
+<text x="502" y="380">Au-delà de exit : ne tape plus</text>
+</g>
+</svg>

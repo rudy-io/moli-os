@@ -1441,6 +1441,11 @@ fn spawn_house_drivers(
                 history.cloned(),
                 &config.zone.name,
                 place,
+                config
+                    .sun
+                    .as_ref()
+                    .map(moli_outdoor::sun::Config::facades)
+                    .unwrap_or_default(),
             )),
             cancel.clone(),
         ));

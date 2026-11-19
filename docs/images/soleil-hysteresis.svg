@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="400" viewBox="0 0 680 400" font-family="sans-serif" role="img">
+<title>L'incidence d'une baie sur une journée, et quand le soleil tape</title>
+<rect width="680" height="400" fill="#ffffff"/>
+<rect x="100" y="75" width="500" height="39" fill="#EF9F27" opacity="0.12"/>
+<line x1="100" y1="300" x2="600" y2="300" stroke="#888780" stroke-width="0.5"/>
+<line x1="100" y1="30" x2="100" y2="300" stroke="#888780" stroke-width="0.5"/>
+<line x1="100" y1="75" x2="600" y2="75" stroke="#888780" stroke-width="1" stroke-dasharray="4 4"/>
+<line x1="100" y1="114" x2="600" y2="114" stroke="#888780" stroke-width="1" stroke-dasharray="4 4"/>
+<path d="M100 30 C120 62 135 82 150 95 C170 120 185 140 200 154 C220 175 235 190 250 200 C270 215 285 225 300 230 C320 237 335 240 350 240 C365 240 380 237 400 230 C415 225 430 215 450 200 C465 190 480 175 500 154 C515 140 530 120 550 95 C565 82 580 62 600 30" fill="none" stroke="#D85A30" stroke-width="2"/>
+<line x1="166" y1="114" x2="166" y2="350" stroke="#BA7517" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="566" y1="75" x2="566" y2="350" stroke="#BA7517" stroke-width="0.8" stroke-dasharray="2 3"/>
+<rect x="100" y="350" width="500" height="18" rx="4" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<rect x="166" y="350" width="400" height="18" rx="4" fill="#EF9F27"/>
+<g font-size="12" fill="#444441">
+<text x="40" y="34">90°</text>
+<text x="40" y="304">0°</text>
+<text x="30" y="170">Incidence</text>
+<text x="608" y="79">75° exit</text>
+<text x="608" y="118">62° enter</text>
+<text x="360" y="98" text-anchor="middle">entre les deux : l'état ne change pas</text>
+<text x="100" y="320">Matin</text>
+<text x="350" y="320" text-anchor="middle">Midi</text>
+<text x="600" y="320" text-anchor="end">Soir</text>
+<text x="100" y="342">&lt;id&gt;_sun</text>
+<text x="166" y="388">passe sous 62° : vrai</text>
+<text x="566" y="388" text-anchor="end">repasse au-dessus de 75° : faux</text>
+</g>
+</svg>
