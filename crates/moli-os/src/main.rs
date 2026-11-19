@@ -1460,6 +1460,20 @@ fn spawn_house_drivers(
             cancel.clone(),
         ));
     }
+    if !config.heating.is_empty() {
+        // The schedule follows the house's clock; an unknown zone falls back to UTC.
+        let zone = jiff::tz::TimeZone::get(&config.zone.name).unwrap_or(jiff::tz::TimeZone::UTC);
+        tasks.push(spawn_driver(
+            hub,
+            InstanceId::from(moli_heating::INSTANCE),
+            Arc::new(moli_heating::Heating::new(
+                hub.clone(),
+                config.heating.clone(),
+                zone,
+            )),
+            cancel.clone(),
+        ));
+    }
     if let Some(energy) = energy {
         tasks.push(spawn_driver(
             hub,

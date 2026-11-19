@@ -59,6 +59,7 @@ moli-ipp = { path = "crates/moli-ipp" }
 moli-assistant = { path = "crates/moli-assistant" }
 moli-automation = { path = "crates/moli-automation" }
 moli-alarm = { path = "crates/moli-alarm" }
+moli-heating = { path = "crates/moli-heating" }
 moli-helpers = { path = "crates/moli-helpers" }
 moli-lights = { path = "crates/moli-lights" }
 moli-outdoor = { path = "crates/moli-outdoor" }
