@@ -62,6 +62,7 @@ jiff.workspace = true
 moli-lights.workspace = true
 moli-outdoor.workspace = true
 moli-scenes.workspace = true
+moli-heating.workspace = true
 moli-presence.workspace = true
 moli-telegram.workspace = true
 moli-phones.workspace = true

@@ -532,6 +532,7 @@ impl Assistant {
             author: moli_automation::Author::Assistant,
             approved: None,
             approved_version: None,
+            approved_with_code: false,
             note: draft.note.clone(),
             created: 0,
             updated: 0,

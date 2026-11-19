@@ -127,7 +127,11 @@ dans `crates/moli-api/tests/household.rs` ;
 `a_scene_never_carries_an_order_that_wants_the_code_each_time` dans `crates/moli-os/src/config.rs`.
 
 Limite connue : un automatisme validé **avant** qu'une règle `code_each_time` soit écrite
-continue de tourner ; après avoir ajouté la règle, le revalider (avec le code).
+continue de tourner ; après avoir ajouté la règle, le revalider (avec le code). Moli les nomme
+au démarrage (avertissement au journal) : la validation retient si le code a été tapé
+(`approved_with_code`, hors de l'empreinte, jamais repris de ce qui est enregistré). Un
+automatisme validé avant cette version est nommé aussi tant qu'il n'est pas revalidé. Preuve :
+`an_automation_approved_before_the_rule_is_named_at_start` dans `crates/moli-automation/tests/engine.rs`.
 
 ## 5. Règles de conception
 

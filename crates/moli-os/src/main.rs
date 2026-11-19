@@ -596,6 +596,16 @@ async fn start_brains(
     )
     .await
     .context("cannot load the automations")?;
+    // Approved before a `[[guard.code_each_time]]` rule covered one of their
+    // orders: they still run without the code (SECURITY-MODEL.md, known
+    // limit). Named, so a person approves them again, with the code.
+    let unchecked = automations.approved_before_the_code();
+    if !unchecked.is_empty() {
+        tracing::warn!(
+            automations = %unchecked.join(", "),
+            "approved without the code an order of theirs now wants each time ([[guard.code_each_time]]): they still run without it; approve them again, with the code"
+        );
+    }
     let assistant = start_assistant(config, hub, energy, history)?;
     if let Some(moli) = &assistant {
         moli.set_automations(automations.clone());
@@ -1446,6 +1456,20 @@ fn spawn_house_drivers(
                 hub.clone(),
                 config.scenes.clone(),
                 config.rhythm.clone(),
+                zone,
+            )),
+            cancel.clone(),
+        ));
+    }
+    if !config.heating.is_empty() {
+        // The schedule follows the house's clock; an unknown zone falls back to UTC.
+        let zone = jiff::tz::TimeZone::get(&config.zone.name).unwrap_or(jiff::tz::TimeZone::UTC);
+        tasks.push(spawn_driver(
+            hub,
+            InstanceId::from(moli_heating::INSTANCE),
+            Arc::new(moli_heating::Heating::new(
+                hub.clone(),
+                config.heating.clone(),
                 zone,
             )),
             cancel.clone(),
