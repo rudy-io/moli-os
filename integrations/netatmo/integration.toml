@@ -8,7 +8,7 @@ driver = "netatmo"
 crate = "moli-netatmo"
 
 [discovery]
-mdns = ["_hap._tcp"]
+mdns = []
 ssdp = []
 ports = []
 

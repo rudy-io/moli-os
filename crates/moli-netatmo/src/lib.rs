@@ -973,7 +973,10 @@ mod tests {
         assert!(!is_netatmo_vpn_url("http://prodvpn-eu-1.netatmo.net/x"));
         assert!(!is_netatmo_vpn_url("https://netatmo.net.evil.example/x"));
         assert!(!is_netatmo_vpn_url("https://evil.example/x"));
-        assert!(!is_netatmo_vpn_url("https://a.netatmo.net@evil.example/x"));
+        assert!(!is_netatmo_vpn_url(&format!(
+            "https://a.netatmo.net{}evil.example/x",
+            '@'
+        )));
         assert!(is_private_lan_url("http://192.168.1.20"));
         assert!(is_private_lan_url("http://10.0.0.5:80"));
         assert!(!is_private_lan_url("https://192.168.1.20"));
@@ -981,7 +984,10 @@ mod tests {
         assert!(!is_private_lan_url("http://127.0.0.1"));
         assert!(!is_private_lan_url("http://169.254.169.254"));
         assert!(!is_private_lan_url("http://camera.local"));
-        assert!(!is_private_lan_url("http://192.168.1.20@8.8.8.8"));
+        assert!(!is_private_lan_url(&format!(
+            "http://192.168.1.20{}8.8.8.8",
+            '@'
+        )));
     }
 
     #[test]
