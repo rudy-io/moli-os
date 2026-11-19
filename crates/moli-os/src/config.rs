@@ -67,6 +67,11 @@ pub struct Config {
     /// The rhythm of the day: the white and the level lights take by the hour.
     #[serde(default)]
     pub rhythm: Option<moli_scenes::Rhythm>,
+    /// Heating: a room's own thermostat on the room's sensor, correcting its
+    /// valves' setpoints, with a weekly schedule. Moli runs the rooms as
+    /// instance `chauffage`.
+    #[serde(default)]
+    pub heating: Vec<moli_heating::Room>,
     /// The home's own assistant (absent: no conversation in the dashboard).
     /// Its API key: `moli-os secrets set assistant api_key`.
     #[serde(default)]
@@ -292,6 +297,7 @@ pub(crate) fn reserved_instance(id: &str) -> bool {
         moli_lights::INSTANCE,
         moli_outdoor::INSTANCE,
         moli_scenes::INSTANCE,
+        moli_heating::INSTANCE,
         moli_api::PEOPLE_INSTANCE,
     ]
     .contains(&id)
@@ -487,6 +493,20 @@ impl Config {
         }
         moli_scenes::check(&self.scenes, self.rhythm.as_ref())
             .map_err(|e| anyhow::anyhow!("[[scene]] {e}"))?;
+        moli_heating::check(&self.heating).map_err(|e| anyhow::anyhow!("[[heating]] {e}"))?;
+        // The heating writes its valves by itself, with no code typed.
+        for room in &self.heating {
+            for valve in &room.valves {
+                if guard.code_each_time_on(valve) {
+                    bail!(
+                        "[[heating]] {:?}: {} wants the code each time \
+                         ([[guard.code_each_time]]); the heating cannot write it",
+                        room.id,
+                        valve
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
