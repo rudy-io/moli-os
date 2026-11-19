@@ -239,12 +239,17 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
   l'autre). En `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
 - **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
-  reste sous sa consigne, il monte ; elle la dépasse, il descend ; à 0,2 °C près, il tient. 1 °C de
+  reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
+  chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
   décalage par heure et par degré d'erreur, au plus un quart d'heure compté d'un coup, borné à
   −3 / +6 °C ; arrêté en `off` et quand la sonde se tait. Consigne de la vanne = consigne de la
   pièce + décalage, au demi-degré, dans les bornes de la vanne. Exemple : pièce voulue à 20, restée
-  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. **Le thermomètre de la vanne
-  n'entre pas dans le calcul** : un premier calcul sur l'écart « vanne − sonde » s'emballait
+  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. Une pièce encore chaude d'une
+  consigne qui vient de baisser (19,5 la nuit, 18 le jour) refroidit seule, vannes fermées : le
+  décalage tient au lieu de descendre toute la journée jusqu'à −3, ce qui laisserait les vannes
+  froides au retour de la consigne du soir. Une vanne est fermée quand son thermomètre dépasse de
+  plus de 0,5 °C la consigne qu'elle tient (sans thermomètre : quand la sonde de la pièce la
+  dépasse). **Le thermomètre de la vanne ne fait jamais monter le décalage** : un premier calcul sur l'écart « vanne − sonde » s'emballait
   (le radiateur chauffe, la vanne lit plus chaud, l'écart grandit, la consigne monte, la vanne
   reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
   pièce (tado X) : une chambre voulue à 18 °C recevait 24.

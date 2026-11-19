@@ -14,6 +14,11 @@
 //!
 //! Example: the room should be at 20 °C and stays at 19.5 for an hour: the
 //! shift grows by about 0.5, the valve is given 20.5.
+//!
+//! The shift only comes down while a valve still heats: a room left warm by
+//! a setpoint just lowered (20 at night, 18 by day) cools on its own, valves
+//! shut, and a shift lowered all day long would leave them cold when the
+//! setpoint goes back up in the evening.
 
 use std::time::Duration;
 
@@ -49,6 +54,21 @@ pub fn too_soon(since_last: Option<Duration>, floor: Duration) -> bool {
     since_last.is_some_and(|d| d < floor)
 }
 
+/// A valve whose thermometer reads more than this over the setpoint it
+/// holds (°C) has shut: the room's excess is none of its doing.
+pub const SHUT_MARGIN: f64 = 0.5;
+
+/// Whether a valve still heats: its thermometer is not over the setpoint
+/// it holds by more than [`SHUT_MARGIN`]. Its thermometer unknown, the
+/// room's says it (a valve reads the room or warmer, by its radiator).
+#[must_use]
+pub fn valve_heats(held: f64, valve_temp: Option<f64>, room_temp: f64) -> bool {
+    match valve_temp {
+        Some(t) => t <= held + SHUT_MARGIN,
+        None => room_temp <= held,
+    }
+}
+
 /// The shift a room's valves are given, learned from the room's error.
 #[derive(Clone, Debug, Default)]
 pub struct Shift {
@@ -65,9 +85,11 @@ impl Shift {
         }
     }
 
-    /// The room's error (`setpoint − temperature`), held for `elapsed`.
-    pub fn update(&mut self, error: f64, elapsed: Duration) -> f64 {
-        if error.is_finite() && error.abs() > DEADBAND {
+    /// The room's error (`setpoint − temperature`), held for `elapsed`;
+    /// `heating`: a valve still heats ([`valve_heats`]), or the room's
+    /// excess does not lower the shift.
+    pub fn update(&mut self, error: f64, elapsed: Duration, heating: bool) -> f64 {
+        if error.is_finite() && error.abs() > DEADBAND && (error > 0.0 || heating) {
             let hours = elapsed.min(MAX_STEP).as_secs_f64() / 3600.0;
             self.value =
                 (self.value + GAIN_PER_HOUR * error * hours).clamp(SHIFT_RANGE.0, SHIFT_RANGE.1);
@@ -134,12 +156,12 @@ mod tests {
         let mut shift = Shift::default();
         // Half a degree under for an hour (in 10-minute readings): + 0.5.
         for _ in 0..6 {
-            shift.update(0.5, 10 * MINUTE);
+            shift.update(0.5, 10 * MINUTE, true);
         }
         assert!((shift.get() - 0.5).abs() < 1e-9, "{}", shift.get());
         // A degree over for half an hour: − 0.5.
         for _ in 0..3 {
-            shift.update(-1.0, 10 * MINUTE);
+            shift.update(-1.0, 10 * MINUTE, true);
         }
         assert!(shift.get().abs() < 1e-9, "{}", shift.get());
     }
@@ -147,18 +169,46 @@ mod tests {
     #[test]
     fn the_shift_holds_near_the_setpoint_and_stays_bounded() {
         let mut shift = Shift::from(1.0);
-        shift.update(0.15, 10 * MINUTE);
-        shift.update(-0.2, 10 * MINUTE);
+        shift.update(0.15, 10 * MINUTE, true);
+        shift.update(-0.2, 10 * MINUTE, true);
         assert_eq!(shift.get(), 1.0, "inside the deadband");
         // Hours of silence count as a quarter of an hour, never more.
-        shift.update(2.0, 5 * 60 * MINUTE);
+        shift.update(2.0, 5 * 60 * MINUTE, true);
         assert!((shift.get() - 1.5).abs() < 1e-9, "{}", shift.get());
         for _ in 0..100 {
-            shift.update(5.0, 15 * MINUTE);
+            shift.update(5.0, 15 * MINUTE, true);
         }
         assert_eq!(shift.get(), SHIFT_RANGE.1);
         assert_eq!(Shift::from(-50.0).get(), SHIFT_RANGE.0);
         assert_eq!(Shift::from(f64::NAN).get(), 0.0);
+    }
+
+    #[test]
+    fn a_room_warm_from_a_lowered_setpoint_does_not_lower_the_shift() {
+        // The night's 19.5 learned a shift of 1; at 7:00 the setpoint is 18,
+        // the room still at 19.3 and the valve, holding 19, reads 20.4: shut.
+        let mut shift = Shift::from(1.0);
+        assert!(!valve_heats(19.0, Some(20.4), 19.3));
+        for _ in 0..40 {
+            shift.update(
+                18.0 - 19.3,
+                15 * MINUTE,
+                valve_heats(19.0, Some(20.4), 19.3),
+            );
+        }
+        assert_eq!(shift.get(), 1.0, "held all day");
+        // Still too warm with the valve open (its thermometer at what it
+        // holds): the shift comes down.
+        assert!(valve_heats(19.0, Some(19.2), 19.3));
+        shift.update(-1.0, 15 * MINUTE, true);
+        assert!(shift.get() < 1.0);
+        // Too cold, shut or not: the shift goes up.
+        let before = shift.get();
+        shift.update(1.0, 10 * MINUTE, false);
+        assert!(shift.get() > before);
+        // No thermometer on the valve: the room's.
+        assert!(valve_heats(19.0, None, 18.8));
+        assert!(!valve_heats(19.0, None, 19.3));
     }
 
     #[test]

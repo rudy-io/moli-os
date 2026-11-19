@@ -55,7 +55,7 @@ use moli_core::{
 use moli_runtime::{BoxFuture, CommandRequest, Driver, DriverCtx, Hub};
 use serde::Deserialize;
 
-use regulation::{Shift, valve_setpoint, worth_sending};
+use regulation::{Shift, valve_heats, valve_setpoint, worth_sending};
 use schedule::{DAYS, Step, format_day, parse_day, step_at};
 
 /// The instance that runs the rooms.
@@ -468,6 +468,37 @@ impl Heating {
         (now_ms().saturating_sub(sample.ts) <= FRESH_MS).then_some(value)
     }
 
+    /// Whether one of the room's valves still heats (none known: yes, as
+    /// before): the room's excess lowers the shift only then.
+    fn heating(&self, room: &Room, room_t: f64) -> bool {
+        let mut known = false;
+        for valve in &room.valves {
+            let point = PointId::from(valve.as_str());
+            let Some(held) = self.hub.state(&point).and_then(|s| s.value.as_f64()) else {
+                continue;
+            };
+            known = true;
+            if valve_heats(held, self.valve_thermometer(&point), room_t) {
+                return true;
+            }
+        }
+        !known
+    }
+
+    /// A valve's own thermometer: the read-only temperature in °C on the
+    /// device of its setpoint, if fresh.
+    fn valve_thermometer(&self, setpoint: &PointId) -> Option<f64> {
+        let (device, key) = setpoint.split()?;
+        let view = self.hub.device(&device)?;
+        let spec = view.device.points.iter().find(|p| {
+            p.key.as_ref() != key
+                && !p.access.write
+                && p.semantic == Semantic::Temperature
+                && p.unit == Some(Unit::Celsius)
+        })?;
+        self.fresh(PointId::new(&device, spec.key.as_ref()).as_str())
+    }
+
     /// The valve's setpoint bounds, if Moli may write it: a writable
     /// temperature in °C with its bounds, on a device that is not an opening
     /// nor a lock (a shutter's position, a dimmer, a volume never are).
@@ -535,7 +566,8 @@ impl Heating {
         {
             let now = Instant::now();
             let elapsed = run.read.map_or(Duration::ZERO, |t| now - t);
-            run.shift.update(run.setpoint - room_t, elapsed);
+            let heating = self.heating(room, room_t);
+            run.shift.update(run.setpoint - room_t, elapsed, heating);
             run.read = Some(now);
         } else {
             run.read = None;
