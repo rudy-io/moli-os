@@ -1351,6 +1351,7 @@ const KINDS: &[&str] = &[
     "z2m",
     "zigbee",
     "zwave",
+    "rfxcom2mqtt",
     "hue",
     "overkiz",
     "dirigera",
@@ -1376,6 +1377,7 @@ const KINDS: &[&str] = &[
     "synology",
     "philips",
     "androidtv",
+    "appletv",
     "frigate",
     "bambu",
     "esphome",
@@ -1597,6 +1599,9 @@ fn build_driver(
         "zwave" => Arc::new(moli_zwave::Zwave::new(
             config.options.clone().try_into().with_context(context)?,
         )),
+        "rfxcom2mqtt" => Arc::new(moli_rfxcom2mqtt::Rfxcom2Mqtt::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
         "hue" => Arc::new(moli_hue::Hue::new(
             config.options.clone().try_into().with_context(context)?,
         )),
@@ -1651,6 +1656,9 @@ fn build_driver(
             config.options.clone().try_into().with_context(context)?,
         )),
         "androidtv" => Arc::new(moli_androidtv::AndroidTv::new(
+            config.options.clone().try_into().with_context(context)?,
+        )),
+        "appletv" => Arc::new(moli_appletv::AppleTv::new(
             config.options.clone().try_into().with_context(context)?,
         )),
         "frigate" => configured_driver(config, moli_frigate::Frigate::new)?,

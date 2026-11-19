@@ -34,6 +34,10 @@
   const maxVolume = $derived((hub.devices[target]?.points ?? []).find((p) => p.key === 'volume')?.kind?.max ?? 100);
   const canWrite = $derived(points.some((p) => p.key === 'text'));
   const canHold = $derived(points.some((p) => p.key === 'hold'));
+  /** The keys the device announces (an Apple TV has no mute); none
+   *  announced: every key is offered, as before. */
+  const keyNames = $derived(new Set(points.find((p) => p.key === 'key')?.kind?.values ?? []));
+  const has = (name) => keyNames.size === 0 || keyNames.has(name);
   const volumeLabel = $derived(sound ? (hub.devices[sound]?.model ?? hub.devices[sound]?.native_name ?? '').toUpperCase() : t('salon.tele.volume_tv'));
 
   /** One step, or mute: the speaker's own when it plays the TV. */
@@ -340,13 +344,13 @@
   <div class="row three">
     <button onclick={() => key('Back')} disabled={!on} aria-label={t('salon.tele.retour')}><Icon name="back" size={24} /></button>
     <button onclick={() => key('Home')} disabled={!on} aria-label={t('salon.tele.accueil')}><Icon name="home" size={24} /></button>
-    <button onclick={() => key('Options')} disabled={!on} aria-label={t('salon.tele.options')}><Icon name="dots" size={24} /></button>
+    <button onclick={() => key('Options')} disabled={!on || !has('Options')} aria-label={t('salon.tele.options')}><Icon name="dots" size={24} /></button>
   </div>
 
   <div class="row three">
-    <button onclick={() => key('Previous')} disabled={!on} aria-label={t('salon.tele.precedent')}><Icon name="previous" size={24} /></button>
+    <button onclick={() => key('Previous')} disabled={!on || !has('Previous')} aria-label={t('salon.tele.precedent')}><Icon name="previous" size={24} /></button>
     <button class="primary" onclick={() => key('PlayPause')} disabled={!on} aria-label={t('salon.tele.lecture_pause')}><Icon name="play-pause" size={26} /></button>
-    <button onclick={() => key('Next')} disabled={!on} aria-label={t('salon.tele.suivant')}><Icon name="next" size={24} /></button>
+    <button onclick={() => key('Next')} disabled={!on || !has('Next')} aria-label={t('salon.tele.suivant')}><Icon name="next" size={24} /></button>
   </div>
 
   <div class="volume">
@@ -356,7 +360,9 @@
       <b class="num">{muted ? t('salon.tele.muet') : volume != null ? num(volume) : '—'}</b>
     </div>
     <button onclick={() => step(1)} disabled={!on} aria-label={t('salon.tele.volume_plus')}><Icon name="volume-plus" size={24} /></button>
-    <button class="mute" class:active={muted} onclick={toggleMute} disabled={!on} aria-label={t('salon.couper_son')}><Icon name={muted ? 'volume-off' : 'volume-high'} size={22} /></button>
+    {#if sound || has('Mute')}
+      <button class="mute" class:active={muted} onclick={toggleMute} disabled={!on} aria-label={t('salon.couper_son')}><Icon name={muted ? 'volume-off' : 'volume-high'} size={22} /></button>
+    {/if}
   </div>
 
   <p class="status" role="status">{busy ? t('salon.tele.un_instant') : !ok ? t('salon.tele.veille_profonde') : on ? t('salon.tele.allumee') : t('salon.tele.en_veille')}</p>

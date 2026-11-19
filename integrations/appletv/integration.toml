@@ -1,0 +1,26 @@
+[integration]
+id = "appletv"
+name = "Apple TV (protocole Companion)"
+brands = ["Apple"]
+models = ["Apple TV 4K", "Apple TV HD"]
+transport = "tcp"
+driver = "appletv"
+crate = "moli-appletv"
+
+[discovery]
+# The Apple TV announces `_companion-link._tcp` (TXT `rpMd=AppleTV…`); the
+# instance gives its address, the pairing gives its identity.
+mdns = ["_companion-link._tcp"]
+ssdp = []
+ports = [49153]
+
+[needs]
+# Written by the driver: `credentials` (the pairing). Given once by a person,
+# through a pipe: `pin`, the code the Apple TV shows while pairing.
+secrets = []
+vars = []
+options = ["host"]
+
+[origin]
+reused = ""
+author = "agent"

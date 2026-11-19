@@ -24,11 +24,12 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon', 'WeekSchedule']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'WeekSchedule']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
+  components.Salon = (await vite.ssrLoadModule('/src/maison/pages/Salon.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
@@ -785,25 +786,71 @@ test('icons-only trigger relays keep a label on every icon button', () => {
   assert.doesNotMatch(html, />Impulsion · Relais 1</);
 });
 
-test('a room shows its trigger device and a lone control point stays a cover', () => {
+test('a room shows a one-relay trigger as a pad and a lone control point stays a cover', () => {
   const room = showRoom([
     { id: 'z2m:gate', points: [trigger('state_l1', 'State')], values: {} },
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
-  assert.match(room, /Impulsion · Relais 1/);
+  // One relay: a pad with its name and « Impulsion », no relay buttons.
+  assert.match(room, /data-pulse="idle"/);
+  assert.doesNotMatch(room, /Impulsion · Relais 1/);
   // No measured position: the pad opens the cover tile instead of sending open.
-  assert.match(room, /shutter-icon/);
+  assert.ok(room.includes(icons.shutter));
   assert.doesNotMatch(room, /data-cover-command/);
 });
 
-test('a partly open cover shows the open shutter, never the alert icon', () => {
-  const position = [point('opening', number(0, 100, 1), false, 'position')];
-  const opened = show('ShutterIcon', position, { opening: 42 });
+test('a trigger device with several relays keeps one button per relay', () => {
+  const room = showRoom([
+    { id: 'z2m:gate', points: [trigger('state_l1', 'State'), trigger('state_l2', 'State')], values: {} },
+  ]);
+  assert.match(room, /Impulsion · Relais 1/);
+  assert.match(room, /Impulsion · Relais 2/);
+  assert.doesNotMatch(room, /data-pulse=/);
+});
+
+test('a one-relay trigger pad is named, draws a garage door or a gate, and waits for the hub', () => {
+  const pad = (html) => buttons(html).find((button) => /data-pulse=/.test(button));
+  const garage = showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Porte atelier' } }]);
+  assert.match(garage, /<b[^>]*>Porte atelier<\/b><small[^>]*>Impulsion<\/small>/);
+  assert.ok(garage.includes(icons.garage));
+  assert.doesNotMatch(pad(garage), /disabled/);
+  const gate = showRoom([{ id: 'shelly:gate', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Portail' } }]);
+  assert.ok(gate.includes(icons.gate));
+  hub.connected = false;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {} }])), /disabled/);
+  hub.connected = true;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [{ ...trigger('relay', 'Ouvrir / fermer'), access: { read: false, write: false } }], values: {} }])), /disabled/);
+});
+
+test('a cover pad draws the open shutter when open and says closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 42 } }]);
   assert.ok(opened.includes(icons['shutter-open']));
   assert.ok(!opened.includes(icons['shutter-alert']));
-  const closed = show('ShutterIcon', position, { opening: 0 });
+  assert.match(opened, /<small[^>]*>Ouvert à 42 %<\/small>/);
+  const closed = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 0 } }]);
   assert.ok(closed.includes(icons.shutter));
-  assert.ok(!closed.includes(icons['shutter-alert']));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+  assert.doesNotMatch(closed, /Ouvert à 0/);
+  const full = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 100 } }]);
+  assert.match(full, /<small[^>]*>Ouvert<\/small>/);
+});
+
+test('an open cover tile draws the open shutter and says open, closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = show('CoverTile', position, { opening: 100 });
+  assert.match(opened, /class="device-icon[^"]*open/);
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.match(opened, /<small[^>]*>Ouvert<\/small>/);
+  const closed = show('CoverTile', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+});
+
+test('a trigger tile named as a garage door draws a garage, a gate stays a gate', () => {
+  const points = [trigger('state_l1', 'State'), trigger('state_l2', 'State')];
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Porte voiture' }).includes(icons.garage));
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Portail' }).includes(icons.gate));
 });
 
 test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
@@ -1058,6 +1105,41 @@ test('the NAS card of a NAS that sleeps says so and shows no gauge or volume', (
   assert.ok(html.includes('DiskStation'));
   assert.ok(!html.includes('Volume 1'));
   assert.ok(!html.includes('class="gauges"'));
+});
+
+test('the living room drives an Apple TV: its own apps, and no key it does not have', () => {
+  const id = 'appletv:ATV-TEST';
+  const keys = ['CursorUp', 'CursorDown', 'CursorLeft', 'CursorRight', 'Confirm', 'Back', 'Home', 'PlayPause', 'Next', 'Previous', 'VolumeUp', 'VolumeDown', 'Options'];
+  hub.devices = { [id]: {
+    id, native_name: 'Apple TV', model: 'Apple TV', label: { room: 'Salon' }, online: true, members: [],
+    points: [
+      point('power', { type: 'binary' }, true, 'on_off'),
+      { ...point('key', enumeration(...keys)), access: { read: false, write: true } },
+      { ...point('app', { type: 'text' }), access: { read: false, write: true } },
+      point('apps', { type: 'text' }, false),
+    ],
+    state: {
+      power: { value: true },
+      apps: { value: 'App\u00a0Store=com.apple.TVAppStore\nDisney+=com.disney.disneyplus\nNetflix=com.netflix.Netflix\nPhotos=com.apple.TVPhotos' },
+    },
+  } };
+  home.home.config = { salon: { tv: id } };
+  const html = render(components.Salon, { props: {} }).body;
+  // Its favourites it has, in the usual order; none it lacks, nor Android's.
+  assert.ok(html.indexOf('>Netflix<') > 0 && html.indexOf('>Netflix<') < html.indexOf('>Disney+<'), 'Netflix then Disney+');
+  assert.doesNotMatch(html, />YouTube</);
+  assert.doesNotMatch(html, />Photos</, 'not a favourite');
+  // No mute on an Apple TV; the keys it has stay.
+  assert.doesNotMatch(html, /Couper le son/);
+  assert.match(html, /aria-label="Options"/);
+  // A device that announces no keys keeps every one (an older driver).
+  hub.devices[id].points = hub.devices[id].points.filter((p) => p.key !== 'key');
+  assert.match(render(components.Salon, { props: {} }).body, /Couper le son/);
+  // An app listed twice (no favourite among them): shown once, the page stands.
+  hub.devices[id].state.apps = { value: 'Arte=tv.arte\nArte=tv.arte\nPhotos=com.apple.TVPhotos' };
+  const twice = render(components.Salon, { props: {} }).body;
+  assert.equal(twice.split('>Arte<').length, 2, 'Arte once');
+  assert.match(twice, />Photos</);
 });
 
 test('a plug that measures its draw says it on its pad, only while on', () => {

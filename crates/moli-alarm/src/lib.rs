@@ -85,6 +85,10 @@ const SILENT_GRACE: Duration = Duration::from_secs(60);
 /// the state cache is written once a minute, a power cut just after arming
 /// or triggering would lose it.
 const PHASE: &str = "phase";
+/// How long a phase the vault refused waits before it is tried again: on
+/// its own clock, not at each event of the house (a full or read-only disk
+/// is not to be written to several times a second).
+const KEEP_AGAIN: Duration = Duration::from_secs(5);
 /// Where the settings made on the screen are kept (the instance's vault).
 const SETTINGS: &str = "settings";
 
@@ -471,9 +475,9 @@ struct Live {
     unconfirmed: BTreeSet<String>,
     /// The phase last kept in the vault.
     kept: Option<Kept>,
-    /// The phase the vault last refused: said once in the log, tried again
-    /// at each turn of the loop until it is kept.
-    unkept: Option<Kept>,
+    /// The phase the vault last refused, and when to try it again: said
+    /// once in the log, tried again every `KEEP_AGAIN` until it is kept.
+    unkept: Option<(Kept, Instant)>,
 }
 
 impl Live {
@@ -523,11 +527,15 @@ impl Live {
     }
 
     /// Keeps the phase in the vault when it changed. Counted as kept only
-    /// once the vault took it: a refused write is tried again at the next
-    /// turn of the loop, not only at the next change.
+    /// once the vault took it: a refused write is tried again after
+    /// `KEEP_AGAIN` (the loop wakes for it), not only at the next change;
+    /// a new phase is tried at once.
     async fn keep(&mut self, ctx: &DriverCtx) {
         let now = Kept::of(self.alarm.phase());
-        if self.kept.as_ref() == Some(&now) || !ctx.can_store_secrets() {
+        if self.kept.as_ref() == Some(&now)
+            || !ctx.can_store_secrets()
+            || !keep_due(self.unkept.as_ref(), &now, Instant::now())
+        {
             return;
         }
         let Ok(text) = serde_json::to_string(&now) else {
@@ -539,12 +547,21 @@ impl Live {
                 self.unkept = None;
             }
             Err(e) => {
-                if self.unkept.as_ref() != Some(&now) {
-                    tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: phase not kept (a power cut would lose it), tried again");
-                    self.unkept = Some(now);
+                if self
+                    .unkept
+                    .as_ref()
+                    .is_none_or(|(refused, _)| *refused != now)
+                {
+                    tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: phase not kept (a power cut would lose it), tried again every {} s", KEEP_AGAIN.as_secs());
                 }
+                self.unkept = Some((now, Instant::now() + KEEP_AGAIN));
             }
         }
+    }
+
+    /// When a phase the vault refused is to be tried again.
+    fn keep_again(&self) -> Option<Instant> {
+        self.unkept.as_ref().map(|(_, at)| *at)
     }
 
     /// After a restart: the sensors the cache says active are to be
@@ -850,11 +867,15 @@ impl Driver for AlarmDriver {
             ctx.set_availability(&live.id, true);
             live.show(ctx, &resumed);
             live.doubt_the_cache(ctx);
+            if !ctx.can_store_secrets() {
+                tracing::warn!(instance = %ctx.instance(), "alarm: no vault, its phase is not kept at each change: a power cut in the minute after arming or triggering finds it as it was before (only the state cache, written once a minute, is read again)");
+            }
             live.keep(ctx).await;
             ctx.ready();
             loop {
                 let wake = live.wake();
                 let lost = live.lost_due();
+                let again = live.keep_again();
                 tokio::select! {
                     command = ctx.next_command() => {
                         let Some(command) = command else { return Ok(()) };
@@ -866,6 +887,10 @@ impl Driver for AlarmDriver {
                     () = async {
                         if let Some(at) = lost { tokio::time::sleep_until(at).await }
                     }, if lost.is_some() => live.report_lost(ctx),
+                    // Nothing to do here: `keep` below tries the refused phase again.
+                    () = async {
+                        if let Some(at) = again { tokio::time::sleep_until(at).await }
+                    }, if again.is_some() => {}
                     event = events.recv() => match event {
                         Ok(Event::State { point, value, ts, .. }) => live.sensed(ctx, point.as_str(), &value, ts),
                         Ok(Event::Availability { .. } | Event::DeviceUpserted { .. }
@@ -884,9 +909,41 @@ impl Driver for AlarmDriver {
     }
 }
 
+/// Whether the phase is to be written now: always a phase the vault has
+/// not refused yet, a refused one only once its wait is over.
+fn keep_due(unkept: Option<&(Kept, Instant)>, now: &Kept, at: Instant) -> bool {
+    match unkept {
+        Some((refused, again)) if refused == now => at >= *again,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_phase_waits_before_it_is_tried_again() {
+        let armed = Kept {
+            mode: Mode::parse("night"),
+            state: "armed_night".into(),
+            cause: Vec::new(),
+        };
+        let triggered = Kept {
+            state: "triggered".into(),
+            ..armed.clone()
+        };
+        let t0 = Instant::now();
+        let refused = (armed.clone(), t0 + KEEP_AGAIN);
+        // Never refused: written at once.
+        assert!(keep_due(None, &armed, t0));
+        // Refused: not at each event of the house, only once the wait is over.
+        assert!(!keep_due(Some(&refused), &armed, t0));
+        assert!(!keep_due(Some(&refused), &armed, t0 + KEEP_AGAIN / 2));
+        assert!(keep_due(Some(&refused), &armed, t0 + KEEP_AGAIN));
+        // A new phase (here triggered) does not wait.
+        assert!(keep_due(Some(&refused), &triggered, t0));
+    }
 
     #[test]
     fn what_counts_as_seeing_something() {

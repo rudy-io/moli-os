@@ -22,6 +22,7 @@ moli-voltalis = { path = "crates/moli-voltalis" }
 moli-z2m = { path = "crates/moli-z2m" }
 moli-zigbee = { path = "crates/moli-zigbee" }
 moli-zwave = { path = "crates/moli-zwave" }
+moli-rfxcom2mqtt = { path = "crates/moli-rfxcom2mqtt" }
 moli-api = { path = "crates/moli-api" }
 moli-hue = { path = "crates/moli-hue" }
 moli-homeassistant = { path = "crates/moli-homeassistant" }
@@ -71,6 +72,7 @@ moli-phones = { path = "crates/moli-phones" }
 moli-ambiance = { path = "crates/moli-ambiance" }
 moli-moonraker = { path = "crates/moli-moonraker" }
 moli-androidtv = { path = "crates/moli-androidtv" }
+moli-appletv = { path = "crates/moli-appletv" }
 moli-esphome = { path = "crates/moli-esphome" }
 moli-alexa = { path = "crates/moli-alexa" }
 moli-demo = { path = "crates/moli-demo" }

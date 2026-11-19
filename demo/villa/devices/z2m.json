@@ -587,6 +587,49 @@
    }
   },
   {
+   "id": "z2m:moteur-garage",
+   "instance": "z2m",
+   "native_name": "Moteur de la porte du garage",
+   "manufacturer": "SONOFF",
+   "model": "ZBMINIR2",
+   "native_room": "Garage",
+   "points": [
+    {
+     "key": "state",
+     "label": "State",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "cycle"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "state": {
+    "linkquality": 120
+   }
+  },
+  {
    "id": "z2m:mouvement-garage",
    "instance": "z2m",
    "native_name": "Mouvement du garage",
@@ -1325,6 +1368,64 @@
     "battery_low": false,
     "voltage": 2800,
     "linkquality": 70
+   }
+  },
+  {
+   "id": "z2m:moteur-portail",
+   "instance": "z2m",
+   "native_name": "Moteur du portail",
+   "manufacturer": "Tuya",
+   "model": "ZG-2002-RF",
+   "native_room": "Allée",
+   "points": [
+    {
+     "key": "state_l1",
+     "label": "State l1",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "cycle"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "state_l2",
+     "label": "State l2",
+     "kind": {
+      "type": "enum",
+      "values": [
+       "cycle"
+      ]
+     },
+     "access": {
+      "read": false,
+      "write": true
+     },
+     "semantic": "control"
+    },
+    {
+     "key": "linkquality",
+     "label": "Linkquality",
+     "kind": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 255.0
+     },
+     "access": {
+      "read": true,
+      "write": false
+     },
+     "unit": "lqi",
+     "semantic": "signal_strength"
+    }
+   ],
+   "state": {
+    "linkquality": 96
    }
   }
  ]

@@ -246,10 +246,11 @@ async fn a_power_cut_right_after_arming_or_triggering_loses_nothing() {
 }
 
 /// The vault refuses the write when it is armed (a full or read-only disk):
-/// the phase is not counted as kept, and the next turn of the loop keeps it
-/// once the vault takes it again. A power cut then still finds it armed.
+/// the phase is not counted as kept, and it is tried again a few seconds
+/// later on its own (no event of the house needed) once the vault takes it
+/// again. A power cut then still finds it armed.
 #[tokio::test]
-async fn a_phase_the_vault_refused_is_kept_at_the_next_turn() {
+async fn a_phase_the_vault_refused_is_kept_a_few_seconds_later() {
     let dir = std::env::temp_dir().join(format!("moli-alarm-refused-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -285,13 +286,10 @@ async fn a_phase_the_vault_refused_is_kept_at_the_next_turn() {
         state(&hub, "state").await,
         Value::Text("armed_night".into())
     );
-    // The vault works again; the next turn of the loop (here the same
-    // order, which changes nothing) keeps the phase.
+    // The vault works again; nothing happens in the house, the alarm tries
+    // again on its own after its wait (5 s).
     std::fs::remove_file(&vault).unwrap();
-    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
-        .await
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(5500)).await;
     cancel.cancel();
     drop(hub);
     tokio::time::sleep(Duration::from_millis(100)).await;
