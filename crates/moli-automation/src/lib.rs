@@ -432,6 +432,7 @@ impl Automations {
                 a.author = old.author;
                 a.approved.clone_from(&old.approved);
                 a.approved_version.clone_from(&old.approved_version);
+                a.approved_with_code = old.approved_with_code;
                 a.enabled = if by.human {
                     old.enabled
                 } else {
@@ -453,6 +454,7 @@ impl Automations {
                 a.author = by.author;
                 a.approved = None;
                 a.approved_version = None;
+                a.approved_with_code = false;
                 a.enabled = false;
                 list.push(a.clone());
                 lock(&self.0.fingerprints).remove(&a.id);
@@ -565,6 +567,7 @@ impl Automations {
                     mode: a.mode,
                     graph: a.graph.clone(),
                 });
+                a.approved_with_code = code_typed;
                 a.enabled = true;
                 a.note = None;
             }
@@ -593,6 +596,19 @@ impl Automations {
             Step::Toggle { point } => hub.wants_code(&PointId::from(point.as_str()), None),
             _ => false,
         })
+    }
+
+    /// Running automations with an order that wants the code each time
+    /// (`[[guard.code_each_time]]`), approved without it: approved before
+    /// the rule was written. They still run; said at start, by name, so a
+    /// person approves them again with the code.
+    #[must_use]
+    pub fn approved_before_the_code(&self) -> Vec<String> {
+        self.list()
+            .into_iter()
+            .filter(|a| a.is_live() && !a.approved_with_code && self.wants_code(&a.graph))
+            .map(|a| a.name)
+            .collect()
     }
 
     /// Off: anyone, any time. On: a person approving what they saw.
@@ -918,6 +934,7 @@ mod tests {
             author: Author::Human,
             approved: None,
             approved_version: None,
+            approved_with_code: false,
             note: None,
             created: 0,
             updated: 0,
