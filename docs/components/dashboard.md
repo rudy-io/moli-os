@@ -249,6 +249,17 @@ session ; `chrome --screenshot` ne rend jamais la main à cause du flux SSE.
   renvoie pas sa table (écriture seule) : l'éditeur le dit, enregistrer la remplace. Une TRV-ZBT
   garde trois groupes ; les textes sont ceux du groupe en cours d'édition, ce que l'éditeur signale
   quand ce n'est pas le groupe suivi par la vanne.
+  La page **Chauffage** (`pages/Chauffage.svelte`) réunit, au-dessus de la pompe à chaleur, chaque
+  thermostat qui a une table horaire (thermostats de pièce de Moli, `crates/moli-heating`, et vannes
+  Zigbee2MQTT) : la carte de la vanne sans son repli de table horaire, la correction appliquée aux
+  vannes (`valve_correction`), **la semaine** (`ui/WeekSchedule.svelte`, calcul pur dans
+  `lib/week.js`) en sept bandes de 24 h colorées par consigne sur une même échelle pour toutes les
+  pièces (15 °C froid → 23 °C chaud, `color-mix` entre `--cool` et `--warm`), avec l'heure actuelle
+  sur la ligne du jour, puis l'éditeur du jour choisi. Une limite entre deux créneaux se fait glisser
+  (au quart d'heure, entre ses voisines) ou se déplace aux flèches ; le jour part en lâchant (aux
+  flèches : quand elles se reposent), par `act`. « Copier la semaine vers » écrit les sept jours dans
+  une autre pièce, aux bornes de celle-ci, jour après jour, et s'arrête au premier ordre retenu
+  (pièce protégée : le code). L'onglet apparaît dès qu'un tel thermostat ou une pompe à chaleur existe.
   La **courbe** (`ui/ValveChart.svelte`, calcul pur dans `lib/valve-history.js`) trace, sur 6 h, 24 h
   ou 7 j, la température mesurée, la consigne et ce que demande la table horaire, sur une même
   échelle, d'après `/api/history`. Lecture seule. La table tracée est celle d'aujourd'hui : le hub

@@ -30,6 +30,8 @@
   import { airzonePresent } from './lib/airzone.js';
   import { printersPresent, camerasUseful } from './lib/tabs.js';
   import { mapUseful } from './lib/map-tab.js';
+  import { isValve } from './lib/capabilities.js';
+  import { scheduleSpec } from './lib/schedule.js';
 
   let { route } = $props();
   $effect(() => {
@@ -63,7 +65,7 @@
     { path: 'alarme', label: 'commun.nav.alarme', icon: 'shield', shown: () => Object.values(hub.devices).some(isAlarm) },
     { path: 'parler', label: 'commun.nav.parler', icon: 'talk' },
     { path: 'energie', label: 'commun.nav.energie', icon: 'bolt' },
-    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating') },
+    { path: 'chauffage', label: 'commun.nav.chauffage', icon: 'fire', shown: () => Object.values(hub.devices).some((d) => deviceKind(d) === 'heating' || (isValve(d) && scheduleSpec(d))) },
     { path: 'impression', label: 'commun.nav.impression', icon: 'printer3d', shown: () => printersPresent(hub.devices) },
     { path: 'dehors', label: 'commun.nav.dehors', icon: 'flower-outline' },
     { path: 'automatismes', label: 'commun.nav.automatismes', icon: 'robot' },

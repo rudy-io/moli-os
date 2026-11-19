@@ -3,10 +3,42 @@
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import Spark from '../ui/infra/Spark.svelte';
+  import ValveCard from '../ui/ValveCard.svelte';
+  import WeekSchedule from '../ui/WeekSchedule.svelte';
+  import ScheduleEditor from '../ui/ScheduleEditor.svelte';
+  import { isValve } from '../lib/capabilities.js';
+  import { DAYS, scheduleSpec, writeDays } from '../lib/schedule.js';
+  import { copyWeek } from '../lib/week.js';
 
   const heaters = $derived(Object.values(hub.devices).filter((d) => deviceKind(d) === 'heating'));
   const pacs = $derived(heaters.filter((d) => d.points.some((p) => p.key === 'compressor_active')));
   const circuits = $derived(heaters.filter((d) => !pacs.includes(d)).sort((a, b) => a.id.localeCompare(b.id)));
+  // Every thermostat with a weekly schedule: Moli's room thermostats, Zigbee valves.
+  const rooms = $derived(
+    Object.values(hub.devices)
+      .filter((d) => isValve(d) && scheduleSpec(d))
+      .sort((a, b) => nameOf(a.id).localeCompare(nameOf(b.id))),
+  );
+
+  // The day each room's editor shows, chosen in its week.
+  let chosen = $state({});
+  // Copying a week to another room: where to, and what came of it.
+  let copyTo = $state({});
+  let copied = $state({});
+
+  async function copy(from) {
+    const to = copyTo[from];
+    const source = scheduleSpec(device(from));
+    const target = scheduleSpec(device(to));
+    if (!source || !target || !reachable(to)) return;
+    const texts = Object.fromEntries(DAYS.map((d) => [d, value(from, `weekly_schedule_${d}`)]));
+    const week = copyWeek(source, target, texts);
+    copied[from] = 'busy';
+    const { stopped } = await writeDays(Object.keys(week), (d) =>
+      act(`${to}/weekly_schedule_${d}`, week[d], t('commun.vanne.prog.label', { name: nameOf(to) })),
+    );
+    copied[from] = stopped ? null : to;
+  }
 
   const MODES = ['dhw', 'dhwAndHeating', 'standby'];
   const PROGRAMS = ['comfort', 'normal', 'reduced', 'standby'];
@@ -51,8 +83,46 @@
     <p class="page-sub">{t('maison.chauffage.sous_titre')}</p>
   </header>
 
-  {#if !heaters.length}
+  {#if !heaters.length && !rooms.length}
     <p class="muted">{t('maison.chauffage.aucun')}</p>
+  {/if}
+
+  {#if rooms.length}
+    <div class="grid">
+      {#each rooms as r (r.id)}
+        {@const id = r.id}
+        {@const name = nameOf(id)}
+        {@const correction = value(id, 'valve_correction')}
+        {@const others = rooms.filter((o) => o.id !== id)}
+        <section class="card room" class:unreachable={!reachable(id)}>
+          <ValveCard {id} {name} schedule={false} />
+          {#if typeof correction === 'number'}
+            <p class="muted">{t('maison.chauffage.correction', { gap: `${correction > 0 ? '+' : ''}${num(correction, 1)}°` })}</p>
+          {/if}
+          <h3>{t('maison.chauffage.semaine.titre')}</h3>
+          <WeekSchedule {id} {name} bind:day={chosen[id]} />
+          <h3>{t('maison.chauffage.semaine.detail')}</h3>
+          <ScheduleEditor {id} {name} bind:day={chosen[id]} />
+          {#if others.length}
+            <div class="copy">
+              <label>
+                <span>{t('maison.chauffage.copier')}</span>
+                <select bind:value={copyTo[id]}>
+                  <option value={undefined}>—</option>
+                  {#each others as o (o.id)}
+                    <option value={o.id}>{nameOf(o.id)}</option>
+                  {/each}
+                </select>
+              </label>
+              <button class="pill" disabled={!copyTo[id] || copied[id] === 'busy'} onclick={() => copy(id)}>{t('maison.chauffage.copier_action')}</button>
+              {#if copied[id] && copied[id] !== 'busy'}
+                <span class="muted">{t('maison.chauffage.copie_faite', { name: nameOf(copied[id]) })}</span>
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {/each}
+    </div>
   {/if}
 
   <div class="grid">
@@ -313,5 +383,36 @@
   .sparks {
     display: grid;
     gap: 12px;
+  }
+  .room {
+    gap: 10px;
+  }
+  .muted {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+  .copy {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    padding-top: 6px;
+    border-top: 1px solid var(--surface-3);
+  }
+  .copy label {
+    display: grid;
+    gap: 4px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    font-weight: 600;
+  }
+  .copy select {
+    border: none;
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    padding: 6px 8px;
   }
 </style>
