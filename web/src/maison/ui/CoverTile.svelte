@@ -56,8 +56,8 @@
   const status = $derived([
     pos == null ? t('commun.volet.position_inconnue')
       : !live ? t('commun.volet.derniere_position', { pct: num(pos) })
-        : pos === 0 ? t('systeme.format.binaire.contact.on')
-          : pos === 100 ? t('systeme.format.binaire.contact.off')
+        : pos === 0 ? t('commun.volet.ferme')
+          : pos === 100 ? t('commun.volet.ouvert')
             : t('commun.volet.ouvert_a', { pct: num(pos) }),
     live ? going : '',
   ].filter(Boolean).join(' · '));
@@ -107,7 +107,7 @@
 <div class="cover" class:standalone class:icons class:open={live && pos > 0} title={icons ? [label, status].filter(Boolean).join(' · ') : undefined}>
   <div class="heading">
     <span class="device-icon" class:open={live && pos > 0} class:moving={live && !!going}>
-      <Icon name={live ? 'shutter' : 'offline'} size={24} />
+      <Icon name={!live ? 'offline' : pos > 0 ? 'shutter-open' : 'shutter'} size={24} />
     </span>
     {#if !icons}<span class="name">{label}<small>{status}</small></span>{/if}
   </div>
@@ -191,11 +191,13 @@
     border-radius: 50%;
     background: var(--surface-3);
     color: var(--ink-2);
-    transition: background-color 0.35s ease, color 0.35s ease;
+    transition: background-color 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
   }
+  /* Open, like a lit lamp: solid warm, its ink and its glow. */
   .device-icon.open {
-    background: var(--warm-soft);
-    color: var(--warm-ink);
+    background: var(--warm);
+    color: var(--warm-deep);
+    box-shadow: 0 0 0 6px var(--warm-glow), 0 6px 22px var(--warm-glow);
   }
   .device-icon.moving { animation: moving 1.6s ease-in-out infinite alternate; }
   .name {

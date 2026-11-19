@@ -24,7 +24,7 @@ before(async () => {
   home = await vite.ssrLoadModule('/src/maison/lib/home.svelte.js');
   ({ energy } = await vite.ssrLoadModule('/src/maison/lib/energy-live.svelte.js'));
   ({ icons } = await vite.ssrLoadModule('/src/maison/lib/icons.js'));
-  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart', 'ShutterIcon']) {
+  for (const name of ['ClimateCard', 'CoverTile', 'ImpulseTile', 'SpeakerCard', 'LightTile', 'RoomCard', 'VacuumCard', 'ValveCard', 'ScheduleEditor', 'ValveChart']) {
     components[name] = (await vite.ssrLoadModule(`/src/maison/ui/${name}.svelte`)).default;
   }
   components.NasCard = (await vite.ssrLoadModule('/src/maison/ui/infra/NasCard.svelte')).default;
@@ -785,25 +785,71 @@ test('icons-only trigger relays keep a label on every icon button', () => {
   assert.doesNotMatch(html, />Impulsion · Relais 1</);
 });
 
-test('a room shows its trigger device and a lone control point stays a cover', () => {
+test('a room shows a one-relay trigger as a pad and a lone control point stays a cover', () => {
   const room = showRoom([
     { id: 'z2m:gate', points: [trigger('state_l1', 'State')], values: {} },
     { id: 'fixture:shutter', points: [point('control', enumeration('open', 'close', 'stop'))], values: {} },
   ]);
-  assert.match(room, /Impulsion · Relais 1/);
+  // One relay: a pad with its name and « Impulsion », no relay buttons.
+  assert.match(room, /data-pulse="idle"/);
+  assert.doesNotMatch(room, /Impulsion · Relais 1/);
   // No measured position: the pad opens the cover tile instead of sending open.
-  assert.match(room, /shutter-icon/);
+  assert.ok(room.includes(icons.shutter));
   assert.doesNotMatch(room, /data-cover-command/);
 });
 
-test('a partly open cover shows the open shutter, never the alert icon', () => {
-  const position = [point('opening', number(0, 100, 1), false, 'position')];
-  const opened = show('ShutterIcon', position, { opening: 42 });
+test('a trigger device with several relays keeps one button per relay', () => {
+  const room = showRoom([
+    { id: 'z2m:gate', points: [trigger('state_l1', 'State'), trigger('state_l2', 'State')], values: {} },
+  ]);
+  assert.match(room, /Impulsion · Relais 1/);
+  assert.match(room, /Impulsion · Relais 2/);
+  assert.doesNotMatch(room, /data-pulse=/);
+});
+
+test('a one-relay trigger pad is named, draws a garage door or a gate, and waits for the hub', () => {
+  const pad = (html) => buttons(html).find((button) => /data-pulse=/.test(button));
+  const garage = showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Porte atelier' } }]);
+  assert.match(garage, /<b[^>]*>Porte atelier<\/b><small[^>]*>Impulsion<\/small>/);
+  assert.ok(garage.includes(icons.garage));
+  assert.doesNotMatch(pad(garage), /disabled/);
+  const gate = showRoom([{ id: 'shelly:gate', points: [trigger('relay', 'Ouvrir / fermer')], values: {}, label: { room: 'Workshop', name: 'Portail' } }]);
+  assert.ok(gate.includes(icons.gate));
+  hub.connected = false;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [trigger('relay', 'Ouvrir / fermer')], values: {} }])), /disabled/);
+  hub.connected = true;
+  assert.match(pad(showRoom([{ id: 'shelly:door', points: [{ ...trigger('relay', 'Ouvrir / fermer'), access: { read: false, write: false } }], values: {} }])), /disabled/);
+});
+
+test('a cover pad draws the open shutter when open and says closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 42 } }]);
   assert.ok(opened.includes(icons['shutter-open']));
   assert.ok(!opened.includes(icons['shutter-alert']));
-  const closed = show('ShutterIcon', position, { opening: 0 });
+  assert.match(opened, /<small[^>]*>Ouvert à 42 %<\/small>/);
+  const closed = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 0 } }]);
   assert.ok(closed.includes(icons.shutter));
-  assert.ok(!closed.includes(icons['shutter-alert']));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+  assert.doesNotMatch(closed, /Ouvert à 0/);
+  const full = showRoom([{ id: 'fixture:shutter', points: position, values: { opening: 100 } }]);
+  assert.match(full, /<small[^>]*>Ouvert<\/small>/);
+});
+
+test('an open cover tile draws the open shutter and says open, closed at 0 %', () => {
+  const position = [point('opening', number(0, 100, 1), true, 'position')];
+  const opened = show('CoverTile', position, { opening: 100 });
+  assert.match(opened, /class="device-icon[^"]*open/);
+  assert.ok(opened.includes(icons['shutter-open']));
+  assert.match(opened, /<small[^>]*>Ouvert<\/small>/);
+  const closed = show('CoverTile', position, { opening: 0 });
+  assert.ok(closed.includes(icons.shutter));
+  assert.match(closed, /<small[^>]*>Fermé<\/small>/);
+});
+
+test('a trigger tile named as a garage door draws a garage, a gate stays a gate', () => {
+  const points = [trigger('state_l1', 'State'), trigger('state_l2', 'State')];
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Porte voiture' }).includes(icons.garage));
+  assert.ok(show('ImpulseTile', points, {}, {}, { name: 'Portail' }).includes(icons.gate));
 });
 
 test('a cover pad is disabled when its tile could not act: offline, read-only or hub down', () => {
