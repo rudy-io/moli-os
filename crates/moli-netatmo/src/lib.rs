@@ -213,6 +213,14 @@ fn looks_corrupted(secret: &str) -> bool {
             .any(|c| c.is_whitespace() || matches!(c, ';' | '$' | '"' | '\'' | '`'))
 }
 
+/// Only an explicit `invalid_grant` means the `refresh_token` is dead. Any other
+/// 400/401/403 (quota, transient error, wrong client) must not erase secrets.
+fn is_invalid_grant(status: StatusCode, body: &[u8]) -> bool {
+    status == StatusCode::BAD_REQUEST
+        && serde_json::from_slice::<Json>(body)
+            .is_ok_and(|j| j["error"].as_str() == Some("invalid_grant"))
+}
+
 async fn refresh_access_token(
     client_id: &str,
     client_secret: &str,
@@ -245,10 +253,7 @@ async fn refresh_access_token(
         .header("accept", "application/json")
         .body(Full::new(Bytes::from(bytes_body)))?;
     let (status, bytes) = moli_net::web(API_HOST, 443, true, req, HTTP_LIMIT, MAX_BODY).await?;
-    if matches!(
-        status,
-        StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-    ) {
+    if is_invalid_grant(status, &bytes) {
         let detail = String::from_utf8_lossy(&bytes[..bytes.len().min(160)]).into_owned();
         return Ok(TokenOutcome::InvalidCredentials(format!(
             "HTTP {} {detail}",
@@ -552,9 +557,7 @@ async fn ensure_token(
             Ok(Some(tok))
         }
         TokenOutcome::InvalidCredentials(why) => {
-            tracing::warn!(instance = %ctx.instance(), reason = %why, "netatmo credentials rejected: clearing vault keys");
-            ctx.forget_secret(CLIENT_ID_KEY).await?;
-            ctx.forget_secret(CLIENT_SECRET_KEY).await?;
+            tracing::warn!(instance = %ctx.instance(), reason = %why, "netatmo refresh_token rejected (invalid_grant): clearing it");
             ctx.forget_secret(REFRESH_KEY).await?;
             *cached = None;
             Ok(None)
@@ -882,6 +885,18 @@ async fn run(config: &Config, ctx: &mut DriverCtx) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_invalid_grant_clears_the_refresh_token() {
+        let grant = br#"{"error":"invalid_grant"}"#;
+        assert!(is_invalid_grant(StatusCode::BAD_REQUEST, grant));
+        assert!(!is_invalid_grant(StatusCode::FORBIDDEN, grant));
+        assert!(!is_invalid_grant(
+            StatusCode::BAD_REQUEST,
+            b"{\"error\":\"invalid_client\"}"
+        ));
+        assert!(!is_invalid_grant(StatusCode::UNAUTHORIZED, b"not json"));
+    }
 
     #[test]
     fn parses_homesdata_and_homestatus_fixture() {
