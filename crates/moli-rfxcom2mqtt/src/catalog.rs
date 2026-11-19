@@ -295,13 +295,13 @@ impl Entry {
     pub fn encode(&self, key: &str, value: &Value) -> anyhow::Result<(String, String)> {
         let (Some(command), "on") = (&self.command, key) else {
             return Err(anyhow::anyhow!(moli_i18n::tr!(
-                "pilotes.rfxcom.point_lu_seul",
+                "pilotes.rfxcom2mqtt.point_lu_seul",
                 point = key
             )));
         };
         let Value::Bool(on) = value else {
             return Err(anyhow::anyhow!(moli_i18n::tr!(
-                "pilotes.rfxcom.on_attend_booleen"
+                "pilotes.rfxcom2mqtt.on_attend_booleen"
             )));
         };
         let payload = if *on {
@@ -599,8 +599,9 @@ fn number(f: f64) -> Value {
 mod tests {
     use super::*;
 
-    const DISCOVERY: &[u8] = include_bytes!("../../../integrations/rfxcom/fixtures/discovery.json");
-    const STATES: &[u8] = include_bytes!("../../../integrations/rfxcom/fixtures/states.json");
+    const DISCOVERY: &[u8] =
+        include_bytes!("../../../integrations/rfxcom2mqtt/fixtures/discovery.json");
+    const STATES: &[u8] = include_bytes!("../../../integrations/rfxcom2mqtt/fixtures/states.json");
 
     #[derive(Deserialize)]
     struct Message {

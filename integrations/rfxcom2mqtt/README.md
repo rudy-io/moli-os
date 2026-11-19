@@ -27,7 +27,7 @@
   Chacon `lighting2`, une entité du pont et une configuration Zigbee2MQTT du même broker,
   toutes deux ignorées) et `fixtures/states.json` (états : trames reçues, écho d'un ordre
   envoyé, sonde d'un voisin sans découverte) : captures réelles rendues anonymes, rejouées
-  par les tests de `crates/moli-rfxcom/src/catalog.rs`.
+  par les tests de `crates/moli-rfxcom2mqtt/src/catalog.rs`.
 - **Vérifié sur du vrai matériel** (18 novembre 2026) : rfxcom2mqtt 1.2.1, RFXtrx433
   firmware 1025 (Type 2). Prise Chacon (`lighting2`, sous-type AC) : `On` puis `Off` publiés
   sur son sujet de commande, émis par le RFXtrx (« ACK - transmit OK »), la lumière s'allume

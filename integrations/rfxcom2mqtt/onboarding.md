@@ -11,7 +11,7 @@
 4. Nommer les appareils dans rfxcom2mqtt (`devices:` de sa configuration) aide à les
    reconnaître ; une prise Chacon n'apparaît qu'une fois que rfxcom2mqtt l'a entendue
    (télécommande) ou commandée.
-5. Déclarer `kind = "rfxcom"` ; `moli-os check-config`, redémarrer ; les appareils annoncés
+5. Déclarer `kind = "rfxcom2mqtt"` ; `moli-os check-config`, redémarrer ; les appareils annoncés
    par rfxcom2mqtt apparaissent.
 6. Tester une commande sur une cible neutre, humain présent, jamais dans une chambre
    protégée : le 433 MHz ne confirme rien, seul un humain voit si la prise a obéi.

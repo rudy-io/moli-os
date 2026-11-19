@@ -212,7 +212,7 @@ base_topic = "zigbee2mqtt"
 # bridge. Only the devices it announces through its discovery become devices.
 # [[driver]]
 # id = "rfxcom"
-# kind = "rfxcom"
+# kind = "rfxcom2mqtt"
 #
 # [driver.options]
 # host = "127.0.0.1"

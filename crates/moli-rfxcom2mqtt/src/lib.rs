@@ -71,20 +71,20 @@ fn default_discovery_topic() -> String {
 
 /// The rfxcom2mqtt driver.
 #[derive(Debug)]
-pub struct Rfxcom {
+pub struct Rfxcom2Mqtt {
     config: Config,
 }
 
-impl Rfxcom {
+impl Rfxcom2Mqtt {
     #[must_use]
     pub fn new(config: Config) -> Self {
         Self { config }
     }
 }
 
-impl Driver for Rfxcom {
+impl Driver for Rfxcom2Mqtt {
     fn kind(&self) -> &'static str {
-        "rfxcom"
+        "rfxcom2mqtt"
     }
 
     fn run<'a>(&'a self, ctx: &'a mut DriverCtx) -> BoxFuture<'a, anyhow::Result<()>> {
@@ -237,12 +237,12 @@ fn decide_command(
 ) -> CommandDecision {
     if !connected {
         return CommandDecision::Refuse {
-            reason: moli_i18n::tr!("pilotes.rfxcom.broker_injoignable"),
+            reason: moli_i18n::tr!("pilotes.rfxcom2mqtt.broker_injoignable"),
         };
     }
     let Some(entry) = catalog.by_id(device) else {
         return CommandDecision::Refuse {
-            reason: moli_i18n::tr!("pilotes.rfxcom.appareil_inconnu"),
+            reason: moli_i18n::tr!("pilotes.rfxcom2mqtt.appareil_inconnu"),
         };
     };
     match entry.encode(key, value) {
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(
             decide_command(false, &catalog, &id, "on", &Value::Bool(true)),
             CommandDecision::Refuse {
-                reason: moli_i18n::tr!("pilotes.rfxcom.broker_injoignable")
+                reason: moli_i18n::tr!("pilotes.rfxcom2mqtt.broker_injoignable")
             }
         );
         assert_eq!(
@@ -471,7 +471,7 @@ mod tests {
                 &Value::Bool(true)
             ),
             CommandDecision::Refuse {
-                reason: moli_i18n::tr!("pilotes.rfxcom.appareil_inconnu")
+                reason: moli_i18n::tr!("pilotes.rfxcom2mqtt.appareil_inconnu")
             }
         );
         assert_eq!(

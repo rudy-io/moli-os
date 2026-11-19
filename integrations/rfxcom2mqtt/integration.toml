@@ -1,12 +1,12 @@
 [integration]
-id = "rfxcom"
+id = "rfxcom2mqtt"
 name = "RFXcom 433 MHz (via rfxcom2mqtt)"
 # Any device rfxcom2mqtt announces through its discovery: no list per brand.
 brands = []
 models = []
 transport = "mqtt"
-driver = "rfxcom"
-crate = "moli-rfxcom"
+driver = "rfxcom2mqtt"
+crate = "moli-rfxcom2mqtt"
 
 [discovery]
 # Devices come from the bridge's retained discovery configs, not from the network.
@@ -27,7 +27,7 @@ options = []
 reused = "protocole MQTT de rfxcom2mqtt (devices/…, cmd/…, bridge/status) et sa découverte Home Assistant"
 author = "agent"
 
-# Replayed by the crate's tests (crates/moli-rfxcom/src/catalog.rs).
+# Replayed by the crate's tests (crates/moli-rfxcom2mqtt/src/catalog.rs).
 [[fixture]]
 file = "fixtures/discovery.json"
 

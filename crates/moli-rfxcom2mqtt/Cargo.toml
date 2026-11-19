@@ -1,5 +1,5 @@
 [package]
-name = "moli-rfxcom"
+name = "moli-rfxcom2mqtt"
 description = "Moli OS driver for 433 MHz devices exposed by an rfxcom2mqtt MQTT gateway."
 version.workspace = true
 edition.workspace = true

@@ -76,7 +76,7 @@ Le hub l'appelle quand une surface demande une image : rien n'est récupéré po
 ```toml
 [[driver]]
 id = "enceinte"         # non vide, sans ':' ni '/', unique ; réservés : core, assistant, automations
-kind = "sonos"          # z2m, zwave, rfxcom, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
+kind = "sonos"          # z2m, zwave, rfxcom2mqtt, hue, dirigera, tuya, reolink, sonos, philips, frigate, bambu, tapo, lifx, govee, shelly, igd, synology, helpers, profile
 # enabled = false       # désactive l'instance sans la supprimer
 
 [driver.options]        # s'applique au [[driver]] qui précède ; clés inconnues refusées
@@ -98,7 +98,7 @@ l'exige).
 - Un humain y range une valeur par un tube, jamais au clavier :
   `printf %s "$V" | moli-os secrets set <instance> <nom>` ; `moli-os secrets forget <instance> <nom>`.
   Redémarrer moli-os ensuite (les pilotes lisent leurs secrets au démarrage).
-- Seuls `z2m`, `zwave` et `rfxcom` (`password_env`) et, en option, `hue` (`app_key_env`) lisent un
+- Seuls `z2m`, `zwave` et `rfxcom2mqtt` (`password_env`) et, en option, `hue` (`app_key_env`) lisent un
   secret dans une variable d'environnement ; la config ne contient que le **nom** de la
   variable.
 - Aucune surface ne sert jamais un secret.
@@ -383,11 +383,13 @@ base_topic = "zwave"        # défaut
   encodage on/niveau, tolérance (enveloppe, propertyKey, bornes), règles de disponibilité
   et de config.
 
-## `rfxcom` : 433 MHz via rfxcom2mqtt (`crates/moli-rfxcom`)
+## `rfxcom2mqtt` : 433 MHz via rfxcom2mqtt (`crates/moli-rfxcom2mqtt`)
 
 - **Couvre** : les sondes (température, humidité, pression, batterie, signal) et les
   interrupteurs 433 MHz (`lighting1`…`lighting6` : prises Chacon, DIO, KlikAanKlikUit…)
   qu'un pont rfxcom2mqtt annonce par sa découverte Home Assistant ; aucun code par marque.
+  Le pilote passe par la passerelle, comme `z2m` : le nom `rfxcom` reste libre pour un
+  pilote qui parlerait directement au RFXtrx sur son port série, comme `zigbee`.
 - **Protocole** : MQTT local (1883 par défaut). Abonnement d'abord à
   `{discovery}/+/+/config`, `{discovery}/+/+/+/config` et `{base}/bridge/status`
   (retenu), puis, une fois la découverte calme (aucune nouvelle configuration pendant 1 s,
@@ -406,7 +408,7 @@ base_topic = "zwave"        # défaut
 ```toml
 [[driver]]
 id = "rfxcom"
-kind = "rfxcom"
+kind = "rfxcom2mqtt"
 [driver.options]
 host = "127.0.0.1"                 # défaut
 port = 1883                        # défaut
@@ -443,7 +445,7 @@ discovery_topic = "homeassistant"  # défaut (homeassistant.discovery_topic du p
   ni `rssi`). Une sonde Oregon change d'identifiant au changement de piles. Une commande
   avant `ConnAck` est refusée (`broker injoignable`). Taille de paquet portée à 1 Mio (les
   configurations des autres ponts passent par le même préfixe).
-- **Tests** : `src/catalog.rs` sur `integrations/rfxcom/fixtures/discovery.json` et
+- **Tests** : `src/catalog.rs` sur `integrations/rfxcom2mqtt/fixtures/discovery.json` et
   `states.json` (captures réelles anonymisées) : appareils issus de la seule découverte,
   typage, décodage des trames et des échos, encodage `on`, retrait, refus d'un sujet de
   commande étranger, collision d'identifiants, plafonds ; `src/lib.rs` : routage des
