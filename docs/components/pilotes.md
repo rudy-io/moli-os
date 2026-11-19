@@ -239,26 +239,40 @@ valves = ["matter:…-1/target_temperature"]   # la consigne de chaque vanne
   `valve_correction` (le décalage appliqué aux vannes, °C, en lecture, gardé d'un démarrage à
   l'autre). En `auto`, une consigne changée à la main tient jusqu'au créneau suivant.
 - **La correction** : un décalage appris de **l'erreur de la pièce** (consigne − sonde) : la pièce
-  reste sous sa consigne, il monte ; elle la dépasse, il descend ; à 0,2 °C près, il tient. 1 °C de
+  reste sous sa consigne, il monte ; elle la dépasse, il descend, **mais seulement tant qu'une vanne
+  chauffe encore** ; à 0,2 °C près, il tient. 1 °C de
   décalage par heure et par degré d'erreur, au plus un quart d'heure compté d'un coup, borné à
   −3 / +6 °C ; arrêté en `off` et quand la sonde se tait. Consigne de la vanne = consigne de la
   pièce + décalage, au demi-degré, dans les bornes de la vanne. Exemple : pièce voulue à 20, restée
-  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. **Le thermomètre de la vanne
-  n'entre pas dans le calcul** : un premier calcul sur l'écart « vanne − sonde » s'emballait
+  à 19,5 pendant une heure → décalage 0,5, la vanne reçoit 20,5. Une pièce encore chaude d'une
+  consigne qui vient de baisser (19,5 la nuit, 18 le jour) refroidit seule, vannes fermées : le
+  décalage tient au lieu de descendre toute la journée jusqu'à −3, ce qui laisserait les vannes
+  froides au retour de la consigne du soir. Une vanne est fermée quand son thermomètre dépasse de
+  plus de 0,5 °C la consigne qu'elle tient (sans thermomètre : quand la sonde de la pièce la
+  dépasse). **Le thermomètre de la vanne ne fait jamais monter le décalage** : un premier calcul sur l'écart « vanne − sonde » s'emballait
   (le radiateur chauffe, la vanne lit plus chaud, l'écart grandit, la consigne monte, la vanne
   reste ouverte), et s'ajoutait à la régulation d'une vanne qui suivait déjà une sonde de la
   pièce (tado X) : une chambre voulue à 18 °C recevait 24.
 - **Écritures** : une vanne n'est écrite que si sa consigne change d'au moins un demi-degré, au
-  plus toutes les 10 min (sauf quand la consigne ou le mode de la pièce vient de changer), jamais
-  dans les 3 min qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Les ordres
-  passent par le hub au nom de la maison (`system`), comme ceux d'une scène, acteur
-  « Chauffage · <pièce> » au journal. Une vanne dont la consigne n'est pas inscriptible avec des
-  bornes est laissée de côté.
+  plus toutes les 10 min (quand la consigne ou le mode de la pièce vient de changer : au plus
+  toutes les 30 s, et le changement attend la vanne qui n'est pas encore là), jamais dans les 3 min
+  qui suivent un démarrage (les pilotes et les sondes reviennent d'abord). Une écriture refusée
+  (vanne endormie) compte aussi : elle n'est pas retentée chaque minute. Les ordres passent par le
+  hub au nom de la maison (`system`), comme ceux d'une scène, acteur « Chauffage · <pièce> » au
+  journal. **Une vanne, c'est une consigne en °C**, inscriptible, avec des bornes, sur un appareil
+  qui n'est ni un ouvrant ni une serrure : une position de volet, un variateur, un volume sont
+  laissés de côté (dit une fois au journal).
+- **La garde** : les appareils des vannes sont les **membres** de l'appareil de la pièce. Un ordre
+  d'un agent à `chauffage:<id>` est jugé sur la pièce du chauffage **et** sur celles de ses vannes
+  (pièces protégées, heures calmes) : une vanne rangée dans une chambre protégée la protège même si
+  le nom du `[[heating]]` diffère. Un ordre que le hub a déjà donné pour échoué n'est pas appliqué.
 - **Sonde muette** (plus de 30 min sans relevé, ou appareil hors ligne) : le décalage tient et les
   vannes ne sont plus touchées, sauf quand on change la consigne ou le mode de la pièce.
 - **Le programme de la vanne elle-même** (appli du fabricant) doit être coupé : sinon il réécrit la
   consigne à chaque créneau et les deux se contredisent. `moli-os check-config` refuse une pièce
-  mal écrite, et une vanne dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`).
+  mal écrite, une vanne qui est elle-même une pièce du chauffage (`chauffage:…`), et une vanne
+  dont la consigne demande le code à chaque fois (`[[guard.code_each_time]]`). L'unité d'une vanne
+  ne se voit qu'une fois son pilote lancé : c'est le thermostat qui la vérifie.
 
 ## `z2m` : Zigbee via Zigbee2MQTT (`crates/moli-z2m`)
 
@@ -986,10 +1000,18 @@ kind = "frigate"
 - **Secrets** : `password` (compte `review.user`, seulement avec `review`) et `certificate`
   (posé par le pilote). ⚠️ Pas d'option d'identifiants MQTT (contrairement à `z2m`).
 - **Points** : `motion`, `status` (texte), compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` ; `detection`, `recording`, `snapshots` **écrivables** (publiés sur `…/<switch>/set` en `ON`/`OFF`).
-- **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : elles sont ignorées). Disponibilité globale via `frigate/available`.
-- **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate).
+- **Zones** (avec `review` seulement) : chaque zone de la configuration de Frigate (`/api/config`, lue en tâche de
+  fond, nouvel essai de 5 s à 5 min tant que Frigate ne répond pas) devient un appareil « Zone <nom> (<caméra>) »,
+  `<instance>:zone.<zone>` : compteurs `person`, `car`, `dog`, `cat`, `bird`, `all` (sens `occupancy`), tenus à jour
+  par MQTT (`frigate/<zone>/<objet>`). **Un capteur pour l'alarme** : un compte au-dessus de 0 est actif
+  (`[[driver.options.sensor]] point = "frigate:zone.allee/person"`). Le nom affiché est le `friendly_name` de la zone,
+  sinon sa clé. Une zone de même nom sur deux caméras : un seul appareil (Frigate les compte sous un seul sujet), au nom
+  de la première. Une zone ajoutée dans Frigate apparaît au redémarrage du pilote ; une zone retirée de Frigate est
+  retirée de Moli à ce moment-là (seuls les ids `zone.…` de l'instance).
+- **Découverte** : une caméra apparaît quand elle publie `motion` ou l'état de `detect` (les zones publient aussi des comptes : sans `review`, elles sont ignorées). Disponibilité globale via `frigate/available`, zones comprises.
+- **Identité** : nom de la caméra dans la config Frigate (c'est l'identifiant de Frigate) ; zone : `zone.<nom>` (un point, que Frigate refuse dans un nom de caméra : jamais le même id qu'une caméra).
 - **Pièges** : abonnements ciblés, jamais les JPEG retenus (`…/snapshot`) ni `stats`. Broker injoignable : commandes refusées (pas mises en file), nouvel essai après 5 s.
-- **Tests** : correspondance sujets → points.
+- **Tests** : correspondance sujets → points ; zones lues de la configuration (`friendly_name`, nom refusé, zone sur deux caméras) ; id de zone jamais celui d'une caméra.
 
 ## `bambu` : imprimante Bambu Lab (`crates/moli-bambu`)
 

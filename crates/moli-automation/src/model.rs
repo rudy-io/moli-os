@@ -25,6 +25,12 @@ pub struct Automation {
     /// after someone else changed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_version: Option<Version>,
+    /// The house's code was typed when that version was approved. Outside
+    /// the fingerprint, and only ever set by the approval itself (never by
+    /// what is saved): it names, at start, an automation approved before a
+    /// `[[guard.code_each_time]]` rule covered one of its orders.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approved_with_code: bool,
     /// Why it stopped by itself, what an import could not translate…
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,

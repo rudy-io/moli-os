@@ -49,7 +49,7 @@
 //! entry = 5       # seconds to disarm on coming home
 //! trigger = 480   # seconds triggered (0: until disarmed)
 //! [[driver.options.sensor]]
-//! point = "frigate:zone_jardin/person"
+//! point = "frigate:zone.jardin/person"
 //! name = "Jardin"
 //! modes = ["home", "night"]
 //! immediate = false   # true: no entry delay for it
@@ -471,6 +471,9 @@ struct Live {
     unconfirmed: BTreeSet<String>,
     /// The phase last kept in the vault.
     kept: Option<Kept>,
+    /// The phase the vault last refused: said once in the log, tried again
+    /// at each turn of the loop until it is kept.
+    unkept: Option<Kept>,
 }
 
 impl Live {
@@ -487,6 +490,7 @@ impl Live {
             started_ms: moli_core::now_ms(),
             unconfirmed: BTreeSet::new(),
             kept: None,
+            unkept: None,
         };
         live.look(ctx);
         live.silent = live.not_answering(ctx);
@@ -518,19 +522,29 @@ impl Live {
         }
     }
 
-    /// Keeps the phase in the vault when it changed.
+    /// Keeps the phase in the vault when it changed. Counted as kept only
+    /// once the vault took it: a refused write is tried again at the next
+    /// turn of the loop, not only at the next change.
     async fn keep(&mut self, ctx: &DriverCtx) {
         let now = Kept::of(self.alarm.phase());
-        if self.kept.as_ref() == Some(&now) {
+        if self.kept.as_ref() == Some(&now) || !ctx.can_store_secrets() {
             return;
         }
         let Ok(text) = serde_json::to_string(&now) else {
             return;
         };
-        if let Err(e) = ctx.store_secret(PHASE, &text).await {
-            tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: phase not kept (a power cut would lose it)");
+        match ctx.store_secret(PHASE, &text).await {
+            Ok(()) => {
+                self.kept = Some(now);
+                self.unkept = None;
+            }
+            Err(e) => {
+                if self.unkept.as_ref() != Some(&now) {
+                    tracing::warn!(instance = %ctx.instance(), error = %e, "alarm: phase not kept (a power cut would lose it), tried again");
+                    self.unkept = Some(now);
+                }
+            }
         }
-        self.kept = Some(now);
     }
 
     /// After a restart: the sensors the cache says active are to be
@@ -898,7 +912,7 @@ mod tests {
             entry = 5
             trigger = 480
             [[sensor]]
-            point = "frigate:zone_terrasse/person"
+            point = "frigate:zone.terrasse/person"
             modes = ["night"]
             "#,
         );
@@ -907,7 +921,7 @@ mod tests {
             r#"
             [modes.night]
             [[sensor]]
-            point = "frigate:zone_terrasse/person"
+            point = "frigate:zone.terrasse/person"
             modes = ["away"]
             "#,
         );
@@ -944,7 +958,7 @@ mod tests {
     #[test]
     fn the_settings_fit_in_the_point_they_are_written_on() {
         let sensor = |i: usize, name: &str| SensorConfig {
-            point: format!("frigate:zone_capteur_{i}/person"),
+            point: format!("frigate:zone.capteur_{i}/person"),
             name: Some(name.to_owned()),
             modes: vec![Mode::Night, Mode::Away],
             immediate: i.is_multiple_of(2),

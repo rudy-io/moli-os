@@ -596,6 +596,16 @@ async fn start_brains(
     )
     .await
     .context("cannot load the automations")?;
+    // Approved before a `[[guard.code_each_time]]` rule covered one of their
+    // orders: they still run without the code (SECURITY-MODEL.md, known
+    // limit). Named, so a person approves them again, with the code.
+    let unchecked = automations.approved_before_the_code();
+    if !unchecked.is_empty() {
+        tracing::warn!(
+            automations = %unchecked.join(", "),
+            "approved without the code an order of theirs now wants each time ([[guard.code_each_time]]): they still run without it; approve them again, with the code"
+        );
+    }
     let assistant = start_assistant(config, hub, energy, history)?;
     if let Some(moli) = &assistant {
         moli.set_automations(automations.clone());

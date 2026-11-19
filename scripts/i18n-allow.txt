@@ -6,6 +6,7 @@ web/src/maison/pages/Infra.svelte  'Serveur de la maison'
 web/src/maison/pages/Systeme.svelte  'Aide'
 # La pièce de l'alarme dans le plan de la maison de référence (à remplacer par un rôle : voir la spec).
 web/src/maison/ui/SecurityPanel.svelte  roomOf\(d\) === 'Sécurité'
+web/src/maison/lib/tabs.js  \) === 'Sécurité',
 # Les mots que l'imprimante emploie, dans chaque langue de la maison (reconnaissance, pas affichage).
 web/src/maison/ui/PaperPrinterCard.svelte  STUCK = /papier
 web/src/maison/ui/PaperPrinterCard.svelte  /envoi\|en attente

@@ -244,3 +244,64 @@ async fn a_power_cut_right_after_arming_or_triggering_loses_nothing() {
     cancel.cancel();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The vault refuses the write when it is armed (a full or read-only disk):
+/// the phase is not counted as kept, and the next turn of the loop keeps it
+/// once the vault takes it again. A power cut then still finds it armed.
+#[tokio::test]
+async fn a_phase_the_vault_refused_is_kept_at_the_next_turn() {
+    let dir = std::env::temp_dir().join(format!("moli-alarm-refused-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let vault = dir.join("vault");
+    let key = moli_runtime::MasterKey::generate().unwrap();
+    let start = |key: moli_runtime::MasterKey| {
+        let hub = Hub::new(HubOptions {
+            secrets: Some((vault.join("secrets.enc"), key)),
+            ..HubOptions::default()
+        })
+        .unwrap();
+        let alarm: Config = toml::from_str("[modes.night]\n[modes.home]\n").unwrap();
+        let cancel = CancellationToken::new();
+        spawn_driver(
+            &hub,
+            InstanceId::from("alarme"),
+            Arc::new(AlarmDriver::new(alarm).unwrap()),
+            cancel.clone(),
+        );
+        (hub, cancel)
+    };
+    let mode = PointId::from("alarme:maison/mode".to_owned());
+
+    let (hub, cancel) = start(key.clone());
+    settle(&hub, 1).await;
+    // A file where the vault's folder should be: every write fails.
+    let _ = std::fs::remove_dir_all(&vault);
+    std::fs::write(&vault, b"in the way").unwrap();
+    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        state(&hub, "state").await,
+        Value::Text("armed_night".into())
+    );
+    // The vault works again; the next turn of the loop (here the same
+    // order, which changes nothing) keeps the phase.
+    std::fs::remove_file(&vault).unwrap();
+    hub.command(&mode, Value::Text("night".into()), Origin::Automation, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    cancel.cancel();
+    drop(hub);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (hub, cancel) = start(key);
+    settle(&hub, 1).await;
+    assert_eq!(
+        state(&hub, "state").await,
+        Value::Text("armed_night".into())
+    );
+    cancel.cancel();
+    let _ = std::fs::remove_dir_all(&dir);
+}
