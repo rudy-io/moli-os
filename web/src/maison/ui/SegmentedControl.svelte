@@ -41,7 +41,9 @@
 
   function select(segment) {
     if (segment.disabled) return;
-    value = segment.value;
+    // The parent owns the value: a choice only becomes real once the parent
+    // accepts it. A confirmation can be cancelled, and the pill must then
+    // stay where the house really is.
     onchange?.(segment.value);
   }
 </script>
