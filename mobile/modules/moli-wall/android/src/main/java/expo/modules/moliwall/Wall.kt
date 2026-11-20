@@ -153,6 +153,12 @@ object Wall {
       val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
       if (on) activity.window.addFlags(flags) else activity.window.clearFlags(flags)
     }
+    // The screen stays on while Moli shows: Android's own screen timeout
+    // (30 s on a fresh tablet) would put it to sleep long before Moli's
+    // `idle` minutes. Moli sleeps it itself (`sleep`, lockNow), and a wake
+    // turns it on again with this flag still set.
+    if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     // A tablet turns freely, wall tablet or not; a phone stays upright.
     activity.requestedOrientation =
       if (on || isTablet(activity)) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
