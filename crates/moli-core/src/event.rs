@@ -31,6 +31,13 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         pulse: bool,
     },
+    /// The same value, read again: only the reading's time moved (#230). At
+    /// most every five minutes per point; nothing changed, so nothing to
+    /// record nor to react to. A surface updates the point's age.
+    Seen {
+        point: PointId,
+        ts: u64,
+    },
     Availability {
         device: DeviceId,
         online: bool,
@@ -260,4 +267,25 @@ pub struct JournalEntry {
     pub action: Action,
     pub outcome: Outcome,
     pub duration_ms: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_read_again_is_its_own_event_for_the_surfaces() {
+        // A point and a time, nothing else (#230): clients that do not know
+        // it ignore it, those that read `state` never mistake it for one.
+        let seen = Event::Seen {
+            point: PointId::from("z2m:sonde/temperature"),
+            ts: 1_800_000_000_000,
+        };
+        let json = serde_json::to_value(&seen).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "type": "seen", "point": "z2m:sonde/temperature", "ts": 1_800_000_000_000_u64 })
+        );
+        assert_eq!(serde_json::from_value::<Event>(json).unwrap(), seen);
+    }
 }

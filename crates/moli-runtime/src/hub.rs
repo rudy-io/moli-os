@@ -111,6 +111,37 @@ pub enum ApprovalError {
 
 /// How long a held order waits for a human.
 const APPROVAL_TTL_MS: u64 = 10 * 60 * 1000;
+/// A value read again unchanged is told (`Event::Seen`) at most this often
+/// per point (#230): enough for an age shown to the minute.
+pub const SEEN_EVERY_MS: u64 = 5 * 60 * 1000;
+
+/// What a reading tells the surfaces.
+#[derive(Debug, PartialEq, Eq)]
+enum Tell {
+    /// A new value (or a press, a copy, a first sample): `Event::State`.
+    Change,
+    /// The same value, read again, and nothing told about this point for
+    /// `SEEN_EVERY_MS`: `Event::Seen`.
+    Seen,
+    Nothing,
+}
+
+/// `changed`: the value is new (as `record_state` decides); `before`: the
+/// time of the reading it replaces; `ts`: its own; `told`: when this point
+/// was last told (a change or a `Seen`), else `before`.
+fn tell(changed: bool, before: Option<u64>, ts: u64, told: Option<u64>) -> Tell {
+    if changed {
+        return Tell::Change;
+    }
+    match before {
+        Some(before)
+            if ts > before && ts.saturating_sub(told.unwrap_or(before)) >= SEEN_EVERY_MS =>
+        {
+            Tell::Seen
+        }
+        _ => Tell::Nothing,
+    }
+}
 /// Orders waiting for a human, at most: a flood of requests must not bury
 /// the dashboard. Past it, whoever holds the most, the new request counted,
 /// gives way (their oldest): a flood never pushes out the request of someone
@@ -464,6 +495,9 @@ struct Model {
     /// Retained values are displayable, but not usable as current observations
     /// until each point receives its first sample from this driver run.
     awaiting_samples: HashMap<DeviceId, BTreeSet<Arc<str>>>,
+    /// Per point, when its reading was last told (a change or a `Seen`):
+    /// a value read again unchanged is told again after `SEEN_EVERY_MS`.
+    told: HashMap<DeviceId, HashMap<Arc<str>, u64>>,
     availability: HashMap<DeviceId, bool>,
     /// Devices taken offline because their driver failed, with what they
     /// were before: given back when the driver runs again, unless it said
@@ -2130,6 +2164,7 @@ impl Hub {
                     model.availability.remove(&id);
                     model.unconfirmed.remove(&id);
                     model.awaiting_samples.remove(&id);
+                    model.told.remove(&id);
                     model.held_offline.remove(&id);
                     restored.push(Event::DeviceRemoved { device: id });
                 }
@@ -2462,6 +2497,7 @@ impl Hub {
             let cached_removed = model.cached_devices.remove(id).is_some();
             model.unconfirmed.remove(id);
             model.awaiting_samples.remove(id);
+            model.told.remove(id);
             model.held_offline.remove(id);
             model.availability.remove(id);
             model.snapshots.remove(id);
@@ -2712,6 +2748,7 @@ impl Hub {
                 .get_mut(device)
                 .is_some_and(|keys| keys.remove(&key));
             let states = model.states.entry(device.clone()).or_default();
+            let before = states.get(&key).map(|s| s.ts);
             // A copied value also tells when its reading got newer: its age is
             // what it says.
             let changed = always
@@ -2726,12 +2763,25 @@ impl Hub {
                     ts,
                 },
             );
-            changed.then(|| Event::State {
-                point: PointId::new(device, &key),
-                value,
-                ts,
-                pulse: always,
-            })
+            let told = model.told.entry(device.clone()).or_default();
+            let point = PointId::new(device, &key);
+            match tell(changed, before, ts, told.get(&key).copied()) {
+                Tell::Change => {
+                    told.insert(key, ts);
+                    Some(Event::State {
+                        point,
+                        value,
+                        ts,
+                        pulse: always,
+                    })
+                }
+                // The same value, read again (#230): only its time moved.
+                Tell::Seen => {
+                    told.insert(key, ts);
+                    Some(Event::Seen { point, ts })
+                }
+                Tell::Nothing => None,
+            }
         };
         if let Some(event) = event {
             self.emit(event);
@@ -3087,5 +3137,54 @@ mod opening_tests {
             Some(Semantic::OnOff),
             &Value::Bool(true)
         ));
+    }
+}
+
+#[cfg(test)]
+mod seen_tests {
+    use super::{SEEN_EVERY_MS, Tell, tell};
+
+    const T: u64 = 1_800_000_000_000;
+
+    #[test]
+    fn a_new_value_is_a_change_whatever_the_clock() {
+        assert_eq!(tell(true, Some(T), T, Some(T)), Tell::Change);
+        assert_eq!(tell(true, None, T, None), Tell::Change);
+    }
+
+    #[test]
+    fn the_same_value_read_again_is_told_once_per_window() {
+        // Told at T (a change); read again a minute later: nothing.
+        assert_eq!(tell(false, Some(T), T + 60_000, Some(T)), Tell::Nothing);
+        // Five minutes after it was last told: `Seen`.
+        assert_eq!(
+            tell(false, Some(T + 240_000), T + SEEN_EVERY_MS, Some(T)),
+            Tell::Seen
+        );
+        // Right after a `Seen` (told again at T + 5 min): nothing until the
+        // next window.
+        let seen = T + SEEN_EVERY_MS;
+        assert_eq!(
+            tell(false, Some(seen), seen + 60_000, Some(seen)),
+            Tell::Nothing
+        );
+        assert_eq!(
+            tell(false, Some(seen + 60_000), seen + SEEN_EVERY_MS, Some(seen)),
+            Tell::Seen
+        );
+    }
+
+    #[test]
+    fn a_reading_that_is_not_newer_tells_nothing() {
+        // The same time again, or an older one (a late report).
+        assert_eq!(tell(false, Some(T), T, None), Tell::Nothing);
+        assert_eq!(
+            tell(false, Some(T), T - 1, Some(T - SEEN_EVERY_MS)),
+            Tell::Nothing
+        );
+        // Never told (a restored value): the window starts at its reading.
+        assert_eq!(tell(false, Some(T), T + 60_000, None), Tell::Nothing);
+        assert_eq!(tell(false, Some(T), T + SEEN_EVERY_MS, None), Tell::Seen);
+        assert_eq!(tell(false, None, T, None), Tell::Nothing);
     }
 }
