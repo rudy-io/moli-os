@@ -91,8 +91,20 @@
           "color": "#E8B931"
         }
       ],
-      "expo-secure-store",
-      "expo-localization"
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Moli retient le code de la maison derrière Face ID, pour ne pas le retaper."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Moli retient le code de la maison derrière Face ID, pour ne pas le retaper."
+        }
+      ],
+      "expo-localization",
+      "./plugins/with-wall"
     ],
     "locales": {
       "fr": "./locales/fr.json",

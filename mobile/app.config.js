@@ -9,6 +9,12 @@
 const fs = require("fs");
 const path = require("path");
 
+// Each build a higher number than the last (Android's versionCode): the
+// house offers an update only to an older app (src/update.ts). Minutes since
+// 2026 (MOLI_VERSION_CODE to force one): always growing, far below the limit.
+const buildNumber = () =>
+  Number(process.env.MOLI_VERSION_CODE) || Math.floor((Date.now() - Date.UTC(2026, 0, 1)) / 60000);
+
 module.exports = ({ config }) => {
   const file = path.join(__dirname, "house.json");
   const house = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
@@ -21,7 +27,11 @@ module.exports = ({ config }) => {
       ...(house.bundleId && { bundleIdentifier: house.bundleId }),
       ...(house.appleTeamId && { appleTeamId: house.appleTeamId }),
     },
-    android: { ...config.android, ...(house.bundleId && { package: house.bundleId }) },
+    android: {
+      ...config.android,
+      versionCode: buildNumber(),
+      ...(house.bundleId && { package: house.bundleId }),
+    },
     extra: {
       ...config.extra,
       // Only when there is one: a null here reached the build as {} (build 7

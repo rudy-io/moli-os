@@ -9,6 +9,7 @@
   import AlexaAccount from '../ui/AlexaAccount.svelte';
   import EngieAccount from '../ui/EngieAccount.svelte';
   import DashboardCode from '../ui/DashboardCode.svelte';
+  import WallCard from '../ui/WallCard.svelte';
   import PeopleCard from '../ui/PeopleCard.svelte';
   import { hub, home, hidden, watches } from '../lib/home.svelte.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
@@ -172,6 +173,9 @@
   <PeopleCard />
 
   <DashboardCode />
+
+  <!-- In the Moli app on an Android tablet only. -->
+  <WallCard />
 
   <section class="gateway-entry" aria-label={t('systeme.airzone.title')}>
     <div><h2>{t('systeme.airzone.title')}</h2><p>{t('systeme.airzone.help')}</p></div>

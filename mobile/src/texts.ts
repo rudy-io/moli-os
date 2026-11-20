@@ -14,6 +14,7 @@ const fr = {
   badAddress: "Cette adresse ne ressemble pas à une adresse web.",
   unreachable: "Personne ne répond à cette adresse. Vérifie-la, et que tu es bien connecté (Wi-Fi de la maison pour une adresse locale).",
   notMoli: "Quelque chose répond, mais ce n'est pas un Moli (ou il est caché derrière une autre connexion).",
+  notMoliTitle: "Ce n'est pas un Moli",
   refused:
     "C'est bien un Moli, mais il n'ouvre qu'au Wi-Fi de la maison ou à travers Cloudflare Access. Connecte-toi au Wi-Fi de la maison, ou demande à la personne qui l'a installé.",
   insecure: "Hors de la maison, l'adresse doit commencer par https:// : sans chiffrement, tout passerait en clair.",
@@ -35,6 +36,21 @@ const fr = {
   later: "Plus tard",
   continue: "Continuer",
   phone: "Téléphone",
+  fingerprintKeep: "Retenir le code de la maison",
+  fingerprintUnlock: "Code de la maison",
+  fingerprintOfferTitle: "Utiliser l'empreinte ?",
+  fingerprintOfferText: "La prochaine fois, ton empreinte remplacera le code de la maison sur ce téléphone.",
+  fingerprintNo: "Non merci",
+  fingerprintYes: "Oui",
+  updateTitle: "Nouvelle version de Moli",
+  updateText: "Une mise à jour de l'appli est prête sur ta maison. L'installer maintenant ?",
+  updateInstall: "Installer",
+  updatePermTitle: "Autoriser les mises à jour",
+  updatePermText:
+    "Android demande d'autoriser Moli à installer ses propres mises à jour. Active « Autoriser cette source », puis reviens dans Moli.",
+  updateDownloading: "Téléchargement de la mise à jour…",
+  updateFailed: "La mise à jour n'a pas pu s'installer. Réessaie plus tard.",
+  googleFailed: "La connexion avec Google n'a pas abouti. Réessaie, ou choisis le code par e-mail.",
 };
 
 const en: typeof fr = {
@@ -48,6 +64,7 @@ const en: typeof fr = {
   badAddress: "This doesn't look like a web address.",
   unreachable: "Nobody answers at this address. Check it, and that you are connected (the house's Wi-Fi for a local address).",
   notMoli: "Something answers, but it isn't a Moli (or it hides behind another sign-in).",
+  notMoliTitle: "This isn't a Moli",
   refused:
     "This is a Moli, but it only lets in the house's Wi-Fi or Cloudflare Access. Join the house's Wi-Fi, or ask whoever set it up.",
   insecure: "Away from home, the address must start with https://: without encryption, everything would travel in the clear.",
@@ -69,6 +86,21 @@ const en: typeof fr = {
   later: "Later",
   continue: "Continue",
   phone: "Phone",
+  fingerprintKeep: "Remember the house code",
+  fingerprintUnlock: "House code",
+  fingerprintOfferTitle: "Use your fingerprint?",
+  fingerprintOfferText: "Next time, your fingerprint will replace the house code on this phone.",
+  fingerprintNo: "No thanks",
+  fingerprintYes: "Yes",
+  updateTitle: "New version of Moli",
+  updateText: "An update of the app is ready on your house. Install it now?",
+  updateInstall: "Install",
+  updatePermTitle: "Allow updates",
+  updatePermText:
+    "Android asks to let Moli install its own updates. Turn on “Allow from this source”, then come back to Moli.",
+  updateDownloading: "Downloading the update…",
+  updateFailed: "The update could not be installed. Try again later.",
+  googleFailed: "Signing in with Google did not work. Try again, or choose the e-mail code.",
 };
 
 const lang = getLocales()[0]?.languageCode ?? "fr";

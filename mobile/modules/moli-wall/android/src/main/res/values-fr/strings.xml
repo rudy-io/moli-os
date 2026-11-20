@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="moli_wall_channel">Tablette murale</string>
+  <string name="moli_wall_watching">L\'écran s\'allume quand quelqu\'un passe</string>
+  <string name="moli_wall_admin_why">Moli éteint l\'écran quand personne n\'est là, et le rallume quand quelqu\'un passe.</string>
+</resources>

@@ -93,7 +93,30 @@ export type Probe =
   | { ok: true; via: "access" }
   /** A Moli answered, but only lets in its home network or Access. */
   | { ok: false; why: "refused"; message?: string }
-  | { ok: false; why: "unreachable" | "not-moli" | "insecure" };
+  /** Something else answered. `elsewhere`: it sent us to another address
+   *  (another sign-in in front of the house?), the person may know better. */
+  | { ok: false; why: "not-moli"; elsewhere: boolean }
+  | { ok: false; why: "unreachable" | "insecure" };
+
+/** A Moli tells itself apart by its session answer (crates/moli-api,
+ *  `/api/session`): JSON with, among others, `via` and `min_pin`. A page that
+ *  merely says « moli » is not one. */
+export function looksLikeMoliSession(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  return typeof b.via === "string" && typeof b.min_pin === "number";
+}
+
+/** Asks `base` whether it is a Moli: true, false, or null (no answer). */
+export async function isMoli(base: string, signal?: AbortSignal): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${base}/api/session`, { headers: { accept: "application/json" }, signal });
+    if (!res.ok) return false;
+    return looksLikeMoliSession(await res.json().catch(() => null));
+  } catch {
+    return null;
+  }
+}
 
 /** Knocks at the address before keeping it: is there a Moli, and can we get in? */
 export async function probe(base: string): Promise<Probe> {
@@ -110,6 +133,7 @@ export async function probe(base: string): Promise<Probe> {
         return url.hostname;
       }
     })();
+    const elsewhere = landed !== url.hostname;
     if (landed === ACCESS || landed.endsWith(`.${ACCESS}`)) return { ok: true, via: "access" };
     const text = await res.text().catch(() => "");
     if (res.status === 403) {
@@ -120,10 +144,10 @@ export async function probe(base: string): Promise<Probe> {
       } catch {
         // Not Moli's refusal.
       }
-      return { ok: false, why: "not-moli" };
+      return { ok: false, why: "not-moli", elsewhere };
     }
-    if (res.ok && /moli/i.test(text)) return { ok: true, via: "direct" };
-    return { ok: false, why: "not-moli" };
+    if (res.ok && !elsewhere && (await isMoli(base, abort.signal))) return { ok: true, via: "direct" };
+    return { ok: false, why: "not-moli", elsewhere };
   } catch {
     return { ok: false, why: "unreachable" };
   } finally {
