@@ -652,6 +652,13 @@ impl Outdoor {
                 if declare {
                     ctx.upsert_device(sun::device(id.clone(), ctx.instance(), &self.facades));
                     ctx.set_availability(&id, true);
+                    if !self.facades.is_empty() {
+                        ctx.set_state(
+                            &id,
+                            sun::FACADES,
+                            Value::from(sun::names(&self.facades).as_str()),
+                        );
+                    }
                 }
                 for (key, value) in [(sun::ELEVATION, elevation), (sun::AZIMUTH, azimuth)] {
                     if let Some(v) = value {

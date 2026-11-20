@@ -31,6 +31,7 @@ before(async () => {
   components.Pieces = (await vite.ssrLoadModule('/src/maison/pages/Pieces.svelte')).default;
   components.Salon = (await vite.ssrLoadModule('/src/maison/pages/Salon.svelte')).default;
   components.SecurityPanel = (await vite.ssrLoadModule('/src/maison/ui/SecurityPanel.svelte')).default;
+  components.Dehors = (await vite.ssrLoadModule('/src/maison/pages/Dehors.svelte')).default;
 });
 beforeEach(() => { hub.connected = true; home.home.config = null; energy.summary = null; });
 after(async () => {
@@ -1178,3 +1179,50 @@ test('beside the week, the card leaves the schedule out and the editor opens the
   const html = show('ScheduleEditor', schedulePoints(), { ...valveValues, weekly_schedule_wednesday: '00:00/17 07:00/20' }, {}, { day: 'wednesday' });
   assert.equal(inputs(html).filter((tag) => tag.includes('type="time"')).length, 2);
 });
+
+test('the outside page shows the sun: its height and way, its arc by day, the façades it is on (#258)', () => {
+  const at = (iso) => Date.parse(iso);
+  const dev = (id, points, values) => ({
+    id, native_name: id, model: null, label: {}, online: true, members: [], points,
+    state: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, ts: at('2026-11-20T10:00:00Z') }])),
+  });
+  const text = (key) => point(key, { type: 'text' }, false, 'config');
+  const deg = (key) => point(key, number(-90, 360, 0.5), false);
+  const weather = dev('meteo:x', [text('sunrise'), text('sunset')], { sunrise: '2026-11-20T07:15', sunset: '2026-11-20T16:15' });
+  const sun = (values, withFacades = true) =>
+    dev('dehors:soleil', [deg('elevation'), deg('azimuth'), ...(withFacades ? [text('facades'), deg('sud_incidence'), point('sud_sun', { type: 'binary' }, false), deg('est_incidence'), point('est_sun', { type: 'binary' }, false)] : [])], values);
+  const page = (devices, now) => {
+    home.home.config = { outdoor: { weather: 'meteo:x' } };
+    home.home.now = at(now);
+    hub.devices = Object.fromEntries(devices.map((d) => [d.id, d]));
+    return render(components.Dehors, { props: {} }).body.replace(/<!--.*?-->/g, '');
+  };
+
+  // By day: height and way, the sun on its arc, the façade it is on lit.
+  const day = page(
+    [weather, sun({ elevation: 18.5, azimuth: 172, facades: 'sud=Façade sud\nest=Façade est', sud_incidence: 35, sud_sun: true, est_incidence: 75.5, est_sun: false })],
+    '2026-11-20T11:45:00',
+  );
+  assert.match(day, /hauteur 19° · S</);
+  assert.match(day, /class="sunarc/);
+  assert.match(day, /<i style="left:/, 'the sun on its arc');
+  assert.match(day, /Soleil sur/);
+  assert.match(day, /class="chip [\w-]* ?warm"[^>]*title="Incidence : 35°"[^>]*>.*?Façade sud/s);
+  assert.match(day, /class="chip [\w-]*"[^>]*title="Incidence : 76°"[^>]*>.*?Façade est/s);
+
+  // At night: the arc stays, without the sun on it; no façade lit.
+  const night = page(
+    [weather, sun({ elevation: -20, azimuth: 300, facades: 'sud=Façade sud\nest=Façade est', sud_incidence: 120, sud_sun: false, est_incidence: 170, est_sun: false })],
+    '2026-11-20T21:00:00',
+  );
+  assert.match(night, /class="sunarc/);
+  assert.doesNotMatch(night, /<i style="left:/);
+  assert.doesNotMatch(night, /chip [\w-]* ?warm/);
+
+  // No façade declared: no « Soleil sur »; no `dehors:soleil` at all: no height either.
+  assert.doesNotMatch(page([weather, sun({ elevation: 18.5, azimuth: 172 }, false)], '2026-11-20T11:45:00'), /Soleil sur/);
+  const bare = page([weather], '2026-11-20T11:45:00');
+  assert.doesNotMatch(bare, /hauteur|Soleil sur/);
+  assert.match(bare, /class="sunarc/, 'the arc needs only sunrise and sunset');
+});
+
