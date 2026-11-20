@@ -407,7 +407,9 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   }, []);
 
   return (
-      <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top"]}>
+      // Every edge: Android's buttons at the bottom (or on the side, a tablet
+      // turned) must not cover the dashboard's menu.
+      <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top", "bottom", "left", "right"]}>
         <StatusBar style={top.dark ? "light" : "dark"} hidden={!!wall.state?.enabled} />
         {failed ? (
           <View style={styles.center}>
