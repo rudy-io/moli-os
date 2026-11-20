@@ -97,12 +97,9 @@
   // Only the hours the forecast speaks of (a first answer in the
   // afternoon says nothing of the morning: no line there, not a zero).
   const fcHours = $derived([...byHour.keys()].filter(inLight).sort((a, b) => a - b));
-  const fcPath = $derived(fcHours.length > 1 ? line(fcHours.map((h) => [mid(h), y(byHour.get(h).kwh)])) : '');
-  const bandPath = $derived(
-    fcHours.length > 1
-      ? `${line(fcHours.map((h) => [mid(h), y(byHour.get(h).hi)]))} ${[...fcHours].reverse().map((h) => `L${mid(h).toFixed(1)} ${y(byHour.get(h).lo).toFixed(1)}`).join(' ')} Z`
-      : '',
-  );
+  // Drawn column by column, like the bars: the low–high range behind each
+  // hour, the expected value a dashed mark across it.
+  const fcCols = $derived(fcHours.map((h) => ({ h, ...byHour.get(h) })).filter((f) => f.hi > 0.005));
   // Made: each past hour at its middle; the current one pro rata, at the
   // middle of what has gone by.
   const madePts = $derived(
@@ -221,6 +218,9 @@
           <text class="axis" x={L - 6} y={y(v) + 4} text-anchor="end">{v}</text>
         {/each}
         {#if base}<line class="floor" x1={L} x2={W - R} y1={y(base / 1000)} y2={y(base / 1000)} />{/if}
+        {#each fcCols as f (f.h)}
+          <rect class="band" x={x(f.h) + (col - bw) / 2 - 4} y={y(f.hi)} width={bw + 8} height={Math.max(1, y(f.lo) - y(f.hi))} rx="3" />
+        {/each}
         {#each bars as b (b.h)}
           {@const cx = x(b.h) + (col - bw) / 2}
           {#if b.now}
@@ -234,8 +234,9 @@
             <rect class="peak" x={cx - 3} y={y(b.now.used) - 3} width={bw + 6} height={y(0) - y(b.now.used) + 3} rx="5" />
           {/if}
         {/each}
-        {#if bandPath}<path class="band" d={bandPath} />{/if}
-        {#if fcPath}<path class="expected" d={fcPath} />{/if}
+        {#each fcCols as f (f.h)}
+          <line class="expected" x1={x(f.h) + (col - bw) / 2 - 4} x2={x(f.h) + (col + bw) / 2 + 4} y1={y(f.kwh)} y2={y(f.kwh)} />
+        {/each}
         {#if madePts.length}
           <path class="made" d={line(madePts)} />
           {#each madePts as [a, c], i (i)}<circle class="dot" cx={a} cy={c} r="3.5" />{/each}
@@ -265,7 +266,7 @@
       <span><i class="sw usual"></i>{t('energie.jour.legende_habitude')}</span>
       <span><i class="sw ahead"></i>{t('energie.jour.legende_a_venir')}</span>
       {#if madePts.length}<span><i class="sw made"></i>{t('energie.prevision.legende_produit')}</span>{/if}
-      {#if fcPath}<span><i class="sw expected"></i>{t('energie.jour.legende_prevision')}</span><span><i class="sw band"></i>{t('energie.prevision.legende_fourchette')}</span>{/if}
+      {#if fcCols.length}<span><i class="sw expected"></i>{t('energie.jour.legende_prevision')}</span><span><i class="sw band"></i>{t('energie.prevision.legende_fourchette')}</span>{/if}
       {#if windows.length}<span><i class="sw off"></i>{t('commun.jour.heures_creuses')}</span>{/if}
       {#if base}<span><i class="sw floor"></i>{t('commun.jour.talon_legende')}</span>{/if}
       <span class="muted">{t('energie.jour.unite')}</span>
@@ -439,14 +440,14 @@
 
   .band {
     fill: var(--warm);
-    fill-opacity: 0.16;
+    fill-opacity: 0.18;
   }
 
   .expected {
-    fill: none;
     stroke: var(--warm-ink);
-    stroke-width: 2;
-    stroke-dasharray: 6 5;
+    stroke-width: 2.5;
+    stroke-dasharray: 5 3;
+    stroke-linecap: butt;
   }
 
   .made {
