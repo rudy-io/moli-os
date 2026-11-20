@@ -7,10 +7,21 @@
   purgée (une valeur stable a toujours une valeur « avant la fenêtre »).
 - Lecture : `series(point, from, to, max_points)` → valeurs brutes, ou seaux (moyenne, min,
   max, nombre) quand il y en a trop.
+- **Points gardés à vie** (`[server] history_hourly`, par exemple la température
+  extérieure) : chaque heure devient une statistique (moyenne pondérée par le temps que
+  chaque valeur a tenu, plus basse, plus haute) dans `hourly_stats`, jamais purgée. Calculée
+  toutes les heures, toujours avant la purge ; une valeur nulle ou non numérique est un trou
+  (l'heure sans valeur connue n'a pas de ligne). `series` lit ces heures dès que la fenêtre
+  remonte plus loin que les changements gardés : rien que des seaux, une heure pesant autant
+  qu'une autre.
+- **Reprise** : `moli-os history import` (lignes JSON `{"point", "hour", "avg", "min",
+  "max"}` sur l'entrée standard, par exemple les statistiques long terme de HA ou une archive
+  météo) ; seulement les heures d'avant les statistiques de Moli pour ce point
+  (`hourly_since`), sans écraser une heure connue. Rejouable, Moli en marche.
 - Surfaces : `/api/history` (courbes du dashboard), outil MCP `history` (statistiques +
   série compacte) et **`history_sql`** pour les agents : une seule requête `SELECT`, `ATTACH`,
-  `PRAGMA`, `BEGIN` interdits, 2 s et 200 lignes maximum, 64 Ko par valeur, sur la vue
-  `history(point, ts, kind, num, txt)`.
+  `PRAGMA`, `BEGIN` interdits, 2 s et 200 lignes maximum, 64 Ko par valeur, sur les vues
+  `history(point, ts, kind, num, txt)` et `hourly(point, hour, avg, min, max)`.
 - Utilisé par : les courbes, les passages du jour (caméras), « dernier passage » à la porte,
   Moli (questions sur le passé), le nœud d'automatisme… (les automatismes lisent l'état
   courant, pas l'historique).

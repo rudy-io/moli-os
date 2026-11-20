@@ -557,7 +557,7 @@ impl MoliMcp {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Run ONE read-only SQL query (SQLite) over the recorded history. View: history(point, ts ms, kind b/i/f/t/z, num, txt). Writes, ATTACH and PRAGMA are refused; 2 s and 200 rows max. Use it for questions the other tools cannot answer (counts, durations, comparisons)."
+        description = "Run ONE read-only SQL query (SQLite) over the recorded history. Views: history(point, ts ms, kind b/i/f/t/z, num, txt), every change of the last weeks; hourly(point, hour ms, avg, min, max), hourly statistics kept for ever for a few points (the outside temperature). Writes, ATTACH and PRAGMA are refused; 2 s and 200 rows max. Use it for questions the other tools cannot answer (counts, durations, comparisons)."
     )]
     async fn history_sql(
         &self,
