@@ -124,3 +124,30 @@ export function latest(byCamera, n = 20) {
   for (const { camera, items } of byCamera) for (const item of items) out.push({ camera, item });
   return out.sort((a, b) => b.item.start - a.item.start).slice(0, n);
 }
+
+/** The longest extract saved at once (seconds): what the NVR cuts in one go. */
+export const EXTRACT_MAX = 3600;
+
+/** An extract to save, in whole seconds, never past what is recorded yet
+ *  (`now` less two seconds); null when it is empty or too long. */
+export function extract(start, end, now) {
+  const from = Math.floor(start);
+  const to = Math.min(Math.ceil(end), Math.floor(now) - 2);
+  return to > from + 1 && to - from <= EXTRACT_MAX ? { start: from, end: to } : null;
+}
+
+/** The file an extract is saved as: the camera, then its local date and
+ *  time (`entree-2026-11-20-11h21m05.mp4`). */
+export function extractName(camera, start) {
+  const slug =
+    String(camera ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'camera';
+  const d = new Date(start * 1000);
+  const two = (n) => String(n).padStart(2, '0');
+  return `${slug}-${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}-${two(d.getHours())}h${two(d.getMinutes())}m${two(d.getSeconds())}.mp4`;
+}

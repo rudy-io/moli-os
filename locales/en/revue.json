@@ -39,5 +39,16 @@
   "revue.chargement": "Loading events…",
   "revue.depuis": "Last {n} hours",
   "revue.rien_24h": "Nothing reported in 24 h.",
-  "revue.revoir_camera": "Watch {camera} at {heure} again"
+  "revue.revoir_camera": "Watch {camera} at {heure} again",
+  "revue.export.exporter": "Export",
+  "revue.export.titre": "Export a clip",
+  "revue.export.debut": "Start",
+  "revue.export.fin": "End",
+  "revue.export.ici": "Here",
+  "revue.export.ici_aide": "{borne} at the moment shown",
+  "revue.export.reculer": "{borne} 10 seconds earlier",
+  "revue.export.avancer": "{borne} 10 seconds later",
+  "revue.export.telecharger": "Download",
+  "revue.export.duree": "{duree} of video",
+  "revue.export.invalide": "The end must come after the start, and the clip last an hour at most."
 }
