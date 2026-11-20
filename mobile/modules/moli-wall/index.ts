@@ -30,6 +30,7 @@ type Subscription = { remove(): void };
 
 export type MoliWallModule = {
   state(): WallState;
+  dress(): boolean;
   configure(options: WallOptions): WallState;
   pin(on: boolean): boolean;
   wake(): void;
