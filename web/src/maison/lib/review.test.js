@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW, extract, extractName, EXTRACT_MAX } from './review.js';
+import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, latest, WINDOW, extract, extractName, recordedIn, EXTRACT_MAX } from './review.js';
 
 test('a day, local, from midnight to midnight', () => {
   const noon = new Date(2026, 10, 15, 12, 30).getTime() / 1000;
@@ -115,4 +115,12 @@ test('an extract is named after its camera and its local time', () => {
   assert.equal(extractName('Entrée', t), 'entree-2026-11-20-11h21m05.mp4');
   assert.equal(extractName('Allée du portail !', t), 'allee-du-portail-2026-11-20-11h21m05.mp4');
   assert.equal(extractName('', t), 'camera-2026-11-20-11h21m05.mp4');
+});
+
+test('an extract needs something recorded in it', () => {
+  const recorded = [{ start: 100, end: 200 }, { start: 500, end: 600 }];
+  assert.equal(recordedIn(150, 170, recorded), true);
+  assert.equal(recordedIn(190, 510, recorded), true);
+  assert.equal(recordedIn(250, 400, recorded), false);
+  assert.equal(recordedIn(250, 400, []), true);
 });

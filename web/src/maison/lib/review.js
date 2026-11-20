@@ -136,6 +136,13 @@ export function extract(start, end, now) {
   return to > from + 1 && to - from <= EXTRACT_MAX ? { start: from, end: to } : null;
 }
 
+/** Whether something was recorded between `start` and `end`: the NVR
+ *  refuses an extract with nothing in it. Recordings not read yet (an
+ *  empty list): not known, let it try. */
+export function recordedIn(start, end, recorded) {
+  return !recorded.length || recorded.some((r) => r.start < end && start < r.end);
+}
+
 /** The file an extract is saved as: the camera, then its local date and
  *  time (`entree-2026-11-20-11h21m05.mp4`). */
 export function extractName(camera, start) {

@@ -50,5 +50,6 @@
   "revue.export.avancer": "{borne} 10 seconds later",
   "revue.export.telecharger": "Download",
   "revue.export.duree": "{duree} of video",
-  "revue.export.invalide": "The end must come after the start, and the clip last an hour at most."
+  "revue.export.invalide": "The end must come after the start, and the clip last an hour at most.",
+  "revue.export.rien": "Nothing recorded then: move the start or the end."
 }

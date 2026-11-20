@@ -5,7 +5,7 @@
   import { home } from '../lib/home.svelte.js';
   import LiveVideo from './LiveVideo.svelte';
   import CameraTile from './CameraTile.svelte';
-  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, extract, extractName, LEAD } from '../lib/review.js';
+  import { dayOf, at, timeAt, bars, playable, windowFrom, windowOf, listed, labelsOf, hours, outline, readable, extract, extractName, recordedIn, LEAD } from '../lib/review.js';
 
   /** A camera with its past (its NVR): the picture (live, or what was
    *  recorded at the chosen moment, or an event's photo) with the zones over
@@ -200,6 +200,7 @@
 
   const saved = $derived(cut ? extract(cut.start, cut.end, home.now / 1000) : null);
   const savedName = $derived(saved ? extractName(name, saved.start) : '');
+  const savedHas = $derived(saved ? recordedIn(saved.start, saved.end, recorded) : false);
   function lengthOf(s) {
     const m = Math.floor(s / 60);
     const r = s % 60;
@@ -337,7 +338,9 @@
         </div>
       {/each}
       <div class="go">
-        {#if saved}
+        {#if saved && !savedHas}
+          <span class="bad">{t('revue.export.rien')}</span>
+        {:else if saved}
           <span class="length">{t('revue.export.duree', { duree: lengthOf(saved.end - saved.start) })}</span>
           <a class="save" href="{base}/recording?start={saved.start}&end={saved.end}&download={savedName}" download={savedName}>
             <Icon name="download" size={16} />{t('revue.export.telecharger')}

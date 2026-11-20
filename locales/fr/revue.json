@@ -50,5 +50,6 @@
   "revue.export.avancer": "{borne} 10 secondes plus tard",
   "revue.export.telecharger": "Télécharger",
   "revue.export.duree": "{duree} de vidéo",
-  "revue.export.invalide": "La fin doit venir après le début, et l’extrait durer une heure au plus."
+  "revue.export.invalide": "La fin doit venir après le début, et l’extrait durer une heure au plus.",
+  "revue.export.rien": "Rien d’enregistré sur ce moment : déplace le début ou la fin."
 }
