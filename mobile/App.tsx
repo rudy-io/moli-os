@@ -19,7 +19,7 @@ import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground, unpair } from "./src/moli";
 import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from "./src/house";
-import { fingerprintReady, forgetPin, keepPin, pinKept, unlockPin } from "./src/pinlock";
+import { declineOffer, fingerprintReady, forgetPin, keepPin, offerDeclined, pinKept, unlockPin } from "./src/pinlock";
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
 
@@ -183,6 +183,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       `changeHouse: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'change-house' })); }, ` +
       `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock' })); }, ` +
       `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin) })); }, ` +
+      `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin) })); }, ` +
       `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); } }; true;`,
     [lock],
   );
@@ -343,6 +344,20 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
         );
       } else if (msg.type === "pin-remember" && typeof msg.pin === "string") {
         if (await keepPin(base, msg.pin)) setLock((l) => ({ ...l, kept: true }));
+      } else if (msg.type === "pin-offer" && typeof msg.pin === "string") {
+        // A code just typed right: offered once, in the app's own dialog
+        // (the code sheet closes behind it). « No thanks » is final.
+        const pin = msg.pin;
+        if (!(await fingerprintReady()) || (await pinKept(base)) || (await offerDeclined(base))) return;
+        Alert.alert(t.fingerprintOfferTitle, t.fingerprintOfferText, [
+          { text: t.fingerprintNo, style: "cancel", onPress: () => declineOffer(base) },
+          {
+            text: t.fingerprintYes,
+            onPress: async () => {
+              if (await keepPin(base, pin)) setLock((l) => ({ ...l, kept: true }));
+            },
+          },
+        ]);
       } else if (msg.type === "pin-forget") {
         await forgetPin(base);
         setLock((l) => ({ ...l, kept: false }));

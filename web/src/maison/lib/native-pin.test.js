@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fingerprintAvailable, pinSaved, unlockPin, rememberPin, forgetPin } from './native-pin.js';
+import { fingerprintAvailable, pinSaved, unlockPin, rememberPin, forgetPin, offerPin } from './native-pin.js';
 
 /** A window with the app's bridge; `answer` is what the app sends back. */
 function phone({ fingerprint = true, saved = true, answer } = {}) {
@@ -17,6 +17,7 @@ function phone({ fingerprint = true, saved = true, answer } = {}) {
         if (answer !== undefined) queueMicrotask(() => listeners.forEach((fn) => fn({ detail: answer })));
       },
       rememberPin: (pin) => calls.push(['remember', pin]),
+      offerPin: (pin) => calls.push(['offer', pin]),
       forgetPin: () => calls.push(['forget']),
     },
   };
@@ -73,4 +74,17 @@ test('only a code of 4 to 8 digits is kept; forgetting goes to the app', () => {
   rememberPin('4829', win);
   forgetPin(win);
   assert.deepEqual(calls, [['remember', '4829'], ['forget']]);
+});
+
+test('a code typed right is offered to the app once nothing is kept, never twice', () => {
+  const fresh = phone({ saved: false });
+  offerPin('12', fresh.win);
+  offerPin('482913', fresh.win);
+  assert.deepEqual(fresh.calls, [['offer', '482913']]);
+  const kept = phone({ saved: true });
+  offerPin('482913', kept.win);
+  assert.deepEqual(kept.calls, [], 'a kept code is not offered again');
+  const none = phone({ fingerprint: false, saved: false });
+  offerPin('482913', none.win);
+  assert.deepEqual(none.calls, []);
 });

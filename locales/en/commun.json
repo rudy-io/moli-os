@@ -309,7 +309,6 @@
   "commun.code.effacer": "Delete",
   "commun.code.nouveau_choisir": "Choose a new code",
   "commun.code.empreinte": "Use fingerprint",
-  "commun.code.empreinte_retenir": "Remember the code with my fingerprint",
   "commun.code.empreinte_perime": "The remembered code no longer works: type the new one, it will be remembered instead.",
   "commun.lampe.temperature": "{label} color temperature",
   "commun.kelvin": "{n} K",

@@ -24,6 +24,7 @@ const keyOf = (base: string) => {
   return "pin." + host.replace(/[^A-Za-z0-9.-]/g, "_");
 };
 const flagOf = (base: string) => keyOf(base) + ".kept";
+const declinedOf = (base: string) => keyOf(base) + ".declined";
 
 const locked: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
@@ -42,6 +43,15 @@ export async function fingerprintReady(): Promise<boolean> {
 /** A code is kept for this house. */
 export async function pinKept(base: string): Promise<boolean> {
   return (await SecureStore.getItemAsync(flagOf(base)).catch(() => null)) === "1";
+}
+
+/** The person said « no thanks » once: never offered again for this house. */
+export async function offerDeclined(base: string): Promise<boolean> {
+  return (await SecureStore.getItemAsync(declinedOf(base)).catch(() => null)) === "1";
+}
+
+export async function declineOffer(base: string): Promise<void> {
+  await SecureStore.setItemAsync(declinedOf(base), "1").catch(() => {});
 }
 
 /** Keeps the code behind the fingerprint (the phone asks for it once). */

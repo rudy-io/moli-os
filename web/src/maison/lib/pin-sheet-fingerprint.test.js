@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 
 // The code sheet, rendered: in the Moli app with a fingerprint, the kept code
-// is one button away; without a kept code, a box offers to keep it; in a
-// browser, the keypad alone, as before.
+// is one button away; without a kept code, the keypad alone (the app offers
+// to keep it itself, after a code typed right); in a browser, as before.
 let vite;
 let render;
 let hub;
@@ -50,19 +50,18 @@ function app(bridge) {
 
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-test('a kept code: the fingerprint button, no box', () => {
+test('a kept code: the fingerprint button', () => {
   app({ fingerprint: true, pinSaved: true });
   const html = text(render(Sheet).body);
   assert.match(html, /Avec l’empreinte/);
-  assert.doesNotMatch(html, /Retenir le code/);
+  assert.doesNotMatch(html, /type="checkbox"/);
 });
 
-test('no kept code yet: the box to keep it, ticked', () => {
+test('no kept code yet: the keypad alone, no box (the app offers itself)', () => {
   app({ fingerprint: true, pinSaved: false });
   const body = render(Sheet).body;
-  assert.match(text(body), /Retenir le code avec l’empreinte/);
-  assert.match(body, /type="checkbox"[^>]*checked/);
-  assert.doesNotMatch(text(body), /Avec l’empreinte/);
+  assert.doesNotMatch(text(body), /empreinte/i);
+  assert.doesNotMatch(body, /type="checkbox"/);
 });
 
 test('a browser, or a phone without fingerprint: the keypad alone', () => {

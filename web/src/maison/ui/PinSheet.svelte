@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { home, hub, confirmHeld, dismissHeld, refreshSession } from '../lib/home.svelte.js';
-  import { fingerprintAvailable, pinSaved, unlockPin, rememberPin, forgetPin } from '../lib/native-pin.js';
+  import { fingerprintAvailable, pinSaved, unlockPin, rememberPin, forgetPin, offerPin } from '../lib/native-pin.js';
   import { t } from '../../lib/i18n.svelte.js';
   import Icon from './Icon.svelte';
 
@@ -26,7 +26,6 @@
   // In the Moli app: the code kept behind the fingerprint (lib/native-pin.js).
   const fingerprint = fingerprintAvailable();
   let saved = $state(pinSaved());
-  let keep = $state(true);
 
   // The guard's reason is the house's own words (French or English): the
   // patterns recognise it, the sentence shown is ours.
@@ -137,8 +136,8 @@
     } else {
       const code = pin;
       error = (await confirmHeld(code)) ?? '';
-      // Right code, typed: kept behind the fingerprint if asked.
-      if (!error && fingerprint && keep && !saved) rememberPin(code);
+      // Right code, typed: the app may offer, once, to keep it behind the fingerprint.
+      if (!error && fingerprint && !saved) offerPin(code);
     }
     busy = false;
     pin = '';
@@ -173,14 +172,10 @@
     <button onclick={() => press('0')}>0</button>
     <button class="ok" onclick={submit} disabled={pin.length < 4 || busy} aria-label={t('commun.valider')}>OK</button>
   </div>
-  {#if fingerprint && mode === 'enter'}
-    {#if saved}
-      <button class="finger" onclick={unlock} disabled={busy}>
-        <Icon name="fingerprint" size={22} />{t('commun.code.empreinte')}
-      </button>
-    {:else}
-      <label class="keep"><input type="checkbox" bind:checked={keep} />{t('commun.code.empreinte_retenir')}</label>
-    {/if}
+  {#if fingerprint && saved && mode === 'enter'}
+    <button class="finger" onclick={unlock} disabled={busy}>
+      <Icon name="fingerprint" size={22} />{t('commun.code.empreinte')}
+    </button>
   {/if}
   {#if hub.session?.owner && mode === 'enter'}
     <button class="link" onclick={() => ((mode = 'new'), (pin = ''), (error = ''))}>{t('commun.code.nouveau_choisir')}</button>
@@ -311,15 +306,6 @@
 
   .finger:disabled {
     opacity: 0.5;
-  }
-
-  .keep {
-    margin-top: 12px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--ink-2);
-    font-size: 14px;
   }
 
   .link {

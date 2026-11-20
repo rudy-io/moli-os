@@ -7,7 +7,10 @@
 // The app announces what it can before the page loads:
 //   window.MoliNative.fingerprint = true   — a fingerprint or face is set up
 //   window.MoliNative.pinSaved = true      — a code is kept for this house
-// and answers each request with a `moli-native-pin` event on `window`:
+// After a code typed right, the dashboard hands it to the app (`offerPin`):
+// the app offers, once, to keep it behind the fingerprint (its own dialog,
+// which outlives the code sheet; « no thanks » is never asked again).
+// The app answers each unlock request with a `moli-native-pin` event on `window`:
 //   { detail: { pin } }                    — unlocked
 //   { detail: { error: 'cancel' | 'unavailable' } }
 
@@ -44,6 +47,12 @@ export function unlockPin(win = globalThis.window, timeout = 60_000) {
     timer = setTimeout(() => done(null), timeout);
     native(win).unlockPin();
   });
+}
+
+/** A code just typed right: the app may offer, once, to keep it behind the
+ *  fingerprint (nothing if already kept, or once declined). */
+export function offerPin(pin, win = globalThis.window) {
+  if (fingerprintAvailable(win) && !pinSaved(win) && /^[0-9]{4,8}$/.test(pin ?? '')) native(win).offerPin?.(pin);
 }
 
 /** Keeps `pin` behind the fingerprint (the app asks for it once, to lock it). */
