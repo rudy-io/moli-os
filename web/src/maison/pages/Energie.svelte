@@ -3,15 +3,14 @@
   import { home, hub, value, isOn, nameOf, deviceKind, doorOpen, act } from '../lib/home.svelte.js';
   import { isValve } from '../lib/capabilities.js';
   import { energy, useEnergy, euros, kwh, watts, power, liveLook, billOf } from '../lib/energy-live.svelte.js';
-  import { offPeak, nextChange, clockText, minutesText, windowText, baseload, typicalDay, todayByHour, prices, advise } from '../lib/energy-advice.js';
+  import { offPeak, nextChange, clockText, minutesText, windowText, baseload, prices, advise } from '../lib/energy-advice.js';
   import { t, locale } from '../../lib/i18n.svelte.js';
   import Icon from '../ui/Icon.svelte';
   import EnergyChart from '../ui/EnergyChart.svelte';
   import TariffPie from '../ui/TariffPie.svelte';
-  import DayProfile from '../ui/DayProfile.svelte';
   import HousePrice from '../ui/HousePrice.svelte';
   import EnergyFlow from '../ui/EnergyFlow.svelte';
-  import SolarForecast from '../ui/SolarForecast.svelte';
+  import DayEnergy from '../ui/DayEnergy.svelte';
   import { batteryNow } from '../lib/battery.js';
   import { yearOverYear, trendTone } from '../lib/year-compare.js';
 
@@ -201,8 +200,6 @@
 
   const windows = $derived(offPeak(tariff, home.now));
   const change = $derived(nextChange(windows, home.now));
-  const profile = $derived(typicalDay(week));
-  const todayHours = $derived(todayByHour(week, home.now));
   const base = $derived(baseload(week));
   const price = $derived(prices(s));
 
@@ -374,8 +371,18 @@
 
     <EnergyFlow />
 
-    <!-- Where a solar forecast exists (the solcast driver). -->
-    <SolarForecast />
+    <!-- The day hour by hour: used, from the sun, bought, the usual day, and
+         with panels what they made against the forecast (solcast driver). -->
+    {#if week}
+      <DayEnergy
+        {week}
+        {windows}
+        {base}
+        cost={s.today.total.cost}
+        currency={cur}
+        foot={windows.length ? t('energie.journee.creuses', { windows: windows.map(windowText).join(t('energie.et')) }) : ''}
+      />
+    {/if}
 
     {#if tips.length}
       <section class="card tips">
@@ -454,16 +461,6 @@
     </div>
 
     <TariffPie {windows} />
-
-    {#if profile}
-      <section class="card">
-        <div class="card-head"><h2><Icon name="clock" size={18} />{t('energie.journee.titre')}</h2></div>
-        <DayProfile {profile} {windows} {base} today={todayHours} now={home.now} />
-        {#if windows.length}
-          <p class="foot muted">{t('energie.journee.creuses', { windows: windows.map(windowText).join(t('energie.et')) })}</p>
-        {/if}
-      </section>
-    {/if}
 
     <section class="card">
       <div class="card-head">
