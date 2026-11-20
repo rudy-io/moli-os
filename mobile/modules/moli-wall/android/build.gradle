@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'moli'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.moliwall"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  // The front camera, read a few times a second while the screen sleeps.
+  def camerax = "1.4.2"
+  implementation "androidx.camera:camera-core:${camerax}"
+  implementation "androidx.camera:camera-camera2:${camerax}"
+  implementation "androidx.camera:camera-lifecycle:${camerax}"
+  implementation "androidx.lifecycle:lifecycle-service:2.8.7"
+}

@@ -103,7 +103,8 @@
           "faceIDPermission": "Moli retient le code de la maison derrière Face ID, pour ne pas le retaper."
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      "./plugins/with-wall"
     ],
     "locales": {
       "fr": "./locales/fr.json",

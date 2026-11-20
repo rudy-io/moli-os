@@ -22,6 +22,7 @@ import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from ".
 import { declineOffer, fingerprintReady, forgetPin, keepPin, offerDeclined, pinKept, unlockPin } from "./src/pinlock";
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
+import { useWall, WALL_WATCH, wallAvailable, type WallState } from "./src/wall";
 
 // The shell: Moli's own dashboard, at the house's address, chosen on the
 // first screen (src/house.ts) unless this build is made for one house.
@@ -176,6 +177,14 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       `if (window.MoliNative) { window.MoliNative.fingerprint = ${lock.fingerprint}; window.MoliNative.pinSaved = ${lock.kept}; } true;`,
     );
   }, [lock]);
+  // The wall tablet (src/wall.ts): its state is told to the page with a
+  // `moli-native-wall` event on `window` (null: not possible here).
+  const tellWall = useCallback((state: WallState | null) => {
+    webRef.current?.injectJavaScript(
+      `window.dispatchEvent(new CustomEvent('moli-native-wall', { detail: ${JSON.stringify(state)} })); true;`,
+    );
+  }, []);
+  const wall = useWall(tellWall);
   const bridge = useMemo(
     () =>
       `window.MoliNative = { platform: ${JSON.stringify(Platform.OS)}, mic: true, ` +
@@ -184,7 +193,9 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       `unlockPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-unlock' })); }, ` +
       `rememberPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-remember', pin: String(pin) })); }, ` +
       `offerPin: function (pin) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-offer', pin: String(pin) })); }, ` +
-      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); } }; true;`,
+      `forgetPin: function () { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pin-forget' })); }, ` +
+      `wall: ${wallAvailable}, ` +
+      `wallSend: function (type, extra) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: 'wall-' + type }, extra || {}))); } }; true;`,
     [lock],
   );
 
@@ -314,6 +325,17 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       alive.current = true;
       return;
     }
+    // The wall tablet: only the house's own pages may set it up.
+    if (msg.type?.startsWith("wall-")) {
+      let fromHouse = false;
+      try {
+        fromHouse = new URL(e.nativeEvent.url).host === new URL(base).host;
+      } catch {
+        fromHouse = false;
+      }
+      if (fromHouse) await wall.onMessage(msg as Parameters<typeof wall.onMessage>[0]);
+      return;
+    }
     if (msg.type === "theme" && typeof (msg as { bg?: unknown }).bg === "string") {
       const bg = (msg as { bg: string }).bg;
       const rgb = bg.match(/\d+(\.\d+)?/g)?.slice(0, 3).map(Number) ?? [22, 21, 18];
@@ -373,7 +395,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       // Not signed in yet, or refused: try again on the next page.
       pairingAsked.current = false;
     }
-  }, [base, askLeave]);
+  }, [base, askLeave, wall.onMessage]);
 
   const startLocation = useCallback(async () => {
     setAskLocation(false);
@@ -386,7 +408,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
 
   return (
       <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top"]}>
-        <StatusBar style={top.dark ? "light" : "dark"} />
+        <StatusBar style={top.dark ? "light" : "dark"} hidden={!!wall.state?.enabled} />
         {failed ? (
           <View style={styles.center}>
             <Text style={styles.title}>{t.unreachableTitle}</Text>
@@ -412,7 +434,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             style={styles.web}
             applicationNameForUserAgent="MoliNative"
             injectedJavaScriptBeforeContentLoaded={bridge}
-            injectedJavaScript={THEME_WATCH}
+            injectedJavaScript={THEME_WATCH + WALL_WATCH}
             allowsBackForwardNavigationGestures
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -440,6 +462,11 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
             textZoom={100}
           />
         )}
+        {wall.dark && (
+          // Nobody there, and Moli may not switch the screen off: black over
+          // the page until a touch or a movement.
+          <Pressable style={[StyleSheet.absoluteFill, styles.dark]} onPress={wall.wake} />
+        )}
         {askLocation && (
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{t.locationTitle}</Text>
@@ -461,6 +488,7 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   web: { flex: 1, backgroundColor: BG },
+  dark: { backgroundColor: "#000" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: BG, padding: 24 },
   title: { color: "#f3efe6", fontSize: 22, fontWeight: "600" },
   sub: { color: "#b9b2a4", fontSize: 14, marginTop: 8, textAlign: "center" },

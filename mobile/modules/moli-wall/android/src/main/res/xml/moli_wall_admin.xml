@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What Moli asks as the tablet's administrator: only to put the screen to sleep. -->
+<device-admin>
+  <uses-policies>
+    <force-lock />
+  </uses-policies>
+</device-admin>
