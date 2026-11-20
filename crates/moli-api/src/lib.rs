@@ -387,6 +387,12 @@ fn integration_routes(humans: &Arc<session::Sessions>, options: &Options) -> Rou
 }
 
 pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Router {
+    // The house's data folder, next to home.json.
+    let data_dir = options
+        .home_path
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf);
     let allowed = guard::AllowedHosts::new(&options.allowed_hosts);
     let (humans, gate, persons) = people(&hub, options);
     // Moli adds people through the same household the screens use.
@@ -455,24 +461,12 @@ pub fn router(hub: Hub, shutdown: CancellationToken, options: &Options) -> Route
         .layer(Extension(rest::BenchFile(options.bench_path.clone())))
         .layer(Extension(system::HouseZone(options.timezone.clone())))
         .layer(Extension(rest::HomeFile(options.home_path.clone())))
-        .layer(Extension(plan::PlanDir(
-            options
-                .home_path
-                .as_deref()
-                .and_then(std::path::Path::parent)
-                .map(std::path::Path::to_path_buf),
-        )))
+        .layer(Extension(plan::PlanDir(data_dir.clone())))
         .layer(Extension(rest::Metered(options.energy.clone())))
         .layer(Extension(assistant::Moli(options.assistant.clone())))
         .layer(Extension(automations::Autos(options.automations.clone())))
         .layer(Extension(phones::PhonesGate(options.phones.clone())))
-        .layer(Extension(appli::AppDir(
-            options
-                .home_path
-                .as_deref()
-                .and_then(std::path::Path::parent)
-                .map(std::path::Path::to_path_buf),
-        )))
+        .layer(Extension(appli::AppDir(data_dir)))
         .layer(Extension(Arc::new(appli::Handoffs::default())))
         .layer(Extension(humans))
         .layer(Extension(persons))
