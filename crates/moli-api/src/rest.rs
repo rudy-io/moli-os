@@ -270,8 +270,8 @@ pub(crate) fn command_status(e: &CommandError) -> StatusCode {
         CommandError::ReadOnly => StatusCode::FORBIDDEN,
         CommandError::Invalid(_) => StatusCode::UNPROCESSABLE_ENTITY,
         CommandError::DriverUnavailable | CommandError::Busy => StatusCode::SERVICE_UNAVAILABLE,
-        CommandError::Timeout => StatusCode::GATEWAY_TIMEOUT,
-        CommandError::Driver(_) => StatusCode::BAD_GATEWAY,
+        CommandError::Timeout | CommandError::OutcomeUnknown => StatusCode::GATEWAY_TIMEOUT,
+        CommandError::Driver(_) | CommandError::DriverRefused(_) => StatusCode::BAD_GATEWAY,
         CommandError::Mirror => StatusCode::CONFLICT,
     }
 }

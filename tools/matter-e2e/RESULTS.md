@@ -1,3 +1,32 @@
+# Stabilisation après fusion — 2026-11-15
+
+Build de production exécuté depuis le dépôt Moli seul, Dockerfile inchangé,
+x86_64 musl. `rust:1-alpine` résolvait pendant ce build vers Rust 1.100.0
+(`sha256:cfbeb9c8c956f048a081ae034a7c8ffbd60242f3ff76b645d3a41523f665f761`).
+
+| Variante | Image (octets) | Binaire (octets) | SHA-256 binaire |
+|---|---:|---:|---|
+| Standard avec symboles | 34 455 473 | 34 451 232 | `6c947d2711be83ffd70e7ca7a06b9cf66c1cfe8e8388f8fa36faa96d38dda6eb` |
+| Compacte (`MOLI_STRIP_SYMBOLS=true`) | 28 329 905 | 28 325 808 | `ea0527f77a10117400c1fb933b96e31aff11a2e2858a41f30e3a7171942e87fb` |
+
+Le binaire standard extrait a passé les deux commandes suivantes avec code 0 :
+
+```sh
+MOLI_BIN=/absolute/path/to/moli-os ./run.sh
+E2E_EXTENDED=1 MOLI_BIN=/absolute/path/to/moli-os ./run.sh
+```
+
+La suite a confirmé commissioning, Descriptor, On/Off, abonnement, identité après
+redémarrage, refus de coffre corrompu et de mauvaise clé. La suite étendue a aussi
+confirmé variation/CT/RGB, stores, thermostat, contrôles de serrure approuvés,
+refus sans transmission et retrait/rétablissement réactif selon la politique PIN.
+Elle utilise l'accessoire matter.js dans un namespace isolé, sans uplink physique.
+
+Les deux variantes dépassent le budget image de 25 000 000 octets. Le strip réduit
+l'image d'environ 6,1 Mo mais ne suffit pas à respecter ce budget ; aucune
+optimisation plus large n'a été entreprise dans cette mission de stabilisation.
+Ces E2E ne valident ni radio Thread/BLE, ni compatibilité physique de chaque famille.
+
 # Corrections de revue — 2026-11-06
 
 Le binaire de développement contenant le verrou borné du coffre et la réconciliation

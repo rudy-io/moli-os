@@ -70,11 +70,15 @@ fails closed. An empty fabric reports a clear waiting status and exposes no comm
 
 Descriptor DeviceTypeList (attribute 0) and ServerList (attribute 1) are read together.
 Endpoint 0 and aggregator containers are excluded; child IDs use node ID plus endpoint.
+Malformed `ServerList` entries, lists above the local bound, or incomplete metadata
+abort that discovery cycle instead of publishing a partial device list.
 Bridged NodeLabel is used as a display name when present and bounded; renaming
 refreshes discovery without changing identity. Missing labels keep the generated name.
 Rediscovery preserves surviving devices and compatible samples; only disappeared
 endpoints are removed. Upsert prunes obsolete or incompatible point readings. Supported functions include OnOff, dimming/color, covers, thermostats, guarded locks
-and sensor measurements. The exact capability gates and limitations are in
+and sensor measurements. On lights advertising Level Control with OnOff, setting
+`brightness` while the lamp is off turns it on at that level (Matter
+MoveToLevelWithOnOff). The exact capability gates and limitations are in
 [COMPATIBILITY.md](COMPATIBILITY.md). BooleanState is contact only for device
 type 0x0015 (true = closed), leak only for 0x0043 (true = water detected). Unknown or
 contradictory contact/leak types are ignored. Known invalid/null sensor samples publish
@@ -97,12 +101,22 @@ through queueing, reconnect and retransmissions; acknowledgements must be unambi
 and match the expected path.
 No optimistic state update is published. Restart after adding a node to enumerate it.
 No new HTTP endpoint is introduced.
+After queueing an order, a deadline, controller shutdown or unusable acknowledgement
+is reported as an unknown outcome and is never automatically replayed; inspect the
+observed state before submitting another command. An explicit Matter status refusal
+is definitive and also does not trigger follow-up retries.
 
 FR : configurer explicitement les racines d'attestation de production, ouvrir le partage
 Matter depuis le contrôleur existant, saisir le code via l'entrée standard de `secrets set`,
 puis redémarrer. Le coffre chiffré conserve le tissu Matter ; un essai réel sur pont Hue (OnOff uniquement) est documenté dans `HARDWARE.md` — stores, serrure et thermostat n’ont tourné que sur l’accessoire virtuel — et les radios Thread/BLE restent non validées. Cette contribution ne contient aucun
 chemin Bluetooth : le commissionnement se fait avec l'application du fabricant ou un autre
 contrôleur, puis Moli pilote l'appareil en IP à travers le routeur de bordure existant.
+
+Pour compléter les essais réels sans confondre résultats simulés et matériels,
+utiliser la [matrice de validation communautaire](COMMUNITY-TESTS.md). Le seul
+essai physique documenté dans cette contribution porte sur On/Off via un pont
+Hue v2; les autres familles et Thread restent explicitement non validés sur
+matériel.
 
 ### Bridges and bounded subscriptions
 

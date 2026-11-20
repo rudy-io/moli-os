@@ -381,6 +381,31 @@ pub struct Node {
     pub(crate) node_id: u64,
 }
 
+/// A response was received, but its acknowledgement could not be trusted.
+/// The action may already have been executed, so callers must not retry it as
+/// though the operation certainly failed.
+fn classify_response<T>(result: Result<T, Error>, node_id: u64) -> Result<T, Error> {
+    match result {
+        Err(Error::Codec(_) | Error::InteractionModel(_)) => Err(Error::OutcomeUnknown { node_id }),
+        result => result,
+    }
+}
+
+fn decode_invoke_response(
+    response: &[u8],
+    path: CommandPath,
+    node_id: u64,
+) -> Result<InvokeResult, Error> {
+    let result = match parse_invoke_response_checked(response, path) {
+        Err(error) => Err(Error::from(error)),
+        Ok(InvokeResponse::Status(status)) => Ok(InvokeResult::Status(status)),
+        Ok(InvokeResponse::Command { path, fields_tlv }) => {
+            tlv_to_value(&fields_tlv).map(|fields| InvokeResult::Data { path, fields })
+        }
+    };
+    classify_response(result, node_id)
+}
+
 impl Node {
     /// The device's operational node ID.
     #[must_use]
@@ -688,7 +713,11 @@ impl Node {
             Err(_) => Err(Error::OutcomeUnknown {
                 node_id: self.node_id,
             }),
-            Ok(Err(_)) => Err(Error::ControllerStopped),
+            // The request was accepted by the actor queue. If its reply channel
+            // then disappears, the action may already have reached the device.
+            Ok(Err(_)) => Err(Error::OutcomeUnknown {
+                node_id: self.node_id,
+            }),
             Ok(Ok(result)) => Self::classify_action_reply(result, self.node_id, std_deadline),
         }
     }
@@ -741,10 +770,14 @@ impl Node {
             reply: crate::actor::ActionReply::before(reply, deadline),
         };
         let resp = self.action_before(command, rx, deadline).await?;
-        Ok(parse_write_response_checked(
-            &resp,
-            &writes.iter().map(|(path, _)| *path).collect::<Vec<_>>(),
-        )?)
+        classify_response(
+            parse_write_response_checked(
+                &resp,
+                &writes.iter().map(|(path, _)| *path).collect::<Vec<_>>(),
+            )
+            .map_err(Error::from),
+            self.node_id,
+        )
     }
 
     /// Like [`write`](Self::write) but always performs a **timed** interaction:
@@ -821,13 +854,7 @@ impl Node {
             reply: crate::actor::ActionReply::before(reply, deadline),
         };
         let resp = self.action_before(command, rx, deadline).await?;
-        match parse_invoke_response_checked(&resp, path)? {
-            InvokeResponse::Status(s) => Ok(InvokeResult::Status(s)),
-            InvokeResponse::Command { path, fields_tlv } => Ok(InvokeResult::Data {
-                path,
-                fields: tlv_to_value(&fields_tlv)?,
-            }),
-        }
+        decode_invoke_response(&resp, path, self.node_id)
     }
 
     /// Invoke a command with **pre-encoded** TLV command fields — e.g. the
@@ -914,13 +941,7 @@ impl Node {
             reply: crate::actor::ActionReply::before(reply, deadline),
         };
         let resp = self.action_before(command, rx, deadline).await?;
-        match parse_invoke_response_checked(&resp, path)? {
-            InvokeResponse::Status(s) => Ok(InvokeResult::Status(s)),
-            InvokeResponse::Command { path, fields_tlv } => Ok(InvokeResult::Data {
-                path,
-                fields: tlv_to_value(&fields_tlv)?,
-            }),
-        }
+        decode_invoke_response(&resp, path, self.node_id)
     }
 
     /// Like [`invoke_tlv`](Self::invoke_tlv) (pre-encoded TLV fields) but always
@@ -2011,6 +2032,53 @@ mod tests {
                 opcode: OP_WRITE_REQUEST,
                 ..
             })
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_queued_request_with_a_closed_reply_reports_an_unknown_outcome() {
+        use super::{Command, Error, Node};
+        use std::time::{Duration, Instant};
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let node = Node { tx, node_id: 7 };
+        let action = tokio::spawn(async move {
+            node.write_before(
+                &[(
+                    matter_interaction::AttributePath {
+                        endpoint: 1,
+                        cluster: 8,
+                        attribute: 0,
+                    },
+                    Value::Uint(1),
+                )],
+                Instant::now() + Duration::from_secs(1),
+            )
+            .await
+        });
+        let Some(Command::Action { reply, .. }) = rx.recv().await else {
+            panic!("expected queued action");
+        };
+        drop(reply);
+        assert!(matches!(
+            action.await.unwrap(),
+            Err(Error::OutcomeUnknown { node_id: 7 })
+        ));
+    }
+
+    #[test]
+    fn an_untrusted_action_response_reports_an_unknown_outcome() {
+        use super::{decode_invoke_response, CommandPath, Error};
+        assert!(matches!(
+            decode_invoke_response(
+                &[],
+                CommandPath {
+                    endpoint: 1,
+                    cluster: 6,
+                    command: 1,
+                },
+                7,
+            ),
+            Err(Error::OutcomeUnknown { node_id: 7 })
         ));
     }
 
