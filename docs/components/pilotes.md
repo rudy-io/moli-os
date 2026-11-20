@@ -1391,8 +1391,10 @@ transmet aucun). Ses `members` sont les sources.
   une valeur dès qu'une source a parlé une fois. Frais = relevé depuis moins de `stale_after`.
 - **L'âge** : la valeur garde l'heure du relevé de sa source, pas celle de la recopie ; la règle
   `stale` des automatismes marche telle quelle. Quand une source relit seulement la même valeur,
-  l'heure avance au plus toutes les 5 minutes : l'âge reste juste à 5 minutes près, et
-  l'historique ne prend pas une ligne par répétition.
+  l'heure avance à chaque relevé, sans ligne dans l'historique : comme pour tout appareil, le
+  hub ne le dit qu'en `seen`, au plus toutes les 5 minutes (#230), et l'âge affiché reste juste
+  à 5 minutes près. Une valeur recopiée dont le relevé est plus ancien (la dernière connue d'une
+  autre source) est un changement : son âge recule.
 - **La source** : `<clé>_source` (texte, lecture seule, sens `config`) porte l'identifiant de
   l'appareil source. Il ne change que quand la source change : son heure dit depuis quand cette
   source est retenue. `stations` et `forecast` (texte, sens `config`) listent les sources
