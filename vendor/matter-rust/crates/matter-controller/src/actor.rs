@@ -7389,6 +7389,10 @@ impl<T: AsyncDatagram, D: Discovery> Actor<T, D> {
                 }
             }
             if let Some(attrs) = priming.push_parsed(rd) {
+                tracing::debug!(
+                    priming_attributes = attrs.len(),
+                    "priming snapshot complete"
+                );
                 for (path, value) in attrs {
                     // Priming reports are bounded the same way as steady-state
                     // ones: try_send, drop+count on a full buffer.
@@ -15845,6 +15849,45 @@ mod tests {
             reports < total,
             "the flood was bounded: delivered fewer reports than were sent"
         );
+    }
+
+    /// A priming snapshot is queued before `subscribe()` returns its receiver.
+    /// If that snapshot exceeds the report buffer, the first live state report
+    /// is preceded by `Lagged`; Moli tears down the subscription before it can
+    /// consume that state. Keep headroom for the 276 distinct values observed
+    /// after reassembly of the Hue priming snapshot (295 items were sent).
+    #[tokio::test]
+    async fn hue_sized_priming_snapshot_does_not_hide_first_live_report() {
+        let (mut sink, mut report_rx, _ctrl_rx) = test_report_sink();
+        let priming_items = 295;
+
+        for i in 0..priming_items {
+            assert!(sink.try_send_report(mk_report(i)));
+        }
+        let mut priming_received = 0;
+        while let Ok(event) = report_rx.try_recv() {
+            assert!(matches!(event, SubscriptionEvent::Report(_)));
+            priming_received += 1;
+        }
+        assert_eq!(priming_received, priming_items);
+
+        let onoff = mk_report(0xFFFF);
+        assert!(sink.try_send_report(onoff));
+
+        let mut saw_live_report = false;
+        while let Ok(event) = report_rx.try_recv() {
+            match event {
+                SubscriptionEvent::Lagged { .. } => {
+                    panic!("live report must not be hidden behind priming loss");
+                }
+                SubscriptionEvent::Report(report) if report.path.attribute == 0xFFFF => {
+                    saw_live_report = true;
+                }
+                SubscriptionEvent::Report(_) => {}
+                other => panic!("unexpected report event: {other:?}"),
+            }
+        }
+        assert!(saw_live_report, "first live report must reach the consumer");
     }
 
     /// A closed consumer (receiver dropped) is reported so the actor reaps the
