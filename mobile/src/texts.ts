@@ -14,6 +14,7 @@ const fr = {
   badAddress: "Cette adresse ne ressemble pas à une adresse web.",
   unreachable: "Personne ne répond à cette adresse. Vérifie-la, et que tu es bien connecté (Wi-Fi de la maison pour une adresse locale).",
   notMoli: "Quelque chose répond, mais ce n'est pas un Moli (ou il est caché derrière une autre connexion).",
+  notMoliTitle: "Ce n'est pas un Moli",
   refused:
     "C'est bien un Moli, mais il n'ouvre qu'au Wi-Fi de la maison ou à travers Cloudflare Access. Connecte-toi au Wi-Fi de la maison, ou demande à la personne qui l'a installé.",
   insecure: "Hors de la maison, l'adresse doit commencer par https:// : sans chiffrement, tout passerait en clair.",
@@ -54,6 +55,7 @@ const en: typeof fr = {
   badAddress: "This doesn't look like a web address.",
   unreachable: "Nobody answers at this address. Check it, and that you are connected (the house's Wi-Fi for a local address).",
   notMoli: "Something answers, but it isn't a Moli (or it hides behind another sign-in).",
+  notMoliTitle: "This isn't a Moli",
   refused:
     "This is a Moli, but it only lets in the house's Wi-Fi or Cloudflare Access. Join the house's Wi-Fi, or ask whoever set it up.",
   insecure: "Away from home, the address must start with https://: without encryption, everything would travel in the clear.",

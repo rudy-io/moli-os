@@ -18,7 +18,7 @@ import * as Battery from "expo-battery";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { pairing, pairingRequest, pairingScript, report, resume, savePairing, startBackground, unpair } from "./src/moli";
-import { allowedSuffixes, currentHouse, forgetHouse, PRESET, saveHouse } from "./src/house";
+import { allowedSuffixes, currentHouse, forgetHouse, looksLikeMoliSession, PRESET, saveHouse } from "./src/house";
 import { declineOffer, fingerprintReady, forgetPin, keepPin, offerDeclined, pinKept, unlockPin } from "./src/pinlock";
 import { t } from "./src/texts";
 import { Welcome } from "./src/Welcome";
@@ -57,6 +57,15 @@ const EVERY = 10 * 60 * 1000;
 // Back from the background, the page has this long to answer, or it is reloaded.
 const PAGE_ALIVE = 3000;
 const PING = `window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'alive' })); true;`;
+// Once signed in (behind Cloudflare Access the first screen could not tell),
+// the page is asked whether it is a Moli: its session answer, with the
+// page's own cookies.
+const MOLI_CHECK = `
+  fetch('/api/session', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; })
+    .then(function (b) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'moli-check', body: b })); });
+  true;`;
 
 // A notification that arrives while the app is open shows anyway.
 Notifications.setNotificationHandler({
@@ -154,6 +163,9 @@ class Guard extends Component<{ children: ReactNode; onLeave: () => void }, { br
 function House({ base, onLeave }: { base: string; onLeave: () => void }) {
   const webRef = useRef<WebView>(null);
   const [failed, setFailed] = useState(false);
+  // The address turned out not to be a Moli (checked once signed in).
+  const [notMoli, setNotMoli] = useState(false);
+  const checked = useRef(false);
   const [askLocation, setAskLocation] = useState(false);
   // The top of the screen takes the dashboard's own colour (day or night).
   const [top, setTop] = useState<{ bg: string; dark: boolean }>({ bg: BG, dark: true });
@@ -303,6 +315,10 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       return;
     }
     if (url.hostname !== new URL(base).hostname || url.pathname.startsWith("/cdn-cgi/")) return;
+    if (!checked.current) {
+      checked.current = true;
+      webRef.current?.injectJavaScript(MOLI_CHECK);
+    }
     if (pairingAsked.current || (await pairing())) return;
     pairingAsked.current = true;
     const token = await pushToken();
@@ -323,6 +339,12 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
     }
     if (msg.type === "alive") {
       alive.current = true;
+      return;
+    }
+    if (msg.type === "moli-check") {
+      // A network hiccup (null) is not proof: only a plain « not Moli » is.
+      const body = (msg as { body?: unknown }).body;
+      if (body !== null && body !== undefined && !looksLikeMoliSession(body)) setNotMoli(true);
       return;
     }
     // The wall tablet: only the house's own pages may set it up.
@@ -411,7 +433,16 @@ function House({ base, onLeave }: { base: string; onLeave: () => void }) {
       // turned) must not cover the dashboard's menu.
       <SafeAreaView style={[styles.root, { backgroundColor: top.bg }]} edges={["top", "bottom", "left", "right"]}>
         <StatusBar style={top.dark ? "light" : "dark"} hidden={!!wall.state?.enabled} />
-        {failed ? (
+        {notMoli ? (
+          <View style={styles.center}>
+            <Text style={styles.title}>{t.notMoliTitle}</Text>
+            <Text style={styles.sub}>{t.notMoli}</Text>
+            <Text style={styles.address}>{base.replace(/^https?:\/\//, "")}</Text>
+            <Pressable style={styles.button} onPress={onLeave}>
+              <Text style={styles.buttonText}>{t.changeHouse}</Text>
+            </Pressable>
+          </View>
+        ) : failed ? (
           <View style={styles.center}>
             <Text style={styles.title}>{t.unreachableTitle}</Text>
             <Text style={styles.sub}>{t.unreachableSub}</Text>
