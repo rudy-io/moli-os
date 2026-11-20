@@ -58,8 +58,15 @@ La vue Airzone reste une vue de consultation. Le pilotage autorisé est accessib
 La page Installation présente d’abord les passerelles et leurs actions courantes. Les adresses, les identifiants, le retrait réversible et le remplacement sont repliés dans les réglages ; les diagnostics détaillés sont dans « Informations techniques ». L’assistant conserve l’aide sur l’appairage physique et la restauration des cartes sous « Besoin d’aide ? ». La découverte des zones déjà appairées reste automatique ; l’API locale n’offre ni appairage ni désappairage physique.
 
 
-Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : thème,
-Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli.
+Navigation : rail à gauche (bas de l'écran sur téléphone, défilable) ; pied de rail : Thème,
+Système, Atelier. Bulle « Demander à Moli » sur toutes les pages sauf Moli. Une pastille glisse
+d'un onglet à l'autre, une page arrive en fondu ; un onglet ajouté ou retiré se range en glissant.
+
+**Thème** ouvre une feuille : l'apparence (Auto / Jour / Nuit) et les onglets du menu, chacun avec
+son interrupteur. Seuls les onglets éteints sont mémorisés (`maison-onglets` dans le navigateur) :
+chaque écran a son menu, et un onglet qui apparaît plus tard (une première caméra) se montre de
+lui-même. Accueil ne s'éteint pas. Un onglet que la maison n'a rien pour remplir n'est pas listé.
+Une page éteinte s'ouvre toujours par son adresse (`#/plan`).
 
 ## La mise en page de la maison : `data/home.json`
 
@@ -139,7 +146,7 @@ telles que les appareils les nomment).
 ## Conception visuelle
 
 - Thème **porcelaine** le jour, **nuit** après le coucher du soleil (point `daylight` de la
-  météo) ; bascule Auto / Jour / Nuit (mémorisée dans le navigateur).
+  météo) ; choix Auto / Jour / Nuit dans la feuille Thème (mémorisé dans le navigateur).
 - Ambre = allumé, bleu = climat/froid, corail = attention. Grandes cibles tactiles, peu de mots,
   aucun jargon. Police Figtree Variable, icônes Material Design (sélection dans
   `lib/icons.js` : seules celles-ci sont dans le paquet).
