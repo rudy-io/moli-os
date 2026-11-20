@@ -55,6 +55,15 @@ class MoliWallModule : Module() {
 
     Function("state") { state() }
 
+    /** The window dressed again (orientation, full screen): the shell calls
+     *  it once mounted, should the activity have come before the module. */
+    Function("dress") {
+      val activity = appContext.currentActivity ?: return@Function false
+      val on = Wall.settings(context).enabled
+      activity.runOnUiThread { Wall.dress(activity, on) }
+      true
+    }
+
     Function("configure") { options: WallOptions ->
       val s = WallSettings(options.enabled, options.camera, options.sensitivity, options.idle)
       Wall.save(context, s)

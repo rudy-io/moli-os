@@ -62,7 +62,16 @@ object Wall {
   fun hasCamera(context: Context) =
     context.checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
-  fun isTablet(context: Context) = context.resources.configuration.smallestScreenWidthDp >= 600
+  /** A tablet: 600 dp wide at least, or a screen of 7 inches or more (some
+   *  tablets declare a density that makes them look narrower). */
+  fun isTablet(context: Context): Boolean {
+    if (context.resources.configuration.smallestScreenWidthDp >= 600) return true
+    val m = context.resources.displayMetrics
+    if (m.xdpi <= 0f || m.ydpi <= 0f) return false
+    val w = m.widthPixels / m.xdpi
+    val h = m.heightPixels / m.ydpi
+    return kotlin.math.sqrt(w * w + h * h) >= 7f
+  }
 
   private fun homeAlias(context: Context) = ComponentName(context.packageName, context.packageName + HOME_ALIAS)
 

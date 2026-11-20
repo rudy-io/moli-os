@@ -59,6 +59,11 @@ export function useWall(tell: (state: WallState | null) => void) {
     setDark(false);
   }, []);
 
+  // Orientation and full screen, once the shell is up (a tablet turns freely).
+  useEffect(() => {
+    if (wallAvailable) MoliWall!.dress();
+  }, []);
+
   // Movements seen by the camera (the native side has woken the screen).
   useEffect(() => {
     if (!wallAvailable) return;
