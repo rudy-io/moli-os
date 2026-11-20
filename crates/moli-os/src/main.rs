@@ -60,6 +60,9 @@ enum Command {
     /// Energy history.
     #[command(subcommand)]
     Energy(EnergyCommand),
+    /// History of the points kept for ever (`[server] history_hourly`).
+    #[command(subcommand)]
+    History(HistoryCommand),
     /// Tuya devices.
     #[command(subcommand)]
     Tuya(TuyaCommand),
@@ -143,6 +146,16 @@ enum ZigbeeCommand {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum HistoryCommand {
+    /// Import hourly statistics of a point kept for ever (JSON lines
+    /// `{"point", "hour" (ms), "avg", "min", "max"}` on standard input), e.g.
+    /// from Home Assistant statistics or a weather archive. Only hours
+    /// before Moli's own statistics of the point are taken; safe to run
+    /// twice, and while moli-os runs.
+    Import,
 }
 
 #[derive(Subcommand)]
@@ -275,6 +288,7 @@ fn main() -> anyhow::Result<()> {
         }) => tuya_import(&config, &instance, devices_file, cloud, summary),
         Command::Zigbee(command) => zigbee_command(&config, command),
         Command::Energy(EnergyCommand::Import) => energy_import(&config),
+        Command::History(HistoryCommand::Import) => history_import(&config),
         Command::Energy(EnergyCommand::Demo { days }) => energy_demo(&config, days),
         Command::CheckConfig => check_config(&config),
         Command::AirzoneInspect(args) => airzone::run(&config, &args),
@@ -1034,6 +1048,46 @@ fn energy_import(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `moli-os history import`: hourly statistics from elsewhere.
+fn history_import(config: &Config) -> anyhow::Result<()> {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        point: String,
+        #[serde(flatten)]
+        hour: moli_history::Hour,
+    }
+    if config.server.history_days == 0 {
+        bail!("history is disabled ([server] history_days = 0)");
+    }
+    let kept = &config.server.history_hourly;
+    let mut by_point: std::collections::BTreeMap<String, Vec<moli_history::Hour>> =
+        std::collections::BTreeMap::new();
+    let mut invalid = 0usize;
+    for (n, line) in std::io::stdin().lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let row: Row = serde_json::from_str(&line).with_context(|| format!("line {}", n + 1))?;
+        if kept.contains(&row.point) && row.hour.is_valid() {
+            by_point.entry(row.point).or_default().push(row.hour);
+        } else {
+            invalid += 1;
+        }
+    }
+    let store = moli_history::Store::open(&config.server.data_dir.join("history.db"))?;
+    for (point, hours) in &by_point {
+        let (inserted, skipped) = store.import_hourly(point, hours)?;
+        println!("{point}: {inserted} hours imported, {skipped} skipped (known or recorded live)");
+    }
+    if invalid > 0 {
+        println!(
+            "{invalid} invalid (a point not in [server] history_hourly, or an impossible hour)"
+        );
+    }
+    Ok(())
+}
+
 fn energy_demo(config: &Config, days: u32) -> anyhow::Result<()> {
     if !config.server.demo {
         bail!("a made-up past is for a demo house only ([server] demo = true)");
@@ -1338,6 +1392,7 @@ fn start_history(
     let options = moli_history::Options {
         path: config.server.data_dir.join("history.db"),
         retention_days: config.server.history_days,
+        hourly: config.server.history_hourly.clone(),
     };
     let started = moli_history::History::start(hub, &options, cancel.clone())
         .context("cannot open the history database")?;
