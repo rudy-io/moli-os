@@ -29,7 +29,9 @@ fi
 sdk=${ANDROID_HOME:-$HOME/Android/Sdk}
 aapt2=$(ls -1 "$sdk"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n 1 || true)
 [[ -x $aapt2 ]] || { echo "aapt2 not found (Android SDK build-tools, ANDROID_HOME)" >&2; exit 1; }
-badging=$("$aapt2" dump badging "$work/app/moli.apk" | head -n 1)
+# All of it, then its first line (cut short, aapt2 would fail on a broken pipe).
+badging=$("$aapt2" dump badging "$work/app/moli.apk")
+badging=${badging%%$'\n'*}
 code=$(sed -nE "s/.*versionCode='([0-9]+)'.*/\1/p" <<<"$badging")
 name=$(sed -nE "s/.*versionName='([^']*)'.*/\1/p" <<<"$badging")
 [[ -n $code ]] || { echo "no versionCode in the APK" >&2; exit 1; }
